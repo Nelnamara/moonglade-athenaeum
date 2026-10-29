@@ -9478,12 +9478,13 @@ DEFAULT_EDIT_MODEL = "edit-pro"
 # before the table defaults existed (SCOPE_2026-09-26's rule for unobserved behaviour).
 _EDIT_ASPECT_UNKNOWN_MODEL = "3:4"
 
-# The model PixAI runs a hand/face Fix on -- the same CHAT model the Edit card calls
-# Reference Pro. A Fix submit (POST /v2/task/fixer, just {mediaId, boxes}) never names a
-# model, so this is how the Fix paths that DO need one -- pricing the request, and labelling
-# the collected output's Model instead of leaving an em-dash -- get it without a second
-# hardcoded copy of the id. Reference Pro is known-flaky; a Fix's intermittent failures are
-# that model, not this app.
+# The model PixAI ran a hand/face Fix on BEFORE October 2026 -- the same CHAT model the Edit
+# card calls Reference Pro. Kept only because it labels the Fixes collected before then (a
+# Fix submit, POST /v2/task/fixer with just {mediaId, boxes}, never names a model).
+# PixAI now runs a Fix on PixAI Edit v4.1 (2066624583022309376): measured 2026-10-28 through
+# POST /v2/task/fixer/price, whose answer equals the v4.1 quote and not this model's. The app
+# no longer prices with this constant -- a Fix is priced by PixAI's own Fix price route off
+# the exact submit body (price_fixer).
 FIXER_MODEL_ID = EDIT_MODELS["reference-pro"]["model_id"]
 
 
@@ -10384,7 +10385,10 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
         name_len = getattr(args, "name_length", 60)
         name_sep = getattr(args, "name_sep", "_")
         if fx is not None:
-            stem = img_dir / build_fix_stem_name(fix_label, fx.get("boxes"), task_id, mid,
+            # A Fix made since PixAI's Hand/Face Fix launch may carry `passes` (each with
+            # its own tag) instead of, or beside, `boxes`; fix_marker reads `tag` off both.
+            fix_parts = list(fx.get("boxes") or []) + list(fx.get("passes") or [])
+            stem = img_dir / build_fix_stem_name(fix_label, fix_parts, task_id, mid,
                                                  name_len, name_sep)
         else:
             stem = img_dir / build_stem_name(prompt, task_id, mid, name_len, name_sep)
@@ -11639,8 +11643,8 @@ def clean_fix_boxes(boxes):
     'hand'|'face' (lowercased), non-negative integer origin, positive size, at most 20.
     Anything else is dropped, so a stale or malformed client box can't reach the server.
 
-    Shared by submit_fixer and build_fixer_price_parameters deliberately: the shape that
-    gets PRICED has to be the shape that gets SUBMITTED, or the cost badge would quote a
+    Called only through build_fixer_body, which both the price and the submit use: the body
+    that gets PRICED has to be the body that gets SUBMITTED, or the cost badge would quote a
     request PixAI never receives."""
     clean = []
     for b in (boxes or []):
@@ -11657,42 +11661,87 @@ def clean_fix_boxes(boxes):
     return clean[:20]
 
 
-def build_fixer_price_parameters(media_id, boxes, *, model_id=None):
-    """createGenerationTask-shaped `parameters` for a hand/face Fix, built ONLY to hand to
-    price_task(). NOTHING submits these -- a Fix is submitted by submit_fixer, which never
-    sees them.
+FIX_ONE_KIND = ("A Fix repairs one kind at a time — clear the face boxes or the hand "
+                "boxes first.")
 
-    A Fix goes out as a REST body of just {mediaId, boxes}, and that body is not priceable.
-    What PixAI's server builds from it is a taskKind=chat generation carrying a `chat.fixer`
-    block, and GET /v2/task-price DOES price that: measured 2026-07-25 it answers a flat
-    8000 for a Fix, invariant to box count (1 / 3 / 10), canvas size and priority. Drop the
-    chat block from the same call and it falls back to the 1200 base floor -- the block, not
-    the scalars, is what carries the cost, which is why this synthesizes one instead of
-    passing the REST body through. Nothing here is invented: no width/height, no priority,
-    no prompt, because the measurement showed none of them move the number."""
+# PixAI's own Fix PRICE route. Its input is the exact body the Fix submit sends, and it
+# answers {actualPrice, originalPrice} without creating anything (measured 2026-10-28, issue
+# #93). It sits one path segment away from the SPEND route, "/task/fixer" -- so it is a
+# named constant, never assembled from that string, and the assert below fails the import
+# if an edit ever makes the two the same.
+_FIXER_PRICE_PATH = "/task/fixer/price"
+assert _FIXER_PRICE_PATH != "/task/fixer"
+
+
+def build_fixer_body(media_id, boxes):
+    """THE body of a hand/face Fix: {mediaId, boxes}, boxes cleaned by clean_fix_boxes. The
+    price (price_fixer, on POST /v2/task/fixer/price) and the spend (submit_fixer, on POST
+    /v2/task/fixer) both send what this returns, so the quote is the quote of the job sent.
+
+    Raises PixAIError when no box survives the cleaner, and FIX_ONE_KIND when the boxes carry
+    more than one tag: since PixAI's Hand Fix / Face Fix launch (2026-10-21) its server
+    refuses a face box and a hand box in one Fix ("all boxes must share one tag", measured
+    2026-10-28 on the price route, which shares the submit route's input schema). A Fix is
+    one pass of one kind."""
     clean = clean_fix_boxes(boxes)
     if not clean:
-        raise PixAIError("fixer needs at least one hand/face box")
-    mid = str(media_id)
-    model = str(model_id or FIXER_MODEL_ID)
-    return {"mediaId": mid, "modelId": model,
-            "chat": {"fixer": {"boxes": clean}, "mediaId": mid, "modelId": model}}
+        raise PixAIError("drag a box over a hand or face")
+    if len({b["tag"] for b in clean}) > 1:
+        raise PixAIError(FIX_ONE_KIND)
+    return {"mediaId": str(media_id), "boxes": clean}
+
+
+def price_fixer(session, body):
+    """PixAI's price for a Fix of exactly `body` (build_fixer_body's dict), from POST
+    /v2/task/fixer/price -> {"cost": int, "original": int|None}, or None.
+
+    A QUOTE, not a spend: it creates nothing, so it does not call _check_read_only (the same
+    footing as the read-only POST to /kaisuuken/check), and it rides the API-key session the
+    caller hands it -- never _session_for_create. The path is the module constant, never
+    taken from a caller. Single attempt (rest_post has no retry loop) and fails soft like
+    price_task: every way the call can fail is None, which the badge renders as its red
+    couldn't-verify state -- never a guessed price.
+
+    The body is put through build_fixer_body once more before it goes out: for a dict that
+    builder made it is the same body (cleaning is idempotent), and a hand-built one that is
+    empty or carries two kinds is refused here, before any network call."""
+    try:
+        sent = build_fixer_body((body or {}).get("mediaId") or "", (body or {}).get("boxes"))
+    except (PixAIError, AttributeError):
+        return None
+    if not sent["mediaId"]:
+        return None
+    try:
+        data = _rest_post(session, _FIXER_PRICE_PATH, sent)
+    except (PixAIError, requests.RequestException, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        ap = data.get("actualPrice")
+        if ap is None:
+            return None
+        op = data.get("originalPrice")
+        return {"cost": int(ap), "original": int(op) if op is not None else None}
+    except (TypeError, ValueError):
+        return None
 
 
 def submit_fixer(session, media_id, boxes):
     """Submit a hand/face fixer task via POST /v2/task/fixer -> task id (poll it like any
     generation). `boxes` = [{x, y, width, height, tag}] in ORIGINAL-image pixel coords, tag
-    'hand' | 'face' (<=20). Builds a mask from the boxes and repairs those regions. Raises."""
+    'hand' | 'face' (<=20), all ONE kind. Builds a mask from the boxes and repairs those
+    regions. Raises.
+
+    READ_ONLY first, then build_fixer_body -- so a body with no usable box, or with two kinds
+    PixAI would refuse, is refused here before any network call. Never sends cusPrompts."""
     _check_read_only("submit a hand/face fix (spends credits)")
-    clean = clean_fix_boxes(boxes)
-    if not clean:
-        raise PixAIError("fixer needs at least one hand/face box")
+    body = build_fixer_body(media_id, boxes)
     # The fixer IS a credit-spending create, so it rides the mirror JWT session when the
     # toggle is on (review F1: the choke belongs at "a create", not only at gql_mutate sites).
     # Create-only -- the caller polls/collects on its own API-key session (F6); pass-through
     # when the mirror is off; refuses before spend if the mirror is on but unavailable (F5).
-    data = _rest_post(_session_for_create(session), "/task/fixer",
-                      {"mediaId": str(media_id), "boxes": clean}) or {}
+    data = _rest_post(_session_for_create(session), "/task/fixer", body) or {}
     tid = data.get("id")
     if not tid:
         raise PixAIError("fixer: no task id returned: " + json.dumps(data)[:200])
@@ -11752,9 +11801,10 @@ class GenerationRequest:
                       the workflow-less shape that survives the allowlist
                       returns a confident WRONG number. No number is the honest
                       answer until that is measured live.
-    media_id / boxes  the Fix's own submit body: POST /v2/task/fixer takes
-                      {mediaId, boxes} and never sees `parameters` (those are
-                      the synthesized chat.fixer shape, built for pricing only).
+    media_id / boxes  the Fix's inputs: submit_fixer rebuilds its POST
+                      /v2/task/fixer body from these with build_fixer_body, the
+                      builder that made `parameters` (which, for a Fix, IS that
+                      {mediaId, boxes} body, priced on /v2/task/fixer/price).
     model_version_id  the RESOLVED model version an image gen will submit --
                       the one fact a route needs to tell "no model picked" from
                       "the builder refused something".
@@ -12108,30 +12158,31 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
                                  note=None if params else "pick an image to edit")
 
     if road == "fix":
-        # A hand/face Fix is submitted over POST /v2/task/fixer, whose {mediaId, boxes}
-        # body /v2/task-price cannot read -- but the taskKind=chat task PixAI builds from
-        # it IS priceable, so build_fixer_price_parameters synthesizes that chat.fixer
-        # shape (see its docstring for the measurement). `parameters` is therefore the
-        # PRICE shape only; `media_id` + `boxes` are what actually go out, which is why
-        # submit() reads those, and a shape this could not synthesize never blocks a
-        # submit -- submit_fixer runs the same clean_fix_boxes and is the real guard.
+        # A hand/face Fix is submitted over POST /v2/task/fixer with a body of {mediaId,
+        # boxes}, and PixAI prices that very body on POST /v2/task/fixer/price (#93). So
+        # `parameters` IS the submit body, from build_fixer_body: price() hands it to
+        # price_fixer, and submit() -> submit_fixer rebuilds the same dict from `media_id` +
+        # `boxes` with the same builder. A body the builder refuses (no usable box, or face
+        # and hand together, which PixAI's server refuses) is a note with no parameters --
+        # nothing to price -- and submit_fixer refuses it again, before any network call.
         src = str(p.get("source") or "").strip()
         if src and rs.media_id is not None:
             src = str(rs.media_id(src) or src)
         boxes = list(p.get("boxes") or [])
         # no_card is forced True here and is NOT read off the payload: /v2/task/fixer
         # takes only mediaId + boxes, with no kaisuukenId field anywhere on it, so a free
-        # card can never be spent on a Fix however well /v2/kaisuuken/check matches the
-        # synthesized params. Letting the card check run would paint the badge emerald
-        # "FREE -- a card covers this" over an action about to charge full credits.
+        # card can never be spent on a Fix, and price() never runs the card check for one.
+        # Letting it run would paint the badge emerald "FREE -- a card covers this" over an
+        # action about to charge full credits.
         if not src:
             return GenerationRequest(mode="fix", no_card=True, boxes=boxes,
                                      note="pick an image to fix")
         try:
-            params = build_fixer_price_parameters(src, boxes)
-        except PixAIError:
-            return GenerationRequest(mode="fix", no_card=True, media_id=src, boxes=boxes,
-                                     note="drag a box over a hand or face")
+            params = build_fixer_body(src, boxes)
+        except PixAIError as e:
+            note = FIX_ONE_KIND if str(e) == FIX_ONE_KIND else "drag a box over a hand or face"
+            return GenerationRequest(mode="fix", parameters=None, no_card=True, media_id=src,
+                                     boxes=boxes, note=note)
         return GenerationRequest(mode="fix", parameters=params, no_card=True,
                                  media_id=src, boxes=boxes)
 
@@ -12475,6 +12526,19 @@ def _price_answer(session, req):
         return {"cost": None, "free": False, "note": req.note}
     if req.price_note:
         return {"cost": None, "free": False, "note": req.price_note}
+    if req.mode == "fix":
+        # #93: a Fix is priced by PixAI's own Fix price route off the exact submit body
+        # (req.parameters IS that body). Never a card check -- no card can cover a Fix --
+        # and a failed quote is cost None with no number from anywhere else.
+        q = price_fixer(session, req.parameters)
+        boxes = req.parameters.get("boxes") or []
+        out = {"cost": q["cost"] if q else None, "free": False,
+               "cards": None, "cards_held": None, "cards_needed": None, "card_short": False,
+               "card_name": None, "card_template": None, "card_expires": None,
+               "fix_pass": boxes[0]["tag"] if boxes else None, "fix_boxes": len(boxes)}
+        if q and q.get("original") is not None and q["original"] > q["cost"]:
+            out["original_cost"] = q["original"]
+        return out
     if req.unlimited:
         # S4: free by the entitlement, never by a card -- no /v2/kaisuuken/check at all. The
         # list price rides along as `list_cost` when /v2/task-price answers (what PixAI's
@@ -12533,10 +12597,11 @@ def submit(session, req, *, no_card=None, before_send=None, on_send=None, exact=
     the check that would tell a user otherwise."""
     _check_read_only(_SUBMIT_ACTIONS.get(req.mode, _SUBMIT_ACTION_DEFAULT))
     if req.mode == "fix":
-        # A Fix's `parameters` are the PRICE shape and may legitimately be None while the
-        # submit is still good (a box clean_fix_boxes would drop is not this function's
-        # call to make -- submit_fixer runs the same cleaner and is the real guard). What
-        # it cannot do without is the two fields /v2/task/fixer actually takes.
+        # A Fix's `parameters` are the submit body build_fixer_body made for the price.
+        # submit_fixer rebuilds the same body from `media_id` + `boxes` with that same
+        # builder, after its own READ_ONLY check, and is the real guard: a body the builder
+        # refuses (no usable box, two kinds) raises there before any network call. What
+        # this cannot do without is the two inputs that body is built from.
         if not req.media_id or not req.boxes:
             raise PixAIError(req.note or "nothing to submit")
         return {"task_id": submit_fixer(session, req.media_id, req.boxes)}

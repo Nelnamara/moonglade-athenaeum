@@ -25014,11 +25014,12 @@ def create_app(out_dir: Path):
         """Submit a hand/face fixer task from the Edit-tab canvas. `boxes` are original-image
         pixel coords. Login required; returns {task_id} for the async poller.
 
-        The Fix is the one road whose submit body is NOT `parameters`: /v2/task/fixer takes
-        {mediaId, boxes}, so the request carries those and core.submit sends them. Its
-        `parameters` are the synthesized chat.fixer shape /api/price quotes off the same
-        request -- built here too, so the badge and the spend cannot describe different
-        boxes."""
+        The Fix rides REST, not createGenerationTask: /v2/task/fixer takes {mediaId, boxes}.
+        The request's `parameters` are that very body (core.build_fixer_body), the one
+        /api/price quotes on PixAI's Fix price route, and core.submit -> submit_fixer
+        rebuilds it with the same builder -- so the badge and the spend cannot describe
+        different boxes. Face and hand boxes together are refused before any network call
+        (PixAI's server refuses them; a Fix is one kind)."""
         try:
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}

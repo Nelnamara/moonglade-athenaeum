@@ -10,6 +10,7 @@ import pathlib
 from types import SimpleNamespace
 
 import pytest
+import requests
 
 from moonglade import backup as core
 from moonglade import gallery as moonglade_gallery
@@ -183,61 +184,197 @@ def test_collect_writes_the_fix_model_and_leaves_the_rest_empty(monkeypatch, tmp
 
 
 # ---------------------------------------------------------------------------
-# 3. Pricing -- /v2/task-price CAN price a Fix, given the chat.fixer-shaped params
+# 3. Pricing -- PixAI's own Fix price route, off the exact submit body (#93)
+#
+# On 2026-10-21 PixAI launched Hand Fix and Face Fix, priced per pass, and GET
+# /v2/task-price stopped answering the chat.fixer shape this app used to synthesize (400 at
+# chat.fixer.passes). PixAI's POST /v2/task/fixer/price takes the very {mediaId, boxes} body
+# the Fix submit sends, and its server refuses face and hand boxes in one Fix. So the badge
+# quotes the submit body itself, and a two-kind body is refused before any network call.
 # ---------------------------------------------------------------------------
 
-def test_fix_price_params_carry_the_boxes_in_the_chat_block():
-    """The chat block is what carries the cost: measured 2026-07-25, the same call without
-    it returns the 1200 base floor instead of a Fix's real price."""
-    p = core.build_fixer_price_parameters(
-        "700", [{"x": 1, "y": 2, "width": 3, "height": 4, "tag": "FACE"}])
-    assert p["chat"]["fixer"]["boxes"] == [{"x": 1, "y": 2, "width": 3, "height": 4,
-                                           "tag": "face"}]
-    assert p["chat"]["modelId"] == REFERENCE_PRO and p["modelId"] == REFERENCE_PRO
-    assert p["chat"]["mediaId"] == "700" and p["mediaId"] == "700"
+FACE = {"x": 1, "y": 2, "width": 3, "height": 4, "tag": "face"}
+HAND = {"x": 5, "y": 6, "width": 7, "height": 8, "tag": "hand"}
 
 
-def test_fix_price_params_share_submit_fixers_own_box_cleaning(monkeypatch):
-    """The priced shape must be the SUBMITTED shape -- if the two filtered boxes
-    differently, the badge would price a request the server never receives."""
-    boxes = [{"x": 5, "y": 6, "width": 7, "height": 8, "tag": "Hand"},
-             {"x": 1, "y": 1, "width": 0, "height": 5, "tag": "hand"},   # zero width
+def _tripwire(name):
+    def _boom(*a, **k):
+        raise AssertionError("reached " + name + " -- this must be refused before any network call")
+    return _boom
+
+
+def _record_posts(monkeypatch, answer=None):
+    """Every _rest_post call, as (path, body). The price route answers `answer`; the spend
+    route answers a task id."""
+    posts = []
+
+    def fake_post(s, path, body, **k):
+        posts.append((path, body))
+        if path == "/task/fixer":
+            return {"id": "F1"}
+        return answer if answer is not None else {"actualPrice": 4800, "originalPrice": 8000}
+    monkeypatch.setattr(core, "_rest_post", fake_post)
+    return posts
+
+
+def test_fix_body_is_the_submit_body(monkeypatch):
+    """ONE builder: what build_fixer_body returns is byte for byte the body submit_fixer
+    POSTs to /v2/task/fixer -- including the boxes the cleaner drops, an upper-case tag,
+    and a 21st box."""
+    boxes = [{"x": 5, "y": 6, "width": 7, "height": 8, "tag": "Hand"},   # upper-case: kept
+             {"x": 1, "y": 1, "width": 0, "height": 5, "tag": "hand"},   # zero width: dropped
              {"x": 1, "y": 1, "width": 5, "height": 5, "tag": "elbow"}]  # not a fixer tag
-    seen = {}
-    monkeypatch.setattr(core, "_rest_post",
-                        lambda s, path, body, **k: seen.update(body=body) or {"id": "F1"})
-    core.submit_fixer(object(), "700", boxes)
-    priced = core.build_fixer_price_parameters("700", boxes)
-    assert priced["chat"]["fixer"]["boxes"] == seen["body"]["boxes"]
-    assert len(seen["body"]["boxes"]) == 1
+    boxes += [dict(HAND, x=i) for i in range(20)]                        # 21 usable in all
+    posts = _record_posts(monkeypatch)
+    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    assert core.submit_fixer(object(), "700", boxes) == "F1"
+    (path, sent), = posts
+    assert path == "/task/fixer"
+    body = core.build_fixer_body("700", boxes)
+    assert sent == body
+    assert set(sent) == {"mediaId", "boxes"}, "never cusPrompts, never anything else"
+    assert sent["mediaId"] == "700"
+    assert len(sent["boxes"]) == 20 and sent["boxes"][0]["tag"] == "hand"
+    assert all(b["width"] > 0 and b["tag"] == "hand" for b in sent["boxes"])
 
 
-def test_fix_price_params_refuse_a_request_with_no_usable_box():
-    with pytest.raises(core.PixAIError):
-        core.build_fixer_price_parameters("700", [])
+def test_fix_body_refuses_no_usable_box():
+    with pytest.raises(core.PixAIError, match="drag a box"):
+        core.build_fixer_body("700", [])
+    with pytest.raises(core.PixAIError, match="drag a box"):
+        core.build_fixer_body("700", [{"x": 1, "y": 1, "width": 5, "height": 5, "tag": "elbow"}])
 
 
-def _price_client(tmp_path, monkeypatch, cost=8000):
+def test_fix_body_refuses_two_kinds():
+    with pytest.raises(core.PixAIError, match="one kind") as err:
+        core.build_fixer_body("700", [FACE, HAND])
+    assert str(err.value) == core.FIX_ONE_KIND
+    # case does not smuggle a second kind past the check
+    with pytest.raises(core.PixAIError, match="one kind"):
+        core.build_fixer_body("700", [dict(FACE, tag="FACE"), dict(HAND, tag="Hand")])
+    # ...and one kind, however many boxes, is fine
+    assert len(core.build_fixer_body("700", [FACE, dict(FACE, x=9)])["boxes"]) == 2
+
+
+def test_submit_fixer_refuses_two_kinds_before_any_network(monkeypatch):
+    monkeypatch.setattr(core, "_rest_post", _tripwire("_rest_post"))
+    monkeypatch.setattr(core, "_session_for_create", _tripwire("_session_for_create"))
+    with pytest.raises(core.PixAIError, match="one kind"):
+        core.submit_fixer(object(), "700", [FACE, HAND])
+    # READ_ONLY is still checked FIRST: the refusal a read-only install sees is READ_ONLY's.
+    monkeypatch.setattr(core, "READ_ONLY", True)
+    with pytest.raises(core.PixAIError, match="READ_ONLY"):
+        core.submit_fixer(object(), "700", [FACE, HAND])
+
+
+def _price_client(tmp_path, monkeypatch, answer=None):
     seen = {}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "price_task",
-                        lambda s, params: seen.update(params=params) or cost)
+    monkeypatch.setattr(core, "price_task", _tripwire("price_task (GET /v2/task-price)"))
     monkeypatch.setattr(core, "match_kaisuuken",
                         lambda s, params, **k: seen.setdefault("card_checked", True)
                         and {"id": "c1", "total": 9})
+    seen["posts"] = _record_posts(monkeypatch, answer)
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="700", filename="a_700.png",
                        created_at="2026-07-25T00:00:00")])
     return login_client(tmp_path), seen
 
 
-def test_price_route_prices_a_fix(tmp_path, monkeypatch):
+def test_price_route_quotes_on_the_fixer_price_route(tmp_path, monkeypatch):
+    cli, seen = _price_client(tmp_path, monkeypatch)
+    payload = {"mode": "fix", "source": "700", "boxes": [FACE]}
+    d = cli.post("/api/price", json=payload).get_json()
+    assert d["cost"] == 4800 and d["original_cost"] == 8000
+    assert d["fix_pass"] == "face" and d["fix_boxes"] == 1
+    assert d["free"] is False
+    (path, priced), = seen["posts"]
+    assert path == "/task/fixer/price"
+    # ...and the body quoted is the body /api/fix sends for the same payload
+    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    r = cli.post("/api/fix", json=payload).get_json()
+    assert r.get("task_id") == "F1", r
+    (spend_path, sent), = seen["posts"][1:]
+    assert spend_path == "/task/fixer"
+    assert sent == priced == {"mediaId": "700", "boxes": [FACE]}
+
+
+def test_price_route_omits_the_list_price_unless_it_is_higher(tmp_path, monkeypatch):
+    cli, _ = _price_client(tmp_path, monkeypatch,
+                           answer={"actualPrice": 8000, "originalPrice": 8000})
+    d = cli.post("/api/price", json={"mode": "fix", "source": "700", "boxes": [HAND]}).get_json()
+    assert d["cost"] == 8000 and "original_cost" not in d and d["fix_pass"] == "hand"
+
+
+def test_fix_price_never_touches_the_spend_route(tmp_path, monkeypatch):
+    import inspect
+    assert core._FIXER_PRICE_PATH == "/task/fixer/price"
+    assert core._FIXER_PRICE_PATH != "/task/fixer"
+    # price_fixer takes no path: nothing a caller hands it can turn the quote into a spend
+    assert list(inspect.signature(core.price_fixer).parameters) == ["session", "body"]
+    # it rides the session it is handed -- never the mirror's create session
+    monkeypatch.setattr(core, "_session_for_create", _tripwire("_session_for_create"))
+    cli, seen = _price_client(tmp_path, monkeypatch)
+    cli.post("/api/price", json={"mode": "fix", "source": "700", "boxes": [FACE]})
+    assert seen["posts"] and all(p != "/task/fixer" for p, _ in seen["posts"])
+    # a quote is not a spend: READ_ONLY still answers it
+    monkeypatch.setattr(core, "READ_ONLY", True)
+    d = cli.post("/api/price", json={"mode": "fix", "source": "700", "boxes": [FACE]}).get_json()
+    assert d["cost"] == 4800
+    assert all(p == "/task/fixer/price" for p, _ in seen["posts"])
+
+
+@pytest.mark.parametrize("exc", [core.PixAIError("400 bad"),
+                                 requests.ConnectionError("dropped"),
+                                 ValueError("not json")])
+def test_fix_price_fails_soft(exc, tmp_path, monkeypatch):
+    cli, seen = _price_client(tmp_path, monkeypatch)
+
+    def boom(*a, **k):
+        raise exc
+    monkeypatch.setattr(core, "_rest_post", boom)
+    r = cli.post("/api/price", json={"mode": "fix", "source": "700", "boxes": [FACE]})
+    d = r.get_json()
+    assert r.status_code == 200 and "error" not in d
+    assert d["cost"] is None and d["free"] is False and "original_cost" not in d
+    assert core.price_fixer(object(), {"mediaId": "700", "boxes": [FACE]}) is None
+
+
+@pytest.mark.parametrize("answer", [{}, {"originalPrice": 8000}, [], None, {"actualPrice": "n/a"}])
+def test_fix_price_without_a_price_is_no_price(answer, monkeypatch):
+    monkeypatch.setattr(core, "_rest_post", lambda *a, **k: answer)
+    assert core.price_fixer(object(), {"mediaId": "700", "boxes": [FACE]}) is None
+
+
+def test_price_fixer_refuses_a_hand_built_body_before_any_network(monkeypatch):
+    monkeypatch.setattr(core, "_rest_post", _tripwire("_rest_post"))
+    for body in ({"mediaId": "700", "boxes": [FACE, HAND]}, {"mediaId": "700", "boxes": []},
+                 {"mediaId": "", "boxes": [FACE]}, {}, None):
+        assert core.price_fixer(object(), body) is None
+
+
+def test_price_route_two_kinds_is_a_note_not_a_price(tmp_path, monkeypatch):
     cli, seen = _price_client(tmp_path, monkeypatch)
     d = cli.post("/api/price", json={"mode": "fix", "source": "700",
-                                     "boxes": [{"x": 1, "y": 2, "width": 3, "height": 4,
-                                                "tag": "face"}]}).get_json()
-    assert d["cost"] == 8000
-    assert seen["params"]["chat"]["fixer"]["boxes"][0]["tag"] == "face"
+                                     "boxes": [FACE, HAND]}).get_json()
+    assert d["cost"] is None and d["free"] is False
+    assert d["note"] == core.FIX_ONE_KIND
+    assert seen["posts"] == [], "no network call for a body PixAI refuses"
+
+
+def test_fix_route_two_kinds_is_refused_before_any_network(tmp_path, monkeypatch):
+    """A hand-rolled /api/fix with face and hand boxes: refused, nothing sent -- and under
+    READ_ONLY the refusal is READ_ONLY's."""
+    cli, seen = _price_client(tmp_path, monkeypatch)
+    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    d = cli.post("/api/fix", json={"mode": "fix", "source": "700",
+                                   "boxes": [FACE, HAND]}).get_json()
+    assert "one kind" in d["error"] and "task_id" not in d
+    assert seen["posts"] == []
+    monkeypatch.setattr(core, "READ_ONLY", True)
+    d = cli.post("/api/fix", json={"source": "700", "boxes": [FACE, HAND]}).get_json()
+    assert "READ_ONLY" in d["error"]
+    assert seen["posts"] == []
 
 
 def test_price_route_never_claims_a_free_card_covers_a_fix(tmp_path, monkeypatch):
@@ -252,33 +389,38 @@ def test_price_route_never_claims_a_free_card_covers_a_fix(tmp_path, monkeypatch
     assert "card_checked" not in seen
 
 
-def test_price_route_reaches_task_price_with_the_chat_block_intact(tmp_path, monkeypatch, pixai):
-    """The one test that stubs nothing but the HTTP call itself. price_task forwards only
-    keys in its own scalar/nested sets, so if `chat` ever stopped surviving that filter the
-    badge would quietly show the 1200 base floor instead of a Fix's real price -- a wrong
-    number, which is worse than none."""
-    seen = {}
-    monkeypatch.setattr(core, "_rest_get",
-                        lambda s, path, params=None, **k: seen.update(path=path, params=params)
-                        or {"originalPrice": 8000, "actualPrice": 8000})
-    save_catalog(tmp_path / "catalog.db",
-                 [_row(media_id="700", filename="a_700.png",
-                       created_at="2026-07-25T00:00:00")])
-    d = login_client(tmp_path).post(
-        "/api/price", json={"mode": "fix", "source": "700",
-                            "boxes": [{"x": 1, "y": 2, "width": 3, "height": 4,
-                                       "tag": "face"}]}).get_json()
-    assert d["cost"] == 8000 and d["free"] is False
-    assert seen["path"] == "/task-price"
-    assert '"fixer"' in seen["params"]["chat"] and seen["params"]["mediaId"] == "700"
-
-
 def test_price_route_fix_without_a_box_is_a_note_not_a_price(tmp_path, monkeypatch):
-    cli, _ = _price_client(tmp_path, monkeypatch)
+    cli, seen = _price_client(tmp_path, monkeypatch)
     d = cli.post("/api/price", json={"mode": "fix", "source": "700", "boxes": []}).get_json()
     assert d["cost"] is None and "box" in d["note"]
     d2 = cli.post("/api/price", json={"mode": "fix", "source": ""}).get_json()
     assert d2["cost"] is None and d2["note"]
+    assert seen["posts"] == []
+
+
+def _collect_fix(monkeypatch, tmp_path, fixer):
+    _stub_collect(monkeypatch, tmp_path)
+    task = _fixer_task(source="700")
+    task["parameters"]["chat"]["fixer"] = fixer
+    monkeypatch.setattr(core, "_task_detail_query", lambda s, t: task)
+    core.collect_generation(object(), "T1", str(tmp_path))
+    return next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
+                if r["media_id"] == "M9")["filename"]
+
+
+def test_collect_names_a_passes_only_fix(monkeypatch, tmp_path):
+    """A v4.1 Fix task may carry chat.fixer.passes instead of boxes; it is still named for
+    the kind it repaired, never a bare `fix`."""
+    name = _collect_fix(monkeypatch, tmp_path,
+                        {"passes": [{"tag": "face", "imageSize": "1K", "boxCount": 2}]})
+    assert "_fix-face_" in name
+
+
+def test_collect_names_a_fix_carrying_boxes_and_passes(monkeypatch, tmp_path):
+    name = _collect_fix(monkeypatch, tmp_path,
+                        {"boxes": [{"x": 1, "y": 1, "width": 9, "height": 9, "tag": "hand"}],
+                         "passes": [{"tag": "hand", "imageSize": "2K", "boxCount": 1}]})
+    assert "_fix-hand_" in name
 
 
 # ---------------------------------------------------------------------------
