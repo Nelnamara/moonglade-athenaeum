@@ -1709,9 +1709,11 @@ def test_toasts_anchored_top_right(tmp_path):
     html = cli.get("/").get_data(as_text=True)   # the React shell (classic cut, 2026-08-08)
     assert "mg-notify.js" not in html            # the vanilla script tag is gone from the shell
     notify_css = (Path(__file__).resolve().parents[2] / "gallery" / "src" / "styles" / "notify.css").read_text(encoding="utf-8")
-    assert "#mg-toasts{position:fixed;right:16px;top:64px" in notify_css   # top-right, clear of the header
+    # top-right, clear of the header; since #73 the right edge also clears a sideways phone's island
+    anchor = "#mg-toasts{position:fixed;right:calc(16px + var(--mg-safe-r,0px));top:64px"
+    assert anchor in notify_css
     app_css = (Path(__file__).resolve().parents[2] / "gallery" / "dist" / "app.css").read_text(encoding="utf-8")
-    assert "#mg-toasts{position:fixed;right:16px;top:64px" in app_css      # the built bundle truly ships it
+    assert anchor in app_css      # the built bundle truly ships it
 
 
 def test_price_enhance_mode_returns_no_cost(tmp_path, monkeypatch, pixai):

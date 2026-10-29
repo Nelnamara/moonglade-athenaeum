@@ -36,7 +36,10 @@ describe("O4/O5: where the chips are mounted", () => {
     const c = code(sep);
     assert.match(c, /import GoalChips from "\.\/GoalChips\.jsx";/);
     assert.ok(c.indexOf("<GoalChips />") > 0);
-    assert.ok(c.indexOf("<GoalChips />") < c.indexOf('className="mgx-cred"'), "before the credits chip");
+    // Since #72 the credits chip is built once (`creditsChip`) and placed where the header renders it,
+    // inside the linked account's door group; the goal chips still come before that placement.
+    assert.match(c, /const creditsChip = \(\s*<button type="button" className="mgx-cred"/);
+    assert.ok(c.indexOf("<GoalChips />") < c.indexOf("{creditsChip}"), "before the credits chip");
   });
 
   test("the Loom's header mounts them", () => {
