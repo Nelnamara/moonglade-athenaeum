@@ -12286,6 +12286,7 @@ def _supervised():
 # New on every server start: a notice keyed by it is said once per start in every open tab
 # (gallery/src/notify/serverNotice.js remembers the key it last showed).
 _SERVER_START = secrets.token_hex(8)
+_SERVER_BOOT = time.monotonic()      # for "up" in the line the server writes when it stops
 
 
 # THINGS OUTSIDE THE APP THAT NAME ITS OLD FILES (moonglade.outside; DECISIONS 2026-10-07,
@@ -12378,6 +12379,93 @@ def _schedule_server_exit(code):
 
 
 RESTART_EXIT_CODE = 42        # the supervisor's "relaunch me" signal (see _schedule_server_exit)
+
+
+# WHY THE SERVER ENDED (#95). A Stop, a Restart or an update leaves a request line in
+# moonglade.log and nothing in serve.log, the file the launcher points at; so each now writes its
+# reason when it asks (_note_server_exit) and main()'s `finally` writes one line saying what ended
+# it (server_exit_reason). They are kept OUT of _schedule_server_exit, whose signature and body
+# the tests pin.
+def _clean_for_log(text, limit=100):
+    """Text a client controls (a user name, a browser string) made safe for one log line: printable
+    ASCII only, so no newline can forge a second line, a double quote turned into a single one
+    so a value cannot close its own quotes, and cut to `limit`."""
+    return re.sub(r'[^\x20-\x7e]|"', lambda m: "'" if m.group() == '"' else "?",
+                  str(text or ""))[:limit]
+
+
+def _span_words(seconds):
+    """45s, 3m05s, 3h12m05s -- hours only when there are hours, minutes only when there are."""
+    try:
+        s = max(0, int(seconds))
+    except (TypeError, ValueError):
+        s = 0
+    h, rest = divmod(s, 3600)
+    m, sec = divmod(rest, 60)
+    if h:
+        return "%dh%02dm%02ds" % (h, m, sec)
+    if m:
+        return "%dm%02ds" % (m, sec)
+    return "%ds" % sec
+
+
+def _note_server_exit(why):
+    """Remember who or what asked for the exit that is about to happen, and log it. First wins,
+    like _schedule_server_exit: a second click keeps the first reason."""
+    with _EXIT_LOCK:
+        if _SERVER_CONTROL.get("exit_why"):
+            return
+        _SERVER_CONTROL["exit_why"] = why
+    import logging as _logging
+    _logging.getLogger(__name__).info("server exit requested: %s", why)
+
+
+def server_exit_reason(scheduled, code, why, interrupted, errored=True):
+    """The sentence for why the server is ending (pure): what main()'s `finally` writes.
+    `errored`: an exception is leaving the serve loop (False when the loop returned)."""
+    if scheduled and code == RESTART_EXIT_CODE:
+        return "Restart requested " + (why or "(no details recorded)")
+    if scheduled:
+        return "Stop requested " + (why or "(no details recorded)")
+    if interrupted:
+        return "Ctrl+C in a terminal"
+    if not errored:
+        return "the server loop ended on its own, with no Stop or Restart asked for"
+    return ("an unhandled error ended the server loop (its traceback follows in moonglade.log "
+            "as CRITICAL, and in this file)")
+
+
+def _install_signal_note():
+    """Off Windows only: a SIGTERM or SIGHUP is logged, then the default action runs as it
+    would have (the handler restores the default and sends the signal again). On Windows nothing
+    is installed: a pythonw process is never handed one. Main thread only."""
+    if sys.platform == "win32":
+        return
+    import signal
+    import logging as _logging
+
+    def _note(signum, frame):
+        try:
+            name = signal.Signals(signum).name
+        except Exception:                               # noqa: BLE001
+            name = str(signum)
+        try:
+            _logging.getLogger(__name__).info("server received %s", name)
+        except Exception:                               # noqa: BLE001
+            pass
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    for name in ("SIGTERM", "SIGHUP"):
+        sig = getattr(signal, name, None)
+        if sig is None:
+            continue
+        try:
+            if signal.getsignal(sig) is not signal.SIG_DFL:
+                continue                  # ignored (nohup) or handled by someone: left as it is
+            signal.signal(sig, _note)
+        except (ValueError, OSError):
+            pass
 
 
 def _power_in_progress():
@@ -16397,6 +16485,7 @@ def create_app(out_dir: Path):
         if busy:
             return jsonify({"error": "\"{}\" is still running — stop that job first "
                                      "(the server can't shut down while it works).".format(busy)}), 409
+        _note_power_request("Stop")
         _schedule_server_exit(0)
         return jsonify({"ok": True, "action": "stop"})
 
@@ -16496,6 +16585,7 @@ def create_app(out_dir: Path):
         if busy:
             return jsonify({"error": "\"{}\" is still running — stop that job first "
                                      "(the server can't restart while it works).".format(busy)}), 409
+        _note_power_request("Restart")
         _schedule_server_exit(42)
         return jsonify({"ok": True, "action": "restart"})
 
@@ -16663,6 +16753,7 @@ def create_app(out_dir: Path):
             if still:
                 raise RuntimeError('"%s" started while updating' % still)
             _schedule_server_exit(42)
+            _note_server_exit("by the update just applied")
 
         # The activity log is the ONLY part of this that survives the restart a successful
         # update is about to trigger -- and the only record at all of one that failed while
@@ -18511,6 +18602,20 @@ def create_app(out_dir: Path):
     def _is_local_request():
         ra = (request.remote_addr or "").strip()
         return ra in ("127.0.0.1", "::1", "localhost")
+
+    def _note_power_request(action):
+        """Who pressed Stop or Restart, for the line the server writes when it ends (#95): the
+        address, whether it is this PC, the signed-in user and the browser string. All of it is
+        cleaned to one printable line first -- a client controls the user name and the browser.
+        No cookie, token or header dump is read."""
+        try:
+            _note_server_exit("from %s (%s), user \"%s\", browser \"%s\"" % (
+                _clean_for_log(request.remote_addr),
+                "this PC" if _is_local_request() else "another device",
+                _clean_for_log(session.get("user")),
+                _clean_for_log(request.headers.get("User-Agent"), 100)))
+        except Exception:                               # noqa: BLE001 -- a log line never gates a Stop
+            pass
 
     def _is_authorized_request():
         """THE canonical authorization gate for every network-originated request:
@@ -29442,6 +29547,7 @@ def main():
     out_dir = Path(prepared.library)
     from moonglade import logs as moonglade_logging
     moonglade_logging.setup_logging(verbose=args.verbose)
+    _install_signal_note()
     prepared.log()
     # A fresh clone has neither the (git-ignored) output folder nor a catalog -- refusing
     # to start here used to be the ONLY thing a brand-new user saw: a console exit, before
@@ -29522,6 +29628,9 @@ def main():
     url = "{}://{}:{}/".format(
         scheme, "localhost" if args.host == "0.0.0.0" else args.host, args.port)
     print("\nGallery ready ->  {}".format(url))
+    import logging as _ready_logging
+    _ready_logging.getLogger(__name__).info("server started: pid %d, supervised %s",
+                                            os.getpid(), _supervised())
     if ssl_context:
         print("(self-signed HTTPS: your browser/phone will show a one-time 'proceed anyway' warning)")
     print("Press Ctrl+C to stop.\n")
@@ -29610,12 +29719,35 @@ def main():
     # Claude registration, a shortcut): off-thread, for the notice (server_notice).
     _outside_prime()
     clean_stop = False
+    interrupted = False
     try:
         srv.serve_forever()
         clean_stop = True
     except KeyboardInterrupt:
         clean_stop = True            # Ctrl+C on a terminal launch -> clean stop (exit 0)
+        interrupted = True
     finally:
+        # First, and wrapped: one line saying what ended the server (#95), in serve.log (a
+        # flushed print: the console handler passes warnings only) and in moonglade.log. A
+        # failure here can never stop the cleanup below.
+        try:
+            _stop_code = _SERVER_CONTROL.get("exit_code", 0)
+            _stop_sched = bool(_SERVER_CONTROL.get("exit_scheduled"))
+            if not clean_stop and not _stop_sched:
+                _stop_code = 1               # an error is leaving: Python exits with 1
+            _stop_why = server_exit_reason(_stop_sched, _stop_code,
+                                           _SERVER_CONTROL.get("exit_why", ""), interrupted,
+                                           errored=not clean_stop)
+            _stop_up = _span_words(time.monotonic() - _SERVER_BOOT)
+            import logging as _stop_logging
+            _stop_logging.getLogger(__name__).info(
+                "server stopping: %s (pid %d, up %s, exit code %d)",
+                _stop_why, os.getpid(), _stop_up, _stop_code)
+            print("[server] %s stopping: %s (pid %d, up %s, exit code %d)" % (
+                time.strftime("%Y-%m-%d %H:%M:%S"), _stop_why, os.getpid(), _stop_up,
+                _stop_code), flush=True)
+        except Exception:                    # noqa: BLE001 -- a log line only
+            pass
         _count_timer.cancel()
         # A Stop (exit 0) is a clean start's end; a Restart (42) counts only through the
         # timer, so a run of quick Restarts never deletes the snapshots.

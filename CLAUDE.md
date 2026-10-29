@@ -264,6 +264,7 @@ single-image generation.
 
 - `set_verbose()` + `vlog()`: timestamped diagnostics (per-page fetch, per-image resolve/download timing, startup disk-scan time) to stdout. Console output is a no-op until enabled with `-v` / `--verbose`.
 - `moonglade/logs.py` is the persistent baseline: a rotating file at `local/logs/moonglade.log` beside the launcher's `serve.log` (3.19 and earlier: the library's `logs/`), always on regardless of `-v` (only the console mirror is verbose-gated). See `../moonglade-internal/architecture.md`'s module reference for the full design.
+- `serve.log` also carries `[launcher]` start/end lines for every server run and a `[server]` line at every stop, with the reason; read it first for "it stopped and nothing said why".
 
 ## Recapture procedure (when PixAI changes their frontend)
 
