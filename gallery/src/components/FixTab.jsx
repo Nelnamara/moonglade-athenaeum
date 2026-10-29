@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { FIX_COLORS, FIX_MAX_BOXES, FIX_MIN_PX, scaleBoxes } from "../gen/editCore.js";
+import { FIX_COLORS, FIX_MAX_BOXES, FIX_MIN_PX, FIX_NO_BOX_ON_PICTURE, scaleBoxes } from "../gen/editCore.js";
 import { submitTask, useResultLines } from "../gen/submitTask.js";
 import usePriceProbe from "../gen/usePriceProbe.js";
 import { ResultLines } from "./EditTab.jsx";
@@ -8,9 +8,11 @@ import CostBadge from "./CostBadge.jsx";
 
 /* The Fix tab: drag boxes over hands and faces, PixAI repairs what is inside
    them. Two things make this surface unlike every other:
-   - a Fix ALWAYS spends, at a flat rate invariant to box count, and NO free card
-     can ever cover it (the fixer endpoint has no kaisuukenId field), so the
-     price is quoted in the confirm before anything is submitted;
+   - a Fix ALWAYS spends, and NO free card can ever cover it (the fixer endpoint
+     has no kaisuukenId field). PixAI prices a Fix per pass, and one Fix is one
+     pass of one kind (Face OR Hand -- picking the other kind clears the boxes,
+     #93), so the price is PixAI's quote for exactly these boxes, shown beside the
+     button and quoted in the confirm before anything is submitted;
    - boxes are drawn in DISPLAY pixels but submitted in ORIGINAL-image pixels;
      the server does not rescale, so the scale factor decides which part of the
      picture is actually repaired.
@@ -55,10 +57,11 @@ export default function FixTab({ visible, dock, source }) {
   useEffect(() => { setBoxes([]); }, [source]);
 
   /* The ▲-collapsed dock hides the settings grid with display:none (DC 1209), and a
-     hidden <img> reports clientWidth 0 -- scaleBoxes would then fall back to scale 1
-     and SUBMIT DISPLAY PIXELS AS ORIGINAL PIXELS, repairing the wrong region. So the
-     last real measurement (natural / client width, taken whenever the picture is laid
-     out) is remembered and stands in for the element while it is hidden. The dock's
+     hidden <img> reports clientWidth 0 -- scaleBoxes then has no size to map through
+     (null: nothing priced, nothing sent). So the last real measurement (the natural and
+     shown width AND height, taken whenever the picture is laid out -- the height places
+     the picture inside a letterboxed element, #93 review F1) is remembered and stands in
+     for the element while it is hidden. The dock's
      width does not change between collapsed and expanded, so the remembered scale is
      the live one. */
   const measured = useRef(null);
@@ -66,8 +69,9 @@ export default function FixTab({ visible, dock, source }) {
     const img = imgRef.current;
     // live only once the picture is both laid out AND decoded (naturalWidth 0 = not
     // loaded yet -- a scale of 0 would zero every box)
-    if (img && img.clientWidth && img.naturalWidth) {
-      measured.current = { naturalWidth: img.naturalWidth, clientWidth: img.clientWidth };
+    if (img && img.clientWidth && img.clientHeight && img.naturalWidth && img.naturalHeight) {
+      measured.current = { naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight,
+        clientWidth: img.clientWidth, clientHeight: img.clientHeight };
       return img;
     }
     return measured.current;
@@ -83,17 +87,26 @@ export default function FixTab({ visible, dock, source }) {
      that window; it no longer has to. The probe's identity gate keeps ✦ Fix unpressable until
      a verdict for THESE boxes has settled, so by the time the dialog can open, probe.response
      already holds that payload's answer -- the guarantee replaces the flush. */
-  const build = useCallback(() => ({
-    payload: { mode: "fix", source, boxes: scaleBoxes(boxes, scaleEl()) },
-    idle: (source && boxes.length) ? null : true,
-  }), [source, boxes]);
+  // Counts the picture's loads (#93 review 2, F1): a build that ran before the picture could
+  // say its size re-runs once it loads (imgTick is in both deps below).
+  const [imgTick, setImgTick] = useState(0);
+  const build = useCallback(() => {
+    const scaled = scaleBoxes(boxes, scaleEl());
+    // no size to map through yet: nothing to price (the badge idles; ✦ Fix stays shut);
+    // boxes drawn but none on the picture: nothing to price, and the badge says why
+    return {
+      payload: { mode: "fix", source, boxes: scaled || [] },
+      idle: (source && boxes.length && scaled && !scaled.length) ? FIX_NO_BOX_ON_PICTURE
+        : (source && boxes.length && scaled) ? null : true,
+    };
+  }, [source, boxes, imgTick]); // eslint-disable-line react-hooks/exhaustive-deps
   // `enabled: visible` is the #27 cleanup and the DC's re-price-on-sub-tab-entry (2927) in one
   // seam: hidden, no timer is armed and no request is out (the badge is portaled into the
   // footer and unmounts with the tab); becoming visible again forces a re-price, because the
   // badge comes back idle whatever the settled verdict says.
   const probe = usePriceProbe({ build, costRef, enabled: visible });
 
-  useEffect(() => { probe.refresh(); }, [source, boxes, probe.refresh]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { probe.refresh(); }, [source, boxes, imgTick, probe.refresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---- the canvas: draw, paint, resize ---- */
   const paint = useCallback(() => {
@@ -101,7 +114,9 @@ export default function FixTab({ visible, dock, source }) {
     if (!c || !img) return;
     const w = img.clientWidth, h = img.clientHeight;
     if (!w || !h) return;
-    if (img.naturalWidth) measured.current = { naturalWidth: img.naturalWidth, clientWidth: w };
+    if (img.naturalWidth && img.naturalHeight) {
+      measured.current = { naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight, clientWidth: w, clientHeight: h };
+    }
     if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
     const ctx = c.getContext("2d");
     ctx.clearRect(0, 0, w, h);
@@ -128,9 +143,11 @@ export default function FixTab({ visible, dock, source }) {
     return () => window.removeEventListener("resize", onResize);
   }, [paint]);
 
+  // clamped to the canvas: a drag that runs past its edge ends AT the edge (#93 review F3)
   const rel = (e) => {
     const r = canvasRef.current.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
+    return { x: Math.min(Math.max(e.clientX - r.left, 0), r.width),
+      y: Math.min(Math.max(e.clientY - r.top, 0), r.height) };
   };
   const onDown = (e) => {
     if (e.button !== 0 || !source) return;
@@ -177,22 +194,28 @@ export default function FixTab({ visible, dock, source }) {
     if (!probe.canSubmit) { probe.refresh(); return; }
     const d = probe.response;
     const priced = d && typeof d.cost === "number" ? d.cost : null;
+    // no size to map through, or no box on the picture: send nothing
+    if (!(scaleBoxes(boxes, scaleEl()) || []).length) return;
     const quote = priced == null
       ? "The price could not be verified, and a Fix ALWAYS spends credits (no free card can cover it)."
       : "This will spend " + Number(priced).toLocaleString() +
         " credits — a Fix is never covered by a free card.";
-    if (!window.confirm(
-      "Repair " + boxes.length + " area" + (boxes.length === 1 ? "" : "s") + "?\n\n" + quote
-    )) return;
+    // one Fix in flight: held from the first click, through the confirm, until it settles
     busyRef.current = true; setBusy(true);
-    const emit = openLine("Submitting…");
-    await submitTask("/api/fix",
-      { source, boxes: scaleBoxes(boxes, scaleEl()) },
-      { label: "Fixed", emit });
-    busyRef.current = false; setBusy(false);
-    // The submit DEBITED credits (a Fix always spends); the payload is byte-identical,
-    // so only a FORCED re-price gets past the short-circuit.
-    probe.refresh({ force: true });
+    try {
+      if (!window.confirm(
+        "Repair " + boxes.length + " " + tag + " area" + (boxes.length === 1 ? "" : "s") + "?\n\n" + quote
+      )) return;
+      const emit = openLine("Submitting…");
+      await submitTask("/api/fix",
+        { source, boxes: scaleBoxes(boxes, scaleEl()) },
+        { label: "Fixed", emit });
+      // The submit DEBITED credits (a Fix always spends); the payload is byte-identical,
+      // so only a FORCED re-price gets past the short-circuit.
+      probe.refresh({ force: true });
+    } finally {
+      busyRef.current = false; setBusy(false);
+    }
   };
 
   if (!visible) return null;
@@ -211,7 +234,9 @@ export default function FixTab({ visible, dock, source }) {
     : "Submit — this spends credits (a Fix is never card-covered)";
   // The price probe's verdict gates the button IN ADDITION to source/boxes/busy: the number
   // the confirm quotes must have been priced off the payload this click submits.
-  const goOff = !source || !boxes.length || busy || !probe.canSubmit;
+  // ...and off while no box is on the picture (an empty scale) or its size is unknown (null)
+  const goOff = !source || !boxes.length || busy || !probe.canSubmit
+    || !(scaleBoxes(boxes, scaleEl()) || []).length;
   const costLine = (
     /* no cardLabel: a Fix can never be card-covered */
     <CostBadge ref={costRef} hint="Drag a box over a hand or face to see the cost."
@@ -226,7 +251,7 @@ export default function FixTab({ visible, dock, source }) {
   // The composer's line (a Fix has no prompt) -- the slab itself carries the DC's own
   // instruction copy (1501), so this only says where things stand.
   const statusNote = !source ? "Pick a source image in SOURCE, then drag a box over each hand or face to repair."
-    : !boxes.length ? "Drag a box over a hand or face on the source — Face / Hand sets which."
+    : !boxes.length ? "Drag a box over each " + tag + " — or pick " + (tag === "face" ? "Hand" : "Face") + ". One kind per Fix."
     : "";
   // Composer top row (DC 1557-1562: pip · summary) + the prompt slot: a Fix has no prompt,
   // so the composer carries the tab's own status line instead of an empty box.
@@ -269,7 +294,7 @@ export default function FixTab({ visible, dock, source }) {
           {[["face", "Face"], ["hand", "Hand"]].map(([t, l]) => (
             <button key={t} type="button" role="tab" aria-selected={tag === t}
               className={"mgdock-seg" + (tag === t ? " on" : "")}
-              onClick={() => setTag(t)}>{l}</button>
+              onClick={() => { if (t !== tag) { setTag(t); setBoxes([]); } }}>{l}</button>
           ))}
         </div>
         <div className="mgdock-peachnote">A fix can't be card-covered — it always spends, and always asks first.</div>
@@ -283,7 +308,7 @@ export default function FixTab({ visible, dock, source }) {
         {source ? (
           <div className="mgdock-fixwrap" ref={wrapRef}>
             <img ref={imgRef} src={"/full/" + encodeURIComponent(source)} alt=""
-              onLoad={paint} draggable={false} />
+              onLoad={() => { paint(); setImgTick((n) => n + 1); }} draggable={false} />
             <canvas ref={canvasRef}
               onPointerDown={onDown} onPointerMove={onMove}
               onPointerUp={onUp} onPointerLeave={onUp} />

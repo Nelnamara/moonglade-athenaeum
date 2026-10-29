@@ -44,11 +44,13 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
 - **feat** — a **Feats of the Athenaeum** achievement. Worth no points on purpose, and the whole
   section stays hidden until your first one lands.
 - **the filter bar** — the row of search, filter, sort and layout controls above the Library.
-- **the Fixer** — drawing a box over a hand or a face and having PixAI repair it. **It is not
-  built yet.** On a computer the dock's **Edit** tab offers **Edit** and **Enhance** and nothing
-  else; on a phone, **Create → Edit → Fixer** is a placeholder that says touch box-drawing is
-  still to come. The one-click **Handfix** and **Face Enhance** presets under **Enhance** are
-  what do that job today.
+- **the Fixer** — drawing a box over a hand or a face and having PixAI repair it. **In the
+  gallery it is not built yet.** On a computer the dock's **Edit** tab offers **Edit** and
+  **Enhance** and nothing else; on a phone, **Create → Edit → Fixer** is a placeholder that says
+  touch box-drawing is still to come. The one-click **Handfix** and **Face Enhance** presets
+  under **Enhance** are what do that job there. The Loom's own **Edit** tab has a Fixer, on the
+  computer and the phone: it repairs faces or hands, one kind per Fix, and shows PixAI's price
+  before it asks.
 - **The Folio of Honors** — the **🏆 Folio** button beside **✦ Generate** and **▰ The Loom**:
   achievements, ladders, points, relics and skins. See [The Folio of Honors](Folio-of-Honors).
 - **the Guide** — this wiki, read inside the app: the round **?** button or the **?** key opens it

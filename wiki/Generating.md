@@ -801,8 +801,9 @@ pixels.
 > Bright, Soft, Dark, Startled, Playful — one family on screen at a time, so you pick from a
 > handful rather than scrolling every expression PixAI ships. A purple ♛ means that expression
 > needs a PixAI membership. There is still no CLI `--workflow-id`: these are web-only and mirror-gated.
-> Separately, the box-coordinate hand/face **Fixer** (Edit → Fix) works on any credential and
-> always has, and plain **Upscale** and **Hires** are ordinary generation settings on the
+> Separately, the Loom's box-coordinate hand/face **Fixer** (Edit → Fixer) works on any
+> credential: one kind per Fix (faces or hands, not both at once), priced by PixAI before it
+> asks you to confirm. Plain **Upscale** and **Hires** are ordinary generation settings on the
 > Generate tab, not workflows.
 
 ## Multi-reference video (`--reference-video`)

@@ -144,6 +144,7 @@ import GalleryPicker from "../gallery/src/components/GalleryPicker.jsx";
 import ModelPicker from "../gallery/src/components/ModelPicker.jsx";
 import CostBadge from "../gallery/src/components/CostBadge.jsx";
 import { adjustedText } from "../gallery/src/gen/genCore.js";
+import { scaleBoxes, fixPassNote, FIX_NO_BOX_ON_PICTURE } from "../gallery/src/gen/editCore.js";
 import VideoDrawer from "../gallery/src/components/VideoDrawer.jsx";
 import { installNotify, NotifyRoot } from "../gallery/src/notify/index.jsx";
 // The in-app guide (Session I): Help, About and the what's-new sheet, and the Loom's own
@@ -517,18 +518,14 @@ const fixStroke = (tag) => {
   } catch (e) { return FIX_COLORS[k]; }
 };
 const FIX_MIN_PX = 6;
-const FIX_MAX_BOXES = 20;   // clean_fix_boxes truncates at 20 server-side
+const FIX_MAX_BOXES = 20;   // PixAI takes at most 20 boxes, all one kind
 // boxes arrive as {x,y,w,h,tag} in DISPLAY pixels (the canvas's own coordinate space); the
-// wire wants {x,y,width,height,tag} in ORIGINAL-image pixels. Scale comes from the rendered
-// <img> -- naturalWidth/clientWidth -- exactly like editCore.js's scaleBoxes; the server does
-// NOT rescale, so getting this wrong repairs the wrong part of the picture.
-const scaleFixBoxes = (boxes, imgEl) => {
-  const scale = imgEl && imgEl.clientWidth ? (imgEl.naturalWidth / imgEl.clientWidth) : 1;
-  return boxes.map((b) => ({
-    x: Math.round(b.x * scale), y: Math.round(b.y * scale),
-    width: Math.round(b.w * scale), height: Math.round(b.h * scale), tag: b.tag,
-  }));
-};
+// wire wants {x,y,width,height,tag} in ORIGINAL-image pixels, and the server does NOT
+// rescale. The scaler is no longer a local copy (#96): it is editCore.js's own, imported
+// above -- scaleBoxes(fixBoxes, fixImgRef.current) on the desktop and inside phoneFixBoxes()
+// on the phone. Both <img>s are /full/<id>, so naturalWidth/Height are the original's, and
+// the boxes map through the picture's RENDERED rect -- the desktop's `object-fit:contain`
+// letterbox included (#93 review F1). A size the <img> cannot say is a refusal (null).
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const fmt = (s) => { s = Math.max(0, Math.round(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
@@ -2278,7 +2275,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
 
   // ---- Fixer -- desktop port of LoomMobile's own seventh increment (2026-08-03), itself a
   // verbatim port of gallery/src/components/FixTab.jsx's real, already-shipped box-drawing
-  // (same FIX_COLORS/FIX_MIN_PX/FIX_MAX_BOXES/scaleFixBoxes module-scope constants, same
+  // (same FIX_COLORS/FIX_MIN_PX/FIX_MAX_BOXES module-scope constants and editCore's scaleBoxes, same
   // paint()/onDown/onMove/onUp math). The real submit path (genFixState/setGenFixState/
   // genFix) already existed on useGenerationPipeline's own return value and was already
   // computed every render in App() -- it just wasn't threaded into this component's props before
@@ -2292,6 +2289,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   const fixCanvasRef = useRef(null);
   const fixDragRef = useRef(null);
   const [genFixPrice, setGenFixPrice] = useState({});
+  // Counts the Fixer picture's loads (#93 review 2, F1). The <img> is new each time the Fixer
+  // sub-tab mounts, but the boxes are this component's state and survive the trip, so the
+  // price effect can run before the picture can say its size -- and only a load tells it to
+  // run again (the onLoad also re-renders ✦ Fix's can-it-measure check).
+  const [fixImgTick, setFixImgTick] = useState(0);
+  const onFixImgLoad = () => { fixPaint(); setFixImgTick((n) => n + 1); };
   useEffect(() => {
     setFixBoxes([]);
   }, [active && active.c.id, active && active.c.openFrame && active.c.openFrame.mediaId]);
@@ -2320,9 +2323,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, [fixPaint]);
+  // Clamped to the canvas (#93 review F3): with the pointer captured, a drag keeps reporting
+  // past the canvas's edge, and a box must never reach outside the picture it is drawn on.
   const fixRel = (e) => {
     const r = fixCanvasRef.current.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
+    return { x: Math.min(Math.max(e.clientX - r.left, 0), r.width),
+      y: Math.min(Math.max(e.clientY - r.top, 0), r.height) };
   };
   const fixDown = (e) => {
     if (e.button !== 0 || !(active && active.c.openFrame && active.c.openFrame.mediaId)) return;
@@ -2367,15 +2373,25 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     const id = active.c.id;
     const src = active.c.openFrame && active.c.openFrame.mediaId;
     if (!src || !fixBoxes.length) { setGenFixPrice((s) => ({ ...s, [id]: null })); return; }
-    setGenFixPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true } }));
+    // the boxes in the picture's own pixels, through its rendered (letterboxed) rect; null
+    // while the <img> cannot say its sizes -- nothing is priced, the line stays "checking…"
+    // until the picture's load (fixImgTick, a dependency) runs this again
+    const boxes = scaleBoxes(fixBoxes, fixImgRef.current);
+    if (boxes && !boxes.length) { setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr: null, offPicture: true } })); return; }
+    setGenFixPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true, offPicture: false } }));
+    if (!boxes) return;
     let live = true;
     const t = setTimeout(() => {
-      priceBody({ mode: "fix", source: src, boxes: scaleFixBoxes(fixBoxes, fixImgRef.current) })
+      priceBody({ mode: "fix", source: src, boxes })
         .then((pr) => { if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr } })); });
     }, 250);
     return () => { live = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, editSub, active && active.c.id, active && active.c.openFrame && active.c.openFrame.mediaId, fixBoxes]);
+  }, [tab, editSub, active && active.c.id, active && active.c.openFrame && active.c.openFrame.mediaId, fixBoxes, fixImgTick]);
+  // #93: one Fix is one pass of ONE kind -- PixAI refuses face and hand boxes together --
+  // so picking the other kind clears the boxes drawn (as PixAI's own Fixer does), and the
+  // effect above idles the cost line for the empty set.
+  const pickFixKind = (k) => { if (k !== fixTag) { setFixTag(k); setFixBoxes([]); } };
 
   // ---- Filter compare -- desktop port of LoomMobile's own sixth increment (2026-08-03).
   // Real, shared, offline art-filter library (static/mg-art-filters.js) -- PixAI's own 7
@@ -3544,8 +3560,11 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       const busyE = ge.phase === "submitting" || ge.phase === "running";
       const src = active.c.openFrame && active.c.openFrame.mediaId;
       const gf = genFixState[active.c.id] || {};
-      const busyF = gf.phase === "submitting" || gf.phase === "running";
+      // "pricing": genFix's own fresh quote + confirm, before runGen submits -- one Fix in flight
+      const busyF = gf.phase === "pricing" || gf.phase === "submitting" || gf.phase === "running";
       const fixPriceEntry = genFixPrice[active.c.id];
+      // #93: the per-pass reading ("face pass · 40% off 8,000") off THIS answer only.
+      const fixNote = fixPriceEntry && fixPriceEntry.pr ? fixPassNote(fixPriceEntry.pr) : "";
       tabBody = (
         <div>
           {/* Edit/Fixer/Enhance sub-strip -- The Loom.dc.html's editSubChips, ported from
@@ -3593,7 +3612,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               <div className="lv-slablab">Source — {sel ? "this shot's" : "the draft's"} open frame</div>
               {src ? (
                 <div className="lv-fixwrap">
-                  <img ref={fixImgRef} src={"/full/" + encodeURIComponent(src)} alt="source" onLoad={fixPaint} draggable={false} />
+                  <img ref={fixImgRef} src={"/full/" + encodeURIComponent(src)} alt="source" onLoad={onFixImgLoad} draggable={false} />
                   <canvas ref={fixCanvasRef}
                     onPointerDown={fixDown} onPointerMove={fixMove} onPointerUp={fixUp} onPointerLeave={fixUp} />
                 </div>
@@ -3605,8 +3624,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                   <div className="lv-fixhint">Drag a box over the hand or face on the source.</div>
                   <div className="lv-slabrow">
                     <div className="lv-segtrack" style={{ flex: "1 1 auto" }}>
-                      <span className={"lv-segbtn" + (fixTag !== "hand" ? " on" : "")} onClick={() => setFixTag("face")}>Face</span>
-                      <span className={"lv-segbtn" + (fixTag === "hand" ? " on" : "")} onClick={() => setFixTag("hand")}>Hand</span>
+                      <span className={"lv-segbtn" + (fixTag !== "hand" ? " on" : "")} onClick={() => pickFixKind("face")}>Face</span>
+                      <span className={"lv-segbtn" + (fixTag === "hand" ? " on" : "")} onClick={() => pickFixKind("hand")}>Hand</span>
                     </div>
                     <button className="lv-mini2" disabled={!fixBoxes.length} onClick={() => setFixBoxes([])}>Clear{fixBoxes.length ? " " + fixBoxes.length : ""}</button>
                   </div>
@@ -3616,13 +3635,15 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               </div>
               <div className="lv-dim" style={{ padding: "4px 2px" }}>
                 {fixPriceEntry && fixPriceEntry.loading ? "checking…"
-                  : fixPriceEntry && fixPriceEntry.pr && typeof fixPriceEntry.pr.cost === "number" ? "≈ " + Number(fixPriceEntry.pr.cost).toLocaleString() + " credits — never card-covered"
+                  : fixPriceEntry && fixPriceEntry.pr && typeof fixPriceEntry.pr.cost === "number" ? "≈ " + Number(fixPriceEntry.pr.cost).toLocaleString() + " credits" + (fixNote ? " · " + fixNote : "") + " — never card-covered"
                   : !src ? "Pick a source image first."
                   : !fixBoxes.length ? "Drag at least one box to see the cost."
+                  : fixPriceEntry && fixPriceEntry.offPicture ? FIX_NO_BOX_ON_PICTURE
                   : "Couldn't verify the cost — a Fix always spends credits."}
               </div>
-              <button className="lv-go" disabled={busyF || !src || !fixBoxes.length}
-                onClick={() => genFix(active, scaleFixBoxes(fixBoxes, fixImgRef.current))}>
+              {/* off when no box is on the picture (a null or empty scale): nothing to repair */}
+              <button className="lv-go" disabled={busyF || !src || !fixBoxes.length || !(scaleBoxes(fixBoxes, fixImgRef.current) || []).length}
+                onClick={() => { const scaled = scaleBoxes(fixBoxes, fixImgRef.current); if (scaled && scaled.length) genFix(active, scaled); }}>
                 {busyF ? (gf.msg || "fixing…") : "✦ Fix " + fixTag}
               </button>
               {gf.phase === "error" && <div className="lv-gerr">{gf.msg}</div>}
@@ -4876,7 +4897,7 @@ const LOOM_MOBILE_STYLES = `
    .gd-fixwrap: an <img> in normal flow (sets the wrapper's real rendered height) with a
    same-sized <canvas> absolutely positioned on top, so canvas pixel coordinates and the
    image's own displayed pixels are the SAME coordinate space -- exactly what
-   scaleFixBoxes() needs to convert them to original-image pixels afterward. .lm-fixhint/
+   the box scaler (editCore's scaleBoxes, via phoneFixBoxes()) needs to convert them to original-image pixels afterward. .lm-fixhint/
    .lm-fixwarn colors/sizes are copied verbatim from the locked design's own real
    fixHintStyle/fixWarnStyle strings (Loom Mobile.dc.html's data-dc-script), not
    re-guessed. Face/Hand tag chips reuse .lm-modechips/.lm-modechip (the same chip visual
@@ -5767,11 +5788,16 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
     const p = priceState[id];
     if (!p) return noInputMsg;
     if (p.loading) return "checking…";
+    if (p.offPicture) return FIX_NO_BOX_ON_PICTURE;   // a Fix's boxes, none of them on the picture
     const tally = p.pr ? tallyPrices([p.pr]) : null;
     // The server's pre-spend receipt (SCOPE_2026-09-26 G7), in the same words as the
     // desktop CostBadge's note line, so a phone spend is never resized in silence.
     const adj = p.pr ? adjustedText(p.pr.adjusted) : "";
-    return (tally ? formatCostEstimate(tally) : "—") + (adj ? " · Adjusted before sending: " + adj : "");
+    // #93: a Fix answer's per-pass reading. `fix_pass` rides only a Fix answer, and only a
+    // settled price carries the words -- a failed quote keeps the tally's own wording.
+    const fixNote = p.pr && typeof p.pr.cost === "number" ? fixPassNote(p.pr) : "";
+    return (tally ? formatCostEstimate(tally) : "—") + (fixNote ? " · " + fixNote : "")
+      + (adj ? " · Adjusted before sending: " + adj : "");
   };
   const priceTitle = (priceState, id) => {
     const p = priceState[id];
@@ -5789,9 +5815,9 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
   // technique (Pointer Events + getBoundingClientRect + DISPLAY-to-ORIGINAL-pixel scaling)
   // already used successfully for the reel scrub (increment 1) and the trim handles/crop
   // rectangle (increment 5) in THIS component. This screen ports FixTab.jsx's real, working
-  // approach verbatim -- same FIX_COLORS/FIX_MIN_PX/FIX_MAX_BOXES/scaleFixBoxes (this file's
-  // own local copy of editCore.js's constants, see that comment for why it's a copy and not
-  // an import), same paint()/onDown/onMove/onUp box math, same confirm-gated real submit
+  // approach verbatim -- same FIX_COLORS/FIX_MIN_PX/FIX_MAX_BOXES (this file's own local
+  // copy of editCore.js's constants) and editCore's own scaler (scaleBoxes, through
+  // phoneFixBoxes below -- #96), same paint()/onDown/onMove/onUp box math, same confirm-gated real submit
   // through the real /api/fix endpoint (genFix, useGenerationPipeline) -- not a re-derived
   // or lighter-weight version. Declared here, ahead of the Filter-compare block below, so
   // every one of its own real /api/price calls (the debounced preview effect at the end of
@@ -5802,7 +5828,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
   // Fixer's own box-drawing state -- 'face' | 'hand' (fixTag, matches the design's own
   // fixKind default) and the boxes themselves, {x,y,w,h,tag} in DISPLAY pixels (the canvas's
   // own coordinate space), scaled to ORIGINAL-image pixels only at submit/price time via
-  // scaleFixBoxes -- same DISPLAY-vs-ORIGINAL split FixTab.jsx's own header comment
+  // phoneFixBoxes() -- same DISPLAY-vs-ORIGINAL split FixTab.jsx's own header comment
   // documents. Boxes reset whenever the source image changes (a new shot selected, or this
   // shot's open frame replaced) -- a box drawn against one picture's pixel grid is meaningless
   // (and potentially misleading) against a different one, so nothing here lets a stale box
@@ -5813,20 +5839,50 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
   const fixCanvasRef = useRef(null);
   const fixDragRef = useRef(null);
   const [genFixPrice, setGenFixPrice] = useState({});   // cardId -> {loading, pr} -- read-only preview, see the other three price effects above
+  // The shown width the current boxes were drawn at (0 = none recorded). A phone turned
+  // mid-draw changes the picture's clientWidth, and a box drawn in the old width's pixels
+  // scaled by the new width would repair the wrong area -- so a width change clears the
+  // boxes (fixPaint) and phoneFixBoxes() refuses a mismatch outright (#96).
+  const fixDrawnW = useRef(0);
+  // Counts the Fixer picture's loads, so a price effect that ran before the picture could say
+  // its size runs again once it can (#93 review 2, F1 -- the desktop's fixImgTick, same shape).
+  const [fixImgTick, setFixImgTick] = useState(0);
   useEffect(() => {
     setFixBoxes([]);
   }, [dfLive && dfLive.c.id, dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId]);
+  // #96: THE phone scaler -- boxes priced and sent in the ORIGINAL picture's pixels. The
+  // <img> is /full/<id>, so naturalWidth is the original's; a picture not loaded yet (or not
+  // laid out, or resized since the boxes were drawn) is null, and null prices nothing and
+  // sends nothing. The price effect and the ✦ Fix button both call this, so what is priced
+  // is what is sent.
+  // The scaling itself is editCore's scaleBoxes -- the same rendered-picture-rect formula as
+  // the desktop Fixer (#93 review F1); this helper adds only the phone's turned-mid-draw check.
+  const phoneFixBoxes = () => {
+    const img = fixImgRef.current;
+    if (!img || (fixDrawnW.current && img.clientWidth !== fixDrawnW.current)) return null;
+    return scaleBoxes(fixBoxes, img);
+  };
+  // #93: one Fix is one pass of ONE kind -- PixAI refuses face and hand boxes together --
+  // so picking the other kind clears the boxes drawn (as PixAI's own Fixer does), and the
+  // price effect below idles the cost line for the empty set.
+  const pickFixKind = (k) => { if (k !== fixTag) { setFixTag(k); setFixBoxes([]); } };
   // ---- the canvas: draw, paint, resize -- verbatim port of FixTab.jsx's own paint()/onDown/
   // onMove/onUp, adapted only for this component's fixBoxes/fixTag/fixDragRef naming. Canvas
   // dimensions track the rendered <img>'s own clientWidth/clientHeight every paint (matching
   // FixTab.jsx exactly), so a box drawn here lives in the SAME pixel space the image is
-  // actually displayed in -- scaleFixBoxes() is what converts that to original-image pixels
+  // actually displayed in -- phoneFixBoxes() is what converts that to original-image pixels
   // before it ever reaches the server.
   const fixPaint = useCallback(() => {
     const cvs = fixCanvasRef.current, img = fixImgRef.current;
     if (!cvs || !img) return;
     const w = img.clientWidth, h = img.clientHeight;
     if (!w || !h) return;
+    if (fixBoxes.length && fixDrawnW.current && fixDrawnW.current !== w) {
+      // the picture was resized under boxes drawn at the old width (#96): they no longer
+      // mark what they marked, so they go, exactly as a new source clears them
+      fixDrawnW.current = 0;
+      setFixBoxes([]);
+    }
     if (cvs.width !== w || cvs.height !== h) { cvs.width = w; cvs.height = h; }
     const ctx = cvs.getContext("2d");
     ctx.clearRect(0, 0, w, h);
@@ -5847,9 +5903,12 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, [fixPaint]);
+  // Clamped to the canvas (#93 review F3): with the pointer captured, a drag keeps reporting
+  // past the canvas's edge, and a box must never reach outside the picture it is drawn on.
   const fixRel = (e) => {
     const r = fixCanvasRef.current.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
+    return { x: Math.min(Math.max(e.clientX - r.left, 0), r.width),
+      y: Math.min(Math.max(e.clientY - r.top, 0), r.height) };
   };
   // setPointerCapture on down -- NOT in FixTab.jsx (a desktop-mouse surface, where
   // onPointerLeave alone is enough), but the SAME real mobile convention every other
@@ -5890,6 +5949,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
           });
         }
       } else {
+        fixDrawnW.current = (fixImgRef.current && fixImgRef.current.clientWidth) || 0;
         setFixBoxes((old) => old.concat([{ x: d.x, y: d.y, w: d.w, h: d.h, tag: fixTag }]));
       }
     }
@@ -5906,15 +5966,23 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
     const id = dfLive.c.id;
     const src = dfLive.c.openFrame && dfLive.c.openFrame.mediaId;
     if (!src || !fixBoxes.length) { setGenFixPrice((s) => ({ ...s, [id]: null })); return; }
-    setGenFixPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true } }));
+    // #96: the boxes in the original picture's pixels, or null while the picture cannot say
+    // its real size -- then nothing is priced and the line stays "checking…" (✦ Fix is shut)
+    // until the picture's load (fixImgTick, a dependency) runs this again. An empty list is
+    // no box on the picture: nothing to price, and the line says so.
+    const boxes = phoneFixBoxes();
+    if (boxes && !boxes.length) { setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr: null, offPicture: true } })); return; }
+    // No stale verdict: the line says "checking…" from here until THIS set's answer lands.
+    setGenFixPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true, offPicture: false } }));
+    if (!boxes) return;
     let live = true;
     const t = setTimeout(() => {
-      priceBody({ mode: "fix", source: src, boxes: scaleFixBoxes(fixBoxes, fixImgRef.current) })
+      priceBody({ mode: "fix", source: src, boxes })
         .then((pr) => { if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr } })); });
     }, 250);
     return () => { live = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [genOpen, genTab, editSub, dfLive && dfLive.c.id, dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId, fixBoxes]);
+  }, [genOpen, genTab, editSub, dfLive && dfLive.c.id, dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId, fixBoxes, fixImgTick]);
 
   // ---- Filter compare -- sixth and FINAL increment (2026-08-03), per the locked design's
   // own filterCompareOpen/fcStrength/fcAngle state (Loom Mobile.dc.html: search
@@ -6769,7 +6837,8 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
               const busyE = ge.phase === "submitting" || ge.phase === "running";
               const src = c.openFrame && c.openFrame.mediaId;
               const gf = genFixState[c.id] || {};
-              const busyF = gf.phase === "submitting" || gf.phase === "running";
+              // "pricing": genFix's own fresh quote + confirm, before runGen submits -- one Fix in flight
+              const busyF = gf.phase === "pricing" || gf.phase === "submitting" || gf.phase === "running";
               return (
                 <>
                   {/* Edit/Fixer/Enhance sub-strip -- matches the locked design's own
@@ -6824,8 +6893,11 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                   <span className="lm-microlab">Source — this shot's open frame</span>
                   {src ? (
                     <div className="lm-fixwrap">
-                      <img ref={fixImgRef} src={"/thumbs/" + src + ".jpg"} alt="source"
-                        draggable={false} onLoad={fixPaint} />
+                      {/* #96: the FULL picture, as on the desktop -- its naturalWidth is the
+                          original's, which phoneFixBoxes() scales by. Drawn at the canvas's CSS
+                          size, so only the sharpness changes. */}
+                      <img ref={fixImgRef} src={"/full/" + encodeURIComponent(src)} alt="source"
+                        draggable={false} onLoad={() => { fixPaint(); setFixImgTick((n) => n + 1); }} />
                       <canvas ref={fixCanvasRef}
                         onPointerDown={fixDown} onPointerMove={fixMove}
                         onPointerUp={fixUp} onPointerLeave={fixUp} />
@@ -6836,7 +6908,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                     {["face", "hand"].map((t) => (
                       <button type="button" key={t} className={"lm-modechip" + (fixTag === t ? " on" : "")}
                         style={fixTag === t ? { borderColor: FIX_COLORS[t], color: FIX_COLORS[t] } : null}
-                        onClick={() => setFixTag(t)}>{t === "face" ? "Face" : "Hand"}</button>
+                        onClick={() => pickFixKind(t)}>{t === "face" ? "Face" : "Hand"}</button>
                     ))}
                   </div>
                   {fixBoxes.length > 0 && (
@@ -6849,9 +6921,10 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                   <div className="lm-gencost">
                     <span className="lm-gencosttext" title={priceTitle(genFixPrice, c.id)}>{priceLine(genFixPrice, c.id, "Drag a box over a hand or face to see the cost.")}</span>
                   </div>
-                  <button type="button" className="lm-genbtn" disabled={busyF || !src || !fixBoxes.length}
+                  <button type="button" className="lm-genbtn"
+                    disabled={busyF || !src || !fixBoxes.length || !(phoneFixBoxes() || []).length}
                     title={!src ? "This shot has no open-frame image yet" : !fixBoxes.length ? "Drag at least one box" : "Submit the repair — always spends"}
-                    onClick={() => genFix(dfLive, scaleFixBoxes(fixBoxes, fixImgRef.current))}>
+                    onClick={() => { const scaled = phoneFixBoxes(); if (scaled && scaled.length) genFix(dfLive, scaled); }}>
                     {busyF ? (gf.msg || "fixing…") : "✦ Fix " + fixTag}
                   </button>
                   {gf.phase === "error" && <div className="lm-gerr">{gf.msg}</div>}
@@ -9731,7 +9804,7 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
   // Mobile's original 6-increment plan (2026-08-03). Ported from the real, already-shipped
   // gallery/src/components/FixTab.jsx -- SAME real endpoint (/api/fix), SAME real body shape
   // ({source, boxes}, boxes already scaled to ORIGINAL-image pixels by the caller -- see
-  // LoomMobile's own scaleFixBoxes/genFix call site), SAME real /api/price mode:"fix" check,
+  // LoomMobile's own phoneFixBoxes()/genFix call site), SAME real /api/price mode:"fix" check,
   // SAME real confirm wording FixTab.jsx's own run() uses. Reuses runGen -- the exact submit/
   // poll/register/route machinery genEdit/genRef already share -- for the actual POST, poll,
   // and Job Tracker registration; only the CONFIRM step is bespoke, because a Fix's spend
@@ -9744,6 +9817,7 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
   // caller -- this function never touches DISPLAY-pixel coordinates or a DOM element, matching
   // every other real submit function in this hook (genEdit/genRef take already-resolved
   // ids/text, never DOM refs).
+  const fixInFlight = useRef(new Set());   // shot ids with a Fix between its first tap and its settled submit
   const genFix = async (entry, scaledBoxes) => {
     const c = entry.c;
     const src = c.openFrame && c.openFrame.mediaId;
@@ -9756,23 +9830,43 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     // fresh read the moment the owner taps Fix. mode:"fix" always comes back free:false
     // (server-forced -- see _params_and_nocard), so `cost` is the only field this confirm
     // ever needs.
-    const pr = await priceBody({ mode: "fix", source: src, boxes: scaledBoxes });
-    const priced = pr && typeof pr.cost === "number" ? pr.cost : null;
-    // Wording ported VERBATIM from FixTab.jsx's own run() -- "ALWAYS spends" / "never
-    // covered by a free card" -- not confirmSpend's generic phrasing, which this Fix gate
-    // deliberately does not call.
-    const quote = priced == null
-      ? "The price could not be verified, and a Fix ALWAYS spends credits (no free card can ever cover it)."
-      : "This will spend " + Number(priced).toLocaleString() + " credits — a Fix is never covered by a free card.";
-    if (!window.confirm(
-      "Repair " + scaledBoxes.length + " area" + (scaledBoxes.length === 1 ? "" : "s") + "?\n\n" + quote
-    )) return;
-    // quoteBody is null: runGen's own confirmSpend gate exists for the OTHER two drawer tabs
-    // (which CAN be free-card-covered) -- this submit already ran its own, Fix-correct
-    // confirm above, so passing null here skips a SECOND, wrongly-worded confirm rather than
-    // stacking one on top of it.
-    runGen(setGenFixState, c.id, "/api/fix", { source: src, boxes: scaledBoxes }, null, "",
-      "Fix · " + entry.code + " · " + (c.title || "untitled"));
+    // ONE Fix in flight per shot (#93 review F4): two taps before the first price landed used
+    // to run two prices, two confirms and two paid submits. The ref is the synchronous gate (a
+    // second tap can arrive before any re-render); the "pricing" phase is what shuts ✦ Fix on
+    // screen from the first tap. Both are held until the confirm is declined or the submit
+    // has settled (runGen sets "submitting" -> "running" itself, which keeps the button shut).
+    if (fixInFlight.current.has(c.id)) return;
+    fixInFlight.current.add(c.id);
+    const prior = genFixState[c.id];
+    const restore = () => setGenFixState((s) => {
+      const n = { ...s };
+      if (prior === undefined) delete n[c.id]; else n[c.id] = prior;
+      return n;
+    });
+    setGenFixState((s) => ({ ...s, [c.id]: { phase: "pricing", msg: "checking the price…" } }));
+    try {
+      const pr = await priceBody({ mode: "fix", source: src, boxes: scaledBoxes });
+      const priced = pr && typeof pr.cost === "number" ? pr.cost : null;
+      // Wording ported VERBATIM from FixTab.jsx's own run() -- "ALWAYS spends" / "never
+      // covered by a free card" -- not confirmSpend's generic phrasing, which this Fix gate
+      // deliberately does not call.
+      const quote = priced == null
+        ? "The price could not be verified, and a Fix ALWAYS spends credits (no free card can ever cover it)."
+        : "This will spend " + Number(priced).toLocaleString() + " credits — a Fix is never covered by a free card.";
+      if (!window.confirm(
+        "Repair " + scaledBoxes.length + " " + scaledBoxes[0].tag + " area" + (scaledBoxes.length === 1 ? "" : "s") + "?\n\n" + quote
+      )) { restore(); return; }
+      // quoteBody is null: runGen's own confirmSpend gate exists for the OTHER two drawer tabs
+      // (which CAN be free-card-covered) -- this submit already ran its own, Fix-correct
+      // confirm above, so passing null here skips a SECOND, wrongly-worded confirm rather than
+      // stacking one on top of it.
+      await runGen(setGenFixState, c.id, "/api/fix", { source: src, boxes: scaledBoxes }, null, "",
+        "Fix · " + entry.code + " · " + (c.title || "untitled"));
+    } catch (e) {
+      restore();   // nothing was sent (runGen catches its own failures); give the button back
+    } finally {
+      fixInFlight.current.delete(c.id);
+    }
   };
   // Batch-generate the whole board: fire every shot that needs a render in sequence,
   // staggered so the submits don't collide. Each shot manages its own status/poll via
