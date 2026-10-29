@@ -6,10 +6,12 @@ import { LANDSCAPE_QUERY, TURN_SETTLE_MS, phoneColumns, sidesKept } from "../lib
    Live, like hooks/useIsMobile.js: it follows the media query, resize and orientationchange, so a
    turn re-flows the columns on the spot. The query is lib/phoneCore.js's LANDSCAPE_QUERY -- the same
    condition phone-landscape.css is written under, so the columns and the CSS rail cannot disagree.
-   It reads, and writes one thing: the attribute data-mg-sides-kept on <html> (#73) -- present while the
-   browser has already kept the side room the safe areas ask for (lib/phoneCore.js's sidesKept, decided
-   from the window's shape), so phone-landscape.css counts the side safe areas once. Set and cleared with
-   the turn; nothing is stored, and the attribute and its probe element leave with the gallery.
+   It reads, and writes two attributes on <html> (#73): data-mg-sides-kept -- present while the browser
+   has already kept the side room the safe areas ask for (lib/phoneCore.js's sidesKept, decided from the
+   window's shape), so phone-landscape.css counts the side safe areas once -- and, for 700 ms after that
+   state flips while the phone was ALREADY sideways (a late correction), data-mg-slide, which lets the
+   css slide the change instead of jumping. Set and cleared with the turn; nothing is stored, and the
+   attributes and the probe element leave with the gallery.
 
    AND AGAIN ONCE THE TURN HAS SETTLED (owner's walk, 2026-10-03): a phone can deliver a turn's events
    while the query still answers for the old way up, and fire nothing afterwards, which left the
@@ -69,13 +71,24 @@ export default function usePhoneLandscape() {
     const de = document.documentElement;
     live += 1;
     let safe = { t: 0, r: 0, b: 0, l: 0, kept: false };
+    let wasLandscape = false;
+    let slideTimer = 0;
     const readSafe = () => {
       const cs = getComputedStyle(probe);
       const px = (v) => Math.round(parseFloat(v) || 0);
       const l = px(cs.paddingLeft), r = px(cs.paddingRight);
-      const kept = sidesKept({ landscape: read().landscape, innerW: window.innerWidth,
+      const landscape = read().landscape;
+      const kept = sidesKept({ landscape, innerW: window.innerWidth,
         screenW: window.screen && window.screen.width, screenH: window.screen && window.screen.height, left: l, right: r });
       safe = { t: px(cs.paddingTop), r, b: px(cs.paddingBottom), l, kept };
+      // A late correction -- the state flips while the phone was already sideways at the last read -- slides
+      // over half a second (phone-landscape.css, :root[data-mg-slide]); the turn itself never does.
+      if (wasLandscape && landscape && de.hasAttribute("data-mg-sides-kept") !== kept) {
+        de.setAttribute("data-mg-slide", "");
+        clearTimeout(slideTimer);
+        slideTimer = setTimeout(() => de.removeAttribute("data-mg-slide"), 700);
+      }
+      wasLandscape = landscape;
       de.toggleAttribute("data-mg-sides-kept", kept);
     };
     const sync = () => {
@@ -110,7 +123,8 @@ export default function usePhoneLandscape() {
       if (raf) cancelAnimationFrame(raf);
       if (stopDebug) stopDebug();
       probe.remove();
-      if (--live === 0) de.removeAttribute("data-mg-sides-kept");
+      clearTimeout(slideTimer);
+      if (--live === 0) { de.removeAttribute("data-mg-sides-kept"); de.removeAttribute("data-mg-slide"); }
       timers.forEach(clearTimeout);
     };
   }, []);

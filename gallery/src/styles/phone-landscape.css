@@ -41,9 +41,11 @@
 
 @media (orientation: landscape) and (max-height: 520px) {
 
-  /* A late re-read (the hook reads again at 120 / 400 / 1000 ms after a turn) slides the side room in
-     or out over half a second instead of jumping the whole page. */
-  :root { transition: --mg-safe-l .5s ease, --mg-safe-r .5s ease; }
+  /* A late correction (the hook reads again at 120 / 400 / 1000 ms after a turn, and the sides-kept state
+     can flip while the phone is already sideways) slides the side room in or out over half a second
+     instead of jumping the whole page. The turn itself never slides: the hook sets data-mg-slide only for
+     a flip after the first sideways read. */
+  :root[data-mg-slide] { transition: --mg-safe-l .5s ease, --mg-safe-r .5s ease; }
 
   /* ---- the shell: rail | (hero, tab, goal chips) ------------------------------------------------
      A grid instead of a column. The rail spans every row; the notch's inset on the left is added to
@@ -161,12 +163,24 @@
   /* ---- the record (Image Details): the picture beside a side panel that scrolls as one ------------ */
   .idm-root { padding-left: var(--mg-safe-l); padding-right: var(--mg-safe-r); }
   .idm-topbar { padding: max(8px, env(safe-area-inset-top)) 12px 6px; }
-  .idm-body { flex-direction: row; gap: 0; overflow: hidden; padding: 10px 0 0 14px; }
+  .idm-body { flex-direction: row; gap: 14px; overflow: hidden; padding: 10px 0 0 14px; }
   /* The frame is the picture's own shape, centred left of the panel -- not a grey box stretched across all
      the room with the picture floating in it (#73). A note-only frame ("file not found") keeps a sensible
      width; a frame with a picture in it takes the picture's, so a narrow portrait has no bars beside it. */
   .idm-body > .idm-frame { flex: 0 1 auto; align-self: center; width: auto; margin: 0 auto; }
   .idm-body > .idm-frame:not(:has(img, video)) { min-width: min(240px, 100%); }
+  /* With the picture's shape known (.hasar, --idm-ar = width / height from the row) the frame is that shape,
+     as big as the room allows -- up to the height cap or the room beside the panel -- and the picture fills
+     it. So a thumbnail (Data saver's 256 px one, behind "Tap to load full size") fills the same box the
+     full picture will, instead of sitting at its natural size with the pill clipped. Without a known shape
+     the rules above stand. */
+  .idm-body > .idm-frame.hasar { --idm-h: calc(100dvh - 70px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    min-width: 0; width: min(100%, calc(var(--idm-h) * var(--idm-ar))); aspect-ratio: var(--idm-ar); }
+  .idm-body > .idm-frame.hasar:not(:has(img, video)) { width: auto; aspect-ratio: auto; min-width: min(240px, 100%); }
+  .idm-frame.hasar img, .idm-frame.hasar video { position: absolute; inset: 0; width: 100%; height: 100%;
+    max-width: none; max-height: none; object-fit: contain; }
+  /* the pill is a button of words: in a narrow tall frame it wraps instead of being clipped */
+  .idm-frame .lbm-tapfull { white-space: normal; text-align: center; max-width: calc(100% - 12px); }
   .idm-frame img, .idm-frame video { width: auto; max-width: 100%; max-height:calc(100dvh - 70px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
   .idm-rec { display: flex; flex-direction: column; gap: 14px; flex: none; width: min(380px, 46%);
     min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
@@ -188,5 +202,5 @@
 
 @media (orientation: landscape) and (max-height: 520px) and (prefers-reduced-motion: reduce) {
   .glm-sheet, .cm-modelwrap .mfly { animation: none; }
-  :root { transition: none; }
+  :root, :root[data-mg-slide] { transition: none; }
 }

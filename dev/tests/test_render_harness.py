@@ -8319,8 +8319,11 @@ def test_landscape_counts_the_side_safe_areas_once(phone_q_server, render_browse
         _settle(page)
         fit = page.evaluate(_Q_PICTURE_FIT_JS)
         assert abs(fit["frame"] - fit["shown"]) <= 3, "the frame is the picture's own shape: %r" % fit
-        page.add_style_tag(content=".idm-body > .idm-frame { flex: 1 1 0 !important; min-width: 0 !important;"
-                                   " margin: 0 14px 0 0 !important } .idm-frame img, .idm-frame video { width: 100% !important }")
+        page.add_style_tag(content=".idm-body > .idm-frame { flex: 1 1 0 !important; min-width: 0 !important; width: auto !important;"
+                                   " aspect-ratio: auto !important; margin: 0 14px 0 0 !important }"
+                                   " .idm-frame img, .idm-frame video { position: static !important; inset: auto !important;"
+                                   " width: 100% !important; height: auto !important; object-fit: contain !important;"
+                                   " max-height: calc(100dvh - 91px) !important }")
         _settle(page)
         old = page.evaluate(_Q_PICTURE_FIT_JS)
         assert old["frame"] - old["shown"] > 100, "with the old stretched frame the grey bars are back: %r" % old
@@ -8330,6 +8333,8 @@ def test_landscape_counts_the_side_safe_areas_once(phone_q_server, render_browse
         _settle(page)
         fit = page.evaluate(_Q_PICTURE_FIT_JS)
         assert abs(fit["frame"] - fit["shown"]) <= 3, "a wide picture fills its frame too: %r" % fit
+        frame, rec = _q_boxes(page, ".idm-frame", ".idm-rec")
+        assert rec["l"] - frame["r"] >= 12, "a wide picture keeps its gutter beside the panel: %r %r" % (frame, rec)
     finally:
         ctx.close()
     ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch,
@@ -8339,6 +8344,8 @@ def test_landscape_counts_the_side_safe_areas_once(phone_q_server, render_browse
         _q_open(page)
         b = read(page)
         assert b["inner"] == 734 and b["kept"] is True, b
+        assert not page.evaluate("document.documentElement.hasAttribute('data-mg-slide')"), \
+            "the turn itself does not slide, only a late correction does"
         assert b["track"] == 56 and b["padR"] == "0px" and round(b["body"]) == 678, \
             "the browser already kept the room: counted once, not twice: %r" % b
         page.click(".glm-bar2 .glm-metal:has-text('Sort')")
@@ -8352,6 +8359,56 @@ def test_landscape_counts_the_side_safe_areas_once(phone_q_server, render_browse
         _settle(page)
         again = read(page)
         assert again["kept"] is False and again["track"] == 115 and again["padR"] == "59px", again
+        # a late re-read that finds the room kept while the phone is already sideways is a correction: it slides
+        page.evaluate("window.dispatchEvent(new Event('resize'))")
+        page.wait_for_function("() => document.documentElement.hasAttribute('data-mg-sides-kept')")
+        assert page.evaluate("document.documentElement.hasAttribute('data-mg-slide')"), "the correction slides"
+        page.wait_for_function("() => !document.documentElement.hasAttribute('data-mg-slide')", timeout=3000)
+    finally:
+        ctx.close()
+
+
+def test_landscape_record_fills_the_same_frame_with_a_data_saver_thumbnail(
+        phone_q_server, render_browser, monkeypatch):
+    """#73 review. Under Data saver the record shows the 256 px thumbnail behind 'Tap to load full size'.
+    Sideways the frame is the picture's own shape, as big as the room allows, and the thumbnail fills it
+    -- the same box the full picture will -- instead of sitting at its natural size (about a third of the
+    room) with the pill clipped. A long size label wraps inside the frame rather than being cut. Runs on
+    every engine (no CDP)."""
+    ctx, page, seen = _q_land(render_browser, phone_q_server, monkeypatch)
+    try:
+        _q_open(page)
+        page.evaluate("localStorage.setItem('mg_phone_saver', 'always')")
+        page.reload(wait_until="domcontentloaded")
+        page.wait_for_selector(".glm-tile")
+        _settle(page)
+        sizes = {}
+        for idx in (0, 1):                                 # a portrait and a wide picture
+            _q_tile(page, idx).click()
+            page.wait_for_selector(".lbm-root")
+            page.click(".lbm-chip:has-text('Details')")
+            page.wait_for_selector(".idm-remixrow")
+            page.wait_for_function("() => { const i = document.querySelector('.idm-frame img');"
+                                   " return i && i.complete && i.naturalWidth > 0; }")
+            page.wait_for_selector(".idm-frame .lbm-tapfull")
+            _settle(page)
+            got = page.evaluate("""() => { const f = document.querySelector('.idm-frame'), i = f.querySelector('img'),
+                b = f.querySelector('.lbm-tapfull'); b.textContent = '\\u25D0 Tap to load full size \\u00b7 12.3 MB (a long label)';
+                const fb = f.getBoundingClientRect(), ib = i.getBoundingClientRect(), bb = b.getBoundingClientRect();
+                return {frame: [fb.width, fb.height], img: [ib.width, ib.height], natural: i.naturalWidth,
+                        shown: Math.min(ib.width, ib.height * i.naturalWidth / i.naturalHeight),
+                        pillInside: bb.left >= fb.left - 0.5 && bb.right <= fb.right + 0.5 && bb.top >= fb.top - 0.5 && bb.bottom <= fb.bottom + 0.5}; }""")
+            assert got["natural"] <= 300, "it is the small saver thumbnail: %r" % got
+            assert abs(got["frame"][0] - got["shown"]) <= 3, "the thumbnail fills the frame, no bars: %r" % got
+            assert got["frame"][1] >= 280 or got["frame"][0] >= 280, "and the frame is as big as the room allows: %r" % got
+            assert got["pillInside"], "the pill is inside the frame, not clipped: %r" % got
+            sizes[idx] = got["frame"]
+            page.evaluate("document.querySelector('.idm-topbar button, .idm-topbar a').click()")
+            page.wait_for_selector(".idm-root", state="detached")
+            if page.locator(".lbm-root").count():
+                page.keyboard.press("Escape")
+                page.wait_for_selector(".lbm-root", state="detached")
+        assert sizes[0][1] > 250 and sizes[1][0] > 250, sizes
     finally:
         ctx.close()
 

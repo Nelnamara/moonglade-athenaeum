@@ -592,9 +592,12 @@ export function phoneColumns(width, landscape) {
    Edge on iPhone draw the page under the island (viewport-fit=cover) and report the inset on both sides; the
    window is then the whole screen. Chrome can keep its own room around the island and still report the inset,
    which would indent the page twice. Decided from the window's shape, never from the angle: the side room the
-   browser kept (the screen's long side less the window) covers what the insets ask for. iOS reports the two
-   sides equal when sideways; an Android cutout is one side only, and the page really sits under it, so an
-   uneven pair is never treated as kept. */
+   browser kept (the screen's long side less the window) MATCHES what the insets ask for, within a few px.
+   Matches, not merely covers: Page Zoom above 100% (Safari, Firefox, Edge on iPhone) shrinks the window by
+   the zoom without the browser keeping any room -- the page is still drawn under the island -- and a wrong
+   "kept" hides content under it, which is worse than a doubled band. iOS reports the two sides equal when
+   sideways; an Android cutout is one side only, and the page really sits under it, so an uneven pair is
+   never treated as kept. */
 export const SIDE_SLACK_PX = 4;
 export function sidesKept({ landscape, innerW, screenW, screenH, left, right }) {
   if (!landscape) return false;
@@ -602,7 +605,7 @@ export function sidesKept({ landscape, innerW, screenW, screenH, left, right }) 
   const long = Math.max(Number(screenW) || 0, Number(screenH) || 0);
   const w = Number(innerW);
   if (!(ask > 0) || !(long > 0) || !(w > 0)) return false;
-  return Math.abs(l - r) <= SIDE_SLACK_PX && long - w >= ask - SIDE_SLACK_PX;
+  return Math.abs(l - r) <= SIDE_SLACK_PX && Math.abs((long - w) - ask) <= SIDE_SLACK_PX;
 }
 
 /* Rotation keeps your place. Before the turn the gallery notes WHICH picture sits at the top of the

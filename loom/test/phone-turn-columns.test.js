@@ -58,7 +58,8 @@ describe("the side room is counted once (#73)", () => {
   test("every read sets the attribute from the window's shape, never from an angle", () => {
     assert.match(hook, /de\.toggleAttribute\("data-mg-sides-kept", kept\)/);
     assert.match(hook, /const sync = \(\) => \{\s*readSafe\(\);/);
-    assert.match(hook, /sidesKept\(\{ landscape: read\(\)\.landscape, innerW: window\.innerWidth/);
+    assert.match(hook, /const landscape = read\(\)\.landscape;/);
+    assert.match(hook, /sidesKept\(\{ landscape, innerW: window\.innerWidth/);
     assert.doesNotMatch(hook.replace(/\/\*[\s\S]*?\*\//g, ""), /screen\.orientation|window\.orientation|\.angle/);
   });
   test("the four insets come from one hidden probe, made once and removed with the hook", () => {
@@ -68,8 +69,13 @@ describe("the side room is counted once (#73)", () => {
     assert.match(hook, /probe\.remove\(\);/);
   });
   test("the attribute comes off when the last phone-shell user goes, never while another lives", () => {
-    assert.match(hook, /if \(--live === 0\) de\.removeAttribute\("data-mg-sides-kept"\);/);
+    assert.match(hook, /if \(--live === 0\) \{ de\.removeAttribute\("data-mg-sides-kept"\); de\.removeAttribute\("data-mg-slide"\); \}/);
     assert.match(hook, /live \+= 1;/);
+  });
+  test("the slide is asked for only when the state flips while the phone was already sideways", () => {
+    assert.match(hook, /if \(wasLandscape && landscape && de\.hasAttribute\("data-mg-sides-kept"\) !== kept\) \{\s*de\.setAttribute\("data-mg-slide", ""\);/);
+    assert.match(hook, /setTimeout\(\(\) => de\.removeAttribute\("data-mg-slide"\), 700\)/);
+    assert.match(hook, /de\.removeAttribute\("data-mg-slide"\)/);
   });
   test("it is only ever set under the landscape query, so an upright phone never carries it", () => {
     // sidesKept's first test is `landscape`, and the hook feeds it read().landscape (the media query's answer)
