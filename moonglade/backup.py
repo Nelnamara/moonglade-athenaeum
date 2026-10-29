@@ -14900,6 +14900,17 @@ def _contest_title(t):
     return t or ""
 
 
+def _contest_rule(rule):
+    """One contest rule, with every `*_ids` list turned into strings. A 19-digit id that
+    arrives as a bare JSON number would be ROUNDED by the browser's JSON.parse above 2^53
+    and link the wrong recipe or model; str() here keeps every digit (null entries dropped)."""
+    out = dict(rule)
+    for k, v in rule.items():
+        if isinstance(k, str) and k.endswith("_ids") and isinstance(v, list):
+            out[k] = [str(i) for i in v if i is not None]
+    return out
+
+
 def list_contests(session, active_only=False, max_pages=_CONTEST_MAX_PAGES, meta=None):
     """Return the PixAI contest board as normalized dicts, newest-first. `active_only`
     keeps just the currently-running ones (runtimeStatus=='running'). Pages through
@@ -14951,7 +14962,8 @@ def list_contests(session, active_only=False, max_pages=_CONTEST_MAX_PAGES, meta
                 #   tack_name -- the tag an entry must carry (PixAI calls a tag a "tack")
                 #   desc_url / result_url -- the contest's own rules + results documents,
                 #     both frequently absent (null upstream -> "" here)
-                "rules": [x for x in (r.get("rules") or []) if isinstance(x, dict)],
+                "rules": [_contest_rule(x) for x in (r.get("rules") or [])
+                          if isinstance(x, dict)],
                 "tack_name": r.get("proposedTackName") or "",
                 "desc_url": r.get("descUrl") or "",
                 "result_url": r.get("resultUrl") or "",

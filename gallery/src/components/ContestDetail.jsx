@@ -282,7 +282,7 @@ export default function ContestDetail({ contest, mineRow, onBack, onClose, onEnt
                             {String(id)} <span className="a">↗</span>
                           </a>
                         ) : (
-                          <span className="mgct-idlink" key={String(id)}>{String(id)}</span>
+                          <span className="mgct-idlink plain" key={String(id)}>{String(id)}</span>
                         )))}
                       </span>
                     );

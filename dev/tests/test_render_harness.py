@@ -2420,6 +2420,11 @@ def test_the_desktop_contest_detail_names_a_required_recipe_with_a_link(logged_i
     widget = desk.evaluate(_RULE_LINES, ".mgct-reqrule")
     assert len(widget) == 1 and "1 required widget" in widget[0]["text"]
     assert "w1" in widget[0]["text"] and widget[0]["links"] == []
+    colours = desk.evaluate("""() => { const q = (s) => getComputedStyle(document.querySelector(s)).color;
+        const p = document.createElement('a'); p.className = 'mgct-idlink'; document.body.appendChild(p);
+        const link = getComputedStyle(p).color; p.remove();
+        return {plain: q('.mgct-idlink.plain'), link}; }""")
+    assert colours["plain"] != colours["link"], colours
     assert "0 required" not in desk.inner_text("body")
 
 
