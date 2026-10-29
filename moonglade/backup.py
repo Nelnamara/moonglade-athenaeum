@@ -14900,12 +14900,27 @@ def _contest_title(t):
     return t or ""
 
 
-def list_contests(session, active_only=False, max_pages=_CONTEST_MAX_PAGES):
+def _contest_rule(rule):
+    """One contest rule, with every `*_ids` list turned into strings. A 19-digit id that
+    arrives as a bare JSON number would be ROUNDED by the browser's JSON.parse above 2^53
+    and link the wrong recipe or model; str() here keeps every digit (null entries dropped)."""
+    out = dict(rule)
+    for k, v in rule.items():
+        if isinstance(k, str) and k.endswith("_ids") and isinstance(v, list):
+            out[k] = [str(i) for i in v if i is not None]
+    return out
+
+
+def list_contests(session, active_only=False, max_pages=_CONTEST_MAX_PAGES, meta=None):
     """Return the PixAI contest board as normalized dicts, newest-first. `active_only`
     keeps just the currently-running ones (runtimeStatus=='running'). Pages through
     /v2/contest/list until the board's own `totalPage`, never past `max_pages`
     (_CONTEST_MAX_PAGES), pausing _CONTEST_PAGE_PAUSE between pages; when the ceiling rather
-    than `totalPage` ends the walk, the log says so. Read-only, no spend."""
+    than `totalPage` ends the walk, the log says so. Read-only, no spend.
+
+    `meta`, when given, is an out-dict the caller reads afterwards (the return value stays a
+    plain list): pages_read, total_page, total_count, limit (rows the walk could read) and
+    `truncated` -- True only when the ceiling, not the board's own `totalPage`, ended it."""
     out = []
     page = 1
     while True:
@@ -14943,12 +14958,12 @@ def list_contests(session, active_only=False, max_pages=_CONTEST_MAX_PAGES):
                 # renderer holding half a construct -- and the detail view now renders it.
                 "description": _contest_title(r.get("description")),
                 # The entry requirements, straight through (contest detail view):
-                #   rules  -- [{type: 'required_model_ids', model_ids: [...]}
-                #              | {type: 'required_lora_ids', lora_ids: [...]}]; [] = no restriction
+                #   rules  -- [{type: 'required_model_ids', model_ids: [...]} | {type: 'required_lora_ids', lora_ids: [...]} | {type: 'required_recipe_ids', recipe_ids: [...]}]; [] = no restriction
                 #   tack_name -- the tag an entry must carry (PixAI calls a tag a "tack")
                 #   desc_url / result_url -- the contest's own rules + results documents,
                 #     both frequently absent (null upstream -> "" here)
-                "rules": [x for x in (r.get("rules") or []) if isinstance(x, dict)],
+                "rules": [_contest_rule(x) for x in (r.get("rules") or [])
+                          if isinstance(x, dict)],
                 "tack_name": r.get("proposedTackName") or "",
                 "desc_url": r.get("descUrl") or "",
                 "result_url": r.get("resultUrl") or "",
@@ -14959,9 +14974,16 @@ def list_contests(session, active_only=False, max_pages=_CONTEST_MAX_PAGES):
                 "reward_distributed_at": r.get("rewardDistributedAt") or "",
             })
         total_page = int(d.get("totalPage") or 1)
+        total_count = int(d.get("totalCount") or 0)
         if page >= total_page:
+            if meta is not None:
+                meta.update(pages_read=page, total_page=total_page, total_count=total_count,
+                            limit=page * _CONTEST_PAGE_SIZE, truncated=False)
             break
         if page >= max_pages:
+            if meta is not None:
+                meta.update(pages_read=page, total_page=total_page, total_count=total_count,
+                            limit=page * _CONTEST_PAGE_SIZE, truncated=True)
             from moonglade import logs as moonglade_logging
             moonglade_logging.get_logger().warning(
                 "contest board: stopped at the %d-page ceiling; the board reports %d pages, "

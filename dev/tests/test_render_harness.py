@@ -2355,6 +2355,158 @@ def test_the_phone_contest_detail_folds_to_one_open_section_over_a_pinned_enter_
         "opening a second section did not close the first: {!r}".format(after))
 
 
+_RECIPE_ID = "2049376847228801627"
+
+
+def _board_with_recipe_rules():
+    """The harness board with the JoJo contest carrying a recipe rule beside a model rule
+    (#94), plus a third contest whose rule kind the app has never seen."""
+    board = json.loads(json.dumps(_MOBILE_BOARD))
+    jojo = next(c for c in board["contests"] if c["slug"] == "jojo-pose")
+    jojo["rules"] = [{"type": "required_recipe_ids", "recipe_ids": [_RECIPE_ID]},
+                     {"type": "required_model_ids", "model_ids": ["m1", "m2"]}]
+    widget = json.loads(json.dumps(jojo))
+    widget.update(id="c-widget", slug="widget-run", title="Widget Run",
+                  url="https://pixai.art/en/contest/widget-run",
+                  rules=[{"type": "required_widget_ids", "widget_ids": ["w1"]}])
+    board["contests"].append(widget)
+    board["community"] = 2
+    return board
+
+
+# One read of a Models row: each rule line's own text and the links inside it.
+_RULE_LINES = """(root) => [...document.querySelectorAll(root)].map(el => ({
+    text: el.textContent.replace(/\\s+/g, ' ').trim(),
+    links: [...el.querySelectorAll('a')].map(a => a.getAttribute('href')),
+    rel: [...el.querySelectorAll('a')].map(a => a.getAttribute('rel'))}))"""
+
+
+def _stub_contest_reads(page, board):
+    _json_route(page, "**/api/contests", board)
+    _json_route(page, "**/api/contest/mine",
+                {"contests": [], "total_entries": 0, "sync_running": False})
+    _json_route(page, "**/api/contest/*/artworks", {"entries": [], "total_count": 104})
+    _json_route(page, "**/api/contest/sync", {"started": False, "skipped": "recent"})
+    _json_route(page, "**/api/myart/items", _MOBILE_ART)
+
+
+def test_the_desktop_contest_detail_names_a_required_recipe_with_a_link(logged_in_page):
+    """#94: a required-recipes rule read as "0 required models" with no links. The Models row
+    now has a recipe line linking to the recipe on pixai.art, the model line is unchanged,
+    and a rule kind the app has not seen is shown by its own name with no link."""
+    desk = logged_in_page(**DESKTOP)
+    _stub_contest_reads(desk, _board_with_recipe_rules())
+    desk.goto("/", wait_until="domcontentloaded")
+    _freeze_motion(desk)
+    desk.wait_for_selector(".mgx-navspine", timeout=10_000)
+    desk.click('.mgx-navspine button.mgx-nav:has-text("Contests")')
+    desk.wait_for_selector(".mgct-card", timeout=10_000)
+    desk.click('.mgct-card:has-text("JoJo Pose")')
+    desk.wait_for_selector(".mgct-reqrule", timeout=10_000)
+    _settle(desk)
+    lines = desk.evaluate(_RULE_LINES, ".mgct-reqrule")
+    notes = desk.evaluate("() => [...document.querySelectorAll('.mgct-reqnote')].map(n => n.textContent.trim())")
+    assert notes == ["1 required recipe", "2 required models"], notes
+    assert lines[0]["links"] == ["https://pixai.art/recipes/" + _RECIPE_ID]
+    assert lines[1]["links"] == ["https://pixai.art/model/m1", "https://pixai.art/model/m2"]
+    assert all(r == "noopener noreferrer" for l in lines for r in l["rel"])
+    assert "0 required" not in desk.inner_text("body")
+
+    desk.click(".mgct-back")
+    desk.wait_for_selector(".mgct-card", timeout=10_000)
+    desk.click('.mgct-card:has-text("Widget Run")')
+    desk.wait_for_selector(".mgct-reqrule", timeout=10_000)
+    _settle(desk)
+    widget = desk.evaluate(_RULE_LINES, ".mgct-reqrule")
+    assert len(widget) == 1 and "1 required widget" in widget[0]["text"]
+    assert "w1" in widget[0]["text"] and widget[0]["links"] == []
+    colours = desk.evaluate("""() => { const q = (s) => getComputedStyle(document.querySelector(s)).color;
+        const p = document.createElement('a'); p.className = 'mgct-idlink'; document.body.appendChild(p);
+        const link = getComputedStyle(p).color; p.remove();
+        return {plain: q('.mgct-idlink.plain'), link}; }""")
+    assert colours["plain"] != colours["link"], colours
+    assert "0 required" not in desk.inner_text("body")
+
+
+def test_the_phone_contest_detail_names_a_required_recipe_with_a_link(logged_in_page):
+    page = logged_in_page(**MOBILE)
+    _open_contests_on_the_phone(page, [])
+    _stub_contest_reads(page, _board_with_recipe_rules())
+    page.reload(wait_until="domcontentloaded")
+    page.wait_for_selector(".glm-body", timeout=10_000)
+    _freeze_motion(page)
+    page.click('button[title="More"]')
+    page.click('.glm-menu-item:has-text("Contests")')
+    page.wait_for_selector(".cmb-hero", timeout=10_000)
+    page.click('.cmb-card:has-text("JoJo Pose")')
+    page.wait_for_selector(".cmb-acc", timeout=10_000)
+    page.click('.cmb-sechead:has-text("Requirements")')
+    page.wait_for_selector(".cmb-secbody", timeout=10_000)
+    _settle(page)
+    body = page.inner_text(".cmb-secbody")
+    assert "1 required recipe" in body and "2 required models" in body
+    assert "0 required" not in body
+    hrefs = page.evaluate(
+        "() => [...document.querySelectorAll('.cmb-secbody a')].map(a => a.getAttribute('href'))")
+    assert hrefs == ["https://pixai.art/recipes/" + _RECIPE_ID,
+                     "https://pixai.art/model/m1", "https://pixai.art/model/m2"]
+    # a 19-digit id must wrap inside the 390pt screen, not push the page sideways
+    over = page.evaluate("""() => {
+        const s = document.querySelector('.cmb-secbody');
+        return {sw: s.scrollWidth, cw: s.clientWidth, dw: document.documentElement.scrollWidth,
+                vw: window.innerWidth};
+    }""")
+    assert over["sw"] <= over["cw"] + 1 and over["dw"] <= over["vw"] + 1, over
+
+    page.click(".cmb-back")
+    page.wait_for_selector(".cmb-hero", timeout=10_000)
+    page.click('.cmb-card:has-text("Widget Run")')
+    page.wait_for_selector(".cmb-acc", timeout=10_000)
+    page.click('.cmb-sechead:has-text("Requirements")')
+    page.wait_for_selector(".cmb-secbody", timeout=10_000)
+    body = page.inner_text(".cmb-secbody")
+    assert "1 required widget" in body and "w1" in body and "0 required" not in body
+    assert page.locator(".cmb-secbody a").count() == 0
+
+
+def test_the_contest_lists_say_so_when_the_board_was_cut_at_the_ceiling(logged_in_page):
+    """#94: past the app's page ceiling the oldest contests are dropped; the lists now say
+    so. A board payload without `board` (or with truncated false) shows no such line."""
+    cut = json.loads(json.dumps(_MOBILE_BOARD))
+    cut["board"] = {"truncated": True, "limit": 1000, "total_count": 1200}
+    line = "The newest 1,000 of PixAI's 1,200 contests are shown; older ones are not read."
+
+    desk = logged_in_page(**DESKTOP)
+    _stub_contest_reads(desk, cut)
+    desk.goto("/", wait_until="domcontentloaded")
+    _freeze_motion(desk)
+    desk.wait_for_selector(".mgx-navspine", timeout=10_000)
+    desk.click('.mgx-navspine button.mgx-nav:has-text("Contests")')
+    desk.wait_for_selector(".mgct-card", timeout=10_000)
+    assert line in desk.inner_text(".mgct-footer >> nth=-1")
+
+    page = logged_in_page(**MOBILE)
+    _open_contests_on_the_phone(page, [])
+    _stub_contest_reads(page, cut)
+    page.reload(wait_until="domcontentloaded")
+    page.wait_for_selector(".glm-body", timeout=10_000)
+    _freeze_motion(page)
+    page.click('button[title="More"]')
+    page.click('.glm-menu-item:has-text("Contests")')
+    page.wait_for_selector(".cmb-hero", timeout=10_000)
+    assert line in page.inner_text(".cmb-foot >> nth=-1")
+
+    whole = json.loads(json.dumps(_MOBILE_BOARD))          # no "board" key at all
+    _stub_contest_reads(page, whole)
+    page.reload(wait_until="domcontentloaded")
+    page.wait_for_selector(".glm-body", timeout=10_000)
+    _freeze_motion(page)
+    page.click('button[title="More"]')
+    page.click('.glm-menu-item:has-text("Contests")')
+    page.wait_for_selector(".cmb-hero", timeout=10_000)
+    _settle(page)
+    assert "contests are shown" not in page.inner_text("body")
+
 def test_the_phone_entry_screen_never_enters_on_one_tap(logged_in_page):
     """Frame D3, and the safety half of it. The confirm bar is DISABLED with nothing picked,
     the tiles are real 44pt+ targets, picking two arms the bar with the count -- and no

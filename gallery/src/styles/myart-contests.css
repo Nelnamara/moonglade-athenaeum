@@ -464,6 +464,8 @@ button.mgct-enter.small { font-size: 12.5px; padding: 10px 20px; }
   color: var(--lavender); overflow-wrap: anywhere; }
 .mgct-idlink .a { color: var(--overlay0); }
 .mgct-idlink:hover { color: var(--text); }
+/* An id with nowhere to link to (a rule kind the app has not seen): plain text, not link-coloured. */
+.mgct-idlink.plain, .mgct-idlink.plain:hover { color: var(--text); }
 @media (max-width: 720px) {
   .mgct-cols { grid-template-columns: 1fr; }
   .mgct-tiers { grid-template-columns: repeat(2, 1fr); }

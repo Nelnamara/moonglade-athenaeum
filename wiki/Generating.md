@@ -944,10 +944,11 @@ The web gallery goes further. Under **Contests** in the header, opening a contes
 its full page: PixAI's own **brief** (what they're actually asking for), the **prize
 breakdown** tier by tier — how much each rank pays, how many people place there, and what
 that adds up to — and the **requirements**: the tag an entry must carry, whether the contest
-restricts you to particular models or LoRAs, a link to its rules document if it published
+restricts you to particular models, LoRAs or recipes (each with a link), a link to its rules document if it published
 one, and how the winners get decided. Below that sit both dates, a preview of the entries,
 and the winners once results land. Each winner shows the **tier** it won — PixAI pays by tier
-(a tier can hold many winners), so the list never numbers its places — and what that tier paid.
+(a tier can hold many winners), so the list never numbers its places — and what that tier paid. If PixAI's contest board ever
+grows past what the app reads, the list says so.
 
 **Wins are verified, never taken on trust.** For every contest you entered, the app checks
 PixAI's own winners list at the contest's result date, then once a day for two weeks (it stops

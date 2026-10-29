@@ -3,6 +3,7 @@ import Icon from "../icons/Icons.jsx";
 import { apiGet } from "../api.js";
 import { fmt, countdown, dayOf, tsOf } from "../hooks/useContests.js";
 import { Markdown } from "./ContestDetail.jsx";
+import { ruleLine } from "../lib/contestRules.js";
 import "../styles/contest-mobile.css";
 
 /* THE DETAIL, ON THE PHONE — pixel source `Contest Mobile Handoff.dc.html` frame D2
@@ -164,16 +165,19 @@ export default function ContestDetailMobile({ contest, mineRow, onBack, onEnter 
                 // turns a model id into its title, and inventing a lookup would be a new
                 // upstream call per id. Same call desktop's ContestDetail.jsx makes.
                 rules.map((r, i) => {
-                  const lora = r.type === "required_lora_ids";
-                  const ids = (lora ? r.lora_ids : r.model_ids) || [];
+                  const { kind, ids, href } = ruleLine(r);
                   return (
                     <span key={i}>
-                      {ids.length} required {lora ? "LoRA" : "model"}{ids.length === 1 ? "" : "s"}
+                      {ids.length} required {kind}{ids.length === 1 ? "" : "s"}
                       {ids.map((id) => (
                         <span key={String(id)}>
                           {" "}
-                          <a href={"https://pixai.art/model/" + encodeURIComponent(String(id))}
-                            target="_blank" rel="noopener noreferrer">{String(id)} ↗</a>
+                          {href(id) ? (
+                            <a href={href(id)}
+                              target="_blank" rel="noopener noreferrer">{String(id)} ↗</a>
+                          ) : (
+                            <span>{String(id)}</span>
+                          )}
                         </span>
                       ))}
                     </span>

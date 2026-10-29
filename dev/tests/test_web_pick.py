@@ -1306,7 +1306,8 @@ _CONTEST_PAGES = {
          "prizeAmount": 29000000, "mediaId": "M1", "startAt": "2026-06-26T00:00:00Z",
          "endAt": "2026-07-06T00:00:00Z", "prizeDistribution": [{"rank": 1, "count": 1, "amount": 100}],
          "description": {"en": _LONG_BRIEF, "ja": "nope"},
-         "rules": [{"type": "required_model_ids", "model_ids": ["mA", "mB"]}, "junk"],
+         "rules": [{"type": "required_model_ids", "model_ids": ["mA", "mB"]},
+                   {"type": "required_recipe_ids", "recipe_ids": ["2049376847228801627"]}, "junk"],
          "proposedTackName": "summer-embers", "descUrl": "https://pixai.art/doc/se",
          "resultUrl": None},
         {"id": "2", "title": {"en": "Rookie Contest"}, "slug": "user-rookie", "type": "community",
@@ -1351,8 +1352,11 @@ def test_list_contests_carries_the_whole_brief_and_the_entry_requirements(pixai)
     assert c1["description"] == _LONG_BRIEF
     assert len(c1["description"]) > 600
     assert c1["description"].endswith("[rules](https://pixai.art/rules)")
-    # the requirements, passed through; the non-dict rule entry is dropped, not carried
-    assert c1["rules"] == [{"type": "required_model_ids", "model_ids": ["mA", "mB"]}]
+    # the requirements, passed through; the non-dict rule entry is dropped, not carried,
+    # and a kind the reader does not special-case (a recipe rule, #94) arrives intact
+    assert c1["rules"] == [{"type": "required_model_ids", "model_ids": ["mA", "mB"]},
+                           {"type": "required_recipe_ids",
+                            "recipe_ids": ["2049376847228801627"]}]
     assert c1["tack_name"] == "summer-embers"
     assert c1["desc_url"] == "https://pixai.art/doc/se"
     assert c1["result_url"] == ""            # null upstream -> "", never None
@@ -1361,6 +1365,24 @@ def test_list_contests_carries_the_whole_brief_and_the_entry_requirements(pixai)
     assert c2["rules"] == [] and c2["tack_name"] == "" and c2["desc_url"] == ""
     assert c2["result_url"] == "" and c2["description"] == ""
 
+
+def test_rule_ids_reach_the_browser_as_strings_with_every_digit(pixai):
+    """A bare 19-digit JSON number is rounded by the browser's JSON.parse (above 2^53) and
+    would link the wrong recipe or model, so the reader makes every *_ids entry a string."""
+    big = 2049376847228801627
+    assert float(big) != big                          # the browser would not keep it
+    pages = {1: {"data": [{"id": "9", "title": {"en": "Big Ids"}, "slug": "big",
+                           "type": "community", "runtimeStatus": "running", "mediaId": "",
+                           "rules": [{"type": "required_recipe_ids", "recipe_ids": [big, "77"]},
+                                     {"type": "required_model_ids", "model_ids": [12, None]},
+                                     {"type": "required_widget_ids", "widget_ids": [big]}]}],
+                 "page": 1, "pageSize": 50, "totalPage": 1, "totalCount": 1}}
+    pixai.on("/contest/list", lambda call: pages[call.params["page"]])
+    rules = core.list_contests(pixai)[0]["rules"]
+    assert rules[0]["recipe_ids"] == ["2049376847228801627", "77"]
+    assert rules[1]["model_ids"] == ["12"]
+    assert rules[2]["widget_ids"] == ["2049376847228801627"]
+    assert rules[0]["type"] == "required_recipe_ids"
 
 def test_api_contests_route(tmp_path, pixai):
     pixai.on("/contest/list", lambda call: _CONTEST_PAGES[call.params["page"]])
