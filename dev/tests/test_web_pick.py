@@ -1306,7 +1306,8 @@ _CONTEST_PAGES = {
          "prizeAmount": 29000000, "mediaId": "M1", "startAt": "2026-06-26T00:00:00Z",
          "endAt": "2026-07-06T00:00:00Z", "prizeDistribution": [{"rank": 1, "count": 1, "amount": 100}],
          "description": {"en": _LONG_BRIEF, "ja": "nope"},
-         "rules": [{"type": "required_model_ids", "model_ids": ["mA", "mB"]}, "junk"],
+         "rules": [{"type": "required_model_ids", "model_ids": ["mA", "mB"]},
+                   {"type": "required_recipe_ids", "recipe_ids": ["2049376847228801627"]}, "junk"],
          "proposedTackName": "summer-embers", "descUrl": "https://pixai.art/doc/se",
          "resultUrl": None},
         {"id": "2", "title": {"en": "Rookie Contest"}, "slug": "user-rookie", "type": "community",
@@ -1351,8 +1352,11 @@ def test_list_contests_carries_the_whole_brief_and_the_entry_requirements(pixai)
     assert c1["description"] == _LONG_BRIEF
     assert len(c1["description"]) > 600
     assert c1["description"].endswith("[rules](https://pixai.art/rules)")
-    # the requirements, passed through; the non-dict rule entry is dropped, not carried
-    assert c1["rules"] == [{"type": "required_model_ids", "model_ids": ["mA", "mB"]}]
+    # the requirements, passed through; the non-dict rule entry is dropped, not carried,
+    # and a kind the reader does not special-case (a recipe rule, #94) arrives intact
+    assert c1["rules"] == [{"type": "required_model_ids", "model_ids": ["mA", "mB"]},
+                           {"type": "required_recipe_ids",
+                            "recipe_ids": ["2049376847228801627"]}]
     assert c1["tack_name"] == "summer-embers"
     assert c1["desc_url"] == "https://pixai.art/doc/se"
     assert c1["result_url"] == ""            # null upstream -> "", never None
