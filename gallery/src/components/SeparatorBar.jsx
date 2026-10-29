@@ -138,6 +138,68 @@ export default function SeparatorBar({
     </div>
   );
 
+  // The credits chip: gold billing tooltip drops below, right-anchored. A const so a linked account can set it
+  // INSIDE the doors group (below) and an unlinked one can set it bare.
+  const creditsChip = (
+    <button type="button" className="mgx-cred" data-expiring={expiring ? "1" : undefined}
+      onClick={() => window.open("https://pixai.art/en/membership/credit-packs", "_blank", "noopener")}
+      aria-label={"Credits " + credits + ", cards " + cards + "." +
+        (expiring ? " " + expiry.lines.map(expiryText).join(". ") + "." : "") +
+        " Buy credits or cards on PixAI."}>
+      {warn ? <span className="mgx-warndot" aria-hidden="true">!</span> : null}
+      <span className="mgx-credval">{credits}</span>
+      <span className="mgx-credlab">CREDITS</span>
+      <span className="mgx-creddiv" aria-hidden="true" />
+      <span className="mgx-credcards">
+        <span className="mgx-credval cards">{cards}</span>
+        <span className="mgx-credlab cards">CARDS</span>
+      </span>
+      <span className="mgx-credtip" role="tooltip">
+        {expiring ? (
+          <span className="mgx-tipexpiry">
+            <span className="mgx-tipexphead">{cards} cards</span>
+            {expiry.lines.map((l) => (
+              <span className="mgx-tipexp" key={l.kind + l.at}>{expiryText(l)}</span>
+            ))}
+            {expiry.other ? (
+              <span className="mgx-tipdim">
+                {expiry.other.toLocaleString()} other card{expiry.other === 1 ? "" : "s"}, no expiry soon
+              </span>
+            ) : null}
+          </span>
+        ) : null}
+        {warn ? <span className="mgx-tipwarn">{warn}</span> : null}
+        <span className="mgx-tiprow">
+          <span className="mgx-tipk">Credits</span><b className="mgx-tipv">{credits}</b>
+        </span>
+        {hasSplit ? (
+          blur ? (
+            <span className="mgx-tipdim">paid / free — hidden while blurred</span>
+          ) : (
+            <span className="mgx-tipdim">
+              {Number(paid).toLocaleString()} paid · {Number(freeCr).toLocaleString()} free
+            </span>
+          )
+        ) : null}
+        <span className="mgx-tiprow head">
+          <span className="mgx-tipk">Free cards</span><b className="mgx-tipv">{cards}</b>
+        </span>
+        {cardsBy.slice(0, 8).map((c) => (
+          <span className="mgx-tipcard" key={c.name}>
+            <b>{c.count}</b>
+            <span className="nm">{c.name}</span>
+            {c.category ? <i>{c.category}</i> : null}
+          </span>
+        ))}
+        {cardsBy.length > 8 ? (
+          <span className="mgx-tipdim">+{cardsBy.length - 8} more types</span>
+        ) : null}
+        {cardExpiry ? <span className="mgx-tipdim">soonest expiry: {cardExpiry}</span> : null}
+        <span className="mgx-tipfoot">Click to buy credits or cards on PixAI</span>
+      </span>
+    </button>
+  );
+
   return (
     <div className="mgx-sep">
       <div className="mgx-sepleft">
@@ -232,67 +294,17 @@ export default function SeparatorBar({
         {/* ✉ THE INBOX and 🎁 THE GIFT BOX (Sessions R + Y, Inbox and Event Handoff §1; two doors
             since the owner's walk 2026-10-04: the gift box is for rewards only). Twins, 8 px
             apart and one 8 px gap before the credits chip, shown only with a linked account. */}
-        {linked ? <InboxDoor onOpenContests={openContests} /> : null}
-        {linked ? <GiftBox account={account} /> : null}
-
-        {/* account credits chip: gold billing tooltip drops below, right-anchored */}
-        <button type="button" className="mgx-cred" data-expiring={expiring ? "1" : undefined}
-          onClick={() => window.open("https://pixai.art/en/membership/credit-packs", "_blank", "noopener")}
-          aria-label={"Credits " + credits + ", cards " + cards + "." +
-            (expiring ? " " + expiry.lines.map(expiryText).join(". ") + "." : "") +
-            " Buy credits or cards on PixAI."}>
-          {warn ? <span className="mgx-warndot" aria-hidden="true">!</span> : null}
-          <span className="mgx-credval">{credits}</span>
-          <span className="mgx-credlab">CREDITS</span>
-          <span className="mgx-creddiv" aria-hidden="true" />
-          <span className="mgx-credcards">
-            <span className="mgx-credval cards">{cards}</span>
-            <span className="mgx-credlab cards">CARDS</span>
+        {/* The doors and the credits chip are ONE group (#72): the handoff draws the door one 8 px gap
+            before the credits chip, and this row now wraps, so as three loose items the row could break
+            between the inbox and the gift box or between the gift box and the credits. As one
+            non-breaking item they wrap together. Unlinked, the chip stands alone. */}
+        {linked ? (
+          <span className="mgx-doors">
+            <InboxDoor onOpenContests={openContests} />
+            <GiftBox account={account} />
+            {creditsChip}
           </span>
-          <span className="mgx-credtip" role="tooltip">
-            {expiring ? (
-              <span className="mgx-tipexpiry">
-                <span className="mgx-tipexphead">{cards} cards</span>
-                {expiry.lines.map((l) => (
-                  <span className="mgx-tipexp" key={l.kind + l.at}>{expiryText(l)}</span>
-                ))}
-                {expiry.other ? (
-                  <span className="mgx-tipdim">
-                    {expiry.other.toLocaleString()} other card{expiry.other === 1 ? "" : "s"}, no expiry soon
-                  </span>
-                ) : null}
-              </span>
-            ) : null}
-            {warn ? <span className="mgx-tipwarn">{warn}</span> : null}
-            <span className="mgx-tiprow">
-              <span className="mgx-tipk">Credits</span><b className="mgx-tipv">{credits}</b>
-            </span>
-            {hasSplit ? (
-              blur ? (
-                <span className="mgx-tipdim">paid / free — hidden while blurred</span>
-              ) : (
-                <span className="mgx-tipdim">
-                  {Number(paid).toLocaleString()} paid · {Number(freeCr).toLocaleString()} free
-                </span>
-              )
-            ) : null}
-            <span className="mgx-tiprow head">
-              <span className="mgx-tipk">Free cards</span><b className="mgx-tipv">{cards}</b>
-            </span>
-            {cardsBy.slice(0, 8).map((c) => (
-              <span className="mgx-tipcard" key={c.name}>
-                <b>{c.count}</b>
-                <span className="nm">{c.name}</span>
-                {c.category ? <i>{c.category}</i> : null}
-              </span>
-            ))}
-            {cardsBy.length > 8 ? (
-              <span className="mgx-tipdim">+{cardsBy.length - 8} more types</span>
-            ) : null}
-            {cardExpiry ? <span className="mgx-tipdim">soonest expiry: {cardExpiry}</span> : null}
-            <span className="mgx-tipfoot">Click to buy credits or cards on PixAI</span>
-          </span>
-        </button>
+        ) : creditsChip}
 
         {claimCredits ? (
           <button type="button" className="mgx-claim" onClick={onClaim} disabled={claiming}

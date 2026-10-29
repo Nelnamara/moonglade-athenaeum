@@ -125,7 +125,7 @@
 /* ---- the composer's { } Inspect toggle ---- */
 .mgrun-inspect-toggle { font: inherit; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 7px;
   border: 1px solid var(--surface1); background: transparent; color: var(--subtext); cursor: pointer;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
 .mgrun-inspect-toggle.on { border-color: var(--lavender); color: var(--text); }
 .gd-res.warn { color: var(--peach); }
 

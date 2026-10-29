@@ -9594,12 +9594,17 @@ def _rf_iso(days):
     return (_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
-def _rf_account(expiring=True):
-    """A linked account: 13 free cards, 5 of them lapsing in two days unless `expiring` is off."""
-    return {"credits": 46200, "cards": 13, "cards_by": [
+def _rf_account(expiring=True, social=False):
+    """A linked account: 13 free cards, 5 of them lapsing in two days unless `expiring` is off.
+    `social` adds what makes the header's right cluster its full width: the followers and following
+    chip and a daily claim waiting (#72)."""
+    acct = {"credits": 46200, "cards": 13, "cards_by": [
         {"name": "Tsubaki.3", "count": 5, "category": "image", "expires": "",
          "expiry_counts": [{"expires_at": _rf_iso(2), "count": 5}] if expiring else []},
         {"name": "Daily recipe", "count": 8, "category": "image", "expires": "", "expiry_counts": []}]}
+    if social:
+        acct.update({"followers": 1234, "following": 567, "claim_credits": 2000, "claim_ids": ["daily-credit"]})
+    return acct
 
 
 def _rf_items():
@@ -10151,3 +10156,325 @@ def test_each_phone_sheet_wears_its_doors_picture_in_its_title_row(logged_in_pag
     h = page.evaluate(_RF_HEAD_JS, [".glm-sheet.ib-sheet", ".glm-sheet-title"])
     assert h["src"] == "/branding/rewards/gift.png" and abs(h["emblem"]["w"] - 40) < 0.5, h
     assert page.locator(".glm-sheet.ib-sheet").get_attribute("aria-label") == "GIFT BOX"
+
+
+# ---------------------------------------------------------------------------
+# #72 -- the desktop build on an iPad. Four pieces of CSS, each proven in this file's two-phase
+# style: the shipped state first, then the pre-fix rule put back as an in-page <style> and the
+# same measurement flipped, so a test that cannot fail cannot pass either. The account read and
+# the inbox reads are answered in the page (_rf_routes); nothing reaches PixAI.
+# ---------------------------------------------------------------------------
+
+_IPAD_UA = ("Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 "
+            "(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1")
+
+
+def _ipad(logged_in_page, width, height):
+    """A signed-in iPad: touch, the iPad Safari user agent, mobile viewport semantics, and a screen
+    the size of the window (so an overflowing page cannot hide behind a wider layout viewport)."""
+    page = logged_in_page(width=width, height=height, screen={"width": width, "height": height},
+                          is_mobile=True, has_touch=True, user_agent=_IPAD_UA)
+    for pat in ("**/api/model-version*", "**/api/task-params/*", "**/api/video-task-params/*", "**/api/price*"):
+        page.route(pat, lambda r: _q_json(r, {"error": "the harness has no PixAI"}))
+    return page
+
+
+# The pinned goal is the one chip of the header's right cluster that comes out of the sealed
+# roster, so the test stands in a static node of the same classes (as wide as a real pin) before
+# the credits chip rather than reading sealed content.
+_IPAD_PIN_JS = """() => {
+  const cred = document.querySelector('.mgx-sepright button.mgx-cred');
+  const at = cred.closest('.mgx-doors') || cred;   // the doors group is one item of the row
+  const wrap = document.createElement('div'); wrap.className = 'mgg-chips';
+  wrap.innerHTML = '<span class="mgg-pin" role="button" tabindex="0"><span class="mgg-pin-t">Moonwell Regular - 3 to go</span>'
+    + '<button type="button" class="mgg-x">x</button></span><span class="mgg-vigil">Vigil - day 12</span>';
+  at.parentNode.insertBefore(wrap, at);
+}"""
+
+_IPAD_HEADER_JS = """() => {
+  const row = document.querySelector('.mgx-sepright');
+  const r = (e) => { const b = e.getBoundingClientRect(); return {l: b.left, t: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height}; };
+  const kids = [...row.children].map((e) => ({cls: String(e.className).slice(0, 24), ...r(e)})).filter((k) => k.w > 0 && k.h > 0);
+  const hit = (a, b) => Math.min(a.r, b.r) - Math.max(a.l, b.l) > 1 && Math.min(a.b, b.b) - Math.max(a.t, b.t) > 1;
+  const overlaps = [];
+  for (let i = 0; i < kids.length; i++) for (let j = i + 1; j < kids.length; j++)
+    if (hit(kids[i], kids[j])) overlaps.push([kids[i].cls, kids[j].cls]);
+  const pick = (s) => { const e = document.querySelector(s); return e ? r(e) : null; };
+  return {right: row.getBoundingClientRect().right, docW: document.documentElement.scrollWidth, innerW: innerWidth,
+          kids: kids.map((k) => [k.cls, Math.round(k.l), Math.round(k.r), Math.round(k.t)]), overlaps, cred: pick('.mgx-sepright button.mgx-cred'),
+          claim: pick('.mgx-sepright .mgx-claim'), help: pick('.mgx-sepright .mgx-sephelp')};
+}"""
+
+_IPAD_SIZES = [(744, 1133), (820, 1180), (1024, 1366), (1180, 820), (1194, 834)]
+
+# the doors group: where the inbox door, the gift door and the credits chip sit (#72)
+_DOORS_JS = """() => {
+  const r = (s) => { const e = document.querySelector(s); if (!e) return null; const b = e.getBoundingClientRect();
+    return {l: b.left, r: b.right, t: b.top, b: b.bottom}; };
+  const g = document.querySelector('.mgx-doors');
+  return {inbox: r('.mgx-sepright .ib-door.inbox'), gift: r('.mgx-sepright .ib-door.gift'),
+          cred: r('.mgx-sepright button.mgx-cred'),
+          grouped: !!g && !!g.querySelector('.ib-door.inbox') && !!g.querySelector('.ib-door.gift')
+                   && !!g.querySelector('button.mgx-cred')};
+}"""
+
+
+def _doors_on_one_line(d):
+    mid = lambda k: (d[k]["t"] + d[k]["b"]) / 2
+    return abs(mid("inbox") - mid("gift")) < 8 and abs(mid("gift") - mid("cred")) < 8
+
+
+def test_the_header_row_holds_a_linked_account_at_every_ipad_width(logged_in_page):
+    """#72 A. With an account linked, the separator bar's right cluster (Activity, the pinned goal,
+    followers and following, the inbox and the gift box, credits and cards, the claim button, the ?)
+    is 1,175 px of unbreakable row. It was flex:none and never wrapped, so on an iPad the credits
+    chip, the claim button and the ? ran off the right edge, and Safari either panned sideways or
+    shrank the page to fit. Now the row wraps onto a second line. Judged against the device width
+    (not innerWidth, which grows with an overflowing page on a mobile viewport).
+
+    The inbox door, the gift door and the credits chip wrap as ONE group (`.mgx-doors`): the Inbox
+    handoff draws the door one 8 px gap before the credits chip, and a wrapping row would otherwise
+    split them (the inbox ends one line, the gift box starts the next; or the credits chip drops
+    alone). Checked at every iPad size and on 900 and 1000 px desktop windows, where the row wraps
+    as well.
+
+    Phase 2 puts the old rule back (no wrap, flex:none, no cap) and the right edge leaves the screen;
+    and, apart from it, flattens the group so the doors and chip are loose items again, which splits
+    them at 820 and 1024 (iPad) and on the 900 px window."""
+    split_when_loose = []
+    for width, height, ipad in [(w, h, True) for w, h in _IPAD_SIZES] + [(900, 800, False), (1000, 800, False)]:
+        page = _ipad(logged_in_page, width, height) if ipad else logged_in_page(width=width, height=height)
+        _rf_routes(page, account=_rf_account(social=True))
+        _visit(page, "/")
+        page.wait_for_selector(".mgx-sepright .mgx-claim")
+        page.wait_for_selector(".ib-door.inbox")
+        _dismiss_any_achievement_toast(page)
+        page.evaluate(_IPAD_PIN_JS)
+        _settle(page)
+        g = page.evaluate(_IPAD_HEADER_JS)
+        where = "%dx%d: %r" % (width, height, g)
+        assert g["innerW"] == width and g["docW"] <= width, ("the page is as wide as the screen", where)
+        assert g["right"] <= width, ("the right cluster ends inside the screen", where)
+        assert g["overlaps"] == [], ("no two chips overlap", where)
+        for k in ("cred", "claim", "help"):
+            assert g[k] and g[k]["l"] >= 0 and g[k]["r"] <= width, ("%s is on screen" % k, where)
+
+        d = page.evaluate(_DOORS_JS)
+        assert d["grouped"], ("the doors and the credits chip are one group", where)
+        assert _doors_on_one_line(d), ("the doors and the credits chip share a line", json.dumps(d))
+        assert abs((d["gift"]["l"] - d["inbox"]["r"]) - 8) < 1.5, ("the twins are 8 px apart", json.dumps(d))
+        assert abs((d["cred"]["l"] - d["gift"]["r"]) - 8) < 1.5, ("8 px from the gift box to the credits", json.dumps(d))
+
+        # Phase 2a: the doors as loose items of the row, as they were.
+        flat = page.add_style_tag(content=".mgx-doors { display: contents !important; }")
+        _settle(page)
+        if not _doors_on_one_line(page.evaluate(_DOORS_JS)):
+            split_when_loose.append((width, ipad))
+        flat.evaluate("e => e.remove()")
+
+        # Phase 2b: the rule as it shipped before.
+        page.add_style_tag(content=".mgx-sepright { flex-wrap: nowrap !important; flex: none !important;"
+                                   " justify-content: normal !important; max-width: none !important; gap: 12px !important; }")
+        _settle(page)
+        old = page.evaluate(_IPAD_HEADER_JS)
+        if width <= 1180:
+            assert old["right"] > width and old["docW"] > width, (
+                "the pre-fix row runs past the screen at %d: %s" % (width, json.dumps(old)))
+    assert (820, True) in split_when_loose and (1024, True) in split_when_loose and (900, False) in split_when_loose, (
+        "loose, the doors and the credits chip are split by the wrap", split_when_loose)
+
+
+def test_the_generate_composer_row_wraps_instead_of_squeezing(logged_in_page):
+    """#72 B. The dock's top row (model chip, "pick a model . 1024x1024 . Auto", the run pieces, the
+    { } toggle) needs about 640 px and the composer is 373 to 515 px wide on an upright iPad. The row
+    did not wrap, so the shrinkable pieces took all of the squeeze: the model chip to a sliver, the
+    hint to three lines, the { } toggle to two. Now the row drops to a second line and each keeps its
+    size.
+
+    Phase 2a puts the row back to nowrap, with the toggle's own `white-space: nowrap` still in place:
+    the chip and the hint crush and the toggle holds one line, which is that declaration's whole job
+    (it pins the toggle even when the row is squeezed). Phase 2b takes it away too and the toggle
+    breaks onto two lines."""
+    for width, height in ((744, 1133), (820, 1180)):
+        page = _ipad(logged_in_page, width, height)
+        _visit(page, "/")
+        page.wait_for_selector(".mgg-card")
+        _dismiss_any_achievement_toast(page)
+        page.click(".mgx-gen")
+        page.wait_for_selector(".mgdock-composer-top .mgrun-inspect-toggle")
+        _settle(page)
+        probe = """() => ({
+            chipClipped: (() => { const s = document.querySelector('.mgdock-modelchip > span:not(.mgdock-chipph)');
+                                  return s.scrollWidth - s.clientWidth; })(),
+            toggleH: document.querySelector('.mgrun-inspect-toggle').getBoundingClientRect().height,
+            framesH: document.querySelector('.mgdock-frames').getBoundingClientRect().height})"""
+        m = page.evaluate(probe)
+        assert m["chipClipped"] <= 0 and m["toggleH"] < 30 and m["framesH"] < 24, ("%dpx" % width, m)
+
+        squeeze = page.add_style_tag(content=".mgdock-composer-top { flex-wrap: nowrap !important; }")
+        _settle(page)
+        old = page.evaluate(probe)
+        assert old["chipClipped"] > 0 and old["framesH"] >= 24, ("the pre-fix row is crushed at %d" % width, old)
+        assert old["toggleH"] < 30, ("the toggle's nowrap holds it to one line even squeezed", old)
+
+        page.add_style_tag(content=".mgrun-inspect-toggle { white-space: normal !important; }")
+        _settle(page)
+        old2 = page.evaluate(probe)
+        assert old2["toggleH"] >= 30, ("without its nowrap the squeezed toggle breaks in two at %d" % width, old2)
+        squeeze.evaluate("e => e.remove()")
+
+
+def test_the_lightbox_arrows_stay_off_a_wide_picture_held_upright(logged_in_page):
+    """#72 C. The Lightbox capped the picture at 94vw while the < > buttons reach 64 px in from each
+    edge, so a landscape picture on an upright iPad (24 px of margin at 820) ran under both. The cap is
+    now the smaller of 94vw and the width less the arrows' 144 px (--lbx-capw). The harness library's
+    first picture is a true 900 x 600. Held sideways (1180) the picture was never near the arrows, and
+    the box is the one it always was.
+
+    Phase 2 puts the 94vw cap back and the arrows land on the picture."""
+    rects = """() => { const r = (s) => { const b = document.querySelector(s).getBoundingClientRect();
+                return {l: b.left, t: b.top, r: b.right, b: b.bottom}; };
+              return {hero: r('.lbx-hero'), prev: r('.lbx-prev'), next: r('.lbx-next')}; }"""
+
+    def hits(a, b):
+        return min(a["r"], b["r"]) - max(a["l"], b["l"]) > 0 and min(a["b"], b["b"]) - max(a["t"], b["t"]) > 0
+
+    for width, height, crowded in ((820, 1180, True), (1180, 820, False)):
+        page = _ipad(logged_in_page, width, height)
+        _visit(page, "/")
+        page.wait_for_selector(".mgg-card")
+        _dismiss_any_achievement_toast(page)
+        # row 0 is the oldest, so the last card; it is the one with a file behind it
+        page.locator(".mgg-card").last.click()
+        page.wait_for_selector(".lbx .lbx-hero img")
+        _settle(page)
+        g = page.evaluate(rects)
+        assert not hits(g["hero"], g["prev"]) and not hits(g["hero"], g["next"]), ("%dpx" % width, g)
+        if crowded:
+            assert g["hero"]["r"] - g["hero"]["l"] <= width - 144 + 1, ("the cap is the width less the arrows", g)
+        else:
+            assert abs((g["hero"]["r"] - g["hero"]["l"]) - 900) <= 1, ("sideways the picture is its own 900 px", g)
+
+        page.add_style_tag(content=".lbx-hero { width: 94vw !important; max-width: 94vw !important; }")
+        _settle(page)
+        old = page.evaluate(rects)
+        if crowded:
+            assert hits(old["hero"], old["prev"]) and hits(old["hero"], old["next"]), (
+                "the pre-fix cap puts the arrows on the picture", old)
+
+
+def test_details_kicker_series_stays_on_one_line(logged_in_page):
+    """#72 D. Beside the picture the record column is narrow, and the kicker ("MODEL . v1" and the
+    find-more button) is a flex row whose pieces all shrink; the series span was squeezed to 15 to 22 px
+    and broke "." and "v1" onto two lines. The span and the button now keep their size, and the model
+    name is what gives; a name with no spaces in it breaks anywhere (`overflow-wrap: anywhere`) instead
+    of pushing the button out of the row.
+
+    The shared library has no dial-in series, so the span is given the text a real one carries, and the
+    kicker a width that cannot hold everything. Each declaration is proven on its own: take the series
+    rule away and the span breaks in two; take the button rule away (a short name, so the button is the
+    piece left to give) and the button breaks in two; take the wrap rule away and a 49-character name
+    pushes the button past the kicker."""
+    series = """() => document.querySelector('.p-kicker-series').getBoundingClientRect().height"""
+    mini = """() => { const b = document.querySelector('.p-kicker .gd-mini').getBoundingClientRect();
+                     return {h: b.height, w: b.width}; }"""
+    inside = """() => { const k = document.querySelector('.p-kicker').getBoundingClientRect();
+                        const b = document.querySelector('.p-kicker .gd-mini').getBoundingClientRect();
+                        return {over: b.right - k.right, kw: k.width}; }"""
+    setup = """(o) => { const k = document.querySelector('.p-kicker'); k.style.width = o.width + 'px';
+                       document.querySelector('.p-kicker-series').textContent = o.series;
+                       k.firstChild.nodeValue = o.name; }"""
+    for width, height in ((1024, 1366), (1180, 820)):
+        page = _ipad(logged_in_page, width, height)
+        _visit(page, "/")
+        page.wait_for_selector(".mgg-card")
+        _dismiss_any_achievement_toast(page)
+        # row 0 (the oldest, so the last card) carries the model name; DETAILS is the card's own ghost chip
+        page.evaluate("() => { const c = [...document.querySelectorAll('.mgg-card')].pop();"
+                      " c.querySelector('button.mgg-chip.ghost').click(); }")
+        page.wait_for_selector(".p-kicker .p-kicker-series", state="attached")
+        page.wait_for_selector(".p-kicker .gd-mini", state="attached")
+        _settle(page)
+
+        # the series span, with the model name giving
+        page.evaluate(setup, {"width": 150, "series": " \u00b7 v1", "name": "HARNESS MODEL"})
+        _settle(page)
+        assert page.evaluate(series) < 20, "%dpx: the series stays on one line" % width
+        undo = page.add_style_tag(content=".p-kicker-series { flex: 0 1 auto !important; white-space: normal !important; }")
+        _settle(page)
+        assert page.evaluate(series) >= 20, "%dpx: without its rule the series span breaks in two" % width
+        undo.evaluate("e => e.remove()")
+
+        # the find-more button, with a name too short to give anything up
+        page.evaluate(setup, {"width": 70, "series": " \u00b7 v1", "name": "AB"})
+        _settle(page)
+        m = page.evaluate(mini)
+        assert m["h"] < 30 and m["w"] > 60, ("%dpx: the button keeps its size and its one line" % width, m)
+        undo = page.add_style_tag(content=".p-kicker .gd-mini { flex: 0 1 auto !important; white-space: normal !important; }")
+        _settle(page)
+        m = page.evaluate(mini)
+        assert m["h"] >= 30 or m["w"] <= 60, ("%dpx: without its rule the squeezed button breaks in two" % width, m)
+        undo.evaluate("e => e.remove()")
+
+        # a long name with no spaces: the button stays in the kicker
+        page.evaluate(setup, {"width": 260, "series": " \u00b7 v3 \u00b7 2/4",
+                              "name": "ANEXTREMELYLONGMODELNAMEWITHNOSPACESATALLINIT0123456789"})
+        _settle(page)
+        i = page.evaluate(inside)
+        assert i["over"] <= 1, ("%dpx: the button stays inside the kicker" % width, i)
+        page.add_style_tag(content=".p-kicker { overflow-wrap: normal !important; }")
+        _settle(page)
+        i = page.evaluate(inside)
+        assert i["over"] > 1, ("%dpx: without overflow-wrap the long name pushes the button out" % width, i)
+
+
+_INBOX_ITEMS = 40
+
+
+def test_the_inbox_panel_fits_under_the_header_and_its_list_scrolls(logged_in_page):
+    """#97. The inbox (and gift box) panel was sized as if it opened about 86 px from the top of the
+    screen (`max-height: calc(100dvh - 96px)`), but it opens under the sticky header, 350 to 400 px
+    down, so on a short window its last rows sat below the screen where no scroll could reach them.
+    Its room is now the screen less the header (`--mgx-chrome-h`), and the list inside scrolls.
+    Measured at the 1280x800 desktop window the owner's report names, a sideways iPad and an upright
+    one, with 40 items.
+
+    Phase 2 puts the old `calc(100dvh - 96px)` back and the panel's bottom leaves the screen."""
+    items = []
+    base = _rf_items()
+    for i in range(_INBOX_ITEMS):
+        it = dict(base[i % len(base)])
+        it["id"] = "n%d" % i
+        items.append(it)
+    probe = """() => { const p = document.querySelector('.ib-panel'); const b = p.getBoundingClientRect();
+        const sc = [...p.querySelectorAll('*')].find((e) => /(auto|scroll)/.test(getComputedStyle(e).overflowY)
+                                                          && e.scrollHeight > e.clientHeight + 2);
+        const s2 = p.querySelector('.ib-scroll');
+        return {top: b.top, bottom: b.bottom, vh: innerHeight, scrolls: !!sc, rows: p.querySelectorAll('.ib-row').length,
+                scroll: s2 ? [s2.clientHeight, s2.scrollHeight, getComputedStyle(s2).overflowY] : null,
+                chrome: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--mgx-chrome-h'))}; }"""
+    for width, height, ipad, short in ((1280, 800, False, True), (1180, 820, True, True), (744, 1133, True, False)):
+        page = _ipad(logged_in_page, width, height) if ipad else logged_in_page(width=width, height=height)
+        _rf_routes(page, account=_rf_account(social=True))
+        page.route(re.compile(r"/api/inbox(\?|$)"), lambda r: _q_json(r, {
+            "items": items, "cursor": None, "has_more": False, "csrf": "harness", "read_only": False}))
+        _visit(page, "/")
+        page.wait_for_selector(".mgx-sepright .ib-door.inbox")
+        _dismiss_any_achievement_toast(page)
+        page.keyboard.press("Escape")             # the daily-claim prompt a waiting claim raises
+        _settle(page)
+        page.click(".mgx-sepright .ib-door.inbox")
+        page.wait_for_selector(".ib-panel")
+        page.wait_for_selector(".ib-panel .ib-row", state="attached")
+        _settle(page)
+        m = page.evaluate(probe)
+        where = "%dx%d: %s" % (width, height, json.dumps(m))
+        assert m["chrome"] > 0 and m["top"] >= m["chrome"] - 1, ("it opens under the header", where)
+        assert m["bottom"] <= m["vh"] + 0.5, ("the whole panel is on the screen", where)
+        assert m["scroll"][2] == "auto" and (m["scrolls"] or not short), ("its own list scrolls when it must", where)
+
+        page.add_style_tag(content=".ib-panel { max-height: calc(100dvh - 96px) !important; }")
+        _settle(page)
+        old = page.evaluate(probe)
+        if short:            # upright, the 12 rows are shorter than either cap, so only the short windows flip
+            assert old["bottom"] > old["vh"] + 1, ("the old size runs off the screen at %dx%d" % (width, height), json.dumps(old))

@@ -770,8 +770,8 @@ html.mg-noblur .mgdock-scrim {
   border: 1px solid var(--surface1); }
 .mgdock-composer.focus { border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(182, 146, 230, .13), 0 16px 40px rgba(100, 58, 172, .26); }
-.mgdock-composer-top { display: flex; align-items: center; gap: 9px;
-  padding-bottom: 6px; }
+.mgdock-composer-top { display: flex; flex-wrap: wrap; align-items: center; gap: 9px;
+  row-gap: 6px; padding-bottom: 6px; }
 /* model pip (DC modelPipStyle 3581-3584 + modelColor 3576): thumb + short name in a
    pill; lavender name + accent-tinted border while no model is picked; the empty
    thumb is the plain dark disc (rgba(12,10,28,.9), no border). `.static` = the same
