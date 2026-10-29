@@ -6,8 +6,6 @@ the user-visible symptom rather than the internals, because the whole class of b
 
   M01  resolve_media() swallowed a media-CDN TLS failure into the same soft (None, {}) as a
        genuinely missing image, so the corporate-proxy case printed only "no url for media".
-  M03  _bookmarks_persisted() never checked the HTTP status, so an auth/gateway refusal
-       carrying valid non-GraphQL JSON became an empty Bookmarks tab.
   M04  video_faststart() logged nothing for a non-zero ffmpeg exit (its most common failure),
        and run_faststart_videos() counted such a file as neither fixed nor skipped.
        Round 2: the first repair turned that silent undercount into a FALSE ALARM. The sweep
@@ -154,71 +152,6 @@ class TestM01ResolveMediaTls:
             core._CONSOLE_LOCK.release()
         assert wrote.wait(2), "the progress bar never resumed after the lock was released"
         t.join()
-
-
-# ---------------------------------------------------------------------------
-# M03 -- _bookmarks_persisted() must not turn a refusal into an empty list
-# ---------------------------------------------------------------------------
-
-def _persisted_args():
-    return dict(variables={}, want_lora=False, lbt="", kw="", after="", limit=24)
-
-
-class TestM03BookmarksStatus:
-    def test_raises_on_401_instead_of_returning_empty(self, mock_session, mocker):
-        """A stale U3T / expired key answers with a plain REST-shaped body that has no
-        'errors' array, so the old shape-only check fell through to `or {}` and the user saw
-        an empty Bookmarks tab for a request that never ran."""
-        resp = mocker.MagicMock()
-        resp.status_code = 401
-        resp.ok = False
-        resp.text = '{"statusCode":401,"message":"Unauthorized"}'
-        resp.json.return_value = {"statusCode": 401, "message": "Unauthorized"}
-        mock_session.get.return_value = resp
-
-        with pytest.raises(core.PixAIError, match="401"):
-            core._bookmarks_persisted(mock_session, **_persisted_args())
-
-    def test_raises_on_non_graphql_body_even_with_http_200(self, mock_session, mocker):
-        """A gateway can answer 200 with its own JSON. A real GraphQL reply always carries a
-        'data' key, so its absence -- not the status alone -- is the reliable tell."""
-        resp = mocker.MagicMock()
-        resp.status_code = 200
-        resp.ok = True
-        resp.text = '{"statusCode":502,"message":"Bad Gateway"}'
-        resp.json.return_value = {"statusCode": 502, "message": "Bad Gateway"}
-        mock_session.get.return_value = resp
-
-        with pytest.raises(core.PixAIError, match="non-GraphQL"):
-            core._bookmarks_persisted(mock_session, **_persisted_args())
-
-    def test_still_returns_the_connection_on_success(self, mock_session, mocker):
-        """The guards must not start rejecting good answers -- including a legitimately
-        EMPTY bookmark list, which is a real state and not an error."""
-        conn = {"totalCount": 0, "pageInfo": {"hasNextPage": False}, "edges": []}
-        resp = mocker.MagicMock()
-        resp.status_code = 200
-        resp.ok = True
-        resp.json.return_value = {"data": {"me": {"bookmarkedGenerationModels": conn}}}
-        mock_session.get.return_value = resp
-
-        assert core._bookmarks_persisted(mock_session, **_persisted_args()) == conn
-
-    def test_persisted_query_rotation_still_gets_its_own_message(self, mock_session, mocker):
-        """An APQ miss answers {"errors":[...]} with NO 'data' key at all, so the errors
-        branch has to be tested before the shape guard or the self-healing hint is lost. That
-        ordering now lives in the seam (PixAIClient.persisted reads `errors` -- and the
-        PersistedQueryNotFound special case -- before the missing-`data` guard), so the
-        recapture hint the seam raises ('Recapture the hash') is what surfaces here."""
-        resp = mocker.MagicMock()
-        resp.status_code = 200
-        resp.ok = True
-        resp.text = ""
-        resp.json.return_value = {"errors": [{"message": "PersistedQueryNotFound"}]}
-        mock_session.get.return_value = resp
-
-        with pytest.raises(core.PixAIError, match="Recapture"):
-            core._bookmarks_persisted(mock_session, **_persisted_args())
 
 
 # ---------------------------------------------------------------------------

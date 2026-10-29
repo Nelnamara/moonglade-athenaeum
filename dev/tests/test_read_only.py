@@ -5,7 +5,7 @@ even when --confirm/--apply are passed, since those flags are exactly what a cau
 first run wants to be safe to use without reading the source first.
 
 This file covers the four WEB choke points -- submit_generation, submit_fixer,
-delete_task_gql, claim_reward -- that the web app's generate/edit/fix/delete/claim
+delete_task, claim_reward -- that the web app's generate/edit/fix/delete/claim
 routes all funnel through. The CLI's generation entry points (run_generate,
 run_generate_video, run_reference_video, run_edit_image) build their OWN
 createGenerationTask call instead of calling through these choke points and, until 2026-07-21, none of them checked
@@ -47,18 +47,17 @@ class TestSubmitFixer:
         mock_session.post.assert_not_called()
 
 
-class TestDeleteTaskGqlReadOnly:
+class TestDeleteTaskReadOnly:
     def test_blocked_when_read_only(self, mock_session, monkeypatch):
         monkeypatch.setattr(core, "READ_ONLY", True)
-        monkeypatch.setattr(core, "DELETE_TASK_HASH", "deadbeef")  # would otherwise pass its own guard
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.delete_task_gql(mock_session, "123")
+            core.delete_task(mock_session, "123")
         mock_session.post.assert_not_called()
 
     def test_the_gallery_delete_route_sends_nothing(self, pixai, monkeypatch, tmp_path):
         """The gallery's Delete from PixAI is the one road to a delete now (the command-line
         --delete-task is gone), so this is the end-to-end proof: the real route with the REAL
-        delete_task_gql behind it. READ_ONLY refuses up front, with one plain 403 and no job,
+        delete_task behind it. READ_ONLY refuses up front, with one plain 403 and no job,
         and not one request reaches PixAI -- not the delete, not a read before it."""
         from moonglade.gallery import CATALOG_FIELDS, save_catalog
         from tests.conftest import login_client
@@ -91,7 +90,6 @@ class TestRoutedImageDeleteReadOnly:
     def test_both_branches_blocked_before_any_network_call(
             self, mock_session, monkeypatch, outputs, branch):
         monkeypatch.setattr(core, "READ_ONLY", True)
-        monkeypatch.setattr(core, "DELETE_TASK_HASH", "deadbeef")
         reads = []
         monkeypatch.setattr(core, "task_detail_gql",
                             lambda *a, **k: reads.append(1) or {"outputs": outputs})

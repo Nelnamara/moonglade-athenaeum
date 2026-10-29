@@ -44,6 +44,9 @@ SPEND_PATHS = ("submit_generation", "run_generate", "run_generate_video",
                # delete mutations after reading the live task, so it is an
                # account-mutating path in its own right.
                "delete_image_routed",
+               # The whole-task delete (#92): POST /v2/task/{id}/delete through rest_post.
+               # Not GraphQL at all now, so it must never grow a gql_adhoc call either.
+               "delete_task",
                # LoRA training: spends real credits once the free-training quota is
                # gone, and a re-POST would start a SECOND training (2026-08-06).
                "submit_training",
@@ -310,8 +313,8 @@ class TestSpendingPathsAreSingleAttempt:
         _assert_single_attempt(gql_calls, core._UPSERT_ARTWORK)
 
     def test_delete_artwork(self, mock_session, gql_calls):
-        """Like deleteGenerationTask: success is the ABSENCE of an error, and a retry could
-        delete something already gone."""
+        """A void mutation: success is the ABSENCE of an error, and a retry could delete
+        something already gone."""
         core.delete_artwork(mock_session, "art1")
         _assert_single_attempt(gql_calls, core._DELETE_ARTWORK)
 
@@ -356,29 +359,38 @@ class TestRestSpendPathsAreSingleAttempt:
         assert posts == ["/task/fixer"]
 
     def test_the_routed_image_delete_has_no_retry_loop(self):
-        """The per-image delete's WHOLE-TASK branch calls delete_task_gql, which hand-rolls
-        one session.post rather than riding gql_mutate -- so the no-retry rule cannot be
-        inherited from the helper there. Read as structure, the same way _rest_post is
-        above: neither the router nor the function it calls may put a loop around the post.
+        """The per-image delete's WHOLE-TASK branch calls delete_task, which makes one
+        rest_post (POST /v2/task/{id}/delete, #92) rather than riding gql_mutate -- so the
+        no-retry rule cannot be inherited from the helper there. Read as structure, the same
+        way _rest_post is below: neither the router nor the function it calls may put a loop
+        around the post, and delete_task sends exactly one.
 
         Parsed rather than string-scanned, so prose in the docstrings ("for it", "wait for")
         cannot make this pass or fail by accident."""
         for fn, name in ((core.delete_image_routed, "delete_image_routed"),
-                         (core.delete_task_gql, "delete_task_gql")):
+                         (core.delete_task, "delete_task")):
             tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
             loops = [n for n in ast.walk(tree)
                      if isinstance(n, (ast.For, ast.AsyncFor, ast.While))]
             assert not loops, (
-                "{} grew a loop around a destructive delete -- a re-sent deleteGeneration"
-                "Task can fire again against a task that already changed".format(name))
-        # A comprehension or generator expression is a loop too: it can wrap the delete
-        # call without any For/While statement. Checked on the router only -- it is the
-        # function that picks the branch and must fire exactly one of them.
-        routed = ast.parse(textwrap.dedent(inspect.getsource(core.delete_image_routed)))
-        comps = [n for n in ast.walk(routed)
-                 if isinstance(n, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp))]
-        assert not comps, (
-            "delete_image_routed grew a loop around a destructive delete -- it must fire once")
+                "{} grew a loop around a destructive delete -- a re-sent task delete "
+                "can fire again against a task that already changed".format(name))
+            # A comprehension or generator expression is a loop too: it can wrap the delete
+            # call without any For/While statement.
+            comps = [n for n in ast.walk(tree)
+                     if isinstance(n, (ast.ListComp, ast.SetComp, ast.DictComp,
+                                       ast.GeneratorExp))]
+            assert not comps, (
+                "{} grew a loop around a destructive delete -- it must fire once".format(name))
+        # ONE send in delete_task: a single rest_post call, and no raw session verb at all.
+        # (`answer.get("success")` reads the parsed reply; it is not a send.)
+        tree = ast.parse(textwrap.dedent(inspect.getsource(core.delete_task)))
+        sends = [n.func.attr for n in ast.walk(tree)
+                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                 and n.func.attr in ("rest_post", "post", "get", "put", "patch", "delete",
+                                     "request", "mutate", "query")
+                 and not (isinstance(n.func.value, ast.Name) and n.func.value.id == "answer")]
+        assert sends == ["rest_post"], sends
 
     def test_rest_post_has_no_retry_loop(self):
         """Read the IMPLEMENTATION, not the delegate. `core._rest_post` is now one line

@@ -217,20 +217,25 @@ class TestM02BlurParity:
             core.model_search_market_gql(object(), usage="MODEL")
         assert core._model_blur_supported is None
 
-    def test_a_refused_flag_does_not_demote_bookmarks_to_the_persisted_hash(self, monkeypatch):
-        """model_bookmarks_gql falls back to the persisted document on any PixAIError. If a
-        blur refusal escaped, the bookmark tab would silently switch to PixAI's own fragment
-        -- which we cannot narrow to the fields a row needs and which rots when they redeploy
-        -- for a reason that has nothing to do with the hash."""
-        def _boom(*a, **k):
-            raise AssertionError("the persisted fallback must not be reached")
-        monkeypatch.setattr(core, "_bookmarks_persisted", _boom)
+    def test_a_refused_flag_is_answered_without_it_on_bookmarks(self, monkeypatch):
+        """A refusal of the blur leaf alone is answered by re-asking the same ad-hoc document
+        without it, so the tab still loads -- it is not an error."""
         calls = []
         monkeypatch.setattr(core, "gql_adhoc",
                             _fake_pixai(False, [{"isNsfw": True}], calls))
         res = core.model_bookmarks_gql(object(), usage="MODEL")
-        assert res["_path"] == "adhoc"
+        assert "_path" not in res                            # one road, nothing to report (#92)
         assert [r["should_blur"] for r in res["results"]] == [True]
+
+    def test_an_ad_hoc_refusal_propagates(self, monkeypatch):
+        """#92 retired the saved-request fallback: a refusal of the bookmarks document is the
+        PixAIError it is, so the route and the cached walk report it -- never an empty list,
+        never a second road."""
+        def _always_refuse(session, query, variables=None, retries=None):
+            raise core.PixAIError("401 Unauthorized -- API key missing/expired.")
+        monkeypatch.setattr(core, "gql_adhoc", _always_refuse)
+        with pytest.raises(core.PixAIError, match="401"):
+            core.model_bookmarks_gql(object(), usage="MODEL")
 
 
 # ---------------------------------------------------------------------------

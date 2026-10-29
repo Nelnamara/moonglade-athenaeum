@@ -1,22 +1,16 @@
 {
   "_comment": "Copy this file to config.json and set PIXAI_API_KEY. config.json is git-ignored and will never be committed.",
 
-  "_comment_api_key": "THE ONLY VALUE YOU NEED. Your official API key from platform.pixai.art (lifetime up to ~2 years). Sent as the Bearer credential for ALL calls. Your USER_ID is auto-resolved from it, and the persisted-query hashes below ship with working defaults -- so with just this key, everything works. Nothing else here is required unless a default stops working.",
+  "_comment_api_key": "THE ONLY VALUE YOU NEED. Your official API key from platform.pixai.art (lifetime up to ~2 years). Sent as the Bearer credential for ALL calls. Your USER_ID is auto-resolved from it -- so with just this key, everything works. Nothing else here is required.",
   "PIXAI_API_KEY": "YOUR_PIXAI_API_KEY",
 
-  "_comment_optional": "EVERYTHING BELOW IS OPTIONAL. Leave as-is. The hashes are public identifiers of PixAI's own frontend GraphQL ops (not secrets, not per-user); they ship baked-in and only need a value here if PixAI overhauls their frontend and a built-in default goes stale (you'll get a clear 'recapture' error if so).",
+  "_comment_optional": "EVERYTHING BELOW IS OPTIONAL. Leave as-is.",
 
   "_comment_user_id": "Optional override. Auto-resolved from the API key via the `me` query; only set this to pin a specific id.",
   "USER_ID": "",
 
-  "_comment_hashes": "Optional override for the baked-in persisted-query hash of the whole-generation delete. Capture from DevTools -> Network -> graphql -> the matching request -> Payload -> extensions.persistedQuery.sha256Hash, only if the default rotates.",
-  "DELETE_TASK_HASH": "",
-
   "_comment_read_only": "Set true to refuse every credit-spending or account-deleting call outright -- CLI or web, and even with --confirm/--apply passed. A safety net for a first run, testing, or handing the tool to someone else. See the Trust & Safety wiki page.",
   "READ_ONLY": false,
-
-  "_comment_refresh_hash": "Optional override for the baked-in refreshToken persisted-query hash the mirror uses to self-renew its browser session; only set this if that default rotates.",
-  "REFRESH_TOKEN_HASH": "",
 
   "_comment_legacy": "DEPRECATED legacy fallback for users WITHOUT an API key. U3T is the 'u3t' field from a graphql request Payload; the short-lived Bearer token then goes in token.txt / PIXAI_TOKEN / --token and must be re-captured every few hours. Leave blank when using PIXAI_API_KEY (recommended).",
   "U3T": "",
