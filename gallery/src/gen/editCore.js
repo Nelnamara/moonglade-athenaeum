@@ -101,7 +101,21 @@ export function editModelIsNew(model, now) {
 // Fix: face/hand box colors and the classic's minimum drag size (DISPLAY px).
 export const FIX_COLORS = { face: "#b692e6", hand: "#4fc99a" };
 export const FIX_MIN_PX = 6;
-export const FIX_MAX_BOXES = 20;   // clean_fix_boxes truncates at 20 server-side
+export const FIX_MAX_BOXES = 20;   // PixAI takes at most 20 boxes, all one kind
+
+/* #93: the badge's per-pass reading of a Fix answer, in its existing note line (Session H:
+   copy in an existing line, no new element). PixAI prices a Fix per pass and a Fix is one
+   pass of one kind, so the words are the kind, then the discount -- only when THIS answer's
+   list price is above its price. "" for every non-Fix answer (no `fix_pass`). */
+export function fixPassNote(d) {
+  if (!(d && d.fix_pass)) return "";
+  let s = d.fix_pass + " pass";
+  const orig = Number(d.original_cost), cost = Number(d.cost);
+  if (orig > cost) {
+    s += " · " + Math.round((orig - cost) / orig * 100) + "% off " + Number(orig).toLocaleString();
+  }
+  return s;
+}
 
 export const editCaps = (model) => EDIT_CAPS[model] || EDIT_CAPS[DEFAULT_EDIT_MODEL];
 
@@ -146,9 +160,7 @@ export function editGate(s) {
    {x,y,width,height,tag} in ORIGINAL-image pixels. The scale comes from the
    rendered <img> -- naturalWidth/clientWidth -- and the server does NOT rescale,
    so getting this wrong repairs the wrong part of the picture. */
-export function scaleBoxes(boxes, imgEl) {
-  const scale = imgEl && imgEl.clientWidth
-    ? (imgEl.naturalWidth / imgEl.clientWidth) : 1;
+function mapBoxes(boxes, scale) {
   return boxes.map((b) => ({
     x: Math.round(b.x * scale),
     y: Math.round(b.y * scale),
@@ -156,6 +168,24 @@ export function scaleBoxes(boxes, imgEl) {
     height: Math.round(b.h * scale),
     tag: b.tag,
   }));
+}
+
+/* The scaler with the picture's REAL width as an explicit argument (#96): the phone Loom
+   passes the shown width and the original's, so it can never take the scale from a
+   thumbnail. A missing width on either side is null -- a refusal, never a scale-1 guess:
+   the caller prices nothing and keeps ✦ Fix disabled. */
+export function boxesToOriginal(boxes, displayWidth, originalWidth) {
+  if (!displayWidth || !originalWidth) return null;
+  return mapBoxes(boxes, originalWidth / displayWidth);
+}
+
+/* FixTab and the desktop Loom: the scale off the <img> they draw on (/full/<id>, so its
+   naturalWidth is the original's). Same arithmetic as before #96, byte for byte, scale-1
+   fallback included -- it shares only the mapping with boxesToOriginal. */
+export function scaleBoxes(boxes, imgEl) {
+  const scale = imgEl && imgEl.clientWidth
+    ? (imgEl.naturalWidth / imgEl.clientWidth) : 1;
+  return mapBoxes(boxes, scale);
 }
 
 export const EDIT_DEFAULTS = {

@@ -8,9 +8,11 @@ import CostBadge from "./CostBadge.jsx";
 
 /* The Fix tab: drag boxes over hands and faces, PixAI repairs what is inside
    them. Two things make this surface unlike every other:
-   - a Fix ALWAYS spends, at a flat rate invariant to box count, and NO free card
-     can ever cover it (the fixer endpoint has no kaisuukenId field), so the
-     price is quoted in the confirm before anything is submitted;
+   - a Fix ALWAYS spends, and NO free card can ever cover it (the fixer endpoint
+     has no kaisuukenId field). PixAI prices a Fix per pass, and one Fix is one
+     pass of one kind (Face OR Hand -- picking the other kind clears the boxes,
+     #93), so the price is PixAI's quote for exactly these boxes, shown beside the
+     button and quoted in the confirm before anything is submitted;
    - boxes are drawn in DISPLAY pixels but submitted in ORIGINAL-image pixels;
      the server does not rescale, so the scale factor decides which part of the
      picture is actually repaired.
@@ -182,7 +184,7 @@ export default function FixTab({ visible, dock, source }) {
       : "This will spend " + Number(priced).toLocaleString() +
         " credits — a Fix is never covered by a free card.";
     if (!window.confirm(
-      "Repair " + boxes.length + " area" + (boxes.length === 1 ? "" : "s") + "?\n\n" + quote
+      "Repair " + boxes.length + " " + tag + " area" + (boxes.length === 1 ? "" : "s") + "?\n\n" + quote
     )) return;
     busyRef.current = true; setBusy(true);
     const emit = openLine("Submitting…");
@@ -226,7 +228,7 @@ export default function FixTab({ visible, dock, source }) {
   // The composer's line (a Fix has no prompt) -- the slab itself carries the DC's own
   // instruction copy (1501), so this only says where things stand.
   const statusNote = !source ? "Pick a source image in SOURCE, then drag a box over each hand or face to repair."
-    : !boxes.length ? "Drag a box over a hand or face on the source — Face / Hand sets which."
+    : !boxes.length ? "Drag a box over each " + tag + " — or pick " + (tag === "face" ? "Hand" : "Face") + ". One kind per Fix."
     : "";
   // Composer top row (DC 1557-1562: pip · summary) + the prompt slot: a Fix has no prompt,
   // so the composer carries the tab's own status line instead of an empty box.
@@ -269,7 +271,7 @@ export default function FixTab({ visible, dock, source }) {
           {[["face", "Face"], ["hand", "Hand"]].map(([t, l]) => (
             <button key={t} type="button" role="tab" aria-selected={tag === t}
               className={"mgdock-seg" + (tag === t ? " on" : "")}
-              onClick={() => setTag(t)}>{l}</button>
+              onClick={() => { if (t !== tag) { setTag(t); setBoxes([]); } }}>{l}</button>
           ))}
         </div>
         <div className="mgdock-peachnote">A fix can't be card-covered — it always spends, and always asks first.</div>

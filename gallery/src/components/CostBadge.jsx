@@ -3,6 +3,7 @@ import React, {
 } from "react";
 import { adjustedText } from "../gen/genCore.js";
 import { classify, isShort } from "../gen/costBadgeCore.js";
+import { fixPassNote } from "../gen/editCore.js";
 import "../styles/cost-badge.css";
 
 /* CostBadge — the React port of static/mg-cost-badge.js's <mg-cost-badge> custom element:
@@ -222,6 +223,9 @@ function build(view, props) {
   if (state === "paid" && d.profile && Number(d.profile_extra) > 0) {
     brk.push("profile " + d.profile + " +" + fmt(d.profile_extra));
   }
+  // #93: a Fix answer's per-pass reading ("face pass · 40% off 8,000"), the same note line.
+  // Only on a settled PAID answer -- a failed quote is the red error state, never this.
+  if (state === "paid" && fixPassNote(d)) brk.push(fixPassNote(d));
   const adj = [brk.join(" · "), adj0].filter(Boolean).join(" · ");
   if (adj) tip = (tip ? tip + " " : "") + adj + ".";
   // ONE note line, never a line of its own ("copy in an existing line"): the receipt joins

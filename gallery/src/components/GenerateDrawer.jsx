@@ -1364,7 +1364,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
                   <div className="mgdock-lbl">QUALITY</div>
                   <div className="mgdock-editcopy">
                     {sub === "fixer"
-                      ? "A Fix has no quality knob — PixAI repairs what is inside your boxes at one flat rate."
+                      ? "A Fix has no quality knob — PixAI prices each Fix itself, and the price shows beside the button."
                       : "Art filters have no quality knob — they composite at the picture's full resolution, in your browser."}
                   </div>
                 </div>
