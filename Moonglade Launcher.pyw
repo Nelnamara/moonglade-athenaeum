@@ -38,6 +38,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import webbrowser
 
 # This file's own folder IS the app folder (moonglade.paths.APP_ROOT), spelled by
@@ -197,7 +198,9 @@ if PORT != _early_port or HTTPS != _early_https:
 # The server runs as the package's module (3.20), from this folder: `-m` finds the moonglade
 # package through the working directory, which is why cwd=here below matters.
 cmd = [sys.executable, "-m", "moonglade.gallery"]
-env = dict(os.environ, MOONGLADE_SUPERVISED="1")
+# PYTHONFAULTHANDLER: the server's Python writes every thread's stack to its stderr (serve.log)
+# on a native crash (an access violation inside a library), from the first import on.
+env = dict(os.environ, MOONGLADE_SUPERVISED="1", PYTHONFAULTHANDLER="1")
 # Set once the server has ended for good: the browser is then never opened on a dead port.
 _server_gone = threading.Event()
 
@@ -257,6 +260,53 @@ except Exception:                                       # noqa: BLE001 -- a log 
     pass
 
 
+def _span(seconds):
+    """How long, in words a person reads at a glance: 45s, 3m05s, 3h12m05s."""
+    try:
+        s = max(0, int(seconds))
+    except (TypeError, ValueError):
+        s = 0
+    h, rest = divmod(s, 3600)
+    m, sec = divmod(rest, 60)
+    if h:
+        return "%dh%02dm%02ds" % (h, m, sec)
+    if m:
+        return "%dm%02ds" % (m, sec)
+    return "%ds" % sec
+
+
+def _record(line):
+    """One timed "[launcher] YYYY-MM-DD HH:MM:SS ..." line in serve.log. It goes through `_log`,
+    the handle the server writes through, so the order in the file is the true order. A line
+    in a log never stops anything: whatever goes wrong here is dropped."""
+    try:
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        if _log is subprocess.DEVNULL:
+            _log_line(stamp + " " + line)
+            return
+        _log.write("[launcher] %s %s\n" % (stamp, line))
+        _log.flush()
+    except Exception:                                   # noqa: BLE001 -- a log line only
+        pass
+
+
+def _exit_words(rc):
+    """The server's exit code in plain words; an NT status (a native crash) also in hex."""
+    if rc is None:
+        return "no exit code"
+    if rc == 0:
+        return "exit code 0 (a normal stop)"
+    if rc == RESTART_CODE:
+        return "exit code %d (restart)" % rc
+    words = "exit code %s" % rc
+    try:
+        if rc > 255:
+            words += " (0x%08X)" % (rc & 0xFFFFFFFF)
+    except TypeError:
+        pass
+    return words
+
+
 def _log_size():
     """How much of serve.log is written now: where this server's own output will begin."""
     try:
@@ -284,7 +334,9 @@ def _why_it_stopped(rc, since=0):
     marked = [ln.split("[prepare] ", 1)[1] for ln in tail if "[prepare] " in ln]
     if marked:
         return marked[-1]
-    last = [ln.strip() for ln in tail if ln.strip()][-3:]
+    # The launcher's own start/end lines (_record) are not the server's output: left out, so the
+    # box shows the same last lines it always did.
+    last = [ln.strip() for ln in tail if ln.strip() and not ln.startswith("[launcher] ")][-3:]
     text = "The server stopped as it started (code %s)." % rc
     if last:
         text += " The end of local\\logs\\serve.log says:\n\n" + "\n".join(last)
@@ -369,24 +421,40 @@ if sys.platform == "win32":
                      name="moonglade-shortcuts").start()
 
 first = True
-while True:
-    _began = time.monotonic()
-    _log_from = _log_size()
-    proc = subprocess.Popen(cmd, env=env, cwd=here,
-                            stdin=subprocess.DEVNULL, stdout=_log, stderr=_log)
-    if first:
-        threading.Thread(target=_open_when_ready, daemon=True).start()
-        first = False
-    rc = proc.wait()                # blocks until the child fully exits (frees the port)
-    if rc == RESTART_CODE:
-        time.sleep(0.6)             # let the socket release before rebinding
-        continue                    # relaunch
-    _server_gone.set()
-    if rc not in (0, None) and time.monotonic() - _began < BOOT_S:
-        try:
-            if _log is not subprocess.DEVNULL:
-                _log.flush()
-        except Exception:                               # noqa: BLE001
-            pass
-        _stop(_why_it_stopped(rc, _log_from))
-    break                           # 0 = stop; a crash after it ran -> supervisor exits
+_starts = 0
+try:
+    while True:
+        _began = time.monotonic()
+        _log_from = _log_size()
+        proc = subprocess.Popen(cmd, env=env, cwd=here,
+                                stdin=subprocess.DEVNULL, stdout=_log, stderr=_log)
+        _starts += 1
+        _pid = getattr(proc, "pid", "?")
+        _record("server pid %s started (start %d, launcher pid %d)" % (_pid, _starts, os.getpid()))
+        if first:
+            threading.Thread(target=_open_when_ready, daemon=True).start()
+            first = False
+        rc = proc.wait()                # blocks until the child fully exits (frees the port)
+        _record("server pid %s ended: %s after %s%s" % (
+            _pid, _exit_words(rc), _span(time.monotonic() - _began),
+            "; starting it again" if rc == RESTART_CODE else ""))
+        if rc == RESTART_CODE:
+            time.sleep(0.6)             # let the socket release before rebinding
+            continue                    # relaunch
+        _server_gone.set()
+        if rc not in (0, None) and time.monotonic() - _began < BOOT_S:
+            try:
+                if _log is not subprocess.DEVNULL:
+                    _log.flush()
+            except Exception:                           # noqa: BLE001
+                pass
+            _stop(_why_it_stopped(rc, _log_from))
+        break                           # 0 = stop; a crash after it ran -> supervisor exits
+    _record("launcher closing: the server has ended and was not asked to restart")
+except SystemExit:
+    raise
+except BaseException:
+    # An error in the launcher itself (a failed relaunch, say) has no console under pythonw:
+    # it is written here, then raised as before.
+    _record("launcher stopped by an error:\n" + traceback.format_exc().rstrip())
+    raise
