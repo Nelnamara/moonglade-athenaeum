@@ -41,6 +41,173 @@ def pytest_configure(config):
     still collects and runs the same suite through this conftest."""
     config.addinivalue_line(
         "markers", "render: browser-rendering assertions (dev/tests/test_render_harness.py)")
+    config.addinivalue_line(
+        "markers", "network: a test that is truly about the network; the network guard (#98) "
+                   "stands down for it. None today -- see the guard below.")
+    _net_child_setup(config)
+
+
+def pytest_unconfigure(config):
+    _net_child_teardown()
+
+
+# ---------------------------------------------------------------------------------------------
+# THE NETWORK GUARD (#98): no test opens a connection to anything but this machine.
+#
+# A run that reaches PixAI with a fixture's made-up key, GitHub for a release list, PyPI from a
+# pip the setup-file test starts, or HuggingFace for the CLIP model, is a test that depends on
+# the network, is slow when the network is, and touches real services from CI for no reason.
+# Nothing private leaks (the keys are test values) and the calls fail harmlessly, which is
+# exactly why it went unseen until a connection-refusing plugin counted about a thousand of
+# them in one render-harness run (2026-10-28).
+#
+# HOW IT HOLDS. dev/tests/netguard.py replaces `socket.socket.connect` / `connect_ex` and
+# `socket.getaddrinfo` once, here at conftest import. So it covers every THREAD of the process
+# -- the render harness's gallery server is a werkzeug server on a daemon thread of this very
+# process, so its outbound calls are caught the same as a test's own -- and each pytest-xdist
+# worker, which imports this conftest on its own. The Python processes a test starts get the
+# same guard through a `sitecustomize` on PYTHONPATH (_net_child_setup), and report to a log
+# file this process reads back.
+#
+# A refusal alone would not fail a test: the app catches network errors by design (an offline
+# machine must still show a Panel), so a refused call just looks like "offline". The attempt is
+# RECORDED with the address and the app/test frames that asked, and the phase of the test that
+# was running when it happened (setup, call or teardown) is failed with that message. An attempt
+# by a background thread between two tests is charged to the next phase that reports.
+#
+# A test that is genuinely ABOUT the network marks itself `@pytest.mark.network`; the guard
+# stands down for it. None does today, which is the point: a new one is a failure the day it
+# appears. The fix is a stub in the fixture (as test_render_harness.py's `_harness_stays_offline`
+# does), not a mark.
+# ---------------------------------------------------------------------------------------------
+import tempfile as _tempfile
+import threading as _threading
+
+from tests import netguard as _netguard
+
+_NET_LOCK = _threading.Lock()
+_NET_ATTEMPTS = []                 # [(kind, target, [frame, ...])] not yet charged to a test
+_NET_STATE = {"allowed": False, "log": None, "read": 0, "dir": None}
+
+
+def _net_record(kind, target):
+    """The in-process `record`: keep the attempt for the test that is running; refuse it
+    unless that test is marked @pytest.mark.network."""
+    if _NET_STATE["allowed"]:
+        return False
+    frames = _netguard.callers()
+    # Who was running when it happened: a background thread's attempt is charged to whichever
+    # phase reports next, and without this the test that gets the blame looks guilty.
+    running = os.environ.get("PYTEST_CURRENT_TEST", "(no test running)")
+    with _NET_LOCK:
+        _NET_ATTEMPTS.append((kind, target, frames, running, _threading.current_thread().name))
+    return True
+
+
+_netguard.install(_net_record)
+
+
+def _net_child_setup(config):
+    """Give every Python process a test starts the guard too: a sitecustomize on PYTHONPATH,
+    and a log file (one per pytest process, so each xdist worker reads only its own children)."""
+    if _NET_STATE["dir"] is not None:
+        return
+    _net_clear_stale()
+    folder = Path(_tempfile.mkdtemp(prefix="mg-netguard-"))
+    _netguard.child_site(folder / "site")
+    _NET_STATE["dir"] = folder
+    _NET_STATE["log"] = folder / "children.log"
+    os.environ[_netguard.LOG_ENV] = str(_NET_STATE["log"])
+    old = os.environ.get("PYTHONPATH")
+    os.environ["PYTHONPATH"] = str(folder / "site") + (os.pathsep + old if old else "")
+
+
+def _net_clear_stale(older_than=6 * 3600):
+    """Remove the temp folders of earlier runs that were killed before pytest_unconfigure ran.
+    Only ones old enough that no live run can still be using them."""
+    import shutil
+    import time
+    try:
+        for old in Path(_tempfile.gettempdir()).glob("mg-netguard-*"):
+            if time.time() - old.stat().st_mtime > older_than:
+                shutil.rmtree(old, ignore_errors=True)
+    except OSError:
+        pass
+
+
+def _net_child_teardown():
+    folder = _NET_STATE["dir"]
+    if folder is None:
+        return
+    import shutil
+    os.environ.pop(_netguard.LOG_ENV, None)
+    os.environ.pop(_netguard.OFF_ENV, None)
+    shutil.rmtree(folder, ignore_errors=True)
+    _NET_STATE["dir"] = None
+
+
+def _net_take_children():
+    """The attempts the test's child processes logged since the last look."""
+    log = _NET_STATE["log"]
+    if log is None or not log.exists():
+        return []
+    try:
+        data = log.read_bytes()
+    except OSError:
+        return []
+    fresh = data[_NET_STATE["read"]:].decode("utf-8", "replace")
+    _NET_STATE["read"] = len(data)
+    out = []
+    for line in fresh.splitlines():
+        kind, _, target = line.partition("\t")
+        if kind:
+            out.append((kind, target, ["(a Python process the test started)"],
+                        os.environ.get("PYTEST_CURRENT_TEST", "(no test running)"),
+                        "child process"))
+    return out
+
+
+def _net_message(attempts):
+    seen, lines = set(), []
+    for kind, target, frames, running, thread in attempts:
+        key = (kind, str(target), tuple(frames[-2:]))
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append("  %s %s\n      asked by %s\n      made while %s was running, in thread %s"
+                     % (kind, target, " <- ".join(reversed(frames[-4:])) or "?", running, thread))
+    return ("the test opened a connection that leaves this machine (#98). Stub the call in "
+            "the test's fixture; a test that is truly about the network is marked "
+            "@pytest.mark.network.\n" + "\n".join(lines))
+
+
+def pytest_runtest_setup(item):
+    allowed = item.get_closest_marker("network") is not None
+    _NET_STATE["allowed"] = allowed
+    if allowed:
+        os.environ[_netguard.OFF_ENV] = "1"
+    else:
+        os.environ.pop(_netguard.OFF_ENV, None)
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Fail the phase that made a non-loopback attempt, including a refused one the app
+    swallowed. Each report drains what has been recorded so far."""
+    outcome = yield
+    report = outcome.get_result()
+    with _NET_LOCK:
+        taken, _NET_ATTEMPTS[:] = list(_NET_ATTEMPTS), []
+    taken += _net_take_children()
+    if taken and not _NET_STATE["allowed"]:
+        message = _net_message(taken)
+        if report.failed and report.longrepr:
+            # A real failure keeps its text: the network message goes after it, both visible.
+            message = "%s\n\n%s\n%s" % (report.longrepr, "-" * 60, message)
+        report.outcome = "failed"
+        report.longrepr = message
+
+
 _NOT_FIRST_PARTY = frozenset({"tests", "node_modules", ".git", "__pycache__"})
 
 
@@ -904,6 +1071,23 @@ def _no_live_config(monkeypatch):
     core._config_cache.clear()
     yield
     core._config_cache.clear()
+
+
+from moonglade import bonjour as _bonjour_mod   # noqa: E402 -- beside the fixture that stubs it
+
+# Captured at import, before `_no_lan_probe` swaps it, for the one test that is about it.
+REAL_LAN_IP = _bonjour_mod.lan_ip
+
+
+@pytest.fixture(autouse=True)
+def _no_lan_probe(monkeypatch):
+    """`bonjour.lan_ip()` learns the machine's LAN address by opening a UDP socket "toward"
+    8.8.8.8: no packet is sent, but it is a non-loopback connect, and the network guard (#98)
+    fails a test for one. /api/bonjour/status calls it, so every test that reads that route
+    (and the render harness, whose pages ask for it) would reach it. It answers None here, the
+    function's own "no LAN route" answer; a test that wants an address patches `lan_ip` itself,
+    and the test of `lan_ip` drives REAL_LAN_IP against a stand-in socket."""
+    monkeypatch.setattr(_bonjour_mod, "lan_ip", lambda: None)
 
 
 # Captured at import, before `_no_live_card_network` (below) swaps them for a raising

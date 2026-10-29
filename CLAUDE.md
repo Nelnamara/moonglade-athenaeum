@@ -344,6 +344,13 @@ recently within hours of a "correction." All tests must pass before merging to m
   `xfail`ed unless the commit message names the cause. The browser-driven render harness
   stays in the local run for the same reason — without it every guard in that file is
   decoration, and the one local failure it ever had was a real precondition bug in a test.
+- **No test opens a connection that leaves the machine** (#98). `dev/tests/conftest.py` installs
+  `dev/tests/netguard.py` for the whole run: any non-loopback connect or lookup is refused, in any
+  thread (the render harness's server runs on one), in each xdist worker and in the Python
+  processes a test starts, and it fails the test that made it, naming the address and the caller.
+  The cure is a stub in the fixture (`_harness_stays_offline` in the render harness is the
+  pattern), not a mark; `@pytest.mark.network` exists for a test truly about the network, and
+  none uses it.
 - **Achievement and celebration work runs from an unearned baseline.** Before building or
   verifying a celebration, put the feat under test back to genuinely unearned on the dev
   library — flag cleared, `earned_at` un-pinned, `seen` cleared — because a re-earn never
