@@ -214,6 +214,9 @@ A visible change gets a design or workshop step first.
   contest picked, and the first real Edit Pro V2.0 edit each confirm a path that was built against
   PixAI's documented shape but never exercised for real.
 - **Advanced training's parameters** stay at PixAI's defaults until PixAI unlocks them.
+- **Fixer:** PixAI's own Fixer can take a custom repair instruction for faces (`cusPrompts`, up to 500
+  characters) and prices two kinds as two passes, but its server refuses two kinds in one Fix today.
+  When it takes them, let one Fix carry both and add the face instruction (needs a design pass first).
 
 ---
 
