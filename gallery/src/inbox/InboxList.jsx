@@ -229,6 +229,8 @@ export function GiftRows({ data, error, claim, claimLocked, readOnly }) {
 /* The row the reader is looking at: the last one whose top is inside the list's box, and how far
    below the box's top it sits. */
 function rowInView(el) {
+  /* At the very top there is nothing to hold: a new notification should show at the top. */
+  if (el.scrollTop === 0) return null;
   const box = el.getBoundingClientRect();
   let pick = null;
   for (const r of el.querySelectorAll(".ib-row")) {
