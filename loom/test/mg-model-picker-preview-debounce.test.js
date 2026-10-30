@@ -43,8 +43,12 @@ test("the hover preview is portaled to <body>, out of the transformed, clipping 
     "the preview renders through a portal, inside a box-less .model-picker wrapper its CSS still matches");
   assert.match(src, /<\/div>, document\.body\) : null\}/, "the portal target is document.body");
   const dockCss = readFileSync(path.join(__dirname, "../../gallery/src/styles/dock.css"), "utf8");
-  assert.match(dockCss, /\.mgx-dock-host \.mfly \{[^}]*transform: translateX\(-50%\)/,
-    "the palette really is transformed -- the reason the preview cannot live inside it");
+  // Since the owner's iPad walk (2026-10-29) the palette is centred by its insets, not a transform
+  // (the entry animation's last frame wiped that transform out). It is still transformed while its
+  // entry runs, and clips, so the preview stays out of it.
+  assert.match(dockCss, /\.mgx-dock-host \.mfly \{[^}]*animation: mgSlab /,
+    "the palette is transformed by its entry animation -- a reason the preview cannot live inside it");
+  assert.match(dockCss, /@keyframes mgSlab \{ from \{ opacity: 0; transform: translate3d/);
   const pickerCss = readFileSync(path.join(__dirname, "../../gallery/src/styles/model-picker.css"), "utf8");
   assert.match(pickerCss, /\.model-picker \.mg-preview\{position:fixed;z-index:500;/,
     "the preview stays fixed and above the palette (335)");

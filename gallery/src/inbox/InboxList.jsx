@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   TABS, GLYPH, groupInbox, workDelta, timeAgo, giftMeta, giftPreview, bonusText, expiringLines, expiryText,
 } from "./inboxCore.js";
@@ -226,15 +226,45 @@ export function GiftRows({ data, error, claim, claimLocked, readOnly }) {
   );
 }
 
+/* The row the reader is looking at: the last one whose top is inside the list's box, and how far
+   below the box's top it sits. */
+function rowInView(el) {
+  const box = el.getBoundingClientRect();
+  let pick = null;
+  for (const r of el.querySelectorAll(".ib-row")) {
+    const b = r.getBoundingClientRect();
+    if (b.top >= box.top && b.top < box.bottom) pick = r;
+    else if (pick) break;
+  }
+  return pick ? { node: pick, y: pick.getBoundingClientRect().top - box.top } : null;
+}
+
 /* The inbox: work cards, then everything else. */
 export function InboxBody({ st, tab, now }) {
   const tip = useTip();
   const scrollRef = useRef(null);
+  const anchor = useRef(null);
   const g = groupInbox(st.items, tab);
+  /* AN OLDER PAGE LANDS WITHOUT MOVING WHAT YOU ARE READING (owner's iPad walk, 2026-10-29: "Gets to
+     bottom but bounces back up 3 lines"). Reaching the end reads the next, older page, and the list
+     is grouped -- work cards first, EVERYTHING ELSE after -- so a like or comment in that page on a
+     work not carded yet adds a card ABOVE the rows at the end, where the reader is. A browser keeps
+     the scroll offset (Safari) or the top row in view (scroll anchoring), never the end, so the rows
+     being read slid down by the cards' height. The list remembers the last row in view at every
+     scroll and, when the items change, puts that row back where it was; overflow-anchor is off on
+     .ib-scroll (inbox.css) so this is the one rule in every engine. */
   const onScroll = (e) => {
     const el = e.currentTarget;
+    anchor.current = rowInView(el);
     if (el.scrollTop + el.clientHeight >= el.scrollHeight - 40) loadMore();
   };
+  useEffect(() => { anchor.current = null; }, [tab]);
+  useLayoutEffect(() => {
+    const el = scrollRef.current, a = anchor.current;
+    if (!el || !a || !a.node.isConnected) return;
+    const moved = a.node.getBoundingClientRect().top - el.getBoundingClientRect().top - a.y;
+    if (Math.abs(moved) >= 1) el.scrollTop += moved;
+  }, [st.items]);
   const empty = st.loaded && !g.works.length && !g.rest.length;
   return (
     <div className="ib-scroll" ref={scrollRef} onScroll={onScroll}>

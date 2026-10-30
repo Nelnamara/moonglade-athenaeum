@@ -47,12 +47,18 @@ describe("two doors: ✉ Inbox, then 🎁 Gift box, then the credits chip (owner
   test("both sit in the header's right group before the credits chip, only with a linked account", () => {
     const inbox = bar.indexOf("<InboxDoor ");
     const gift = bar.indexOf("<GiftBox ");
-    // Since #72 the two doors and the credits chip wrap as one group (.mgx-doors), so the header's
-    // row can break before the group but never between the doors and the chip.
+    // Since #72 the account end of the row -- the two doors, the credits chip, the claim button and
+    // the ? -- wraps as one group (.mgx-acct), so the header's row can break before the group but
+    // never inside it (the owner's iPad walk 2026-10-29 saw the ? alone on a line).
     const chip = bar.indexOf("{creditsChip}", gift);
     assert.ok(inbox > 0 && gift > inbox && chip > gift, "✉ Inbox, then 🎁 Gift box, then the credits chip");
     assert.match(bar, /const creditsChip = \(\s*<button type="button" className="mgx-cred" data-expiring/);
-    assert.match(bar, /\{linked \? \(\s*<span className="mgx-doors">\s*<InboxDoor [^>]*\/>\s*<GiftBox [^>]*\/>\s*\{creditsChip\}\s*<\/span>\s*\) : creditsChip\}/);
+    assert.match(bar, /<span className="mgx-acct">\s*\{linked \? <InboxDoor [^>]*\/> : null\}\s*\{linked \? <GiftBox [^>]*\/> : null\}\s*\{creditsChip\}/);
+    const help = bar.indexOf('className={"mgx-sephelp"');
+    assert.ok(help > 0, "the ? is rendered");
+    const group = bar.slice(bar.indexOf('<span className="mgx-acct">'), bar.indexOf("</span>", help) + 7);
+    assert.ok(group.includes('className="mgx-claim"') && group.includes('className={"mgx-sephelp"'),
+      "the claim button and the ? are inside the group, after the credits chip");
     assert.match(bar, /const linked = !!\(account && !account\.error && account\.credits != null\)/);
   });
 

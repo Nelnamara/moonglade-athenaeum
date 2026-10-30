@@ -300,10 +300,23 @@
   gap: 8px 20px; flex: 1 1 auto; min-width: 0; }
 .mgx-sepright { position: relative; display: flex; flex-wrap: wrap; justify-content: flex-end;
   align-items: center; gap: 8px 12px; flex: 0 1 auto; max-width: 100%; margin-left: auto; }
-/* the inbox door, the gift door and the credits chip, one item of that row so they wrap together
-   (SeparatorBar.jsx). 12px less .ib-wrap's -4px margin is the handoff's 8px: twins 8px apart and
-   the last door 8px before the credits chip. Static, so the inbox panel still anchors to the row. */
-.mgx-doors { display: flex; align-items: center; gap: 12px; flex: none; }
+/* The account end of the row -- the inbox door, the gift door, the credits chip, the claim button
+   and the ? -- one item of that row, so it wraps whole (SeparatorBar.jsx). 12px is the row's own
+   gap, so nothing moves where the row fits on one line; less .ib-wrap's -4px margin it is the
+   handoff's 8px between the twins and from the last door to the credits chip. Static, so the inbox
+   panel still anchors to the row. */
+.mgx-acct { display: flex; align-items: center; gap: 12px; flex: none; }
+/* BELOW 1200px THE BAR READS AS ITS TWO HALVES, NOT A PILE (owner's iPad walk, 2026-10-29: "All
+   bunched together ... but still on right side"). Here the right cluster never fits beside the nav
+   and SIZE, so it is a line of its own; right-aligned and wrapping item by item it piled up at the
+   right edge in two or three ragged lines (the ? alone on the last one, sideways). Now it takes the
+   whole line: the status chips (Activity, the pinned goal and Vigil, followers) start at the left
+   like the nav row above them, and the account group holds the right end, as the handoff's bar
+   holds its left and right halves. 1200 is help.css's line for the ? joining this row. */
+@media (max-width: 1199px) {
+  .mgx-sepright { flex: 1 1 100%; justify-content: flex-start; }
+  .mgx-acct { margin-left: auto; }
+}
 
 /* ---- glyph-spine nav pills ---- */
 .mgx-navspine { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; }

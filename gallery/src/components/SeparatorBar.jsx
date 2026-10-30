@@ -294,33 +294,35 @@ export default function SeparatorBar({
         {/* ✉ THE INBOX and 🎁 THE GIFT BOX (Sessions R + Y, Inbox and Event Handoff §1; two doors
             since the owner's walk 2026-10-04: the gift box is for rewards only). Twins, 8 px
             apart and one 8 px gap before the credits chip, shown only with a linked account. */}
-        {/* The doors and the credits chip are ONE group (#72): the handoff draws the door one 8 px gap
-            before the credits chip, and this row now wraps, so as three loose items the row could break
-            between the inbox and the gift box or between the gift box and the credits. As one
-            non-breaking item they wrap together. Unlinked, the chip stands alone. */}
-        {linked ? (
-          <span className="mgx-doors">
-            <InboxDoor onOpenContests={openContests} />
-            <GiftBox account={account} />
-            {creditsChip}
-          </span>
-        ) : creditsChip}
+        {/* THE ACCOUNT END OF THE ROW is ONE group (#72; owner's iPad walk 2026-10-29): the doors,
+            the credits chip, the claim button and the ?, in the handoff's order. The handoff draws the
+            door one 8 px gap before the credits chip and the bar ending on credits; this row wraps on
+            a tablet, and as loose items it broke anywhere -- between the twins, before the credits, and
+            on a sideways iPad the ? alone on a third line -- a right-hand pile instead of a row. As one
+            non-breaking item the account end stays whole, and below 1200 px (shell.css) it holds the
+            right end of its line while the status chips start at the left, like the bar's two halves.
+            Unlinked there are no doors; the rest is the same group. */}
+        <span className="mgx-acct">
+          {linked ? <InboxDoor onOpenContests={openContests} /> : null}
+          {linked ? <GiftBox account={account} /> : null}
+          {creditsChip}
 
-        {claimCredits ? (
-          <button type="button" className="mgx-claim" onClick={onClaim} disabled={claiming}
-            title="Claim your free daily credits">
-            <i className="mgx-claimribbon" aria-hidden="true" />
-            {claiming ? "claiming…" : "+" + Number(claimCredits).toLocaleString() + " claim"}
-          </button>
-        ) : null}
+          {claimCredits ? (
+            <button type="button" className="mgx-claim" onClick={onClaim} disabled={claiming}
+              title="Claim your free daily credits">
+              <i className="mgx-claimribbon" aria-hidden="true" />
+              {claiming ? "claiming…" : "+" + Number(claimCredits).toLocaleString() + " claim"}
+            </button>
+          ) : null}
 
-        {/* The guide's "?" (Session I decision 2; the handoff's section A header draws it
-            just before Generate). In the hero state it stands before the banner's own
-            Generate button (Banner.jsx) -- this row has no room to spare at 1280 and would
-            wrap onto a second line -- so here it shows only in the slim state, beside the
-            slim launcher, and below 1200 px, where this row already wraps and the banner's
-            row has no room either (help.css). */}
-        <HelpButton surface="gallery" className={"mgx-sephelp" + (slim ? " slim" : "")} />
+          {/* The guide's "?" (Session I decision 2; the handoff's section A header draws it
+              just before Generate). In the hero state it stands before the banner's own
+              Generate button (Banner.jsx) -- this row has no room to spare at 1280 and would
+              wrap onto a second line -- so here it shows only in the slim state, beside the
+              slim launcher, and below 1200 px, where this row already wraps and the banner's
+              row has no room either (help.css). */}
+          <HelpButton surface="gallery" className={"mgx-sephelp" + (slim ? " slim" : "")} />
+        </span>
 
         {/* slim-state Generate launcher — the banner's big button is hidden then */}
         {slim ? (
