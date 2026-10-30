@@ -1158,9 +1158,16 @@ button.mgdock-snipdel:hover { color: var(--red, #f38ba8); }
    The existing mg-model-picker mount (ModelFlyout's .mfly, styles.css: fixed,
    right of the old side drawer) re-anchors as the dock's bottom-center
    palette (DC paletteStyle). Scoped under the dock host so the rule can't
-   leak; z stays in the 300 band it already owned. */
-.mgx-dock-host .mfly { top: auto; right: auto; left: 50%; bottom: 250px;
-  transform: translateX(-50%);
+   leak; z stays in the 300 band it already owned.
+   CENTRED BY ITS INSETS, NOT BY A TRANSFORM (owner's iPad walk, 2026-10-29: "Model picker is cut
+   off on right side"). It was left:50% + transform:translateX(-50%), and its own entry animation
+   (mgSlab, fill-mode both) ends on `transform: none` -- an animation outranks the rule, so once
+   the .42s entry had run the -50% was gone for good and the palette's LEFT edge sat at the middle
+   of the screen: on an iPad and on any window under ~1440px its right half ran off the edge, and
+   on a wide desktop it sat right of centre. The harness never saw it because it freezes every
+   animation before measuring, which drops that last frame. left:0 + right:0 + auto margins centre
+   a box of this width with no transform for the animation to overwrite. */
+.mgx-dock-host .mfly { top: auto; right: 0; left: 0; bottom: 250px; margin-inline: auto;
   width: min(720px, calc(100vw - 48px)); max-height: 46vh;
   flex-direction: column; min-height: 0;
   border-radius: 16px; border: 1px solid var(--surface1);

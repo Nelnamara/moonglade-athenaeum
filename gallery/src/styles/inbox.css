@@ -82,8 +82,11 @@
 .ib-chip.on { border-color: var(--lavender); background: rgba(182, 146, 230, .16); color: var(--text); }
 .ib-tabs.phone .ib-chip { min-height: 32px; padding: 6px 12px; font-size: 11px; }
 
+/* overflow-anchor: none -- the inbox list keeps the row being read in place itself when an older
+   page lands (InboxList.jsx, InboxBody); a browser's own anchoring would hold the TOP row instead,
+   and Safari has none, so it is off and the one rule is the list's. */
 .ib-scroll { display: flex; flex-direction: column; gap: 7px; min-height: 0; overflow-y: auto;
-  overscroll-behavior: contain; }
+  overscroll-behavior: contain; overflow-anchor: none; }
 .ib-lab { font-size: 9.5px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); }
 .ib-dim { font-size: 9.5px; line-height: 1.45; color: var(--overlay0); }
 .ib-warn { font-size: 10.5px; line-height: 1.5; color: var(--peach); }

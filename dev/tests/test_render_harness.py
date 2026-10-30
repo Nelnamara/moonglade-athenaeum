@@ -10252,7 +10252,7 @@ def _ipad(logged_in_page, width, height):
 # the credits chip rather than reading sealed content.
 _IPAD_PIN_JS = """() => {
   const cred = document.querySelector('.mgx-sepright button.mgx-cred');
-  const at = cred.closest('.mgx-doors') || cred;   // the doors group is one item of the row
+  const at = cred.closest('.mgx-acct') || cred;    // the account end is one item of the row
   const wrap = document.createElement('div'); wrap.className = 'mgg-chips';
   wrap.innerHTML = '<span class="mgg-pin" role="button" tabindex="0"><span class="mgg-pin-t">Moonwell Regular - 3 to go</span>'
     + '<button type="button" class="mgg-x">x</button></span><span class="mgg-vigil">Vigil - day 12</span>';
@@ -10275,21 +10275,34 @@ _IPAD_HEADER_JS = """() => {
 
 _IPAD_SIZES = [(744, 1133), (820, 1180), (1024, 1366), (1180, 820), (1194, 834)]
 
-# the doors group: where the inbox door, the gift door and the credits chip sit (#72)
+# the account end of the row (#72): where the inbox door, the gift door, the credits chip, the claim
+# button and the ? sit, and where the row's first status chip starts and its account group ends
 _DOORS_JS = """() => {
-  const r = (s) => { const e = document.querySelector(s); if (!e) return null; const b = e.getBoundingClientRect();
-    return {l: b.left, r: b.right, t: b.top, b: b.bottom}; };
-  const g = document.querySelector('.mgx-doors');
+  const box = (e) => { const b = e.getBoundingClientRect(); return {l: b.left, r: b.right, t: b.top, b: b.bottom}; };
+  const r = (s) => { const e = document.querySelector(s); return e ? box(e) : null; };
+  const g = document.querySelector('.mgx-acct');
+  const first = [...document.querySelector('.mgx-sepright').children]
+    .find((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.height > 0; });
   return {inbox: r('.mgx-sepright .ib-door.inbox'), gift: r('.mgx-sepright .ib-door.gift'),
-          cred: r('.mgx-sepright button.mgx-cred'),
-          grouped: !!g && !!g.querySelector('.ib-door.inbox') && !!g.querySelector('.ib-door.gift')
-                   && !!g.querySelector('button.mgx-cred')};
+          cred: r('.mgx-sepright button.mgx-cred'), claim: r('.mgx-sepright .mgx-claim'),
+          help: r('.mgx-sepright .mgx-sephelp'), row: r('.mgx-sepright'), acct: r('.mgx-acct'),
+          first: first ? Object.assign(box(first), {cls: String(first.className).slice(0, 24)}) : null,
+          grouped: !!g && ['.ib-door.inbox', '.ib-door.gift', 'button.mgx-cred', '.mgx-claim', '.mgx-sephelp']
+                            .every((s) => !!g.querySelector(s))};
 }"""
 
 
 def _doors_on_one_line(d):
+    """The doors, the credits chip, the claim button and the ? share one line."""
     mid = lambda k: (d[k]["t"] + d[k]["b"]) / 2
-    return abs(mid("inbox") - mid("gift")) < 8 and abs(mid("gift") - mid("cred")) < 8
+    return all(abs(mid("inbox") - mid(k)) < 8 for k in ("gift", "cred", "claim", "help"))
+
+
+def _reads_as_two_halves(d):
+    """Below 1200 px: the status chips start at the row's left edge and the account group holds its
+    right end, as the handoff's bar holds its two halves, instead of everything piling up at the right."""
+    return (d["first"] is not None and not d["first"]["cls"].startswith("mgx-acct")
+            and abs(d["first"]["l"] - d["row"]["l"]) < 1.5 and abs(d["acct"]["r"] - d["row"]["r"]) < 1.5)
 
 
 def test_the_header_row_holds_a_linked_account_at_every_ipad_width(logged_in_page):
@@ -10300,15 +10313,18 @@ def test_the_header_row_holds_a_linked_account_at_every_ipad_width(logged_in_pag
     shrank the page to fit. Now the row wraps onto a second line. Judged against the device width
     (not innerWidth, which grows with an overflowing page on a mobile viewport).
 
-    The inbox door, the gift door and the credits chip wrap as ONE group (`.mgx-doors`): the Inbox
-    handoff draws the door one 8 px gap before the credits chip, and a wrapping row would otherwise
-    split them (the inbox ends one line, the gift box starts the next; or the credits chip drops
-    alone). Checked at every iPad size and on 900 and 1000 px desktop windows, where the row wraps
-    as well.
+    The account end of the row -- the inbox door, the gift door, the credits chip, the claim button
+    and the ? -- wraps as ONE group (`.mgx-acct`): the Inbox handoff draws the door one 8 px gap
+    before the credits chip, and a wrapping row would otherwise split them (the inbox ends one line,
+    the gift box starts the next; the credits chip drops alone; sideways, the ? alone on a third
+    line). Below 1200 px the row reads as the bar's two halves (owner's iPad walk 2026-10-29: "All
+    bunched together ... but still on right side"): the status chips start at the left, the account
+    group holds the right end. Checked at every iPad size and on 900 and 1000 px desktop windows,
+    where the row wraps as well.
 
     Phase 2 puts the old rule back (no wrap, flex:none, no cap) and the right edge leaves the screen;
-    and, apart from it, flattens the group so the doors and chip are loose items again, which splits
-    them at 820 and 1024 (iPad) and on the 900 px window."""
+    apart from it, flattens the group so the pieces are loose items again, which splits them at some
+    width; and puts the right-aligned pile back, which takes the status chips off the left edge."""
     split_when_loose = []
     for width, height, ipad in [(w, h, True) for w, h in _IPAD_SIZES] + [(900, 800, False), (1000, 800, False)]:
         page = _ipad(logged_in_page, width, height) if ipad else logged_in_page(width=width, height=height)
@@ -10328,17 +10344,25 @@ def test_the_header_row_holds_a_linked_account_at_every_ipad_width(logged_in_pag
             assert g[k] and g[k]["l"] >= 0 and g[k]["r"] <= width, ("%s is on screen" % k, where)
 
         d = page.evaluate(_DOORS_JS)
-        assert d["grouped"], ("the doors and the credits chip are one group", where)
-        assert _doors_on_one_line(d), ("the doors and the credits chip share a line", json.dumps(d))
+        assert d["grouped"], ("the doors, credits, claim and ? are one group", where)
+        assert _doors_on_one_line(d), ("the doors, credits, claim and ? share a line", json.dumps(d))
         assert abs((d["gift"]["l"] - d["inbox"]["r"]) - 8) < 1.5, ("the twins are 8 px apart", json.dumps(d))
         assert abs((d["cred"]["l"] - d["gift"]["r"]) - 8) < 1.5, ("8 px from the gift box to the credits", json.dumps(d))
+        assert _reads_as_two_halves(d), ("status chips from the left, the account group at the right end", json.dumps(d))
 
-        # Phase 2a: the doors as loose items of the row, as they were.
-        flat = page.add_style_tag(content=".mgx-doors { display: contents !important; }")
+        # Phase 2a: the pieces as loose items of the row, as they were.
+        flat = page.add_style_tag(content=".mgx-acct { display: contents !important; }")
         _settle(page)
         if not _doors_on_one_line(page.evaluate(_DOORS_JS)):
             split_when_loose.append((width, ipad))
         flat.evaluate("e => e.remove()")
+
+        # Phase 2c: the right-aligned pile of 3.20.5 -- everything ends up at the right edge.
+        pile = page.add_style_tag(content=".mgx-sepright { flex: 0 1 auto !important; justify-content: flex-end !important; }"
+                                          " .mgx-acct { margin-left: 0 !important; }")
+        _settle(page)
+        assert not _reads_as_two_halves(page.evaluate(_DOORS_JS)), ("the pile does not read as two halves at %d" % width)
+        pile.evaluate("e => e.remove()")
 
         # Phase 2b: the rule as it shipped before.
         page.add_style_tag(content=".mgx-sepright { flex-wrap: nowrap !important; flex: none !important;"
@@ -10548,3 +10572,149 @@ def test_the_inbox_panel_fits_under_the_header_and_its_list_scrolls(logged_in_pa
         old = page.evaluate(probe)
         if short:            # upright, the 12 rows are shorter than either cap, so only the short windows flip
             assert old["bottom"] > old["vh"] + 1, ("the old size runs off the screen at %dx%d" % (width, height), json.dumps(old))
+
+
+# ---------------------------------------------------------------------------
+# The owner's iPad walk of 3.20.5 (2026-10-29, Safari). Two of its three fails were things this file
+# could not see as written: the model palette is only wrong AFTER its entry animation has run (and
+# _visit freezes every animation), and the inbox only moves when an older page lands while you read.
+# ---------------------------------------------------------------------------
+
+_PALETTE_JS = """async () => {
+  const m = document.querySelector('.mgx-dock-host .mfly');
+  await Promise.all(m.getAnimations().map((a) => a.finished.catch(() => null)));
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const b = m.getBoundingClientRect();
+  // the width a fixed box lays out in: the window less a desktop scrollbar
+  return {l: b.left, r: b.right, w: b.width, vw: document.documentElement.clientWidth, anim: getComputedStyle(m).animationName,
+          transform: getComputedStyle(m).transform};
+}"""
+
+
+def test_the_generate_model_palette_stays_on_screen_once_its_entry_has_run(logged_in_page):
+    """Walk i-03 / i-05 ("Model browser cut off", "Model picker is cut off on right side"). The dock's
+    model palette was centred by left:50% + transform:translateX(-50%), and its entry animation
+    (mgSlab, fill-mode both) ends on `transform: none`. An animation outranks the rule, so once the
+    .42 s entry had run the -50% was gone and the palette's LEFT edge sat at the middle of the screen:
+    half of it past the right edge on an iPad, upright or sideways, and on a 1280 px window. Every
+    other test here freezes motion before measuring, which drops that last frame, so this one runs
+    the animation for real and waits for it to finish. Now the palette is centred by its insets.
+
+    Phase 2 puts the transform centring back: once the entry has run the right edge leaves the
+    screen. With the animation off too, the same old rule is centred: the animation's fill was it."""
+    for width, height, ipad in ((820, 1180, True), (1180, 820, True), (1280, 800, False)):
+        page = _ipad(logged_in_page, width, height) if ipad else logged_in_page(width=width, height=height)
+        page.route(re.compile(r"/api/model-search(\?|$)"), lambda r: _q_json(r, {"results": [
+            {"model_id": "fake-%d" % i, "title": "Fake model %d" % i, "preview_url": "", "liked_count": i,
+             "description": "", "official": False, "should_blur": False} for i in range(12)],
+            "has_more": False, "next_cursor": ""}))
+        page.goto("/", wait_until="domcontentloaded")          # NOT _visit: the motion is the point
+        page.wait_for_selector(".mgg-card")
+        _dismiss_any_achievement_toast(page)
+        page.click(".mgx-gen")
+        page.wait_for_selector(".mgdock-modelchip")
+        page.wait_for_timeout(600)                              # the dock's own entry
+        page.click(".mgdock-modelchip")
+        page.wait_for_selector(".mgx-dock-host .mfly")
+        g = page.evaluate(_PALETTE_JS)
+        where = "%dx%d: %s" % (width, height, json.dumps(g))
+        assert g["anim"] != "none", ("the entry animation really ran", where)
+        assert g["l"] >= 0 and g["r"] <= g["vw"], ("the palette is on the screen", where)
+        if ipad:
+            assert abs((g["l"] + g["r"]) / 2 - g["vw"] / 2) <= 1, ("the palette is centred", where)
+
+        page.add_style_tag(content=".mgx-dock-host .mfly { left: 50% !important; right: auto !important;"
+                                   " margin-inline: 0 !important; transform: translateX(-50%); }")
+        old = page.evaluate(_PALETTE_JS)
+        assert old["r"] > old["vw"], ("the old centring runs off the right once the entry has run at %d" % width, old)
+        page.add_style_tag(content=".mgx-dock-host .mfly { animation: none !important; }")
+        still = page.evaluate(_PALETTE_JS)
+        # where the old rule meant it to be (it is the animation's fill that defeated it), and where it is now
+        assert still["r"] <= still["vw"], ("without the animation the old rule was on screen", still)
+        assert abs(still["l"] - g["l"]) <= 1 and abs(still["r"] - g["r"]) <= 1, ("now it sits where it was drawn to", where, still)
+
+
+def _older_pages_items(k, per=20):
+    """Page k of an inbox the way PixAI pages it (newest first, 20 a time). Each page opens with
+    likes and comments on two works only that page has, then PixAI news: the panel cards works
+    FIRST, so an older page's works land above the EVERYTHING ELSE rows at the end."""
+    out = []
+    for j in range(per):
+        i = k * per + j
+        at = _rf_iso(-(i + 1) / 24.0)
+        if j < 4:
+            art = {"id": str(5000 + k * 10 + j // 2), "title": "Work %d-%d" % (k, j // 2), "thumb": "", "media_id": ""}
+            out.append({"id": "o%d" % i, "type": "COMMENT" if j % 2 else "LIKE", "cat": "comment" if j % 2 else "like",
+                        "unread": False, "created_at": at, "users": [{"id": "u%d" % i, "name": "kurone%d" % i}],
+                        "artwork": art, "content": "comment %d" % i})
+        else:
+            out.append({"id": "o%d" % i, "type": "NEWS", "cat": "news", "unread": False, "created_at": at,
+                        "users": [], "artwork": None, "content": "PixAI news number %d" % i})
+    return out
+
+
+_INBOX_ROW_IN_VIEW_JS = """(text) => {
+  const s = document.querySelector('.ib-panel .ib-scroll'); const sb = s.getBoundingClientRect();
+  const rows = [...s.querySelectorAll('.ib-row')];
+  const norm = (e) => e.innerText.replace(/\\s+/g, ' ').trim().slice(0, 40);
+  let row = null;
+  if (text) row = rows.find((e) => norm(e) === text);
+  else for (const e of rows) { const b = e.getBoundingClientRect(); if (b.top >= sb.top && b.top < sb.bottom) row = e; }
+  return row ? {text: norm(row), y: row.getBoundingClientRect().top - sb.top, rows: rows.length,
+                scrollTop: s.scrollTop, scrollH: s.scrollHeight} : null;
+}"""
+
+
+def test_an_older_inbox_page_lands_without_moving_the_row_you_are_reading(logged_in_page):
+    """Walk i-04 ("Gets to bottom but bounces back up 3 lines", upright and sideways). Reaching the end
+    of the inbox list reads the next, older page, and the panel draws work cards first and EVERYTHING
+    ELSE after, so a like or comment in that page on a work not carded yet lands ABOVE the rows the
+    reader is on. Safari keeps the scroll offset, so those rows slid down by the new cards' height; a
+    browser with scroll anchoring keeps the TOP row in view instead, which on a tall upright panel is
+    above the new cards and moves the same rows anyway. Now the list keeps the row being read in
+    place itself, and the browser's anchoring is off on the list so it is the one rule everywhere.
+
+    The older page is held until the row in view has been measured, then let through. The pre-fix
+    bundle moves that row by the inserted cards at 820 x 1180 (both engines) and at 1180 x 820 in an
+    engine without anchoring; this asserts it does not move at all."""
+    for width, height in ((820, 1180), (1180, 820)):
+        page = _ipad(logged_in_page, width, height)
+        _rf_routes(page, account=_rf_account(social=True))
+        held = []
+
+        def inbox(route):
+            m = re.search(r"before=c(\d+)", route.request.url)
+            k = int(m.group(1)) if m else 0
+            if k and not held_open[0]:
+                held.append(route)
+                return
+            _q_json(route, {"items": _older_pages_items(k), "cursor": "c%d" % (k + 1) if k < 2 else None,
+                            "has_more": k < 2, "csrf": "harness", "read_only": False})
+        held_open = [False]
+        page.route(re.compile(r"/api/inbox(\?|$)"), inbox)
+        _visit(page, "/")
+        page.wait_for_selector(".mgx-sepright .ib-door.inbox")
+        _dismiss_any_achievement_toast(page)
+        page.keyboard.press("Escape")             # the daily-claim prompt a waiting claim raises
+        _settle(page)
+        page.locator(".mgx-sepright .ib-door.inbox").tap()
+        page.wait_for_selector(".ib-panel .ib-row")
+        _settle(page)
+        page.evaluate("() => { const s = document.querySelector('.ib-panel .ib-scroll'); s.scrollTop = s.scrollHeight; }")
+        page.wait_for_function("() => document.querySelectorAll('.ib-panel .ib-row').length > 0")
+        for _ in range(40):                       # the end of the list asks for the older page
+            if held:
+                break
+            page.wait_for_timeout(50)
+        assert held, "reaching the end asked for the older page"
+        _settle(page)
+        before = page.evaluate(_INBOX_ROW_IN_VIEW_JS, None)
+        held_open[0] = True
+        for r in held:
+            inbox(r)
+        page.wait_for_function("(n) => document.querySelectorAll('.ib-panel .ib-row').length > n", arg=before["rows"])
+        _settle(page)
+        after = page.evaluate(_INBOX_ROW_IN_VIEW_JS, before["text"])
+        where = "%dx%d: %s -> %s" % (width, height, json.dumps(before), json.dumps(after))
+        assert after and after["rows"] > before["rows"], ("the older page landed", where)
+        assert abs(after["y"] - before["y"]) < 1, ("the row being read did not move", where)

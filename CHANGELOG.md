@@ -16,6 +16,11 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Fixed
+- **Generate's model picker opens in the middle of the screen again, whole.** It was centred by a shift that its own opening motion undid as soon as it finished, so the picker's left edge settled at the middle of the screen: on an iPad, upright or sideways, and on any window narrower than about 1,440 px, its right half was cut off, and on a wide screen it sat right of centre. It is now centred without that shift. (2026-10-29)
+- **On an iPad, the header's chips read as a row again instead of a pile at the right.** Below 1,200 px, the row under the nav now starts at the left with the activity chip (then your pinned goal, followers) and ends at the right with the inbox and gift box, the credits, the claim button and the **?**, which stay together; sideways the **?** no longer sits alone on a line of its own. Wider windows are unchanged. (#72) (2026-10-29)
+- **The inbox no longer jumps back when it reads older messages.** Scrolling to the end of the inbox reads the next, older page; a like or a comment there on a picture not shown yet added its card above the rows you were reading, so they slid down out of view, most of all on an iPad held upright. What you are reading now stays where it is, and a new notification still shows at the top when the list is at the top. (2026-10-29)
+
 ## [3.20.5] - 2026-10-28 — Loose Ends
 
 ### Fixed
