@@ -10426,9 +10426,22 @@ _SEP_LINES_JS = """() => {
   const credlab = document.querySelector('.mgx-acct .mgx-cred > .mgx-credlab:not(.cards)');
   const cardslab = document.querySelector('.mgx-acct .mgx-credlab.cards');
   lines.sort((a, c) => a.t - c.t);
+  // The row's natural width: its items side by side at their own widths, plus the gaps between them.
+  // The end-of-row wrapper (.mgx-sepend) stretches to fill its line, so it counts as its pieces.
+  const own = (e) => e.getBoundingClientRect().width;
+  const natural = (e, kids) => { const g = parseFloat(getComputedStyle(e).columnGap) || 0;
+    return kids.reduce((w, k) => w + (k.classList.contains('mgx-sepend') ? natural(k, [...k.children].filter(vis)) : own(k)), 0)
+      + g * Math.max(0, kids.length - 1); };
+  const rcs = getComputedStyle(right);
+  const rowNatural = natural(right, [...right.children].filter(vis));
+  const rowW = right.clientWidth - parseFloat(rcs.paddingLeft) - parseFloat(rcs.paddingRight);
+  const chipEl = document.querySelector('.mgx-sep .at-chip');
+  const sizeChipLine = !!chipEl && Math.abs(size.getBoundingClientRect().top + size.getBoundingClientRect().height / 2
+    - chipEl.getBoundingClientRect().top - chipEl.getBoundingClientRect().height / 2) < 8;
   const lone = lines.slice(1).filter((L) => L.sels.every((x) => ACCT.includes(x)) || L.sels.every((x) => x === '.mgx-launcher')).length;
   return {lines: lines.length, lone, lineTops: lines.map((L) => Math.round(L.t)), lineItems: lines.map((L) => L.items.join(' ')), overlaps,
-          sizeIn: size.parentElement.className, sizeFirst: firstKid === size,
+          sizeIn: size.parentElement.className, sizeFirst: firstKid === size, sizeChipLine,
+          rowNatural, rowW, rowFits: rowNatural <= rowW + 0.5,
           acctR: acct.right, acctT: acct.top, sepContentR: sb.right - parseFloat(scs.paddingRight),
           rowR: right.getBoundingClientRect().right, lastLineT: lines.length ? lines[lines.length - 1].t : null,
           pastRight: items.filter((i) => i.r > document.documentElement.clientWidth + 0.5).map((i) => i.s),
@@ -10455,14 +10468,20 @@ _RUNNING_JOB = {"jobs": [{"job_id": "hdr-1", "type": "generate", "label": "Gener
 def test_the_ipad_header_is_the_tabs_then_one_row_led_by_size(logged_in_page):
     """Owner's pick B (2026-11-01), from his iPad walk: on an upright iPad (820 x 1180) with an
     account linked, the Vigil on, no goal pinned, no claim waiting and an idle queue, the header bar
-    is TWO lines -- the tabs, then one row: SIZE, the activity chip, the Vigil, followers and
-    following, and the account group (inbox, gift box, credits, ?) ending it at the right. It was
-    four (the nav, SIZE alone, the status chips, the account group pushed right). The activity chip
-    reads "idle" (its tail is out of sight, still in its text for a screen reader) and the credits
-    chip drops the word CREDITS below 1000 px; CARDS stays.
+    is the tabs, then one row: SIZE, the activity chip, the Vigil, followers and following, and the
+    account group (inbox, gift box, credits, ?) ending it at the right. It was four lines (the nav,
+    SIZE alone, the status chips, the account group pushed right). The activity chip reads "idle"
+    (its tail is out of sight, still in its text for a screen reader) and the credits chip drops the
+    word CREDITS below 1000 px; CARDS stays.
 
-    Phase 2 puts the SIZE pill back at the end of the nav half, where it sat before, and the bar
-    is more than two lines again."""
+    Whether that row is ONE line depends on the platform's fonts (one line on Windows and macOS, two
+    under GitHub's Linux fonts), so the line count is judged against the row's own natural width,
+    measured in the page: two lines in all when it fits the bar, three when it does not -- then the
+    end of the row (followers and the account group) goes down together, the account group still
+    ending the last line at the right, never alone.
+
+    Phase 2 puts the SIZE pill back at the end of the nav half, where it sat before, and it no longer
+    shares a line with the activity chip."""
     page = _ipad(logged_in_page, 820, 1180)
     acct = dict(_rf_account(), followers=31, following=5)     # his row: a few followers, no claim waiting
     _rf_routes(page, account=acct)
@@ -10475,9 +10494,11 @@ def test_the_ipad_header_is_the_tabs_then_one_row_led_by_size(logged_in_page):
     _settle(page)
     m = page.evaluate(_SEP_LINES_JS)
     where = json.dumps(m)
-    assert m["lines"] == 2, ("the tabs, then one row", where)
-    assert m["sizeIn"] == "mgx-sepright" and m["sizeFirst"], ("SIZE is the first item of the row", where)
+    assert m["sizeIn"] == "mgx-sepright" and m["sizeFirst"] and m["sizeChipLine"], ("SIZE is the first item of the row", where)
+    assert m["lines"] == (2 if m["rowFits"] else 3), ("the tabs, then the row: one line when it fits, else two", where)
+    assert m["lone"] == 0, ("no line holds only the account group", where)
     assert m["sepContentR"] - 24 <= m["acctR"] <= m["sepContentR"] + 0.5, ("the account group ends the row at the right", where)
+    assert abs(m["acctT"] - m["lastLineT"]) < 8, ("on the last line", where)
     assert m["scrollW"] == m["innerW"] == 820 and m["pastRight"] == [] and m["overlaps"] == [], where
     assert m["tailW"] is not None and m["tailW"] <= 1, ("the chip reads its state word only", where)
     assert m["chipText"] == "idle · nothing in the queue", ("the full sentence stays in its text", where)
@@ -10487,7 +10508,7 @@ def test_the_ipad_header_is_the_tabs_then_one_row_led_by_size(logged_in_page):
     page.evaluate("() => document.querySelector('.mgx-sepleft').appendChild(document.querySelector('.mgx-size'))")
     _settle(page)
     old = page.evaluate(_SEP_LINES_JS)
-    assert old["lines"] > m["lines"], ("with SIZE in the nav half the bar is taller again", json.dumps(old))
+    assert not old["sizeChipLine"], ("with SIZE in the nav half it no longer leads the row", json.dumps(old))
 
 
 def test_the_desktop_header_keeps_size_in_the_nav_and_the_full_activity_text(logged_in_page):
@@ -10534,8 +10555,10 @@ def test_the_crowded_ipad_header_wraps_with_the_account_group_last(logged_in_pag
     sits alone on a line of its own: the followers chip goes down with it (.mgx-sepend, review of
     pick B, 2026-11-01; a single running job or claim used to leave it alone, pushed right).
 
-    Phase 2 flattens the end-of-row wrapper and the group is alone on its line again. Then it takes
-    the group's spring away and it no longer reaches the right edge."""
+    The line count is judged against the row's natural width (fonts differ by platform), and the
+    "never alone" rule over a sweep of widths from 744 to 1199. Phase 2 flattens the end-of-row
+    wrapper and at some width the group is alone on its line again. Then it takes the group's spring
+    away and it no longer reaches the right edge."""
     page = _ipad(logged_in_page, 820, 1180)
     if state == "all":
         acct = _rf_account(social=True)
@@ -10559,7 +10582,8 @@ def test_the_crowded_ipad_header_wraps_with_the_account_group_last(logged_in_pag
     m = page.evaluate(_SEP_LINES_JS)
     where = "%s: %s" % (state, json.dumps(m))
     assert m["sizeIn"] == "mgx-sepright" and m["sizeFirst"], ("SIZE leads the row", where)
-    assert m["lines"] >= 3 and m["overlaps"] == [] and m["pastRight"] == [], ("it wraps cleanly", where)
+    assert (m["lines"] == 2) if m["rowFits"] else (m["lines"] >= 3), ("it wraps only when it must", where)
+    assert m["overlaps"] == [] and m["pastRight"] == [], ("cleanly", where)
     assert m["scrollW"] == m["innerW"] == 820, where
     assert m["lone"] == 0, ("no line holds only the account group", where)
     assert abs(m["acctR"] - m["rowR"]) < 1.5 and abs(m["acctT"] - m["lastLineT"]) < 8, (
@@ -10568,12 +10592,22 @@ def test_the_crowded_ipad_header_wraps_with_the_account_group_last(logged_in_pag
         assert m["tailW"] is not None and m["tailW"] <= 1, ("it reads 1 running", where)
         assert m["chipText"] == "1 job running", ("the full sentence stays in its text", where)
 
-    # Phase 2a: the end of the row as loose items, as built before the review.
+    # Across the widths below 1200 the group is never alone on a line; Phase 2a: as loose items (before
+    # the review), at some width it is. Which widths depends on the platform's fonts, hence the sweep.
+    def lone_widths():
+        out = []
+        for w in range(744, 1200, 9):
+            page.set_viewport_size({"width": w, "height": 1180})
+            if page.evaluate(_SEP_LINES_JS)["lone"]:
+                out.append(w)
+        page.set_viewport_size({"width": 820, "height": 1180})
+        return out
+    assert lone_widths() == [], ("no width below 1200 leaves the account group alone", state)
     flat = page.add_style_tag(content=".mgx-sepend { display: contents !important; }")
     _settle(page)
-    loose = page.evaluate(_SEP_LINES_JS)
-    assert loose["lone"] >= 1, ("loose, the account group is alone on its line", json.dumps(loose))
+    assert lone_widths(), ("loose, the account group is alone on its line at some width", state)
     flat.evaluate("e => e.remove()")
+    _settle(page)
 
     # Phase 2b: the account group without its spring.
     page.add_style_tag(content=".mgx-acct { margin-left: 0 !important; }")
@@ -10953,7 +10987,8 @@ def test_a_first_inbox_page_that_fits_still_reads_the_older_ones(logged_in_page)
                 if hold and len(asked) == 1:
                     held.append(route)
                     return
-            _q_json(route, {"items": _older_pages_items(k), "cursor": "c%d" % (k + 1) if k < 2 else None,
+            # 12 a page: well inside the panel whatever the platform's fonts make a row's height
+            _q_json(route, {"items": _older_pages_items(k, per=12), "cursor": "c%d" % (k + 1) if k < 2 else None,
                             "has_more": k < 2, "csrf": "harness", "read_only": False})
         page.route(re.compile(r"/api/inbox(\?|$)"), inbox)
         _visit(page, "/")
