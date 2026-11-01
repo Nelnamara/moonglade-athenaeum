@@ -38,7 +38,8 @@ describe("O4/O5: where the chips are mounted", () => {
     assert.ok(c.indexOf("<GoalChips />") > 0);
     // Since #72 the credits chip is built once (`creditsChip`) and placed where the header renders it,
     // inside the linked account's door group; the goal chips still come before that placement.
-    assert.match(c, /const creditsChip = \(\s*<button type="button" className="mgx-cred"/);
+    // (Since 2026-11-01 the class also carries " nobal" when there is no balance, so it is an expression.)
+    assert.match(c, /const creditsChip = \(\s*<button type="button" className=\{"mgx-cred" \+/);
     assert.ok(c.indexOf("<GoalChips />") < c.indexOf("{creditsChip}"), "before the credits chip");
   });
 
