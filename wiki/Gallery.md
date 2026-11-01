@@ -35,8 +35,8 @@ The banner across the top carries the big buttons at its right, and a row of sma
 sits under it. On a narrow window — an iPad, say — the banner's rows wrap onto a second line rather
 than overlapping, and the four layout marks stay visible. Below 1,200 px the bar under the banner is
 the destinations, then a row that starts with the SIZE slider, carries the status chips and ends at
-the right with your account (inbox, gift box, credits, **?**). On an upright iPad that row is one line
-when it is quiet; a pinned goal, a claim waiting or a job running sends the end of it to one more
+the right with your account (inbox, gift box, credits, **?**). On an upright 11-inch or larger iPad that
+row is one line when it is quiet (an iPad mini is narrower and takes two); a pinned goal, a claim waiting or a job running sends the end of it to one more
 line, with your account still at the right. Along the banner:
 
 - **?** — opens the [guide](Home#help-inside-the-app) on this page (the **?** key does the same from
