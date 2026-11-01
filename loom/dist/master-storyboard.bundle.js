@@ -12266,7 +12266,7 @@ ${"=".repeat(48)}
           }
         );
       }), overflow ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-overflow" }, "+", overflow) : null) : /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dot" }),
-      /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-chiptext" }, hasLive ? live.length + (live.length === 1 ? " job" : " jobs") + " running" : "idle \xB7 nothing in the queue"),
+      /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-chiptext" }, hasLive ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, live.length, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-chiptail" }, live.length === 1 ? " job" : " jobs"), " running") : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, "idle", /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-chiptail" }, " \xB7 nothing in the queue"))),
       /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-caret" }, "\u25BE")
     );
   }

@@ -5776,6 +5776,20 @@ body.mg-moment-up > #root {
   font-size: 8px;
   color: var(--overlay0);
 }
+@media (max-width: 1199px) {
+  .mgx-sep .at-chip .at-chiptail {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
 .at-dot {
   width: 7px;
   height: 7px;

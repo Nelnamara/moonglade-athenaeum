@@ -10,6 +10,7 @@ import useActivity from "../notify/useActivity.js";
 import { expiringLines, expiryText } from "../inbox/inboxCore.js";
 import InboxDoor from "../inbox/InboxDoor.jsx";
 import GiftBox from "../inbox/GiftBox.jsx";
+import useMediaQuery from "../hooks/useMediaQuery.js";
 import "../styles/shell.css";
 
 /* The separator bar (DC "Frontend Gallery", §3 of the build map): nav pills ·
@@ -45,6 +46,11 @@ function lapse(account) {
   return "Membership lapses in " + days + " day" + (days === 1 ? "" : "s") +
     " — Turbo priority and free cards stop then.";
 }
+
+/* The bar's one breakpoint: below it the SIZE pill leads the second line and the "?" joins the row
+   (help.css), the chip labels tighten and the activity chip reads its state word only (shell.css,
+   notify.css). */
+export const HEADER_NARROW_QUERY = "(max-width: 1199px)";
 
 export default function SeparatorBar({
   boot, account,
@@ -98,6 +104,13 @@ export default function SeparatorBar({
     ? { followers: Number(account.followers).toLocaleString(),
         following: Number(account.following).toLocaleString() }
     : null;
+
+  /* Below 1200 px the SIZE pill leads the second line of the bar (owner's pick B, 2026-11-01): it
+     moves out of the nav half into the head of .mgx-sepright, so that line reads SIZE, the status
+     chips, then the account group at its right end. CSS cannot re-parent a node, so the pill
+     renders in ONE of the two places off this query -- help.css's line for the "?" (and
+     shell.css's), the same query text, so the markup and the stylesheet flip together. */
+  const narrow = useMediaQuery(HEADER_NARROW_QUERY);
 
   // Header-docked Activity control (Claude Design handoff 2026-08-09, drift item 39):
   // replaces the old floating #jobs-fab/#jobs-tray with this bar's own ambient activity
@@ -200,6 +213,26 @@ export default function SeparatorBar({
     </button>
   );
 
+  /* SIZE pill — drives the grid's --thumb var (152 … 4-across max). The
+     native <input type=range> was swapped for the shared Custom Slider
+     (drift §48) in its `compact` skin; onChange hands back the numeric
+     value, persisted as mg_gallery_density up in App. One node, two homes
+     (`narrow`, above): the end of the nav half at 1200 px and up, the head
+     of the right half below. */
+  const sizePill = (
+    <div className="mgx-size" title="Thumbnail size">
+      <span className="mgx-size-lab">SIZE</span>
+      <div className="mgx-size-slot">
+        <CustomSlider
+          compact
+          min={152} max={thumbMax} step={4} value={thumb}
+          onChange={(v) => onThumb(Math.round(v))}
+          ariaLabel="Thumbnail size"
+        />
+      </div>
+    </div>
+  );
+
   return (
     <div className="mgx-sep">
       <div className="mgx-sepleft">
@@ -233,24 +266,12 @@ export default function SeparatorBar({
         </button>
 
 
-        {/* SIZE pill — drives the grid's --thumb var (152 … 4-across max). The
-            native <input type=range> was swapped for the shared Custom Slider
-            (drift §48) in its `compact` skin; onChange hands back the numeric
-            value, persisted as mg_gallery_density up in App. */}
-        <div className="mgx-size" title="Thumbnail size">
-          <span className="mgx-size-lab">SIZE</span>
-          <div className="mgx-size-slot">
-            <CustomSlider
-              compact
-              min={152} max={thumbMax} step={4} value={thumb}
-              onChange={(v) => onThumb(Math.round(v))}
-              ariaLabel="Thumbnail size"
-            />
-          </div>
-        </div>
+        {narrow ? null : sizePill}
       </div>
 
       <div className="mgx-sepright">
+        {narrow ? sizePill : null}
+
         {/* Activity control -- back to its original spot, FIRST in this row (2026-08-10:
             the "move it last so its dropdown reaches the true edge" fix from earlier today
             was never actually shown to/approved -- only "the dropdown is cut off" was. The
@@ -299,9 +320,12 @@ export default function SeparatorBar({
             door one 8 px gap before the credits chip and the bar ending on credits; this row wraps on
             a tablet, and as loose items it broke anywhere -- between the twins, before the credits, and
             on a sideways iPad the ? alone on a third line -- a right-hand pile instead of a row. As one
-            non-breaking item the account end stays whole, and below 1200 px (shell.css) it holds the
-            right end of its line while the status chips start at the left, like the bar's two halves.
-            Unlinked there are no doors; the rest is the same group. */}
+            non-breaking item the account end stays whole and ENDS THE ROW at its right. Below 1200 px
+            (owner's pick B, 2026-11-01; shell.css) this half is the bar's second line under the tabs:
+            SIZE leads it, the status chips follow, and the account group holds the right end -- one
+            line on an upright iPad, and when it does not fit the overflow starts the next line at the
+            left and the group still ends the last one at the right. Unlinked there are no doors; the
+            rest is the same group. */}
         <span className="mgx-acct">
           {linked ? <InboxDoor onOpenContests={openContests} /> : null}
           {linked ? <GiftBox account={account} /> : null}

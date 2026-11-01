@@ -52,10 +52,24 @@ export default function ActivityChip({ jobs, open, onToggle, title, max = 3 }) {
       ) : (
         <span className="at-dot" />
       )}
+      {/* The state word and its tail (owner's pick B, 2026-11-01): below 1200 px the header's
+          second line has room for the state only, so notify.css takes the tail out of sight
+          there -- "idle · nothing in the queue" reads "idle", "3 jobs running" reads
+          "3 running". Visually hidden, not removed: the text content and the name a screen
+          reader hears are the full sentence at every width. */}
       <span className="at-chiptext">
-        {hasLive
-          ? live.length + (live.length === 1 ? " job" : " jobs") + " running"
-          : "idle · nothing in the queue"}
+        {hasLive ? (
+          <>
+            {live.length}
+            <span className="at-chiptail">{live.length === 1 ? " job" : " jobs"}</span>
+            {" running"}
+          </>
+        ) : (
+          <>
+            {"idle"}
+            <span className="at-chiptail">{" · nothing in the queue"}</span>
+          </>
+        )}
       </span>
       <span className="at-caret">▾</span>
     </div>
