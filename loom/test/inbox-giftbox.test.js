@@ -52,7 +52,7 @@ describe("two doors: ✉ Inbox, then 🎁 Gift box, then the credits chip (owner
     // never inside it (the owner's iPad walk 2026-10-29 saw the ? alone on a line).
     const chip = bar.indexOf("{creditsChip}", gift);
     assert.ok(inbox > 0 && gift > inbox && chip > gift, "✉ Inbox, then 🎁 Gift box, then the credits chip");
-    assert.match(bar, /const creditsChip = \(\s*<button type="button" className="mgx-cred" data-expiring/);
+    assert.match(bar, /const creditsChip = \(\s*<button type="button" className=\{"mgx-cred" \+ \(credits === "—" \? " nobal" : ""\)\}\s*data-expiring/);
     assert.match(bar, /<span className="mgx-acct">\s*\{linked \? <InboxDoor [^>]*\/> : null\}\s*\{linked \? <GiftBox [^>]*\/> : null\}\s*\{creditsChip\}/);
     const help = bar.indexOf('className={"mgx-sephelp"');
     assert.ok(help > 0, "the ? is rendered");
