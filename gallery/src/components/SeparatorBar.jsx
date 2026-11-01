@@ -10,6 +10,7 @@ import useActivity from "../notify/useActivity.js";
 import { expiringLines, expiryText } from "../inbox/inboxCore.js";
 import InboxDoor from "../inbox/InboxDoor.jsx";
 import GiftBox from "../inbox/GiftBox.jsx";
+import useMediaQuery from "../hooks/useMediaQuery.js";
 import "../styles/shell.css";
 
 /* The separator bar (DC "Frontend Gallery", §3 of the build map): nav pills ·
@@ -45,6 +46,11 @@ function lapse(account) {
   return "Membership lapses in " + days + " day" + (days === 1 ? "" : "s") +
     " — Turbo priority and free cards stop then.";
 }
+
+/* The bar's one breakpoint: below it the SIZE pill leads the second line and the "?" joins the row
+   (help.css), the chip labels tighten and the activity chip reads its state word only (shell.css,
+   notify.css). */
+export const HEADER_NARROW_QUERY = "(max-width: 1199px)";
 
 export default function SeparatorBar({
   boot, account,
@@ -99,6 +105,13 @@ export default function SeparatorBar({
         following: Number(account.following).toLocaleString() }
     : null;
 
+  /* Below 1200 px the SIZE pill leads the second line of the bar (owner's pick B, 2026-11-01): it
+     moves out of the nav half into the head of .mgx-sepright, so that line reads SIZE, the status
+     chips, then the account group at its right end. CSS cannot re-parent a node, so the pill
+     renders in ONE of the two places off this query -- help.css's line for the "?" (and
+     shell.css's), the same query text, so the markup and the stylesheet flip together. */
+  const narrow = useMediaQuery(HEADER_NARROW_QUERY);
+
   // Header-docked Activity control (Claude Design handoff 2026-08-09, drift item 39):
   // replaces the old floating #jobs-fab/#jobs-tray with this bar's own ambient activity
   // cluster upgraded into the real trigger+dropdown. Reads jobsStore -- real /api/jobs
@@ -139,9 +152,11 @@ export default function SeparatorBar({
   );
 
   // The credits chip: gold billing tooltip drops below, right-anchored. A const so a linked account can set it
-  // INSIDE the doors group (below) and an unlinked one can set it bare.
+  // INSIDE the doors group (below) and an unlinked one can set it bare. `nobal` marks a chip with no balance
+  // to show (the dash): below 1000 px the word CREDITS steps aside only when a number stands for it (shell.css).
   const creditsChip = (
-    <button type="button" className="mgx-cred" data-expiring={expiring ? "1" : undefined}
+    <button type="button" className={"mgx-cred" + (credits === "—" ? " nobal" : "")}
+      data-expiring={expiring ? "1" : undefined}
       onClick={() => window.open("https://pixai.art/en/membership/credit-packs", "_blank", "noopener")}
       aria-label={"Credits " + credits + ", cards " + cards + "." +
         (expiring ? " " + expiry.lines.map(expiryText).join(". ") + "." : "") +
@@ -200,6 +215,26 @@ export default function SeparatorBar({
     </button>
   );
 
+  /* SIZE pill — drives the grid's --thumb var (152 … 4-across max). The
+     native <input type=range> was swapped for the shared Custom Slider
+     (drift §48) in its `compact` skin; onChange hands back the numeric
+     value, persisted as mg_gallery_density up in App. One node, two homes
+     (`narrow`, above): the end of the nav half at 1200 px and up, the head
+     of the right half below. */
+  const sizePill = (
+    <div className="mgx-size" title="Thumbnail size">
+      <span className="mgx-size-lab">SIZE</span>
+      <div className="mgx-size-slot">
+        <CustomSlider
+          compact
+          min={152} max={thumbMax} step={4} value={thumb}
+          onChange={(v) => onThumb(Math.round(v))}
+          ariaLabel="Thumbnail size"
+        />
+      </div>
+    </div>
+  );
+
   return (
     <div className="mgx-sep">
       <div className="mgx-sepleft">
@@ -233,24 +268,12 @@ export default function SeparatorBar({
         </button>
 
 
-        {/* SIZE pill — drives the grid's --thumb var (152 … 4-across max). The
-            native <input type=range> was swapped for the shared Custom Slider
-            (drift §48) in its `compact` skin; onChange hands back the numeric
-            value, persisted as mg_gallery_density up in App. */}
-        <div className="mgx-size" title="Thumbnail size">
-          <span className="mgx-size-lab">SIZE</span>
-          <div className="mgx-size-slot">
-            <CustomSlider
-              compact
-              min={152} max={thumbMax} step={4} value={thumb}
-              onChange={(v) => onThumb(Math.round(v))}
-              ariaLabel="Thumbnail size"
-            />
-          </div>
-        </div>
+        {narrow ? null : sizePill}
       </div>
 
       <div className="mgx-sepright">
+        {narrow ? sizePill : null}
+
         {/* Activity control -- back to its original spot, FIRST in this row (2026-08-10:
             the "move it last so its dropdown reaches the true edge" fix from earlier today
             was never actually shown to/approved -- only "the dropdown is cut off" was. The
@@ -269,70 +292,82 @@ export default function SeparatorBar({
             Generate dock share this bar. */}
         <GoalChips />
 
-        {/* FOLLOWERS / FOLLOWING (owner, 2026-09-06: "BOTH beside the credits chip and in
-            the account popup"). Free -- both numbers already ride the same /api/account
-            call the credits chip beside it makes, and have since the CLI's --account
-            dashboard; no screen had ever read them.
+        {/* THE END OF THE ROW (review of pick B, 2026-11-01): followers, the account group and the slim
+            launcher wrap as ONE piece below 1200 px, so a row too full for one line carries on at the
+            LEFT of the next with these, and the account group never sits alone on a line of its own,
+            pushed right (a job running, a claim waiting or a pinned goal each used to do that on an
+            upright iPad). At 1200 px and up it is display:contents (shell.css): the same flex items
+            as before. Static either way, so the activity and inbox panels still anchor to the row. */}
+        <span className="mgx-sepend">
+          {/* FOLLOWERS / FOLLOWING (owner, 2026-09-06: "BOTH beside the credits chip and in
+              the account popup"). Free -- both numbers already ride the same /api/account
+              call the credits chip beside it makes, and have since the CLI's --account
+              dashboard; no screen had ever read them.
 
-            THE SAME CHIP, minus the affordance. It borrows .mgx-cred's own markup and
-            classes verbatim -- val, label, divider -- and adds only .mgx-social, which
-            takes the pointer cursor and the hover lift back off. This is a reading, not a
-            control: there is nowhere for it to go and nothing for it to do (following
-            somebody is a WRITE to PixAI, and the scope's out-of-scope list rules that out),
-            so it is a <span>, not a button, and never enters the tab order. */}
-        {social ? (
-          <span className="mgx-cred mgx-social"
-            title={social.followers + " followers · " + social.following + " following on PixAI"}>
-            <span className="mgx-credval">{social.followers}</span>
-            <span className="mgx-credlab">FOLLOWERS</span>
-            <span className="mgx-creddiv" aria-hidden="true" />
-            <span className="mgx-credval">{social.following}</span>
-            <span className="mgx-credlab">FOLLOWING</span>
-          </span>
-        ) : null}
-
-        {/* ✉ THE INBOX and 🎁 THE GIFT BOX (Sessions R + Y, Inbox and Event Handoff §1; two doors
-            since the owner's walk 2026-10-04: the gift box is for rewards only). Twins, 8 px
-            apart and one 8 px gap before the credits chip, shown only with a linked account. */}
-        {/* THE ACCOUNT END OF THE ROW is ONE group (#72; owner's iPad walk 2026-10-29): the doors,
-            the credits chip, the claim button and the ?, in the handoff's order. The handoff draws the
-            door one 8 px gap before the credits chip and the bar ending on credits; this row wraps on
-            a tablet, and as loose items it broke anywhere -- between the twins, before the credits, and
-            on a sideways iPad the ? alone on a third line -- a right-hand pile instead of a row. As one
-            non-breaking item the account end stays whole, and below 1200 px (shell.css) it holds the
-            right end of its line while the status chips start at the left, like the bar's two halves.
-            Unlinked there are no doors; the rest is the same group. */}
-        <span className="mgx-acct">
-          {linked ? <InboxDoor onOpenContests={openContests} /> : null}
-          {linked ? <GiftBox account={account} /> : null}
-          {creditsChip}
-
-          {claimCredits ? (
-            <button type="button" className="mgx-claim" onClick={onClaim} disabled={claiming}
-              title="Claim your free daily credits">
-              <i className="mgx-claimribbon" aria-hidden="true" />
-              {claiming ? "claiming…" : "+" + Number(claimCredits).toLocaleString() + " claim"}
-            </button>
+              THE SAME CHIP, minus the affordance. It borrows .mgx-cred's own markup and
+              classes verbatim -- val, label, divider -- and adds only .mgx-social, which
+              takes the pointer cursor and the hover lift back off. This is a reading, not a
+              control: there is nowhere for it to go and nothing for it to do (following
+              somebody is a WRITE to PixAI, and the scope's out-of-scope list rules that out),
+              so it is a <span>, not a button, and never enters the tab order. */}
+          {social ? (
+            <span className="mgx-cred mgx-social"
+              title={social.followers + " followers · " + social.following + " following on PixAI"}>
+              <span className="mgx-credval">{social.followers}</span>
+              <span className="mgx-credlab">FOLLOWERS</span>
+              <span className="mgx-creddiv" aria-hidden="true" />
+              <span className="mgx-credval">{social.following}</span>
+              <span className="mgx-credlab">FOLLOWING</span>
+            </span>
           ) : null}
 
-          {/* The guide's "?" (Session I decision 2; the handoff's section A header draws it
-              just before Generate). In the hero state it stands before the banner's own
-              Generate button (Banner.jsx) -- this row has no room to spare at 1280 and would
-              wrap onto a second line -- so here it shows only in the slim state, beside the
-              slim launcher, and below 1200 px, where this row already wraps and the banner's
-              row has no room either (help.css). */}
-          <HelpButton surface="gallery" className={"mgx-sephelp" + (slim ? " slim" : "")} />
-        </span>
+          {/* ✉ THE INBOX and 🎁 THE GIFT BOX (Sessions R + Y, Inbox and Event Handoff §1; two doors
+              since the owner's walk 2026-10-04: the gift box is for rewards only). Twins, 8 px
+              apart and one 8 px gap before the credits chip, shown only with a linked account. */}
+          {/* THE ACCOUNT END OF THE ROW is ONE group (#72; owner's iPad walk 2026-10-29): the doors,
+              the credits chip, the claim button and the ?, in the handoff's order. The handoff draws the
+              door one 8 px gap before the credits chip and the bar ending on credits; this row wraps on
+              a tablet, and as loose items it broke anywhere -- between the twins, before the credits, and
+              on a sideways iPad the ? alone on a third line -- a right-hand pile instead of a row. As one
+              non-breaking item the account end stays whole and ENDS THE ROW at its right. Below 1200 px
+              (owner's pick B, 2026-11-01; shell.css) this half is the bar's second line under the tabs:
+              SIZE leads it, the status chips follow, and the account group holds the right end -- one
+              line on an upright iPad when nothing is waiting, and when it does not fit the overflow
+              starts the next line at the left (the followers chip goes down with the group, .mgx-sepend
+              above) and the group still ends the last one at the right. Unlinked there are no doors; the
+              rest is the same group. */}
+          <span className="mgx-acct">
+            {linked ? <InboxDoor onOpenContests={openContests} /> : null}
+            {linked ? <GiftBox account={account} /> : null}
+            {creditsChip}
 
-        {/* slim-state Generate launcher — the banner's big button is hidden then */}
-        {slim ? (
-          <button type="button" data-dock-toggle="1"
-            className={"mgx-metal mgx-launcher" + (dockOpen ? " mgx-dockdim" : "")}
-            onClick={onToggleDock}
-            title="Open or close the Generate dock">
-            ✦ Generate
-          </button>
-        ) : null}
+            {claimCredits ? (
+              <button type="button" className="mgx-claim" onClick={onClaim} disabled={claiming}
+                title="Claim your free daily credits">
+                <i className="mgx-claimribbon" aria-hidden="true" />
+                {claiming ? "claiming…" : "+" + Number(claimCredits).toLocaleString() + " claim"}
+              </button>
+            ) : null}
+
+            {/* The guide's "?" (Session I decision 2; the handoff's section A header draws it
+                just before Generate). In the hero state it stands before the banner's own
+                Generate button (Banner.jsx) -- this row has no room to spare at 1280 and would
+                wrap onto a second line -- so here it shows only in the slim state, beside the
+                slim launcher, and below 1200 px, where this row already wraps and the banner's
+                row has no room either (help.css). */}
+            <HelpButton surface="gallery" className={"mgx-sephelp" + (slim ? " slim" : "")} />
+          </span>
+
+          {/* slim-state Generate launcher — the banner's big button is hidden then */}
+          {slim ? (
+            <button type="button" data-dock-toggle="1"
+              className={"mgx-metal mgx-launcher" + (dockOpen ? " mgx-dockdim" : "")}
+              onClick={onToggleDock}
+              title="Open or close the Generate dock">
+              ✦ Generate
+            </button>
+          ) : null}
+        </span>
       </div>
     </div>
   );

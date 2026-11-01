@@ -32,8 +32,12 @@ disabled — **`Moonglade Launcher.pyw`** is the everyday launch. All of the ser
 ## The header
 
 The banner across the top carries the big buttons at its right, and a row of smaller destinations
-sits under it. On a narrow window — an iPad, say — the rows wrap onto a second line rather than
-overlapping, and the four layout marks stay visible. Along the banner:
+sits under it. On a narrow window — an iPad, say — the banner's rows wrap onto a second line rather
+than overlapping, and the four layout marks stay visible. Below 1,200 px the bar under the banner is
+the destinations, then a row that starts with the SIZE slider, carries the status chips and ends at
+the right with your account (inbox, gift box, credits, **?**). On an upright 11-inch or larger iPad that
+row is one line when it is quiet (an iPad mini is narrower and takes two); a pinned goal, a claim waiting or a job running sends the end of it to one more
+line, with your account still at the right. Along the banner:
 
 - **?** — opens the [guide](Home#help-inside-the-app) on this page (the **?** key does the same from
   anywhere outside a text field). The first time you open the gallery, a **Welcome to the stacks**
@@ -223,7 +227,7 @@ The filter bar:
   dropdown too. They belong to **your account**, not to the install — if someone else
   has a login here, your saved searches are yours and theirs are theirs. (Your skin
   choice, being purely cosmetic, is still install-wide.)
-- **Layout** — four small marks sit beside the SIZE slider in the header: **▤** masonry,
+- **Layout** — four small marks end the library bar, just after **Actions**: **▤** masonry,
   **▦** grid, **▣** hero, **≡** timeline. Hover one and it names itself. The layout you pick
   is remembered the same way your thumbnail size is. **A phone has no masonry / grid / hero /
   timeline switcher** — it lays the library out in two staggered columns — but it has its own

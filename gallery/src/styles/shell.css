@@ -301,21 +301,41 @@
 .mgx-sepright { position: relative; display: flex; flex-wrap: wrap; justify-content: flex-end;
   align-items: center; gap: 8px 12px; flex: 0 1 auto; max-width: 100%; margin-left: auto; }
 /* The account end of the row -- the inbox door, the gift door, the credits chip, the claim button
-   and the ? -- one item of that row, so it wraps whole (SeparatorBar.jsx). 12px is the row's own
-   gap, so nothing moves where the row fits on one line; less .ib-wrap's -4px margin it is the
-   handoff's 8px between the twins and from the last door to the credits chip. Static, so the inbox
-   panel still anchors to the row. */
+   and the ? -- one item of that row, so it wraps whole (SeparatorBar.jsx), and it ENDS the row at
+   its right. 12px is the row's own gap, so nothing moves where the row fits on one line; less
+   .ib-wrap's -4px margin it is the handoff's 8px between the twins and from the last door to the
+   credits chip. Static, so the inbox panel still anchors to the row. */
 .mgx-acct { display: flex; align-items: center; gap: 12px; flex: none; }
-/* BELOW 1200px THE BAR READS AS ITS TWO HALVES, NOT A PILE (owner's iPad walk, 2026-10-29: "All
-   bunched together ... but still on right side"). Here the right cluster never fits beside the nav
-   and SIZE, so it is a line of its own; right-aligned and wrapping item by item it piled up at the
-   right edge in two or three ragged lines (the ? alone on the last one, sideways). Now it takes the
-   whole line: the status chips (Activity, the pinned goal and Vigil, followers) start at the left
-   like the nav row above them, and the account group holds the right end, as the handoff's bar
-   holds its left and right halves. 1200 is help.css's line for the ? joining this row. */
+/* The end of the row -- the followers chip, the account group and the slim launcher (SeparatorBar.jsx).
+   At 1200px and up it is no box at all, so they are the row's own flex items as they always were. */
+.mgx-sepend { display: contents; }
+/* BELOW 1200px THE BAR IS TWO LINES: THE TABS, THEN ONE ROW (owner's pick B, 2026-11-01, from a
+   workshop of real renders after his iPad walk of 2026-10-29: four lines on an upright iPad -- the
+   nav, SIZE alone, the status chips, the account group pushed right). Here the right half never
+   fits beside the nav, so it is the second line, and SeparatorBar.jsx moves the SIZE pill to lead
+   it (the same 1199/1200 line, read in JS: CSS cannot re-parent it). That line reads SIZE, the
+   status chips (Activity, the cost slot, the pinned goal and Vigil, followers), a spring, then the
+   account group at the right end: one line on an upright iPad with an idle queue and no claim.
+   When it does not fit it wraps, and the followers chip, the account group and the slim launcher wrap
+   as ONE piece (.mgx-sepend, a flex box here): the overflow starts the next line at the left and the
+   account group still ends the last line at the right, never alone on a line of its own (review of
+   pick B: a job running, a claim waiting or a pinned goal each did that). The gaps tighten to 8px and the chips' labels and
+   padding with them; the activity chip reads its state word only (notify.css), and below 1000px
+   the credits chip drops the word CREDITS (its aria-label still says it; CARDS stays) -- unless
+   there is no balance to read, when the dash keeps its label. Neither
+   half is display:contents -- .mgx-sepright keeps its box and position:relative, the anchor of the
+   activity and inbox panels. 1200 is help.css's line for the ? joining this row. */
 @media (max-width: 1199px) {
-  .mgx-sepright { flex: 1 1 100%; justify-content: flex-start; }
+  .mgx-sepright { flex: 1 1 100%; justify-content: flex-start; gap: 8px; }
   .mgx-acct { margin-left: auto; }
+  .mgx-sepend { display: flex; align-items: center; gap: 8px; flex: 1 0 auto; }
+  .mgx-sepright .mgx-credlab { letter-spacing: .04em; }
+  .mgx-sepright .mgx-cred, .mgx-sepright .mgx-credcards { gap: 6px; }
+  .mgx-sepright .mgx-cred { padding-left: 12px; padding-right: 12px; }
+  .mgx-sepright .mgx-social { padding-left: 11px; padding-right: 11px; }
+}
+@media (max-width: 999px) {
+  .mgx-acct .mgx-cred:not(.nobal) > .mgx-credlab:not(.cards) { display: none; }
 }
 
 /* ---- glyph-spine nav pills ---- */

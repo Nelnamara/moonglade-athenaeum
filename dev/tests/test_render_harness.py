@@ -10251,8 +10251,12 @@ def _ipad(logged_in_page, width, height):
 # roster, so the test stands in a static node of the same classes (as wide as a real pin) before
 # the credits chip rather than reading sealed content.
 _IPAD_PIN_JS = """() => {
-  const cred = document.querySelector('.mgx-sepright button.mgx-cred');
-  const at = cred.closest('.mgx-acct') || cred;    // the account end is one item of the row
+  const right = document.querySelector('.mgx-sepright');
+  const cred = right.querySelector('button.mgx-cred');
+  // before the end of the row (followers, the account group: .mgx-sepend since pick B's review), where
+  // GoalChips draws the real chips; a bundle without the wrapper takes the followers chip or the group
+  const at = right.querySelector(':scope > .mgx-sepend') || right.querySelector(':scope > .mgx-social')
+    || cred.closest('.mgx-acct') || cred;
   const wrap = document.createElement('div'); wrap.className = 'mgg-chips';
   wrap.innerHTML = '<span class="mgg-pin" role="button" tabindex="0"><span class="mgg-pin-t">Moonwell Regular - 3 to go</span>'
     + '<button type="button" class="mgg-x">x</button></span><span class="mgg-vigil">Vigil - day 12</span>';
@@ -10286,6 +10290,8 @@ _DOORS_JS = """() => {
   return {inbox: r('.mgx-sepright .ib-door.inbox'), gift: r('.mgx-sepright .ib-door.gift'),
           cred: r('.mgx-sepright button.mgx-cred'), claim: r('.mgx-sepright .mgx-claim'),
           help: r('.mgx-sepright .mgx-sephelp'), row: r('.mgx-sepright'), acct: r('.mgx-acct'),
+          sepL: (() => { const e = document.querySelector('.mgx-sep');
+                         return e.getBoundingClientRect().left + parseFloat(getComputedStyle(e).paddingLeft); })(),
           first: first ? Object.assign(box(first), {cls: String(first.className).slice(0, 24)}) : null,
           grouped: !!g && ['.ib-door.inbox', '.ib-door.gift', 'button.mgx-cred', '.mgx-claim', '.mgx-sephelp']
                             .every((s) => !!g.querySelector(s))};
@@ -10300,9 +10306,11 @@ def _doors_on_one_line(d):
 
 def _reads_as_two_halves(d):
     """Below 1200 px: the status chips start at the row's left edge and the account group holds its
-    right end, as the handoff's bar holds its two halves, instead of everything piling up at the right."""
+    right end, as the handoff's bar holds its two halves, instead of everything piling up at the right.
+    The left edge is the bar's own (its content edge), so a pile that happens to fill its line nearly
+    whole still reads as a pile."""
     return (d["first"] is not None and not d["first"]["cls"].startswith("mgx-acct")
-            and abs(d["first"]["l"] - d["row"]["l"]) < 1.5 and abs(d["acct"]["r"] - d["row"]["r"]) < 1.5)
+            and abs(d["first"]["l"] - d["sepL"]) < 1.5 and abs(d["acct"]["r"] - d["row"]["r"]) < 1.5)
 
 
 def test_the_header_row_holds_a_linked_account_at_every_ipad_width(logged_in_page):
@@ -10318,9 +10326,10 @@ def test_the_header_row_holds_a_linked_account_at_every_ipad_width(logged_in_pag
     before the credits chip, and a wrapping row would otherwise split them (the inbox ends one line,
     the gift box starts the next; the credits chip drops alone; sideways, the ? alone on a third
     line). Below 1200 px the row reads as the bar's two halves (owner's iPad walk 2026-10-29: "All
-    bunched together ... but still on right side"): the status chips start at the left, the account
-    group holds the right end. Checked at every iPad size and on 900 and 1000 px desktop windows,
-    where the row wraps as well.
+    bunched together ... but still on right side"): SIZE leads it (owner's pick B, 2026-11-01, the
+    pill moved out of the nav half), the status chips follow from the left, the account group holds
+    the right end. Checked at every iPad size and on 900 and 1000 px desktop windows, where the row
+    wraps as well.
 
     Phase 2 puts the old rule back (no wrap, flex:none, no cap) and the right edge leaves the screen;
     apart from it, flattens the group so the pieces are loose items again, which splits them at some
@@ -10349,9 +10358,10 @@ def test_the_header_row_holds_a_linked_account_at_every_ipad_width(logged_in_pag
         assert abs((d["gift"]["l"] - d["inbox"]["r"]) - 8) < 1.5, ("the twins are 8 px apart", json.dumps(d))
         assert abs((d["cred"]["l"] - d["gift"]["r"]) - 8) < 1.5, ("8 px from the gift box to the credits", json.dumps(d))
         assert _reads_as_two_halves(d), ("status chips from the left, the account group at the right end", json.dumps(d))
+        assert d["first"]["cls"].startswith("mgx-size"), ("SIZE leads the row below 1200 px", json.dumps(d))
 
         # Phase 2a: the pieces as loose items of the row, as they were.
-        flat = page.add_style_tag(content=".mgx-acct { display: contents !important; }")
+        flat = page.add_style_tag(content=".mgx-acct, .mgx-sepend { display: contents !important; }")
         _settle(page)
         if not _doors_on_one_line(page.evaluate(_DOORS_JS)):
             split_when_loose.append((width, ipad))
@@ -10364,9 +10374,12 @@ def test_the_header_row_holds_a_linked_account_at_every_ipad_width(logged_in_pag
         assert not _reads_as_two_halves(page.evaluate(_DOORS_JS)), ("the pile does not read as two halves at %d" % width)
         pile.evaluate("e => e.remove()")
 
-        # Phase 2b: the rule as it shipped before.
+        # Phase 2b: the rule as it shipped before, with the activity chip's full sentence back (pick B
+        # shortened it below 1200 px, which alone lets a no-wrap row squeeze onto a sideways iPad).
         page.add_style_tag(content=".mgx-sepright { flex-wrap: nowrap !important; flex: none !important;"
-                                   " justify-content: normal !important; max-width: none !important; gap: 12px !important; }")
+                                   " justify-content: normal !important; max-width: none !important; gap: 12px !important; }"
+                                   " .mgx-sep .at-chip .at-chiptail { position: static !important; width: auto !important;"
+                                   " height: auto !important; margin: 0 !important; clip: auto !important; clip-path: none !important; }")
         _settle(page)
         old = page.evaluate(_IPAD_HEADER_JS)
         if width <= 1180:
@@ -10376,6 +10389,197 @@ def test_the_header_row_holds_a_linked_account_at_every_ipad_width(logged_in_pag
     # 1024 and 900; CI's Linux at 1024, 900 and 1000), so the counterfactual only asks that the
     # group is what holds them together somewhere: without it, at least one width splits.
     assert split_when_loose, ("loose, the doors and the credits chip are split by the wrap", split_when_loose)
+
+
+# The header bar's lines (owner's pick B, 2026-11-01): every visible piece of .mgx-sep grouped into lines
+# by vertical overlap, plus where the SIZE pill lives, the account group's right edge against the bar's
+# right content edge and the row's, the activity chip's visible tail and the CREDITS label.
+_SEP_LINES_JS = """() => {
+  const sep = document.querySelector('.mgx-sep');
+  const sels = ['.mgx-navspine > *', '.mgx-sqbtn', '.mgx-size', '.at-chip', '.mgx-costslot.has', '.mgg-pin', '.mgg-vigil',
+                '.mgx-social', '.ib-door', 'button.mgx-cred', 'button.mgx-claim', '.mgx-sephelp', '.mgx-launcher'];
+  const vis = (e) => { const cs = getComputedStyle(e); if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+                       const b = e.getBoundingClientRect(); return b.width > 0 && b.height > 0; };
+  const items = [], seen = new Set();
+  for (const s of sels) for (const e of sep.querySelectorAll(s)) {
+    if (seen.has(e) || !vis(e)) continue; seen.add(e);
+    const b = e.getBoundingClientRect(); items.push({s, l: b.left, r: b.right, t: b.top, b: b.bottom});
+  }
+  const lines = [];
+  // a line after the first that holds only account-group pieces, or only the slim launcher
+  const ACCT = ['.ib-door', 'button.mgx-cred', 'button.mgx-claim', '.mgx-sephelp'];
+  for (const it of [...items].sort((a, c) => a.t - c.t)) {
+    const ln = lines.find((L) => it.t < L.b - 2 && it.b > L.t + 2);
+    if (ln) { ln.t = Math.min(ln.t, it.t); ln.b = Math.max(ln.b, it.b); ln.items.push(it.s + '@' + Math.round(it.l) + '-' + Math.round(it.r)); ln.sels.push(it.s); }
+    else lines.push({t: it.t, b: it.b, items: [it.s + '@' + Math.round(it.l) + '-' + Math.round(it.r)], sels: [it.s]});
+  }
+  const overlaps = [];
+  for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
+    const a = items[i], c = items[j];
+    if (Math.min(a.r, c.r) - Math.max(a.l, c.l) > 1 && Math.min(a.b, c.b) - Math.max(a.t, c.t) > 1) overlaps.push([a.s, c.s]);
+  }
+  const right = document.querySelector('.mgx-sepright'), size = document.querySelector('.mgx-size');
+  const firstKid = [...right.children].find((e) => vis(e));
+  const sb = sep.getBoundingClientRect(), scs = getComputedStyle(sep);
+  const acct = document.querySelector('.mgx-acct').getBoundingClientRect();
+  const tail = document.querySelector('.mgx-sep .at-chiptail');
+  const credlab = document.querySelector('.mgx-acct .mgx-cred > .mgx-credlab:not(.cards)');
+  const cardslab = document.querySelector('.mgx-acct .mgx-credlab.cards');
+  lines.sort((a, c) => a.t - c.t);
+  const lone = lines.slice(1).filter((L) => L.sels.every((x) => ACCT.includes(x)) || L.sels.every((x) => x === '.mgx-launcher')).length;
+  return {lines: lines.length, lone, lineTops: lines.map((L) => Math.round(L.t)), lineItems: lines.map((L) => L.items.join(' ')), overlaps,
+          sizeIn: size.parentElement.className, sizeFirst: firstKid === size,
+          acctR: acct.right, acctT: acct.top, sepContentR: sb.right - parseFloat(scs.paddingRight),
+          rowR: right.getBoundingClientRect().right, lastLineT: lines.length ? lines[lines.length - 1].t : null,
+          pastRight: items.filter((i) => i.r > document.documentElement.clientWidth + 0.5).map((i) => i.s),
+          scrollW: document.documentElement.scrollWidth, innerW: innerWidth,
+          tailW: tail ? tail.getBoundingClientRect().width : null,
+          chipText: document.querySelector('.mgx-sep .at-chiptext').textContent,
+          credlab: !!credlab && vis(credlab), cardslab: !!cardslab && vis(cardslab)};
+}"""
+
+# The Vigil on and no goal pinned: a stand-in .mgg-chips of the real classes where GoalChips draws it
+# (after the cost slot), so no sealed roster is read.
+_IPAD_VIGIL_JS = """() => {
+  const right = document.querySelector('.mgx-sepright');
+  const wrap = document.createElement('div'); wrap.className = 'mgg-chips';
+  wrap.innerHTML = '<span class="mgg-vigil">Vigil - day 1</span>';
+  const cost = right.querySelector('.mgx-costslot');
+  right.insertBefore(wrap, cost.nextSibling);
+}"""
+
+_RUNNING_JOB = {"jobs": [{"job_id": "hdr-1", "type": "generate", "label": "Generated", "status": "running",
+                          "started": True, "ts": 0, "started_at": 0}]}
+
+
+def test_the_ipad_header_is_the_tabs_then_one_row_led_by_size(logged_in_page):
+    """Owner's pick B (2026-11-01), from his iPad walk: on an upright iPad (820 x 1180) with an
+    account linked, the Vigil on, no goal pinned, no claim waiting and an idle queue, the header bar
+    is TWO lines -- the tabs, then one row: SIZE, the activity chip, the Vigil, followers and
+    following, and the account group (inbox, gift box, credits, ?) ending it at the right. It was
+    four (the nav, SIZE alone, the status chips, the account group pushed right). The activity chip
+    reads "idle" (its tail is out of sight, still in its text for a screen reader) and the credits
+    chip drops the word CREDITS below 1000 px; CARDS stays.
+
+    Phase 2 puts the SIZE pill back at the end of the nav half, where it sat before, and the bar
+    is more than two lines again."""
+    page = _ipad(logged_in_page, 820, 1180)
+    acct = dict(_rf_account(), followers=31, following=5)     # his row: a few followers, no claim waiting
+    _rf_routes(page, account=acct)
+    _visit(page, "/")
+    page.wait_for_selector(".mgx-sepright .ib-door.inbox")
+    page.wait_for_selector(".mgx-social")
+    _dismiss_any_achievement_toast(page)
+    assert page.locator(".mgx-claim").count() == 0 and page.locator(".mgg-pin").count() == 0
+    page.evaluate(_IPAD_VIGIL_JS)
+    _settle(page)
+    m = page.evaluate(_SEP_LINES_JS)
+    where = json.dumps(m)
+    assert m["lines"] == 2, ("the tabs, then one row", where)
+    assert m["sizeIn"] == "mgx-sepright" and m["sizeFirst"], ("SIZE is the first item of the row", where)
+    assert m["sepContentR"] - 24 <= m["acctR"] <= m["sepContentR"] + 0.5, ("the account group ends the row at the right", where)
+    assert m["scrollW"] == m["innerW"] == 820 and m["pastRight"] == [] and m["overlaps"] == [], where
+    assert m["tailW"] is not None and m["tailW"] <= 1, ("the chip reads its state word only", where)
+    assert m["chipText"] == "idle · nothing in the queue", ("the full sentence stays in its text", where)
+    assert not m["credlab"] and m["cardslab"], ("CREDITS drops below 1000 px, CARDS stays", where)
+
+    # Phase 2: the pill back in the nav half.
+    page.evaluate("() => document.querySelector('.mgx-sepleft').appendChild(document.querySelector('.mgx-size'))")
+    _settle(page)
+    old = page.evaluate(_SEP_LINES_JS)
+    assert old["lines"] > m["lines"], ("with SIZE in the nav half the bar is taller again", json.dumps(old))
+
+
+def test_the_desktop_header_keeps_size_in_the_nav_and_the_full_activity_text(logged_in_page):
+    """At 1200 px and up nothing of pick B applies: at 1280 x 900 the SIZE pill ends the nav half and
+    the activity chip shows its whole sentence. The pill's home follows the window live: narrowed
+    to 1100 px it moves to lead the row, widened again it goes back.
+
+    Phase 2 puts the narrow rule for the chip's tail in force at 1280 and the tail goes out of sight,
+    so the width read above can tell the two apart."""
+    page = logged_in_page(**DESKTOP)
+    _rf_routes(page, account=_rf_account(social=True))
+    _visit(page, "/")
+    page.wait_for_selector(".mgx-sepright .ib-door.inbox")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+    m = page.evaluate(_SEP_LINES_JS)
+    where = json.dumps(m)
+    assert m["sizeIn"] == "mgx-sepleft", ("SIZE ends the nav half at 1280", where)
+    assert m["tailW"] is not None and m["tailW"] > 20, ("the chip shows its full text", where)
+    assert m["chipText"] == "idle · nothing in the queue", where
+    assert m["credlab"], ("CREDITS shows at 1280", where)
+
+    page.set_viewport_size({"width": 1100, "height": 900})
+    page.wait_for_function("() => document.querySelector('.mgx-size').parentElement.classList.contains('mgx-sepright')")
+    page.set_viewport_size(DESKTOP)
+    page.wait_for_function("() => document.querySelector('.mgx-size').parentElement.classList.contains('mgx-sepleft')")
+    _settle(page)
+    assert page.evaluate(_SEP_LINES_JS)["tailW"] > 20
+
+    # Phase 2: the narrow rule for the tail, in force at 1280.
+    page.add_style_tag(content=".mgx-sep .at-chip .at-chiptail { position: absolute; width: 1px; height: 1px;"
+                               " overflow: hidden; clip-path: inset(50%); }")
+    _settle(page)
+    assert page.evaluate(_SEP_LINES_JS)["tailW"] <= 1
+
+
+@pytest.mark.parametrize("state", ["all", "run", "claim"])
+def test_the_crowded_ipad_header_wraps_with_the_account_group_last(logged_in_page, state):
+    """A busy row on an upright iPad: everything at once (a goal pinned -- a stand-in of the real
+    classes -- a claim waiting and a job running), or just one of the everyday ones (a job running,
+    the daily claim waiting) on his row (the Vigil, a few followers). Where the row cannot hold it all
+    it wraps: SIZE still leads it, nothing overlaps or runs past the right edge, the activity chip
+    reads "1 running", and the account group ends the last line at the row's right edge -- and never
+    sits alone on a line of its own: the followers chip goes down with it (.mgx-sepend, review of
+    pick B, 2026-11-01; a single running job or claim used to leave it alone, pushed right).
+
+    Phase 2 flattens the end-of-row wrapper and the group is alone on its line again. Then it takes
+    the group's spring away and it no longer reaches the right edge."""
+    page = _ipad(logged_in_page, 820, 1180)
+    if state == "all":
+        acct = _rf_account(social=True)
+    else:
+        acct = dict(_rf_account(), followers=31, following=5)
+        if state == "claim":
+            acct.update(claim_credits=2000, claim_ids=["daily-credit"])
+    _rf_routes(page, account=acct)
+    if state != "claim":
+        page.route("**/api/jobs", lambda r: _q_json(r, _RUNNING_JOB))
+    _visit(page, "/")
+    page.wait_for_selector(".mgx-sepright .ib-door.inbox")
+    page.wait_for_selector(".mgx-social")
+    if state != "run":
+        page.wait_for_selector(".mgx-sepright .mgx-claim")
+    if state != "claim":
+        page.wait_for_selector(".mgx-sep .at-chip.live")
+    _dismiss_any_achievement_toast(page)
+    page.evaluate(_IPAD_PIN_JS if state == "all" else _IPAD_VIGIL_JS)
+    _settle(page)
+    m = page.evaluate(_SEP_LINES_JS)
+    where = "%s: %s" % (state, json.dumps(m))
+    assert m["sizeIn"] == "mgx-sepright" and m["sizeFirst"], ("SIZE leads the row", where)
+    assert m["lines"] >= 3 and m["overlaps"] == [] and m["pastRight"] == [], ("it wraps cleanly", where)
+    assert m["scrollW"] == m["innerW"] == 820, where
+    assert m["lone"] == 0, ("no line holds only the account group", where)
+    assert abs(m["acctR"] - m["rowR"]) < 1.5 and abs(m["acctT"] - m["lastLineT"]) < 8, (
+        "the account group ends the last line at the right", where)
+    if state != "claim":
+        assert m["tailW"] is not None and m["tailW"] <= 1, ("it reads 1 running", where)
+        assert m["chipText"] == "1 job running", ("the full sentence stays in its text", where)
+
+    # Phase 2a: the end of the row as loose items, as built before the review.
+    flat = page.add_style_tag(content=".mgx-sepend { display: contents !important; }")
+    _settle(page)
+    loose = page.evaluate(_SEP_LINES_JS)
+    assert loose["lone"] >= 1, ("loose, the account group is alone on its line", json.dumps(loose))
+    flat.evaluate("e => e.remove()")
+
+    # Phase 2b: the account group without its spring.
+    page.add_style_tag(content=".mgx-acct { margin-left: 0 !important; }")
+    _settle(page)
+    old = page.evaluate(_SEP_LINES_JS)
+    assert abs(old["acctR"] - old["rowR"]) >= 1.5, ("without its spring the group stops short", json.dumps(old))
 
 
 def test_the_generate_composer_row_wraps_instead_of_squeezing(logged_in_page):
@@ -10688,7 +10892,11 @@ def test_an_older_inbox_page_lands_without_moving_the_row_you_are_reading(logged
             if k and not held_open[0]:
                 held.append(route)
                 return
-            _q_json(route, {"items": _older_pages_items(k), "cursor": "c%d" % (k + 1) if k < 2 else None,
+            # 30 a page, not PixAI's 20: this is the reader who SCROLLED to the end, so the first page has
+            # to be longer than the panel, and since the header is two lines on an upright iPad (owner's
+            # pick B, 2026-11-01) the panel holds 20 of these short rows whole at 820 x 1180. A page that
+            # fits is read on by the list itself, at its top (the next test).
+            _q_json(route, {"items": _older_pages_items(k, per=30), "cursor": "c%d" % (k + 1) if k < 2 else None,
                             "has_more": k < 2, "csrf": "harness", "read_only": False})
         held_open = [False]
         page.route(re.compile(r"/api/inbox(\?|$)"), inbox)
@@ -10718,3 +10926,60 @@ def test_an_older_inbox_page_lands_without_moving_the_row_you_are_reading(logged
         where = "%dx%d: %s -> %s" % (width, height, json.dumps(before), json.dumps(after))
         assert after and after["rows"] > before["rows"], ("the older page landed", where)
         assert abs(after["y"] - before["y"]) < 1, ("the row being read did not move", where)
+
+
+def test_a_first_inbox_page_that_fits_still_reads_the_older_ones(logged_in_page):
+    """Review of pick B (2026-11-01). The end of the inbox list is reached by scrolling it, and a list
+    that does not overflow never scrolls: on an upright iPad (820 x 1180), under the two-line header,
+    the panel holds PixAI's whole 20-row page, so the older notifications were out of reach (master
+    had the same; the 4-line header of a62 hid it). Now, once a page lands, while there are more and
+    the list still fits its box, the next page is read without any scrolling, page by page until the
+    list scrolls or there are no more.
+
+    The older page is held until the first page has been measured, so the test knows that page fit.
+    Phase 2 opens the same inbox in a list too short for it (it overflows, as a real reader's would
+    once there is more than fits): nothing is read until the reader scrolls, so the read above came
+    from the fill, not from anything else on the page."""
+    for phase in ("fits", "overflows"):
+        page = _ipad(logged_in_page, 820, 1180)
+        _rf_routes(page, account=_rf_account(social=True))
+        asked, held = [], []
+
+        def inbox(route, hold=True):
+            m = re.search(r"before=c(\d+)", route.request.url)
+            k = int(m.group(1)) if m else 0
+            if k:
+                asked.append(k)
+                if hold and len(asked) == 1:
+                    held.append(route)
+                    return
+            _q_json(route, {"items": _older_pages_items(k), "cursor": "c%d" % (k + 1) if k < 2 else None,
+                            "has_more": k < 2, "csrf": "harness", "read_only": False})
+        page.route(re.compile(r"/api/inbox(\?|$)"), inbox)
+        _visit(page, "/")
+        page.wait_for_selector(".mgx-sepright .ib-door.inbox")
+        _dismiss_any_achievement_toast(page)
+        page.keyboard.press("Escape")             # the daily-claim prompt a waiting claim raises
+        if phase == "overflows":
+            page.add_style_tag(content=".ib-panel .ib-scroll { max-height: 240px !important; }")
+        _settle(page)
+        page.locator(".mgx-sepright .ib-door.inbox").tap()
+        page.wait_for_selector(".ib-panel .ib-row")
+        _settle(page)
+        for _ in range(30):
+            if asked:
+                break
+            page.wait_for_timeout(50)
+        box = page.evaluate("() => { const s = document.querySelector('.ib-panel .ib-scroll');"
+                            " return {sh: s.scrollHeight, ch: s.clientHeight, top: s.scrollTop,"
+                            " rows: document.querySelectorAll('.ib-panel .ib-row').length}; }")
+        where = "%s: asked %r, %s" % (phase, asked, json.dumps(box))
+        if phase == "fits":
+            assert box["sh"] <= box["ch"] + 40 and box["top"] == 0, ("the first page fits and nobody scrolled", where)
+            assert asked == [1], ("the older page is read without scrolling", where)
+            for r in held:
+                inbox(r, hold=False)
+            page.wait_for_function("(n) => document.querySelectorAll('.ib-panel .ib-row').length > n", arg=box["rows"])
+        else:
+            assert box["sh"] > box["ch"] + 40 and box["top"] == 0, ("the list overflows, unscrolled", where)
+            assert asked == [], ("an overflowing list waits for the reader to scroll", where)
