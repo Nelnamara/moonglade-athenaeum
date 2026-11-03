@@ -826,6 +826,17 @@ const V2_STYLES = `
 .lv-topend > .lv-fill{flex:1 1 auto;}
 .lv-topend .at-chip{min-width:0;max-width:100%;}
 .lv-topend .at-chiptext{min-width:0;overflow:hidden;text-overflow:ellipsis;}
+/* The pinned goal and the Vigil give way before Render and Export do (2026-11-02). The chips are
+   flex:none in the gallery's bar, so a long goal name made the end cluster wider than its box;
+   justify-content:flex-end then spilled it LEFT, over Play, Render and Export. Here they may shrink,
+   the goal name ends in an ellipsis, and a bar that carries them asks for a wider end cluster, so
+   the cluster takes its own row (as it already does below ~1100px) before the name is squeezed
+   to nothing. */
+.lv-topend > .mgg-chips{flex:0 1 auto;min-width:0;}
+.lv-topend .mgg-pin{min-width:0;}
+.lv-topend .mgg-pin > *{flex:none;}
+.lv-topend .mgg-pin > .mgg-pin-t{flex:0 1 auto;min-width:0;}
+.lv-topend:has(.mgg-chips){flex-basis:460px;}
 /* ← Gallery in the page's own form (The Loom.dc.html:142; the Arena brief: the same on every
    surface): uppercase, 11 px / 700, letter-spacing .1em. */
 .lv-top a.lv-close{flex:none;white-space:nowrap;font:700 11px/12px system-ui;letter-spacing:.1em;text-transform:uppercase;}
@@ -926,7 +937,7 @@ const V2_STYLES = `
   border-radius:5px;cursor:pointer;font-size:11px;flex:0 0 auto;}
 .lv-col:hover{color:var(--accent);}
 .lv-railbtn{width:38px;height:38px;border:1px solid var(--surface1);background:var(--base);color:var(--subtext);
-  border-radius:8px;cursor:pointer;font-size:17px;line-height:1;flex:0 0 auto;}
+  border-radius:8px;cursor:pointer;font-size:17px;line-height:1;flex:0 0 auto;display:grid;place-items:center;padding:0;}
 .lv-railbtn:hover{border-color:var(--accent);color:var(--accent);}
 .lv-railbtn.on{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--base));}
 /* THE TIMELINE DRAWER (The Loom.dc.html:146-170, 1001-1003): fixed under the top bar, full
@@ -1638,6 +1649,22 @@ function useAccountLine(landedKey, bind) {
   return acct;
 }
 
+// The right rail's four tab marks, one set: 16-unit line icons, 1.5 stroke, round caps, drawn in
+// currentColor so each takes the rail button's colour (subtext, accent when on) exactly as the
+// ✦ the Loom handoff draws there (The Loom.dc.html:329) does. They replace a text glyph and
+// three emoji, which drew at three different sizes and stroke weights.
+const GEN_GLYPHS = {
+  Image: <path d="M8 1.5l1.6 4.9 4.9 1.6-4.9 1.6L8 14.5l-1.6-4.9L1.5 8l4.9-1.6z" />,
+  Edit: <><path d="M10.2 3.3l2.5 2.5L5.4 13.1l-3.2.7.7-3.2z" /><path d="M8.7 4.8l2.5 2.5" /></>,
+  Reference: <><rect x="2" y="3" width="12" height="10" rx="1.6" /><circle cx="5.6" cy="6.4" r="1" /><path d="M2.4 11.8l3.4-3.3 2.4 2.3 2-2 3.4 3.2" /></>,
+  Video: <><rect x="1.8" y="4" width="8.9" height="8" rx="1.6" /><path d="M10.7 7.2l3.5-2v5.6l-3.5-2" /></>,
+};
+function GenGlyph({ name }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{GEN_GLYPHS[name]}</svg>
+  );
+}
 function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, frameFix, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, genFixState, setGenFixState, genFix, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, spend, refreshSpend, batchTally,
   // Session P: the Video drawer's beforeSend host, the unclear-send way-out, and the draft's
   // "attach to A·0n" (all useGenerationPipeline's).
@@ -3147,7 +3174,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   );
   // Collapsed Generate: the right-edge icon rail ("gallery-drawer muscle memory") —
   // clicking an icon expands the drawer back out AND switches to that tab.
-  const GEN_ICONS = [["Image", "✦"], ["Edit", "✎"], ["Reference", "🖼"], ["Video", "🎬"]];
+  const GEN_ICONS = [["Image", <GenGlyph name="Image" />], ["Edit", <GenGlyph name="Edit" />], ["Reference", <GenGlyph name="Reference" />], ["Video", <GenGlyph name="Video" />]];
   let gen, genHead;
   {
     const gs = genState[active.c.id];
