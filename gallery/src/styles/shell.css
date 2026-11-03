@@ -378,22 +378,18 @@
    don't, so it reads as "live/unlocked" even before hover, and a one-time NEW flag. */
 .mgx-nav.ai { color: color-mix(in oklab, var(--emerald) 78%, #f4eeff); }
 .mgx-nav.ai:hover, .mgx-nav.ai:focus-visible {
-  color: var(--emerald);
-  text-shadow: 0 0 15px color-mix(in srgb, var(--emerald) 70%, transparent); }
-.mgx-nav-mark.ai { color: var(--emerald);
-  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--emerald) 55%, transparent)); }
+  color: var(--emerald); text-shadow: none; }
+.mgx-nav-mark.ai { color: var(--emerald); }
 .mgx-nav.ai:hover .mgx-nav-mark.ai, .mgx-nav.ai:focus-visible .mgx-nav-mark.ai {
-  transform: rotate(90deg) scale(1.12); color: var(--emerald); }
-.mgx-nav-underline.ai {
-  background: linear-gradient(90deg, var(--emerald), color-mix(in oklab, var(--emerald) 55%, var(--sapphire))); }
+  color: var(--emerald); }
+.mgx-nav-underline.ai { background: var(--emerald); }
 .mgx-nav.ai .mgx-nav-underline.ai { transform: scaleX(1); opacity: .45; }
 .mgx-nav.ai:hover .mgx-nav-underline.ai, .mgx-nav.ai:focus-visible .mgx-nav-underline.ai {
-  opacity: 1; box-shadow: 0 0 12px color-mix(in srgb, var(--emerald) 85%, transparent); }
-.mgx-nav-new { font-size: 8px; font-weight: 800; letter-spacing: .1em; line-height: 1;
-  text-transform: uppercase; color: #052018; background: var(--emerald);
-  border-radius: 4px; padding: 2px 4px; animation: mgxNewPulse 2.4s ease-in-out infinite; }
-@keyframes mgxNewPulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
-@media (prefers-reduced-motion: reduce) { .mgx-nav-new { animation: none; } }
+  opacity: 1; box-shadow: none; }
+/* The NEW flag as Frontend Gallery.dc.html draws it on the AI Tools button: 8px uppercase
+   text, .06em tracking, opacity .8 -- no fill, no pulse. */
+.mgx-nav-new { font-size: 8px; letter-spacing: .06em; line-height: 1;
+  text-transform: uppercase; opacity: .8; }
 
 /* ---- 26px square utility toggles (slim, blur) ---- */
 .mgx-sqbtn { display: grid; place-items: center; width: 26px; height: 26px;
@@ -560,13 +556,12 @@
    ClaimModal (claim-modal.css) is additive, not a replacement -- this pill is
    the always-there quiet reminder even after the modal's been dismissed for
    the session. */
-@keyframes mgxClaimPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(79,201,154,.45); } 50% { box-shadow: 0 0 0 6px rgba(79,201,154,0); } }
 button.mgx-claim { display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
   font-weight: 600; padding: 7px 13px; border-radius: 999px; cursor: pointer; font-family: inherit;
   border: 1px solid var(--emerald); background: rgba(79,201,154,.14); color: var(--emerald);
-  animation: mgxClaimPulse 2.6s ease-in-out infinite; white-space: nowrap; }
+  white-space: nowrap; }
 button.mgx-claim:hover:not(:disabled) { background: rgba(79,201,154,.26); }
-button.mgx-claim:disabled { opacity: .7; cursor: default; animation: none; }
+button.mgx-claim:disabled { opacity: .7; cursor: default; }
 button.mgx-claim .mgx-claimribbon { display: inline-block; width: 14px; height: 14px;
   background: url(/branding/rewards/claim.png) center/contain no-repeat; }
 
