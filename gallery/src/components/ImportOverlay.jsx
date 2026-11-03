@@ -114,8 +114,10 @@ export default function ImportOverlay({ onClose, collections, onImported }) {
                 {previewList.map((f, i) => {
                   const url = thumbUrl(f);
                   return previewCapped ? (
-                    <div className="mgim-tile" key={f.name + f.size}>
-                      {url ? <img src={url} alt="" /> : (kindOf(f) === "video" ? <span>▶</span> : null)}
+                    <div className="mgim-tile" key={f.name + f.size} title={f.name}>
+                      {url ? <img src={url} alt="" /> : (kindOf(f) === "video" ? <span>▶</span> : (
+                        <span className="mgim-ext">{(f.name.match(/\.([^.\\/]+)$/) || [])[1]}</span>
+                      ))}
                     </div>
                   ) : (
                     <div className="mgim-row" key={f.name + f.size}>
@@ -157,7 +159,7 @@ export default function ImportOverlay({ onClose, collections, onImported }) {
                 )}
               </div>
 
-              {result && !result.ok && <div className="mgim-result err">{result.error}</div>}
+              {result && !result.ok && <div className="mgim-result err" role="alert">{result.error}</div>}
 
               <div className="mgim-actions">
                 <button type="button" className="mgim-cancel" onClick={onClose}>Cancel</button>
