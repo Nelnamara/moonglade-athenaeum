@@ -16,7 +16,7 @@
   padding: 34px 20px; border-radius: 14px; border: 1.5px dashed var(--surface1);
   background: rgba(12,10,28,.5); transition: border-color .2s, background .2s; }
 .mgim-drop.hot { border-color: var(--lavender); background: rgba(182,146,230,.08); }
-.mgim-drop-icon { font-size: 22px; color: var(--lavender); }
+.mgim-drop-icon { color: var(--lavender); }
 .mgim-drop-text { font-size: 12.5px; color: var(--subtext); }
 .mgim-drop-buttons { display: flex; gap: 10px; padding-top: 4px; }
 .mgim-btn { padding: 8px 16px; border-radius: 999px; border: 1px solid var(--surface1);

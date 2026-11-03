@@ -71,10 +71,10 @@
 }
 .mgfo-unleash:hover { background: color-mix(in srgb, var(--red) 14%, transparent); }
 .mgfo-unleash-dot {
-  width: 10px; height: 10px; border-radius: 3px; border: 1px solid var(--red); flex: none;
-  background: transparent; transition: background .15s, box-shadow .15s;
+  width: 12px; height: 12px; border-radius: 3px; border: 1px solid var(--red); flex: none;
+  background: transparent; transition: background .15s;
 }
-.mgfo-unleash-dot.on { background: var(--red); box-shadow: 0 0 6px color-mix(in srgb, var(--red) 70%, transparent); }
+.mgfo-unleash-dot.on { background: var(--red); }
 .mgfo-unleash { font-size: 10px; font-weight: 700; letter-spacing: .04em; color: var(--red); white-space: nowrap; }
 .mgfo-spacer { flex: 1 1 auto; }
 .mgfo-index {
