@@ -819,24 +819,32 @@ const V2_STYLES = `
 .lv-findchips{display:flex;align-items:center;gap:8px;flex:1000 1 60px;max-width:max-content;min-width:0;
   overflow-x:auto;scrollbar-width:none;}
 .lv-findchips::-webkit-scrollbar{display:none;}
-.lv-topend{display:flex;align-items:center;gap:10px;flex:1000 1 220px;max-width:max-content;min-width:0;justify-content:flex-end;}
+.lv-topend{display:flex;align-items:center;gap:10px;flex:1000 1 var(--end-min,290px);max-width:max-content;min-width:0;justify-content:flex-end;}
 .lv-topend.withexport{flex:1 1 auto;max-width:none;}
+.lv-topend.withexport:has(.mgg-pin,.mgg-vigil){flex-basis:calc(var(--end-min) + 30px);}
 .lv-topend > *{flex:none;}
-.lv-topend .lv-top-act-wrap{flex:0 1 auto;min-width:0;display:flex;}
+.lv-topend .lv-top-act-wrap{flex:0 1 auto;min-width:58px;display:flex;}
 .lv-topend > .lv-fill{flex:1 1 auto;}
 .lv-topend .at-chip{min-width:0;max-width:100%;}
 .lv-topend .at-chiptext{min-width:0;overflow:hidden;text-overflow:ellipsis;}
 /* The pinned goal and the Vigil give way before Render and Export do (2026-11-02). The chips are
    flex:none in the gallery's bar, so a long goal name made the end cluster wider than its box;
-   justify-content:flex-end then spilled it LEFT, over Play, Render and Export. Here they may shrink,
-   the goal name ends in an ellipsis, and a bar that carries them asks for a wider end cluster, so
-   the cluster takes its own row (as it already does below ~1100px) before the name is squeezed
-   to nothing. */
-.lv-topend > .mgg-chips{flex:0 1 auto;min-width:0;}
-.lv-topend .mgg-pin{min-width:0;}
+   justify-content:flex-end then spilled it LEFT, over Play, Render and Export. Here the name may
+   shrink (ellipsis) down to about twelve characters, and each shrinkable piece carries its real
+   floor as a min-width, so the cluster can never be squeezed under what it holds. The cluster's
+   flex-basis is that floor (--end-min), and the basis is what decides the wrap: the cluster takes
+   its own row (as it already does below ~1100px) only when even the floor does not fit on the
+   first row, while a short goal still takes its natural width. The chips' wrapper dissolves so the
+   pin and the Vigil are the flex items themselves. */
+.lv-topend{--end-min:290px;}
+.lv-topend:has(.mgg-vigil){--end-min:378px;}
+.lv-topend:has(.mgg-pin){--end-min:434px;}
+.lv-topend:has(.mgg-pin):has(.mgg-vigil){--end-min:518px;}
+.lv-topend > .mgg-chips{display:contents;}
+.lv-topend .mgg-pin{flex:0 1 auto;min-width:calc(65px + 12ch);}
 .lv-topend .mgg-pin > *{flex:none;}
 .lv-topend .mgg-pin > .mgg-pin-t{flex:0 1 auto;min-width:0;}
-.lv-topend:has(.mgg-chips){flex-basis:460px;}
+.lv-topend .mgg-vigil{margin-left:-2px;}
 /* ← Gallery in the page's own form (The Loom.dc.html:142; the Arena brief: the same on every
    surface): uppercase, 11 px / 700, letter-spacing .1em. */
 .lv-top a.lv-close{flex:none;white-space:nowrap;font:700 11px/12px system-ui;letter-spacing:.1em;text-transform:uppercase;}
