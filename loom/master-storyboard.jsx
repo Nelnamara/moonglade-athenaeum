@@ -819,11 +819,12 @@ const V2_STYLES = `
 .lv-findchips{display:flex;align-items:center;gap:8px;flex:1000 1 60px;max-width:max-content;min-width:0;
   overflow-x:auto;scrollbar-width:none;}
 .lv-findchips::-webkit-scrollbar{display:none;}
-.lv-topend{display:flex;align-items:center;gap:10px;flex:1000 1 var(--end-min,290px);max-width:max-content;min-width:0;justify-content:flex-end;}
+.lv-topend{display:flex;align-items:center;gap:10px;flex:1000 1 calc(var(--end-min,290px) + var(--end-live,0px));max-width:max-content;min-width:0;justify-content:flex-end;}
 .lv-topend.withexport{flex:1 1 auto;max-width:none;}
-.lv-topend.withexport:has(.mgg-pin,.mgg-vigil){flex-basis:calc(var(--end-min) + 30px);}
+.lv-topend.withexport:has(.mgg-pin,.mgg-vigil){flex-basis:calc(var(--end-min) + var(--end-live,0px) + 30px);}
 .lv-topend > *{flex:none;}
 .lv-topend .lv-top-act-wrap{flex:0 1 auto;min-width:58px;display:flex;}
+.lv-topend .lv-top-act-wrap:has(.at-chip.live){min-width:95px;}
 .lv-topend > .lv-fill{flex:1 1 auto;}
 .lv-topend .at-chip{min-width:0;max-width:100%;}
 .lv-topend .at-chiptext{min-width:0;overflow:hidden;text-overflow:ellipsis;}
@@ -835,11 +836,13 @@ const V2_STYLES = `
    flex-basis is that floor (--end-min), and the basis is what decides the wrap: the cluster takes
    its own row (as it already does below ~1100px) only when even the floor does not fit on the
    first row, while a short goal still takes its natural width. The chips' wrapper dissolves so the
-   pin and the Vigil are the flex items themselves. */
+   pin and the Vigil are the flex items themselves. A live Activity chip (job rings in place of the
+   idle dot) has a wider floor, 95px against 58px, so it adds its 37px to the cluster's basis. */
 .lv-topend{--end-min:290px;}
 .lv-topend:has(.mgg-vigil){--end-min:378px;}
 .lv-topend:has(.mgg-pin){--end-min:434px;}
 .lv-topend:has(.mgg-pin):has(.mgg-vigil){--end-min:518px;}
+.lv-topend:has(.at-chip.live){--end-live:37px;}
 .lv-topend > .mgg-chips{display:contents;}
 .lv-topend .mgg-pin{flex:0 1 auto;min-width:calc(65px + 12ch);}
 .lv-topend .mgg-pin > *{flex:none;}
