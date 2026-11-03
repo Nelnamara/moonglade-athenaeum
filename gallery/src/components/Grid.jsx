@@ -834,18 +834,19 @@ function Grid({
   return (
     <div className={"gridwrap" + (blur ? " mgg-blur" : "") + (selectMode ? " mgg-selecting" : "")}>
       {/* The separator bar the classic had between the controls and the grid:
-          count left, browsing tip right (verbatim from master — the owner missed
+          one plain line (Frontend Gallery.dc.html matchesText: "N matches · click an
+          image to open the lightbox"; the lightbox itself teaches the arrow keys and F)
+          -- was: count left, browsing tip right (verbatim from master — the owner missed
           it, and it does real work giving the grid air from the header instead of
           the cards butting straight into the strip). */}
       <div className="tipbar">
-        {total != null && (
-          <span className="tb-count">
-            {Number(total).toLocaleString()} match{total === 1 ? "" : "es"}
+        <span className="tb-count">
+          {total != null && (
+            <>{Number(total).toLocaleString()} match{total === 1 ? "" : "es"}</>
+          )}
+          <span className="tb-tip">
+            {total != null ? " · " : ""}click an image to open the lightbox
           </span>
-        )}
-        <span className="sp" />
-        <span className="tb-tip">
-          tip: click an image to open the lightbox · arrow keys to browse · F for slideshow
         </span>
       </div>
 

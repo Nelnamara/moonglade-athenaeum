@@ -283,7 +283,7 @@ button:disabled { cursor: default; }
   font-size: 11.5px; color: var(--overlay0); background: var(--surface0);
   border-bottom: 1px solid var(--surface1); }
 .tb-count { color: var(--subtext); font-variant-numeric: tabular-nums; }
-.tb-tip { font-style: italic; }
+.tb-tip { color: inherit; }
 @media (max-width: 860px) { .tb-tip { display: none; } }
 .stars { font-size: 11px; color: var(--gold); letter-spacing: 1px; }
 .vbadge { position: absolute; top: 8px; right: 8px; z-index: 2; font-size: 10px;
