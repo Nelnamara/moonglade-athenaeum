@@ -659,7 +659,7 @@ export default function ModelPicker({
                   <div className="mg-cov">
                     {m.preview_url && <img className={m.should_blur ? "blur" : undefined} loading="lazy" src={m.preview_url} alt="" />}
                     {m.official && <span className="mg-pill">Official</span>}
-                    {incompat && arch && <span className="mg-ibadge">&#9888; {arch}</span>}
+                    {incompat && arch && <span className="mg-ibadge"><Icon name="warning" /> {arch}</span>}
                   </div>
                   <div className="mg-meta">
                     <div className="mg-nm">{m.title}</div>

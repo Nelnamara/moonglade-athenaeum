@@ -66,6 +66,8 @@
 html { color-scheme: dark; scrollbar-gutter: stable; }
 body { margin: 0; background: var(--mantle); color: var(--text);
   font: 14px/1.5 var(--font-system); }
+/* Unslop pick 3: bold inside running text is semi-bold too, never the browser's 700. */
+b, strong { font-weight: 600; }
 button { font: inherit; cursor: pointer; }
 button:disabled { cursor: default; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

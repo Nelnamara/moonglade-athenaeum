@@ -300,7 +300,7 @@ test("10. the two new icons carry their per-surface sizes, measured not guessed"
   assert.match(iconCss, /button\.mgcp-chip \.mgico \{/);
 });
 
-test("11. the phone menu's Publish row wears ☁, the mark Publish wears everywhere else", () => {
+test("11. the phone menu's Publish row wears the publish icon, the mark Publish wears everywhere else", () => {
   // unslop pick 2B: Publish wears the `publish` line icon on the phone menu and on every desktop surface.
   assert.match(appMobile, /\{ icon: <Icon name="publish" \/>, label: "Publish", screen: "publish" \}/);
   assert.doesNotMatch(appMobile, /icon: "✎"/);

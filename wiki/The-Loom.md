@@ -318,7 +318,7 @@ Other controls in the top bar:
   since been deleted ride alongside as **(+N unk)**, because an unknown is not a zero; and a
   clip you brought in from your library rather than rendered here is left out entirely — that
   money was spent elsewhere — and named on hover. Nothing is fetched from PixAI to work it out.
-- **💾 Use an existing video instead** (Video tab) — skip generation entirely and attach a
+- **Use an existing video instead** (Video tab) — skip generation entirely and attach a
   video you already have as this shot's clip.
 
 ### A shot's own settings
