@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import Stars from "./Stars.jsx";
 import YourLayer from "./YourLayer.jsx";
 import MobileSheet from "./MobileSheet.jsx";
@@ -253,7 +254,7 @@ export default function ImageDetailsMobile({
         <button type="button" className="idm-back" onClick={close}>← Gallery</button>
         <button type="button" className="idm-lb" title="Full-screen viewer"
           onClick={() => onOpenLightbox(row.media_id)}>
-          ⛶
+          <Icon name="expand" />
         </button>
         <div className="idm-fill" />
         {indexLabel ? <span className="idm-index">{indexLabel}</span> : null}
@@ -291,13 +292,13 @@ export default function ImageDetailsMobile({
             up to 380 px wide, with the foot pinned to ITS bottom. */}
         <div className="idm-rec">
         <div className="idm-chiprow">
-          <a className="idm-chip" href={"/full/" + encodeURIComponent(row.media_id) + "?dl=1"}>⬇ Download</a>
+          <a className="idm-chip" href={"/full/" + encodeURIComponent(row.media_id) + "?dl=1"}><Icon name="download" /> Download</a>
           {/* ☁ Publish -- real since 2026-08-07, same real pipeline as desktop's
               DetailsView.jsx. Already-published rows say so instead of offering it
               twice; this row is the full catalog row, artwork_id is right here. */}
           {(row.artwork_id || "").trim()
-            ? <span className="idm-chip is-off" title="Already on your PixAI profile — manage it from My Art">☁ Published</span>
-            : <button type="button" className="idm-chip" onClick={() => onPublish && onPublish(row.media_id)}>☁ Publish</button>}
+            ? <span className="idm-chip is-off" title="Already on your PixAI profile — manage it from My Art"><Icon name="publish" /> Published</span>
+            : <button type="button" className="idm-chip" onClick={() => onPublish && onPublish(row.media_id)}><Icon name="publish" /> Publish</button>}
           {/* The third entry point Contest Mobile Handoff.dc.html keeps -- "Details'
               contest chip". Gated on artwork_id, exactly the condition desktop's My Art
               row uses for its own "★ Enter into contest…": only a PUBLISHED piece has an
@@ -384,10 +385,10 @@ export default function ImageDetailsMobile({
               <div className="idm-row-label">Engagement</div>
               <div className="idm-row-vwrap">
                 <div className="idm-row-val">
-                  {views != null ? "👁 " + Number(views).toLocaleString() + " · " : ""}
+                  {views != null ? <><Icon name="eye" /> {Number(views).toLocaleString()} · </> : null}
                   {/* Session R (R5b): the "💬 n" count left this line -- the thread below
                       carries it, read live. */}
-                  ♥ {row.liked_count || 0}
+                  <Icon name="heart" /> {row.liked_count || 0}
                   {row.aes_score ? " · aesthetic " + row.aes_score : ""}
                 </div>
               </div>

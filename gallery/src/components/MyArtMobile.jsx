@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import { apiGet, apiPost } from "../api.js";
 import { fmt, artworksNeverSynced, NEVER_SYNCED_WHY } from "../hooks/useMyArt.js";
 import useSheet from "../hooks/useSheet.js";
@@ -298,7 +299,7 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
         )}
       </div>
 
-      {err && <div className="myam-err">⚠ {err}</div>}
+      {err && <div className="myam-err"><Icon name="warning" /> {err}</div>}
 
       {!rows && !rowsErr && <div className="mgh-loading">loading your artwork…</div>}
       {rowsErr && <div className="mgh-loading">couldn't load — {rowsErr}</div>}
@@ -350,11 +351,11 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
                       <div className="myam-title">{it.title}</div>
                       <div className="myam-date">{dateLabel(it.date)}</div>
                     </div>
-                    <span className="myam-likes" style={{ color: heartCol(it.likes) }}>♥ {fmt(it.likes)}</span>
+                    <span className="myam-likes" style={{ color: heartCol(it.likes) }}><Icon name="heart" /> {fmt(it.likes)}</span>
                     {/* Comment badge, same idiom as likes (owner, 2026-09-06) -- and the
                         same two-rung colour rule the desktop card uses, for the same
                         reason: comments never reach the heart's mauve threshold here. */}
-                    <span className="myam-likes" style={{ color: commentCol(it.comments) }}>💬 {fmt(it.comments)}</span>
+                    <span className="myam-likes" style={{ color: commentCol(it.comments) }}><Icon name="comment" /> {fmt(it.comments)}</span>
                   </div>
                   {/* Per-card views + the comparison bar, on every published card. Same
                       .mgma-barwrap/.mgma-bar the desktop card restores -- one bar, one
@@ -388,7 +389,7 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
                 <div className="myam-loramark" style={{ color: tc }}>◆</div>
                 <div className="myam-loracol">
                   <div className="myam-loraname">{m.title}</div>
-                  <div className="myam-lorameta">🔥 {fmt(m.ref_count)} uses · ♥ {fmt(m.liked_count)}</div>
+                  <div className="myam-lorameta"><Icon name="uses" /> {fmt(m.ref_count)} uses · <Icon name="heart" /> {fmt(m.liked_count)}</div>
                 </div>
               </a>
             );
@@ -411,8 +412,8 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
           {selected.size > 0 && (
             <>
               <button type="button" className="myam-bulkbtn" onClick={() => askBulk("visibility", { private: false })}>◉ Publish</button>
-              <button type="button" className="myam-bulkbtn" onClick={() => askBulk("visibility", { private: true })}>🔒 Hide</button>
-              <button type="button" className="myam-bulkdgr" onClick={() => askBulk("delete", {})}>🗑</button>
+              <button type="button" className="myam-bulkbtn" onClick={() => askBulk("visibility", { private: true })}><Icon name="lock" /> Hide</button>
+              <button type="button" className="myam-bulkdgr" onClick={() => askBulk("delete", {})}><Icon name="trash" title="Delete" /></button>
             </>
           )}
           <button type="button" className="myam-bulkbtn" disabled={selected.size === 0} onClick={() => setSelected(new Set())}>Clear</button>
@@ -433,7 +434,7 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
       <MobileSheet open={sheet === "cardmenu"} closing={closing} onClose={closeSheet}
         title={(menuItem && menuItem.title) || ""}>
         <button type="button" className="myam-sheetrow" disabled={busy} onClick={cardTogglePublish}>
-          <span>{menuItem && menuItem.public ? "🔒" : "◉"}</span>
+          <span>{menuItem && menuItem.public ? <Icon name="lock" /> : "◉"}</span>
           {menuItem && menuItem.public ? "Make private" : "Publish (make public)"}
         </button>
         <button type="button" className="myam-sheetrow"
@@ -441,7 +442,7 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
           <span>✎</span>Edit tags
         </button>
         <button type="button" className="myam-sheetrow dgr" disabled={busy} onClick={askCardDelete}>
-          <span>🗑</span>Delete
+          <span><Icon name="trash" /></span>Delete
         </button>
       </MobileSheet>
 

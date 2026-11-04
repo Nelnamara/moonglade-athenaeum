@@ -165,7 +165,7 @@ export default function DuplicateReviewMobile({ csrf, onResolved }) {
             ? "Quarantine every pending group's current keep/remove selection in one go"
             : "No pending group has a keeper selected"}
           onClick={() => setAutoConfirmOpen(true)}>
-          ⚡ Auto-resolve all{autoGroupCount ? " (" + autoGroupCount + ")" : ""}
+          <Icon name="bolt" /> Auto-resolve all{autoGroupCount ? " (" + autoGroupCount + ")" : ""}
         </button>
       </div>
 
@@ -232,7 +232,7 @@ export default function DuplicateReviewMobile({ csrf, onResolved }) {
                 })}
               </div>
 
-              {groupErr && <div className="mgdr-grouperr">⚠ {groupErr}</div>}
+              {groupErr && <div className="mgdr-grouperr"><Icon name="warning" /> {groupErr}</div>}
 
               <div className="mgdr-groupfoot">
                 {resolved ? (
@@ -304,7 +304,7 @@ export default function DuplicateReviewMobile({ csrf, onResolved }) {
               )}
               {autoOnlyCopyCount > 0 && <> {onlyCopyNote(autoOnlyCopyCount, autoFileCount, "duplicates")}</>}
             </p>
-            {autoError && <div className="mgdr-grouperr">⚠ {autoError}</div>}
+            {autoError && <div className="mgdr-grouperr"><Icon name="warning" /> {autoError}</div>}
             <div className="mgdr-autoconfirm-actions">
               <button type="button" className="mgdr-autocancel mgdrm-wide" disabled={autoBusy}
                 onClick={() => { setAutoConfirmOpen(false); setAutoError(""); }}>

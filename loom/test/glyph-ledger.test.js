@@ -178,7 +178,7 @@ test("7. BOTH of the Control Panel's doors wear the laptop-cog", () => {
   assert.doesNotMatch(app, /⛭/);
   assert.doesNotMatch(tabBar, /icon: "⚙"/);
   // CreateMobile's "⚙ Advanced" is generic settings, NOT the Panel -- it keeps its gear
-  assert.match(src("components/CreateMobile.jsx"), /⚙ Advanced/);
+  assert.match(src("components/CreateMobile.jsx"), /<Icon name="gear" \/> Advanced/);
 });
 
 // ---------------------------------------------------------------- the character picks
@@ -301,12 +301,12 @@ test("10. the two new icons carry their per-surface sizes, measured not guessed"
 });
 
 test("11. the phone menu's Publish row wears ☁, the mark Publish wears everywhere else", () => {
-  assert.match(appMobile, /\{ icon: "☁", label: "Publish", screen: "publish" \}/);
+  assert.match(appMobile, /\{ icon: <Icon name="publish" \/>, label: "Publish", screen: "publish" \}/);
   assert.doesNotMatch(appMobile, /icon: "✎"/);
   // the surfaces it is now agreeing with
   assert.match(app, /img\("publish", "☁", "Publish"/);
   assert.match(details, /☁ Publish<\/button>/);
-  assert.match(src("components/ImageDetailsMobile.jsx"), /☁ Publish<\/button>/);
+  assert.match(src("components/ImageDetailsMobile.jsx"), /<Icon name="publish" \/> Publish<\/button>/);
   assert.match(src("components/Lightbox.jsx"), /☁ Publish<\/button>/);
   // and "Edit this" still keeps ✎ (the ruling's own carve-out)
   assert.match(details, /✎ Edit this<\/button>/);

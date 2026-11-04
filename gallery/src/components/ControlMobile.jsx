@@ -4,6 +4,7 @@ import {
   ActionChip, SkinsRow, BrandingTab, UsersSubOverlay, TrashSubOverlay, PowerModal,
   MarkArt, fmtEvery, BlurToggleTile,
 } from "./ControlPanelOverlay.jsx";
+import Icon from "../icons/Icons.jsx";
 import MobileScreen from "./MobileScreen.jsx";
 import DataSaverRow from "./DataSaverRow.jsx";
 import PagingRow from "./PagingRow.jsx";
@@ -222,7 +223,7 @@ export default function ControlMobile({ account, brandRequest }) {
   if (summaryErr) {
     return (
       <div className="glm-tab glm-placeholder">
-        <div className="glm-placeholder-icon" aria-hidden="true">⚠</div>
+        <div className="glm-placeholder-icon" aria-hidden="true"><Icon name="warning" /></div>
         <div className="glm-placeholder-title">Control</div>
         <div className="glm-placeholder-note">{summaryErr}</div>
       </div>
@@ -231,7 +232,7 @@ export default function ControlMobile({ account, brandRequest }) {
   if (!summary) {
     return (
       <div className="glm-tab glm-placeholder">
-        <div className="glm-placeholder-icon" aria-hidden="true">⚙</div>
+        <div className="glm-placeholder-icon" aria-hidden="true"><Icon name="panel" /></div>
         <div className="glm-placeholder-title">Control</div>
         <div className="glm-placeholder-note">Loading…</div>
       </div>
@@ -375,7 +376,7 @@ export default function ControlMobile({ account, brandRequest }) {
         {jobResult && (
           <div className={"mgcp-runresult" + (jobResult.ok ? "" : " warn")}>
             <div className="mgcp-runresulthead">
-              {jobResult.ok ? "✓ Finished" : "⚠ Finished with " + jobResult.warnCount + " warning" + (jobResult.warnCount !== 1 ? "s" : "")}
+              {jobResult.ok ? "✓ Finished" : <><Icon name="warning" /> {"Finished with " + jobResult.warnCount + " warning" + (jobResult.warnCount !== 1 ? "s" : "")}</>}
               <button type="button" className="mgcp-run" onClick={() => setJobResult(null)}>dismiss</button>
             </div>
             {jobResult.lines.length > 0 && (
@@ -501,7 +502,7 @@ export default function ControlMobile({ account, brandRequest }) {
                 </div>
                 {!isLocal && (
                   <div className="mgcp-footnote" style={{ marginTop: 12 }}>
-                    <span>🔒 destructive stages: serving machine only</span>
+                    <span><Icon name="lock" /> destructive stages: serving machine only</span>
                   </div>
                 )}
               </>
@@ -509,7 +510,7 @@ export default function ControlMobile({ account, brandRequest }) {
               <div className="ctm-ledger">
                 {schedule && (
                   <div className="ctm-standing">
-                    <b>⏱ Standing order</b>{" "}
+                    <b><Icon name="timer" /> Standing order</b>{" "}
                     run <b>{(summary.all_actions || summary.actions || []).find((a) => a.action === schedule.action)?.label || schedule.action}</b>
                     {" every "}<b>{schedule.interval_hours || 6}h</b>
                     {" — "}<b className={schedule.enabled ? "ok" : ""}>{schedule.enabled ? "on" : "off"}</b>
@@ -564,14 +565,14 @@ export default function ControlMobile({ account, brandRequest }) {
             <input className="mgcp-taskinput" value={taskId} placeholder="task or media id…"
               onChange={(e) => setTaskId(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") importTask(); }} />
-            <button type="button" className="mgcp-chip" onClick={importTask}>⬇ Import</button>
+            <button type="button" className="mgcp-chip" onClick={importTask}><Icon name="download" /> Import</button>
           </div>
           <div className={"mgcp-tilenote" + (taskState === "running" ? " busy" : taskState?.done ? " ok" : "")}>
             {taskState === "running" ? "⟳ resolving the task on PixAI…"
               : taskState?.done ? (taskState.already
                 ? "✓ already in your library — nothing new to fetch"
                 : "✓ imported — " + taskState.saved + " added to the catalog")
-              : taskState?.error ? "⚠ " + taskState.error
+              : taskState?.error ? <><Icon name="warning" /> {taskState.error}</>
               : "spends nothing — edits and Favorites strays Sync misses"}
           </div>
         </div>
@@ -593,9 +594,9 @@ export default function ControlMobile({ account, brandRequest }) {
       </div>
 
       <div className="ctm-sec">
-        <a className="mgcp-smallchip" href="/export-csv" style={{ textDecoration: "none" }}>⬇ Download catalog (CSV)</a>
+        <a className="mgcp-smallchip" href="/export-csv" style={{ textDecoration: "none" }}><Icon name="download" /> Download catalog (CSV)</a>
         <a className="mgcp-smallchip" href="/export-curation" style={{ textDecoration: "none" }}
-          title="Ratings, collections and their order, smart collections, tags, marks and notes, as one file. It goes back in with --import-curation.">⬇ Download curation (JSON)</a>
+          title="Ratings, collections and their order, smart collections, tags, marks and notes, as one file. It goes back in with --import-curation."><Icon name="download" /> Download curation (JSON)</a>
       </div>
 
       {/* The blur toggle, in its own ctm-sec exactly like Skins below -- the same shared

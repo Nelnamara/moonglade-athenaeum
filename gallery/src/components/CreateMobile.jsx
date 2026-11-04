@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import { createPortal } from "react-dom";
 import {
   SIZES, STEPS_FALLBACK, MODES as GEN_MODES, UNLIMITED_PRO,
@@ -478,7 +479,7 @@ export default function CreateMobile({
                 )}
 
                 <button type="button" className="cm-advrow" onClick={openAdv}>
-                  ⚙ Advanced — resolution, quality, aspect
+                  <Icon name="gear" /> Advanced — resolution, quality, aspect
                 </button>
 
                 {sheetHost ? createPortal(
@@ -522,7 +523,7 @@ export default function CreateMobile({
 
             {editSub === "fixer" && (
               <div className="glm-placeholder cm-soon">
-                <div className="glm-placeholder-icon" aria-hidden="true">⛶</div>
+                <div className="glm-placeholder-icon" aria-hidden="true"><Icon name="crop" /></div>
                 <div className="glm-placeholder-title">Fixer</div>
                 <div className="glm-placeholder-note">
                   Drag a box over the hand or face on the source. A fix can't
@@ -695,7 +696,7 @@ export default function CreateMobile({
             )}
 
             <button type="button" className="cm-advrow" onClick={openAdv}>
-              ⚙ Advanced — LoRA, size, tuning, palette, negative
+              <Icon name="gear" /> Advanced — LoRA, size, tuning, palette, negative
             </button>
 
             <span className="gd-cost cm-cost">
@@ -708,7 +709,7 @@ export default function CreateMobile({
               <div className="gd-results cm-results">
                 {results.map((r) => (
                   <div key={r.id} className={"gd-res " + r.kind}>
-                    {r.kind === "run" ? "⏳ " : r.kind === "ok" ? "✔ " : r.kind === "warn" ? "⚠ " : "✕ "}{r.text}
+                    {r.kind === "run" ? <><Icon name="hourglass" /> </> : r.kind === "ok" ? "✔ " : r.kind === "warn" ? <><Icon name="warning" /> </> : "✕ "}{r.text}
                     {r.media && r.media.map((mid) => (
                       <a key={mid} href={"/full/" + mid} target="_blank" rel="noreferrer">
                         <img src={"/thumbs/" + mid + ".jpg"} alt="" />

@@ -1,4 +1,5 @@
 import React, { useRef } from "react";
+import Icon from "../icons/Icons.jsx";
 import useImport from "../hooks/useImport.js";
 import { notImportedNote } from "../lib/importBatches.js";
 import "../styles/import-overlay.css";
@@ -78,7 +79,7 @@ export default function ImportMobile({ collections, onImported }) {
         </div>
       ) : files.length === 0 ? (
         <div className="mgim-drop">
-          <div className="mgim-drop-icon">⬆</div>
+          <div className="mgim-drop-icon"><Icon name="upload" /></div>
           <div className="mgim-drop-text">Pick images, videos, or a .zip from your device</div>
           <div className="mgim-drop-buttons">
             <button type="button" className="mgim-btn" onClick={() => fileInputRef.current?.click()}>Browse files…</button>
@@ -100,12 +101,12 @@ export default function ImportMobile({ collections, onImported }) {
               const url = thumbUrl(f);
               return previewCapped ? (
                 <div className="mgim-tile" key={f.name + f.size}>
-                  {url ? <img src={url} alt="" /> : <span>{kindOf(f) === "video" ? "▶" : "📦"}</span>}
+                  {url ? <img src={url} alt="" /> : <span>{kindOf(f) === "video" ? "▶" : <Icon name="file" />}</span>}
                 </div>
               ) : (
                 <div className="mgim-row" key={f.name + f.size}>
                   <span className="mgim-thumb">
-                    {url ? <img src={url} alt="" /> : <span>{kindOf(f) === "video" ? "▶" : "📦"}</span>}
+                    {url ? <img src={url} alt="" /> : <span>{kindOf(f) === "video" ? "▶" : <Icon name="file" />}</span>}
                   </span>
                   <span className="mgim-nm" title={f.name}>{f.name}</span>
                   <span className="mgim-sz">{fmtSize(f.size)}</span>
@@ -131,7 +132,7 @@ export default function ImportMobile({ collections, onImported }) {
               onChange={(e) => setNewCollName(e.target.value)} />
           )}
 
-          {result && !result.ok && <div className="mgim-result err">⚠ {result.error}</div>}
+          {result && !result.ok && <div className="mgim-result err"><Icon name="warning" /> {result.error}</div>}
 
           <div className="glm-sheet-actions" style={{ marginTop: 16 }}>
             <button type="button" className="glm-primary" disabled={busy} onClick={doImport}>

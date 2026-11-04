@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import { STRIP_TEXT, bubbleText } from "../lib/installNudge.js";
 import "../styles/phone-u.css";
 
@@ -37,13 +38,21 @@ export function NudgeStrip({ show, onOpen, onDismiss }) {
   );
 }
 
+/* The sentence lives in lib/installNudge.js with a text arrow standing for iOS's Share button; the
+   page draws that one mark as the line icon (unslop pick 2B) and keeps the rest of the words. */
+function BubbleWords({ side }) {
+  const parts = bubbleText(side).split(String.fromCharCode(0x2B06));
+  if (parts.length !== 2) return bubbleText(side);
+  return <>{parts[0]}<Icon name="share" title="Share" />{parts[1]}</>;
+}
+
 export function NudgeBubble({ side }) {
   if (!side) return null;
   const top = side === "top";
   return (
     <div className={"mgnudge-bubble " + (top ? "top" : "bottom")} role="note">
       {top ? <span className="mgnudge-arrow" aria-hidden="true">{"▲"}</span> : null}
-      <div className="mgnudge-card">{bubbleText(side)}</div>
+      <div className="mgnudge-card"><BubbleWords side={side} /></div>
       {!top ? <span className="mgnudge-arrow" aria-hidden="true">{"▼"}</span> : null}
     </div>
   );

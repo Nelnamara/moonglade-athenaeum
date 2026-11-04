@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import { apiGet, apiPost } from "../api.js";
 import useSheet from "../hooks/useSheet.js";
 import MobileSheet from "./MobileSheet.jsx";
@@ -150,7 +151,7 @@ export default function PublishMobile({ mediaId, onClose, onPublished }) {
               its own call and can fail on its own. */}
           {done.entry_error ? (
             <div className="pubm-doneerr">
-              ⚠ The contest entry failed: {done.entry_error}. You can still enter it from
+              <Icon name="warning" /> The contest entry failed: {done.entry_error}. You can still enter it from
               Contests.
             </div>
           ) : null}
@@ -233,7 +234,7 @@ export default function PublishMobile({ mediaId, onClose, onPublished }) {
                 <span>Private</span>
               </label>
 
-              {err && <div className="pubm-note err">⚠ {err}</div>}
+              {err && <div className="pubm-note err"><Icon name="warning" /> {err}</div>}
 
               <button type="button" className="pubm-go" disabled={busy || !mid} onClick={openConfirm}>
                 {busy ? "checking…" : "Preview & publish →"}

@@ -378,7 +378,7 @@ import { InboxEmblem, GiftEmblem } from "../inbox/PanelEmblem.jsx";
    card well, Share via the Web Share API instead of window.print()). */
 
 const MENU_ITEMS = [
-  { icon: "📈", label: "My Art", screen: "myart" },
+  { icon: <Icon name="chart" />, label: "My Art", screen: "myart" },
   // Session N2: the collections screen. The books mark, not the page's ❖ -- the Glyph Ledger
   // (2026-09-05) gave that character to the Folio's skin flag alone.
   { icon: <Icon name="collection" />, label: "Collections", screen: "collections" },
@@ -386,11 +386,11 @@ const MENU_ITEMS = [
   // surface that offers it (the desktop record, the Lightbox, this phone's own picture
   // screen, the grid's right-click menu) and this row alone said ✎ -- the app's mark for
   // Edit, which is a different verb one row away from this one.
-  { icon: "☁", label: "Publish", screen: "publish" },
-  { icon: "⚗", label: "Train a LoRA", screen: "train" },
-  { icon: "⬆", label: "Import", screen: "import" },
-  { icon: "🏅", label: "Contests", screen: "contests" },
-  { icon: "♡", label: "Health", screen: "health" },
+  { icon: <Icon name="publish" />, label: "Publish", screen: "publish" },
+  { icon: <Icon name="flask" />, label: "Train a LoRA", screen: "train" },
+  { icon: <Icon name="upload" />, label: "Import", screen: "import" },
+  { icon: <Icon name="medal" />, label: "Contests", screen: "contests" },
+  { icon: <Icon name="pulse" />, label: "Health", screen: "health" },
 ];
 
 // Per-screen header title -- text matches the design spec exactly (Health's
@@ -1364,7 +1364,7 @@ export default function AppMobile({ boot }) {
             surface={tab === "create" ? "dock" : tab === "control" ? "panel" : "gallery"} />
           <button type="button" className="glm-iconbtn glm-iconbtn-lav" title="More"
             style={{ position: "relative" }} onClick={() => openSheet("menu")}>
-            ☰
+            <Icon name="menu" title="More" />
             {/* RYPc: the Menu door carries the inbox's unread badge (lavender count). */}
             <MenuBadge st={inboxSt} />
           </button>
@@ -1670,7 +1670,7 @@ export default function AppMobile({ boot }) {
         <div className="glm-loom-note">
           Weave shots into a video sequence. On a phone held upright it opens a <b>board and reel</b>{" "}
           view built for the narrow screen; held sideways it opens the wide four-panel board. Either
-          way the other view is one tap away in the Loom's own bar (<b>🖥 Desktop</b> or <b>Mobile view</b>).
+          way the other view is one tap away in the Loom's own bar (<b><Icon name="desktop" /> Desktop</b> or <b>Mobile view</b>).
         </div>
         <div className="glm-sheet-actions">
           <a className="glm-primary glm-primary-loom" href="/loom">Open The Loom</a>

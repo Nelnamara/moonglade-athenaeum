@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import { createPortal } from "react-dom";
 import useSheet from "../hooks/useSheet.js";
 import MobileSheet from "./MobileSheet.jsx";
@@ -135,7 +136,7 @@ export default function TrainMobile({ onClose, onUseLora, backRef }) {
     body = (
       <Screen>
         <TrainStrip running={runs.running} size={GAUGE_SIZES.phone} className="trm-strip" />
-        {retry.err && !retry.ask && <div className="trm-err">⚠ {retry.err}</div>}
+        {retry.err && !retry.ask && <div className="trm-err"><Icon name="warning" /> {retry.err}</div>}
         {runs.errors && runs.errors.length > 0 && (
           <div className="trm-warn">Some runs couldn't be read just now: {runs.errors.join(" · ")}</div>
         )}
@@ -234,7 +235,7 @@ function BasicPhone({ setup, csrf, stepBack, onChooser, onAdvanced, onRuns, head
       <>
         <div className="trm-lab">Dataset images <span className={b.enough ? "ok" : "low"}>{b.counted.length} / {MAX_IMAGES}</span></div>
         <button type="button" className="trm-row" onClick={() => openSheet("sources")}>
-          <span className="trm-row-main">⬆ Upload · ▦ From history · ⎘ Import a dataset</span>
+          <span className="trm-row-main"><Icon name="upload" /> Upload · ▦ From history · ⎘ Import a dataset</span>
         </button>
         <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden
           onChange={(e) => { const fl = e.target.files; e.target.value = ""; b.upload(fl); }} />
@@ -285,12 +286,12 @@ function BasicPhone({ setup, csrf, stepBack, onChooser, onAdvanced, onRuns, head
           <div className="trm-txt">✓ {goalLabel || "—"} · ✓ {b.counted.length} images · ✓ {b.baseName || "—"} · Standard settings{f.reason ? " · " + f.reason : ""}</div>
           <div className="trm-price">
             {f.free && f.struck != null && <span className="struck">{credits(f.struck)}</span>}
-            <span className="gold">🪙 {f.price != null ? credits(f.price) : "?"}</span>
+            <span className="gold"><Icon name="coin" /> {f.price != null ? credits(f.price) : "?"}</span>
             {f.badge && <span className="freebadge">{f.badge}</span>}
             <span className="eta">{etaText(setup.cfg && setup.cfg.eta)}</span>
           </div>
         </div>
-        {!b.ask && b.err && !b.maybe && <div className="trm-err">⚠ {b.err}</div>}
+        {!b.ask && b.err && !b.maybe && <div className="trm-err"><Icon name="warning" /> {b.err}</div>}
         {b.maybe && <div className="trm-warn">PixAI didn't answer clearly, so this run may have started; check Runs before starting again.</div>}
         {setup.paused && <div className="trm-warn">PixAI has paused new training runs; Start waits until it opens again.</div>}
       </>
@@ -331,7 +332,7 @@ function BasicPhone({ setup, csrf, stepBack, onChooser, onAdvanced, onRuns, head
                   : "Spend credits on this training — the amount could not be quoted."}</span>
               </label>
             )}
-            {b.err && <div className="trm-err">⚠ {b.err}</div>}
+            {b.err && <div className="trm-err"><Icon name="warning" /> {b.err}</div>}
             <div className="glm-sheet-actions">
               <button type="button" className="glm-metal glm-widebtn" onClick={() => b.setAsk(null)} disabled={b.busy}>Back</button>
               <button type="button" className="glm-primary glm-widebtn" disabled={b.busy || (!b.ask.is_free && !b.accepted)}
@@ -428,7 +429,7 @@ function AdvancedPhone({ setup, csrf, draftId, stepBack, onBasic, onRuns, head, 
           </button>
         ))}
         <div className="trm-txt">The base can't be changed once you continue. The button below creates the draft on PixAI (free).</div>
-        {a.err && <div className="trm-err">⚠ {a.err}</div>}
+        {a.err && <div className="trm-err"><Icon name="warning" /> {a.err}</div>}
         <button type="button" className="trm-across" onClick={onBasic}>Use Basic instead</button>
       </>
     );
@@ -440,13 +441,13 @@ function AdvancedPhone({ setup, csrf, draftId, stepBack, onBasic, onRuns, head, 
       <>
         <div className="trm-lab">Dataset images <span className={a.enough ? "ok" : "low"}>{ids.length} / {MAX_IMAGES}</span></div>
         <button type="button" className="trm-row" disabled={!canChangeSet} onClick={() => openSheet("sources")}>
-          <span className="trm-row-main">⬆ Upload · ▦ From history</span>
+          <span className="trm-row-main"><Icon name="upload" /> Upload · ▦ From history</span>
         </button>
         <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden
           onChange={(e) => { const fl = e.target.files; e.target.value = ""; a.upload(fl); }} />
         <PhoneGrid items={ids.map((m) => ({ id: m, thumb: "/api/train/thumb/" + m, reject: a.rejected.includes(m) ? "refused" : "" }))}
           onRemove={canChangeSet ? a.removeImage : null} />
-        {a.err && <div className="trm-err">⚠ {a.err}</div>}
+        {a.err && <div className="trm-err"><Icon name="warning" /> {a.err}</div>}
         <div className="trm-txt">At least {MIN_IMAGES}. Adding or taking out a picture changes the draft on PixAI (free). Long-press a picture to take it out.</div>
       </>
     );
@@ -519,7 +520,7 @@ function AdvancedPhone({ setup, csrf, draftId, stepBack, onBasic, onRuns, head, 
         )}
         {a.saving > 0 && <div className="trm-txt" role="status">Saving {a.saving} edit{a.saving === 1 ? "" : "s"}…</div>}
         {done && <div className="trm-txt">{done}</div>}
-        {a.err && <div className="trm-err">⚠ {a.err}</div>}
+        {a.err && <div className="trm-err"><Icon name="warning" /> {a.err}</div>}
         {!g.next && g.left === 0 && ids.length > 0 && <div className="trm-txt">{g.whyNoNext}</div>}
       </>
     );
@@ -562,7 +563,7 @@ function AdvancedPhone({ setup, csrf, draftId, stepBack, onBasic, onRuns, head, 
           <div className="mgtr-note">PixAI's price for this run today, by its base. Free to ask; nothing is spent until Start. {sentence(etaText(eta))}</div>
         </div>
         {!ask && !a.busy && <button type="button" className="trm-across" onClick={a.refreshQuote}>Ask PixAI's price again</button>}
-        {a.err && <div className="trm-err">⚠ {a.err}</div>}
+        {a.err && <div className="trm-err"><Icon name="warning" /> {a.err}</div>}
         {a.maybe && <div className="trm-warn">PixAI didn't answer clearly, so this run may have started; check Runs before starting again.</div>}
       </>
     );
@@ -619,7 +620,7 @@ function AdvancedPhone({ setup, csrf, draftId, stepBack, onBasic, onRuns, head, 
             <div className="pubm-note" style={{ marginBottom: 12 }}>
               {a.startAsk.is_free ? "PixAI quotes this run as free." : "PixAI's price for this run: " + credits(a.startAsk.price) + " credits, charged when it starts."} Parameters at PixAI's defaults.
             </div>
-            {a.err && <div className="trm-err">⚠ {a.err}</div>}
+            {a.err && <div className="trm-err"><Icon name="warning" /> {a.err}</div>}
             <div className="glm-sheet-actions">
               <button type="button" className="glm-metal glm-widebtn" onClick={closeSheet} disabled={!!a.busy}>Back</button>
               <button type="button" className="glm-primary glm-widebtn" disabled={!!a.busy || !!a.started}
@@ -675,7 +676,7 @@ function SourcesSheet({ open, closing, onClose, onUpload, onHistory, onImport, w
   return (
     <MobileSheet open={open} closing={closing} onClose={onClose} className="trm-sheet" title="Add images">
       <div className="glm-sheet-list">
-        <button type="button" className="trm-row" onClick={onUpload}><span className="trm-row-main">⬆ Upload from this phone</span></button>
+        <button type="button" className="trm-row" onClick={onUpload}><span className="trm-row-main"><Icon name="upload" /> Upload from this phone</span></button>
         <button type="button" className="trm-row" onClick={onHistory}><span className="trm-row-main">▦ From history</span></button>
         {withImport && (
           <button type="button" className="trm-row" onClick={onImport}><span className="trm-row-main">⎘ Import a dataset</span></button>

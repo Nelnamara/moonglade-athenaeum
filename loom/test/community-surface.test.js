@@ -261,7 +261,7 @@ describe("My Art draws the numbers it was already fetching", () => {
       // It was fetched for every card and summed into the COMMENTS stat, and never once
       // reached a card (MyArtOverlay drew likes only). Same glyph the app uses for a
       // comment count everywhere else.
-      assert.match(shell, /💬 \{fmt\(it\.comments\)\}/);
+      assert.match(shell, /(💬|<Icon name="comment" \/>) \{fmt\(it\.comments\)\}/);
       assert.match(shell, /commentCol\(it\.comments\)/);
     });
 
@@ -330,7 +330,7 @@ describe("My Art draws the numbers it was already fetching", () => {
     // A partly-swept library must not pass a subtotal off as a total -- the same job the
     // old "(TOP 12)" label was doing, kept.
     assert.match(hook, /VIEWS \(" \+ swept \+ " OF "/);
-    assert.match(mobile, /"VIEWS \(" \+ \(t\.views_rows \|\| 0\)/);
+    assert.match(mobile, /"Views \(" \+ \(t\.views_rows \|\| 0\)/);
   });
 
   test("nothing on this surface fetches views live any more", () => {
