@@ -1201,10 +1201,11 @@ def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
         assert m["ringAnimation"] == "none", (
             "{}: the progress ring is still spinning ({!r}) on a job PixAI has not started -- "
             "motion is what reads as work in progress".format(host, m["ringAnimation"]))
-        assert m["pillText"] == "queued", (
+        # The owner's unslop pick 1C (2026-11-03): state labels are sentence case, not uppercased by CSS.
+        assert m["pillText"] == "Queued", (
             "{}: phase pill reads {!r}".format(host, m["pillText"]))
-        assert m["pillTransform"] == "uppercase", (
-            "{}: the phase pill is not styled as a state label ({!r})".format(
+        assert m["pillTransform"] == "none", (
+            "{}: the phase pill is uppercased again ({!r}); labels are sentence case".format(
                 host, m["pillTransform"]))
         assert m["etaText"] == "est. 27s wait", (
             "{}: estimate chip reads {!r}".format(host, m["etaText"]))
@@ -9351,7 +9352,7 @@ def test_continuous_mounts_at_most_five_pages_with_exact_spacers_and_the_viewer_
         for _ in range(99):
             page.keyboard.press("ArrowRight")
         page.wait_for_function("() => document.querySelector('.lbm-index').textContent === '100'")
-        assert page.locator(".lbm-total").inner_text() == "OF 620"
+        assert page.locator(".lbm-total").inner_text() == "of 620"
         reads = len(_u_libs(seen))
         page.click(".lbm-next")
         page.wait_for_function("() => document.querySelector('.lbm-index').textContent === '101'")
@@ -9505,7 +9506,7 @@ def test_pages_range_select_reaches_pictures_not_loaded_and_the_confirm_counts_t
         assert not page.locator(".glm-pill-accent:has-text('Actions')").is_disabled()
         page.click(".glm-pill-accent:has-text('Actions')")
         page.wait_for_selector(".glm-sheet")
-        assert page.locator(".glm-sheet-title").first.inner_text().startswith("241 SELECTED")
+        assert page.locator(".glm-sheet-title").first.inner_text().startswith("241 selected")
         page.wait_for_selector(".glm-rangecard", state="detached", timeout=6000)
     finally:
         ctx.close()
@@ -9578,7 +9579,7 @@ def test_the_home_screen_nudge_shows_once_after_sign_in_on_ios_safari_with_a_bub
                     arrow: document.querySelector('.mgnudge-arrow').textContent, below: arrow.top >= card.bottom - 0.5,
                     centred: Math.abs((arrow.left + arrow.right) / 2 - innerWidth / 2) < 2}; }""")
         assert abs(b["gap"] - 12) < 1 and b["arrow"] == "▼" and b["below"] and b["centred"], b
-        assert b["text"] == 'Tap ⬆ below, then "Add to Home Screen".', b
+        assert b["text"] == 'Tap Share below, then "Add to Home Screen".', b
         page.mouse.click(195, 420)
         page.wait_for_selector(".mgnudge-bubble", state="detached")
 
@@ -9593,7 +9594,7 @@ def test_the_home_screen_nudge_shows_once_after_sign_in_on_ios_safari_with_a_bub
             return {top: r.top, arrow: document.querySelector('.mgnudge-arrow').textContent, above: arrow.bottom <= card.top + 0.5,
                     text: document.querySelector('.mgnudge-card').textContent}; }""")
         assert abs(t["top"] - 12) < 1 and t["arrow"] == "▲" and t["above"], t
-        assert t["text"] == 'Tap ⬆ above, then "Add to Home Screen".', t
+        assert t["text"] == 'Tap Share above, then "Add to Home Screen".', t
         page.wait_for_selector(".mgnudge-bubble", state="detached", timeout=9500)
         page.set_viewport_size(PHONE)
 
@@ -9746,6 +9747,7 @@ _RF_DOORS_JS = """() => {
           icon: (() => { const i = inbox.querySelector('.ib-inboxic'); if (!i) return null;
             const b = i.getBoundingClientRect(); return {w: b.width, h: b.height, bg: getComputedStyle(i).backgroundImage}; })(),
           glyph: (inbox.querySelector('.ib-inboxglyph') || {}).textContent || '',
+          glyphIcon: !!inbox.querySelector('.ib-inboxglyph svg'),
           inboxBadgeBg: inbox.querySelector('.ib-badge') && getComputedStyle(inbox.querySelector('.ib-badge')).backgroundColor,
           giftBadgeBg: gift.querySelector('.ib-badge') && getComputedStyle(gift.querySelector('.ib-badge')).backgroundColor,
           giftArt: getComputedStyle(gift).backgroundImage, inboxArt: getComputedStyle(inbox).backgroundImage};
@@ -9899,7 +9901,8 @@ _RF_ROW_ICON_JS = """() => {
   const box = (el) => { if (!el) return null; const b = el.getBoundingClientRect();
     return {w: Math.round(b.width), h: Math.round(b.height), bg: getComputedStyle(el).backgroundImage}; };
   return {inbox: box(rows[0].querySelector('.ib-inboxic')), gift: box(rows[1].querySelector('.ib-giftic')),
-          glyph: (rows[0].querySelector('.ib-inboxglyph') || {}).textContent || ''};
+          glyph: (rows[0].querySelector('.ib-inboxglyph') || {}).textContent || '',
+          glyphIcon: !!rows[0].querySelector('.ib-inboxglyph svg')};
 }"""
 
 
@@ -10071,14 +10074,15 @@ def test_the_inbox_picture_falls_back_to_the_envelope_and_the_pack_copy_wins_whe
     page, _ = _rf_desktop(logged_in_page, init=_RF_BREAK_WEBP_JS)
     page.wait_for_selector(".ib-door.inbox .ib-inboxglyph")
     g = page.evaluate(_RF_DOORS_JS)
-    assert g["glyph"] == "✉" and g["icon"] is None, g
+    # the fallback is the line-set mail icon since the owner's unslop pick 2B (2026-11-03), not the ✉ glyph
+    assert g["glyphIcon"] and g["glyph"] == "" and g["icon"] is None, g
     page.context.close()
 
     page, _ = _rf_phone(logged_in_page, init=_RF_BREAK_WEBP_JS)
     page.click(".glm-iconbtn[title=More]")
     page.wait_for_selector(".glm-menu-item .ib-inboxglyph")
     ic = page.evaluate(_RF_ROW_ICON_JS)
-    assert ic["glyph"] == "✉" and ic["inbox"] is None, ic
+    assert ic["glyphIcon"] and ic["glyph"] == "" and ic["inbox"] is None, ic
     page.context.close()
 
     # the pack has it: the pack's copy, asked for once
