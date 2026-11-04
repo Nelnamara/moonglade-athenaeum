@@ -15,23 +15,23 @@
 /* ---- the Random | Matrix row (page: modeOpts, countOpts, ⚄ Reroll, sendSummary) ---- */
 .mgrun-moderow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   padding-top: 8px; margin-top: 6px; border-top: 1px solid color-mix(in srgb, var(--surface1) 60%, transparent); }
-.mgrun-seg { display: flex; gap: 3px; padding: 3px; border-radius: 9px; border: 1px solid var(--surface1); }
+.mgrun-seg { display: flex; gap: 3px; padding: 3px; border-radius: var(--radius-control); border: 1px solid var(--surface1); }
 .mgrun-seg button { font: inherit; font-size: 10.5px; font-weight: 600; padding: 4px 10px;
-  border-radius: 6px; cursor: pointer; border: 0; background: transparent; color: var(--subtext); }
+  border-radius: 7px; cursor: pointer; border: 0; background: transparent; color: var(--subtext); }
 .mgrun-seg button.on { background: var(--lavender); color: var(--base); }
 .mgrun-seg button:disabled { opacity: .45; cursor: not-allowed; }
-.mgrun-reroll { font: inherit; font-size: 10.5px; padding: 5px 9px; border-radius: 8px;
+.mgrun-reroll { font: inherit; font-size: 10.5px; padding: 5px 9px; border-radius: var(--radius-control-sm);
   border: 1px solid var(--surface1); background: transparent; color: var(--subtext); cursor: pointer; }
 .mgrun-summary { flex: 1 1 auto; min-width: 160px; font-size: 10.5px; color: var(--subtext); }
 .mgrun-summary.bad { color: var(--peach); }
-.mgrun-lists { font: inherit; font-size: 10.5px; font-weight: 700; padding: 5px 10px;
+.mgrun-lists { font: inherit; font-size: 10.5px; font-weight: 600; padding: 5px 10px;
   border-radius: 8px; border: 1px solid var(--surface1); background: transparent;
   color: var(--subtext); cursor: pointer; }
 .mgrun-lists.on { border-color: var(--lavender); color: var(--text); }
 
 /* ---- the preview rows ("PREVIEW · what each image will get") ---- */
 .mgrun-preview { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; }
-.mgrun-prevlbl { font-size: 9px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); }
+.mgrun-prevlbl { font-size: 11px; font-weight: 500; letter-spacing: normal; color: var(--overlay0); }
 .mgrun-prevrow { font-size: 10px; line-height: 1.5; color: var(--subtext);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -43,7 +43,7 @@
   background: color-mix(in srgb, var(--gold) 6%, transparent); }
 .mgrun-confirm.err { border-color: color-mix(in srgb, var(--peach) 55%, transparent);
   background: color-mix(in srgb, var(--peach) 6%, transparent); }
-.mgrun-ctitle { font-size: 13px; font-weight: 700; color: var(--text); }
+.mgrun-ctitle { font-size: 13px; font-weight: 600; color: var(--text); }
 .mgrun-ccredits { font-size: 11.5px; color: var(--gold);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .mgrun-ccards { font-size: 10.5px; color: var(--subtext); }
@@ -51,10 +51,10 @@
 .mgrun-cmoved { font-size: 10.5px; color: var(--peach); }
 .mgrun-cerr { font-size: 11px; color: var(--peach); }
 .mgrun-cbtns { display: flex; gap: 6px; flex-wrap: wrap; }
-.mgrun-cgo { font: inherit; font-size: 11px; font-weight: 700; padding: 7px 14px; border-radius: 8px;
+.mgrun-cgo { font: inherit; font-size: 11px; font-weight: 600; padding: 7px 14px; border-radius: var(--radius-control);
   border: 0; background: var(--lavender); color: var(--base); cursor: pointer; }
 .mgrun-cgo:disabled { background: var(--surface0); color: var(--overlay0); cursor: not-allowed; }
-.mgrun-ccancel { font: inherit; font-size: 11px; font-weight: 600; padding: 7px 14px; border-radius: 8px;
+.mgrun-ccancel { font: inherit; font-size: 11px; font-weight: 600; padding: 7px 14px; border-radius: var(--radius-control);
   border: 1px solid var(--surface1); background: transparent; color: var(--subtext); cursor: pointer; }
 
 /* ---- the Lists sheet (page M1: a name and one item per line, saved to the account) ---- */
@@ -62,14 +62,14 @@
   border-radius: 12px; border: 1px solid var(--lavender); background: var(--mantle); }
 .mgrun-sheetrow { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .mgrun-sheet input, .mgrun-sheet textarea { font: inherit; font-size: 11px; padding: 5px 8px;
-  border-radius: 7px; border: 1px solid var(--surface1); background: var(--base); color: var(--text);
+  border-radius: var(--radius-control-sm); border: 1px solid var(--surface1); background: var(--base); color: var(--text);
   outline: none; box-sizing: border-box; }
 .mgrun-sheet textarea { width: 100%; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .mgrun-chip { font: inherit; font-size: 10.5px; padding: 3px 9px; border-radius: 999px;
   border: 1px solid var(--surface1); background: transparent; color: var(--subtext); cursor: pointer; }
 .mgrun-chip.on { border-color: var(--lavender); color: var(--text);
   background: color-mix(in srgb, var(--lavender) 16%, transparent); }
-.mgrun-save { font: inherit; font-size: 10.5px; font-weight: 700; padding: 5px 10px; border-radius: 7px;
+.mgrun-save { font: inherit; font-size: 10.5px; font-weight: 600; padding: 5px 10px; border-radius: var(--radius-control-sm);
   border: 0; background: var(--lavender); color: var(--base); cursor: pointer; }
 .mgrun-save:disabled { background: var(--surface0); color: var(--overlay0); cursor: not-allowed; }
 .mgrun-sheetmsg { font-size: 10px; color: var(--subtext); }
@@ -84,8 +84,8 @@
   width: min(480px, calc(100vw - 32px)); max-height: calc(100vh - 184px); overflow: auto;
   box-sizing: border-box; background: var(--mantle); box-shadow: 0 20px 50px rgba(0, 0, 0, .45); }
 .mgrun-insphead { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.mgrun-insptitle { flex: 1; font-size: 9px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); }
-.mgrun-copy { font: inherit; font-size: 10px; font-weight: 700; padding: 4px 10px; border-radius: 7px;
+.mgrun-insptitle { flex: 1; font-size: 11px; font-weight: 500; letter-spacing: normal; color: var(--overlay0); }
+.mgrun-copy { font: inherit; font-size: 10px; font-weight: 600; padding: 4px 10px; border-radius: var(--radius-control-sm);
   border: 0; background: var(--lavender); color: var(--base); cursor: pointer; }
 /* review S3: the shell the Copy as CLI command is quoted for, beside the button */
 .mgrun-inspshell { font-size: 9.5px; color: var(--overlay0); white-space: nowrap; }
@@ -98,7 +98,7 @@
 .mgrun-inspfoot { font-size: 9.5px; color: var(--overlay0); }
 .mgrun-inspmeta { font-size: 10px; color: var(--subtext); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   white-space: pre-wrap; word-break: break-word; }
-.mgrun-inspbtn { font: inherit; font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 7px;
+.mgrun-inspbtn { font: inherit; font-size: 10.5px; font-weight: 600; padding: 3px 9px; border-radius: var(--radius-control-sm);
   border: 1px solid var(--surface1); background: transparent; color: var(--subtext); cursor: pointer;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .mgrun-inspbtn.on { border-color: var(--lavender); color: var(--text); }
@@ -123,7 +123,7 @@
   background: color-mix(in srgb, var(--base) 74%, transparent); }
 
 /* ---- the composer's { } Inspect toggle ---- */
-.mgrun-inspect-toggle { font: inherit; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 7px;
+.mgrun-inspect-toggle { font: inherit; font-size: 10px; font-weight: 600; padding: 3px 8px; border-radius: var(--radius-control-sm);
   border: 1px solid var(--surface1); background: transparent; color: var(--subtext); cursor: pointer;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
 .mgrun-inspect-toggle.on { border-color: var(--lavender); color: var(--text); }

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import "../styles/account-detail.css";
 import { apiGet } from "../api.js";
 import { cardLogRow } from "../lib/cardLog.js";
@@ -115,11 +116,11 @@ export default function AccountSubOverlay({ onClose }) {
 
           {/* Balance strip */}
           <div className="acct-balance">
-            <div><div className="acct-bignum accent">{acct ? nfmt(acct.credits) : "…"}</div><div className="acct-kick">credits</div></div>
-            <div><div className={"acct-splitnum" + (splitUnknown ? " unknown" : "")}>{splitUnknown ? "— unknown" : nfmt(acct && acct.credits_paid)}</div><div className="acct-kick">of which paid</div></div>
-            <div><div className={"acct-splitnum" + (splitUnknown ? " unknown" : "")}>{splitUnknown ? "— unknown" : nfmt(acct && acct.credits_free)}</div><div className="acct-kick">of which free</div></div>
-            <div><div className="acct-midnum">{acct ? nfmt(acct.cards) : "…"}</div><div className="acct-kick">free cards on hand</div></div>
-            <div><div className="acct-midnum">{coupCount == null ? "…" : coupCount}</div><div className="acct-kick">coupons</div></div>
+            <div><div className="acct-bignum accent">{acct ? nfmt(acct.credits) : "…"}</div><div className="acct-kick">Credits</div></div>
+            <div><div className={"acct-splitnum" + (splitUnknown ? " unknown" : "")}>{splitUnknown ? "— unknown" : nfmt(acct && acct.credits_paid)}</div><div className="acct-kick">Of which paid</div></div>
+            <div><div className={"acct-splitnum" + (splitUnknown ? " unknown" : "")}>{splitUnknown ? "— unknown" : nfmt(acct && acct.credits_free)}</div><div className="acct-kick">Of which free</div></div>
+            <div><div className="acct-midnum">{acct ? nfmt(acct.cards) : "…"}</div><div className="acct-kick">Free cards on hand</div></div>
+            <div><div className="acct-midnum">{coupCount == null ? "…" : coupCount}</div><div className="acct-kick">Coupons</div></div>
             {/* FOLLOWERS / FOLLOWING (owner, 2026-09-06 -- "BOTH beside the credits chip
                 and in the account popup"). Two more cells in the strip that is already
                 here, in the strip's own .acct-midnum/.acct-kick idiom; both numbers ride
@@ -130,11 +131,11 @@ export default function AccountSubOverlay({ onClose }) {
                 "—" rather than 0 when the account read could not answer. */}
             <div>
               <div className="acct-midnum">{acct ? (acct.followers == null ? "—" : nfmt(acct.followers)) : "…"}</div>
-              <div className="acct-kick">followers</div>
+              <div className="acct-kick">Followers</div>
             </div>
             <div>
               <div className="acct-midnum">{acct ? (acct.following == null ? "—" : nfmt(acct.following)) : "…"}</div>
-              <div className="acct-kick">following</div>
+              <div className="acct-kick">Following</div>
             </div>
           </div>
 
@@ -146,7 +147,7 @@ export default function AccountSubOverlay({ onClose }) {
           </div>
 
           <div className="acct-body">
-            {err && <div className="acct-err">⚠ {err}</div>}
+            {err && <div className="acct-err"><Icon name="warning" /> {err}</div>}
 
             {tab === "cards" && (
               <>

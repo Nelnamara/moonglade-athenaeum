@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import { apiGet, apiPost } from "../api.js";
 import { invalidate, peek, put } from "../hooks/swrCache.js";
 import "../styles/overlays.css";
@@ -231,13 +232,13 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
                 <div className="mgpub-gloss" />
               </div>
               <div className="mgpub-srcrow">
-                <span className="k">SOURCE</span>
+                <span className="k">Source</span>
                 <span className="v">{srcLabel || (mid ? "loading…" : "nothing picked yet")}</span>
               </div>
               {/* DC L314-321 -- the inline strip, at the DC's own geometry (52px tall,
                   width from the image's aspect, accent outline on the selected one),
                   carrying real recent art instead of blank swatches. */}
-              <div className="mgpub-pickhead">CHOOSE A DIFFERENT IMAGE</div>
+              <div className="mgpub-pickhead">Choose a different image</div>
               <div className="mgpub-strip">
                 {strip.map((s) => {
                   const w = Math.round(52 * ((s.w || 1) / (s.h || 1)));
@@ -252,7 +253,7 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
                 })}
               </div>
               <button type="button" className="mgpub-browse" onClick={() => setPicking(true)}>
-                🖼 Browse the whole library…
+                <Icon name="image" /> Browse the whole library…
               </button>
               {already ? (
                 <div className="mgpub-note warn">
@@ -332,7 +333,7 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
               {contests.length > 0 && (
                 <>
                   <div className="mgpub-ctrow">
-                    <span className="k">CONTEST</span>
+                    <span className="k">Contest</span>
                     <span className="opt">optional</span>
                   </div>
                   {picked ? (
@@ -345,7 +346,7 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
                           {ctLeft && !ctLeft.over ? " · " + ctLeft.text : ""}
                         </div>
                       </div>
-                      <span className="mgpub-cttrack">⚔ counts toward The Arena</span>
+                      <span className="mgpub-cttrack"><Icon name="swords" /> counts toward The Arena</span>
                       <button type="button" className="mgpub-ctclear" title="Not entering a contest"
                         onClick={() => setContest("")}>×</button>
                     </div>
@@ -353,7 +354,7 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
                     <div className="mgpub-ctmenu">
                       <button type="button" className="mgpub-ctempty"
                         onClick={() => setCtOpen(!ctOpen)}>
-                        <span className="glyph">🏅</span>
+                        <span className="glyph"><Icon name="medal" /></span>
                         <span style={{ flex: 1, minWidth: 0 }}>
                           <span className="t">Not entering a contest</span>
                           <span className="s" style={{ display: "block" }}>
@@ -383,7 +384,7 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
                 <span>Hide the prompt from other people</span>
               </label>
 
-              {err && <div className="mgpub-note err">⚠ {err}</div>}
+              {err && <div className="mgpub-note err"><Icon name="warning" /> {err}</div>}
 
               {done ? (
                 <>
@@ -400,7 +401,7 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
                       would be the same quiet lie this whole fix exists to end. */}
                   {done.entry_error ? (
                     <div className="mgpub-note err">
-                      ⚠ Published — but the contest entry failed: {done.entry_error}. You can
+                      <Icon name="warning" /> Published — but the contest entry failed: {done.entry_error}. You can
                       still enter it from the Contests window.
                     </div>
                   ) : null}
@@ -435,7 +436,7 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
                           </div>
                         </div>
                         <span className={"mgct-badge " + ((picked.type || "") === "official" ? "official" : "community")}>
-                          {(picked.type || "") === "official" ? "☀ OFFICIAL" : "🤝 COMMUNITY"}
+                          {(picked.type || "") === "official" ? <><Icon name="sun" /> Official</> : <><Icon name="community" /> Community</>}
                         </span>
                       </div>
                     </>

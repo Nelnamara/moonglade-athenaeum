@@ -244,8 +244,8 @@ describe("followers and following reach BOTH surfaces the owner asked for", () =
 
   test("the account popup puts them in the balance strip it already had", () => {
     const strip = acct.slice(acct.indexOf("acct-balance"), acct.indexOf("acct-tabs"));
-    assert.match(strip, /acct-kick">followers</);
-    assert.match(strip, /acct-kick">following</);
+    assert.match(strip, /acct-kick">Followers</);
+    assert.match(strip, /acct-kick">Following</);
     assert.match(strip, /acct-midnum/);      // the strip's own idiom, no new class
   });
 });
@@ -261,7 +261,7 @@ describe("My Art draws the numbers it was already fetching", () => {
       // It was fetched for every card and summed into the COMMENTS stat, and never once
       // reached a card (MyArtOverlay drew likes only). Same glyph the app uses for a
       // comment count everywhere else.
-      assert.match(shell, /💬 \{fmt\(it\.comments\)\}/);
+      assert.match(shell, name === "desktop" ? /<Icon name="comment" \/> \{fmt\(it\.comments\)\}/ : /💬 \{fmt\(it\.comments\)\}/);
       assert.match(shell, /commentCol\(it\.comments\)/);
     });
 

@@ -303,7 +303,7 @@ export default function RecipeCreator({ creator, onClose, onBack, phone }) {
     <>
       {step === 1 && (
         <div className="rcp-cbody">
-          <div className="rcp-klabel"><span className="rcp-kicker">MODEL</span><span className="rcp-req">required</span></div>
+          <div className="rcp-klabel"><span className="rcp-kicker">Model</span><span className="rcp-req">required</span></div>
           <div className={"rcp-modelcard" + (draft.model.model_id ? " on" : "")}>
             <span className="rcp-modelcard-ic" aria-hidden="true">⁂</span>
             <span className="rcp-modelcard-t"><b>{draft.model.title || (draft.model.model_type ? modelTypeLabel(draft.model.model_type) : "No model yet")}</b>
@@ -314,7 +314,7 @@ export default function RecipeCreator({ creator, onClose, onBack, phone }) {
           {picker === "model" && (
             <div className="rcp-embed"><ModelPicker kind="base" market onPick={pickModel} style={{ height: phone ? "56dvh" : "340px" }} /></div>
           )}
-          <div className="rcp-klabel"><span className="rcp-kicker">CATEGORY</span><span className="rcp-req">required</span><span className="rcp-flex" /><span className="rcp-fine">how people find it in the market</span></div>
+          <div className="rcp-klabel"><span className="rcp-kicker">Category</span><span className="rcp-req">required</span><span className="rcp-flex" /><span className="rcp-fine">how people find it in the market</span></div>
           <div className="rcp-cats">
             {CATEGORIES.map(([k, label, hint]) => (
               <button key={k} type="button" className={"rcp-cat" + (draft.category === k ? " on" : "")} onClick={() => change({ category: k })} aria-pressed={draft.category === k}>
@@ -332,7 +332,7 @@ export default function RecipeCreator({ creator, onClose, onBack, phone }) {
             <div className="rcp-peach rcp-fine">{neededLine(need1)} · <button type="button" className="rcp-link" onClick={() => setStep(1)}>pick it in step 1</button></div>
           )}
           {prefillNote && <div className="rcp-peach rcp-fine">{prefillNote}</div>}
-          <div className="rcp-klabel"><span className="rcp-kicker">INGREDIENTS</span><span className="rcp-req">required</span></div>
+          <div className="rcp-klabel"><span className="rcp-kicker">Ingredients</span><span className="rcp-req">required</span></div>
           {capErr && <div className="rcp-peach rcp-fine">{capErr}</div>}
           {draft.ingredients.map((g, i) => (
             <Ingredient key={i} g={g} i={i} n={draft.ingredients.length} caps={caps} wr={wr} plim={plim}
@@ -348,7 +348,7 @@ export default function RecipeCreator({ creator, onClose, onBack, phone }) {
             <button type="button" className="rcp-dashed" onClick={() => setKindOpen((v) => !v)}>+ Add ingredient</button>
             {kindOpen && (
               <div className="rcp-kindmenu" role="menu">
-                <div className="rcp-kicker">+ ADD INGREDIENT · {modelTitle.toUpperCase()} ALLOWS</div>
+                <div className="rcp-kicker">+ Add ingredient · {modelTitle} allows</div>
                 {menu.map((k) => (
                   <button key={k.type} type="button" role="menuitem" className={"rcp-kindrow" + (k.off ? " off" : "")}
                     disabled={!!k.off} onClick={() => addKind(k)} title={k.off || ""}>
@@ -361,7 +361,7 @@ export default function RecipeCreator({ creator, onClose, onBack, phone }) {
             )}
           </div>
 
-          <div className="rcp-klabel"><span className="rcp-kicker">TEST THIS RECIPE</span><span className="rcp-flex" /><span className="rcp-mono rcp-fine">{tests} / {TEST_LIMIT} tests</span></div>
+          <div className="rcp-klabel"><span className="rcp-kicker">Test this recipe</span><span className="rcp-flex" /><span className="rcp-mono rcp-fine">{tests} / {TEST_LIMIT} tests</span></div>
           <div className="rcp-testbox">
             <textarea value={t.prompt || ""} maxLength={plim} rows={3} placeholder="A prompt to test it with"
               onChange={(e) => change((d) => ({ test: { ...d.test, prompt: e.target.value } }))} aria-label="Test prompt" />
@@ -398,7 +398,7 @@ export default function RecipeCreator({ creator, onClose, onBack, phone }) {
           {testMsg && <div className="rcp-peach rcp-fine">{testMsg}</div>}
           <div className="rcp-strip rcp-fine">Test results land here.</div>
 
-          <div className="rcp-klabel"><span className="rcp-kicker">SHOWCASE</span><span className="rcp-req">required</span><span className="rcp-flex" />
+          <div className="rcp-klabel"><span className="rcp-kicker">Showcase</span><span className="rcp-req">required</span><span className="rcp-flex" />
             <button type="button" className="rcp-link rcp-fine" onClick={addShowcase}>from history or the gallery</button></div>
           <div className="rcp-showcase">
             {Array.from({ length: Math.max(SHOWCASE_MIN, Math.min(SHOWCASE_MAX, draft.showcase.length + 1)) }, (_, k) => {
@@ -421,12 +421,12 @@ export default function RecipeCreator({ creator, onClose, onBack, phone }) {
         <div className="rcp-cbody">
           <div className="rcp-namecover">
             <div className="rcp-namecol">
-              <div className="rcp-klabel"><span className="rcp-kicker">TITLE</span><span className="rcp-req">required</span><span className="rcp-flex" /><span className="rcp-mono rcp-fine">{(draft.title || "").length} / {TITLE_MAX}</span></div>
+              <div className="rcp-klabel"><span className="rcp-kicker">Title</span><span className="rcp-req">required</span><span className="rcp-flex" /><span className="rcp-mono rcp-fine">{(draft.title || "").length} / {TITLE_MAX}</span></div>
               <input className="rcp-in" value={draft.title} maxLength={TITLE_MAX} onChange={(e) => change({ title: e.target.value })} aria-label="Title" />
-              <div className="rcp-klabel"><span className="rcp-kicker">DESCRIPTION</span><span className="rcp-flex" /><span className="rcp-mono rcp-fine">{fmt((draft.description || "").length)} / {fmt(DESCRIPTION_MAX)}</span></div>
+              <div className="rcp-klabel"><span className="rcp-kicker">Description</span><span className="rcp-flex" /><span className="rcp-mono rcp-fine">{fmt((draft.description || "").length)} / {fmt(DESCRIPTION_MAX)}</span></div>
               <textarea className="rcp-in" rows={3} value={draft.description} maxLength={DESCRIPTION_MAX} placeholder="What it does, and when to reach for it"
                 onChange={(e) => change({ description: e.target.value })} aria-label="Description" />
-              <div className="rcp-kicker">COVER</div>
+              <div className="rcp-kicker">Cover</div>
               <div className="rcp-covers">
                 {draft.showcase.map((s, k) => {
                   const on = (draft.cover || (draft.showcase[0] && draft.showcase[0].media_id)) === s.media_id;
@@ -450,7 +450,7 @@ export default function RecipeCreator({ creator, onClose, onBack, phone }) {
               </div>
             </div>
           </div>
-          <div className="rcp-kicker">WHO CAN USE IT</div>
+          <div className="rcp-kicker">Who can use it</div>
           <div className="rcp-vis">
             {vis.map((v) => (
               <button key={v.key} type="button" className={"rcp-visrow" + (draft.preset === v.key ? " on" : "") + (v.off ? " off" : "")}

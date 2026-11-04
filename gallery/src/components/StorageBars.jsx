@@ -21,7 +21,7 @@ export default function StorageBars({ storage, onPick, compact }) {
   return (
     <section className={"mgcu-stor" + (compact ? " compact" : "")} aria-label="Storage used">
       <div className="mgcu-stor-hd">
-        <div className="mgcu-stor-cap">STORAGE USED</div>
+        <div className="mgcu-stor-cap">Storage used</div>
         <div className="mgcu-stor-total">{storage.total_h}</div>
         <div className="mgcu-stor-hint">{compact ? "tap" : "click"} a segment to filter the library to it</div>
       </div>

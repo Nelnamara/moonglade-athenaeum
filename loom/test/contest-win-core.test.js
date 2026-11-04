@@ -199,7 +199,7 @@ describe("the surfaces are wired to it", () => {
 
   test("the winners strip says tier, not a numbered place", () => {
     const src = read("components/ContestDetail.jsx");
-    assert.match(src, /"TIER " \+ Number\(n\)/);
+    assert.match(src, /"Tier " \+ Number\(n\)/);
     assert.ok(!/"TH"|\["TH", "ST", "ND", "RD"\]/.test(src), "the ordinal suffix table is gone");
   });
 });

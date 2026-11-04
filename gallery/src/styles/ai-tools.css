@@ -23,21 +23,21 @@ html.mg-noblur .mgai-scrim {
 /* header */
 .mgai-head { display: flex; align-items: center; gap: 12px; padding: 15px 18px; flex-wrap: wrap;
   border-bottom: 1px solid var(--surface1); background: rgba(12, 10, 28, .5); }
-.mgai-title { font-size: 16px; font-weight: 800; color: var(--text); }
-.mgai-armed { font-size: 10px; font-weight: 700; color: var(--emerald); white-space: nowrap;
+.mgai-title { font-size: 16px; font-weight: 600; color: var(--text); }
+.mgai-armed { font-size: 10px; font-weight: 600; color: var(--emerald); white-space: nowrap;
   background: color-mix(in oklab, var(--emerald) 13%, transparent);
   border: 1px solid color-mix(in oklab, var(--emerald) 32%, transparent); border-radius: 999px; padding: 3px 9px; }
 .mgai-search { flex: 1 1 auto; min-width: 140px; max-width: 320px; display: flex; align-items: center; gap: 8px;
-  background: rgba(12, 10, 28, .8); border: 1px solid var(--surface1); border-radius: 10px; padding: 7px 11px; }
+  background: rgba(12, 10, 28, .8); border: 1px solid var(--surface1); border-radius: var(--radius-control); padding: 7px 11px; }
 .mgai-search span { color: var(--overlay0); font-size: 13px; }
 .mgai-search input { flex: 1 1 auto; min-width: 0; background: none; border: none; outline: none; color: var(--text);
   font: inherit; font-size: 12.5px; }
 .mgai-search input::placeholder { color: var(--overlay0); }
-.mgai-tiers { display: flex; gap: 4px; padding: 3px; border-radius: 9px; background: rgba(12, 10, 28, .6); border: 1px solid var(--surface1); }
+.mgai-tiers { display: flex; gap: 4px; padding: 3px; border-radius: var(--radius-control); background: rgba(12, 10, 28, .6); border: 1px solid var(--surface1); }
 .mgai-tier { padding: 6px 12px; border-radius: 7px; font-size: 11px; font-weight: 500; cursor: pointer; border: none;
   font-family: inherit; color: var(--subtext); background: transparent; }
-.mgai-tier.on { font-weight: 700; color: #14102a; background: var(--lavender); }
-.mgai-x { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; cursor: pointer;
+.mgai-tier.on { font-weight: 600; color: #14102a; background: var(--lavender); }
+.mgai-x { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: var(--radius-control); cursor: pointer;
   border: 1px solid var(--surface1); background: transparent; color: var(--subtext); font-size: 13px; font-family: inherit;
   transition: border-color .16s, color .16s; }
 .mgai-x:hover { border-color: var(--lavender); color: var(--text); }
@@ -86,16 +86,16 @@ html.mg-noblur .mgai-scrim {
 /* the initial is the FALLBACK, so it steps aside the moment real art lands -- with contain
    it would otherwise show through the letterbox margins beside the picture */
 .mgai-art.has-art .mgai-initial { display: none; }
-.mgai-tierbadge { position: absolute; top: 7px; left: 7px; font-family: ui-monospace, monospace; font-size: 8px;
-  font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--mauve);
+.mgai-tierbadge { position: absolute; top: 7px; left: 7px; font-family: ui-monospace, monospace; font-size: 11px;
+  font-weight: 500; letter-spacing: normal; text-transform: none; color: var(--mauve);
   background: rgba(20, 14, 42, .85); border: 1px solid color-mix(in oklab, var(--mauve) 40%, transparent);
   border-radius: 5px; padding: 2px 6px; }
 .mgai-meta { padding: 9px 11px; display: flex; flex-direction: column; gap: 3px; }
-.mgai-name { font-size: 12px; font-weight: 800; color: var(--text); line-height: 1.2; }
+.mgai-name { font-size: 12px; font-weight: 600; color: var(--text); line-height: 1.2; }
 /* the control chip, pinned top-right OVER the art (comp A4 181). Its colour is the hue
    law for that control type -- set inline from SHAPE, so the border/tint follow it. */
-.mgai-chip { position: absolute; top: 7px; right: 7px; font-family: ui-monospace, monospace; font-size: 8px;
-  font-weight: 800; letter-spacing: .06em; text-transform: uppercase; padding: 2px 6px; border-radius: 5px;
+.mgai-chip { position: absolute; top: 7px; right: 7px; font-family: ui-monospace, monospace; font-size: 11px;
+  font-weight: 500; letter-spacing: normal; text-transform: none; padding: 2px 6px; border-radius: 5px;
   white-space: nowrap; background: rgba(5, 4, 13, .72); border: 1px solid; }
 .mgai-detail { font-size: 10.5px; color: var(--subtext); line-height: 1.4; }
 .mgai-empty { grid-column: 1 / -1; text-align: center; color: var(--overlay0); font-size: 13px; padding: 40px 0; }

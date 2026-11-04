@@ -1,4 +1,5 @@
 import React from "react";
+import Icon from "../icons/Icons.jsx";
 import useHealth, { fmt } from "../hooks/useHealth.js";
 import useBrokenFiles from "../hooks/useBrokenFiles.js";
 import StorageBars from "./StorageBars.jsx";
@@ -100,7 +101,7 @@ export default function HealthOverlay({ onClose, onModelFilter, onTagFilter, onL
       <div className="mgv-host">
         <div className="mgv-slab" role="dialog" aria-label="Collection Health">
           <div className="mgv-titlerow">
-            <div className="mgv-title">♡ Collection Health</div>
+            <div className="mgv-title"><Icon name="pulse" /> Collection Health</div>
             <button type="button" className="mgv-x" onClick={onClose} aria-label="Close">×</button>
           </div>
 
@@ -226,7 +227,7 @@ export default function HealthOverlay({ onClose, onModelFilter, onTagFilter, onL
                       <div className="mgh-donuthole">
                         <div>
                           <div className="mgh-donuttotal">{fmt(d.total)}</div>
-                          <div className="mgh-donutlab">TAGGED</div>
+                          <div className="mgh-donutlab">Tagged</div>
                         </div>
                       </div>
                     </div>

@@ -53,7 +53,7 @@ html.mg-noblur .mgss-scrim {
    series". The app's standard mono kicker -- 11px, .1em, uppercase, --overlay0 (see
    .wz-kicker, .mgdock-lbl, .fm-titlechip) -- so it reads as a label, not a title. */
 .mgss-kicker { flex: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  font-size: 13px; font-weight: 500; letter-spacing: normal; text-transform: none;
   color: var(--overlay0); white-space: nowrap; }
 .mgss-title { font-family: Georgia, "Times New Roman", serif; font-style: italic;
   font-size: 17px; color: var(--text); white-space: nowrap;
@@ -62,20 +62,20 @@ html.mg-noblur .mgss-scrim {
   font-size: 9.5px; color: var(--overlay0); white-space: nowrap; }
 .mgss-sp { flex: 1 1 auto; }
 
-.mgss-segs { flex: none; display: flex; gap: 2px; padding: 2px; border-radius: 8px;
+.mgss-segs { flex: none; display: flex; gap: 2px; padding: 2px; border-radius: var(--radius-control);
   border: 1px solid var(--surface1);
   background: color-mix(in oklab, var(--base) 70%, transparent); }
-.mgss-seg { padding: 5px 11px; border: 0; border-radius: 6px; cursor: pointer;
+.mgss-seg { padding: 5px 11px; border: 0; border-radius: 8px; cursor: pointer;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 9.5px; font-weight: 600; letter-spacing: .06em; white-space: nowrap;
+  font-size: 11.5px; font-weight: 500; letter-spacing: normal; white-space: nowrap;
   color: var(--subtext); background: transparent; transition: background .18s, color .18s; }
 .mgss-seg:hover { color: var(--text); }
-.mgss-seg.on, .mgss-seg.on:hover { font-weight: 800;
+.mgss-seg.on, .mgss-seg.on:hover { font-weight: 600;
   color: var(--mantle); background: var(--lavender); }
 
 .mgss-esc { flex: none; font-size: 11px; color: var(--overlay0); white-space: nowrap; }
 .mgss-x { flex: none; width: 26px; height: 26px; padding: 0; display: grid; place-items: center;
-  border-radius: 8px; border: 1px solid var(--surface1); background: transparent;
+  border-radius: var(--radius-control); border: 1px solid var(--surface1); background: transparent;
   color: var(--subtext); font-size: 12px; font-family: inherit; cursor: pointer;
   transition: color .18s, border-color .18s; }
 .mgss-x:hover { color: var(--text); border-color: var(--lavender); }
@@ -102,10 +102,9 @@ html.mg-noblur .mgss-scrim {
   background: color-mix(in oklab, var(--lavender) 10%, transparent); }
 .mgss-dot { width: 7px; height: 7px; flex: none; border-radius: 50%;
   background: var(--surface1); transition: background .18s, box-shadow .18s; }
-.mgss-run.on .mgss-dot { background: var(--lavender);
-  box-shadow: 0 0 8px color-mix(in oklab, var(--lavender) 80%, transparent); }
+.mgss-run.on .mgss-dot { background: var(--lavender); }
 .mgss-runtext { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.mgss-runname { font-size: 11px; font-weight: 700; color: var(--text);
+.mgss-runname { font-size: 11px; font-weight: 600; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mgss-runmeta { font-size: 9px; color: var(--overlay0); white-space: nowrap; }
 

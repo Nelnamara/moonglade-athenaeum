@@ -151,7 +151,7 @@ test("an old row saved here joins the list untagged, and is old again if taken b
 
 test("an old row carries a mono old tag, 8.5 px and neutral", () => {
   assert.match(read("picker/KeepControls.jsx"), /m\.old \? <span className="mg-old">old<\/span>/);
-  assert.match(css, /\.mg-old \{[^}]*font: 700 8\.5px\/1\.3 ui-monospace[^}]*color: var\(--overlay0\)/);
+  assert.match(css, /\.mg-old \{[^}]*font: 600 8\.5px\/1\.3 ui-monospace[^}]*color: var\(--overlay0\)/);
 });
 
 /* ---- S3b + S4c: the split control and the "Keep this model" menu ---- */
@@ -231,7 +231,7 @@ test("the menu is the recipe Sets menu, titled Keep this model, quick-pick first
   // under READ_ONLY the PixAI rows are disabled with the reason; quick-pick is not
   assert.match(menuSrc, /disabled=\{!!readOnly \|\| busy === s\.id\} title=\{readOnly \|\| undefined\}/);
   // the recipe menu itself is unchanged by default
-  assert.match(menuSrc, /heading = "SAVE TO A RECIPE SET"/);
+  assert.match(menuSrc, /heading = "Save to a recipe set"/);
   assert.match(menuSrc, /variant = "sets"/);
 });
 
@@ -259,9 +259,9 @@ test("the writes ride the model-saved routes with the session's CSRF token", () 
 });
 
 test("the split control matches the handoff: 10 px, lavender once saved", () => {
-  assert.match(css, /\.mg-split-body \{[^}]*font-size: 10px[^}]*padding: 4px 8px[^}]*border-radius: 6px 0 0 6px/);
+  assert.match(css, /\.mg-split-body \{[^}]*font-size: 10px[^}]*padding: 4px 8px[^}]*border-radius: var\(--radius-control-sm\) 0 0 var\(--radius-control-sm\)/);
   assert.match(css, /\.mg-split\.saved \.mg-split-body \{[^}]*color: var\(--lavender\)/);
-  assert.match(css, /\.mg-split-menu \{[^}]*padding: 4px 6px[^}]*border-radius: 0 6px 6px 0[^}]*border-left: 0/);
+  assert.match(css, /\.mg-split-menu \{[^}]*padding: 4px 6px[^}]*border-radius: 0 var\(--radius-control-sm\) var\(--radius-control-sm\) 0[^}]*border-left: 0/);
   assert.match(css, /\.mg-star \{[^}]*font-size: 12px[^}]*color: var\(--lavender\)/);
 });
 

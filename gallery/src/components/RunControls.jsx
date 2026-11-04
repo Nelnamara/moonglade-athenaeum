@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import {
   CELL_CAP, confirmCopy, listItemsFromText, listProblem, previewRows, sendSummary, tokenLine,
 } from "../gen/templateCore.js";
@@ -21,6 +22,15 @@ export function TokenLine({ parsed }) {
     </div>
   );
 }
+
+/* The warning mark is drawn from the `bad` flag; an older sendSummary also wrote it into
+   the text, so a leading U+26A0 (and its emoji selector) is dropped before the line renders. */
+const dropWarnMark = (t) => {
+  const s = String(t == null ? "" : t);
+  let i = s.charCodeAt(0) === 0x26A0 ? 1 : 0;
+  if (i && s.charCodeAt(1) === 0xFE0F) i = 2;
+  return s.slice(i).trimStart();
+};
 
 /* Random | Matrix · ×1–4 · ⚄ Reroll · the summary. Shown while the prompt uses the syntax (a
    plain prompt is a plain send; its count stays the COUNT stops). The Lists ▾ button lives in
@@ -57,10 +67,12 @@ export function RunModeRow({ s, set, parsed, plan, phone }) {
               ))}
             </div>
             <button type="button" className="mgrun-reroll" title="Draw new values for the variables"
-              onClick={() => set({ roll: nextRoll(s.roll) })}>⚄ Reroll</button>
+              onClick={() => set({ roll: nextRoll(s.roll) })}><Icon name="dice" /> Reroll</button>
           </>
         )}
-        <div className={"mgrun-summary" + (bad ? " bad" : "")}>{summary}</div>
+        <div className={"mgrun-summary" + (bad ? " bad" : "")}>
+          {bad ? <><Icon name="warning" /> </> : null}{dropWarnMark(summary)}
+        </div>
       </div>
     </>
   );
@@ -71,8 +83,8 @@ export function RunModeRow({ s, set, parsed, plan, phone }) {
 export function RunPreview({ s, parsed, plan }) {
   if (!parsed || !parsed.syntax || !parsed.vars.length) return null;
   const matrix = s.varMode === "matrix";
-  const label = matrix ? (plan && plan.error && plan.product > CELL_CAP ? "PREVIEW · over the cap" : "PREVIEW · the first cells")
-    : "PREVIEW · what each image will get";
+  const label = matrix ? (plan && plan.error && plan.product > CELL_CAP ? "Preview · over the cap" : "Preview · the first cells")
+    : "Preview · what each image will get";
   const rows = previewRows(plan);
   if (!rows.length) return null;
   return (

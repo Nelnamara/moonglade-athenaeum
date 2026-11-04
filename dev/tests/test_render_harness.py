@@ -1422,11 +1422,11 @@ def test_control_panel_runs_real_jobs_and_manages_a_real_account(logged_in_page,
     # that outlasts _settle (seen 2026-09-07 with a test workflow running beside the
     # harness), so wait for the summary's own text rather than a fixed pause.
     page.wait_for_function(
-        "() => /THE LIBRARY/.test(document.querySelector('[aria-label=\"Control Panel\"]')?.innerText || '')",
+        "() => /The library/.test(document.querySelector('[aria-label=\"Control Panel\"]')?.innerText || '')",
         timeout=20_000)
-    # innerText reflects the CSS text-transform:uppercase on .mgcp-sidekick, not the raw
-    # JSX literal ("The library") -- assert what actually renders.
-    assert "THE LIBRARY" in page.inner_text('[aria-label="Control Panel"]')
+    # .mgcp-sidekick renders its JSX literal as written since the quieted look (2026-11-03,
+    # sentence-case labels, no text-transform) -- assert what actually renders.
+    assert "The library" in page.inner_text('[aria-label="Control Panel"]')
 
     # --- a REAL safe job: Catalog stats, via the REAL /api/panel/run + /api/panel/status
     # this harness's own real (throwaway) catalog answers. The row's own text ("Catalog
@@ -5688,7 +5688,7 @@ def test_the_train_goal_tiles_and_history_pool_draw_pictures_not_slivers(
         assert [round(b["x"] - a["x"] - a["w"]) for a, b in zip(geo, geo[1:])] == [8, 8, 8], "8 px apart"
         for g in geo:
             assert abs(g["w"] / g["h"] - .82) < .01, "the tile is .82 wide-to-tall: %r" % g
-            assert (g["radius"], g["pad"], g["font"]) == ("12px", "6px", "10px/700"), g
+            assert (g["radius"], g["pad"], g["font"]) == ("12px", "6px", "10px/600"), g
             assert abs(g["pw"] - (g["w"] - 2)) < 1 and abs(g["px"] - (g["x"] + 1)) < 1, "edge to edge: %r" % g
             assert abs(g["ph"] - .78 * (g["h"] - 2)) < 1.5, "the picture is the top 78 %%: %r" % g
             assert 0.95 < g["pw"] / g["ph"] < 1.15, "a square-ish picture: %r" % g
@@ -6108,7 +6108,7 @@ def test_train_continue_opens_a_draft_at_its_descriptions_and_writes_nothing(
         describe_btn = page.locator(".mgtr-adv-desc button:has-text('Describe automatically')")
         describe_btn.wait_for()
         assert describe_btn.inner_text() == "Describe automatically (24 images) · 3,600"
-        assert "24 IMAGES" in page.locator(".mgtr-adv-desc .mgtr-kick").first.inner_text()
+        assert "24 images" in page.locator(".mgtr-adv-desc .mgtr-kick").first.inner_text()
         assert posts == [], "continuing a draft sent a training POST: %r" % posts
         assert pixai.mutations() == 0
         assert not [c for c in pixai.calls if c.verb in ("rest_post", "rest_put", "rest_patch")]

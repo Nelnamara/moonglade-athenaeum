@@ -270,11 +270,11 @@ export default function LoginPage({ boot }) {
 
           {!createMode && !lanFirstRun && (
             <>
-              <div className="lgn-lbl">USERNAME</div>
+              <div className="lgn-lbl">Username</div>
               <input aria-label="Username" className="lgn-input" name="username" value={user} autoFocus autoComplete="username"
                 maxLength={64}
                 onChange={(e) => setUser(e.target.value)} onKeyDown={onKey} disabled={busy} />
-              <div className="lgn-lbl" style={{ paddingTop: 14 }}>PASSWORD</div>
+              <div className="lgn-lbl" style={{ paddingTop: 14 }}>Password</div>
               <input aria-label="Password" className="lgn-input lgn-pass" name="password" type="password" value={pass}
                 autoComplete="current-password"
                 onChange={(e) => setPass(e.target.value)} onKeyDown={onKey} disabled={busy} />
@@ -289,7 +289,7 @@ export default function LoginPage({ boot }) {
 
           {createMode && (
             <div className="lgn-fieldin">
-              <div className="lgn-lbl">USERNAME</div>
+              <div className="lgn-lbl">Username</div>
               <input aria-label="Username" className={"lgn-input" + (createSubmitted && usernameErr ? " err" : "")}
                 name="username" value={createUser} autoFocus autoComplete="username" maxLength={64}
                 onChange={(e) => {
@@ -299,7 +299,7 @@ export default function LoginPage({ boot }) {
                 onKeyDown={onKey} disabled={busy} />
               {createSubmitted && usernameErr ? <div className="lgn-fielderr">{usernameErr}</div> : null}
 
-              <div className="lgn-lbl" style={{ paddingTop: 14 }}>PASSWORD</div>
+              <div className="lgn-lbl" style={{ paddingTop: 14 }}>Password</div>
               <input aria-label="Password" className="lgn-input lgn-pass" name="new-password" type="password"
                 value={createPass} autoComplete="new-password"
                 onChange={(e) => {
@@ -315,7 +315,7 @@ export default function LoginPage({ boot }) {
                 <div className={guessOk ? "ok" : ""}>{guessOk ? "✓" : "·"} not a common password or a simple pattern (like 12345678)</div>
               </div>
 
-              <div className="lgn-lbl" style={{ paddingTop: 14 }}>CONFIRM PASSWORD</div>
+              <div className="lgn-lbl" style={{ paddingTop: 14 }}>Confirm password</div>
               <input aria-label="Confirm password" className={"lgn-input lgn-pass" + (matchErr ? " err" : "")}
                 name="confirm-password" type="password" value={createConfirm}
                 autoComplete="new-password"

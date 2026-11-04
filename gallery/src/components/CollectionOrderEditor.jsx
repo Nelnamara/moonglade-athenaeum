@@ -49,7 +49,7 @@ export default function CollectionOrderEditor({ name, csrf, onClose }) {
       <div className="mgcu-scrim" onMouseDown={onClose} />
       <div className="mgcu-mgr mgco" role="dialog" aria-modal="true" aria-label={"Manual order of " + name}>
         <div className="mgco-hd">
-          <div className="mgco-cap"><Icon name="collection" /> {name}{" · MANUAL ORDER"}</div>
+          <div className="mgco-cap"><Icon name="collection" /> {name}{" · manual order"}</div>
           <button type="button" className="mgcu-x" onClick={onClose} aria-label="Close">{"✕"}</button>
         </div>
         {o.ids === null ? <div className="mgco-empty">Reading the order…</div> : null}

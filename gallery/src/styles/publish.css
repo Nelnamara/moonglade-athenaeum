@@ -27,10 +27,10 @@
 .mgpub-gloss { position: absolute; inset: 0; pointer-events: none;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.14), inset 0 0 60px rgba(100,58,172,.16); }
 .mgpub-srcrow { display: flex; align-items: baseline; gap: 10px; }
-.mgpub-srcrow .k { font-size: 9.5px; font-weight: 700; letter-spacing: .14em; color: var(--overlay0); }
+.mgpub-srcrow .k { font-size: 11.5px; font-weight: 500; letter-spacing: normal; color: var(--overlay0); }
 .mgpub-srcrow .v { font-size: 11px; color: var(--subtext); font-variant-numeric: tabular-nums; }
 .mgpub-browse { display: flex; align-items: center; justify-content: center; gap: 8px;
-  padding: 9px; border-radius: 10px; font-size: 12px; font-weight: 600; cursor: pointer;
+  padding: 9px; border-radius: var(--radius-control); font-size: 12px; font-weight: 600; cursor: pointer;
   color: var(--subtext); border: 1px dashed var(--surface1); background: rgba(33,31,58,.4);
   font-family: inherit; }
 
@@ -41,13 +41,13 @@
   padding: 14px 0 6px; }
 .mgpub-right > .mgpub-lab:first-child { padding-top: 0; }
 .mgpub-in { width: 100%; box-sizing: border-box; background: rgba(12,10,28,.8);
-  color: var(--text); border: 1px solid var(--surface1); border-radius: 10px;
+  color: var(--text); border: 1px solid var(--surface1); border-radius: var(--radius-control);
   padding: 10px 13px; font-size: 12.5px; font-family: inherit; outline: none;
   resize: vertical; transition: border-color .2s; }
 .mgpub-in:focus { border-color: var(--accent); }
 .mgpub-tagbox { display: flex; gap: 5px; flex-wrap: wrap; align-items: center;
   min-height: 20px; background: rgba(12,10,28,.8); border: 1px solid var(--surface1);
-  border-radius: 10px; padding: 9px 13px; }
+  border-radius: var(--radius-control); padding: 9px 13px; }
 .mgpub-chip { font-size: 10.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px;
   cursor: pointer; border: 1px solid rgba(182,146,230,.4); background: rgba(182,146,230,.14);
   color: var(--mauve); white-space: nowrap; }
@@ -65,7 +65,7 @@
 .mgpub-note.ok { border-color: rgba(79,201,154,.4); color: var(--emerald); }
 
 /* The metallic Publish button (the suite's shared mgMetal recipe). */
-.mgpub-go { padding: 9px 18px; border-radius: 10px; font-size: 12.5px; font-weight: 700;
+.mgpub-go { padding: 9px 18px; border-radius: 10px; font-size: 12.5px; font-weight: 600;
   cursor: pointer; white-space: nowrap; border: 1px solid rgba(255,255,255,.3);
   color: color-mix(in oklab, var(--accent) 26%, #08040f);
   text-shadow: 0 1px 0 rgba(255,255,255,.4); font-family: inherit;
@@ -74,12 +74,14 @@
     color-mix(in oklab, var(--accent) 22%, #ffffff) 34%, var(--accent) 50%,
     color-mix(in oklab, var(--accent) 74%, #06030d) 68%, var(--mauve) 84%,
     color-mix(in oklab, var(--accent) 50%, #06030d) 100%);
-  background-size: 220% 100%; animation: mgMetal 7s ease-in-out infinite;
+  background-size: 220% 100%; animation: none; background-position: 30% 50%; transition: var(--metal-sweep);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.65), inset 0 -2px 4px rgba(40,20,70,.42),
     0 6px 16px rgba(0,0,0,.45); }
+.mgpub-go:hover:not(:disabled), .mgpub-go:focus-visible { background-position: 100% 50%; }
 .mgpub-go.big { margin-top: 20px; align-self: flex-start; padding: 11px 22px; font-size: 13px; }
 .mgpub-go:disabled { opacity: .5; cursor: not-allowed; animation: none; }
-.mgpub-ghost { padding: 9px 16px; border-radius: 10px; font-size: 12.5px; font-weight: 600;
+@media (prefers-reduced-motion: reduce) { .mgpub-go { transition: none; } }
+.mgpub-ghost { padding: 9px 16px; border-radius: var(--radius-control); font-size: 12.5px; font-weight: 600;
   cursor: pointer; color: var(--subtext); border: 1px solid var(--surface1);
   background: rgba(33,31,58,.5); font-family: inherit; }
 
@@ -87,7 +89,7 @@
 .mgpub-confirm { margin-top: 18px; padding: 13px 15px; border-radius: 12px;
   border: 1px solid var(--accent); background: rgba(182,146,230,.1);
   display: flex; flex-direction: column; gap: 9px; }
-.mgpub-confirm .t { font-size: 13px; font-weight: 700; color: var(--text); }
+.mgpub-confirm .t { font-size: 13px; font-weight: 600; color: var(--text); }
 .mgpub-confirm .b { font-size: 11.5px; color: var(--subtext); line-height: 1.6; }
 .mgpub-confirm .b .warn { color: var(--gold); }
 .mgpub-confirm .n { font-size: 10.5px; color: var(--overlay0); margin-top: 5px; }
@@ -96,7 +98,7 @@
 /* The inline "choose a different image" strip (DC L314-321) -- the DC's own geometry
    (52px tall, width from the image's aspect, accent outline on the selected one),
    carrying real recent library art instead of blank aspect swatches. */
-.mgpub-pickhead { font-size: 9.5px; font-weight: 700; letter-spacing: .14em;
+.mgpub-pickhead { font-size: 11.5px; font-weight: 500; letter-spacing: normal;
   color: var(--overlay0); padding-bottom: 8px; }
 .mgpub-strip { display: flex; gap: 7px; overflow-x: auto; padding: 2px; }
 .mgpub-swatch { flex: none; height: 52px; border-radius: 8px; cursor: pointer;
@@ -110,7 +112,7 @@
 /* Title row + the ✦ suggest popover (DC L326-340) -- real image-to-prompt, free. */
 .mgpub-titlerow { position: relative; display: flex; gap: 8px; align-items: flex-start; }
 .mgpub-suggest { flex: none; width: 38px; height: 38px; display: grid; place-items: center;
-  border-radius: 10px; font-size: 15px; cursor: pointer; color: var(--mauve);
+  border-radius: var(--radius-control); font-size: 15px; cursor: pointer; color: var(--mauve);
   border: 1px solid var(--surface1); background: rgba(12,10,28,.7); font-family: inherit;
   transition: border-color .2s, background .2s; }
 .mgpub-suggest.on { border-color: var(--accent); background: rgba(182,146,230,.16); }
@@ -121,8 +123,8 @@
   box-shadow: 0 18px 50px rgba(0,0,0,.7);
   animation: mgSlab .24s cubic-bezier(.2,.9,.24,1) both;
   max-height: 260px; overflow-y: auto; }
-.mgpub-sugpop .h { font-size: 9.5px; font-weight: 700; letter-spacing: .1em;
-  text-transform: uppercase; color: var(--overlay0); padding-bottom: 8px; }
+.mgpub-sugpop .h { font-size: 11.5px; font-weight: 500; letter-spacing: normal;
+  text-transform: none; color: var(--overlay0); padding-bottom: 8px; }
 .mgpub-sugpop .m { font-size: 11px; color: var(--overlay0); padding: 4px 0; }
 .mgpub-sugitem { display: block; width: 100%; text-align: left; font-size: 11.5px;
   line-height: 1.5; padding: 7px 9px; margin-bottom: 4px; border-radius: 8px;

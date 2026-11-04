@@ -358,7 +358,7 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
                 onClick={toggleManage}>
                 {manageOn ? "Done" : "✎ Manage"}
               </button>
-              {actErr && <span className="mgma2-acterr">⚠ {actErr}</span>}
+              {actErr && <span className="mgma2-acterr"><Icon name="warning" /> {actErr}</span>}
             </div>
           )}
 
@@ -372,9 +372,9 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
                   <button type="button" className="mgma2-toolbtn"
                     onClick={() => askBulk("visibility", { private: false })}>◉ Publish</button>
                   <button type="button" className="mgma2-toolbtn"
-                    onClick={() => askBulk("visibility", { private: true })}>🔒 Unpublish</button>
+                    onClick={() => askBulk("visibility", { private: true })}><Icon name="lock" /> Unpublish</button>
                   <button type="button" className="mgma2-toolbtn danger"
-                    onClick={() => askBulk("delete", {})}>🗑 Delete</button>
+                    onClick={() => askBulk("delete", {})}><Icon name="trash" /> Delete</button>
                 </>
               )}
               <button type="button" className="mgma2-toolbtn" disabled={selected.size === 0}
@@ -384,7 +384,7 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
                   {bulkResult.ok} done{bulkResult.fail ? ", " + bulkResult.fail + " failed" : ""}
                 </span>
               )}
-              {bulkErr && <span className="mgma2-acterr">⚠ {bulkErr}</span>}
+              {bulkErr && <span className="mgma2-acterr"><Icon name="warning" /> {bulkErr}</span>}
             </div>
           )}
 
@@ -486,12 +486,12 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
                         ) : (
                           <>
                             <span className={"mgma2-vis" + (it.public ? " pub" : " priv")}>
-                              {it.public ? "◉ Public" : "🔒 Private"}
+                              {it.public ? "◉ Public" : <><Icon name="lock" /> Private</>}
                             </span>
                             {/* #20: PixAI's own sensitive flag (isSensitive), distinct from
                                 nsfw -- shown only when set, alongside the visibility badge. */}
                             {it.sensitive ? (
-                              <span className="mgma2-vis sens" title="PixAI flagged this as sensitive">⚠ Sensitive</span>
+                              <span className="mgma2-vis sens" title="PixAI flagged this as sensitive"><Icon name="warning" /> Sensitive</span>
                             ) : null}
                           </>
                         )}
@@ -502,7 +502,7 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
                           <button type="button" disabled={busy}
                             title={it.public ? "Make private on PixAI" : "Make public on PixAI"}
                             onClick={() => preview("visibility", it, { private: it.public })}>
-                            {it.public ? "🔒" : "◉"}
+                            {it.public ? <Icon name="lock" /> : "◉"}
                           </button>
                           <button type="button" disabled={busy} title="Edit tags"
                             onClick={() => { setEditing(it.media_id); setTagDraft(it.tags.join(", ")); }}>✎</button>
@@ -512,12 +512,12 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
                               onClick={() => setChooserFor(chooserFor === it.media_id ? null : it.media_id)}>★</button>
                           )}
                           <button type="button" disabled={busy} title="Delete from PixAI"
-                            onClick={() => preview("delete", it)}>🗑</button>
+                            onClick={() => preview("delete", it)}><Icon name="trash" /></button>
                         </span>
                         )}
                         {!manageOn && chooserFor === it.media_id && (
                           <div className="mgctch-pop" onClick={(e) => e.stopPropagation()}>
-                            <div className="mgctch-h">ENTER INTO…</div>
+                            <div className="mgctch-h">Enter into…</div>
                             <div className="mgctch-when">
                               made {dayOf(it.created_at)} — qualifies for {qualifyingFor(it).length} running
                               contest{qualifyingFor(it).length === 1 ? "" : "s"}
@@ -560,12 +560,12 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
                         <span className="mgma2-avatar">NL</span>
                         <span className="mgma2-ftitle" title={it.title}>{it.title}</span>
                         <span className="mgma2-fdate">{dateLabel(it.date)}</span>
-                        <span className="mgma2-likes" style={{ color: heartCol(it.likes) }}>♥ {fmt(it.likes)}</span>
+                        <span className="mgma2-likes" style={{ color: heartCol(it.likes) }}><Icon name="heart" /> {fmt(it.likes)}</span>
                         {/* Owner, 2026-09-06: comment badges on the cards, same idiom as
                             likes. The count was already fetched for every card and already
                             summed into the COMMENTS stat -- it simply never reached a card. */}
                         <span className="mgma2-likes" title={fmt(it.comments) + " comments"}
-                          style={{ color: commentCol(it.comments) }}>💬 {fmt(it.comments)}</span>
+                          style={{ color: commentCol(it.comments) }}><Icon name="comment" /> {fmt(it.comments)}</span>
                       </div>
                       {/* PER-CARD VIEWS + THE COMPARISON BAR (owner, 2026-09-06 -- on EVERY
                           published card, explicitly not a hardcoded twelve).
@@ -622,14 +622,14 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
                               same host-guarded proxy, and eager for the same reason
                               (this grid can sit below the fold too). */}
                           {m.cover_url ? <img src={"/api/pixai-cdn/thumb?u=" + encodeURIComponent(m.cover_url)} alt="" /> : null}
-                          <span className="mgma2-lorabadge"><Icon name="lora" />USER LORA</span>
+                          <span className="mgma2-lorabadge"><Icon name="lora" />User LoRA</span>
                           <span className="mgma2-lorabase" style={{ color: tc, background: tbg, borderColor: tc }}>{tlabel}</span>
                           <div className="mgma2-loraname">{m.title}</div>
                         </div>
                         <div className="mgma2-lorastats">
-                          <span className="fire">🔥 {fmt(m.ref_count)}</span>
-                          <span>💬 {fmt(m.comment_count)}</span>
-                          <span className="mgma2-lorapill">♥ {fmt(m.liked_count)}</span>
+                          <span className="fire"><Icon name="uses" /> {fmt(m.ref_count)}</span>
+                          <span><Icon name="comment" /> {fmt(m.comment_count)}</span>
+                          <span className="mgma2-lorapill"><Icon name="heart" /> {fmt(m.liked_count)}</span>
                         </div>
                       </a>
                     );

@@ -1,4 +1,5 @@
 import React from "react";
+import Icon from "../icons/Icons.jsx";
 import { countdown, dayOf, tsOf } from "../hooks/useContests.js";
 import { bestWin, rowStatus, tierLabel } from "../lib/contestWinCore.js";
 import "../styles/myart-contests.css";
@@ -9,7 +10,7 @@ import "../styles/myart-contests.css";
 
    Status is derived, not stored (lib/contestWinCore.js rowStatus): running → awaiting results →
    results in (a VERIFIED win / checking / not placed). A won row takes the gold treatment and
-   its pill reads the TIER ("🏆 TIER 2") with the prize under the name -- PixAI's rank is the
+   its pill reads the tier (trophy icon + "Tier 2") with the prize under the name -- PixAI's rank is the
    prize tier, so no row ever claims a numbered place. A win is verified only: the app's daily
    check, or the Check fallback below, found the entry on PixAI's own winners list with a tier.
    The achievement side of a win is the toast's business and appears nowhere here.
@@ -42,7 +43,7 @@ export default function ContestMyEntries({ rows, loaded = true, syncing, err, on
   if (err && !list.length) {
     return (
       <div className="mgcte-empty">
-        <div className="glyph">🏅</div>
+        <div className="glyph"><Icon name="medal" /></div>
         <div className="t">Couldn't read your entries</div>
         <div className="c">{err}</div>
         <div className="a">
@@ -57,7 +58,7 @@ export default function ContestMyEntries({ rows, loaded = true, syncing, err, on
   if (!list.length) {
     return (
       <div className="mgcte-empty">
-        <div className="glyph">🏅</div>
+        <div className="glyph"><Icon name="medal" /></div>
         <div className="t">No entries yet</div>
         <div className="c">
           Enter from a contest's page, from a published piece in My Art, or right at
@@ -82,7 +83,7 @@ export default function ContestMyEntries({ rows, loaded = true, syncing, err, on
         {syncing ? " · refreshing…" : ""}
       </div>
       <div className="mgcte-cols">
-        <div>CONTEST</div><div>PIECES</div><div>CLOSES</div><div>RESULTS</div><div>STATUS</div>
+        <div>Contest</div><div>Pieces</div><div>Closes</div><div>Results</div><div>Status</div>
       </div>
       <div className="mgcte-rows">
         {list.map((r) => {
@@ -101,7 +102,7 @@ export default function ContestMyEntries({ rows, loaded = true, syncing, err, on
               <div style={{ minWidth: 0 }}>
                 <div className="mgcte-name">
                   <span className={"mgct-badge " + (official ? "official" : "community")}>
-                    {official ? "☀ OFFICIAL" : "🤝 COMMUNITY"}
+                    {official ? <><Icon name="sun" /> Official</> : <><Icon name="community" /> Community</>}
                   </span>
                   <span className="t" title={r.title}>{r.title || r.slug || r.contest_id}</span>
                 </div>
@@ -125,7 +126,10 @@ export default function ContestMyEntries({ rows, loaded = true, syncing, err, on
               <div className="mgcte-when res">
                 {dayOf(r.result_at).slice(5) || "—"}{decided ? " ✓" : ""}
               </div>
-              <div><span className={"mgcte-status " + status.cls}>{status.text}</span></div>
+              <div><span className={"mgcte-status " + status.cls}>
+                {status.icon || status.cls === "won" ? <><Icon name={status.icon || "trophy"} /> </> : null}
+                {String(status.text || "").replace(/^\u{1F3C6}\s*/u, "")}
+              </span></div>
             </button>
           );
         })}

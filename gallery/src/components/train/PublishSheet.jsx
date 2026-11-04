@@ -1,4 +1,5 @@
 import React from "react";
+import Icon from "../../icons/Icons.jsx";
 import { publishTicks } from "../../gen/trainCore.js";
 
 /* Publish (Training Handoff 4a): one sheet, each permanent consequence ticked. Private | Public;
@@ -40,7 +41,7 @@ export default function PublishSheet({ pub, body = false }) {
           <span className={"mgtr-switch" + (pub.vis === "public" && pub.rebate ? " on" : "")}><span /></span>
         </button>
       )}
-      <div className="mgtr-pub-warn">THIS CAN'T BE UNDONE</div>
+      <div className="mgtr-pub-warn">This can't be undone</div>
       {ticks.map((x) => {
         const on = !!pub.ticks[x.key];
         return (
@@ -51,7 +52,7 @@ export default function PublishSheet({ pub, body = false }) {
           </button>
         );
       })}
-      {pub.err && <div className="mgtr-err">⚠ {pub.err}</div>}
+      {pub.err && <div className="mgtr-err"><Icon name="warning" /> {pub.err}</div>}
       <div className="mgtr-pub-foot">
         <button type="button" className="mgtr-ghost" onClick={pub.close} disabled={pub.busy}>Cancel</button>
         <button type="button" className="mgtr-go" disabled={!all || pub.busy}

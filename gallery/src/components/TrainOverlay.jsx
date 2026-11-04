@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import "../styles/overlays.css";
 import "../styles/train.css";
 import useScrollLock from "../hooks/useScrollLock.js";
@@ -68,7 +69,7 @@ export default function TrainOverlay({ onClose, onUseLora }) {
     </div>
   ) : (
     <div className="mgtr-head">
-      <div className="mgtr-head-title">⚗ Train a LoRA</div>
+      <div className="mgtr-head-title"><Icon name="flask" /> Train a LoRA</div>
       <div className="mgtr-sub">runs on PixAI; the library keeps the receipts</div>
       <button type="button" className="mgv-x" onClick={onClose} aria-label="Close">×</button>
     </div>
@@ -100,7 +101,7 @@ export default function TrainOverlay({ onClose, onUseLora }) {
             {view === "runs" && (
               <div className="mgtr-runsview">
                 <TrainStrip running={runs.running} withCover />
-                {retry.err && !retry.ask && <div className="mgtr-err">⚠ {retry.err}</div>}
+                {retry.err && !retry.ask && <div className="mgtr-err"><Icon name="warning" /> {retry.err}</div>}
                 {runs.errors && runs.errors.length > 0 && (
                   <div className="mgtr-warnnote">Some runs couldn't be read just now: {runs.errors.join(" · ")}</div>
                 )}

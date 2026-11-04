@@ -6,7 +6,6 @@
    existing overlay (Control Panel's own power modal tops out at 341) --
    this can appear at boot alongside anything else already open. */
 
-@keyframes mgclaimPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(79,201,154,.45); } 50% { box-shadow: 0 0 0 9px rgba(79,201,154,0); } }
 @keyframes mgclaimCardIn { from { opacity: 0; transform: translateY(14px) scale(.96); } to { opacity: 1; transform: none; } }
 @keyframes mgclaimFadeOut { from { opacity: 1; } to { opacity: 0; } }
 /* THE SCRIM'S BLUR IS APPLIED AFTER THE FADE, NOT DURING IT -- the same split overlays.css
@@ -50,19 +49,20 @@ html.mg-noblur .mgclaim-scrim {
   text-align: center; padding: 30px 28px 24px; border-radius: 18px;
   border: 1px solid rgba(79,201,154,.35);
   background: linear-gradient(150deg, rgba(18,32,28,.97) 0%, rgba(10,16,14,.98) 55%, rgba(14,11,32,.98) 100%);
-  box-shadow: 0 34px 90px -16px rgba(0,0,0,.78), 0 0 40px rgba(79,201,154,.12);
+  box-shadow: 0 34px 90px -16px rgba(0,0,0,.78);
   animation: mgclaimCardIn .34s cubic-bezier(.2,.9,.24,1) both; position: relative; }
 .mgclaim-card.exiting { animation: mgclaimCardOut .32s ease both; }
 
 .mgclaim-x { position: absolute; top: 12px; right: 12px; width: 26px; height: 26px;
-  display: grid; place-items: center; border-radius: 8px; border: 1px solid var(--surface1);
+  display: grid; place-items: center; border-radius: var(--radius-control); border: 1px solid var(--surface1);
   background: rgba(33,31,58,.6); color: var(--subtext); font-size: 13px; cursor: pointer; }
 .mgclaim-x:hover { color: var(--text); border-color: var(--emerald); }
 
 .mgclaim-mascotwrap { position: relative; width: 120px; height: 120px; margin: 4px auto 12px; }
 .mgclaim-halo { position: absolute; inset: -14px; border-radius: 50%;
   background: radial-gradient(circle, rgba(79,201,154,.4), transparent 68%);
-  animation: mgclaimPulse 2.4s ease-in-out infinite; }
+  /* still since the quieted look (pick 6B): a waiting popup is not live; the coin jump on a
+     claim is the one motion left in the card */ }
 .mgclaim-mascot { position: relative; width: 100%; height: 100%; object-fit: contain;
   display: block; filter: drop-shadow(0 8px 18px rgba(0,0,0,.4)); }
 
@@ -81,10 +81,10 @@ html.mg-noblur .mgclaim-scrim {
 .mgclaim-line { font-size: 12px; color: var(--subtext); line-height: 1.5; margin-bottom: 18px; }
 .mgclaim-err { font-size: 12px; color: var(--red); margin-bottom: 12px; }
 
-button.mgclaim-primary { display: inline-block; width: 100%; font-size: 13px; font-weight: 700;
-  padding: 11px 22px; border-radius: 10px; cursor: pointer; border: 1px solid rgba(79,201,154,.5);
+button.mgclaim-primary { display: inline-block; width: 100%; font-size: 13px; font-weight: 600;
+  padding: 11px 22px; border-radius: var(--radius-control); cursor: pointer; border: 1px solid rgba(79,201,154,.5);
   background: var(--emerald); color: #0a1f16; font-family: inherit;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.3), 0 6px 16px rgba(79,201,154,.22); }
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.3); }
 button.mgclaim-primary:hover:not(:disabled) { filter: brightness(1.06); }
 button.mgclaim-primary:disabled { opacity: .65; cursor: default; }
 .mgclaim-hint { font-size: 10.5px; color: var(--overlay0); margin-top: 11px; }
