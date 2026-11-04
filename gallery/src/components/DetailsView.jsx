@@ -11,6 +11,7 @@ import { localDay, localDayTime } from "../gen/dates.js";
 import { seriesSuffix } from "../gen/seriesName.js";
 import { positionLabel } from "../lib/phoneCore.js";
 import CommentsThread from "../inbox/CommentsThread.jsx";
+import Icon from "../icons/Icons.jsx";
 
 /* Motion: the reveal choreography locked 2026-07-30 (docs/DECISIONS.md, artifact
    477b4655 "The Reveal -- Motion Detail"). The headline LEADS on its own, sliding
@@ -115,7 +116,7 @@ function playReveal(root) {
    its rows even when there is nothing in it (LoRAs). `quiet` rows are the ones folded
    under "More details": they skip the .p-fact reveal class, since the cascade only
    stamps what is on screen. */
-function LedgerRow({ label, value, mono, dim, warm, copyKey, quiet, copied, copy }) {
+function LedgerRow({ label, value, node, mono, dim, warm, copyKey, quiet, copied, copy }) {
   const text = value == null ? "" : String(value);
   const has = text.trim() !== "";
   const cls = "p-row" + (quiet ? "" : " p-fact") + (copyKey && copied === copyKey ? " copied" : "");
@@ -123,7 +124,7 @@ function LedgerRow({ label, value, mono, dim, warm, copyKey, quiet, copied, copy
   return (
     <div className={cls}>
       <span className="p-row-k">{label}</span>
-      <span className={vcls}>{has ? text : "—"}</span>
+      <span className={vcls}>{has ? (node || text) : "—"}</span>
       {copyKey && has ? (
         <button type="button" className="p-copy" title="Copy" aria-label={"Copy " + label}
           onClick={() => copy(text, copyKey)}>⧉</button>
@@ -393,10 +394,18 @@ export default function DetailsView({
   if (row.is_published === "1") {
     // Session R (R5b): the "💬 n" count left this line -- the work's comments are read live
     // in their own section below (COMMENTS · N), which carries the count.
+    // The eye and the heart are line icons (unslop pick 2B), drawn in the row; the value
+    // string is the same facts in words, for the row's has-a-value test.
+    const viewsN = views != null ? Number(views).toLocaleString() : null;
+    const likesN = row.liked_count || 0;
     push("Engagement",
-      (views != null ? "👁 " + Number(views).toLocaleString() + " · " : "") +
-      "♥ " + (row.liked_count || 0) +
-      (row.aes_score ? " · aesthetic " + row.aes_score : ""));
+      (viewsN != null ? viewsN + " views · " : "") + likesN + " likes" +
+      (row.aes_score ? " · aesthetic " + row.aes_score : ""),
+      { node: <>
+        {viewsN != null ? <><Icon name="eye" title="Views" /> {viewsN} · </> : null}
+        <Icon name="heart" title="Likes" /> {likesN}
+        {row.aes_score ? " · aesthetic " + row.aes_score : null}
+      </> });
   }
   push("Content", nsfw);
 
@@ -459,14 +468,14 @@ export default function DetailsView({
               .mgx-metal face); Delete locally is the red-outline danger chip. */}
           <div className="p-actions p-actions-primary">
             <a className="btn mgx-metal" title="Full-resolution file"
-              href={"/full/" + encodeURIComponent(row.media_id) + "?dl=1"}>⬇ Download</a>
+              href={"/full/" + encodeURIComponent(row.media_id) + "?dl=1"}><Icon name="download" /> Download</a>
             {/* ☁ Publish -- cross-page hand-off (Image Details.dc.html:391), REAL since
                 2026-08-06. Already-published rows say so instead of offering it twice;
                 this row is the full catalog row, so artwork_id is right here. */}
             {(row.artwork_id || "").trim()
-              ? <span className="btn is-off" title="Already on your PixAI profile — manage it from My Art">☁ Published</span>
+              ? <span className="btn is-off" title="Already on your PixAI profile — manage it from My Art"><Icon name="publish" /> Published</span>
               : <button className="btn" title="Publish this image to PixAI"
-                  onClick={() => onPublish && onPublish(row.media_id)}>☁ Publish</button>}
+                  onClick={() => onPublish && onPublish(row.media_id)}><Icon name="publish" /> Publish</button>}
             <button className="btn" title="Copy the full prompt"
               onClick={() => copy(promptText, "prompt")}>{copied === "prompt" ? "Copied!" : "⧉ Copy prompt"}</button>
             {/* ⇱ Upscale opens the float (Image Details.dc.html:393-394 / :143-189): the
@@ -558,7 +567,7 @@ export default function DetailsView({
               </summary>
               <div className="p-ledger">
                 {extra.map((x) => (
-                  <LedgerRow key={x.label} label={x.label} value={x.value} mono={x.mono} dim={x.dim} quiet {...c} />
+                  <LedgerRow key={x.label} label={x.label} value={x.value} node={x.node} mono={x.mono} dim={x.dim} quiet {...c} />
                 ))}
               </div>
             </details>
@@ -636,7 +645,7 @@ export default function DetailsView({
           {lineage && (lineage.parent || lineage.siblings.length || lineage.children.length) ? (
             <div className="p-lineage">
               <div className="p-lineage-head">
-                <span className="k">LINEAGE</span>
+                <span className="k">Lineage</span>
                 <span className="s">where this came from, and what came from it</span>
               </div>
               <div className="p-lineage-strip">
@@ -690,7 +699,7 @@ export default function DetailsView({
           {series && series.steps && series.steps.length ? (
             <div className="p-session">
               <div className="p-session-head">
-                <span className="k">⟲ SESSION</span>
+                <span className="k">⟲ Session</span>
                 {series.title ? <span className="t" title={series.title}>{series.title}</span> : null}
                 <span className="s">{series.count_tasks} tasks · {series.count_images} images</span>
               </div>
@@ -739,7 +748,7 @@ export default function DetailsView({
           {similar.images.length ? (
             <div className="p-similar">
               <div className="p-similar-head">
-                <span className="k">◈ SIMILAR</span>
+                <span className="k">◈ Similar</span>
                 <span className="s">the closest by eye, not by model</span>
                 <span className="sp" />
                 {onSimilar ? (
@@ -820,7 +829,7 @@ export default function DetailsView({
                     ? { kind: "ok", title: "Poster rebuilt" }
                     : { kind: "err", title: "Couldn't rebuild the poster", msg: (d && d.error) || "" });
                   if (d && d.ok && d.thumb) setPosterSrc(d.thumb);
-                }}>{posterBusy ? "Rebuilding…" : "🖼 Rebuild poster"}</button>
+                }}>{posterBusy ? "Rebuilding…" : <><Icon name="image" /> Rebuild poster</>}</button>
             ) : null}
             {state.data.can_delete_cloud && row.task_id ? (
               <button className="btn btn-danger" disabled={busy} onClick={deleteCloud}>Delete from PixAI</button>

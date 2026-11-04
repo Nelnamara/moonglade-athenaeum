@@ -165,7 +165,7 @@ describe("the queue estimate is shown as a WAIT, and only while the wait is stil
 // ---------------------------------------------------------------------------
 describe("the inline detail surfaces the estimate labelled, next to the elapsed time", () => {
   test("shows the recorded estimate, attributed and time-qualified", () => {
-    assert.match(tray, />EST\. WAIT</, "no estimate row in the inline detail");
+    assert.match(tray, />Est\. wait</, "no estimate row in the inline detail");
     assert.match(tray, /\{fmtDuration\(j\.eta_seconds\)\} \(PixAI, when queued\)/,
       "the row must attribute the estimate to PixAI AND say WHEN it was taken -- an " +
       "unqualified 'Est. wait' beside a live Spent reads as time remaining");
@@ -173,16 +173,16 @@ describe("the inline detail surfaces the estimate labelled, next to the elapsed 
 
   test("omits the row entirely when nothing was recorded", () => {
     assert.match(tray,
-      /\{typeof j\.eta_seconds === "number" && isFinite\(j\.eta_seconds\) \? \(\s*<div className="at-drow"><span className="at-dk">EST\. WAIT<\/span>/,
+      /\{typeof j\.eta_seconds === "number" && isFinite\(j\.eta_seconds\) \? \(\s*<div className="at-drow"><span className="at-dk">Est\. wait<\/span>/,
       "the EST. WAIT row is not guarded on a recorded, finite number -- an unrecorded " +
       "estimate would render as 'undefined' or 'NaN'");
   });
 
   test("the other rows are untouched", () => {
-    assert.match(tray, />TASK</);
-    assert.match(tray, />SENT</);
-    assert.match(tray, />SPENT</);
-    assert.match(tray, />COST</);
+    assert.match(tray, />Task</);
+    assert.match(tray, />Sent</);
+    assert.match(tray, />Spent</);
+    assert.match(tray, />Cost</);
   });
 });
 

@@ -6,6 +6,7 @@ import { askCloudDelete } from "../lib/cloudDeleteCore.js";
 import { onlyCopyNote } from "../lib/onlyCopy.js";
 import { planShotsSend } from "../curation/loomSend.js";
 import "../styles/librarybar.css";
+import Icon from "../icons/Icons.jsx";
 
 /* The bulk Actions menu, refit per the Frontend Gallery DC (drift §10):
 
@@ -495,7 +496,7 @@ export default function ActionsMenu({
             {item("▮ Send to The Loom · as shots, in order", sendShots,
               { title: "A new act of image-to-video shots, one per picture, in order. Nothing is rendered." })}
             {item("⎙ Print sheet", printSheet)}
-            {item("⬇ Download ZIP", downloadZip)}
+            {item(<><Icon name="download" /> Download ZIP</>, downloadZip)}
             {item("Find / replace in prompts", replacePrompt)}
             {item("Delete locally", deleteLocal,
               { danger: true, sep: true,

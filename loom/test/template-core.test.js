@@ -562,7 +562,7 @@ describe("owner walk 2026-09-29: a Matrix of 3 is quoted as 3, not as 1 (screens
     assert.match(badge, /const sendsN = Math\.max\(1, cardCount\(props\.sends\) \|\| 1\);/);
     assert.match(badge, /const total = n \* sendsN;/);
     assert.match(badge, /\+ "≈ " \+ fmt\(total\) \+ " credits";/, "the main line is the total");
-    assert.match(badge, /: \(warn \|\| short \? "⚠ " : ""\) \+ "≈ " \+ fmt\(total\);/, "and the chip's value");
+    assert.match(badge, /val = \(n === 0\) \? "0" : "≈ " \+ fmt\(total\);/, "and the chip's value");
     assert.match(badge, /parts\.push\(fmt\(sendsN\) \+ " images", "≈ " \+ fmt\(Number\(d\.cost\)\) \+ " each"\);/,
       "the per-image figure is only ever shown saying 'each'");
     const dock = codeOnly(read(path.join(SRC, "components", "GenerateDrawer.jsx")));

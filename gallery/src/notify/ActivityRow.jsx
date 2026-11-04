@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { ago, fmtClock, fmtDuration, groupThousands, kindLabel, labelFor } from "./format.js";
 import MoonGauge from "../components/MoonGauge.jsx";
 import { fractionOf } from "../lib/moonGaugeCore.js";
+import Icon from "../icons/Icons.jsx";
 import { openBrokenFiles } from "../lib/brokenFilesNav.js";
 
 /* ActivityRow -- one job row inside the new header-docked Activity dropdown (Claude Design
@@ -41,9 +42,9 @@ export default function ActivityRow({ job: j, expanded, onToggle: toggle, onDism
   const icon = st === "done" ? (
     <><span className="at-ok at-glyph">✓</span><img className="at-nel" src="/branding/mascots/trk_done.png" alt="" onError={(e) => e.currentTarget.remove()} /></>
   ) : st === "done_with_errors" ? (
-    <><span className="at-warn at-glyph">⚠</span><img className="at-nel" src="/branding/mascots/trk_done.png" alt="" onError={(e) => e.currentTarget.remove()} /></>
+    <><span className="at-warn at-glyph"><Icon name="warning" title="Finished with errors" /></span><img className="at-nel" src="/branding/mascots/trk_done.png" alt="" onError={(e) => e.currentTarget.remove()} /></>
   ) : st === "failed" ? (
-    <><span className="at-err at-glyph">⚠</span><img className="at-nel" src="/branding/mascots/trk_fail.png" alt="" onError={(e) => e.currentTarget.remove()} /></>
+    <><span className="at-err at-glyph"><Icon name="warning" title="Failed" /></span><img className="at-nel" src="/branding/mascots/trk_fail.png" alt="" onError={(e) => e.currentTarget.remove()} /></>
   ) : st === "stale" ? (
     <><span className="at-warn at-glyph">?</span><img className="at-nel" src="/branding/mascots/trk_fail.png" alt="" onError={(e) => e.currentTarget.remove()} /></>
   ) : (
@@ -166,16 +167,16 @@ export default function ActivityRow({ job: j, expanded, onToggle: toggle, onDism
       {expanded ? (
         <div className="at-detail">
           <div className="at-drow">
-            <span className="at-dk">STATUS</span>
+            <span className="at-dk">Status</span>
             <span className={"at-dv" + (st === "failed" ? " bad" : (st === "done_with_errors" || st === "stale") ? " warn" : st === "done" ? " good" : "")}>
               {fin ? (st === "done" ? "Done" : st === "failed" ? "Failed" : st === "stale" ? "Stalled" : "Done, with errors") : queued ? "Queued" : "Running"}
             </span>
           </div>
           {typeof j.paid_credit === "number" && isFinite(j.paid_credit) ? (
-            <div className="at-drow"><span className="at-dk">COST</span><span className="at-dv">{groupThousands(j.paid_credit)} credits</span></div>
+            <div className="at-drow"><span className="at-dk">Cost</span><span className="at-dv">{groupThousands(j.paid_credit)} credits</span></div>
           ) : null}
           <div className="at-drow">
-            <span className="at-dk">TASK</span>
+            <span className="at-dk">Task</span>
             <span className="at-dv at-mono">{j.job_id || "—"}</span>
             <button className={"at-copy" + (copied ? " copied" : "")} title="Copy task ID" onClick={copy}>
               {copied ? "copied!" : "⧉"}
@@ -183,12 +184,12 @@ export default function ActivityRow({ job: j, expanded, onToggle: toggle, onDism
           </div>
           {!compact ? (
             <>
-              <div className="at-drow at-divider"><span className="at-dk">SENT</span><span className="at-dv at-mono">{fmtClock(startedAt)}</span></div>
-              <div className="at-drow"><span className="at-dk">SPENT</span><span className="at-dv at-mono">{fmtDuration(spent)}{running ? " so far" : ""}</span></div>
+              <div className="at-drow at-divider"><span className="at-dk">Sent</span><span className="at-dv at-mono">{fmtClock(startedAt)}</span></div>
+              <div className="at-drow"><span className="at-dk">Spent</span><span className="at-dv at-mono">{fmtDuration(spent)}{running ? " so far" : ""}</span></div>
             </>
           ) : null}
           {typeof j.eta_seconds === "number" && isFinite(j.eta_seconds) ? (
-            <div className="at-drow"><span className="at-dk">EST. WAIT</span><span className="at-dv at-mono">{fmtDuration(j.eta_seconds)} (PixAI, when queued)</span></div>
+            <div className="at-drow"><span className="at-dk">Est. wait</span><span className="at-dv at-mono">{fmtDuration(j.eta_seconds)} (PixAI, when queued)</span></div>
           ) : null}
         </div>
       ) : null}

@@ -1500,10 +1500,10 @@ export default function App({ boot }) {
     // The four nav destinations NOTES §1 flagged as missing, cleared to ship 2026-08-31 --
     // each trivially removable at branch review. Glyphs are the app's own destination
     // marks (AppMobile's MENU_ITEMS table; Folio's is the banner's).
-    go("goto.contests", "🏅", "Contests", () => openOverlay("contests"));
-    go("goto.myart", "📈", "My Art", () => openOverlay("myart"));
-    go("goto.health", "♡", "Health", () => openOverlay("health"));
-    go("goto.folio", "🏆", "Folio", () => openOverlay("folio"));
+    go("goto.contests", <Icon name="medal" />, "Contests", () => openOverlay("contests"));
+    go("goto.myart", <Icon name="chart" />, "My Art", () => openOverlay("myart"));
+    go("goto.health", <Icon name="pulse" />, "Health", () => openOverlay("health"));
+    go("goto.folio", <Icon name="folio" />, "Folio", () => openOverlay("folio"));
     // One row per collection from the LIVE list (already A-Z, case-insensitive, from
     // /api/collections via unique_collections). "Collection:" is matchable text like any
     // other label. No count sub: no route in this app reports a per-collection image
@@ -1631,7 +1631,7 @@ export default function App({ boot }) {
       if (!focusItem.is_video) img("tsubaki", "✦", "Edit with Tsubaki", () => requestTsubaki(mid));
       img("details", "ⓘ", "Open details", () => ctxActions.onDetails(mid));
       img("copyid", "⎘", "Copy id", () => ctxActions.onCopyId(mid), { sub: shortId(mid) });
-      img("publish", "☁", "Publish", () => openPublish(mid));
+      img("publish", <Icon name="publish" />, "Publish", () => openPublish(mid));
     }
 
     /* Help (Session I decision 2): the guide itself on the ? key, the cheat-sheet a row

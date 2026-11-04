@@ -48,32 +48,32 @@ describe("tier wording", () => {
 
 describe("the My-entries status pill", () => {
   test("running and awaiting results", () => {
-    assert.deepEqual(rowStatus({ active: true, result_at: FUTURE }, NOW), { cls: "", text: "RUNNING", sub: "" });
-    assert.equal(rowStatus({ active: false, result_at: FUTURE }, NOW).text, "AWAITING RESULTS");
-    assert.equal(rowStatus({ active: false }, NOW).text, "AWAITING RESULTS", "no result date is not decided");
+    assert.deepEqual(rowStatus({ active: true, result_at: FUTURE }, NOW), { state: "running", cls: "", text: "Running", sub: "" });
+    assert.equal(rowStatus({ active: false, result_at: FUTURE }, NOW).text, "Awaiting results");
+    assert.equal(rowStatus({ active: false }, NOW).text, "Awaiting results", "no result date is not decided");
   });
 
   test("a verified win: gold, TIER n, the prize underneath", () => {
     const s = rowStatus({ active: false, result_at: PAST, won: true, wins: [win(2, 200000)] }, NOW);
-    assert.deepEqual(s, { cls: "won", text: "🏆 TIER 2", sub: "Tier 2, 200,000 credits" });
+    assert.deepEqual(s, { state: "won", cls: "won", icon: "trophy", text: "TIER 2", sub: "Tier 2, 200,000 credits" });
   });
 
   test("results are out but no win is verified: still checking, not 'not placed'", () => {
     const base = { active: false, result_at: PAST, won: false, wins: [] };
-    assert.equal(rowStatus({ ...base, check: { state: "none" } }, NOW).text, "CHECKING RESULTS");
-    assert.equal(rowStatus({ ...base, check: { state: "pending", decided: false } }, NOW).text, "CHECKING RESULTS");
-    assert.equal(rowStatus({ ...base }, NOW).text, "CHECKING RESULTS");
+    assert.equal(rowStatus({ ...base, check: { state: "none" } }, NOW).text, "Checking results");
+    assert.equal(rowStatus({ ...base, check: { state: "pending", decided: false } }, NOW).text, "Checking results");
+    assert.equal(rowStatus({ ...base }, NOW).text, "Checking results");
   });
 
   test("'not placed' only once the check has finished with a decided list", () => {
     const base = { active: false, result_at: PAST, won: false, wins: [] };
-    assert.equal(rowStatus({ ...base, check: { state: "settled", decided: true } }, NOW).text, "NOT PLACED");
-    assert.equal(rowStatus({ ...base, check: { state: "expired", decided: true } }, NOW).text, "NOT PLACED");
+    assert.equal(rowStatus({ ...base, check: { state: "settled", decided: true } }, NOW).text, "Not placed");
+    assert.equal(rowStatus({ ...base, check: { state: "expired", decided: true } }, NOW).text, "Not placed");
   });
 
   test("an expired check that never saw a list says so, and never claims a loss", () => {
     const s = rowStatus({ active: false, result_at: PAST, won: false, wins: [], check: { state: "expired", decided: false } }, NOW);
-    assert.equal(s.text, "NO RESULT FOUND");
+    assert.equal(s.text, "No result found");
     assert.ok(!/lost|not placed/i.test(s.text));
   });
 

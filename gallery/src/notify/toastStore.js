@@ -59,10 +59,16 @@ export function dismiss(id) {
 export function show(o) {
   o = o || {};
   const kind = o.kind || "";
-  const icon = o.icon || (kind === "ok" ? "✓" : kind === "err" ? "⚠" : kind === "unlock" ? "🏆" : "◉");
+  // The mark. `iconName` names a line icon from gallery/src/icons (unslop pick 2B) -- the
+  // way a plain .js caller asks for one, since it cannot write <Icon>; a .jsx caller may
+  // pass the element itself as `icon`. A string `icon` is drawn as text (roster content,
+  // the narrator's pointing hand). An error toast with no mark of its own wears the
+  // warning icon; the unlock's trophy is the celebration's own (out of the pick's scope).
+  const iconName = o.iconName ? String(o.iconName) : (!o.icon && kind === "err" ? "warning" : "");
+  const icon = iconName ? "" : (o.icon || (kind === "ok" ? "✓" : kind === "unlock" ? "🏆" : "◉"));
   const id = ++seq;
   toasts = toasts.concat([{
-    id, kind, icon,
+    id, kind, icon, iconName,
     title: o.title || "",
     msg: o.msg || "",
     thumb: o.thumb || "",

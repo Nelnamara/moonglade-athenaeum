@@ -194,7 +194,7 @@ export default function CommentsThread({ row, phone }) {
     const q = replyQuestion(data.my_name, b.to.author.name, work);
     if (phone) { setAsk({ kind: "reply", q, text: b.text.trim(), tok, b }); return; }
     toastShow({
-      kind: "", icon: "❝", title: q, quote: b.text.trim(), wide: true, sticky: true,
+      kind: "", iconName: "comment", title: q, quote: b.text.trim(), wide: true, sticky: true,
       actions: [
         { label: "Back", run: () => textRef.current && textRef.current.focus() },
         { label: "Post publicly", run: () => post(tok, b) },
@@ -228,7 +228,7 @@ export default function CommentsThread({ row, phone }) {
     const q = deleteQuestion(work);
     if (phone) { setAsk({ kind: "delete", q, c, tok }); return; }
     toastShow({
-      kind: "", icon: "⚠", title: q, sticky: true,
+      kind: "", iconName: "warning", title: q, sticky: true,
       actions: [
         { label: "Keep", run: () => {} },
         { label: "Delete", tone: "ruby", run: () => del(tok, c) },
@@ -285,7 +285,7 @@ export default function CommentsThread({ row, phone }) {
 
   return (
     <section className={"cm-thread" + (phone ? " phone" : "")} ref={ref} aria-label="Comments">
-      <div className="cm-lab">COMMENTS · {Number(total || 0).toLocaleString()}</div>
+      <div className="cm-lab">Comments · {Number(total || 0).toLocaleString()}</div>
       {error ? <div className="cm-warn">{"Couldn't read the comments from PixAI: " + error}</div> : null}
       {seen && !data && !error ? <div className="cm-dim">Reading the comments…</div> : null}
       {data && !t.chains.length && !t.hidden && !error ? <div className="cm-dim">No comments yet.</div> : null}

@@ -60,6 +60,15 @@ export function bubbleText(side) {
   return "Tap ⬆ " + (side === "top" ? "above" : "below") + ', then "Add to Home Screen".';
 }
 
+/* The same sentence in parts, for a render site that draws the Share mark as the `share` line
+   icon (gallery/src/icons, unslop pick 2B) rather than the ⬆ character: the words before the
+   icon, the icon's name, and the words after it. bubbleText stays the plain-string form until
+   InstallNudge.jsx draws from these. */
+export function bubbleParts(side) {
+  return { before: "Tap", icon: "share",
+           after: (side === "top" ? "above" : "below") + ', then "Add to Home Screen".' };
+}
+
 function tabStore(storage) {
   if (storage) return storage;
   try { return typeof sessionStorage !== "undefined" ? sessionStorage : null; } catch { return null; }

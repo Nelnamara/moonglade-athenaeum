@@ -136,7 +136,9 @@ test("CostBadge is a forwardRef whose imperative handle keeps the setPrice/clear
   // the could-not-verify ERROR state, worded so it still warns -- not the idle hint clear() gives.
   b.act((h) => h.setPrice(null));
   assert.equal(b.badge.attr("data-state"), "error");
-  assert.equal(b.badge.text, "⚠ Couldn't verify the cost — generating may spend credits.");
+  // unslop pick 2B: the warning is a line icon beside the words (mgc-ico), not a ⚠ in them
+  assert.equal(b.badge.text, "Couldn't verify the cost — generating may spend credits.");
+  assert.match(b.badge.html, /mgc-ico/, "the could-not-verify state wears the warning icon");
   assert.equal(b.ref.current.state, "error");
   assert.equal(b.ref.current.settled, false);
 
@@ -227,12 +229,13 @@ test("a settled ZERO renders as paid-spends-nothing, never borrowing the free-ca
   assert.equal(b.badge.attr("data-state"), "paid");
   assert.equal(b.badge.text, "0 credits — this spends nothing");
   assert.equal(b.badge.attr("title"), "Priced at zero credits. No free card was involved.");
-  assert.doesNotMatch(b.badge.html, /FREE|🎫/, "a settled zero never borrows the free card's words");
+  assert.doesNotMatch(b.badge.html, /FREE|Free —|🎫|mgc-ico/, "a settled zero never borrows the free card's words or its ticket");
 
   b.act((h) => h.setPrice({ free: true, card_name: "Daily card", cost: 600 }));
   assert.equal(b.badge.attr("data-state"), "free");
-  assert.equal(b.badge.text, "🎫 FREE — Daily card covers this · saves ~600 credits",
-    "the free-card branch keeps its own ticket wording");
+  assert.equal(b.badge.text, "Free — Daily card covers this · saves ~600 credits",
+    "the free-card branch keeps its own wording");
+  assert.match(b.badge.html, /mgc-ico/, "...and its ticket, drawn beside the words");
   assert.doesNotMatch(b.badge.text, /spends nothing/);
 });
 
@@ -244,16 +247,16 @@ test("free branch: a multi-ticket job says how many of the held cards it uses (1
   const b = await mountBadge({});
   const shown = (resp) => { b.act((h) => h.setPrice({ free: true, card_name: "Video card", ...resp })); return b.badge.text; };
   // covered wording is 'uses N of H cards' with N = cards_needed and H = cards_held
-  assert.equal(shown({ cards_needed: 3, cards_held: 5 }), "🎫 FREE — Video card covers this — uses 3 of 5 cards");
-  assert.equal(shown({ cards_needed: 2, cards_held: 2 }), "🎫 FREE — Video card covers this — uses 2 of 2 cards",
+  assert.equal(shown({ cards_needed: 3, cards_held: 5 }), "Free — Video card covers this — uses 3 of 5 cards");
+  assert.equal(shown({ cards_needed: 2, cards_held: 2 }), "Free — Video card covers this — uses 2 of 2 cards",
     "multi-ticket wording starts at cards_needed > 1");
-  assert.equal(shown({ cards_needed: 2 }), "🎫 FREE — Video card covers this — uses 2 of your cards");
+  assert.equal(shown({ cards_needed: 2 }), "Free — Video card covers this — uses 2 of your cards");
   // the 1-ticket '(N left)' wording survives unchanged
-  assert.equal(shown({ cards_held: 4 }), "🎫 FREE — Video card covers this (4 left)");
-  assert.equal(shown({ cards_needed: 1, cards_held: 4 }), "🎫 FREE — Video card covers this (4 left)");
+  assert.equal(shown({ cards_held: 4 }), "Free — Video card covers this (4 left)");
+  assert.equal(shown({ cards_needed: 1, cards_held: 4 }), "Free — Video card covers this (4 left)");
   // held count reads cards_held with the legacy `cards` key as fallback
-  assert.equal(shown({ cards: 7 }), "🎫 FREE — Video card covers this (7 left)");
-  assert.equal(shown({ cards_held: 2, cards: 9, cards_needed: 2 }), "🎫 FREE — Video card covers this — uses 2 of 2 cards",
+  assert.equal(shown({ cards: 7 }), "Free — Video card covers this (7 left)");
+  assert.equal(shown({ cards_held: 2, cards: 9, cards_needed: 2 }), "Free — Video card covers this — uses 2 of 2 cards",
     "cards_held wins over the legacy key");
 });
 
@@ -292,8 +295,9 @@ test("short renders as PAID with the amber warn treatment + data-short, and the 
   assert.equal(badge.attr("data-warn"), "1", "short must ride the paid+warn (amber) attribute");
   assert.equal(badge.attr("data-short"), "1", "the root carries data-short so hosts/tests can tell short from a host warn");
   // the price line, then the note line (its own span) under it; the text accessor joins them
-  assert.equal(badge.text, "⚠ ≈ 600 credits" + NOTE);
-  assert.equal(b.ref.current.text, "⚠ ≈ 600 credits · " + NOTE);
+  assert.equal(badge.text, "≈ 600 credits" + NOTE);
+  assert.equal(b.ref.current.text, "≈ 600 credits · " + NOTE);
+  assert.match(badge.html, /mgc-ico/, "short wears the warning icon");
   const sub = one(b.$.byClass("mgc-sub"), "note line");
   assert.equal(sub.text, NOTE);
   assert.equal(sub.attr("title"), NOTE);
@@ -322,7 +326,7 @@ test("short renders as PAID with the amber warn treatment + data-short, and the 
   // note rides the note line. A host warn alone is amber without being short.
   const warned = await mountBadge({ warn: "V4.0 full costs more" });
   warned.act((h) => h.setPrice(shortResp));
-  assert.equal(warned.badge.text, "⚠ V4.0 full costs more · ≈ 600 credits" + NOTE);
+  assert.equal(warned.badge.text, "V4.0 full costs more · ≈ 600 credits" + NOTE);
   assert.equal(one(warned.$.byClass("mgc-sub")).text, NOTE);
   assert.equal(warned.badge.attr("data-short"), "1");
   warned.act((h) => h.setPrice({ free: false, cost: 600 }));
@@ -334,7 +338,8 @@ test("short renders as PAID with the amber warn treatment + data-short, and the 
   chip.act((h) => h.setPrice(shortResp));
   assert.equal(chip.badge.attr("data-short"), "1");
   assert.equal(chip.$.byClass("mgc-sub").length, 0);
-  assert.equal(one(chip.$.byClass("mgc-val")).text, "⚠ ≈ 600");
+  assert.equal(one(chip.$.byClass("mgc-val")).text, "≈ 600");
+  assert.match(one(chip.$.byClass("mgc-val")).html, /mgc-ico/, "the chip's value wears the warning icon");
   assert.equal(one(chip.$.byClass("mgc-lab")).text, "credits · card short");
   assert.equal(one(chip.$.byClass("mgc-tip")).text, NOTE);
 
@@ -394,7 +399,7 @@ test("a failed Fix quote is the red couldn't-verify state -- never a stale 4,800
   // the next quote fails: the server answers cost null (price_fixer failed soft) with the pass still named
   b.act((h) => h.setPrice({ free: false, cost: null, fix_pass: "face", fix_boxes: 1, cards: null }));
   assert.equal(b.badge.attr("data-state"), "error");
-  assert.doesNotMatch(b.badge.html, /4,800|4800|pass|FREE/);
+  assert.doesNotMatch(b.badge.html, /4,800|4800|pass|FREE|Free —/);
   // and a transport failure is the same error
   b.act((h) => h.setPrice(null));
   assert.equal(b.badge.attr("data-state"), "error");

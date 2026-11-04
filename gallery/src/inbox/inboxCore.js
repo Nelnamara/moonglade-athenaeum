@@ -20,8 +20,10 @@ const TAB_CATS = {
   pixai: ["contest", "news"],
 };
 
-// The glyph each kind wears: ♥ like · ❝ comment · + follow · ✦ contest · ◆ PixAI news.
-export const GLYPH = { like: "♥", comment: "❝", follow: "+", contest: "✦", news: "◆" };
+// The mark each kind wears: the heart and comment line icons (unslop pick 2B) for a like and
+// a comment, named in GLYPH_ICON; + follow · ✦ contest · ◆ PixAI news stay text marks.
+export const GLYPH_ICON = { like: "heart", comment: "comment" };
+export const GLYPH = { follow: "+", contest: "✦", news: "◆" };
 
 export const REPLY_MAX = 4095;
 export const EXPIRY_WINDOW_H = 72;
@@ -171,13 +173,15 @@ export function groupInbox(items, tab) {
   return { works: Array.from(works.values()).sort(byAt), rest: rest.sort(byAt) };
 }
 
-/* "♥ +12 · ❝ 2 new" -- zeroes omitted. */
+/* What changed on a work, as parts the row draws: [{icon: "heart", text: "+12"},
+   {icon: "comment", text: "2 new"}] -- zeroes omitted. The icon is drawn beside the words
+   (heart = likes, comment = comments), never written into them. */
 export function workDelta(card) {
   const parts = [];
-  if (card && card.likes) parts.push("♥ +" + card.likes);
-  if (card && card.newComments) parts.push("❝ " + card.newComments + " new");
-  else if (card && card.comments) parts.push("❝ " + card.comments);
-  return parts.join(" · ");
+  if (card && card.likes) parts.push({ icon: "heart", label: "Likes", text: "+" + card.likes });
+  if (card && card.newComments) parts.push({ icon: "comment", label: "Comments", text: card.newComments + " new" });
+  else if (card && card.comments) parts.push({ icon: "comment", label: "Comments", text: String(card.comments) });
+  return parts;
 }
 
 /* Whether a pushed row raises a toast: comments only (R4b). */

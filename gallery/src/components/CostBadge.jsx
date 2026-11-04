@@ -5,6 +5,7 @@ import { adjustedText } from "../gen/genCore.js";
 import { classify, isShort } from "../gen/costBadgeCore.js";
 import { fixPassNote } from "../gen/editCore.js";
 import "../styles/cost-badge.css";
+import Icon from "../icons/Icons.jsx";
 
 /* CostBadge — the React port of static/mg-cost-badge.js's <mg-cost-badge> custom element:
    the one place the suite says "this generation costs N credits" or "a free card covers it",
@@ -128,6 +129,11 @@ function build(view, props) {
   const warn = (props.warn || "").trim();
   const compact = !!props.compact;
   let main = "", sub = null, title = "", val = "", lab = "", tip = "", dot = false, short = false;
+  // The marks that ride the words (unslop pick 2B): a line icon, drawn where the words are
+  // rendered, never a character inside them -- so `text`, the native title and the hover tip
+  // stay plain words. mainIcon/valIcon name the icon ("ticket" | "warning"); tipWarn marks
+  // the hover tip's host warning.
+  let mainIcon = null, valIcon = null, tipWarn = false;
   // Tsubaki.3 Unlimited Mode (SCOPE_2026-09-26_unlimited-mode C5, §8.7): the server answers a
   // lane request {cost: 0, free: true, unlimited: true} with no card involved, and every form
   // reads "Free ∞" in place of the price and the card line -- the ∞ its own span, in the fixed green.
@@ -152,7 +158,8 @@ function build(view, props) {
     const usesN = (needN != null && needN > 1)
       ? "uses " + fmt(needN) + " of " + (heldN != null ? fmt(heldN) : "your") + " cards" : "";
     const savesN = (d.cost != null && isFinite(Number(d.cost))) ? fmt(d.cost) : "";
-    main = "🎫 FREE — " + card + " covers this"
+    mainIcon = "ticket";
+    main = "Free — " + card + " covers this"
       + (usesN ? " — " + usesN : (leftN ? " (" + leftN + ")" : ""))
       + (savesN ? " · saves ~" + savesN + " credits" : "");
     sub = expiryNote(d.card_expires);
@@ -160,7 +167,7 @@ function build(view, props) {
       ? "A free card is applied automatically at submit — this generation spends 0 credits and "
         + usesN + "."
       : "A free card is applied automatically at submit — this generation spends 0 credits.";
-    val = "FREE";
+    val = "Free";
     lab = card + (usesN ? " · " + usesN : (leftN ? " · " + leftN : ""));
     tip = title + (savesN ? " Saves ~" + savesN + " credits." : "");
     if (sub) { tip += " Card " + sub.text + " — " + sub.title + "."; dot = sub.days <= 7; }
@@ -181,8 +188,9 @@ function build(view, props) {
       : "";
     // A settled ZERO is real (nothing to spend) but is NOT the free-card state — it must not
     // borrow its wording or its emerald.
+    if (n !== 0 && (warn || short)) { mainIcon = "warning"; valIcon = "warning"; }
     main = (n === 0) ? "0 credits — this spends nothing"
-      : (warn ? "⚠ " + warn + " · " : (short ? "⚠ " : "")) + "≈ " + fmt(total) + " credits";
+      : (warn ? warn + " · " : "") + "≈ " + fmt(total) + " credits";
     title = (n === 0) ? "Priced at zero credits. No free card was involved."
       : short ? shortNote
         : "No free card covers this — generating spends credits."
@@ -190,11 +198,13 @@ function build(view, props) {
     // The short sentence takes the note line under the price (block form); the chip has no
     // room for it, so there it rides in the label + billing tooltip instead.
     if (short && !compact) sub = { text: shortNote, title: shortNote, days: null };
-    val = (n === 0) ? "0" : (warn || short ? "⚠ " : "") + "≈ " + fmt(total);
+    val = (n === 0) ? "0" : "≈ " + fmt(total);
     lab = (n === 0) ? "credits — spends nothing" : short ? "credits · card short" : "credits";
-    tip = (n !== 0 && warn) ? "⚠ " + warn + ". " + title : title;
+    tipWarn = n !== 0 && !!warn;
+    tip = tipWarn ? warn + ". " + title : title;
   } else if (state === "error") {
-    main = "⚠ " + (msg || ERR_TEXT);
+    mainIcon = "warning";
+    main = msg || ERR_TEXT;
     title = ERR_TITLE;
     tip = ERR_TITLE;
   } else if (state === "checking") {
@@ -266,7 +276,7 @@ function build(view, props) {
     if (balanceN != null) parts.push(fmt(balanceN) + " credits");
     line = parts.join(" · ");
   }
-  return { state, warn, compact, stack, short, lane, main, sub, noteLine, adj, title, val, lab, tip, dot, text, line, d };
+  return { state, warn, compact, stack, short, lane, main, mainIcon, sub, noteLine, adj, title, val, valIcon, lab, tip, tipWarn, dot, text, line, d };
 }
 
 function detailOf(m) {
@@ -353,7 +363,7 @@ const CostBadge = forwardRef(function CostBadge(props, ref) {
     >
       {showChip ? (
         <>
-          <span className="mgc-val">{m.val}{m.lane ? <span className="mgc-inf">∞</span> : null}</span>
+          <span className="mgc-val">{m.valIcon ? <Icon name={m.valIcon} className="mgc-ico" /> : null}{m.val}{m.lane ? <span className="mgc-inf">∞</span> : null}</span>
           <span className="mgc-div" />
           <span className="mgc-lab">{m.lab}</span>
           {m.sub ? <span className="mgc-sub">{m.sub.text}</span> : null}
@@ -365,7 +375,8 @@ const CostBadge = forwardRef(function CostBadge(props, ref) {
            state is not something a tighter layout gets to hide */
         <>
           <span className="mgc-main">
-            {m.state === "checking" ? <><span className="mgc-pip" />Checking cost…</> : m.main}
+            {m.state === "checking" ? <><span className="mgc-pip" />Checking cost…</>
+              : <>{m.mainIcon ? <Icon name={m.mainIcon} className="mgc-ico" /> : null}{m.main}</>}
             {m.lane ? <span className="mgc-inf">∞</span> : null}
           </span>
           {m.line ? <span className="mgc-line">{m.line}</span> : null}
@@ -375,6 +386,7 @@ const CostBadge = forwardRef(function CostBadge(props, ref) {
         <><span className="mgc-pip" />Checking cost…</>
       ) : (
         <>
+          {m.mainIcon ? <Icon name={m.mainIcon} className="mgc-ico" /> : null}
           {m.main}
           {m.lane ? <span className="mgc-inf">∞</span> : null}
           {m.noteLine ? <span className="mgc-sub" title={m.noteLine.title}>{m.noteLine.text}</span> : null}
@@ -382,7 +394,7 @@ const CostBadge = forwardRef(function CostBadge(props, ref) {
       )}
       {/* aria-hidden: the tip duplicates the chip/text and this is an aria-live region — it
           must not re-announce on every push. */}
-      {m.compact && m.tip ? <span className="mgc-tip" aria-hidden="true">{m.tip}</span> : null}
+      {m.compact && m.tip ? <span className="mgc-tip" aria-hidden="true">{m.tipWarn ? <Icon name="warning" className="mgc-ico" /> : null}{m.tip}</span> : null}
     </div>
   );
 });

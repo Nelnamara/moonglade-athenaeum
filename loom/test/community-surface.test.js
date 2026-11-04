@@ -216,8 +216,8 @@ describe("followers and following reach BOTH surfaces the owner asked for", () =
   test("the chip beside the credits chip renders both numbers", () => {
     assert.match(bar, /account\.followers/);
     assert.match(bar, /account\.following/);
-    assert.match(bar, /FOLLOWERS/);
-    assert.match(bar, /FOLLOWING/);
+    assert.match(bar, /Followers/);
+    assert.match(bar, /Following/);
   });
 
   test("it borrows the credits chip's own classes rather than inventing a chip", () => {
@@ -325,11 +325,11 @@ describe("My Art draws the numbers it was already fetching", () => {
 
   test("the stat row reports a lifetime total, and says so when it is partial", () => {
     const hook = src("hooks/useMyArt.js");
-    assert.match(hook, /TOTAL VIEWS/);
+    assert.match(hook, /Total views/);
     assert.ok(!hook.includes("views_top"), "views_top was the twelve-row subtotal; it is gone");
     // A partly-swept library must not pass a subtotal off as a total -- the same job the
     // old "(TOP 12)" label was doing, kept.
-    assert.match(hook, /VIEWS \(" \+ swept \+ " OF "/);
+    assert.match(hook, /Views \(" \+ swept \+ " of "/);
     assert.match(mobile, /"VIEWS \(" \+ \(t\.views_rows \|\| 0\)/);
   });
 

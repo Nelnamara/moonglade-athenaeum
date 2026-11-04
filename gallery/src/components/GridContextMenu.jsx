@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import "../styles/context-menu.css";
+import Icon from "../icons/Icons.jsx";
 
 /* Right-click context menu for a grid thumbnail -- the five classic Ctx actions
    (Edit / Send to Video / Find similar / Copy id / Open details) brought onto the
@@ -66,7 +67,7 @@ export default function GridContextMenu({ target, onClose, actions }) {
     ...(!target.isVideo && actions.onTsubaki ? [["✦", "Edit with Tsubaki", () => actions.onTsubaki(target.mid)]] : []),
     // #28 scope-add: videos only -- re-extract this clip's poster on demand (same
     // POST /api/rebuild-poster route as Image Details' button). Gated on target.isVideo.
-    ...(target.isVideo ? [["🖼", "Rebuild poster", () => actions.onRebuildPoster(target.mid)]] : []),
+    ...(target.isVideo ? [[<Icon name="image" />, "Rebuild poster", () => actions.onRebuildPoster(target.mid)]] : []),
     // ◈, not the ✧ this row wore before: B2 of the 2026-09-04 Gallery Chrome
     // handoff makes ◈ the one mark for visual similarity everywhere in the app,
     // so this menu row, the tile's own hover door, the lightbox row and the

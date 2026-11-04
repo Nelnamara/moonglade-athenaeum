@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet } from "../api.js";
+import Icon from "../icons/Icons.jsx";
 import {
   HISTORY_DAYS, anyRunning, costColor, costText, dayCells, dayLabel, mergeHistoryPages,
   olderLabel, tipLines, todayKey, tzMinutes,
@@ -200,7 +201,7 @@ export default function HistoryStrip({ onPrefill, onTip }) {
                       {c.video && <span className="mgdock-vtag">▶ video</span>}
                       {running1 && <RunningFace />}
                       {cluster && <ClusterFace count={c.count} />}
-                      {failed && <span className="mgdock-tilefail">⚠</span>}
+                      {failed && <span className="mgdock-tilefail"><Icon name="warning" title="Failed" /></span>}
                       {clickable && (
                         <div className={"mgdock-tilehint" + (hover === c.key ? " show" : "")}>
                           <span>Use these settings →</span>

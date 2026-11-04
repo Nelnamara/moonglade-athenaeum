@@ -39,7 +39,7 @@ const mobile = src("components/ImageDetailsMobile.jsx");
 
 test("A: DetailsView renders the ◈ SIMILAR header + an 8-tile strip, inline in the record", () => {
   assert.match(details, /className="p-similar-head"/);
-  assert.match(details, /◈ SIMILAR/);
+  assert.match(details, /◈ Similar/);
   assert.doesNotMatch(details, /✧ SIMILAR/);                         // B2: one mark, app-wide
   assert.match(details, /the closest by eye, not by model/);             // DC:129's caption, verbatim
   assert.match(details, /className="p-similar-strip"/);

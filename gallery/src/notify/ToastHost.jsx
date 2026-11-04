@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { subscribe, dismiss } from "./toastStore.js";
+import Icon from "../icons/Icons.jsx";
 
 /* ToastHost -- the React face of notify/toastStore.js (no-vanilla campaign, component 6):
    renders the #mg-toasts corner stack from the store's state, portaled to document.body so it
@@ -20,7 +21,7 @@ export default function ToastHost() {
             <span className="mt-avatar" aria-hidden="true"
               style={{ backgroundImage: "url('" + t.avatar.replace(/'/g, "%27") + "')" }} />
           ) : (
-            <span className="mt-ic">{t.icon}</span>
+            <span className="mt-ic">{t.iconName ? <Icon name={t.iconName} /> : t.icon}</span>
           )}
           <div className="mt-main">
             <div className="mt-title">{t.title}{t.code ? <> <b className="mt-code">{t.code}</b></> : null}</div>

@@ -62,12 +62,14 @@ const PING_TRIES_MAX = 50;
 
 // Ported verbatim from ControlPanelOverlay.jsx's own DEDUP_STAGES -- the Tend section's
 // dedup pipeline order, shared so a second, drifting copy never has to exist.
+// `locked` marks the two stages that change files: the render site draws the lock line icon
+// beside the label (unslop pick 2B) -- the label itself stays plain words.
 export const DEDUP_STAGES = [
   { key: "audit", label: "Audit" },
   { key: "dedup-dry", label: "Preview" },
-  { key: "dedup-apply", label: "Quarantine 🔒" },
+  { key: "dedup-apply", label: "Quarantine", locked: true },
   { key: "verify-dupes", label: "Verify" },
-  { key: "dedup-delete", label: "Delete 🔒" },
+  { key: "dedup-delete", label: "Delete", locked: true },
 ];
 
 // Applies a skin app-wide, not just inside whichever component called this -- classic's

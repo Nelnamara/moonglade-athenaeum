@@ -1,8 +1,9 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-  TABS, GLYPH, groupInbox, workDelta, timeAgo, giftMeta, giftPreview, bonusText, expiringLines, expiryText,
+  TABS, GLYPH, GLYPH_ICON, groupInbox, workDelta, timeAgo, giftMeta, giftPreview, bonusText, expiringLines, expiryText,
 } from "./inboxCore.js";
 import { openItem, loadMore, claimGift, clearClaim, markAllRead } from "./inboxStore.js";
+import Icon from "../icons/Icons.jsx";
 
 /* The bodies behind the doors (Inbox and Event Handoff §1-3, §7, §9, §10): the inbox's, shared by
    the desktop's ✉ panel and the phone's Inbox sheet, and the gift box's, shared by the desktop's
@@ -83,7 +84,7 @@ export function EventCards({ events }) {
   if (!events || !events.length) return null;
   return (
     <>
-      <div className="ib-lab">ON PIXAI NOW</div>
+      <div className="ib-lab">On PixAI now</div>
       <div className="ib-events">
         {events.map((e) => {
           const art = failed[e.link] || !e.image ? null : e.image;
@@ -293,7 +294,10 @@ export function InboxBody({ st, tab, now }) {
         <React.Fragment key={w.key}>
           <Row row={w} now={now} tip={tip} readOnly={st.readOnly} notice={st.notice} onOpen={openItem}>
             <span className="ib-thumb" style={bg(thumbOf(w.artwork))} aria-hidden="true" />
-            <span className="ib-text">{w.artwork.title || "Untitled"}<br />{workDelta(w)}</span>
+            <span className="ib-text">{w.artwork.title || "Untitled"}<br />
+              {workDelta(w).map((p, i) => (
+                <React.Fragment key={p.icon}>{i ? " · " : null}<Icon name={p.icon} title={p.label} /> {p.text}</React.Fragment>
+              ))}</span>
           </Row>
           {w.quote ? (
             <button type="button" className="ib-quote ib-quotebtn"
@@ -303,10 +307,10 @@ export function InboxBody({ st, tab, now }) {
           ) : null}
         </React.Fragment>
       ))}
-      {g.rest.length ? <div className="ib-lab">EVERYTHING ELSE</div> : null}
+      {g.rest.length ? <div className="ib-lab">Everything else</div> : null}
       {g.rest.map((r) => (
         <Row key={r.key} row={r} now={now} tip={tip} readOnly={st.readOnly} notice={st.notice} onOpen={openItem}>
-          <span className="ib-glyph" aria-hidden="true">{GLYPH[r.kind] || GLYPH.news}</span>
+          <span className="ib-glyph" aria-hidden="true">{GLYPH_ICON[r.kind] ? <Icon name={GLYPH_ICON[r.kind]} /> : (GLYPH[r.kind] || GLYPH.news)}</span>
           <span className="ib-text">{r.text}</span>
         </Row>
       ))}
