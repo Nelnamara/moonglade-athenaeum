@@ -18,12 +18,12 @@
 .mgts-profrow:disabled { opacity: .35; cursor: not-allowed; }
 .mgts-profmain { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .mgts-profrow.locked .mgts-profmain { opacity: .5; }
-.mgts-profname { font-size: 11.5px; font-weight: 700; }
+.mgts-profname { font-size: 11.5px; font-weight: 600; }
 .mgts-profprice { font-weight: 400; color: var(--overlay0); }
 .mgts-profprice.gold { color: var(--gold); }
 .mgts-profdesc { font-size: 10px; color: var(--subtext); line-height: 1.4; }
 .mgts-check { font-size: 11px; color: var(--lavender); }
-.mgts-memtag { flex: none; font-size: 8px; font-weight: 700; padding: 1px 5px; border-radius: 4px;
+.mgts-memtag { flex: none; font-size: 8px; font-weight: 600; padding: 1px 5px; border-radius: 4px;
   border: 1px solid var(--gold); color: var(--gold); background: var(--base); white-space: nowrap; }
 .mgts-profiles.phone .mgts-profrow { min-height: 44px; align-items: center; }
 
@@ -32,30 +32,30 @@
   padding: 9px 11px; border-radius: 10px; background: var(--base); border: 1px solid var(--gold);
   font-size: 10.5px; line-height: 1.5; color: var(--subtext);
   box-shadow: 0 10px 24px rgba(0, 0, 0, .6); animation: mgtsPop .42s cubic-bezier(.2, .9, .24, 1) both; }
-.mgts-notice b { color: var(--text); }
+.mgts-notice b { color: var(--text); font-weight: 600; }
 .mgts-notice.inline { position: static; width: auto; box-shadow: none; background: var(--mantle);
   font-size: 11px; line-height: 1.45; }
 
 /* ---- decision 1: the two-way switch, the confirm card, the held notes ---- */
-.mgts-seg { display: flex; gap: 4px; padding: 3px; border-radius: 9px;
+.mgts-seg { display: flex; gap: 4px; padding: 3px; border-radius: var(--radius-control);
   background: rgba(12, 10, 28, .6); border: 1px solid var(--surface1); }
 .mgts-segbtn { flex: 1 1 0; text-align: center; font-size: 10.5px; font-weight: 600; padding: 5px 0;
   border-radius: 7px; cursor: pointer; white-space: nowrap; border: 0; background: transparent;
   color: var(--subtext); font-family: inherit; transition: background .25s, color .25s; }
-.mgts-segbtn.on { font-weight: 700; background: rgba(182, 146, 230, .18); color: var(--text); }
+.mgts-segbtn.on { font-weight: 600; background: rgba(182, 146, 230, .18); color: var(--text); }
 .mgts-seg.phone { border-radius: 12px; }
 .mgts-seg.phone .mgts-segbtn { min-height: 40px; font-size: 12px; border-radius: 9px; }
 
 .mgts-confirm { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 9px;
   background: rgba(12, 10, 28, .92); border: 1px solid color-mix(in oklab, var(--peach) 40%, transparent);
   animation: mgtsPop .42s cubic-bezier(.2, .9, .24, 1) both; }
-.mgts-confirm-t { font-size: 10.5px; font-weight: 700; color: var(--peach); }
+.mgts-confirm-t { font-size: 10.5px; font-weight: 600; color: var(--peach); }
 .mgts-confirm-b { font-size: 10px; line-height: 1.45; color: var(--subtext); }
 .mgts-confirm-acts { display: flex; gap: 6px; }
-.mgts-btn { font-size: 10px; font-weight: 600; padding: 4px 10px; border-radius: 7px; cursor: pointer;
+.mgts-btn { font-size: 10px; font-weight: 600; padding: 4px 10px; border-radius: var(--radius-control-sm); cursor: pointer;
   white-space: nowrap; border: 1px solid var(--surface1); background: transparent; color: var(--subtext);
   font-family: inherit; }
-.mgts-btn.primary { font-weight: 700; background: var(--lavender); border-color: var(--lavender); color: var(--base); }
+.mgts-btn.primary { font-weight: 600; background: var(--lavender); border-color: var(--lavender); color: var(--base); }
 .mgts-confirm.sheet { border: 0; background: transparent; padding: 4px 16px 18px; gap: 10px; animation: none; }
 .mgts-confirm.sheet .mgts-confirm-t { font-size: 14px; }
 .mgts-confirm.sheet .mgts-confirm-b { font-size: 12.5px; }
@@ -95,7 +95,7 @@
 .mgts-creathead .sp { flex: 1 1 auto; }
 .mgts-creatname { font-size: 11px; font-weight: 600; color: var(--text); }
 .mgts-creatsub { font-size: 9.5px; color: var(--overlay0); }
-.mgts-settag { font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 5px;
+.mgts-settag { font-size: 9px; font-weight: 600; padding: 1px 6px; border-radius: 5px;
   border: 1px solid var(--surface1); color: var(--overlay0); white-space: nowrap; }
 .mgts-stops { display: flex; gap: 3px; }
 .mgts-cstop { flex: 1 1 0; height: 8px; border-radius: 3px; border: 0; padding: 0; cursor: pointer;
@@ -119,7 +119,7 @@
   min-height: 30px; font-size: 11px; font-weight: 600; border-radius: 8px; cursor: pointer; white-space: nowrap;
   border: 1px solid transparent; background: transparent; color: var(--subtext); font-family: inherit;
   transition: background .25s, color .25s, border-color .25s; }
-.mgts-orbtn.on { font-weight: 700; border-color: var(--lavender); background: rgba(182, 146, 230, .2); color: var(--text); }
+.mgts-orbtn.on { font-weight: 600; border-color: var(--lavender); background: rgba(182, 146, 230, .2); color: var(--text); }
 .mgts-orient.phone .mgts-orbtn { min-height: 44px; font-size: 12px; }
 .mgts-glyph { display: block; border-radius: 3px; box-sizing: border-box; flex: none;
   border: 1.5px solid var(--overlay0); background: transparent;
@@ -153,13 +153,13 @@
 
 .mgts-tiers { position: relative; display: flex; gap: 5px; padding-top: 6px; transition: opacity .3s; }
 .mgts-tier { position: relative; flex: 1 1 0; display: flex; flex-direction: column; align-items: center;
-  gap: 1px; padding: 5px 0; border-radius: 8px; cursor: pointer; font-family: inherit; color: var(--text);
+  gap: 1px; padding: 5px 0; border-radius: var(--radius-control); cursor: pointer; font-family: inherit; color: var(--text);
   border: 1px solid var(--surface1); background: transparent;
   transition: border-color .2s, background .2s, transform .2s; }
 .mgts-tier.on { border-color: var(--lavender); background: rgba(182, 146, 230, .14); }
 .mgts-tier.lift { transform: translateY(-2px); z-index: 301; }
 .mgts-tier:disabled { cursor: not-allowed; }
-.mgts-tiername { font-size: 11px; font-weight: 700; }
+.mgts-tiername { font-size: 11px; font-weight: 600; }
 .mgts-tierdims { font-size: 8.5px; color: var(--overlay0); }
 .mgts-tier.locked .mgts-tiername, .mgts-tier.locked .mgts-tierdims { opacity: .45; }
 .mgts-memtag.tier { position: absolute; top: -7px; right: 4px; }
@@ -216,7 +216,7 @@
 .mgteb { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); width: 72%;
   max-width: 760px; z-index: 4; display: flex; flex-direction: column; align-items: stretch; gap: 6px;
   user-select: text; -webkit-user-select: text; }
-.mgteb-pill { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 16px; border-radius: 999px;
+.mgteb-pill { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 16px; border-radius: var(--radius-control);
   background: rgba(12, 10, 28, .94); border: 1px solid var(--surface1); box-shadow: 0 8px 20px rgba(0, 0, 0, .5);
   transition: border-color .2s; }
 .mgteb-pill:focus-within { border-color: var(--lavender); }
@@ -226,8 +226,8 @@
 .mgteb-cost.cost-badge.compact { border: 0; background: transparent; padding: 0; min-height: 0; box-shadow: none;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--overlay0); }
 .mgteb-cost .mgc-div, .mgteb-cost .mgc-lab, .mgteb-cost .mgc-sub { display: none; }
-.mgteb-go { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; border: 0;
-  background: var(--lavender); color: var(--base); font-size: 14px; font-weight: 700; cursor: pointer; }
+.mgteb-go { flex: none; width: 32px; height: 32px; border-radius: 4px; display: grid; place-items: center; border: 0;
+  background: var(--lavender); color: var(--base); font-size: 14px; font-weight: 600; cursor: pointer; }
 .mgteb-go:disabled { opacity: .4; cursor: not-allowed; }
 .mgteb-line { align-self: center; max-width: 100%; font-size: 11px; line-height: 1.4; padding: 4px 10px; border-radius: 8px;
   background: rgba(12, 10, 28, .9); color: var(--subtext); }
