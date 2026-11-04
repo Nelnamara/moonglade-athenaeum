@@ -464,7 +464,7 @@ export default function GalleryMobile({
 
       <div className={"glm-bar2" + (continuous ? " cont" : "")}>
         {MEDIA_PILLS.map(([v, label]) => (
-          <button key={label} type="button" className={"glm-metal" + (media === v ? " on" : "")}
+          <button key={label} type="button" className={"glm-metal glm-chip" + (media === v ? " on" : "")}
             onClick={() => applyAdvanced({ media: v })}>
             {label}
           </button>

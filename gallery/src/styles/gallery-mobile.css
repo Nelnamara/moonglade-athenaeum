@@ -187,6 +187,8 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
     color-mix(in srgb, var(--lavender) 32%, var(--surface0));
   border: 1px solid color-mix(in srgb, var(--lavender) 62%, transparent); }
 .glm-metal:disabled { opacity: .5; cursor: default; }
+/* the media pills and Create's option chips are filter chips: they stay pills (unslop pick 5B) */
+.glm-metal.glm-chip, .glm-metal.cm-chip { border-radius: 999px; }
 
 /* ---- Gallery tab toolbar (DC barStyle/bar2Style/mediaPills, lines 66-88 & 912-929) ---- */
 .glm-bar { display: flex; align-items: center; gap: 6px; padding: 8px 11px; flex-wrap: wrap;

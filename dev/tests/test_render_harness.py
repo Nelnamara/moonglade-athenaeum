@@ -2797,7 +2797,7 @@ def test_the_phone_my_entries_door_filters_the_same_board_and_adds_a_status_line
     assert len(got) == 2, (
         "My entries is not the board filtered to entered contests: {!r}".format(got))
     by = {g["name"]: g for g in got}
-    assert "RUNNING" in by["JoJo Pose"]["status"], by
+    assert "Running" in by["JoJo Pose"]["status"], by
     assert "2 pieces" in by["JoJo Pose"]["status"], by
     # An ENDED contest is not on the running board at all, so its card is rebuilt from the
     # entries row itself -- the only way a finished contest can still be opened in-app.
@@ -10213,7 +10213,7 @@ def test_each_phone_sheet_wears_its_doors_picture_in_its_title_row(logged_in_pag
     h = page.evaluate(_RF_HEAD_JS, [".glm-sheet.ib-sheet", ".glm-sheet-title"])
     assert abs(h["emblem"]["w"] - 40) < 0.5 and abs(h["emblem"]["r"] - h["head"]["r"]) < 1, h
     assert h["src"].startswith("data:image/webp;base64,") and h["alt"] == "", h
-    assert page.locator(".glm-sheet.ib-sheet").get_attribute("aria-label") == "INBOX"
+    assert page.locator(".glm-sheet.ib-sheet").get_attribute("aria-label") == "Inbox"
     page.mouse.click(195, 12)
     page.wait_for_selector(".glm-sheet.ib-sheet", state="detached")
     page.click(".glm-iconbtn[title=More]")
@@ -10223,7 +10223,7 @@ def test_each_phone_sheet_wears_its_doors_picture_in_its_title_row(logged_in_pag
     _settle(page)
     h = page.evaluate(_RF_HEAD_JS, [".glm-sheet.ib-sheet", ".glm-sheet-title"])
     assert h["src"] == "/branding/rewards/gift.png" and abs(h["emblem"]["w"] - 40) < 0.5, h
-    assert page.locator(".glm-sheet.ib-sheet").get_attribute("aria-label") == "GIFT BOX"
+    assert page.locator(".glm-sheet.ib-sheet").get_attribute("aria-label") == "Gift box"
 
 
 # ---------------------------------------------------------------------------
