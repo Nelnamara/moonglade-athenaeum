@@ -43,9 +43,30 @@ def test_every_named_icon_has_its_art_and_the_art_is_all_named():
     on_disk = {p.stem for p in ICON_DIR.glob("*.svg")}
     assert named == on_disk, "the ICONS table and the .svg files disagree"
     # the app's own keys, so a rename in one place fails here rather than at runtime
-    assert [key for key, _, _ in BUILD.ICONS] == [
+    # (the Glyph Ledger's nine come first and keep their keys; the 2026-11-03 line set follows)
+    assert [key for key, _, _ in BUILD.ICONS][:9] == [
         "search", "uses", "lora", "entered", "snippets", "folio", "panel",
         "collection", "undo"]
+    keys = [key for key, _, _ in BUILD.ICONS]
+    assert len(keys) == len(set(keys)), "an icon key is used twice"
+
+
+def test_the_line_set_is_one_grammar():
+    # Unslop pick 2B (2026-11-03): every _line file is a 24-unit line icon -- 1.5 stroke,
+    # round caps and joins, currentColor -- and fills nothing but a dot.
+    line = [fname for _, fname, _ in BUILD.ICONS if fname.endswith("_line")]
+    assert line and BUILD.LINE == [k for k, f, _ in BUILD.ICONS if f.endswith("_line")]
+    for fname in line:
+        text = (ICON_DIR / (fname + ".svg")).read_text(encoding="utf-8")
+        root = text.split(">", 1)[0]
+        for attr in ('viewBox="0 0 24 24"', 'fill="none"', 'stroke="currentColor"',
+                     'stroke-width="1.5"', 'stroke-linecap="round"', 'stroke-linejoin="round"'):
+            assert attr in root, (fname, attr)
+        body = text.split(">", 1)[1]
+        assert "stroke-width" not in body, fname + ": a path overrides the set's weight"
+        for el in body.split("<")[1:]:
+            if 'fill="currentColor"' in el:
+                assert el.startswith("circle") and 'stroke="none"' in el, fname + ": only a dot fills"
 
 
 def test_the_shipped_art_is_tintable_and_carries_no_hardcoded_colour():

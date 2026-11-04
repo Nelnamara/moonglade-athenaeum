@@ -20,6 +20,15 @@
   flex: none;                /* never squeezed by a flex row it shares with a label */
 }
 
+/* ---- THE LINE SET (2026-11-03, unslop pick 2B): the 24-unit line icons that replaced the
+       colour emoji. `middle` puts the icon's centre on the baseline plus half the x-height
+       of the text it sits in -- the x-height centre the pick asks for -- so a lowercase
+       word and its icon share one optical middle at any size. In a flex row (most chips
+       and buttons) vertical-align does nothing and align-items: center does the same job.
+       Size stays 1em from the component; a site that needs another ratio sets it below,
+       as the duo icons' sites do. ---- */
+.mgico.mgico-line { vertical-align: middle; }
+
 /* ---- badges and chips: 9-10px labels, so the icon runs ~1.3em to stay legible ---- */
 .mgma2-lorabadge .mgico,          /* My Art -- USER LORA */
 .mgct-entered .mgico,             /* contests (desktop) -- Entered xN */

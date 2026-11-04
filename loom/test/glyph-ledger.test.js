@@ -84,8 +84,10 @@ test("the licence ships beside the art", () => {
   assert.match(notice, /github\.com\/gorango\/glyphs/);
   assert.match(notice, /MIT License/);
   assert.match(notice, /THE SOFTWARE IS PROVIDED "AS IS"/);
-  // and the .svg files it covers are actually here
-  const svgs = readdirSync(path.join(SRC, "icons")).filter((f) => f.endsWith(".svg"));
+  // and the .svg files it covers are actually here (the _line set of 2026-11-03 is drawn
+  // for this app and is not the Glyphs set's, so it is not counted here)
+  const svgs = readdirSync(path.join(SRC, "icons"))
+    .filter((f) => f.endsWith(".svg") && !f.endsWith("_line.svg"));
   assert.equal(svgs.length, 9, "expected the nine assigned .svg files: " + svgs.join(", "));
 });
 
