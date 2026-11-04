@@ -83,12 +83,12 @@ export const findMatches = (entries, project, query, filters, opts) => {
   }).map((e) => e.c.id);
 };
 
-/** The chips to show: ⚠ only, then the statuses and modes that occur on this board. */
+/** The chips to show: the warning chip ("only", drawn after its `icon`), then the statuses and modes that occur on this board. */
 export const findChips = (entries, opts) => {
   const statusOf = (opts && opts.statusOf) || ((c) => c.status);
   const st = new Set((entries || []).map((e) => statusOf(e.c)));
   const md = new Set((entries || []).map((e) => e.c.mode));
-  return [{ kind: "warn", key: "warn", label: "⚠ only" }]
+  return [{ kind: "warn", key: "warn", label: "only", icon: "warning" }]
     .concat(FIND_STATUSES.filter((s) => st.has(s)).map((s) => ({ kind: "status", key: s, label: s })))
     .concat(FIND_MODES.filter((m) => md.has(m)).map((m) => ({ kind: "mode", key: m, label: m })));
 };
