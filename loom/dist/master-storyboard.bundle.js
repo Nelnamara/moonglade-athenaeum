@@ -18864,7 +18864,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           /* @__PURE__ */ React.createElement("span", { className: "lm-castbox" + (inShot ? " on" : "") }),
           /* @__PURE__ */ React.createElement("div", { className: "lm-castthumb", style: src ? { backgroundImage: `url(${src})` } : void 0 }, !src && (as.kind === "audio" ? /* @__PURE__ */ React.createElement(Icon, { name: "music" }) : as.kind === "video" ? /* @__PURE__ */ React.createElement(Icon, { name: "video" }) : /* @__PURE__ */ React.createElement(Icon, { name: "image" }))),
           /* @__PURE__ */ React.createElement("div", { className: "lm-castcol" }, /* @__PURE__ */ React.createElement("div", { className: "lm-castname" }, as.name || as.kind), /* @__PURE__ */ React.createElement("div", { className: "lm-casttag" }, as.tag)),
-          missing && /* @__PURE__ */ React.createElement("span", { className: "lm-castmissing" }, "missing"),
+          missing && /* @__PURE__ */ React.createElement("span", { className: "lm-castmissing" }, "Missing"),
           liveTag || pastBudget ? /* @__PURE__ */ React.createElement("span", { className: "lm-castlive" + (pastBudget ? " oob" : "") }, liveTagText(liveTag, pastBudget, c.mode)) : null,
           !!as.lock && /* @__PURE__ */ React.createElement("span", { className: "lm-castlock", title: "Lock appearance" }, /* @__PURE__ */ React.createElement(Icon, { name: "lock" }))
         );
