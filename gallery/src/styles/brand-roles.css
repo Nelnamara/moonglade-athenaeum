@@ -24,11 +24,11 @@ button.mgcp-rl-art:hover { opacity: .8; }
 .mgcp-rl-name { flex: 1; min-width: 0; font-size: 10.5px; line-height: 1.4; color: var(--text); }
 .mgcp-rl-name > div:nth-child(2) { color: var(--subtext); }
 
-.mgcp-rl-ghost { font: inherit; font-size: 10px; padding: 5px 10px; border-radius: 8px; white-space: nowrap;
+.mgcp-rl-ghost { font: inherit; font-size: 10px; padding: 5px 10px; border-radius: var(--radius-control-sm); white-space: nowrap;
   border: 1px solid var(--surface1); background: none; color: var(--subtext); cursor: pointer; }
 .mgcp-rl-ghost:hover:not(:disabled) { color: var(--text); border-color: var(--lavender); }
 .mgcp-rl-ghost:disabled { opacity: .5; cursor: default; }
-.mgcp-rl-primary { font: inherit; font-size: 10.5px; font-weight: 700; padding: 6px 12px; border-radius: 9px;
+.mgcp-rl-primary { font: inherit; font-size: 10.5px; font-weight: 600; padding: 6px 12px; border-radius: var(--radius-control);
   border: 0; background: var(--lavender); color: var(--base); white-space: nowrap; cursor: pointer; }
 .mgcp-rl-primary:disabled { background: var(--surface0); color: var(--overlay0); cursor: default; }
 .mgcp-rl-spacer { flex: 1; }
@@ -48,13 +48,13 @@ button.mgcp-rl-art:hover { opacity: .8; }
 @keyframes mgcp-rl-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
 @keyframes mgcp-rl-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-6px); } }
 .mgcp-rl-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
-.mgcp-rl-tab { font: inherit; font-size: 10px; padding: 4px 9px; border-radius: 999px; white-space: nowrap;
+.mgcp-rl-tab { font: inherit; font-size: 10px; padding: 4px 9px; border-radius: var(--radius-control-sm); white-space: nowrap;
   border: 1px solid var(--surface1); background: none; color: var(--subtext); cursor: pointer; }
 .mgcp-rl-tab.on { border-color: var(--lavender); background: rgba(182, 146, 230, .16); color: var(--text); }
 .mgcp-rl-imgrow { display: flex; align-items: center; gap: 6px; padding: 2px 2px 0; }
 .mgcp-rl-imgname { flex: 1; font-size: 10.5px; }
 .mgcp-rl-imgstate { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9.5px; color: var(--overlay0); }
-.mgcp-rl-spec { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; letter-spacing: .04em;
+.mgcp-rl-spec { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; letter-spacing: .02em;
   color: var(--gold); }
 .mgcp-rl-drop { display: flex; flex-direction: column; gap: 4px; padding: 12px; border-radius: 10px; cursor: pointer;
   border: 1.5px dashed var(--lavender); background: rgba(182, 146, 230, .05);
@@ -105,7 +105,7 @@ button.mgcp-rl-art:hover { opacity: .8; }
 
 /* ---- the phone: a Roles group of 52 px rows, each pushing a role screen (X5a) ---- */
 .mgcp-rlm-group { display: flex; flex-direction: column; gap: 8px; }
-.mgcp-rlm-lab { font-size: 9.5px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); padding: 2px 4px 0; }
+.mgcp-rlm-lab { font-size: 11.5px; font-weight: 500; letter-spacing: normal; color: var(--overlay0); padding: 2px 4px 0; }
 .mgcp-rlm-row { display: flex; align-items: center; gap: 10px; box-sizing: border-box; width: 100%; min-height: 52px;
   padding: 7px 9px; border-radius: 10px; border: 1px solid var(--surface1); background: rgba(33, 31, 58, .3);
   color: var(--text); font: inherit; text-align: left; cursor: pointer; }
@@ -113,7 +113,7 @@ button.mgcp-rl-art:hover { opacity: .8; }
 .mgcp-rlm-screen { display: flex; flex-direction: column; gap: 12px; padding: 14px 14px 22px; }
 .mgcp-rlm-pair { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 6px 0; }
 .mgcp-rlm-btns { display: flex; gap: 8px; }
-.mgcp-rlm-btns > * { flex: 1; min-height: 44px; font-size: 12px; border-radius: 10px; }
+.mgcp-rlm-btns > * { flex: 1; min-height: 44px; font-size: 12px; border-radius: var(--radius-control); }
 .mgcp-rlm-seg { display: flex; gap: 6px; flex-wrap: wrap; }
 .mgcp-rlm-seg .mgcp-rl-tab { min-height: 44px; padding: 0 14px; font-size: 11px; }
 .mgcp-rlm-checks { font-size: 11px; }

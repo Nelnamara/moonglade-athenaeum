@@ -6,8 +6,8 @@
 
 .mgcs-slab { width: min(1180px, calc(100vw - 48px)); }
 
-.mgcs-print { margin-left: auto; font-size: 11.5px; font-weight: 700;
-  padding: 6px 14px; border-radius: 999px; border: 1px solid var(--surface1);
+.mgcs-print { margin-left: auto; font-size: 11.5px; font-weight: 600;
+  padding: 6px 14px; border-radius: var(--radius-control); border: 1px solid var(--surface1);
   background: rgba(33,31,58,.6); color: var(--text); cursor: pointer; }
 .mgcs-print:hover:not(:disabled) { border-color: var(--accent); }
 .mgcs-print:disabled { opacity: .5; cursor: not-allowed; }
