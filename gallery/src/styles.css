@@ -38,6 +38,19 @@
   --serif: var(--font-hero);
   /* --cyan is the Loom colour's local alias; the app's token is --loomc. */
   --cyan: var(--loomc, #47cbc3);
+  /* THE QUIETED LOOK's shared tokens (the owner's unslop picks, 2026-11-03;
+     moonglade-internal DECISIONS "Unslop: the approved look, quieted"). No skin has an
+     equivalent, so they live here and skins do not touch them; the Loom's STYLES :root
+     declares the same four.
+       --radius-control     buttons, inputs, search fields, selects, segmented controls
+       --radius-control-sm  the same, for a control under 26px tall
+       --matte-fill         the flat fill that replaced the glossy lavender glass pills
+       --metal-sweep        the metal buttons' sheen, on hover/focus only -- merged into
+                            each element's own transition list, never `all` */
+  --radius-control: 10px;
+  --radius-control-sm: 8px;
+  --matte-fill: rgba(24, 20, 44, .88);
+  --metal-sweep: background-position 1.2s ease-out;
 }
 * { box-sizing: border-box; }
 /* scrollbar-gutter: RESERVE THE TRACK, ALWAYS. Opening any full-screen panel sets

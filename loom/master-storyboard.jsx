@@ -141,6 +141,7 @@ import MgArtFilters from "../gallery/src/art/artFilters.js";
 // converged onto the shared picker in an earlier pass, so this just swaps the last
 // <mg-gallery-picker> web-component mount for the React component.
 import GalleryPicker from "../gallery/src/components/GalleryPicker.jsx";
+import Icon from "../gallery/src/icons/Icons.jsx";
 import ModelPicker from "../gallery/src/components/ModelPicker.jsx";
 import CostBadge from "../gallery/src/components/CostBadge.jsx";
 import { adjustedText } from "../gallery/src/gen/genCore.js";
@@ -272,6 +273,13 @@ const STYLES = `
   --lv-ink:color-mix(in oklab, var(--mantle) 80%, black);
   --lv-glass-hi:color-mix(in hsl, var(--base) 90%, var(--accent));
   --lv-glass-lo:color-mix(in hsl, var(--mantle) 90%, var(--surface1));
+  /* The unslop pass's shared tokens (2026-11-03), the same four gallery/src/styles.css
+     declares: squarer control corners (8px under 26px tall), the matte fill that replaced
+     the glossy glass pills, and the metal buttons' hover-only sheen transition. */
+  --radius-control:10px;
+  --radius-control-sm:8px;
+  --matte-fill:rgba(24, 20, 44, .88);
+  --metal-sweep:background-position 1.2s ease-out;
 }
 *{box-sizing:border-box}
 /* System fonts only (no CDN) -- matches the gallery's own body{font-family:system-ui,
@@ -1660,21 +1668,15 @@ function useAccountLine(landedKey, bind) {
   return acct;
 }
 
-// The right rail's four tab marks, one set: 16-unit line icons, 1.5 stroke, round caps, drawn in
-// currentColor so each takes the rail button's colour (subtext, accent when on) exactly as the
-// ✦ the Loom handoff draws there (The Loom.dc.html:329) does. They replace a text glyph and
-// three emoji, which drew at three different sizes and stroke weights.
-const GEN_GLYPHS = {
-  Image: <path d="M8 1.5l1.6 4.9 4.9 1.6-4.9 1.6L8 14.5l-1.6-4.9L1.5 8l4.9-1.6z" />,
-  Edit: <><path d="M10.2 3.3l2.5 2.5L5.4 13.1l-3.2.7.7-3.2z" /><path d="M8.7 4.8l2.5 2.5" /></>,
-  Reference: <><rect x="2" y="3" width="12" height="10" rx="1.6" /><circle cx="5.6" cy="6.4" r="1" /><path d="M2.4 11.8l3.4-3.3 2.4 2.3 2-2 3.4 3.2" /></>,
-  Video: <><rect x="1.8" y="4" width="8.9" height="8" rx="1.6" /><path d="M10.7 7.2l3.5-2v5.6l-3.5-2" /></>,
-};
+// The right rail's four tab marks, drawn by the app's ONE icon set (gallery/src/icons/Icons.jsx,
+// the 24-unit line set of the 2026-11-03 unslop pass): 1.5 stroke, round caps, currentColor, so
+// each takes the rail button's colour (subtext, accent when on). These were a local 16-unit set
+// of the same grammar; the shared set redraws the same four marks -- the Generate mark ✦ (The
+// Loom.dc.html:329), a pencil, a picture, a video camera -- so the rail and the rest of the app
+// draw one weight.
+const GEN_GLYPHS = { Image: "generate", Edit: "pencil", Reference: "image", Video: "video" };
 function GenGlyph({ name }) {
-  return (
-    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"
-      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{GEN_GLYPHS[name]}</svg>
-  );
+  return <Icon name={GEN_GLYPHS[name]} size={18} />;
 }
 function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, frameFix, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, genFixState, setGenFixState, genFix, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, spend, refreshSpend, batchTally,
   // Session P: the Video drawer's beforeSend host, the unclear-send way-out, and the draft's
