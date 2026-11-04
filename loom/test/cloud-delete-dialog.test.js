@@ -391,17 +391,17 @@ describe("a task strip says what the task actually is", () => {
   const vid = (id) => ({ media_id: id, is_video: true });
 
   test("a task that made several files is a whole batch", () => {
-    assert.equal(taskLabel([img("a"), img("b")]), "whole batch");
-    assert.equal(taskLabel([img("a"), img("b"), img("c"), vid("d")]), "whole batch");
+    assert.equal(taskLabel([img("a"), img("b")]), "Whole batch");
+    assert.equal(taskLabel([img("a"), img("b"), img("c"), vid("d")]), "Whole batch");
   });
 
   test("a task that made ONE file is not a batch and does not claim to be", () => {
-    assert.equal(taskLabel([img("a")]), "single image");
-    assert.notEqual(taskLabel([img("a")]), "whole batch");
+    assert.equal(taskLabel([img("a")]), "Single image");
+    assert.notEqual(taskLabel([img("a")]), "Whole batch");
   });
 
   test("a single video says video, under the ▶ the strip already draws on it", () => {
-    assert.equal(taskLabel([vid("a")]), "single video");
+    assert.equal(taskLabel([vid("a")]), "Single video");
   });
 
   test("the label is what the strip renders, not a constant beside it", async () => {
@@ -418,9 +418,9 @@ describe("a task strip says what the task actually is", () => {
       textOf(row, "cd-tid"),
     ]);
     assert.deepEqual(rows, [
-      ["whole batch", "task T1"],
-      ["single image", "task T2"],
-      ["single video", "task T3"],
+      ["Whole batch", "task T1"],
+      ["Single image", "task T2"],
+      ["Single video", "task T3"],
     ]);
   });
 });

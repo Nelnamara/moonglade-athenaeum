@@ -8804,10 +8804,10 @@ def test_the_desktop_lightbox_counts_the_whole_walk_once(paged_library_server, r
         page.locator(".mgg-card").first.click()
         page.wait_for_selector(".lbx .lbx-index b")
         read = "() => [document.querySelector('.lbx-index b').textContent, document.querySelector('.lbx-index span').textContent]"
-        assert page.evaluate(read) == ["101", "OF 120"]
+        assert page.evaluate(read) == ["101", "of 120"]
         page.keyboard.press("ArrowRight")
         page.wait_for_function("() => document.querySelector('.lbx-index b').textContent === '102'")
-        assert page.evaluate(read) == ["102", "OF 120"]
+        assert page.evaluate(read) == ["102", "of 120"]
     finally:
         ctx.close()
 

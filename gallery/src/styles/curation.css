@@ -30,7 +30,7 @@
 
 /* ---- a card's mark: keeper (emerald check) or reject (dim cross), always on ------------- */
 .mgg-verdict { position: absolute; top: 7px; left: 7px; z-index: 3; height: 16px; padding: 0 5px;
-  display: grid; place-items: center; border-radius: 5px; font-size: 9.5px; font-weight: 800;
+  display: grid; place-items: center; border-radius: 5px; font-size: 9.5px; font-weight: 600;
   pointer-events: none; }
 .mgg-verdict.keeper { background: var(--emerald); color: var(--base); }
 .mgg-verdict.reject { background: rgba(0, 0, 0, .55); color: rgba(236, 232, 248, .75); }
@@ -43,14 +43,14 @@
   padding: 7px 12px; border-radius: 12px; font-size: 11px;
   border: 1px solid color-mix(in srgb, var(--lavender) 45%, transparent);
   background: color-mix(in srgb, var(--lavender) 8%, transparent); color: var(--subtext); }
-.mgcu-strip-name { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: var(--text); }
+.mgcu-strip-name { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--text); }
 .mgcu-strip-q { flex: 1 1 200px; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 10px; color: var(--overlay0); overflow-wrap: anywhere; }
-.mgcu-btn { font-family: inherit; font-size: 10.5px; font-weight: 600; padding: 5px 10px; border-radius: 7px;
+.mgcu-btn { font-family: inherit; font-size: 10.5px; font-weight: 600; padding: 5px 10px; border-radius: var(--radius-control-sm);
   cursor: pointer; border: 1px solid var(--surface1); background: none; color: var(--subtext);
   transition: border-color .15s, color .15s, background .15s; }
 .mgcu-btn:hover { color: var(--text); border-color: color-mix(in srgb, var(--lavender) 60%, transparent); }
-.mgcu-btn.primary { background: var(--lavender); color: var(--base); border-color: var(--lavender); font-weight: 700; }
+.mgcu-btn.primary { background: var(--lavender); color: var(--base); border-color: var(--lavender); font-weight: 600; }
 .mgcu-btn.primary:hover { color: var(--base); filter: brightness(1.08); }
 .mgcu-btn:disabled { cursor: not-allowed; background: var(--surface0); color: var(--overlay0); border-color: var(--surface0); }
 .mgcu-btn.keeper { color: var(--emerald); border-color: color-mix(in srgb, var(--emerald) 50%, transparent); }
@@ -58,8 +58,8 @@
 /* ---- the collections list: a popover from the Collection chip, the page's rail rows ----- */
 .mgcu-panel { width: 260px; min-width: 0; padding: 12px; gap: 4px; }
 .mgcu-panel-hd { display: flex; align-items: center; gap: 6px; padding-bottom: 6px; }
-.mgcu-panel-cap { flex: 1; font-size: 9px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); }
-.mgcu-panel-manage { font-family: inherit; font-size: 10px; font-weight: 700; color: var(--lavender);
+.mgcu-panel-cap { flex: 1; font-size: 11px; font-weight: 500; letter-spacing: normal; color: var(--overlay0); }
+.mgcu-panel-manage { font-family: inherit; font-size: 10px; font-weight: 600; color: var(--lavender);
   background: none; border: 0; cursor: pointer; padding: 0; }
 .mgcu-panel-manage:hover { color: var(--mauve); text-decoration: underline; }
 .mgcu-row { display: flex; align-items: center; gap: 6px; width: 100%; box-sizing: border-box;
@@ -86,12 +86,12 @@
 .mgcu-mrow { display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 9px;
   border: 1px solid var(--surface0); }
 .mgcu-box { width: 18px; height: 18px; flex: none; padding: 0; border-radius: 5px; display: grid; place-items: center;
-  font-size: 11px; font-weight: 800; font-family: inherit; cursor: pointer; background: none;
+  font-size: 11px; font-weight: 600; font-family: inherit; cursor: pointer; background: none;
   border: 1.5px solid var(--surface1); color: var(--base); }
 .mgcu-box.on { background: var(--lavender); border-color: var(--lavender); }
 .mgcu-box.smart { border-style: dashed; cursor: not-allowed; }
 .mgcu-cover { width: 30px; height: 30px; flex: none; border-radius: 6px; background: var(--surface0) center / cover; }
-.mgcu-mname { flex: 1; min-width: 0; font-family: inherit; font-size: 12px; padding: 4px 6px; border-radius: 6px;
+.mgcu-mname { flex: 1; min-width: 0; font-family: inherit; font-size: 12px; padding: 4px 6px; border-radius: var(--radius-control-sm);
   border: 1px solid transparent; background: transparent; color: var(--text); outline: none; }
 .mgcu-mname:focus { border-color: var(--lavender); }
 .mgcu-mmeta { font-size: 10px; color: var(--overlay0); white-space: nowrap; }
@@ -107,10 +107,10 @@
 .mgcu-confirm { display: flex; flex-direction: column; gap: 7px; padding: 11px 12px; border-radius: 11px;
   border: 1px solid color-mix(in srgb, var(--red) 55%, transparent);
   background: color-mix(in srgb, var(--red) 6%, transparent); }
-.mgcu-confirm-t { font-size: 12px; font-weight: 700; }
+.mgcu-confirm-t { font-size: 12px; font-weight: 600; }
 .mgcu-confirm-b { font-size: 10.5px; color: var(--subtext); }
 .mgcu-confirm-go { display: flex; gap: 6px; }
-.mgcu-btn.danger { background: var(--red); border-color: var(--red); color: var(--base); font-weight: 700; padding: 6px 12px; font-size: 11px; }
+.mgcu-btn.danger { background: var(--red); border-color: var(--red); color: var(--base); font-weight: 600; padding: 6px 12px; font-size: 11px; }
 .mgcu-empty { padding: 18px; text-align: center; font-size: 11px; color: var(--overlay0);
   border: 1px dashed var(--surface1); border-radius: 12px; }
 
@@ -118,12 +118,12 @@
 .mgcu-bulk { position: sticky; top: calc(var(--mgx-chrome-h, 0px) + 6px); z-index: 5; display: flex; align-items: center;
   flex-wrap: wrap; gap: 6px; margin: 10px 12px 0; padding: 8px 10px; border-radius: 12px;
   border: 1px solid var(--lavender); background: color-mix(in srgb, var(--lavender) 8%, var(--mantle)); }
-.mgcu-bulk-n { font-size: 11.5px; font-weight: 700; margin-right: 4px; }
+.mgcu-bulk-n { font-size: 11.5px; font-weight: 600; margin-right: 4px; }
 .mgcu-bulk-stars { display: flex; gap: 1px; }
 .mgcu-bulk-star { font-family: inherit; font-size: 15px; color: var(--gold); cursor: pointer; padding: 0 1px;
   background: none; border: 0; line-height: 1; }
 .mgcu-bulk-star:hover { filter: brightness(1.3); }
-.mgcu-bulk-tag { width: 90px; font-family: inherit; font-size: 10.5px; padding: 5px 8px; border-radius: 7px;
+.mgcu-bulk-tag { width: 90px; font-family: inherit; font-size: 10.5px; padding: 5px 8px; border-radius: var(--radius-control-sm);
   border: 1px solid var(--surface1); background: var(--base); color: var(--text); outline: none; }
 .mgcu-bulk-tag:focus { border-color: var(--lavender); }
 .mgcu-sp { flex: 1; }
@@ -144,7 +144,7 @@
 .mgcu-toast.peach { border-color: var(--peach); }
 .mgcu-toast-t { font-size: 11.5px; }
 .mgcu-toast.peach .mgcu-toast-t { color: var(--peach); }
-.mgcu-toast-undo { font-family: inherit; font-size: 11px; font-weight: 700; color: var(--lavender); cursor: pointer;
+.mgcu-toast-undo { font-family: inherit; font-size: 11px; font-weight: 600; color: var(--lavender); cursor: pointer;
   background: none; border: 0; padding: 0; white-space: nowrap; }
 .mgcu-toast-undo:hover { color: var(--mauve); }
 .mgcu-toast-x { font-family: inherit; font-size: 10px; color: var(--overlay0); cursor: pointer; background: none; border: 0; padding: 0; }
@@ -153,10 +153,10 @@
 /* ---- Details: your layer (N3) ------------------------------------------------------------ */
 .mgcu-layer { display: flex; flex-direction: column; gap: 9px; margin: 14px 0 4px; padding: 12px; border-radius: 14px;
   border: 1px solid var(--surface1); background: color-mix(in srgb, var(--mantle) 60%, transparent); }
-.mgcu-layer-cap { font-size: 9px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); }
+.mgcu-layer-cap { font-size: 11px; font-weight: 500; letter-spacing: normal; color: var(--overlay0); }
 .mgcu-verdicts { display: flex; gap: 5px; }
-.mgcu-verdict { flex: 1; text-align: center; font-family: inherit; font-size: 10.5px; font-weight: 700; padding: 7px 0;
-  border-radius: 8px; cursor: pointer; border: 1px solid var(--surface1); background: none; color: var(--subtext); }
+.mgcu-verdict { flex: 1; text-align: center; font-family: inherit; font-size: 10.5px; font-weight: 600; padding: 7px 0;
+  border-radius: var(--radius-control); cursor: pointer; border: 1px solid var(--surface1); background: none; color: var(--subtext); }
 .mgcu-verdict:hover { color: var(--text); }
 .mgcu-verdict.on.keeper { border-color: var(--emerald); background: color-mix(in srgb, var(--emerald) 14%, transparent); color: var(--text); }
 .mgcu-verdict.on.reject { border-color: var(--overlay0); background: rgba(255, 255, 255, .05); color: var(--text); }
@@ -164,7 +164,7 @@
 .mgcu-tag { font-family: inherit; font-size: 10px; padding: 3px 8px; border-radius: 999px; cursor: pointer;
   border: 1px solid var(--surface1); background: none; color: var(--subtext); }
 .mgcu-tag:hover { color: var(--text); border-color: color-mix(in srgb, var(--lavender) 60%, transparent); }
-.mgcu-field { font-family: inherit; font-size: 10.5px; padding: 6px 8px; border-radius: 7px; border: 1px solid var(--surface1);
+.mgcu-field { font-family: inherit; font-size: 10.5px; padding: 6px 8px; border-radius: var(--radius-control-sm); border: 1px solid var(--surface1);
   background: var(--base); color: var(--text); outline: none; }
 .mgcu-field:focus { border-color: var(--lavender); }
 .mgcu-field-err { font-size: 10px; color: var(--peach); }
@@ -202,7 +202,7 @@
 .mgcu-ac-row:hover, .mgcu-ac-row.on { background: color-mix(in srgb, var(--lavender) 14%, transparent); }
 /* the Operators group's caption -- the Filters tray row's own caption, moved into the list
    (owner's walk, 2026-10-03), set in from the edge like the rows under it */
-.mgcu-ac-cap { font-size: 9px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); padding: 4px 8px 2px; }
+.mgcu-ac-cap { font-size: 11px; font-weight: 500; letter-spacing: normal; color: var(--overlay0); padding: 4px 8px 2px; }
 .mgcu-arerr { position: absolute; left: 12px; top: calc(100% + 4px); z-index: 4; font-size: 10.5px;
   color: var(--peach); white-space: nowrap; pointer-events: none; }
 
@@ -211,12 +211,12 @@
   border-radius: 16px; border: 1px solid var(--surface1);
   background: color-mix(in srgb, var(--base) 60%, transparent); }
 .mgcu-stor-hd { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
-.mgcu-stor-cap { font-size: 9px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); }
+.mgcu-stor-cap { font-size: 11px; font-weight: 500; letter-spacing: normal; color: var(--overlay0); }
 .mgcu-stor-total { font: 15px Georgia, serif; color: var(--text); }
 .mgcu-stor-hint { font-size: 10px; color: var(--overlay0); }
 .mgcu-stor-row { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px; align-items: center; }
 .mgcu-stor-lbl { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; text-align: right;
-  font-size: 10px; font-weight: 700; letter-spacing: .08em; color: var(--subtext); }
+  font-size: 12px; font-weight: 500; letter-spacing: normal; color: var(--subtext); }
 .mgcu-stor-note { font-size: 9px; font-weight: 500; letter-spacing: 0; color: var(--overlay0); }
 .mgcu-stor-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .mgcu-stor-track { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--surface0); }

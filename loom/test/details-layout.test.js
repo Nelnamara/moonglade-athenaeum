@@ -68,7 +68,8 @@ describe("(c) the frame: the DC's formula (DC:357-358 frameStyle)", () => {
     assert.match(r, /width: min\(100%, calc\(72vh \* var\(--ar\)\)\); height: auto;/);
     assert.match(r, /align-self: center; aspect-ratio: var\(--ar\);/);
     assert.match(r, /border-radius: 16px; overflow: hidden;/);
-    assert.match(r, /box-shadow: 0 40px 110px rgba\(0, 0, 0, \.72\), 0 0 90px rgba\(100, 58, 172, \.2\);/);
+    // the quieted look (pick 4B): the depth shadow stays, the violet outer glow is gone
+    assert.match(r, /box-shadow: 0 40px 110px rgba\(0, 0, 0, \.72\);/);
   });
   test("the media fills the frame absolutely with object-fit: contain (DC:52)", () => {
     assert.match(css, /\.placard-frame img, \.placard-frame video \{ position: absolute; inset: 0; width: 100%; height: 100%;\r?\n\s*object-fit: contain;/);
@@ -137,14 +138,15 @@ describe("(e) the ledger: exactly the DC's eleven rows, in the DC's order (DC:37
     assert.match(details, /<LedgerRow label="Media ID" value=\{row\.media_id\} mono dim copyKey="mid" /);
     assert.match(details, /<LedgerRow label="Filename" value=\{row\.filename\} mono dim copyKey="fname" /);
     // an empty value renders the DC's dash, never an absent row
-    assert.match(details, /\{has \? text : "—"\}/);
+    assert.match(details, /\{has \? \(node \|\| text\) : "—"\}/);
   });
   test("the row's CSS is the DC's (DC:93, :331-338): 118px right-aligned label, wrapping 11.5px value, the three faces", () => {
     assert.match(rule(".p-ledger"), /display: flex; flex-direction: column; gap: 3px;/);
     assert.match(rule(".p-row"), /display: flex; gap: 12px; align-items: flex-start; padding: 5px 9px; border-radius: 8px;/);
     const k = rule(".p-row-k");
-    assert.match(k, /flex: none; width: 118px; text-align: right; font-size: 10px; font-weight: 700;/);
-    assert.match(k, /letter-spacing: \.1em; text-transform: uppercase; color: var\(--overlay0\); padding-top: 2px;/);
+    // the quieted look (pick 1C): sentence case, normal tracking, weight 500, 2px up
+    assert.match(k, /flex: none; width: 118px; text-align: right; font-size: 12px; font-weight: 500;/);
+    assert.match(k, /letter-spacing: normal; text-transform: none; color: var\(--overlay0\); padding-top: 2px;/);
     const v = rule(".p-row-v");
     assert.match(v, /flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; word-break: break-word;/);
     assert.match(v, /font-size: 11\.5px; line-height: 1\.65; color: rgba\(226, 222, 238, \.86\);/);
@@ -194,9 +196,9 @@ describe("(f) the picture column: frame, file actions, stars row -- before the r
       'className="detail-index"', "&lsaquo; Prev", "Next &rsaquo;", 'className="focus-btn"'];
     let last = -1;
     for (const o of order) { const i = nav.indexOf(o); assert.ok(i > last, o + " in order"); last = i; }
-    assert.match(nav, /onClick=\{\(\) => onOpenLightbox\(row\.media_id\)\}>&#9974; Lightbox<\/button>/);
+    assert.match(nav, /onClick=\{\(\) => onOpenLightbox\(row\.media_id\)\}><Icon name="expand" \/> Lightbox<\/button>/);
     assert.match(css, /\.detail-div \{ flex: none; width: 1px; height: 12px; background: rgba\(255, 255, 255, \.14\); \}/);
     assert.match(css, /\.detail-index \{ font-size: 11px; color: rgba\(214, 210, 226, \.45\); font-variant-numeric: tabular-nums; \}/);
-    assert.match(rule(".nav-arrow, .nav-disabled, .focus-btn"), /font-size: 11px; font-weight: 600; padding: 6px 12px;\r?\n\s*border-radius: 8px;/);
+    assert.match(rule(".nav-arrow, .nav-disabled, .focus-btn"), /font-size: 11px; font-weight: 600; padding: 6px 12px;\r?\n\s*border-radius: var\(--radius-control\);/);
   });
 });

@@ -43,7 +43,7 @@ describe("ActivityRow tells a queued generation apart from one that is actually 
       "the queued gate is gone (or reworded) -- without it a queued job is indistinguishable " +
       "from active rendering, which is exactly the indefinite spinner the owner reported");
     // ...feeding one guarded pill, which must literally say what phase it is in.
-    assert.match(tray, /\{queued \? \(\s*<span className="at-phase"[^>]*>queued<\/span>\s*\) : null\}/,
+    assert.match(tray, /\{queued \? \(\s*<span className="at-phase"[^>]*>Queued<\/span>\s*\) : null\}/,
       "the phase pill is not rendered under the queued flag, or no longer says 'queued'");
   });
 

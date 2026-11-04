@@ -133,10 +133,10 @@ export default function ActivityRow({ job: j, expanded, onToggle: toggle, onDism
                 a website run too, so it wears this same mark; its hover says where the app
                 heard of it. */}
             {j.source === "pixai" ? (
-              <span className="at-src" title={j.via === "inbox" ? "Started on the PixAI website; PixAI's inbox told the app it finished." : "Started on the PixAI website, not in this app."}>website</span>
+              <span className="at-src" title={j.via === "inbox" ? "Started on the PixAI website; PixAI's inbox told the app it finished." : "Started on the PixAI website, not in this app."}>Website</span>
             ) : null}
             {queued ? (
-              <span className="at-phase" title="PixAI has accepted this generation and no worker has picked it up yet — it has not started rendering.">queued</span>
+              <span className="at-phase" title="PixAI has accepted this generation and no worker has picked it up yet — it has not started rendering.">Queued</span>
             ) : null}
             {queued && typeof j.eta_seconds === "number" && isFinite(j.eta_seconds) ? (
               <span className="at-eta" title="The queue wait PixAI predicted for this model when the job was accepted. An estimate of the WAIT, not a countdown, and not progress — PixAI reports no progress on a running task.">

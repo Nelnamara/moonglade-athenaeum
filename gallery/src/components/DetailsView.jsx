@@ -135,6 +135,9 @@ function LedgerRow({ label, value, node, mono, dim, warm, copyKey, quiet, copied
 
 const MORE_KEY = "mg_details_more";
 
+// A lineage chip's caption in sentence case (the quieted look, pick 1C): "edit" -> "Edit".
+const capFirst = (w) => { const s = String(w || ""); return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; };
+
 /* Reroll-run collapse for the SESSION strip (#34, review item 6). A dial-in
    marathon is mostly seed-only rerolls; drawn one-tile-per-task the frost-queen's
    173-task run would be 173 tiles. So a run of 2+ CONSECUTIVE reroll steps collapses
@@ -420,7 +423,7 @@ export default function DetailsView({
           <>
             <span className="detail-div" aria-hidden="true" />
             <button type="button" className="detail-lb" title="Full-screen viewer"
-              onClick={() => onOpenLightbox(row.media_id)}>&#9974; Lightbox</button>
+              onClick={() => onOpenLightbox(row.media_id)}><Icon name="expand" /> Lightbox</button>
           </>
         ) : null}
         <span className="sp" />
@@ -508,7 +511,7 @@ export default function DetailsView({
         <aside className="placard-record" ref={recordRef}>
           <div className="p-head">
             <p className="p-kicker">
-              {(row.model_name || row.model_id || "—").toUpperCase()}
+              {row.model_name || row.model_id || "—"}
               {/* #34: · v3 · 2/4 -- dial-in version (from the loaded series steps) + batch
                   output (#33 row fields). Same pure helper as the card stamp. */}
               <span className="p-kicker-series">{seriesSuffix(row, (() => {
@@ -654,7 +657,7 @@ export default function DetailsView({
                     <button type="button" className="p-lin-chip" title={lineage.parent.title}
                       onClick={() => onNavigate(lineage.parent.media_id)}>
                       <img src={lineage.parent.thumb} alt="" />
-                      <span className="cap">{lineage.parent.kind}</span>
+                      <span className="cap">{capFirst(lineage.parent.kind)}</span>
                     </button>
                     <span className="p-lin-arrow">→</span>
                   </>
@@ -664,14 +667,14 @@ export default function DetailsView({
                     <button type="button" className="p-lin-chip" title={s.title}
                       onClick={() => onNavigate(s.media_id)}>
                       <img src={s.thumb} alt="" />
-                      <span className="cap">batch</span>
+                      <span className="cap">Batch</span>
                     </button>
                     <span className="p-lin-arrow">→</span>
                   </React.Fragment>
                 ))}
                 <div className="p-lin-chip this" title="This record">
                   <img src={"/thumbs/" + encodeURIComponent(row.media_id) + ".jpg"} alt="" />
-                  <span className="cap">this</span>
+                  <span className="cap">This</span>
                 </div>
                 {lineage.children.map((ch) => (
                   <React.Fragment key={ch.media_id}>
@@ -679,7 +682,7 @@ export default function DetailsView({
                     <button type="button" className="p-lin-chip" title={ch.title}
                       onClick={() => onNavigate(ch.media_id)}>
                       <img src={ch.thumb} alt="" />
-                      <span className="cap">{ch.kind}</span>
+                      <span className="cap">{capFirst(ch.kind)}</span>
                     </button>
                   </React.Fragment>
                 ))}

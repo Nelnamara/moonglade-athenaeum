@@ -260,7 +260,7 @@ export default function Lightbox({
         <div className="lbx-bar">
           <div className="lbx-index">
             <b>{count.at}</b>
-            <span>OF {count.of}</span>
+            <span>of {count.of}</span>
           </div>
           <div className="lbx-stars">
             <Stars mediaId={it.media_id} rating={it.rating} onRate={onRate} />

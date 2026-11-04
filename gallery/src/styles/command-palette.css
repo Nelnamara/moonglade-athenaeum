@@ -97,7 +97,7 @@ html.mg-noblur .mgpal-scrim, html.mg-noblur .mgks-scrim {
   background: linear-gradient(to top, rgba(10, 8, 24, .98), rgba(10, 8, 24, 0)); }
 
 .mgpal-hdr { display: flex; align-items: baseline; gap: 8px; padding: 10px 16px 4px;
-  font-size: 9.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+  font-size: 11.5px; font-weight: 500; letter-spacing: normal; text-transform: none;
   color: var(--overlay0); }
 /* The contextual group's header names its target -- ON THIS IMAGE · moonfall_042.png --
    in mono, un-capsed, and it truncates rather than pushing the header wide. */
@@ -118,12 +118,12 @@ html.mg-noblur .mgpal-scrim, html.mg-noblur .mgks-scrim {
   text-overflow: ellipsis; min-width: 0; }
 /* Matched characters: --accent + 700. No underline, no background -- the row already has
    a highlight and two of them fight. */
-.mgpal-label .hit { color: var(--accent); font-weight: 700; }
+.mgpal-label .hit { color: var(--accent); font-weight: 600; }
 .mgpal-sub { flex: none; font-size: 10.5px; color: var(--overlay0);
   font-variant-numeric: tabular-nums; }
 .mgpal-spacer { flex: 1 1 auto; }
 .mgpal-right { flex: none; font-size: 12px; color: var(--emerald); }
-.mgpal-right.pill { font-size: 9.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+.mgpal-right.pill { font-size: 9.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
   background: color-mix(in srgb, var(--emerald) 16%, transparent); color: var(--emerald); }
 .mgpal-keys { flex: none; display: flex; gap: 4px; }
 .mgpal-key { font-family: ui-monospace, Menlo, monospace; font-size: 10px; line-height: 1.3;
@@ -148,7 +148,7 @@ html.mg-noblur .mgpal-scrim, html.mg-noblur .mgks-scrim {
   border: 1px solid var(--surface1);
   background: linear-gradient(180deg, rgba(18, 14, 42, .98) 0%, rgba(10, 8, 24, .98) 100%);
   box-shadow: 0 14px 40px rgba(0, 0, 0, .6); white-space: nowrap; pointer-events: none; }
-.mgpal-gkey { font-family: ui-monospace, Menlo, monospace; font-size: 11px; font-weight: 700;
+.mgpal-gkey { font-family: ui-monospace, Menlo, monospace; font-size: 11px; font-weight: 600;
   padding: 2px 7px; border-radius: 5px;
   background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent);
   border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
@@ -188,8 +188,8 @@ html.mg-noblur .mgpal-scrim, html.mg-noblur .mgks-scrim {
 .mgks-cols { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px;
   padding: 18px 0 16px; }
 .mgks-col { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
-.mgks-coltitle { font-size: 9.5px; font-weight: 700; letter-spacing: .12em;
-  text-transform: uppercase; color: var(--overlay0);
+.mgks-coltitle { font-size: 11.5px; font-weight: 500; letter-spacing: normal;
+  text-transform: none; color: var(--overlay0);
   border-bottom: 1px solid var(--surface0); padding-bottom: 6px; }
 .mgks-item { display: flex; align-items: center; gap: 6px; min-height: 24px; }
 .mgks-key { flex: none; font-family: ui-monospace, Menlo, monospace; font-size: 10px;
@@ -202,8 +202,8 @@ html.mg-noblur .mgpal-scrim, html.mg-noblur .mgks-scrim {
 .mgks-foot { display: flex; align-items: center; gap: 8px; margin: 0 -24px;
   padding: 9px 24px 11px; border-top: 1px solid var(--surface0); font-size: 10px;
   color: var(--overlay0); flex-wrap: wrap; }
-.mgks-footcaps { font-size: 9.5px; font-weight: 700; letter-spacing: .12em;
-  text-transform: uppercase; }
+.mgks-footcaps { font-size: 11.5px; font-weight: 500; letter-spacing: normal;
+  text-transform: none; }
 .mgks-foottxt { margin-left: 6px; }
 .mgks-fkey { font-family: ui-monospace, Menlo, monospace; padding: 1px 5px; border-radius: 5px;
   background: var(--surface0); border: 1px solid rgba(255, 255, 255, .05); }

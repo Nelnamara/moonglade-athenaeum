@@ -144,7 +144,7 @@ export default function Flyout({ boot, current, queryText = "", onApply, onClose
       style={top != null ? { "--fly-top": top + "px" } : undefined}>
       <div className="flyhd">Advanced search</div>
       <div className="flylegend">
-        <p>these already work — nothing in the app tells you so</p>
+        <p>These already work — nothing in the app tells you so</p>
         <div>
           <code>night*</code> <span>wildcard</span> · <code>model:tsubaki</code>{" "}
           <span>by model</span> · <code>2038314167804392533</code> <span>a task or media id</span>

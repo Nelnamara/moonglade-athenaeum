@@ -145,7 +145,7 @@ describe("source: the desktop Lightbox counts the whole walk, once (#74)", () =>
 
   test("its bar prints the walk's place and length, once each", () => {
     assert.match(lbx, /const count = lightboxCount\(index, offset, total, items\.length\);/);
-    assert.match(lbx, /<b>\{count\.at\}<\/b>\s*<span>OF \{count\.of\}<\/span>/);
+    assert.match(lbx, /<b>\{count\.at\}<\/b>\s*<span>of \{count\.of\}<\/span>/);
     assert.match(lbx, /import \{ lightboxCount \} from "\.\.\/lib\/phoneCore\.js";/);
   });
 

@@ -60,7 +60,7 @@
 .mgfo-switch[aria-checked="true"] .mgfo-switch-track { background: var(--lavender); }
 .mgfo-switch[aria-checked="true"] .mgfo-switch-track i { left: 15px; }
 .mgfo-cardbtn {
-  font: inherit; font-size: 11px; font-weight: 700; padding: 8px 13px; border-radius: 9px; border: 0;
+  font: inherit; font-size: 11px; font-weight: 600; padding: 8px 13px; border-radius: var(--radius-control); border: 0;
   background: var(--lavender); color: var(--base); cursor: pointer; white-space: nowrap;
 }
 .mgfo-cardbtn:hover { filter: brightness(1.08); }
@@ -68,7 +68,7 @@
 /* the per-row pin, beside the jump */
 .mgfo-pinbtn {
   font: inherit; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
-  padding: 0; border-radius: 6px; border: 0; background: transparent; color: var(--overlay0); cursor: pointer;
+  padding: 0; border-radius: var(--radius-control-sm); border: 0; background: transparent; color: var(--overlay0); cursor: pointer;
 }
 .mgfo-pinbtn:hover { color: var(--text); }
 .mgfo-pinbtn.on { color: var(--gold); background: color-mix(in srgb, var(--gold) 18%, transparent); }
@@ -89,7 +89,7 @@
   background: var(--mantle); border: 1px solid var(--lavender); margin: 0 0 14px;
 }
 .mgfo-cardpanel-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.mgfo-cardpanel-lab { flex: 1 1 auto; font-size: 9px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); }
+.mgfo-cardpanel-lab { flex: 1 1 auto; font-size: 11px; font-weight: 500; letter-spacing: normal; color: var(--overlay0); }
 .mgfo-cardbtn.ghost { background: transparent; color: var(--subtext); border: 1px solid var(--surface1); font-weight: 600; }
 .mgfo-cardbtn:disabled { opacity: .5; cursor: default; }
 .mgfo-cardpanel-x { font: inherit; font-size: 11px; color: var(--overlay0); background: transparent; border: 0; padding: 0 4px; cursor: pointer; }
@@ -119,8 +119,8 @@
 .fm-switch[aria-checked="true"] .fm-switch-track { background: var(--lavender); }
 .fm-switch[aria-checked="true"] .fm-switch-track i { left: 15px; }
 .fm-cardbtn {
-  font: inherit; font-size: 12px; font-weight: 700; min-height: 44px; padding: 0 16px; margin: 0;
-  border-radius: 12px; border: 0; background: var(--lavender); color: var(--base); cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 600; min-height: 44px; padding: 0 16px; margin: 0;
+  border-radius: var(--radius-control); border: 0; background: var(--lavender); color: var(--base); cursor: pointer;
 }
 
 .fm-rowwrap { display: flex; flex-direction: column; }
@@ -146,7 +146,7 @@
   border-radius: 12px; font: inherit; text-align: left; color: var(--text); cursor: pointer;
   border: 1px solid var(--surface1); background: transparent;
 }
-.fm-sortopt b { font-size: 12px; font-weight: 700; }
+.fm-sortopt b { font-size: 12px; font-weight: 600; }
 .fm-sortopt span { font-size: 10px; color: var(--overlay0); }
 .fm-sortopt.on { border-color: var(--lavender); background: color-mix(in srgb, var(--lavender) 14%, transparent); }
 .fm-sortfoot { font-size: 10px; color: var(--overlay0); padding: 2px 4px; }

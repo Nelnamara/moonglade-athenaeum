@@ -38,7 +38,7 @@ function Comment({ c, now, replies, open, onToggle, onReply, onDelete, deleteOff
       <div className="cm-head">
         <span className="cm-av" style={bg(c.author.avatar)} aria-hidden="true" />
         <span className="cm-name">{c.author.name}</span>
-        {c.you ? <span className="cm-you">you</span> : null}
+        {c.you ? <span className="cm-you">You</span> : null}
       </div>
       {c.sticker ? (
         <span className="cm-sticker" style={bg(c.sticker)} role="img" aria-label="sticker" />

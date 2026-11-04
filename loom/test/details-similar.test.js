@@ -65,7 +65,7 @@ test("A: DetailsView renders the ◈ SIMILAR header + an 8-tile strip, inline in
 test("A: the strip's CSS exists and matches the DC's geometry (flex row, gap 8, overflow-x, 78px tiles)", () => {
   assert.match(css, /\.p-similar-strip \{[^}]*display: flex;[^}]*gap: 8px;[^}]*overflow-x: auto;[^}]*padding: 2px;/);
   assert.match(css, /\.p-sim-tile \{[^}]*width: 78px;[^}]*height: 78px;[^}]*border-radius: 9px;/);
-  assert.match(css, /\.p-similar-head \.k \{[^}]*font-size: 9\.5px;[^}]*font-weight: 700;[^}]*letter-spacing: \.14em;[^}]*var\(--overlay0\)/);
+  assert.match(css, /\.p-similar-head \.k \{[^}]*font-size: 11\.5px;[^}]*font-weight: 500;[^}]*letter-spacing: normal;[^}]*var\(--overlay0\)/);
   assert.match(css, /\.p-similar-head \.s \{[^}]*font-size: 10\.5px;[^}]*rgba\(214,210,226,\.5\)/);
   assert.match(css, /\.p-seeall \{[^}]*var\(--lavender/);
 });
@@ -157,7 +157,9 @@ test("D: the Lightbox's Publish chip carries the app's metal class (Lightbox.dc.
   // the class is the existing shared recipe, not a fresh duplicate
   const lbxCss = src("styles/lightbox.css");
   assert.match(lbxCss, /\.lbx-chip-metal, \.lbx-chip-metal:hover \{/);
-  assert.match(lbxCss, /animation: lbxMetal 7s ease-in-out infinite/);   // the suite's mgMetal drift, lbx-scoped
+  // the quieted look (unslop pick 6B): still at rest, the sheen sweeps on hover/focus only
+  assert.match(lbxCss, /background-position: 30% 50%;\s*transition: border-color \.2s, color \.2s, var\(--metal-sweep\);/);
+  assert.match(lbxCss, /\.lbx-chip-metal:hover, \.lbx-chip-metal:focus-visible \{ background-position: 100% 50%; \}/);
 });
 
 // ---------------------------------------------------------------- E. one vt-reveal per view
