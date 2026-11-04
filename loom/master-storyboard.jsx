@@ -282,6 +282,9 @@ const STYLES = `
   --metal-sweep:background-position 1.2s ease-out;
 }
 *{box-sizing:border-box}
+/* Bold inside running text is semi-bold like everything else (the unslop pass, pick 3): set it, do
+   not leave the browser's 700. */
+.sb-root b,.sb-root strong,.lv-overlay b,.lv-overlay strong,.lm-root b,.lm-root strong{font-weight:600}
 /* System fonts only (no CDN) -- matches the gallery's own body{font-family:system-ui,
    sans-serif} exactly (moonglade_gallery.py) and its ui-monospace,monospace mono
    convention, rather than inventing a new stack. */
@@ -290,19 +293,19 @@ const STYLES = `
   color:var(--ink);min-height:100vh;padding:0 0 80px;-webkit-font-smoothing:antialiased}
 .sb-mono{font-family:ui-monospace,monospace}
 .sb-projwrap{position:relative;display:inline-flex}
-.sb-projbtn{background:transparent;border:1px solid var(--line);border-radius:6px;color:var(--ink3);cursor:pointer;font-size:11px;line-height:1;padding:3px 6px;margin-left:2px}
+.sb-projbtn{background:transparent;border:1px solid var(--line);border-radius:var(--radius-control-sm);color:var(--ink3);cursor:pointer;font-size:11px;line-height:1;padding:3px 6px;margin-left:2px}
 .sb-projbtn:hover{color:var(--ink);border-color:var(--line2)}
 .sb-projpop{position:absolute;top:calc(100% + 6px);left:0;z-index:318;min-width:240px;max-width:320px;background:var(--panel);border:1px solid var(--line2);border-radius:10px;box-shadow:0 12px 34px rgba(0,0,0,.5);padding:8px;display:flex;flex-direction:column;gap:6px}
-.sb-projpoph{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink3);padding:2px 4px}
+.sb-projpoph{font-size:12px;font-weight:500;letter-spacing:normal;text-transform:none;color:var(--ink3);padding:2px 4px}
 .sb-projlist{display:flex;flex-direction:column;gap:2px;max-height:280px;overflow:auto}
-.sb-projitem{display:flex;align-items:stretch;gap:4px;border-radius:7px}
+.sb-projitem{display:flex;align-items:stretch;gap:4px;border-radius:4px}
 .sb-projitem.on{background:rgba(255,255,255,.06)}
-.sb-projopen{flex:1 1 auto;display:flex;flex-direction:column;align-items:flex-start;gap:1px;background:transparent;border:none;cursor:pointer;text-align:left;padding:6px 8px;border-radius:7px;color:var(--ink)}
+.sb-projopen{flex:1 1 auto;display:flex;flex-direction:column;align-items:flex-start;gap:1px;background:transparent;border:none;cursor:pointer;text-align:left;padding:6px 8px;border-radius:4px;color:var(--ink)}
 .sb-projopen:hover{background:rgba(255,255,255,.05)}
 .sb-projopen b{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:210px}
 .sb-projopen span{font-size:10px;color:var(--ink3)}
 .sb-projitem.on .sb-projopen b{color:var(--amber)}
-.sb-projx{background:transparent;border:none;color:var(--ink3);cursor:pointer;padding:0 8px;font-size:11px;border-radius:7px}
+.sb-projx{background:transparent;border:none;color:var(--ink3);cursor:pointer;padding:0 8px;font-size:11px;border-radius:4px}
 .sb-projx:hover{color:var(--coral);background:rgba(255,80,80,.12)}
 .sb-projacts{display:flex;gap:6px;border-top:1px solid var(--line);padding-top:6px}
 .sb-projveil{position:fixed;inset:0;z-index:317}
@@ -319,7 +322,7 @@ const STYLES = `
    same popover language as the storyboard switcher it sits beside. The TRIGGERS diverged in
    the 2026-08-13 styleset pass: the switcher wears the DC's compact .lv-caret square, and
    Export ▾ wears the bar's normal button idiom (The Loom.dc.html topBtnStyle). */
-.sb-exportitem{display:flex;align-items:center;gap:6px;background:transparent;border:none;cursor:pointer;text-align:left;padding:7px 8px;border-radius:7px;color:var(--ink);font-size:12px;width:100%}
+.sb-exportitem{display:flex;align-items:center;gap:6px;background:transparent;border:none;cursor:pointer;text-align:left;padding:7px 8px;border-radius:4px;color:var(--ink);font-size:12px;width:100%}
 .sb-exportitem:hover{background:rgba(255,255,255,.05)}
 .sb-exportitem:disabled{color:var(--ink3);cursor:default;background:transparent}
 .sb-exportitem small{color:var(--ink3);font-size:10px;margin-left:auto;white-space:nowrap}
@@ -332,8 +335,8 @@ const STYLES = `
 .sb-edl{width:920px;max-width:94vw;display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:14px;
   border:1px solid var(--lavender);background:var(--mantle);box-sizing:border-box}
 .sb-edlhead{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.sb-edlcap{flex:1;font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--overlay0)}
-.sb-edltab{font:600 10px/1.2 system-ui,sans-serif;padding:3px 9px;border-radius:6px;cursor:pointer;
+.sb-edlcap{flex:1;font-size:11px;font-weight:500;letter-spacing:normal;color:var(--overlay0)}
+.sb-edltab{font:600 10px/1.2 system-ui,sans-serif;padding:3px 9px;border-radius:var(--radius-control-sm);cursor:pointer;
   border:1px solid var(--surface1);background:transparent;color:var(--subtext)}
 .sb-edltab.on{background:var(--lavender);color:var(--base)}
 .sb-edlx{font-size:10px;color:var(--overlay0);cursor:pointer;padding:0 4px;border:0;background:transparent}
@@ -352,7 +355,7 @@ const STYLES = `
    in --surface0 on a panel darker than surface0; the Loom's timeline drawer IS --surface0, where
    that border vanishes, so it is one step up (--surface1) for the same contrast. */
 .lv-ribbon{display:flex;flex-direction:column;gap:5px;margin-top:8px;}
-.lv-ribcap{font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--overlay0);}
+.lv-ribcap{font-size:11px;font-weight:500;letter-spacing:normal;color:var(--overlay0);}
 .lv-ribrow{display:flex;gap:10px;overflow-x:auto;padding:4px 4px 4px 0;}
 .lv-ribpair{position:relative;flex:none;display:flex;gap:2px;padding:3px;border-radius:7px;cursor:pointer;
   border:1px solid var(--surface1);outline:none;}
@@ -378,13 +381,13 @@ const STYLES = `
   opacity:0;transition:opacity .15s}
 .sb-shotprev:hover .sb-shotprev-hint{opacity:1}
 .sb-shotprev-play{position:absolute;left:7px;bottom:6px;font-size:12px;line-height:1;color:#fff;
-  background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.25);border-radius:5px;padding:4px 7px;
+  background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.25);border-radius:var(--radius-control-sm);padding:4px 7px;
   cursor:pointer;}
 .sb-shotprev-play:hover{background:rgba(0,0,0,.75);border-color:var(--amber);}
 .sb-shotprev-wrap{margin:8px auto 0;max-width:460px}
 .sb-shotprev-ctrls{display:flex;gap:5px;margin-top:6px;flex-wrap:wrap}
 .sb-shotprev-ctrls button{font:600 11px/1 system-ui;color:var(--ink2);background:var(--panel2);
-  border:1px solid var(--line);border-radius:6px;padding:5px 8px;cursor:pointer}
+  border:1px solid var(--line);border-radius:var(--radius-control-sm);padding:5px 8px;cursor:pointer}
 .sb-shotprev-ctrls button:hover{border-color:var(--amber);color:var(--ink)}
 .sb-shotprev-ctrls button.on{background:var(--amber);color:#1a1206;border-color:var(--amber)}
 .sb-crop-rect{position:absolute;border:2px solid var(--amber);box-shadow:0 0 0 9999px rgba(0,0,0,.45);
@@ -393,13 +396,13 @@ const STYLES = `
   display:flex;align-items:center;justify-content:center;font:600 11px/1 system-ui;
   color:rgba(255,255,255,.85);background:rgba(0,0,0,.15)}
 .sb-trim{margin-top:6px}
-.sb-trim-track{position:relative;height:20px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;cursor:pointer;touch-action:none}
+.sb-trim-track{position:relative;height:20px;background:var(--panel2);border:1px solid var(--line);border-radius:var(--radius-control-sm);cursor:pointer;touch-action:none}
 .sb-trim-sel{position:absolute;top:0;bottom:0;background:color-mix(in srgb,var(--gold) 26%,transparent);border-left:2px solid var(--amber);border-right:2px solid var(--amber)}
 .sb-trim-h{position:absolute;top:-3px;width:11px;height:26px;margin-left:-6px;border-radius:4px;background:var(--amber);cursor:ew-resize;box-shadow:0 1px 4px rgba(0,0,0,.55);touch-action:none;z-index:2}
 .sb-trim-h:hover{background:var(--gold)}
 .sb-trim-read{font-size:11px;color:var(--ink2);margin-top:6px;font-family:ui-monospace,monospace}
 .sb-trim-read b{color:var(--amber)}
-.sb-trim-reset{margin-left:9px;background:none;border:1px solid var(--line);color:var(--ink2);border-radius:5px;font-size:10px;padding:1px 8px;cursor:pointer}
+.sb-trim-reset{margin-left:9px;background:none;border:1px solid var(--line);color:var(--ink2);border-radius:4px;font-size:10px;padding:1px 8px;cursor:pointer}
 .sb-trim-reset:hover{border-color:var(--amber);color:var(--amber)}
 .sb-seq{position:fixed;inset:0;z-index:490;background:color-mix(in srgb,var(--lv-ink) 92%,transparent);display:flex;align-items:center;justify-content:center;padding:22px}
 .sb-seq-box{max-width:1120px;width:100%;display:flex;flex-direction:column;gap:11px}
@@ -420,22 +423,22 @@ const STYLES = `
 .sb-pick-ov{position:fixed;inset:0;z-index:490;background:color-mix(in srgb,var(--lv-ink) 76%,transparent);display:flex;align-items:center;justify-content:center;padding:20px}
 .sb-pick-box{width:920px;max-width:94vw;height:82vh;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:9px}
 .sb-pick-head{display:flex;align-items:center;gap:9px}
-.sb-pick-t{font-size:15px;font-weight:700;white-space:nowrap}
+.sb-pick-t{font-size:15px;font-weight:600;white-space:nowrap}
 .sb-pick-x{background:none;border:none;color:var(--ink2);font-size:24px;line-height:1;cursor:pointer;padding:0 4px}
 .sb-pick-x:hover{color:var(--ink)}
 .sb-pick-filters{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
-.sb-pick-filters select{background:var(--panel2);border:1px solid var(--line);border-radius:6px;color:var(--ink);padding:5px 9px;font-size:12px;cursor:pointer;max-width:210px}
+.sb-pick-filters select{background:var(--panel2);border:1px solid var(--line);border-radius:var(--radius-control);color:var(--ink);padding:5px 9px;font-size:12px;cursor:pointer;max-width:210px}
 .sb-pick-cell{position:relative;border-radius:8px;overflow:hidden;border:1px solid var(--line);cursor:pointer;background:var(--panel2)}
 .sb-pick-cell:hover{border-color:var(--amber)}
 .sb-pick-cell img{width:100%;height:100%;object-fit:cover;display:block}
-.sb-tick{width:22px;height:22px;border-radius:6px;border:1.5px solid var(--line2);background:transparent;
+.sb-tick{width:22px;height:22px;border-radius:var(--radius-control-sm);border:1.5px solid var(--line2);background:transparent;
   cursor:pointer;flex:none;display:grid;place-items:center;color:transparent;transition:all .12s;padding:0}
 .sb-tick.wip{border-color:var(--amber);color:var(--amber)}
 .sb-tick.done{border-color:var(--green);background:var(--green);color:var(--base)}
 .sb-tick.error{border-color:var(--coral);color:var(--coral)}
 .sb-field{display:flex;flex-direction:column;gap:5px;flex:1 1 200px;min-width:0}
-.sb-lab{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);font-weight:600;display:flex;align-items:center;gap:6px}
-.sb-in,.sb-ta,.sb-sel{background:var(--bg2);border:1px solid var(--line2);border-radius:7px;color:var(--ink);
+.sb-lab{font-size:12px;letter-spacing:normal;text-transform:none;color:var(--ink3);font-weight:500;display:flex;align-items:center;gap:6px}
+.sb-in,.sb-ta,.sb-sel{background:var(--bg2);border:1px solid var(--line2);border-radius:var(--radius-control);color:var(--ink);
   font:inherit;font-size:13px;padding:8px 10px;width:100%}
 .sb-ta{resize:vertical;min-height:74px;line-height:1.55}.sb-ta.big{min-height:104px}
 .sb-in:focus,.sb-ta:focus,.sb-sel:focus{outline:none;border-color:var(--amber)}
@@ -448,24 +451,24 @@ const STYLES = `
 .sb-frameprev img{width:100%;height:100%;object-fit:cover}
 .sb-frameprev.discreet img{filter:blur(9px)}
 .sb-tagin{font-family:ui-monospace,monospace;font-size:11px;color:var(--cyan);background:var(--base);
-  border:1px solid var(--line2);border-radius:5px;padding:3px 6px;width:90px}
+  border:1px solid var(--line2);border-radius:var(--radius-control-sm);padding:3px 6px;width:90px}
 .sb-pal{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px}
 .sb-pchip{font-family:ui-monospace,monospace;font-size:10.5px;color:var(--ink2);background:var(--bg2);
-  border:1px solid var(--line);border-radius:5px;padding:3px 7px;cursor:pointer;transition:all .1s}
+  border:1px solid var(--line);border-radius:var(--radius-control-sm);padding:3px 7px;cursor:pointer;transition:all .1s}
 .sb-pchip:hover{border-color:var(--amber);color:var(--amber)}
 .sb-ref{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px;display:flex;gap:10px;align-items:flex-start}
 .sb-refprev{width:64px;height:48px;border-radius:6px;border:1px solid var(--line2);background:var(--panel2);
   flex:none;display:grid;place-items:center;font-size:18px;cursor:pointer;overflow:hidden}
 .sb-refprev img{width:100%;height:100%;object-fit:cover}.sb-refprev.discreet img{filter:blur(8px)}
 .sb-refbody{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:6px}
-.sb-btn{font:inherit;font-size:12.5px;font-weight:500;border-radius:7px;padding:7px 12px;cursor:pointer;
+.sb-btn{font:inherit;font-size:12.5px;font-weight:500;border-radius:var(--radius-control);padding:7px 12px;cursor:pointer;
   border:1px solid var(--line2);background:var(--panel2);color:var(--ink);transition:all .12s;display:inline-flex;align-items:center;gap:6px}
 .sb-btn:hover{border-color:var(--amber);color:var(--amber)}
 .sb-btn.amber{background:var(--amber);color:var(--base);border-color:var(--amber);font-weight:600}
 .sb-btn.amber:hover{filter:brightness(1.08);color:var(--base)}
-.sb-btn.ghost{background:transparent}.sb-btn.sm{font-size:11px;padding:5px 9px}
+.sb-btn.ghost{background:transparent}.sb-btn.sm{font-size:11px;padding:5px 9px;border-radius:var(--radius-control-sm)}
 .sb-btn.danger:hover{border-color:var(--coral);color:var(--coral)}
-.sb-ico{background:transparent;border:none;color:var(--ink3);cursor:pointer;padding:5px;border-radius:6px;font-size:14px;line-height:1;transition:all .12s}
+.sb-ico{background:transparent;border:none;color:var(--ink3);cursor:pointer;padding:5px;border-radius:var(--radius-control-sm);font-size:14px;line-height:1;transition:all .12s}
 .sb-ico:hover{color:var(--ink);background:var(--panel2)}
 .sb-toggle{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--ink2);cursor:pointer}
 .sb-empty{text-align:center;color:var(--ink3);padding:30px;font-size:13px}
@@ -802,11 +805,11 @@ const V2_STYLES = `
 .lv-banner-art{position:absolute;inset:0;
   background:radial-gradient(120% 140% at 18% 0%, color-mix(in oklab, var(--accent) 26%, var(--base)) 0%, var(--base) 62%, color-mix(in oklab, var(--mantle) 87%, black) 100%);}
 .lv-banner-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
-.lv-banner-hide{position:absolute;top:10px;right:12px;font-size:10px;font-weight:700;letter-spacing:.04em;
+.lv-banner-hide{position:absolute;top:10px;right:12px;font-size:12px;font-weight:500;letter-spacing:normal;
   color:#fff;background:rgba(6,4,14,.55);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.25);
-  border-radius:999px;padding:5px 11px;cursor:pointer;font-family:inherit;}
-.lv-banner-show{font-size:10.5px;font-weight:700;letter-spacing:.04em;color:var(--subtext);
-  background:var(--surface1);border:1px solid var(--surface1);border-radius:7px;padding:7px 11px;
+  border-radius:var(--radius-control-sm);padding:5px 11px;cursor:pointer;font-family:inherit;}
+.lv-banner-show{font-size:12.5px;font-weight:500;letter-spacing:normal;color:var(--subtext);
+  background:var(--surface1);border:1px solid var(--surface1);border-radius:var(--radius-control);padding:7px 11px;
   cursor:pointer;white-space:nowrap;font-family:inherit;}
 /* Top bar geometry per The Loom.dc.html:46 + Loom Handoff.dc.html:44 (2026-09-29): ONE row
    at desktop widths -- [Banner] name ▾ · find + chips · Draft · | · Generate all · cost · Play ·
@@ -856,16 +859,16 @@ const V2_STYLES = `
 .lv-topend .mgg-pin > *{flex:none;}
 .lv-topend .mgg-pin > .mgg-pin-t{flex:0 1 auto;min-width:0;}
 .lv-topend .mgg-vigil{margin-left:-2px;}
-/* ← Gallery in the page's own form (The Loom.dc.html:142; the Arena brief: the same on every
-   surface): uppercase, 11 px / 700, letter-spacing .1em. */
-.lv-top a.lv-close{flex:none;white-space:nowrap;font:700 11px/12px system-ui;letter-spacing:.1em;text-transform:uppercase;}
+/* ← Gallery: sentence case, 13 px / 500, no tracking (the unslop pass, pick 1 -- it was the page's
+   uppercase 11 px / 700 / .1em form, The Loom.dc.html:142). Still one row at the owner's width. */
+.lv-top a.lv-close{flex:none;white-space:nowrap;font:500 13px/13px system-ui;letter-spacing:normal;text-transform:none;}
 /* The trailing "a" in this selector is deliberate: the back-to-gallery control is an
    anchor, not a button, so a button-only selector left it as an unstyled browser link --
    rgb(0,0,238) on the dark bar, a measured 1.69:1 against a 4.5:1 floor, and the only way
    out of the Loom. Found by a browser crawl; invisible to any DOM/network check because
    the link works perfectly, it is just illegible.
    NB: this whole block is a JS template literal -- no backticks in these comments. */
-.lv-top button,.lv-top label,.lv-top a{background:var(--surface1);border:1px solid var(--surface1);color:var(--text);border-radius:8px;padding:7px 13px;font:600 12px/1 system-ui;cursor:pointer;}
+.lv-top button,.lv-top label,.lv-top a{background:var(--surface1);border:1px solid var(--surface1);color:var(--text);border-radius:var(--radius-control);padding:7px 13px;font:600 12px/1 system-ui;cursor:pointer;}
 .lv-top a{text-decoration:none;display:inline-block;}
 .lv-top a:hover{border-color:var(--accent);}
 /* margin-left:auto back here, Activity first again, "← Gallery" last (2026-08-10: the
@@ -886,22 +889,22 @@ const V2_STYLES = `
    not a text pill. (The Export trigger next to Render is the opposite case --
    it dropped .sb-projbtn to inherit the bar's normal button idiom.) */
 .lv-top .lv-caret{flex:none;width:26px;height:26px;box-sizing:border-box;background:var(--surface0);border:1px solid var(--surface1);
-  color:var(--subtext);border-radius:6px;cursor:pointer;font-size:11px;display:grid;place-items:center;padding:0;}
+  color:var(--subtext);border-radius:var(--radius-control);cursor:pointer;font-size:11px;display:grid;place-items:center;padding:0;}
 .lv-top .lv-caret:hover{border-color:var(--accent);}
 /* ▶ Generate all -- the DC's "metal" treatment verbatim (The Loom.dc.html:748):
    the one hero control on the bar, an animated accent-metal pill.
    (No backticks in these comments -- this block is a JS template literal.) */
 .lv-genall{border:1px solid rgba(255,255,255,.3) !important;
   color:color-mix(in oklab,var(--accent) 26%,#08040f) !important;
-  text-shadow:0 1px 0 rgba(255,255,255,.4);font-weight:800 !important;padding:7px 15px !important;
+  text-shadow:0 1px 0 rgba(255,255,255,.4);font-weight:600 !important;padding:7px 15px !important;
   background:linear-gradient(100deg,color-mix(in oklab,var(--accent) 50%,#06030d) 0%,var(--accent) 18%,
     color-mix(in oklab,var(--accent) 22%,#ffffff) 34%,var(--accent) 50%,
     color-mix(in oklab,var(--accent) 74%,#06030d) 68%,var(--mauve) 84%,
     color-mix(in oklab,var(--accent) 50%,#06030d) 100%) !important;
-  background-size:220% 100% !important;animation:mgMetal 7s ease-in-out infinite;
+  background-size:220% 100% !important;animation:none;background-position:30% 50% !important;transition:var(--metal-sweep);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.6),inset 0 -2px 4px rgba(10,5,20,.45),0 6px 16px rgba(0,0,0,.45);}
-.lv-genall:hover{border-color:rgba(255,255,255,.5) !important;}
-@keyframes mgMetal{0%{background-position:0% 50%;}50%{background-position:100% 50%;}100%{background-position:0% 50%;}}
+.lv-genall:hover,.lv-genall:focus-visible{border-color:rgba(255,255,255,.5) !important;background-position:100% 50% !important;}
+@media (prefers-reduced-motion:reduce){.lv-genall{transition:none;}}
 .lv-batchbar{padding:6px 20px;font-size:12px;color:var(--subtext);background:var(--surface0);border-bottom:1px solid var(--surface1);}
 .lv-batchfail{color:var(--coral);font-weight:600;}
 .lv-batchstale{color:var(--subtext);font-weight:600;}
@@ -924,7 +927,7 @@ const V2_STYLES = `
   border:1px solid color-mix(in srgb,var(--lavender) 32%,transparent);
   background:linear-gradient(120deg,color-mix(in srgb,var(--lv-glass-hi) 92%,transparent) 0%,color-mix(in srgb,var(--lv-glass-lo) 95%,transparent) 100%);
   backdrop-filter:blur(18px) saturate(1.12);
-  box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px color-mix(in srgb,var(--lavender) 14%,transparent);}
+  box-shadow:0 24px 60px rgba(0,0,0,.55);}
 .lv-boardcol{flex:1;min-width:0;overflow:auto;background:var(--base);}
 
 .lv-backdrop{position:absolute;inset:0;z-index:310;background:color-mix(in srgb,var(--lv-ink) 62%,transparent);
@@ -935,7 +938,7 @@ const V2_STYLES = `
   border:1px solid color-mix(in srgb,var(--lavender) 32%,transparent);
   background:linear-gradient(120deg,color-mix(in srgb,var(--lv-glass-hi) 92%,transparent) 0%,color-mix(in srgb,var(--lv-glass-lo) 95%,transparent) 100%);
   backdrop-filter:blur(18px) saturate(1.12);
-  box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px color-mix(in srgb,var(--lavender) 14%,transparent);overflow:hidden;}
+  box-shadow:0 24px 60px rgba(0,0,0,.55);overflow:hidden;}
 .lv-panel.left{left:20px;width:clamp(220px,21vw,292px);
   animation:lvSlideL .4s cubic-bezier(.18,1.02,.26,1) both;}
 .lv-panel.left.wide{width:min(572px,37vw);}
@@ -953,10 +956,10 @@ const V2_STYLES = `
 .lv-sidehead{flex:none;display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid var(--surface1);}
 .lv-sidetabs{flex:1;min-width:0;margin-bottom:0;}
 .lv-col{width:22px;height:20px;border:1px solid var(--surface1);background:var(--base);color:var(--subtext);
-  border-radius:5px;cursor:pointer;font-size:11px;flex:0 0 auto;}
+  border-radius:4px;cursor:pointer;font-size:11px;flex:0 0 auto;}
 .lv-col:hover{color:var(--accent);}
 .lv-railbtn{width:38px;height:38px;border:1px solid var(--surface1);background:var(--base);color:var(--subtext);
-  border-radius:8px;cursor:pointer;font-size:17px;line-height:1;flex:0 0 auto;display:grid;place-items:center;padding:0;}
+  border-radius:var(--radius-control);cursor:pointer;font-size:17px;line-height:1;flex:0 0 auto;display:grid;place-items:center;padding:0;}
 .lv-railbtn:hover{border-color:var(--accent);color:var(--accent);}
 .lv-railbtn.on{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--base));}
 /* THE TIMELINE DRAWER (The Loom.dc.html:146-170, 1001-1003): fixed under the top bar, full
@@ -986,7 +989,7 @@ const V2_STYLES = `
 .lv-act{margin-bottom:12px;}
 .lv-actrow{display:flex;align-items:center;gap:4px;margin:2px 0 7px;}
 .lv-actname-in{flex:1;min-width:0;background:transparent;border:none;border-bottom:1px dashed var(--surface1);
-  color:var(--accent);font:700 10px/1 system-ui;text-transform:uppercase;letter-spacing:.06em;padding:2px 0;}
+  color:var(--accent);font:500 12px/1 system-ui;text-transform:none;letter-spacing:normal;padding:2px 0;}
 .lv-actname-in:focus{outline:none;border-bottom-color:var(--accent);}
 .lv-ico{width:19px;height:17px;border:1px solid var(--surface1);background:var(--base);color:var(--subtext);
   border-radius:4px;cursor:pointer;font-size:10px;line-height:1;flex:0 0 auto;}
@@ -1017,12 +1020,12 @@ const V2_STYLES = `
 .lv-card.fdim{opacity:.35;}
 .lv-card.fcur,.lv-card.fcur:hover{border-color:var(--lavender);box-shadow:0 0 0 1px var(--lavender) inset;}
 .lv-card.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;}
-.lv-code{font:700 9px/1 system-ui;color:var(--subtext);}
+.lv-code{font:600 9px/1 system-ui;color:var(--subtext);}
 .lv-ctitle{font:600 11px/1.2 system-ui;color:var(--text);margin:4px 0;min-height:26px;}
 .lv-cmeta{display:flex;gap:5px;align-items:center;flex-wrap:wrap;}
-.lv-mode{font:700 8px/1 system-ui;color:var(--accent);}
+.lv-mode{font:600 8px/1 system-ui;color:var(--accent);}
 .lv-dur{font-size:9px;color:var(--subtext);}
-.lv-st{font:700 8px/1 system-ui;text-transform:uppercase;padding:2px 5px;border-radius:4px;margin-left:auto;}
+.lv-st{font:500 11px/1 system-ui;text-transform:none;padding:2px 5px;border-radius:4px;margin-left:auto;}
 .lv-st.done{color:var(--green);background:color-mix(in srgb,var(--green) 16%,transparent);}
 .lv-st.wip{color:var(--amber);background:color-mix(in srgb,var(--amber) 16%,transparent);}
 .lv-st.todo{color:var(--subtext);background:var(--base);}
@@ -1052,7 +1055,7 @@ const V2_STYLES = `
   font-size:9.5px;line-height:1.35;color:var(--peach);background:color-mix(in srgb,var(--peach) 10%,transparent);
   border:1px solid color-mix(in srgb,var(--peach) 45%,transparent);cursor:default;}
 .lv-unclear span{flex:1 1 100%;}
-.lv-unclearbtn{font:600 9px/1 system-ui;padding:4px 7px;border-radius:5px;cursor:pointer;color:var(--peach);
+.lv-unclearbtn{font:600 9px/1 system-ui;padding:4px 7px;border-radius:var(--radius-control-sm);cursor:pointer;color:var(--peach);
   background:var(--base);border:1px solid color-mix(in srgb,var(--peach) 55%,transparent);}
 .lv-unclearbtn:hover{border-color:var(--peach);}
 /* Session P, Stage A2 -- the page's section A card (Loom Handoff.dc.html): the takes strip with
@@ -1063,12 +1066,12 @@ const V2_STYLES = `
    the narrowest (144px) card, and the grey lines use --subtext (--overlay0 on surface1 is ~2:1). */
 .lv-takes{display:flex;flex-direction:column;gap:7px;margin-top:7px;}
 .lv-takerow{display:flex;align-items:center;flex-wrap:wrap;gap:4px;cursor:default;}
-.lv-take{flex:none;width:26px;height:20px;box-sizing:border-box;border:0;padding:0;border-radius:4px;display:grid;place-items:center;
-  font:800 9px/1 system-ui;color:rgba(236,232,248,.9);text-shadow:0 1px 2px rgba(0,0,0,.85);cursor:pointer;
+.lv-take{flex:none;width:26px;height:20px;box-sizing:border-box;border:0;padding:0;border-radius:var(--radius-control-sm);display:grid;place-items:center;
+  font:600 9px/1 system-ui;color:rgba(236,232,248,.9);text-shadow:0 1px 2px rgba(0,0,0,.85);cursor:pointer;
   background:var(--surface0) center/cover no-repeat;}
 .lv-take.on{outline:2px solid var(--gold);outline-offset:1px;}
-.lv-takemore{font:800 9px/1 system-ui;color:var(--subtext);}
-.lv-render{margin-left:auto;font:700 10px/1 system-ui;padding:4px 8px;border-radius:7px;cursor:pointer;
+.lv-takemore{font:600 9px/1 system-ui;color:var(--subtext);}
+.lv-render{margin-left:auto;font:600 10px/1 system-ui;padding:4px 8px;border-radius:var(--radius-control-sm);cursor:pointer;
   border:1px solid var(--surface1);color:var(--subtext);background:var(--base);}
 .lv-render:hover:not(:disabled){border-color:var(--accent);color:var(--text);}
 .lv-render:disabled{opacity:.5;cursor:default;}
@@ -1077,9 +1080,9 @@ const V2_STYLES = `
   border:1px solid color-mix(in srgb,var(--peach) 50%,transparent);background:color-mix(in srgb,var(--peach) 7%,transparent);}
 .lv-staletxt{font-size:10.5px;line-height:1.4;color:var(--peach);}
 .lv-stalebtns{display:flex;gap:5px;}
-.lv-reanchor{font:700 10px/1 system-ui;padding:4px 9px;border-radius:7px;border:0;background:var(--lavender);color:var(--base);cursor:pointer;}
+.lv-reanchor{font:600 10px/1 system-ui;padding:4px 9px;border-radius:var(--radius-control-sm);border:0;background:var(--lavender);color:var(--base);cursor:pointer;}
 .lv-reanchor:disabled{opacity:.6;cursor:default;}
-.lv-keep{font:400 10px/1 system-ui;padding:4px 9px;border-radius:7px;border:1px solid var(--surface1);color:var(--subtext);background:var(--base);cursor:pointer;}
+.lv-keep{font:400 10px/1 system-ui;padding:4px 9px;border-radius:var(--radius-control-sm);border:1px solid var(--surface1);color:var(--subtext);background:var(--base);cursor:pointer;}
 .lv-keep:hover{border-color:var(--accent);color:var(--text);}
 .lv-staleerr{font-size:9.5px;line-height:1.35;color:var(--peach);}
 .lv-needtake{font-size:9.5px;line-height:1.4;color:var(--subtext);}
@@ -1096,7 +1099,7 @@ const V2_STYLES = `
 .sb-shotprev-wrap.side .sb-shotprev-ctrls{grid-column:2;margin-top:0;}
 .sb-shotprev-wrap.side .sb-trim{grid-column:2;}
 .lv-takelist{flex:0 1 260px;max-width:260px;min-width:0;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:8px 2px 4px 0;}
-.lv-takelist-h{font:700 9px/1 system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--subtext);margin-bottom:2px;}
+.lv-takelist-h{font:500 11px/1 system-ui;text-transform:none;letter-spacing:normal;color:var(--subtext);margin-bottom:2px;}
 .lv-takeitem{display:flex;gap:8px;align-items:flex-start;padding:7px;border-radius:8px;background:var(--base);border:1px solid var(--surface1);}
 .lv-takeitem.on{border-color:color-mix(in srgb,var(--gold) 55%,transparent);}
 .lv-takeitem .lv-take{cursor:default;}
@@ -1104,7 +1107,7 @@ const V2_STYLES = `
 .lv-taketitle{font:600 11px/1.2 system-ui;color:var(--text);}
 .lv-takemeta{font-size:9.5px;line-height:1.35;color:var(--subtext);}
 .lv-takebtns{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px;}
-.lv-takebtn{font:600 10px/1 system-ui;padding:4px 8px;border-radius:6px;border:1px solid var(--surface1);background:var(--surface1);color:var(--subtext);cursor:pointer;}
+.lv-takebtn{font:600 10px/1 system-ui;padding:4px 8px;border-radius:var(--radius-control-sm);border:1px solid var(--surface1);background:var(--surface1);color:var(--subtext);cursor:pointer;}
 .lv-takebtn:hover:not(:disabled){border-color:var(--accent);color:var(--accent);}
 .lv-takebtn:disabled{opacity:.45;cursor:default;}
 .lv-reel{position:relative;flex:1;min-height:40px;display:flex;background:var(--base);border:1px solid var(--surface1);border-radius:7px;overflow:hidden;}
@@ -1123,7 +1126,7 @@ const V2_STYLES = `
 .lv-seg.fdim{opacity:.35;}
 /* The find pill and its filter chips in the top bar (the page's sizes; spans, not buttons, so
    the bar's own button chrome does not apply). */
-.lv-find{flex:1000 1 110px;max-width:150px;min-width:0;transition:max-width .2s ease;display:flex;align-items:center;gap:7px;padding:6px 11px;border-radius:999px;
+.lv-find{flex:1000 1 110px;max-width:150px;min-width:0;transition:max-width .2s ease;display:flex;align-items:center;gap:7px;padding:6px 11px;border-radius:var(--radius-control);
   border:1px solid var(--surface1);background:color-mix(in srgb,var(--base) 85%,transparent);box-sizing:border-box;}
 .lv-find.on{border-color:var(--lavender);}
 /* Compact until it is in use, then it grows (the 2026-09-29 one-row bar). */
@@ -1138,7 +1141,7 @@ const V2_STYLES = `
   white-space:nowrap;user-select:none;}
 .lv-findchip.on{border-color:var(--lavender);background:color-mix(in srgb,var(--lavender) 16%,transparent);color:var(--text);}
 .lv-findchip:focus-visible{outline:2px solid var(--lavender);outline-offset:1px;}
-.lv-segcode{font-size:9px;font-weight:700;color:color-mix(in srgb,var(--lv-ink) 55%,transparent);white-space:nowrap;overflow:hidden;
+.lv-segcode{font-size:9px;font-weight:600;color:color-mix(in srgb,var(--lv-ink) 55%,transparent);white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis;pointer-events:none;}
 .lv-segbar{position:absolute;left:0;right:0;bottom:0;height:4px;}
 .lv-segbar.todo{background:rgba(255,255,255,.25);}
@@ -1157,7 +1160,7 @@ const V2_STYLES = `
 .lv-bedtitles{position:absolute;inset:0;display:flex;}
 .lv-bedtitles>div{flex:none;height:100%;}
 .lv-bedctl{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:10.5px;color:var(--subtext);}
-.lv-bedbtn{display:inline-flex;align-items:center;gap:6px;font:600 10.5px/1.2 system-ui,sans-serif;padding:5px 10px;border-radius:8px;
+.lv-bedbtn{display:inline-flex;align-items:center;gap:6px;font:600 10.5px/1.2 system-ui,sans-serif;padding:5px 10px;border-radius:var(--radius-control-sm);
   cursor:pointer;border:1px solid var(--surface1);color:var(--subtext);background:transparent;max-width:360px;box-sizing:border-box;}
 .lv-bedbtn:hover{border-color:var(--loomc);}
 .lv-bedbtn.on{border-color:var(--loomc);color:var(--text);background:color-mix(in srgb,var(--loomc) 10%,transparent);cursor:default;}
@@ -1178,15 +1181,15 @@ const V2_STYLES = `
    shot is bound, "Generate · draft generation — route results into a shot" when not, and the
    collapse › at the RIGHT end. The Image/Edit/Reference/Video tabs are a segmented bar at the
    top of the scroll body (.lv-gentabs), not in the header. */
-.lv-genhdtitle{flex:0 1 auto;font:700 13px/1.2 system-ui;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lv-genhdtitle{flex:0 1 auto;font:600 13px/1.2 system-ui;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .lv-genhdsub{flex:0 1 auto;font:italic 10.5px/1.3 system-ui;color:var(--subtext);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .lv-genhdfill{flex:1 1 auto;}
-.lv-unbind{flex:none;font:700 10.5px/1 system-ui;background:none;border:0;padding:2px 0;
+.lv-unbind{flex:none;font:600 10.5px/1 system-ui;background:none;border:0;padding:2px 0;
   color:var(--subtext);cursor:pointer;white-space:nowrap;}
 .lv-unbind:hover{color:var(--accent);}
-.lv-gentabs{display:flex;gap:4px;padding:3px;border-radius:11px;background:color-mix(in srgb,var(--base) 70%,transparent);
+.lv-gentabs{display:flex;gap:4px;padding:3px;border-radius:var(--radius-control);background:color-mix(in srgb,var(--base) 70%,transparent);
   border:1px solid var(--surface1);margin-bottom:10px;}
-.lv-gentab{flex:1;min-width:0;text-align:center;padding:8px 4px;border-radius:9px;font:800 12px/1 system-ui;letter-spacing:.03em;
+.lv-gentab{flex:1;min-width:0;text-align:center;padding:8px 4px;border-radius:calc(var(--radius-control) - 3px);font:600 12px/1 system-ui;letter-spacing:normal;
   cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:transparent;border:0;
   color:color-mix(in srgb,var(--text) 60%,transparent);}
 .lv-gentab:hover{color:var(--text);}
@@ -1196,10 +1199,10 @@ const V2_STYLES = `
 /* The page's segmented sub-strips (Edit / Fixer / Enhance, Face / Hand, the Continuity 2x2 --
    The Loom.dc.html:409, 433, 501) and its FIELD SLABS (1126-1130): each group of fields sits in
    a rounded well, and the prompt's well is outlined in lavender. Layout only. */
-.lv-segtrack{display:flex;gap:4px;padding:3px;border-radius:9px;background:color-mix(in srgb,var(--base) 60%,transparent);
+.lv-segtrack{display:flex;gap:4px;padding:3px;border-radius:var(--radius-control);background:color-mix(in srgb,var(--base) 60%,transparent);
   border:1px solid var(--surface1);}
 .lv-segtrack.grid2{display:grid;grid-template-columns:1fr 1fr;}
-.lv-segbtn{flex:1;min-width:0;text-align:center;padding:7px 4px;border-radius:7px;font:700 10px/1 system-ui;cursor:pointer;
+.lv-segbtn{flex:1;min-width:0;text-align:center;padding:7px 4px;border-radius:calc(var(--radius-control) - 3px);font:600 10px/1 system-ui;cursor:pointer;
   background:transparent;border:0;color:var(--subtext);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .lv-segbtn:hover{color:var(--text);}
 .lv-segbtn.on{background:color-mix(in srgb,var(--lavender) 20%,transparent);color:var(--text);}
@@ -1207,9 +1210,9 @@ const V2_STYLES = `
   background:color-mix(in srgb,var(--base) 55%,transparent);margin-bottom:9px;min-width:0;}
 .lv-slab.prompt{gap:7px;border-color:color-mix(in srgb,var(--lavender) 30%,transparent);
   background:color-mix(in srgb,var(--base) 62%,transparent);}
-.lv-slablab{font:700 9.5px/1.2 system-ui;letter-spacing:.1em;text-transform:uppercase;color:var(--overlay0);
+.lv-slablab{font:500 11.5px/1.2 system-ui;letter-spacing:normal;text-transform:none;color:var(--overlay0);
   display:flex;align-items:center;flex-wrap:wrap;gap:6px;}
-.lv-slabhint{font:400 9.5px/1.2 system-ui;letter-spacing:0;text-transform:none;color:var(--overlay0);}
+.lv-slabhint{font:400 11px/1.2 system-ui;letter-spacing:0;text-transform:none;color:var(--overlay0);}
 .lv-slab .lv-lab{margin:0 0 5px;}
 .lv-slab .lv-row2{margin-top:0;}
 .lv-slab .lv-ck{margin-top:0;}
@@ -1231,15 +1234,15 @@ const V2_STYLES = `
 .lv-framehandoff .sb-framehead{flex-wrap:nowrap;}
 .lv-framehandoff .sb-tagin{width:62px;}
 .lv-framehandoff .sb-frameprev{height:64px;}
-.lv-lab{font:700 9px/1 system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--subtext);display:block;margin:9px 0 5px;}
+.lv-lab{font:500 11px/1 system-ui;text-transform:none;letter-spacing:normal;color:var(--subtext);display:block;margin:9px 0 5px;}
 .lv-chips{display:flex;gap:5px;flex-wrap:wrap;}
-.lv-chip{background:var(--surface1);border:1px solid var(--surface1);color:var(--subtext);border-radius:6px;padding:3px 9px;font:600 10px/1 system-ui;cursor:pointer;}
+.lv-chip{background:var(--surface1);border:1px solid var(--surface1);color:var(--subtext);border-radius:var(--radius-control-sm);padding:3px 9px;font:600 10px/1 system-ui;cursor:pointer;}
 .lv-chip.on{background:color-mix(in srgb,var(--accent) 18%,transparent);border-color:var(--accent);color:var(--accent);}
-.lv-ta{width:100%;background:var(--base);border:1px solid var(--surface1);border-radius:7px;padding:8px;color:var(--text);font:11px/1.4 system-ui;resize:vertical;min-height:60px;}
+.lv-ta{width:100%;background:var(--base);border:1px solid var(--surface1);border-radius:var(--radius-control);padding:8px;color:var(--text);font:11px/1.4 system-ui;resize:vertical;min-height:60px;}
 .lv-ta:focus{outline:0;border-color:var(--accent);}
-.lv-go{width:100%;margin-top:11px;background:var(--accent);color:var(--base);border:0;border-radius:8px;padding:9px;font:700 12px/1 system-ui;cursor:pointer;}
+.lv-go{width:100%;margin-top:11px;background:var(--accent);color:var(--base);border:0;border-radius:var(--radius-control);padding:9px;font:600 12px/1 system-ui;cursor:pointer;}
 .lv-go:disabled{opacity:.6;cursor:default;}
-.lv-usevid{width:100%;margin-top:7px;background:transparent;color:var(--subtext);border:1px solid var(--surface1);border-radius:8px;padding:7px;font:600 11px/1 system-ui;cursor:pointer;}
+.lv-usevid{width:100%;margin-top:7px;background:transparent;color:var(--subtext);border:1px solid var(--surface1);border-radius:var(--radius-control);padding:7px;font:600 11px/1 system-ui;cursor:pointer;}
 .lv-usevid:hover{border-color:var(--accent);color:var(--accent);}
 .lv-usevid:disabled{opacity:.5;cursor:default;}
 /* 80px, not 48px: the frame is object-fit:cover inside a card whose content width is 144px at
@@ -1250,15 +1253,15 @@ const V2_STYLES = `
    is deliberate; contain would leave wide empty bars on the common case). */
 .lv-cframe{height:80px;border-radius:5px;overflow:hidden;background:var(--base);border:1px solid var(--surface1);display:flex;align-items:center;justify-content:center;margin-bottom:5px;}
 .lv-cframe img{width:100%;height:100%;object-fit:cover;}
-.lv-cframeph{font:700 9px/1 system-ui;color:var(--subtext);}
+.lv-cframeph{font:600 9px/1 system-ui;color:var(--subtext);}
 .lv-cast{flex:1;min-height:0;overflow-y:auto;padding:8px;}
-.lv-castrow-h{font:700 10px/1 system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--subtext);margin-bottom:8px;}
+.lv-castrow-h{font:500 12px/1 system-ui;text-transform:none;letter-spacing:normal;color:var(--subtext);margin-bottom:8px;}
 /* The Loom.dc.html draftStyle/checkBox (2026-08-13 styleset pass): a surface0
    chip whose BORDER stays surface1 even when on -- only the text and the little
    check square take the accent -- and the native checkbox drawn as the DC's own
    12px rounded square instead of the browser widget. (The 📱 Mobile view switch
    shares this chip pattern by design; it isn't in the DC at all.) */
-.lv-top label.lv-draft{display:inline-flex;align-items:center;gap:6px;font:600 12px/1 system-ui;color:var(--subtext);cursor:pointer;padding:6px 11px;border-radius:8px;border:1px solid var(--surface1);background:var(--surface0);user-select:none;}
+.lv-top label.lv-draft{display:inline-flex;align-items:center;gap:6px;font:600 12px/1 system-ui;color:var(--subtext);cursor:pointer;padding:6px 11px;border-radius:var(--radius-control);border:1px solid var(--surface1);background:var(--surface0);user-select:none;}
 .lv-top label.lv-draft.on{color:var(--accent);}
 .lv-draft input{appearance:none;-webkit-appearance:none;margin:0;cursor:pointer;width:12px;height:12px;
   border-radius:3px;border:1px solid var(--surface1);background:var(--base);flex:none;}
@@ -1266,7 +1269,7 @@ const V2_STYLES = `
 .lv-look{margin-bottom:10px;border:1px solid var(--surface1);border-radius:8px;padding:6px 8px;background:var(--surface0);}
 .lv-look>summary{font:600 11px/1.3 system-ui;color:var(--text);cursor:pointer;list-style:none;user-select:none;}
 .lv-look>summary::-webkit-details-marker{display:none;}
-.lv-lookin{width:100%;margin-top:6px;box-sizing:border-box;resize:vertical;font:12px/1.4 system-ui;color:var(--text);background:var(--surface1);border:1px solid var(--surface1);border-radius:6px;padding:6px;}
+.lv-lookin{width:100%;margin-top:6px;box-sizing:border-box;resize:vertical;font:12px/1.4 system-ui;color:var(--text);background:var(--surface1);border:1px solid var(--surface1);border-radius:var(--radius-control);padding:6px;}
 .lv-castph{width:34px;height:34px;border-radius:6px;background:var(--surface1);flex:0 0 auto;}
 /* Detailed Cast & Assets row -- genuinely editable (name/tag/kind/lock), matching V1's
    original sb-assetrow, not just a relabeled copy of the Simple glance card. */
@@ -1275,11 +1278,11 @@ const V2_STYLES = `
 .lv-assetprev{width:38px;height:32px;border-radius:6px;border:1px solid var(--surface1);background:var(--surface1);
   flex:none;display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer;overflow:hidden;}
 .lv-assetprev img{width:100%;height:100%;object-fit:cover;}
-.lv-pickico{width:38px;height:32px;flex:none;border-radius:6px;border:1px dashed var(--surface1);
+.lv-pickico{width:38px;height:32px;flex:none;border-radius:var(--radius-control);border:1px dashed var(--surface1);
   background:transparent;color:var(--subtext);font-size:14px;cursor:pointer;
   display:flex;align-items:center;justify-content:center;}
 .lv-pickico:hover{color:var(--accent);border-color:var(--accent);}
-.lv-tagin{width:76px;flex:none;background:var(--base);border:1px solid var(--surface1);border-radius:6px;
+.lv-tagin{width:76px;flex:none;background:var(--base);border:1px solid var(--surface1);border-radius:var(--radius-control);
   color:var(--accent);font:11px/1.3 ui-monospace,monospace;padding:6px 7px;}
 .lv-tagin:focus{outline:0;border-color:var(--accent);}
 /* The bound shot's LIVE positional @imageN beside the stored-tag input -- read-only and
@@ -1297,12 +1300,12 @@ const V2_STYLES = `
    see refBudget in loom-core.js). .lv-refbudget-over = more resolvable cast/refs than
    slots, i.e. the rows marked .oob below exist. */
 .lv-refbudget{font-size:10px;color:var(--subtext);margin:-4px 0 8px;}
-.lv-refbudget-over{color:var(--peach);font-weight:700;}
-.lv-sel{flex:none;background:var(--base);border:1px solid var(--surface1);border-radius:6px;color:var(--text);
+.lv-refbudget-over{color:var(--peach);font-weight:600;}
+.lv-sel{flex:none;background:var(--base);border:1px solid var(--surface1);border-radius:var(--radius-control);color:var(--text);
   font:10.5px/1.3 system-ui;padding:6px 3px;}
 .lv-locklab,.lv-inshot{display:flex;align-items:center;gap:4px;font-size:9.5px;color:var(--subtext);
   cursor:pointer;flex:none;white-space:nowrap;}
-.lv-addcast{margin-top:8px;width:100%;background:var(--surface1);border:1px dashed var(--surface1);color:var(--subtext);border-radius:7px;padding:7px;font:600 11px/1 system-ui;cursor:pointer;}
+.lv-addcast{margin-top:8px;width:100%;background:var(--surface1);border:1px dashed var(--surface1);color:var(--subtext);border-radius:var(--radius-control);padding:7px;font:600 11px/1 system-ui;cursor:pointer;}
 .lv-addcast:hover{border-color:var(--accent);color:var(--accent);}
 /* Density toggle (Cast tab) + the Simple view's square-card grid. */
 .lv-density{margin-bottom:10px;}
@@ -1322,14 +1325,14 @@ const V2_STYLES = `
 .lv-lib{display:flex;flex-direction:column;gap:6px;padding:12px;border-radius:14px;border:1px solid var(--surface1);
   background:color-mix(in srgb,var(--mantle) 70%,transparent);}
 .lv-libhead{display:flex;align-items:baseline;gap:6px;}
-.lv-libcap{flex:1;font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--overlay0);}
+.lv-libcap{flex:1;font-size:11px;font-weight:500;letter-spacing:normal;color:var(--overlay0);}
 .lv-libhint{font-size:9.5px;color:var(--overlay0);}
 .lv-libnote{font-size:9.5px;line-height:1.45;color:var(--overlay0);}
 .lv-libnote.warn{color:var(--peach);}
-.lv-librow{display:flex;align-items:center;gap:8px;padding:5px 4px;border-radius:7px;cursor:pointer;outline:none;}
+.lv-librow{display:flex;align-items:center;gap:8px;padding:5px 4px;border-radius:4px;cursor:pointer;outline:none;}
 .lv-librow:hover,.lv-librow:focus-visible{background:color-mix(in srgb,var(--lavender) 8%,transparent);}
 .lv-librow.busy{opacity:.55;cursor:progress;}
-.lv-libbox{width:16px;height:16px;flex:none;border-radius:4px;display:grid;place-items:center;font-size:10px;font-weight:800;
+.lv-libbox{width:16px;height:16px;flex:none;border-radius:4px;display:grid;place-items:center;font-size:10px;font-weight:600;
   box-sizing:border-box;border:1.5px solid var(--surface1);color:var(--base);}
 .lv-libbox.on{background:var(--lavender);border-color:var(--lavender);}
 .lv-libav{width:26px;height:26px;flex:none;border-radius:50%;border:0;padding:0;cursor:pointer;background:var(--surface1) center/cover no-repeat;
@@ -1350,17 +1353,17 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
 .lv-footagehead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;}
 .lv-footagehead .lv-castrow-h{margin-bottom:0;}
 .lv-browsebtn{font:600 10px/1 system-ui;background:var(--base);border:1px solid var(--surface1);color:var(--accent);
-  border-radius:6px;padding:5px 8px;cursor:pointer;flex:0 0 auto;}
+  border-radius:var(--radius-control-sm);padding:5px 8px;cursor:pointer;flex:0 0 auto;}
 .lv-browsebtn:hover{border-color:var(--accent);}
 .lv-dropzone{margin-top:8px;border:1.5px dashed var(--surface1);border-radius:8px;padding:12px 8px;text-align:center;
   font-size:10.5px;color:var(--subtext);transition:all .15s;}
 .lv-dropzone.hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 6%,transparent);}
 /* Legend as an on-demand "+ terms" popover per field -- no persistent panel anywhere. */
-.lv-termsbtn{font-size:9px;text-transform:none;letter-spacing:0;color:var(--accent);background:none;border:none;
+.lv-termsbtn{font-size:11px;text-transform:none;letter-spacing:normal;color:var(--accent);background:none;border:none;
   cursor:pointer;text-decoration:underline;text-underline-offset:2px;margin-left:6px;}
 .lv-termspal{display:flex;flex-wrap:wrap;gap:4px;margin:5px 0 2px;padding:7px;background:var(--surface1);border-radius:7px;}
 .lv-termsgrp{width:100%;display:flex;flex-wrap:wrap;gap:4px;align-items:center;}
-.lv-termsgrpt{width:100%;font-size:8px;letter-spacing:.05em;text-transform:uppercase;color:var(--subtext);margin-top:4px;}
+.lv-termsgrpt{width:100%;font-size:11px;font-weight:500;letter-spacing:normal;text-transform:none;color:var(--subtext);margin-top:4px;}
 .lv-footage{padding:8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;align-content:start;}
 .lv-fclip{border-radius:7px;overflow:hidden;border:1px solid var(--surface1);cursor:pointer;background:var(--base);}
 .lv-fclip.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;}
@@ -1371,18 +1374,18 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
 .lv-err p{color:var(--coral);}
 .lv-err pre{color:var(--subtext);font-size:11px;white-space:pre-wrap;text-align:left;max-height:200px;overflow:auto;background:var(--base);padding:10px;border-radius:7px;}
 .lv-tabs{display:flex;gap:4px;margin-bottom:10px;}
-.lv-tab{flex:1;text-align:center;font:600 10px/1 system-ui;padding:6px 4px;border-radius:6px;border:1px solid var(--surface1);background:var(--surface1);color:var(--subtext);cursor:pointer;}
+.lv-tab{flex:1;text-align:center;font:600 10px/1 system-ui;padding:6px 4px;border-radius:var(--radius-control-sm);border:1px solid var(--surface1);background:var(--surface1);color:var(--subtext);cursor:pointer;}
 .lv-tab.on{background:color-mix(in srgb,var(--accent) 18%,transparent);border-color:var(--accent);color:var(--accent);}
-.lv-in{width:100%;background:var(--base);border:1px solid var(--surface1);border-radius:7px;padding:7px 8px;color:var(--text);font:11px/1.3 system-ui;}
+.lv-in{width:100%;background:var(--base);border:1px solid var(--surface1);border-radius:var(--radius-control);padding:7px 8px;color:var(--text);font:11px/1.3 system-ui;}
 .cap-off{opacity:.4;cursor:not-allowed;}
 .lv-in:focus{outline:0;border-color:var(--accent);}
-.lv-minichip{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);border-radius:5px;padding:2px 5px;cursor:pointer;}
+.lv-minichip{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);border-radius:4px;padding:2px 5px;cursor:pointer;}
 .lv-minichip:hover{border-color:var(--accent);color:var(--accent);}
 .lv-refline{font-size:10px;color:var(--subtext);margin:10px 0 4px;}
 /* Draft-mode "route into a shot" picker -- shown only with no shot selected. */
 .lv-drafttarget{margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--surface1);}
 .lv-drafttarget select.lv-sel{display:block;width:100%;flex:none;padding:7px 8px;font-size:11px;}
-.lv-mini2{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);border-radius:5px;padding:3px 7px;cursor:pointer;margin:5px 0;}
+.lv-mini2{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);border-radius:4px;padding:3px 7px;cursor:pointer;margin:5px 0;}
 .lv-mini2:hover{border-color:var(--accent);color:var(--accent);}
 /* L536: Image tab field-parity additions -- a 2-up row (Size/Custom W×H, Mode/Count) and a
    labeled checkbox row, mirroring moonglade_gallery.py's .gen-row/.gen-check at the same sizing. */
@@ -1396,7 +1399,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
 .lv-df{width:min(640px,92vw);max-height:88vh;overflow:auto;background:var(--surface0);border:1px solid var(--surface1);
   border-radius:14px;padding:18px 20px 22px;box-shadow:0 30px 70px -20px rgba(0,0,0,.7);}
 .lv-df-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
-.lv-df-code{font:700 11px/1 ui-monospace,monospace;color:var(--subtext);flex:0 0 auto;}
+.lv-df-code{font:600 11px/1 ui-monospace,monospace;color:var(--subtext);flex:0 0 auto;}
 .lv-df-title{flex:1;min-width:0;background:transparent;border:none;border-bottom:1px solid var(--surface1);
   color:var(--text);font:600 17px/1.2 system-ui;padding:4px 0;}
 .lv-df-title:focus{outline:none;border-bottom-color:var(--accent);}
@@ -1441,7 +1444,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
    moonglade_gallery.py's own #gen-selrow) that opens a floating overlay -- .lv-mpick-veil below
    -- matching the Gallery's #model-flyout presentation: ONE picker experience, not a
    cramped-inline one here and a proper flyout there. */
-.lv-selrow{display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;border-radius:6px;background:var(--panel);border:1px solid var(--line);color:var(--ink);cursor:pointer;font-size:11.5px;text-align:left;}
+.lv-selrow{display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;border-radius:var(--radius-control);background:var(--panel);border:1px solid var(--line);color:var(--ink);cursor:pointer;font-size:11.5px;text-align:left;}
 .lv-selrow:hover{border-color:var(--line2);}
 .lv-selthumb{width:26px;height:26px;border-radius:6px;object-fit:cover;flex:0 0 auto;}
 .lv-selname{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -1465,7 +1468,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
 .lv-mpick-head .x{background:none;border:none;color:var(--ink2);font-size:22px;cursor:pointer;line-height:1;padding:0 4px;}
 .lv-mpick-head .x:hover{color:var(--coral);}
 .lv-mpick-seg{display:flex;gap:6px;padding:10px 14px 0;flex:none;}
-.lv-mpick-seg button{flex:1;padding:6px 0;border-radius:7px;background:transparent;border:1px solid var(--line);color:var(--ink2);cursor:pointer;font-size:12px;}
+.lv-mpick-seg button{flex:1;padding:6px 0;border-radius:var(--radius-control);background:transparent;border:1px solid var(--line);color:var(--ink2);cursor:pointer;font-size:12px;}
 .lv-mpick-seg button.on{background:var(--panel2);color:var(--ink);border-color:var(--amber);font-weight:600;}
 .lv-mpick-body{padding:10px 14px 14px;display:flex;flex-direction:column;min-height:0;flex:1;}
 .lv-mpick-body .model-picker{flex:1;min-height:0;}
@@ -1482,7 +1485,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
 .lv-fixwarn{font-size:10px;line-height:1.45;color:var(--peach);background:color-mix(in srgb,var(--peach) 8%,transparent);
   border:1px solid color-mix(in srgb,var(--peach) 30%,transparent);border-radius:8px;padding:7px 9px;margin-top:8px;}
 .lv-openfilters{display:block;width:100%;box-sizing:border-box;text-align:center;padding:10px;
-  border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid var(--surface1);
+  border-radius:var(--radius-control);font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--surface1);
   background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);margin:6px 0;}
 .lv-openfilters:hover{border-color:var(--accent);}
 /* Filter compare modal -- The Loom.dc.html's own filterCompareOpen, literal values (fixed
@@ -1493,7 +1496,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
   max-height:92vh;overflow-y:auto;border-radius:16px;border:1px solid var(--surface1);
   background:var(--surface0);box-shadow:0 34px 80px -18px rgba(0,0,0,.75);padding:16px 20px 20px;}
 .lv-fc-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
-.lv-fc-title{font-size:15px;font-weight:800;}
+.lv-fc-title{font-size:15px;font-weight:600;}
 .lv-fc-grid{display:grid;grid-template-columns:1fr 1fr 200px;gap:16px;align-items:start;}
 .lv-fc-previewcol{min-width:0;}
 .lv-fc-previewbox{position:relative;width:100%;aspect-ratio:1;border-radius:10px;overflow:hidden;
@@ -1501,7 +1504,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
 .lv-fc-stage{position:relative;width:100%;height:100%;}
 .lv-fc-img{width:100%;height:100%;object-fit:cover;display:block;}
 .lv-fc-side{display:flex;flex-direction:column;gap:10px;}
-.lv-fc-grouplabel{font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+.lv-fc-grouplabel{font-size:11px;font-weight:500;letter-spacing:normal;text-transform:none;
   color:var(--overlay0);margin-bottom:5px;}
 .lv-fc-swatchgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;}
 .lv-fc-tile{position:relative;display:flex;flex-direction:column;gap:3px;cursor:pointer;
@@ -1517,7 +1520,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
 .lv-imgresult{margin-top:10px;border:1px solid var(--surface1);border-radius:8px;padding:8px;}
 .lv-imgresult>img{width:100%;border-radius:6px;display:block;}
 .lv-route{display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-top:8px;}
-.lv-routebtn{font:600 10px/1 system-ui;padding:5px 9px;border-radius:6px;border:1px solid var(--surface1);background:var(--surface1);color:var(--subtext);cursor:pointer;}
+.lv-routebtn{font:600 10px/1 system-ui;padding:5px 9px;border-radius:var(--radius-control-sm);border:1px solid var(--surface1);background:var(--surface1);color:var(--subtext);cursor:pointer;}
 .lv-routebtn:hover{border-color:var(--accent);color:var(--accent);}
 .lv-routebtn.on{background:color-mix(in srgb,var(--accent) 22%,transparent);border-color:var(--accent);color:var(--accent);}
 .lv-ok2{font-size:10px;color:var(--accent);margin-top:6px;}
@@ -1677,6 +1680,11 @@ function useAccountLine(landedKey, bind) {
 const GEN_GLYPHS = { Image: "generate", Edit: "pencil", Reference: "image", Video: "video" };
 function GenGlyph({ name }) {
   return <Icon name={GEN_GLYPHS[name]} size={18} />;
+}
+// A cost line from formatCostEstimate / the price lines. When a free card covers it the words begin
+// "free" and the ticket mark is drawn here (the pure core returns only words; it cannot hold an icon).
+function CostText({ text }) {
+  return typeof text === "string" && /^free\b/.test(text) ? <><Icon name="ticket" style={{ marginRight: "0.3em" }} />{text}</> : text;
 }
 function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, frameFix, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, genFixState, setGenFixState, genFix, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, spend, refreshSpend, batchTally,
   // Session P: the Video drawer's beforeSend host, the unclear-send way-out, and the draft's
@@ -2853,10 +2861,11 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   const findChipsRow = findChipList.map((ch) => (
     <span key={ch.kind + ch.key} className={"lv-findchip" + (chipOn(find, ch) ? " on" : "")} role="button" tabIndex={0}
       aria-pressed={chipOn(find, ch)}
-      title={ch.kind === "warn" ? "Only shots with a ⚠: a changed anchor, a cast member with no picture or past the reference limit, an imported picture"
+      title={ch.kind === "warn" ? "Only shots with a warning: a changed anchor, a cast member with no picture or past the reference limit, an imported picture"
         : ch.kind === "status" ? "Only " + ch.label + " shots" : "Only " + ch.label + " shots"}
       onClick={() => runFind((f) => toggleChip(f, ch))}
-      onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); runFind((f) => toggleChip(f, ch)); } }}>{ch.label}</span>
+      aria-label={ch.kind === "warn" ? "Warnings only" : undefined}
+      onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); runFind((f) => toggleChip(f, ch)); } }}>{ch.icon ? <><Icon name={ch.icon} /> </> : null}{ch.label}</span>
   ));
   // The board grid's JSX. Named boardGrid, not "board": a landing's {board: boardId} key is not
   // this view, and the no-render walkers match names, so the two must not share one.
@@ -3018,7 +3027,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                       <div className="lv-takeline">{takeLine}</div>
                       {stale && (
                         <div className="lv-stale" role="status" onClick={stopCard} onDoubleClick={stopCard}>
-                          <div className="lv-staletxt">&#9888; anchor changed &middot; {staleText(anchor, codeOf)}</div>
+                          <div className="lv-staletxt"><Icon name="warning" /> anchor changed &middot; {staleText(anchor, codeOf)}</div>
                           <div className="lv-stalebtns">
                             <button type="button" className="lv-reanchor" disabled={!!(aw && aw.phase === "wip") || !selectedTakeView(anchor.src)}
                               title={!selectedTakeView(anchor.src)
@@ -3155,7 +3164,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                     backgroundImage: `repeating-linear-gradient(90deg, rgba(0,0,0,.32) 0px, rgba(0,0,0,.32) 1px, transparent 1px, transparent 25px), ${tint}`,
                     backgroundSize: "25px 100%, 25px 100%", backgroundRepeat: "repeat-x, repeat-x",
                   }}
-                  title={`${x.code} ${x.c.title || ""}` + (segStale ? " · ⚠ anchor changed" : "")} onClick={() => setSelShot(x.c.id)}>
+                  title={`${x.code} ${x.c.title || ""}` + (segStale ? " · anchor changed" : "")} onClick={() => setSelShot(x.c.id)}>
                   <span className="lv-segcode">{x.code} · {durOf(x.c)}s</span>
                   <span className={"lv-segbar " + x.c.status} />
                 </div>
@@ -3322,7 +3331,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     videoTrailer = (
       <>
         {sel && <button className="lv-usevid" disabled={busy} onClick={() => useExistingVideo(sel)} title="Skip generation -- use a video you already have in your gallery as this shot's clip">
-          &#128190; Use an existing video instead
+          <Icon name="video" /> Use an existing video instead
         </button>}
         {!sel && gs && gs.mid && (
           <div className="lv-imgresult">
@@ -3358,7 +3367,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           <button type="button" className="lv-selrow" onClick={() => { setPickerKind("base"); setPickerOpen(true); }}>
             {imgModel && imgModel.preview_url ? <img className="lv-selthumb" src={imgModel.preview_url} alt="" /> : null}
             <span className="lv-selname">{imgModel ? imgModel.title : "none — browse models"}</span>
-            <span className="lv-dim lv-selhint">☰ browse</span>
+            <span className="lv-dim lv-selhint"><Icon name="menu" /> browse</span>
           </button>
           {/* problem 5: sampling_method/capabilities were resolved by onBasePick above and
               discarded -- read-only surfacing (not a submit field, see the Gallery's own
@@ -3392,7 +3401,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                 <div key={l.model_id} className={"lv-lchip" + ((l.failed || incompat) ? " failed" : "")}>
                   <span className="lv-lnm"
                     title={incompat ? l.title + " — needs a different base architecture than the one selected; remove it or switch the base" : l.title}>
-                    {l.title}{!l.version_id ? (l.failed ? " ⚠" : " ⏳") : (incompat ? " ⚠" : "")}
+                    {l.title}{!l.version_id ? (l.failed ? <> <Icon name="warning" title="Failed" /></> : <> <Icon name="hourglass" title="Still running" /></>) : (incompat ? <> <Icon name="warning" title="Needs a different base" /></> : null)}
                   </span>
                   {/* Bounds follow the BASE MODEL's architecture: DiT takes 0..1.2, the SD
                       family -2..+2 (negative subtracts that LoRA's influence). Served from
@@ -3747,7 +3756,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     // draft generation"; the collapse › follows it at the right end (rendered by the panel).
     genHead = sel
       ? <>
-          <span className="lv-genhdtitle" title={sel.code + " · " + (sel.c.title || "untitled")}>&#9881; {sel.code} &middot; {sel.c.title || "untitled"}</span>
+          <span className="lv-genhdtitle" title={sel.code + " · " + (sel.c.title || "untitled")}><Icon name="gear" /> {sel.code} &middot; {sel.c.title || "untitled"}</span>
           <span className="lv-genhdfill" />
           <button type="button" className="lv-unbind" onClick={() => setSelShot(null)}
             title="Unbind this shot and go back to draft generation">&#10005; unbind</button>
@@ -3761,15 +3770,15 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     // tab; on Edit it follows the edit controls, where the page draws it.
     const frameHandoff = (tab === "Reference" || tab === "Video" || tab === "Edit") ? (
       <div className="lv-slab">
-        <div className="lv-slablab">FRAME HANDOFF — {
+        <div className="lv-slablab">Frame handoff — {
           tab === "Video" ? "drives this shot’s motion" : tab === "Edit" ? "edit source" : "still composition"}</div>
         <div className="lv-framehandoff">
           <FrameSlot which="open" frame={active.c.openFrame} liveTag={positionTag(active, project, imgSrc, "openFrame")} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
             onPatch={(p) => patchFrame("openFrame", p)}
             extraBtn={prevEntry ? <button className="sb-btn ghost sm" onClick={inheritPrev} disabled={handoff === "wip"}
                 title={prevEntry.c.resultMid ? `Splice in ${prevEntry.code}'s generated clip's last frame` : `Copy ${prevEntry.code}'s closing frame here`}>
-                {handoff === "wip" ? "✂ splicing…" : handoff === "err" ? "✂ splice failed — retry"
-                  : prevEntry.c.resultMid ? `✂ splice ${prevEntry.code}'s last frame` : `↳ inherit ${prevEntry.code} close`}</button>
+                {handoff === "wip" ? <><Icon name="scissors" /> splicing…</> : handoff === "err" ? <><Icon name="scissors" /> splice failed — retry</>
+                  : prevEntry.c.resultMid ? <><Icon name="scissors" /> splice {prevEntry.code}'s last frame</> : `↳ inherit ${prevEntry.code} close`}</button>
               : <span className="sb-hint">{sel ? "first shot — no previous frame" : "draft — no shot sequence to inherit from"}</span>} />
           <div className="sb-conn-mid">&#8594;</div>
           <FrameSlot which="close" frame={active.c.closeFrame} liveTag={positionTag(active, project, imgSrc, "closeFrame")} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
@@ -3803,7 +3812,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         {acct && (() => {
           const bal = balanceLine(acct);
           return (
-            <div className="lv-bal">&#9889; {bal.credits} credits &middot; {bal.cards}
+            <div className="lv-bal"><Icon name="coin" /> {bal.credits} credits &middot; {bal.cards}
               {bal.claim ? <span className="lv-balclaim"> &middot; {bal.claim}</span> : null}</div>
           );
         })()}
@@ -3883,7 +3892,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // the 🔒 its lock, everywhere it's used.
   const libraryList = castApi ? (
     <div className="lv-lib">
-      <div className="lv-libhead"><span className="lv-libcap">&#128100; CAST LIBRARY</span><span className="lv-libhint">tick = in this storyboard</span></div>
+      <div className="lv-libhead"><span className="lv-libcap"><Icon name="person" /> Cast library</span><span className="lv-libhint">tick = in this storyboard</span></div>
       {castApi.libNote ? <div className={"lv-libnote" + (castApi.libPhase === "failed" ? " warn" : "")}>{castApi.libNote}</div> : null}
       {libRows.map((row) => {
         const src = frameSrc(row.picture);
@@ -3899,12 +3908,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               disabled={row.kind === "audio" || !!castApi.working}
               title={row.kind === "audio" ? (row.name || "audio") : "Change this member's picture — it changes on every storyboard that uses it"}
               onClick={(ev) => { ev.stopPropagation(); openPick((mid) => castApi.editLibraryMember(row, { mediaId: String(mid), thumbId: "", source: "" }), row.kind === "video" ? "video" : "image"); }}>
-              {src ? null : (row.kind === "audio" ? "♪" : row.kind === "video" ? "🎞" : "")}</button>
+              {src ? null : (row.kind === "audio" ? <Icon name="music" /> : row.kind === "video" ? <Icon name="video" /> : "")}</button>
             <div className="lv-libtext">
               <div className="lv-libname">{row.name || row.kind}
                 <button type="button" className={"lv-liblock" + (row.lock ? " on" : "")} disabled={!!castApi.working}
                   title={(row.lock ? "Locked (maintain exact appearance) — click to unlock" : "Click to lock its appearance") + " — on every storyboard that uses it"}
-                  onClick={(ev) => { ev.stopPropagation(); castApi.editLibraryMember(row, { lock: !row.lock }); }}>{row.lock ? "🔒" : "🔓"}</button>
+                  onClick={(ev) => { ev.stopPropagation(); castApi.editLibraryMember(row, { lock: !row.lock }); }}>{row.lock ? <Icon name="lock" /> : <Icon name="unlock" />}</button>
               </div>
               <div className="lv-libmeta">{rowMeta(row)}</div>
             </div>
@@ -3931,7 +3940,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         <span className={"lv-tab " + (density === "detailed" ? "on" : "")} onClick={() => setDensity("detailed")}>Detailed</span>
       </div>
       <details className="lv-look" open={!!(project.look || "").trim()}>
-        <summary>🎨 Project look{(project.look || "").trim() ? "" : <span className="lv-dim"> — a style line added to every shot</span>}</summary>
+        <summary><Icon name="brush" /> Project look{(project.look || "").trim() ? "" : <span className="lv-dim"> — a style line added to every shot</span>}</summary>
         <textarea className="lv-lookin" value={project.look || ""} rows={2}
           onChange={(e) => setLook(e.target.value)}
           placeholder="e.g. muted teal grade, 35mm grain, anamorphic flares — applied to every shot's prompt" />
@@ -3992,7 +4001,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         return (
           <div key={as.id} className={"lv-assetrow" + (pastBudget ? " oob" : "")}>
             {as.kind !== "audio" && <button className="lv-pickico" title={"Pick from your gallery" + libEverywhere(as)}
-              onClick={() => openPick((mid) => editAsset(as, { thumbId: "", source: "", mediaId: mid }), as.kind === "video" ? "video" : "image")}>🖼</button>}
+              onClick={() => openPick((mid) => editAsset(as, { thumbId: "", source: "", mediaId: mid }), as.kind === "video" ? "video" : "image")}><Icon name="image" /></button>}
             {as.kind === "image" ? (
               <label className="lv-assetprev" title={"Attach image" + libEverywhere(as)}>
                 {src ? <img src={src} alt="" /> : "＋"}
@@ -4005,7 +4014,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                   frameSrc exactly like an image does -- the bare film emoji made a
                   successful video import invisible here (issue #3's visibility half).
                   The emoji stays as the no-poster fallback (e.g. a hand-retyped kind). */}
-              {as.kind === "video" && src ? <img src={src} alt="" /> : (as.kind === "video" ? "🎞" : "♪")}
+              {as.kind === "video" && src ? <img src={src} alt="" /> : (as.kind === "video" ? <Icon name="video" /> : <Icon name="music" />)}
             </div>}
             <input className="lv-in" style={{ flex: "1 1 100px" }} value={as.name} placeholder="name"
               onChange={(e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, name: e.target.value }))} />
@@ -4167,7 +4176,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         {act.edge === "left" ? activityControl : null}
         {!bannerOpen && (
           <button type="button" className="lv-banner-show" title="Show banner"
-            onClick={() => setBannerOpen(true)}>🖼 Banner</button>
+            onClick={() => setBannerOpen(true)}><Icon name="image" /> Banner</button>
         )}
         {/* ONE ROW (The Loom.dc.html:46-143 + Loom Handoff.dc.html:44, 2026-09-29): the
             storyboard's name and its ▾, the find pill and its chips, Draft, then the Generate
@@ -4182,7 +4191,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           extra={(
             <label className={"sb-projrow" + (mobileUI ? " on" : "")}
               title="Switch to a phone-sized board/reel view — desktop chrome (panels, drawers) hides; your project and any in-progress draft are unaffected">
-              <input type="checkbox" checked={!!mobileUI} onChange={(e) => setMobileUI(e.target.checked)} />📱 Mobile view</label>
+              <input type="checkbox" checked={!!mobileUI} onChange={(e) => setMobileUI(e.target.checked)} /><Icon name="phone" /> Mobile view</label>
           )} />
         {/* Session P (P8): the page's find pill and filter chips, right after the storyboard's
             name, as the page places them. */}
@@ -4190,7 +4199,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         {findChipsRow.length ? <div className="lv-findchips">{findChipsRow}</div> : null}
         <label className={"lv-draft" + (project.draft ? " on" : "")}
           title="Draft mode renders every shot at the cheaper 'basic' quality — block out the animatic, then turn Draft off and re-generate the keepers at pro quality">
-          <input type="checkbox" checked={!!project.draft} onChange={(e) => setDraft(e.target.checked)} />⚡ Draft</label>
+          <input type="checkbox" checked={!!project.draft} onChange={(e) => setDraft(e.target.checked)} /><Icon name="bolt" /> Draft</label>
         <span className="lv-fill" />
         <button className="lv-genall" onClick={() => {
           // Flush+locally-patch BEFORE calling batchGenerate -- do not trust that a hand-
@@ -4228,7 +4237,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                 formatCostEstimate's own wording (shared with the Video tab). */}
             {/^≈.*cr/.test(formatCostEstimate(costEstimate))
               ? formatCostEstimate(costEstimate) + " to finish"
-              : formatCostEstimate(costEstimate)}
+              : <CostText text={formatCostEstimate(costEstimate)} />}
           </button>
         )}
         <button disabled={!entries.some((e) => e.c.resultMid)} onClick={() => playSequence(entries)}
@@ -4301,9 +4310,9 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       <div className="lv-shell">
         <div className="lv-rail">
           <button className={"lv-railbtn" + (!leftCollapsed && leftTab === "cast" ? " on" : "")} title="Cast & assets"
-            onClick={() => { setLeftTab("cast"); openLeftPanel(); }}>&#128100;</button>
+            onClick={() => { setLeftTab("cast"); openLeftPanel(); }}><Icon name="person" /></button>
           <button className={"lv-railbtn" + (!leftCollapsed && leftTab === "footage" ? " on" : "")} title="Footage"
-            onClick={() => { setLeftTab("footage"); openLeftPanel(); }}>&#127916;</button>
+            onClick={() => { setLeftTab("footage"); openLeftPanel(); }}><Icon name="film" /></button>
         </div>
 
         {(!leftCollapsed || leftClosing) && (
@@ -4517,7 +4526,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                           {preview ? <img src={preview} alt={r.tag} /> : "＋"}
                           <input type="file" accept="image/*" style={{ display: "none" }}
                             onChange={async (e) => { const f = e.target.files[0]; if (!f) return; const id = await storeThumb(f); setRef(live.a.id, c.id, r.id, { thumbId: id, source: r.source || f.name }); }} /></label>
-                      ) : <div className="sb-refprev">{r.kind === "video" ? "🎞" : "♪"}</div>}
+                      ) : <div className="sb-refprev">{r.kind === "video" ? <Icon name="video" /> : <Icon name="music" />}</div>}
                       <div className="sb-refbody">
                         <div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
                           <input className="sb-tagin sb-mono" value={r.tag} onChange={(e) => setRef(live.a.id, c.id, r.id, { tag: e.target.value })} />
@@ -4611,23 +4620,18 @@ const LOOM_MOBILE_STYLES = `
   display:flex;flex-direction:column;font-family:system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
 .lm-top{flex:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
   padding:max(10px,env(safe-area-inset-top)) 16px 8px;}
-.lm-back{font:700 11.5px/1 system-ui;letter-spacing:.06em;text-transform:uppercase;
+.lm-back{font:500 13.5px/1 system-ui;letter-spacing:normal;text-transform:none;
   color:var(--subtext);text-decoration:none;white-space:nowrap;background:none;border:none;cursor:pointer;padding:0;}
 .lm-back:hover{color:var(--text);}
 .lm-fill{flex:1 1 auto;}
-.lm-title{font:700 11px/1 system-ui;letter-spacing:.08em;text-transform:uppercase;
+.lm-title{font:500 13px/1 system-ui;letter-spacing:normal;text-transform:none;
   color:var(--subtext);white-space:nowrap;}
 .lm-chip{display:inline-flex;align-items:center;gap:4px;font:600 10px/1 system-ui;
   color:var(--subtext);cursor:pointer;padding:6px 10px;border-radius:999px;
   border:1px solid var(--surface1);background:none;user-select:none;white-space:nowrap;}
 .lm-chip:hover{border-color:var(--accent);color:var(--accent);}
 .lm-chip.on{color:var(--gold);border-color:var(--gold);background:color-mix(in srgb,var(--gold) 15%,transparent);
-  /* issue #12: the glow used the DC's LITERAL default-gold rgba(212,175,55,.35)
-     while every other on-state channel re-skins via var(--gold) -- under the
-     Nightfallen skin that painted a faint yellow smudge beneath a pale-violet
-     chip, i.e. "still doesn't glow". Mixed from the skin's own gold instead,
-     and a touch stronger so it reads at chip size. */
-  box-shadow:0 0 10px color-mix(in srgb,var(--gold) 45%,transparent);}
+  /* No outer glow (the unslop pass, pick 4): the gold border and tint carry the on state. */}
 .lm-chip input{margin:0;cursor:pointer;}
 .lm-reelwrap{flex:none;padding:4px 16px 10px;position:relative;}
 .lm-reelbar{display:flex;gap:3px;height:18px;border-radius:4px;cursor:pointer;touch-action:none;}
@@ -4642,8 +4646,7 @@ const LOOM_MOBILE_STYLES = `
 .lm-handle{position:absolute;top:13px;width:14px;height:14px;border-radius:50%;
   background:var(--accent);border:2px solid var(--text);transform:translate(-50%,-50%);
   box-shadow:0 1px 4px rgba(0,0,0,.5);pointer-events:none;}
-.lm-scrubline{position:absolute;top:6px;bottom:12px;width:2px;background:var(--accent);
-  box-shadow:0 0 6px color-mix(in srgb,var(--accent) 70%,transparent);pointer-events:none;}
+.lm-scrubline{position:absolute;top:6px;bottom:12px;width:2px;background:var(--accent);pointer-events:none;}
 .lm-preview{position:absolute;top:100%;margin-top:8px;z-index:301;display:flex;align-items:center;
   gap:8px;padding:7px 10px;border-radius:10px;background:var(--surface0);border:1px solid var(--surface1);
   box-shadow:0 10px 26px -8px rgba(0,0,0,.6);pointer-events:none;width:172px;box-sizing:border-box;}
@@ -4657,7 +4660,7 @@ const LOOM_MOBILE_STYLES = `
 .lm-acthead{display:flex;align-items:baseline;gap:8px;padding:14px 0 8px;}
 .lm-actname{font-family:Georgia,serif;font-style:italic;font-size:14px;color:var(--text);}
 .lm-actcount{font-size:10px;color:var(--overlay0);}
-.lm-addshot{font-size:10.5px;font-weight:700;color:var(--accent);cursor:pointer;background:none;border:none;padding:0;}
+.lm-addshot{font-size:10.5px;font-weight:600;color:var(--accent);cursor:pointer;background:none;border:none;padding:0;}
 .lm-cardrow{position:relative;display:flex;align-items:center;gap:6px;margin-bottom:7px;}
 .lm-card{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:10px;padding:8px 10px;
   border-radius:11px;border:1px solid var(--surface1);background:var(--surface0);cursor:pointer;
@@ -4666,24 +4669,24 @@ const LOOM_MOBILE_STYLES = `
 .lm-card.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;}
 .lm-thumb{width:48px;height:48px;border-radius:9px;flex:none;background-size:cover;
   background-position:center;background-color:var(--surface1);display:grid;place-items:center;
-  font:700 9px/1 system-ui;color:var(--subtext);}
+  font:600 9px/1 system-ui;color:var(--subtext);}
 .lm-textcol{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:4px;}
 .lm-titlerow{display:flex;align-items:baseline;gap:6px;min-width:0;}
 .lm-code{font-family:ui-monospace,monospace;font-size:9.5px;color:var(--overlay0);flex:none;}
 .lm-cardtitle{font-size:12.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .lm-pillrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
-.lm-modepill{font-size:9px;font-weight:700;padding:2px 6px;border-radius:5px;
+.lm-modepill{font-size:9px;font-weight:600;padding:2px 6px;border-radius:5px;
   background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent);flex:none;}
 .lm-durpill{font-size:9.5px;color:var(--subtext);flex:none;}
-.lm-stpill{font-size:9px;font-weight:700;text-transform:uppercase;flex:none;}
+.lm-stpill{font-size:11px;font-weight:500;text-transform:none;flex:none;}
 .lm-stpill.done{color:var(--emerald);}
 .lm-stpill.wip{color:var(--accent);}
 .lm-stpill.todo{color:var(--overlay0);}
 .lm-stpill.paused{color:var(--peach);}
 .lm-stpill.error{color:var(--red);}
 .lm-warn{font-size:9px;color:var(--peach);}
-.lm-addact{text-align:center;font-size:11px;font-weight:700;color:var(--accent);padding:12px;
-  border:1px dashed var(--surface1);border-radius:11px;cursor:pointer;margin-top:6px;background:none;width:100%;}
+.lm-addact{text-align:center;font-size:11px;font-weight:600;color:var(--accent);padding:12px;
+  border:1px dashed var(--surface1);border-radius:var(--radius-control);cursor:pointer;margin-top:6px;background:none;width:100%;}
 .lm-empty{text-align:center;color:var(--overlay0);font-size:11px;font-style:italic;padding:10px 6px;}
 
 /* ---- Shot Detail (mobile Deep Focus) -- second increment, 2026-08-03 ---- */
@@ -4693,7 +4696,6 @@ const LOOM_MOBILE_STYLES = `
    until 2026-08-06 (every sheet close was an instant unmount; primary buttons were
    flat). Close timing per the DC's own styles: sheet lmSheetDown .28s
    cubic-bezier(.4,0,.2,1) both, scrim lmFadeOut .28s / lmFadeIn .24s. */
-@keyframes lmMetal{0%{background-position:0% 50%;}50%{background-position:100% 50%;}100%{background-position:0% 50%;}}
 @keyframes lmSheetDown{from{transform:translateY(0);}to{transform:translateY(100%);}}
 @keyframes lmFadeIn{from{opacity:0;}to{opacity:1;}}
 @keyframes lmFadeOut{from{opacity:1;}to{opacity:0;}}
@@ -4704,37 +4706,37 @@ const LOOM_MOBILE_STYLES = `
 .lm-df-title{flex:1 1 auto;min-width:0;background:transparent;border:none;
   border-bottom:1px solid var(--surface1);color:var(--text);font:600 14px/1.2 system-ui;padding:4px 0;}
 .lm-df-title:focus{outline:none;border-bottom-color:var(--accent);}
-.lm-df-st{flex:none;border-radius:5px;cursor:pointer;background:var(--base);border:1px solid var(--surface1);
+.lm-df-st{flex:none;border-radius:var(--radius-control-sm);cursor:pointer;background:var(--base);border:1px solid var(--surface1);
   padding:4px 8px;}
-.lm-df-cast{flex:none;font:700 11px/1 system-ui;padding:6px 9px;border-radius:8px;cursor:pointer;
+.lm-df-cast{flex:none;font:600 11px/1 system-ui;padding:6px 9px;border-radius:var(--radius-control-sm);cursor:pointer;
   border:1px solid var(--surface1);background:var(--base);color:var(--subtext);white-space:nowrap;}
 .lm-df-close{flex:none;width:28px;height:28px;display:flex;align-items:center;justify-content:center;
-  border-radius:8px;border:1px solid var(--surface1);color:var(--subtext);cursor:pointer;background:none;
+  border-radius:var(--radius-control);border:1px solid var(--surface1);color:var(--subtext);cursor:pointer;background:none;
   font-size:13px;padding:0;}
 .lm-df-body{flex:1 1 auto;overflow-y:auto;padding:4px 16px max(30px, calc(16px + env(safe-area-inset-bottom)));-webkit-overflow-scrolling:touch;}
-.lm-microlab{display:block;font:700 9px/1 system-ui;text-transform:uppercase;color:var(--subtext);
+.lm-microlab{display:block;font:500 11px/1 system-ui;text-transform:none;color:var(--subtext);
   margin:10px 0 5px;}
 .lm-hint{font-size:9.5px;color:var(--overlay0);padding:5px 2px 0;}
 .lm-modechips{display:flex;gap:5px;}
-.lm-modechip{flex:1;text-align:center;padding:8px 4px;border-radius:8px;font:700 11px/1 system-ui;
+.lm-modechip{flex:1;text-align:center;padding:8px 4px;border-radius:var(--radius-control);font:600 11px/1 system-ui;
   cursor:pointer;border:1px solid var(--surface1);color:var(--subtext);background:none;}
 .lm-modechip.on{background:color-mix(in srgb,var(--accent) 20%,transparent);border-color:var(--accent);
   color:var(--accent);}
 .lm-row2{display:flex;gap:10px;margin:10px 0 4px;}
 .lm-col{flex:1;min-width:0;}
 .lm-in{width:100%;box-sizing:border-box;background:var(--base);border:1px solid var(--surface1);
-  border-radius:8px;padding:8px 10px;color:var(--text);font:12.5px/1.3 system-ui;}
+  border-radius:var(--radius-control);padding:8px 10px;color:var(--text);font:12.5px/1.3 system-ui;}
 .lm-ta{width:100%;box-sizing:border-box;background:var(--base);border:1px solid var(--surface1);
-  border-radius:9px;padding:10px;color:var(--text);font:12.5px/1.45 system-ui;resize:vertical;
+  border-radius:var(--radius-control);padding:10px;color:var(--text);font:12.5px/1.45 system-ui;resize:vertical;
   min-height:66px;}
 .lm-check{display:flex;align-items:center;gap:7px;cursor:pointer;padding:8px 0 0;font-size:11px;
   color:var(--subtext);}
 .lm-frow{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;}
 .lm-fcol{flex:1 1 150px;min-width:150px;}
 .lm-inheritbtn{margin-top:6px;display:inline-block;font-size:9.5px;font-weight:600;color:var(--accent);
-  background:var(--surface1);border:none;border-radius:6px;padding:5px 8px;cursor:pointer;}
-.lm-copybtn{display:inline-block;margin-top:18px;font:700 11px/1 system-ui;padding:8px 16px;
-  border-radius:8px;cursor:pointer;border:1px solid color-mix(in srgb,var(--accent) 40%,transparent);
+  background:var(--surface1);border:none;border-radius:var(--radius-control-sm);padding:5px 8px;cursor:pointer;}
+.lm-copybtn{display:inline-block;margin-top:18px;font:600 11px/1 system-ui;padding:8px 16px;
+  border-radius:var(--radius-control);cursor:pointer;border:1px solid color-mix(in srgb,var(--accent) 40%,transparent);
   background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent);}
 
 /* Other references & @tags rows -- mirrors LoomV2's own sb-ref shape at mobile scale. */
@@ -4747,12 +4749,12 @@ const LOOM_MOBILE_STYLES = `
 .lm-refbody{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:6px;}
 .lm-reftoprow{display:flex;gap:7px;align-items:center;flex-wrap:wrap;}
 .lm-reftag{font-family:ui-monospace,monospace;font-size:11px;color:var(--loomc,#47cbc3);background:var(--base);
-  border:1px solid var(--surface1);border-radius:5px;padding:5px 6px;width:70px;}
+  border:1px solid var(--surface1);border-radius:var(--radius-control);padding:5px 6px;width:70px;}
 .lm-refkind{font-size:9.5px;color:var(--subtext);}
 .lm-refx{margin-left:auto;background:none;border:none;color:var(--subtext);font-size:14px;cursor:pointer;
   padding:0 2px;}
 .lm-addrefrow{display:flex;gap:7px;flex-wrap:wrap;margin-top:4px;}
-.lm-addrefbtn{font:700 10.5px/1 system-ui;padding:6px 11px;border-radius:999px;cursor:pointer;
+.lm-addrefbtn{font:600 10.5px/1 system-ui;padding:6px 11px;border-radius:var(--radius-control-sm);cursor:pointer;
   border:1px solid var(--surface1);background:var(--surface1);color:var(--text);}
 
 /* ---- Cast & assets sheet (bottom sheet, opened from Shot Detail's 👥 button) ---- */
@@ -4765,13 +4767,13 @@ const LOOM_MOBILE_STYLES = `
   animation:lmSheetUp .26s cubic-bezier(.2,.9,.24,1);}
 .lm-sheet.closing{animation:lmSheetDown .28s cubic-bezier(.4,0,.2,1) both;}
 .lm-sheethandle{width:36px;height:4px;border-radius:3px;background:rgba(255,255,255,.18);margin:0 auto 10px;}
-.lm-tabsrow{display:flex;gap:4px;padding:3px;border-radius:9px;background:color-mix(in srgb,var(--base) 60%,transparent);
+.lm-tabsrow{display:flex;gap:4px;padding:3px;border-radius:var(--radius-control);background:color-mix(in srgb,var(--base) 60%,transparent);
   border:1px solid var(--surface1);margin-bottom:10px;}
-.lm-tabbtn{flex:1;text-align:center;padding:7px 4px;border-radius:7px;font:700 11px/1 system-ui;
+.lm-tabbtn{flex:1;text-align:center;padding:7px 4px;border-radius:calc(var(--radius-control) - 3px);font:600 11px/1 system-ui;
   cursor:pointer;background:none;border:none;color:var(--subtext);}
 .lm-tabbtn.on{background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--accent);}
 .lm-budget{font-size:10.5px;color:var(--subtext);margin:4px 0 10px;}
-.lm-budget-over{color:var(--peach);font-weight:700;}
+.lm-budget-over{color:var(--peach);font-weight:600;}
 .lm-i2vnote{font-size:10.5px;font-style:italic;color:var(--peach);margin:4px 0 10px;line-height:1.4;}
 .lm-castrow{display:flex;align-items:center;gap:9px;padding:9px 4px;
   border:none;border-bottom:1px solid rgba(255,255,255,.06);cursor:pointer;background:none;
@@ -4784,7 +4786,7 @@ const LOOM_MOBILE_STYLES = `
 .lm-castcol{flex:1 1 auto;min-width:0;}
 .lm-castname{font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .lm-casttag{font-size:9.5px;font-family:ui-monospace,monospace;color:var(--loomc,#47cbc3);}
-.lm-castmissing{font:700 9px/1 system-ui;color:var(--red);text-transform:uppercase;flex:none;}
+.lm-castmissing{font:500 11px/1 system-ui;color:var(--red);text-transform:none;flex:none;}
 .lm-castlive{flex:none;font:11px/1.3 ui-monospace,monospace;color:var(--loomc,#47cbc3);background:var(--base);
   border:1px dashed var(--overlay0);border-radius:6px;padding:5px 6px;}
 .lm-castlive.oob{color:var(--peach);border-color:var(--peach);font-size:9px;}
@@ -4792,13 +4794,13 @@ const LOOM_MOBILE_STYLES = `
 .lm-castaddrow{display:flex;gap:8px;margin-top:10px;}
 /* Session P (P7): the cast sheet's Library tab -- the page's tick box (lavender, ✓), round
    avatar and monospace meta line, in the sheet's own row. */
-.lm-libhead{display:flex;align-items:baseline;gap:6px;padding:2px 4px 6px;font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--overlay0);}
+.lm-libhead{display:flex;align-items:baseline;gap:6px;padding:2px 4px 6px;font-size:11px;font-weight:500;letter-spacing:normal;color:var(--overlay0);}
 .lm-libhead span:first-child{flex:1;}
-.lm-libhead span:last-child{font-size:9.5px;font-weight:400;letter-spacing:0;}
+.lm-libhead span:last-child{font-size:11px;font-weight:400;letter-spacing:normal;}
 .lm-libnote{font-size:10px;line-height:1.45;color:var(--overlay0);padding:0 4px 6px;}
 .lm-libnote.warn{color:var(--peach);}
 .lm-librow.busy{opacity:.55;}
-.lm-libbox{width:16px;height:16px;flex:none;border-radius:4px;display:grid;place-items:center;font-size:10px;font-weight:800;
+.lm-libbox{width:16px;height:16px;flex:none;border-radius:4px;display:grid;place-items:center;font-size:10px;font-weight:600;
   box-sizing:border-box;border:1.5px solid var(--surface1);color:var(--base);}
 .lm-libbox.on{background:var(--lavender);border-color:var(--lavender);}
 .lm-libav{border-radius:50%;}
@@ -4807,8 +4809,8 @@ const LOOM_MOBILE_STYLES = `
 .lm-fclip{border-radius:8px;overflow:hidden;border:1px solid var(--surface1);cursor:pointer;background:var(--base);}
 .lm-fclip img{width:100%;aspect-ratio:16/10;object-fit:cover;display:block;}
 .lm-fclipmeta{display:flex;justify-content:space-between;padding:5px 7px;font-size:9.5px;color:var(--subtext);}
-.lm-sheetclose{margin-top:12px;text-align:center;padding:11px;border-radius:11px;
-  border:1px solid var(--surface1);font:700 12.5px/1 system-ui;color:var(--subtext);cursor:pointer;
+.lm-sheetclose{margin-top:12px;text-align:center;padding:11px;border-radius:var(--radius-control);
+  border:1px solid var(--surface1);font:600 12.5px/1 system-ui;color:var(--subtext);cursor:pointer;
   background:none;width:100%;}
 
 /* ---- Generate (third increment, 2026-08-03) -- opened from Shot Detail's own
@@ -4817,7 +4819,7 @@ const LOOM_MOBILE_STYLES = `
   animation:lmRise .22s ease both;}
 .lm-gen-top{flex:none;display:flex;align-items:center;gap:8px;
   padding:max(14px,env(safe-area-inset-top)) 16px 10px;}
-.lm-gen-back{flex:none;font:700 11.5px/1 system-ui;letter-spacing:.04em;color:var(--subtext);
+.lm-gen-back{flex:none;font:500 13.5px/1 system-ui;letter-spacing:normal;color:var(--subtext);
   background:none;border:none;cursor:pointer;padding:0;white-space:nowrap;}
 .lm-gen-back:hover{color:var(--text);}
 .lm-gen-title{flex:1 1 auto;min-width:0;font:600 13px/1.2 system-ui;color:var(--text);
@@ -4828,33 +4830,33 @@ const LOOM_MOBILE_STYLES = `
   color:color-mix(in oklab,var(--accent) 26%,#08040f);
   text-shadow:0 1px 0 rgba(255,255,255,.4);
   background:linear-gradient(100deg,color-mix(in oklab,var(--accent) 50%,#06030d) 0%,var(--accent) 18%,color-mix(in oklab,var(--accent) 22%,#ffffff) 34%,var(--accent) 50%,color-mix(in oklab,var(--accent) 74%,#06030d) 68%,var(--mauve) 84%,color-mix(in oklab,var(--accent) 50%,#06030d) 100%);
-  background-size:220% 100%;animation:lmMetal 7s ease-in-out infinite;
+  background-size:220% 100%;animation:none;background-position:30% 50%;transition:var(--metal-sweep);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.6),inset 0 -2px 4px rgba(10,5,20,.45),0 6px 16px rgba(0,0,0,.45);
-  border-radius:9px;padding:11px;font:800 12.5px/1 system-ui;cursor:pointer;
+  border-radius:9px;padding:11px;font:600 12.5px/1 system-ui;cursor:pointer;
   text-align:center;}
-.lm-genbtn:hover{filter:brightness(1.08);}
+.lm-genbtn:hover,.lm-genbtn:focus-visible{filter:brightness(1.08);background-position:100% 50%;}
 .lm-genbtn:disabled{opacity:.5;cursor:default;animation:none;}
-@media (prefers-reduced-motion:reduce){.lm-genbtn{animation:none;}}
+@media (prefers-reduced-motion:reduce){.lm-genbtn{transition:none;}}
 .lm-held{margin-top:8px;font-size:11.5px;line-height:1.4;color:var(--peach);}
 .lm-unclear{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;padding:8px 10px;border-radius:9px;font-size:11.5px;line-height:1.4;
   color:var(--peach);background:color-mix(in srgb,var(--peach) 10%,transparent);border:1px solid color-mix(in srgb,var(--peach) 45%,transparent);}
 .lm-unclear span{flex:1 1 100%;}
-.lm-unclearbtn{font:600 11px/1 system-ui;padding:7px 10px;border-radius:7px;cursor:pointer;color:var(--peach);
+.lm-unclearbtn{font:600 11px/1 system-ui;padding:7px 10px;border-radius:var(--radius-control);cursor:pointer;color:var(--peach);
   background:transparent;border:1px solid color-mix(in srgb,var(--peach) 55%,transparent);}
 .lm-genexisting{display:block;width:100%;box-sizing:border-box;margin-top:7px;background:transparent;
-  color:var(--subtext);border:1px solid var(--surface1);border-radius:8px;padding:9px;font:600 11px/1 system-ui;
+  color:var(--subtext);border:1px solid var(--surface1);border-radius:var(--radius-control);padding:9px;font:600 11px/1 system-ui;
   cursor:pointer;text-align:center;}
 .lm-genexisting:hover{border-color:var(--accent);color:var(--accent);}
 .lm-genexisting:disabled{opacity:.5;cursor:default;}
-.lm-gentermbtn{font-size:9px;text-transform:none;letter-spacing:0;color:var(--accent);background:none;
+.lm-gentermbtn{font-size:11px;text-transform:none;letter-spacing:normal;color:var(--accent);background:none;
   border:none;cursor:pointer;text-decoration:underline;text-underline-offset:2px;margin-left:6px;}
 .lm-gentermpal{display:flex;flex-wrap:wrap;gap:4px;margin:5px 0 8px;padding:7px;background:var(--surface0);
   border-radius:7px;}
 .lm-gentermgrp{width:100%;display:flex;flex-wrap:wrap;gap:4px;align-items:center;}
-.lm-gentermgrpt{width:100%;font-size:8px;letter-spacing:.05em;text-transform:uppercase;color:var(--overlay0);
+.lm-gentermgrpt{width:100%;font-size:11px;font-weight:500;letter-spacing:normal;text-transform:none;color:var(--overlay0);
   margin-top:4px;}
 .lm-genchip{font-family:ui-monospace,monospace;font-size:10px;color:var(--subtext);background:var(--base);
-  border:1px solid var(--surface1);border-radius:5px;padding:3px 7px;cursor:pointer;}
+  border:1px solid var(--surface1);border-radius:var(--radius-control-sm);padding:3px 7px;cursor:pointer;}
 .lm-genchip:hover{border-color:var(--accent);color:var(--accent);}
 .lm-genrefline{font-size:10.5px;color:var(--subtext);margin:8px 0 2px;line-height:1.5;}
 .lm-genframerow{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;}
@@ -4881,9 +4883,9 @@ const LOOM_MOBILE_STYLES = `
 .lm-gencap{font:600 9px/1.2 system-ui;padding:3px 7px;border-radius:5px;
   border:1px solid var(--surface1);background:color-mix(in srgb,var(--surface0) 60%,transparent);color:var(--subtext);}
 .lm-gencost{display:flex;flex-direction:column;gap:2px;margin-top:14px;}
-.lm-gencosttext{font-size:12px;font-weight:700;color:var(--emerald);}
+.lm-gencosttext{font-size:12px;font-weight:600;color:var(--emerald);}
 .lm-gensel{width:100%;box-sizing:border-box;background:var(--base);border:1px solid var(--surface1);
-  border-radius:8px;padding:8px 10px;color:var(--text);font:12.5px/1.3 system-ui;margin-top:6px;}
+  border-radius:var(--radius-control);padding:8px 10px;color:var(--text);font:12.5px/1.3 system-ui;margin-top:6px;}
 
 /* ---- Image/Edit/Reference tabs -- fourth increment (2026-08-03), added to the SAME
    Generate screen the third increment built. Reuses lm-in/lm-ta/lm-check/lm-row2/lm-col/
@@ -4893,7 +4895,7 @@ const LOOM_MOBILE_STYLES = `
 .lm-bal{font-size:10.5px;color:var(--text);padding:6px 0;border-top:1px solid var(--surface1);
   border-bottom:1px solid var(--surface1);opacity:.85;}
 .lm-selrow{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;padding:8px 10px;
-  border-radius:8px;background:var(--base);border:1px solid var(--surface1);color:var(--text);
+  border-radius:var(--radius-control);background:var(--base);border:1px solid var(--surface1);color:var(--text);
   cursor:pointer;font:12.5px/1.3 system-ui;text-align:left;}
 .lm-selthumb{width:26px;height:26px;border-radius:6px;object-fit:cover;flex:none;}
 .lm-selname{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -4914,7 +4916,7 @@ const LOOM_MOBILE_STYLES = `
   font-variant-numeric:tabular-nums;}
 .lm-lrm{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:14px;padding:0 2px;}
 .lm-lrm:hover{color:var(--red);}
-.lm-lorver{flex:1 1 100%;background:var(--base);border:1px solid var(--surface1);border-radius:5px;
+.lm-lorver{flex:1 1 100%;background:var(--base);border:1px solid var(--surface1);border-radius:var(--radius-control-sm);
   color:var(--text);font-size:10px;padding:4px 6px;}
 .lm-mini2-btn{font-size:10px;color:var(--accent);background:none;border:none;cursor:pointer;
   text-decoration:underline;text-underline-offset:2px;padding:6px 0 0;display:block;}
@@ -4922,7 +4924,7 @@ const LOOM_MOBILE_STYLES = `
 .lm-imgresult{margin-top:10px;border:1px solid var(--surface1);border-radius:9px;padding:8px;}
 .lm-imgresult>img{width:100%;border-radius:7px;display:block;}
 .lm-route{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
-.lm-routebtn{font:600 10px/1 system-ui;padding:6px 9px;border-radius:6px;border:1px solid var(--surface1);
+.lm-routebtn{font:600 10px/1 system-ui;padding:6px 9px;border-radius:var(--radius-control-sm);border:1px solid var(--surface1);
   background:var(--surface1);color:var(--subtext);cursor:pointer;}
 .lm-routebtn.on{background:color-mix(in srgb,var(--accent) 22%,transparent);border-color:var(--accent);
   color:var(--accent);}
@@ -5006,7 +5008,7 @@ const LOOM_MOBILE_STYLES = `
 .lm-review-trimreadout{font-family:ui-monospace,monospace;font-size:10.5px;color:var(--subtext);
   margin-top:2px;}
 .lm-review-actionsrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
-.lm-review-cropbtn{font:700 10.5px/1 system-ui;padding:6px 12px;border-radius:999px;cursor:pointer;
+.lm-review-cropbtn{font:600 10.5px/1 system-ui;padding:6px 12px;border-radius:var(--radius-control-sm);cursor:pointer;
   border:1px solid var(--surface1);background:var(--surface1);color:var(--text);}
 .lm-review-cropbtn.on{background:color-mix(in srgb,var(--accent) 22%,transparent);
   border-color:var(--accent);color:var(--accent);}
@@ -5019,7 +5021,7 @@ const LOOM_MOBILE_STYLES = `
    .lm-microlab/.lm-hint/.lm-empty (body chrome) unchanged. Everything below is only what
    this screen's own preview/swatch-grid/slider chrome genuinely needs. */
 .lm-openfiltersbtn{display:block;width:100%;box-sizing:border-box;text-align:center;padding:12px;
-  border-radius:9px;font:700 12px/1 system-ui;cursor:pointer;border:1px solid var(--surface1);
+  border-radius:var(--radius-control);font:600 12px/1 system-ui;cursor:pointer;border:1px solid var(--surface1);
   background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);margin-top:8px;}
 .lm-fc{position:absolute;inset:0;z-index:305;background:var(--mantle);display:flex;
   flex-direction:column;animation:lmRise .22s ease both;}
@@ -5035,7 +5037,7 @@ const LOOM_MOBILE_STYLES = `
 .lm-fc-stage{position:relative;width:100%;height:100%;}
 .lm-fc-img{width:100%;height:100%;object-fit:cover;display:block;}
 .lm-fc-previewcap{font-size:10px;color:var(--subtext);text-align:center;padding-top:6px;}
-.lm-fc-grouplabel{font:700 9px/1 system-ui;letter-spacing:.1em;text-transform:uppercase;
+.lm-fc-grouplabel{font:500 11px/1 system-ui;letter-spacing:normal;text-transform:none;
   color:var(--overlay0);margin:0 0 6px;}
 .lm-fc-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;}
 .lm-fc-tile{display:flex;flex-direction:column;gap:3px;cursor:pointer;border-radius:9px;
@@ -5048,11 +5050,11 @@ const LOOM_MOBILE_STYLES = `
 .lm-fc-name{font-size:8.5px;text-align:center;padding:3px 1px 0;color:var(--subtext);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .lm-fc-sliderwrap{margin-bottom:14px;}
-.lm-fc-sliderlab{font:700 9px/1 system-ui;letter-spacing:.08em;text-transform:uppercase;
+.lm-fc-sliderlab{font:500 11px/1 system-ui;letter-spacing:normal;text-transform:none;
   color:var(--overlay0);margin-bottom:5px;}
 .lm-fc-range{width:100%;height:3px;cursor:pointer;}
 .lm-fc-btnrow{display:flex;gap:8px;margin-bottom:10px;}
-.lm-fc-btn{flex:1;text-align:center;padding:11px;border-radius:9px;font:700 11.5px/1 system-ui;
+.lm-fc-btn{flex:1;text-align:center;padding:11px;border-radius:var(--radius-control);font:600 11.5px/1 system-ui;
   cursor:pointer;border:1px solid var(--surface1);background:color-mix(in srgb,var(--surface0) 60%,transparent);color:var(--text);}
 .lm-fc-btn.primary{border-color:rgba(255,255,255,.3);background:var(--accent);color:var(--base);}
 .lm-fc-spendnote{font-size:10px;color:var(--overlay0);text-align:center;}
@@ -5085,16 +5087,16 @@ const LOOM_MOBILE_STYLES = `
 .lm-takes{margin:8px 0 12px;}
 .lm-takeprev{position:relative;aspect-ratio:16/9;border-radius:11px;background:var(--base) center/cover no-repeat;
   border:1px solid var(--surface1);touch-action:pan-y;user-select:none;-webkit-user-select:none;overflow:hidden;}
-.lm-takeprevlab{position:absolute;left:8px;bottom:7px;font:700 10px/1 system-ui;color:#fff;background:rgba(0,0,0,.55);
+.lm-takeprevlab{position:absolute;left:8px;bottom:7px;font:600 10px/1 system-ui;color:#fff;background:rgba(0,0,0,.55);
   border-radius:6px;padding:4px 7px;}
 .lm-takeswipe{position:absolute;right:8px;bottom:7px;font:600 9.5px/1 system-ui;color:rgba(255,255,255,.8);background:rgba(0,0,0,.45);
   border-radius:6px;padding:4px 7px;}
 .lm-takestrip{display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap;}
-.lm-take{width:40px;height:30px;border-radius:6px;border:1px solid var(--surface1);display:grid;place-items:center;
-  font:800 11px/1 system-ui;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.7);background:var(--surface1) center/cover no-repeat;
+.lm-take{width:40px;height:30px;border-radius:var(--radius-control);border:1px solid var(--surface1);display:grid;place-items:center;
+  font:600 11px/1 system-ui;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.7);background:var(--surface1) center/cover no-repeat;
   cursor:pointer;padding:0;-webkit-touch-callout:none;user-select:none;-webkit-user-select:none;flex:none;}
 .lm-take.on{outline:2px solid var(--gold);outline-offset:1px;}
-.lm-takemore{font:700 10px/1 system-ui;color:var(--overlay0);padding:0 2px;}
+.lm-takemore{font:600 10px/1 system-ui;color:var(--overlay0);padding:0 2px;}
 .lm-takesheethead{display:flex;align-items:center;gap:10px;margin-bottom:6px;}
 .lm-takesheettitle{font:600 13px/1.3 system-ui;color:var(--text);}
 /* P2: the peach underline on the scrub reel, the peach card edge, and Re-anchor / Keep. */
@@ -5104,9 +5106,9 @@ const LOOM_MOBILE_STYLES = `
   border:1px solid color-mix(in srgb,var(--peach) 50%,transparent);background:color-mix(in srgb,var(--peach) 7%,transparent);}
 .lm-staletxt{font-size:11.5px;line-height:1.4;color:var(--peach);}
 .lm-stalebtns{display:flex;gap:8px;}
-.lm-reanchor{font:700 11px/1 system-ui;padding:9px 14px;border-radius:9px;border:none;background:var(--lavender);color:var(--base);cursor:pointer;}
+.lm-reanchor{font:600 11px/1 system-ui;padding:9px 14px;border-radius:var(--radius-control);border:none;background:var(--lavender);color:var(--base);cursor:pointer;}
 .lm-reanchor:disabled{opacity:.55;cursor:default;}
-.lm-keep{font:600 11px/1 system-ui;padding:9px 14px;border-radius:9px;border:1px solid var(--surface1);background:none;color:var(--subtext);cursor:pointer;}
+.lm-keep{font:600 11px/1 system-ui;padding:9px 14px;border-radius:var(--radius-control);border:1px solid var(--surface1);background:none;color:var(--subtext);cursor:pointer;}
 .lm-staleerr{font-size:10.5px;color:var(--peach);}
 .lm-needtake{font-size:11px;line-height:1.4;color:var(--subtext);margin:0 0 12px;}
 /* P8: the ⌕ in the header, the find field under it, and the reel's rings. */
@@ -5114,14 +5116,14 @@ const LOOM_MOBILE_STYLES = `
 .lm-findbtn.open{border-color:var(--lavender);color:var(--lavender);}
 .lm-findbtn.finding{background:color-mix(in srgb,var(--lavender) 16%,transparent);}
 .lm-find{flex:none;display:flex;flex-direction:column;gap:6px;padding:0 16px 8px;}
-.lm-findpill{display:flex;align-items:center;gap:6px;padding:4px 6px 4px 11px;border-radius:999px;border:1px solid var(--surface1);
+.lm-findpill{display:flex;align-items:center;gap:6px;padding:4px 6px 4px 11px;border-radius:var(--radius-control);border:1px solid var(--surface1);
   background:color-mix(in srgb,var(--base) 85%,transparent);}
 .lm-findpill.on{border-color:var(--lavender);}
 .lm-findico{font-size:12px;color:var(--overlay0);}
 .lm-findin{flex:1;min-width:0;border:0;outline:none;background:transparent;color:var(--text);font:13px/1.3 system-ui;padding:6px 0;}
 .lm-findin::placeholder{color:var(--overlay0);}
 .lm-findcount{font:10.5px/1 ui-monospace,monospace;color:var(--subtext);white-space:nowrap;}
-.lm-findstep{width:30px;height:30px;border:none;background:none;color:var(--subtext);font-size:13px;cursor:pointer;border-radius:50%;flex:none;}
+.lm-findstep{width:30px;height:30px;border:none;background:none;color:var(--subtext);font-size:13px;cursor:pointer;border-radius:calc(var(--radius-control) - 4px);flex:none;}
 .lm-findchips{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;}
 .lm-findchip{flex:none;font:600 10.5px/1 system-ui;padding:6px 10px;border-radius:999px;cursor:pointer;
   border:1px solid var(--surface1);background:none;color:var(--subtext);}
@@ -6109,14 +6111,14 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
           aria-label="Find in storyboard" aria-expanded={findOpen} title="Find in storyboard" onClick={toggleFindBar}>&#8981;</button>
         <label className={"lm-chip" + (project.draft ? " on" : "")}
           title="Draft mode renders every shot at the cheaper 'basic' quality — block out the animatic, then turn Draft off and re-generate the keepers at pro quality">
-          <input type="checkbox" checked={!!project.draft} onChange={(e) => setDraft(e.target.checked)} />&#9889; Draft</label>
+          <input type="checkbox" checked={!!project.draft} onChange={(e) => setDraft(e.target.checked)} /><Icon name="bolt" /> Draft</label>
         {/* Not in the locked design (which only shows back-link/title/Draft here) -- added
             because the design's own mobile screen has no return path to LoomV2 at all, and
             without one this toggle would be a one-way trap: flip to Mobile view and the
             .lv-top bar that carries the ONLY other instance of this switch stops rendering.
             A real, bidirectional owner-preference switch needs an exit on both sides. */}
         <button type="button" className="lm-chip" onClick={() => setMobileUI(false)}
-          title="Switch back to the full desktop-style Loom">&#128421; Desktop</button>
+          title="Switch back to the full desktop-style Loom"><Icon name="desktop" /> Desktop</button>
       </div>
       {findOpen && (
         <div className="lm-find">
@@ -6137,7 +6139,8 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
           <div className="lm-findchips">
             {findChips(entries, { statusOf }).map((ch) => (
               <button type="button" key={ch.kind + ch.key} className={"lm-findchip" + (chipOn(find, ch) ? " on" : "")}
-                aria-pressed={chipOn(find, ch)} onClick={() => runFind((f) => toggleChip(f, ch))}>{ch.label}</button>
+                aria-pressed={chipOn(find, ch)} aria-label={ch.kind === "warn" ? "Warnings only" : undefined}
+                onClick={() => runFind((f) => toggleChip(f, ch))}>{ch.icon ? <><Icon name={ch.icon} /> </> : null}{ch.label}</button>
             ))}
           </div>
         </div>
@@ -6217,12 +6220,12 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                           <span className={"lm-stpill " + st}>{gs && gs.msg ? gs.msg : st}</span>
                           {miss.length > 0 && (
                             <span className="lm-warn" title={`No picture on this shot for ${miss.join(", ")} — they are cast here but cannot be referenced, so they are left out of the prompt.`}>
-                              &#9888; {miss.length === 1 ? `${miss[0]}: no image` : `${miss.length} cast: no image`}
+                              <Icon name="warning" /> {miss.length === 1 ? `${miss[0]}: no image` : `${miss.length} cast: no image`}
                             </span>
                           )}
                           {stalePhone && (
                             <span className="lm-warn" title="Its open frame came from another shot's take, and that shot now uses a different one. Open the shot to Re-anchor or Keep.">
-                              &#9888; anchor changed
+                              <Icon name="warning" /> anchor changed
                             </span>
                           )}
                           {unsendablePhone && (
@@ -6299,7 +6302,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                 if (!window.confirm(`Delete shot ${actionsLive.code}${actionsLive.c.title ? ` — "${actionsLive.c.title}"` : ""}? This can't be undone.`)) return;
                 delCard(actionsLive.a.id, actionsLive.c);
                 closeActions();
-              }}>&#128465; Delete</button>
+              }}><Icon name="trash" /> Delete</button>
             <button type="button" className="lm-sheetclose" onClick={closeActions}>Cancel</button>
           </div>
         </>
@@ -6320,7 +6323,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                 onChange={(ev) => dfPatch((cc) => ({ ...cc, title: ev.target.value }))} />
               <button type="button" className="lm-df-cast" onClick={() => setCastSheetOpen(true)}
                 title="Cast & assets bound to this shot">
-                &#128101; {(c.cast || []).length}
+                <Icon name="community" /> {(c.cast || []).length}
               </button>
               <button type="button" className="lm-df-close" title="Close" onClick={() => setDfOpen(false)}>&#10005;</button>
             </div>
@@ -6371,7 +6374,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                     ) : null}
                     {anchor.state === "stale" && (
                       <div className="lm-stale" role="status">
-                        <div className="lm-staletxt">&#9888; anchor changed &middot; {staleText(anchor, phoneCodeOf)}</div>
+                        <div className="lm-staletxt"><Icon name="warning" /> anchor changed &middot; {staleText(anchor, phoneCodeOf)}</div>
                         <div className="lm-stalebtns">
                           <button type="button" className="lm-reanchor" disabled={!!(aw && aw.phase === "wip") || !selectedTakeView(anchor.src)}
                             onClick={() => reanchorShot(c.id)}>{aw && aw.phase === "wip" ? "Re-anchoring…" : "Re-anchor"}</button>
@@ -6418,8 +6421,8 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                     onPatch={(p) => dfPatchFrame("openFrame", p)}
                     extraBtn={dfPrevEntry ? (
                       <button type="button" className="lm-inheritbtn" onClick={dfInheritPrev} disabled={dfHandoff === "wip"}>
-                        {dfHandoff === "wip" ? "✂ splicing…" : dfHandoff === "err" ? "✂ splice failed — retry"
-                          : dfPrevEntry.c.resultMid ? `✂ splice ${dfPrevEntry.code}'s last frame` : `↳ inherit ${dfPrevEntry.code} close`}
+                        {dfHandoff === "wip" ? <><Icon name="scissors" /> splicing…</> : dfHandoff === "err" ? <><Icon name="scissors" /> splice failed — retry</>
+                          : dfPrevEntry.c.resultMid ? <><Icon name="scissors" /> splice {dfPrevEntry.code}'s last frame</> : `↳ inherit ${dfPrevEntry.code} close`}
                       </button>
                     ) : null} />
                 </div>
@@ -6446,7 +6449,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                         <input type="file" accept="image/*" style={{ display: "none" }}
                           onChange={async (e) => { const f = e.target.files[0]; if (!f) return; const id = await storeThumb(f); setRef(dfLive.a.id, c.id, r.id, { thumbId: id, source: r.source || f.name }); }} />
                       </label>
-                    ) : <div className="lm-refprev">{r.kind === "video" ? "🎞" : "♪"}</div>}
+                    ) : <div className="lm-refprev">{r.kind === "video" ? <Icon name="video" /> : <Icon name="music" />}</div>}
                     <div className="lm-refbody">
                       <div className="lm-reftoprow">
                         <input className="lm-reftag" value={r.tag} onChange={(e) => setRef(dfLive.a.id, c.id, r.id, { tag: e.target.value })} />
@@ -6504,7 +6507,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                     const rows = libraryRows(castApi.lib, project, castApi.others);
                     return (
                       <>
-                        <div className="lm-libhead"><span>&#128100; CAST LIBRARY</span><span>tick = in this storyboard</span></div>
+                        <div className="lm-libhead"><span><Icon name="person" /> Cast library</span><span>tick = in this storyboard</span></div>
                         {castApi.libNote ? <div className={"lm-libnote" + (castApi.libPhase === "failed" ? " warn" : "")}>{castApi.libNote}</div> : null}
                         {rows.map((row) => {
                           const src = frameSrc(row.picture);
@@ -6514,10 +6517,10 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                               onClick={() => castApi.toggleCastTick(row)}>
                               <span className={"lm-libbox" + (row.ticked ? " on" : "")}>{row.ticked ? "✓" : ""}</span>
                               <div className="lm-castthumb lm-libav" style={src ? { backgroundImage: `url(${src})` } : undefined}>
-                                {!src && (row.kind === "audio" ? "♪" : row.kind === "video" ? "🎞" : "")}
+                                {!src && (row.kind === "audio" ? <Icon name="music" /> : row.kind === "video" ? <Icon name="video" /> : "")}
                               </div>
                               <div className="lm-castcol">
-                                <div className="lm-castname">{row.name || row.kind}{row.lock ? " 🔒" : ""}</div>
+                                <div className="lm-castname">{row.name || row.kind}{row.lock ? <> <Icon name="lock" title="Locked" /></> : ""}</div>
                                 <div className="lm-libmeta">{rowMeta(row)}</div>
                               </div>
                             </button>
@@ -6554,7 +6557,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                             onClick={() => dfPatch((cc) => ({ ...cc, cast: (cc.cast || []).includes(as.id) ? cc.cast.filter((x) => x !== as.id) : [...(cc.cast || []), as.id] }))}>
                             <span className={"lm-castbox" + (inShot ? " on" : "")} />
                             <div className="lm-castthumb" style={src ? { backgroundImage: `url(${src})` } : undefined}>
-                              {!src && (as.kind === "audio" ? "♪" : as.kind === "video" ? "🎞" : "🖼")}
+                              {!src && (as.kind === "audio" ? <Icon name="music" /> : as.kind === "video" ? <Icon name="video" /> : <Icon name="image" />)}
                             </div>
                             <div className="lm-castcol">
                               <div className="lm-castname">{as.name || as.kind}</div>
@@ -6564,7 +6567,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                             {liveTag || pastBudget ? (
                               <span className={"lm-castlive" + (pastBudget ? " oob" : "")}>{liveTagText(liveTag, pastBudget, c.mode)}</span>
                             ) : null}
-                            {!!as.lock && <span className="lm-castlock" title="Lock appearance">&#128274;</span>}
+                            {!!as.lock && <span className="lm-castlock" title="Lock appearance"><Icon name="lock" /></span>}
                           </button>
                         );
                       })}
@@ -6686,7 +6689,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
               const bal = balanceLine(acct);
               return (
                 <div className="lm-bal" style={{ margin: "0 16px 8px" }}>
-                  &#9889; {bal.credits} credits &middot; {bal.cards}
+                  <Icon name="coin" /> {bal.credits} credits &middot; {bal.cards}
                   {bal.claim ? <span style={{ color: "var(--gold)" }}> &middot; {bal.claim}</span> : null}
                 </div>
               );
@@ -6709,7 +6712,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                   <button type="button" className="lm-selrow" onClick={() => { setPickerKind("base"); setPickerOpen(true); }}>
                     {imgModel && imgModel.preview_url ? <img className="lm-selthumb" src={imgModel.preview_url} alt="" /> : null}
                     <span className="lm-selname">{imgModel ? imgModel.title : "none — browse models"}</span>
-                    <span className="lm-selhint">&#9776; browse</span>
+                    <span className="lm-selhint"><Icon name="menu" /> browse</span>
                   </button>
                   {imgModel && (imgModel.sampling_method || (imgModel.capabilities || []).length > 0) && (
                     <div className="lm-caps">
@@ -6730,7 +6733,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                         return (
                           <div key={l.model_id} className={"lm-lchip" + ((l.failed || incompat) ? " failed" : "")}>
                             <span className="lm-lnm" title={incompat ? l.title + " — needs a different base architecture than the one selected; remove it or switch the base" : l.title}>
-                              {l.title}{!l.version_id ? (l.failed ? " ⚠" : " ⏳") : (incompat ? " ⚠" : "")}
+                              {l.title}{!l.version_id ? (l.failed ? <> <Icon name="warning" title="Failed" /></> : <> <Icon name="hourglass" title="Still running" /></>) : (incompat ? <> <Icon name="warning" title="Needs a different base" /></> : null)}
                             </span>
                             <span className="lm-lw">
                               <input type="range" step="0.1" min={loraRange[0]} max={loraRange[1]} value={l.weight}
@@ -6847,7 +6850,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                     <input type="checkbox" checked={imgAdv.promptHelper}
                       onChange={(ev) => setImgAdv((a) => ({ ...a, promptHelper: ev.target.checked }))} /> Prompt helper</label>
                   <div className="lm-gencost">
-                    <span className="lm-gencosttext" title={priceTitle(imgPrice, c.id)}>{priceLine(imgPrice, c.id, "Pick a model and write a prompt to see the cost.")}</span>
+                    <span className="lm-gencosttext" title={priceTitle(imgPrice, c.id)}><CostText text={priceLine(imgPrice, c.id, "Pick a model and write a prompt to see the cost.")} /></span>
                   </div>
                   <button type="button" className="lm-genbtn"
                     disabled={busyI || !imgModel || !(c.imgPrompt || "").trim() || anyLoraUnresolved(imgLoras) || imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) || overLoraCap(imgLoras, acct && acct.lora_cap)}
@@ -6907,7 +6910,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                   <textarea className="lm-ta" value={c.editPrompt || ""} placeholder="e.g. make it night, add rain, warmer key light…"
                     onChange={(ev) => dfPatch((cc) => ({ ...cc, editPrompt: ev.target.value }))} />
                   <div className="lm-gencost">
-                    <span className="lm-gencosttext" title={priceTitle(editPrice, c.id)}>{priceLine(editPrice, c.id, "Add a source image and instruction to see the cost.")}</span>
+                    <span className="lm-gencosttext" title={priceTitle(editPrice, c.id)}><CostText text={priceLine(editPrice, c.id, "Add a source image and instruction to see the cost.")} /></span>
                   </div>
                   <button type="button" className="lm-genbtn" disabled={busyE || !src} onClick={() => genEdit(dfLive)}>
                     {busyE ? (ge.msg || "editing…") : "✦ Edit the open frame"}
@@ -6959,7 +6962,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                   )}
                   <div className="lm-fixwarn">A fix can't be card-covered — it always spends, and always asks first.</div>
                   <div className="lm-gencost">
-                    <span className="lm-gencosttext" title={priceTitle(genFixPrice, c.id)}>{priceLine(genFixPrice, c.id, "Drag a box over a hand or face to see the cost.")}</span>
+                    <span className="lm-gencosttext" title={priceTitle(genFixPrice, c.id)}><CostText text={priceLine(genFixPrice, c.id, "Drag a box over a hand or face to see the cost.")} /></span>
                   </div>
                   <button type="button" className="lm-genbtn"
                     disabled={busyF || !src || !fixBoxes.length || !(phoneFixBoxes() || []).length}
@@ -7008,8 +7011,8 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                         onPatch={(p) => dfPatchFrame("openFrame", p)}
                         extraBtn={dfPrevEntry ? (
                           <button type="button" className="lm-inheritbtn" onClick={dfInheritPrev} disabled={dfHandoff === "wip"}>
-                            {dfHandoff === "wip" ? "✂ splicing…" : dfHandoff === "err" ? "✂ splice failed — retry"
-                              : dfPrevEntry.c.resultMid ? `✂ splice ${dfPrevEntry.code}'s last frame` : `↳ inherit ${dfPrevEntry.code} close`}
+                            {dfHandoff === "wip" ? <><Icon name="scissors" /> splicing…</> : dfHandoff === "err" ? <><Icon name="scissors" /> splice failed — retry</>
+                              : dfPrevEntry.c.resultMid ? <><Icon name="scissors" /> splice {dfPrevEntry.code}'s last frame</> : `↳ inherit ${dfPrevEntry.code} close`}
                           </button>
                         ) : null} />
                     </div>
@@ -7027,7 +7030,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                   <textarea className="lm-ta" value={c.refPrompt || ""} placeholder="compose a new still from the references…"
                     onChange={(ev) => dfPatch((cc) => ({ ...cc, refPrompt: ev.target.value }))} />
                   <div className="lm-gencost">
-                    <span className="lm-gencosttext" title={priceTitle(refPrice, c.id)}>{priceLine(refPrice, c.id, "Add references and a prompt to see the cost.")}</span>
+                    <span className="lm-gencosttext" title={priceTitle(refPrice, c.id)}><CostText text={priceLine(refPrice, c.id, "Add references and a prompt to see the cost.")} /></span>
                   </div>
                   <button type="button" className="lm-genbtn" disabled={busyR || !refs.length} onClick={() => genRef(dfLive)}>
                     {busyR ? (gr.msg || "generating…") : "✦ Generate from references"}
@@ -7182,7 +7185,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                   <select className="lm-gensel" value={c.isPrivate ? "enhanced" : "normal"}
                     onChange={(ev) => dfPatch((cc) => ({ ...cc, isPrivate: ev.target.value === "enhanced" }))}>
                     <option value="normal">Normal</option>
-                    <option value="enhanced">👑 Private</option>
+                    <option value="enhanced">Private</option>
                   </select>
                 </div>
                 <div className="lm-col">
@@ -7212,7 +7215,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
               )}
 
               <div className="lm-gencost">
-                <span className="lm-gencosttext" title={costTitle}>{costText}</span>
+                <span className="lm-gencosttext" title={costTitle}><CostText text={costText} /></span>
                 <span className="lm-hint">uploads are free &middot; one job at a time</span>
               </div>
 
@@ -7491,19 +7494,19 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
               <div className="lm-review-trimreadout">{fmtT(trimIn)} &rarr; {fmtT(trimOut)}</div>
 
               <div className="lm-review-actionsrow">
-                <button type="button" className="lm-addrefbtn" style={{ whiteSpace: "nowrap" }} onClick={doSplit}>&#9986; Split at playhead</button>
+                <button type="button" className="lm-addrefbtn" style={{ whiteSpace: "nowrap" }} onClick={doSplit}><Icon name="scissors" /> Split at playhead</button>
                 <button type="button" className={"lm-review-cropbtn" + (reviewCropping ? " on" : "")}
-                  onClick={() => setReviewCropping((v) => !v)}>&#9974; {reviewCropping ? "Done" : "Crop"}</button>
+                  onClick={() => setReviewCropping((v) => !v)}><Icon name="crop" /> {reviewCropping ? "Done" : "Crop"}</button>
                 {/* Session P (P3, "Phone: '♪ Bed' in the review panel picks a file; the level and
                     fades are in a sheet"): no bed yet -> it picks a file (kept on this machine,
                     never uploaded to PixAI); a bed -> its sheet. */}
                 {bedApi && (phoneBed ? (
                   <button type="button" className="lm-addrefbtn lm-bedbtn on" onClick={openBedSheet}
-                    title={"Music bed: " + phoneBed.name + " — level and fades"}>&#9834; Bed</button>
+                    title={"Music bed: " + phoneBed.name + " — level and fades"}><Icon name="music" /> Bed</button>
                 ) : (
                   <label className={"lm-addrefbtn lm-bedbtn" + (bedApi.bedWork.phase === "wip" ? " busy" : "")}
                     title="Add one audio file under the whole cut — kept on this machine, never uploaded to PixAI">
-                    {bedApi.bedWork.phase === "wip" ? "♪ Adding…" : "♪ Bed"}
+                    {bedApi.bedWork.phase === "wip" ? <><Icon name="music" /> Adding…</> : <><Icon name="music" /> Bed</>}
                     <input type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac" style={{ display: "none" }} disabled={bedApi.bedWork.phase === "wip"}
                       onChange={(ev) => { const f = ev.target.files && ev.target.files[0]; ev.target.value = ""; if (f) bedApi.pickBed(f); }} />
                   </label>
@@ -7522,7 +7525,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                 <div className="lm-scrim" onClick={() => setBedSheet(false)} />
                 <div className="lm-sheet" role="dialog" aria-label="Music bed">
                   <div className="lm-sheethandle" />
-                  <div className="lm-bedhead">&#9834; {phoneBed.name}{phoneBed.dur ? " · " + bedClock(phoneBed.dur) : ""}</div>
+                  <div className="lm-bedhead"><Icon name="music" /> {phoneBed.name}{phoneBed.dur ? " · " + bedClock(phoneBed.dur) : ""}</div>
                   <span className="lm-microlab">Level</span>
                   <div className="lm-bedlvl">
                     <input type="range" min={BED_DB_MIN} max={BED_DB_MAX} step={1} value={phoneBed.db} aria-label="Music bed level"
@@ -9931,7 +9934,7 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
       if (problem) { holdCard(todo[k].c.id, problem); refused.unshift(todo[k].code); todo.splice(k, 1); }
     }
     const refusedNote = refused.length
-      ? `\n⚠ ${refused.length} shot(s) can't be sent on their engine and are left out: ${refused.join(", ")} (each card says why).` : "";
+      ? `\n${refused.length} shot(s) can't be sent on their engine and are left out: ${refused.join(", ")} (each card says why).` : "";
     if (!todo.length) {
       const line = "Nothing was sent: " + refused.join(", ") + " can't be sent on their engine as they are (each card says why).";
       if (window.Toast) window.Toast.show({ kind: "err", title: "Generate all", msg: line });
@@ -9963,7 +9966,7 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     // these. "Up to N" is the honest claim; "these N will" was not.
     const overflowCodes = (overflowIndexes || []).map((i) => todo[i] && todo[i].code).filter(Boolean);
     const overflowNote = overflow
-      ? `\n⚠ Up to ${overflow} of those priced free on their own may spend credits instead — the batch needs more tickets than you hold ` +
+      ? `\nUp to ${overflow} of those priced free on their own may spend credits instead — the batch needs more tickets than you hold ` +
         `(${shortPools.map((pl) => `${pl.name}: ${pl.held} held, ${pl.needed} needed`).join("; ")}). ` +
         `Once the cards run out, no card is used and each remaining shot spends its full price` +
         (overflowCodes.length ? `: ${overflowCodes.join(", ")}` : "") + `.`
@@ -9981,14 +9984,14 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     // on the card, as the drawer holds them, and named here since no panel shows them.
     const heldCodes = todo.filter((e) => heldVideoRefsLine(shotPayload(e))).map((e) => e.code);
     const heldNote = heldCodes.length
-      ? `\n⚠ ${heldCodes.length} shot(s) go out without video references their engine can't take — held back, not sent and not deleted: ${heldCodes.join(", ")}.` : "";
+      ? `\n${heldCodes.length} shot(s) go out without video references their engine can't take — held back, not sent and not deleted: ${heldCodes.join(", ")}.` : "";
     const msg = `Generate ${todo.length} shot(s)?\n\n` +
       (engines ? `${engines}\n` : "") +
-      `🎫 ${free} covered by free cards\n` +
+      `${free} covered by free cards\n` +
       `≈ ${paid} will spend credits — about ${credits.toLocaleString()} total` +
-      (unknown ? `\n⚠ ${unknown} shot(s)' cost couldn't be verified — they may also spend credits.` : ".") +
+      (unknown ? `\n${unknown} shot(s)' cost couldn't be verified — they may also spend credits.` : ".") +
       overflowNote + refusedNote + heldNote +
-      (emptyPromptShots.length ? `\n⚠ ${emptyPromptShots.length} shot(s) have no prompt text yet: ${emptyPromptShots.map((e) => e.code).join(", ")}` : "");
+      (emptyPromptShots.length ? `\n${emptyPromptShots.length} shot(s) have no prompt text yet: ${emptyPromptShots.map((e) => e.code).join(", ")}` : "");
     if (!window.confirm(msg)) { setBatching(false); return; }
     // Reset ONLY after the confirm is accepted -- resetting before it and leaving batchTally
     // non-null on Cancel would freeze a permanent "0 submitted" banner on screen forever,
@@ -10589,13 +10592,13 @@ export default function App() {
                   that means no audio track, because a missing ffprobe made every clip's length
                   unreadable. Shown next to the download button rather than logged, since the
                   owner is the one who can install the missing piece. */}
-              {exp.warning && <div className="sb-exp-txt" style={{ color: "var(--amber)" }}>&#9888; {exp.warning}</div>}
+              {exp.warning && <div className="sb-exp-txt" style={{ color: "var(--amber)" }}><Icon name="warning" /> {exp.warning}</div>}
               <a className="sb-btn amber" href="/api/loom/export-file" style={{ alignSelf: "center", textDecoration: "none" }}>&#8681; Download mp4</a>
               <button className="sb-btn ghost sm" style={{ alignSelf: "center" }} onClick={closeExport}>Close</button>
             </>}
             {(exp.status === "failed" || exp.status === "cancelled") && <>
               <div className="sb-exp-txt" style={{ color: exp.status === "failed" ? "var(--coral)" : "var(--ink2)" }}>
-                {exp.status === "failed" ? ("⚠ " + (exp.error || "export failed")) : "■ Export stopped."}</div>
+                {exp.status === "failed" ? <><Icon name="warning" /> {exp.error || "export failed"}</> : "■ Export stopped."}</div>
               <button className="sb-btn ghost sm" style={{ alignSelf: "center" }} onClick={closeExport}>Close</button>
             </>}
           </div>
@@ -10611,7 +10614,7 @@ export default function App() {
             <div className="sb-pick-head"><span className="sb-pick-t">Bundle exported, {bundleMissing.total} file(s) left out</span>
               <button className="sb-pick-x" style={{ marginLeft: "auto" }} onClick={closeBundleMissing}>&#215;</button></div>
             <div className="sb-exp-txt" style={{ color: "var(--coral)" }}>
-              &#9888; No file on disk for these references &mdash; everything else exported normally.</div>
+              <Icon name="warning" /> No file on disk for these references &mdash; everything else exported normally.</div>
             {bundleMissing.rows.length > 0 && (
               <div className="sb-miss-list">
                 {bundleMissing.rows.map((row) => (
@@ -10862,9 +10865,9 @@ function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop, vide
           aria-pressed={soundOn}
           title={soundOn ? "Sound on while playing (scrubbing stays silent)" : "Play this shot with sound"}>
           {soundOn ? "\u{1F50A}" : "\u{1F507}"}</button>
-        {onSplit && <button onClick={doSplit} title="Split this shot in two at the playhead">✂ Split</button>}
+        {onSplit && <button onClick={doSplit} title="Split this shot in two at the playhead"><Icon name="scissors" /> Split</button>}
         {onCrop && <button className={cropping ? "on" : ""} onClick={() => { setCropping((v) => !v); setCropDraft(null); }}
-          title="Crop the frame — drag a rectangle; applied on export">⛶ Crop</button>}
+          title="Crop the frame — drag a rectangle; applied on export"><Icon name="crop" /> Crop</button>}
         {crop && onCrop && <button onClick={() => onCrop(null)} title="Clear crop">clear crop</button>}
       </div>
       <div className="sb-trim">
@@ -10983,13 +10986,13 @@ function BedRow({ entries, scale, bed, segs, plan, peaks, api }) {
       <div className="lv-bedctl">
         {bed ? (
           <span className="lv-bedbtn on">
-            {picker(<>&#9834; <span className="lv-bedname">{bed.name}</span>{dur ? " · " + bedClock(dur) : ""}</>,
+            {picker(<><Icon name="music" /> <span className="lv-bedname">{bed.name}</span>{dur ? " · " + bedClock(dur) : ""}</>,
               "lv-bedpick", "Pick a different music bed for this storyboard")}
             <button type="button" className="lv-bedx" aria-label="Remove the music bed"
               title="Remove the music bed from this storyboard. Its file stays on this machine."
               onClick={() => api.removeBed()}>&#10005;</button>
           </span>
-        ) : picker(busy ? "♪ Adding…" : "♪ Add a music bed", "lv-bedbtn",
+        ) : picker(busy ? <><Icon name="music" /> Adding…</> : <><Icon name="music" /> Add a music bed</>, "lv-bedbtn",
           "One audio file under the whole cut — kept on this machine, never uploaded to PixAI")}
         {bed && (
           <>
@@ -11074,7 +11077,7 @@ function RibbonPair({ pair, tintOf, onOpen }) {
 function RibbonStrip({ pairs, tintOf, onOpen, compact }) {
   return (
     <div className={"lv-ribbon" + (compact ? " compact" : "")}>
-      <div className="lv-ribcap">CONTINUITY RIBBON &middot; close frame &rarr; next open frame</div>
+      <div className="lv-ribcap">Continuity ribbon &middot; close frame &rarr; next open frame</div>
       {pairs.length
         ? <div className="lv-ribrow">{pairs.map((p) => <RibbonPair key={p.key} pair={p} tintOf={tintOf} onOpen={onOpen} />)}</div>
         : <div className="lv-ribnone">Nothing to compare yet: the ribbon pairs each rendered shot with the next rendered one.</div>}
@@ -11099,7 +11102,7 @@ function EdlPanel({ project, view, setView, onClose, onDownload, busy }) {
     <div className="sb-seq sb-edlveil" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="sb-edl" role="dialog" aria-label="Edit decision list">
         <div className="sb-edlhead">
-          <div className="sb-edlcap">EDIT DECISION LIST &middot; {plan.slug} &middot; 24 fps &middot; selected takes and trims</div>
+          <div className="sb-edlcap">Edit decision list &middot; {plan.slug} &middot; 24 fps &middot; selected takes and trims</div>
           {[["edl", ".edl"], ["csv", ".csv"]].map(([k, l]) => (
             <button key={k} type="button" className={"sb-edltab" + (view.tab === k ? " on" : "")} aria-pressed={view.tab === k}
               onClick={() => setView({ tab: k })}>{l}</button>

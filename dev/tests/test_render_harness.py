@@ -3981,15 +3981,15 @@ _TOPBAR_ROWS_JS = """() => {
 
 def test_the_loom_top_bar_is_one_row_at_the_owners_width(logged_in_page):
     """Call 5: at 1444 px the whole bar -- name ▾, find and its chips, Draft, the Generate
-    cluster, Activity and ← GALLERY -- sits on ONE row (the page's bar, The Loom.dc.html
-    :46-143). 📱 Mobile view lives in the storyboards popover now; ← Gallery wears the page's
-    uppercase form and ends the row."""
+    cluster, Activity and ← Gallery -- sits on ONE row (the page's bar, The Loom.dc.html
+    :46-143). 📱 Mobile view lives in the storyboards popover now; ← Gallery wears sentence case
+    (13 px / 500, the unslop pass, pick 1 -- it was the page's uppercase form) and ends the row."""
     page = _open_owner_loom(logged_in_page)
     m = page.evaluate(_TOPBAR_ROWS_JS)
     assert m["spread"] <= 6 and m["barHeight"] <= 62, (
         "the Loom's top bar wrapped at 1444 px: {!r}".format(m))
     assert abs(m["galleryRight"] - (m["barRight"] - 16)) <= 2, "← Gallery does not end the row: {!r}".format(m)
-    assert m["galleryUpper"] == "uppercase" and m["hasName"] and not m["mobileInBar"], m
+    assert m["galleryUpper"] == "none" and m["hasName"] and not m["mobileInBar"], m
 
     # The Mobile view switch is one click away, in the ▾ popover.
     page.click(".lv-top .lv-caret")

@@ -1009,7 +1009,7 @@ export const formatCostEstimate = ({ free = 0, paid = 0, credits = 0, unknown = 
   if (settledNone && pending > 0) return "…";
   if (credits > 0) return `≈${credits.toLocaleString()} cr${unknown ? ` (+${unknown} unk)` : ""}${trail}`;
   if (unknown > 0) return `${unknown} unpriced${trail}`;
-  if (free > 0) return `🎫 free${trail}`;
+  if (free > 0) return `free${trail}`;          // the ticket mark is drawn where this is rendered (CostText in master-storyboard.jsx)
   if (paid > 0) return `0 cr${trail}`;     // settled, genuinely zero-cost, not free-card-covered
   return "…" + trail;
 };
