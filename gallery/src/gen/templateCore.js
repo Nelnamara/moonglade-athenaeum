@@ -394,12 +394,12 @@ export function sendRoute(plan, syntax) {
 
 /* The dock's line beside Send (the page's sendSummary). */
 export function sendSummary(parsed, plan, varMode, count) {
-  if (parsed.error) return "⚠ " + parsed.error;
+  if (parsed.error) return parsed.error;   // no ⚠ in the string: RunModeRow draws the warning icon off its own `bad` flag
   const vars = parsed.vars;
   const product = matrixProduct(vars);
   const combos = vars.length ? vars.map((v) => v.options.length).join(" × ") + " = "
     + (product > BIG ? "over a million" : fmt(product)) + " combinations" : "no variables";
-  if (plan && plan.error) return "⚠ " + plan.error;
+  if (plan && plan.error) return plan.error;
   if (varMode === "matrix") return combos + " · every one is sent, queued";
   return combos + " · " + count + " drawn at random";
 }

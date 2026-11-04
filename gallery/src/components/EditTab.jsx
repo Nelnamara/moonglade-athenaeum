@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import Icon from "../icons/Icons.jsx";
 import {
   buildEditPayload, editAspectExtreme, editAspectGroups, editAspectLabel, editCaps, editGate,
   editModelIsNew, EDIT_CAPS, EDIT_PRICE_KEY_SKIP, refTag, switchEditModel,
@@ -208,7 +209,7 @@ export default function EditTab({ visible, s, setS, onDroppedNote, dock }) {
           (1517-1519). Styles: dock.css .mgdock-editmodel / -editmodelrow / -newtag /
           -editcap / -editchips / -editchip / -editnote. */}
       <div className="mgdock-slab" style={{ animationDelay: "60ms" }}>
-        <div className="mgdock-lbl">EDIT MODEL</div>
+        <div className="mgdock-lbl">Edit model</div>
         {/* Session L decision 6 (Small Calls Handoff, L6): Edit v4.0 is the first option,
             with the emerald "new" tag beside the select while it is the pick (30 days);
             resolution and the common aspects are chips, the extremes sit under More ▾ --
@@ -223,7 +224,7 @@ export default function EditTab({ visible, s, setS, onDroppedNote, dock }) {
           </select>
           {editModelIsNew(s.model) ? <span className="mgdock-newtag">new</span> : null}
         </div>
-        <div className="mgdock-editcap">RESOLUTION</div>
+        <div className="mgdock-editcap">Resolution</div>
         <div className="mgdock-editchips" role="radiogroup" aria-label="Resolution">
           {caps.resolutions.map((r) => (
             <button key={r} type="button" role="radio" aria-checked={s.resolution === r}
@@ -231,7 +232,7 @@ export default function EditTab({ visible, s, setS, onDroppedNote, dock }) {
               onClick={() => set({ resolution: r })}>{r}</button>
           ))}
         </div>
-        <div className="mgdock-editcap">ASPECT</div>
+        <div className="mgdock-editcap">Aspect</div>
         <AspectChips s={s} set={set} />
 
         {/* EXTRA -- REAL CAPABILITY, KEPT (owner ruling 2026-08-16; checklist region 2
@@ -241,7 +242,7 @@ export default function EditTab({ visible, s, setS, onDroppedNote, dock }) {
             _edit_params_from_payload). Restyled to the DC's look: the RESOLUTION-style
             caption + the DC's small-select skin, in the slab whose model it overrides. */}
         <div className="mgdock-editcol">
-          <div className="mgdock-editcap">TOOLBOX PRESET</div>
+          <div className="mgdock-editcap">Toolbox preset</div>
           <div className="mgdock-presetrow">
             <select className="mgdock-editsel" value={s.preset}
               title="A banked pixai.art Toolbox prompt — used instead of the instruction, and it pins its own model"
@@ -285,7 +286,7 @@ export default function EditTab({ visible, s, setS, onDroppedNote, dock }) {
           backup.py build_chat_edit_parameters; /api/edit reads none), so an edit has no
           such switch to flip -- real capability wins (owner ruling 2026-08-16). */}
       <div className="mgdock-slab" style={{ animationDelay: "120ms" }}>
-        <div className="mgdock-lbl">QUALITY</div>
+        <div className="mgdock-lbl">Quality</div>
         {caps.qualities.length > 0 ? (
           <div className="mgdock-segs">
             {caps.qualities.map((q) => (
@@ -404,7 +405,7 @@ export function SourceSlab({ s, setS, sub, onSub, droppedNote, onDroppedNote }) 
 
   return (
     <div className="mgdock-slab" style={{ animationDelay: "0ms" }}>
-      <div className="mgdock-lbl">SOURCE</div>
+      <div className="mgdock-lbl">Source</div>
       <div className="mgdock-subtabs" role="tablist">
         {/* Edit / Enhance. The old box-coordinate 'Fixer' sub-tab was removed (owner, 2026-08-18):
             it had been broken a while and the panelplugin Handfix/Face-Enhance presets on Enhance
@@ -447,7 +448,7 @@ export function ResultLines({ lines }) {
     <div className="gd-results">
       {lines.map((r) => (
         <div key={r.id} className={"gd-res " + r.kind}>
-          {r.kind === "run" ? "⏳ " : r.kind === "ok" ? "✔ " : "✕ "}{r.text}
+          {r.kind === "run" ? <><Icon name="hourglass" /> </> : r.kind === "ok" ? "✔ " : "✕ "}{r.text}
           {r.media && r.media.map((mid) => (
             <a key={mid} href={"/full/" + mid} target="_blank" rel="noreferrer">
               <img src={"/thumbs/" + mid + ".jpg"} alt="" />

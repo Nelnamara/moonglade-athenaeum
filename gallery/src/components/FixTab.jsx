@@ -281,7 +281,7 @@ export default function FixTab({ visible, dock, source }) {
       {inDock && dock.goEl ? createPortal(<>{costLine}{goButton}</>, dock.goEl) : null}
       {inDock && dock.resultsEl ? createPortal(results, dock.resultsEl) : null}
       {/* DC 1471 + 2931: editSlabLabel = 'REGION' under the Fixer sub-tab */}
-      <div className="mgdock-lbl">REGION</div>
+      <div className="mgdock-lbl">Region</div>
       {/* DC 1500-1507, verbatim: flex column gap 8 -> instruction copy (1501, 10.5px/1.5
           subtext, always visible) · Face / Hand segmented track (1502-1505: the same
           container + segStyle as the sub-tab strip; the pick is `tag`, DC fixKind, default
