@@ -52,7 +52,7 @@ export default function CollectionsPanel({ anchor, active, names, onPick, onMana
   return (
     <div className="mgl-menu mgcu-panel" style={style} role="dialog" aria-label="Collections">
       <div className="mgcu-panel-hd">
-        <span className="mgcu-panel-cap">COLLECTIONS</span>
+        <span className="mgcu-panel-cap">Collections</span>
         <button type="button" className="mgcu-panel-manage" onClick={onManage}>Manage</button>
       </div>
       <div className="mgcu-panel-scroll">

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import { recipesApi } from "./recipesApi.js";
 
 /* "Save to a recipe set" (K decision 7, K §F). A tick applies at once -- there is no Save
@@ -26,7 +27,7 @@ const RECIPE_API = {
 
 export default function RecipeSetsMenu({
   recipeId, title, rect, onClose, onChanged, sheet,
-  api = RECIPE_API, variant = "sets", heading = "SAVE TO A RECIPE SET", local = null, tag = "",
+  api = RECIPE_API, variant = "sets", heading = "Save to a recipe set", local = null, tag = "",
   readOnly = "", footLink = null, canCreate = true,
 }) {
   const keep = variant === "keep";
@@ -122,7 +123,7 @@ export default function RecipeSetsMenu({
         <>
           <button type="button" className={"rcp-sets-row" + (local.on ? " on" : "")} aria-pressed={!!local.on}
             onClick={local.onToggle}>
-            <span className="rcp-keep-box" aria-hidden="true">{local.on ? "☑" : "☐"}</span>
+            <span className="rcp-keep-box" aria-hidden="true"><Icon name={local.on ? "checkbox-on" : "checkbox-off"} /></span>
             <span className="rcp-sets-name">{local.label}</span>
             <span className="rcp-mono rcp-keep-tag">{local.tag}</span>
           </button>
@@ -135,7 +136,7 @@ export default function RecipeSetsMenu({
         <button key={s.id} type="button" className={"rcp-sets-row" + (s.contains ? " on" : "")}
           onClick={() => toggle(s)} disabled={!!readOnly || busy === s.id} title={readOnly || undefined}
           aria-pressed={!!s.contains}>
-          <span className="rcp-keep-box" aria-hidden="true">{s.contains ? "☑" : "☐"}</span>
+          <span className="rcp-keep-box" aria-hidden="true"><Icon name={s.contains ? "checkbox-on" : "checkbox-off"} /></span>
           <span className="rcp-sets-name">{s.title}</span>
           <span className="rcp-mono rcp-keep-tag">{tag}</span>
         </button>

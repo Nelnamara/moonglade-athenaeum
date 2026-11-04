@@ -119,7 +119,7 @@ test("1. the model picker's uses count wears the drawn icon, not the Similar dia
 });
 
 test("2. My Art's USER LORA badge wears the palette", () => {
-  assert.match(myArt, /<Icon name="lora" \/>USER LORA/);
+  assert.match(myArt, /<Icon name="lora" \/>User LoRA/);
   assert.doesNotMatch(myArt, /◈/);
 });
 
@@ -207,7 +207,7 @@ test("G9: the membership gate is a crown, in PixAI purple that no skin retints",
 });
 
 test("G10: the Arena note wears crossed swords", () => {
-  assert.match(publish, /className="mgpub-cttrack">⚔ counts toward The Arena/);
+  assert.match(publish, /className="mgpub-cttrack"><Icon name="swords" \/> counts toward The Arena/);
   assert.doesNotMatch(publish, /★ counts toward/);
 });
 

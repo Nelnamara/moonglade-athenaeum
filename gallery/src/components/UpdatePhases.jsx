@@ -22,9 +22,9 @@ import React from "react";
    keeps the tool's VERBATIM words (git's or pip's), which is the thing that actually tells
    you the fix. */
 export const UPD_PHASE_HINT = {
-  offline: "nothing was touched",
-  busy: "nothing was touched — try again in a moment",
-  failed: "nothing was touched",
+  offline: "Nothing was touched",
+  busy: "Nothing was touched — try again in a moment",
+  failed: "Nothing was touched",
 };
 
 /* The plain account of what "Update now" will do to a server you are using -- shown before
@@ -35,10 +35,12 @@ export const UPDATE_WHAT = [
   "The server restarts. This tab reloads itself when it is back.",
 ];
 
+const REFUSAL_LABEL = { offline: "Offline", busy: "Busy", failed: "Failed" };
+
 export function UpdateRefusal({ refusal }) {
   return (
     <div className={"mgcp-updrefusal " + refusal.kind}>
-      <span className="mgcp-updrefusal-kind">{refusal.kind}</span>
+      <span className="mgcp-updrefusal-kind">{REFUSAL_LABEL[refusal.kind] || refusal.kind}</span>
       <span className="mgcp-updrefusal-line">{refusal.line}</span>
       <span className="mgcp-updrefusal-note">{UPD_PHASE_HINT[refusal.kind]}</span>
     </div>
@@ -70,8 +72,8 @@ export default function UpdatePhases({ steps, phase }) {
         <i style={{ width: [8, 38, 72, 100][doneCount] + "%" }} />
       </div>
       <div className="mgcp-updhold">
-        {phase === "done" ? "done · reloading into the new version"
-          : "do not close · resumes on its own"}
+        {phase === "done" ? "Done · reloading into the new version"
+          : "Do not close · resumes on its own"}
       </div>
     </>
   );

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import Icon from "../icons/Icons.jsx";
 import { requestPrice } from "../gen/priceRequest.js";
 import useAccountPrefs from "../hooks/useAccountPrefs.js";
 import { recipeMeta, recipesApi } from "./recipesApi.js";
@@ -244,7 +245,7 @@ export default function RecipesOverlay({ open, onClose, closing }) {
                 <div className="rcp-tabs">
                   {TABS.map(([k, label]) => (
                     <button key={k} type="button" className={"rcp-tab" + (tab === k ? " on" : "")} onClick={() => setTab(k)}>
-                      {size === "compact" ? label.toUpperCase() : label}
+                      {label}
                     </button>
                   ))}
                   <span className="rcp-flex" />
@@ -310,14 +311,14 @@ function SortPop({ sort, onPick, right }) {
 function FiltersPop({ cats, models, category, modelType, onCategory, onModel }) {
   return (
     <div className="rcp-pop rcp-filters" onClick={(e) => e.stopPropagation()}>
-      <div className="rcp-kicker">CATEGORY</div>
+      <div className="rcp-kicker">Category</div>
       <div className="rcp-chipset">
         <button type="button" className={"rcp-pchip" + (!category ? " on" : "")} onClick={() => onCategory("")}>All</button>
         {cats.map((c) => (
           <button key={c} type="button" className={"rcp-pchip" + (category === c ? " on" : "")} onClick={() => onCategory(c)}>{categoryLabel(c)}</button>
         ))}
       </div>
-      <div className="rcp-kicker">MODEL</div>
+      <div className="rcp-kicker">Model</div>
       <div className="rcp-chipset">
         <button type="button" className={"rcp-pchip" + (!modelType ? " on" : "")} onClick={() => onModel("")}>All</button>
         {models.map((m) => (
@@ -413,7 +414,7 @@ function Card({ c, sel, misfit, inDock, onSelect, onMenu, saved, hoverIn, hoverO
       <span className="rcp-badges">
         {c.category && <span className="rcp-badge rcp-badge-strong">{categoryLabel(c.category)}</span>}
         <span className="rcp-badge">↗ {compact(c.uses)}</span>
-        {c.followers_only && <span className="rcp-badge rcp-badge-mauve">🔒 Followers</span>}
+        {c.followers_only && <span className="rcp-badge rcp-badge-mauve"><Icon name="lock" /> Followers</span>}
       </span>
       <button type="button" className={"rcp-save" + (saved ? " on" : "")} onClick={(e) => onMenu(e, c)}
         aria-label={saved ? "In a recipe set" : "Save to a recipe set"} title="Save to a recipe set">{saved ? "✓" : "⊕"}</button>
@@ -421,7 +422,7 @@ function Card({ c, sel, misfit, inDock, onSelect, onMenu, saved, hoverIn, hoverO
       {misfit && <span className="rcp-misfit-tag rcp-misfit-mid">{misfit.tag}</span>}
       <span className="rcp-card-foot">
         <span className="rcp-card-title">{c.title}</span>
-        <span className="rcp-card-by"><span>{authorName(c)}</span><span>♡ {compact(c.likes)}</span></span>
+        <span className="rcp-card-by"><span>{authorName(c)}</span><span><Icon name="heart" /> {compact(c.likes)}</span></span>
       </span>
     </div>
   );
@@ -445,8 +446,8 @@ function Pane({ size, card, ctx, fitOf, inDock, onToggle, onPage, onMenu, inSet,
         <span className="rcp-pane-sq"><Art src={card.cover} alt={card.title} /></span>
         <div className="rcp-pane-title">{card.title}</div>
         <div className="rcp-pane-by">{authorName(card)}</div>
-        <div className="rcp-pane-kv first"><span>CATEGORY</span><b>{categoryLabel(card.category) || "—"}</b></div>
-        <div className="rcp-pane-kv"><span>MODEL</span><b>{card.model_title || modelTypeLabel(card.model_type) || "—"}</b></div>
+        <div className="rcp-pane-kv first"><span>Category</span><b>{categoryLabel(card.category) || "—"}</b></div>
+        <div className="rcp-pane-kv"><span>Model</span><b>{card.model_title || modelTypeLabel(card.model_type) || "—"}</b></div>
         <div className="rcp-pane-len">Adds to the prompt: <span className="rcp-mono">{promptAddLine(card, ctx)}</span></div>
         {mf && <div className="rcp-peach rcp-pane-why">{mf.why}. <span className="rcp-lav">{mf.fix}</span></div>}
         {note && !mf && <div className="rcp-peach rcp-pane-why">{note}</div>}
@@ -464,8 +465,8 @@ function Pane({ size, card, ctx, fitOf, inDock, onToggle, onPage, onMenu, inSet,
       </span>
       <div className="rcp-pane-title">{card.title}</div>
       <div className="rcp-pane-by">{authorName(card)} · {categoryLabel(card.category) || "—"} · {card.model_title || modelTypeLabel(card.model_type)}</div>
-      <div className="rcp-pane-stats rcp-mono"><span>♡ {compact(card.likes)}</span><span>↗ {compact(card.uses)}</span><span>▦ {compact(card.artworks)}</span></div>
-      <div className="rcp-kicker">WHAT IT ADDS</div>
+      <div className="rcp-pane-stats rcp-mono"><span><Icon name="heart" /> {compact(card.likes)}</span><span>↗ {compact(card.uses)}</span><span>▦ {compact(card.artworks)}</span></div>
+      <div className="rcp-kicker">What it adds</div>
       <div className="rcp-kinds">{(card.kinds || []).map((k) => <span key={k.type} className="rcp-kind">{kindLabel(k)}</span>)}</div>
       <div className="rcp-pane-fine">Kinds only; a published recipe never shows its prompt text.</div>
       {mf && (
@@ -515,7 +516,7 @@ function RecipePage({ id, fitOf, inDock, onBack, onToggle, note, onMenu, inSet }
           <button type="button" className="rcp-back" onClick={onBack}>‹ Market</button>
           <div className="rcp-page-title">{card.title}</div>
           <button type="button" className="rcp-ghost-sm" onClick={(e) => onMenu(e, card)}>{saved ? "✓ In a set" : "⊕ Save to…"}</button>
-          <span className="rcp-ghost-sm rcp-static">♡ {fmt(card.likes)}</span>
+          <span className="rcp-ghost-sm rcp-static"><Icon name="heart" /> {fmt(card.likes)}</span>
         </div>
         <div className="rcp-page-meta">
           {authorName(card)} · {categoryLabel(card.category) || "—"} · {card.model_title || modelTypeLabel(card.model_type)}
@@ -530,7 +531,7 @@ function RecipePage({ id, fitOf, inDock, onBack, onToggle, note, onMenu, inSet }
           </span>
         </div>
         {card.description ? <div className="rcp-page-desc">{card.description}</div> : null}
-        <div className="rcp-kicker">MADE WITH IT</div>
+        <div className="rcp-kicker">Made with it</div>
         <div className="rcp-made">
           {art === null ? <span className="rcp-muted">Reading…</span>
             : art.length ? art.map((a) => (
@@ -540,7 +541,7 @@ function RecipePage({ id, fitOf, inDock, onBack, onToggle, note, onMenu, inSet }
       </div>
       <aside className="rcp-use">
         <div className="rcp-use-title">Use this recipe</div>
-        <div className="rcp-kicker">RECIPE DETAILS</div>
+        <div className="rcp-kicker">Recipe details</div>
         <div className="rcp-kinds">{(card.kinds || []).map((k) => <span key={k.type} className="rcp-kind">{kindLabel(k)}</span>)}</div>
         <div className="rcp-use-note">Adds to the dock's current request. The price and any refusal show on the dock's Generate button, not here.</div>
         {mf && <div className="rcp-peach rcp-pane-why">{mf.why}. <span className="rcp-lav">{mf.fix}</span></div>}
@@ -598,7 +599,7 @@ function MineTab({ prefs, onOpenPage }) {
     <div className="rcp-scroll rcp-mine">
       {drafts.length > 0 && (
         <>
-          <div className="rcp-kicker">UNFINISHED · {drafts.length}</div>
+          <div className="rcp-kicker">Unfinished · {drafts.length}</div>
           {drafts.map((d) => (
             <div key={d.id} className="rcp-shelf">
               <span className="rcp-shelf-thumb"><Art src={(d.showcase && d.showcase[0] && (d.showcase[0].thumb || "")) || ""} /></span>
@@ -624,7 +625,7 @@ function MineTab({ prefs, onOpenPage }) {
         </>
       )}
       <div className="rcp-mine-head">
-        <span className="rcp-kicker">YOUR RECIPES · {rows ? list.length : "…"}</span>
+        <span className="rcp-kicker">Your recipes · {rows ? list.length : "…"}</span>
         <select className="rcp-minesort" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort your recipes">
           <option value="latest">Newest</option><option value="oldest">Oldest</option>
           <option value="most-liked">Most liked</option><option value="most-used">Most used</option>

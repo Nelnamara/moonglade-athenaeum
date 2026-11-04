@@ -207,15 +207,15 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                 <div className="mgdr-hero-stats">
                   <div className="mgdr-hero-stat">
                     <b>{pendingCount}</b>
-                    <span>group{pendingCount !== 1 ? "s" : ""}{groups.length !== pendingCount ? " of " + groups.length : ""}</span>
+                    <span>Group{pendingCount !== 1 ? "s" : ""}{groups.length !== pendingCount ? " of " + groups.length : ""}</span>
                   </div>
                   <div className="mgdr-hero-stat">
                     <b>{groups.reduce((n, g) => n + (g.members || []).length, 0)}</b>
-                    <span>images involved</span>
+                    <span>Images involved</span>
                   </div>
                   <div className="mgdr-hero-stat">
                     <b>{fmtBytes(pendingReclaimable)}</b>
-                    <span>reclaimable</span>
+                    <span>Reclaimable</span>
                   </div>
                 </div>
               </div>
@@ -238,7 +238,7 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                     ? "Quarantine every pending group's current keep/remove selection in one go"
                     : "No pending group has a keeper selected"}
                   onClick={() => setAutoConfirmOpen(true)}>
-                  ⚡ Auto-resolve all{autoGroupCount ? " (" + autoGroupCount + ")" : ""}
+                  <Icon name="bolt" /> Auto-resolve all{autoGroupCount ? " (" + autoGroupCount + ")" : ""}
                 </button>
               </div>
 
@@ -251,7 +251,7 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
 
               {autoConfirmOpen && (
                 <div className="mgdr-autoconfirm" role="alertdialog" aria-label="Confirm auto-resolve all">
-                  <div className="mgdr-autoconfirm-head">⚠ Auto-resolve all pending groups?</div>
+                  <div className="mgdr-autoconfirm-head"><Icon name="warning" /> Auto-resolve all pending groups?</div>
                   <p className="mgdr-autoconfirm-body">
                     This will quarantine <b>{autoFileCount}</b> file{autoFileCount !== 1 ? "s" : ""} across{" "}
                     <b>{autoGroupCount}</b> group{autoGroupCount !== 1 ? "s" : ""} — moved to{" "}
@@ -264,7 +264,7 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                     {/* #66: warn, don't block -- an only copy goes with the rest, named here. */}
                     {autoOnlyCopyCount > 0 && <> {onlyCopyNote(autoOnlyCopyCount, autoFileCount, "duplicates")}</>}
                   </p>
-                  {autoError && <div className="mgdr-grouperr">⚠ {autoError}</div>}
+                  {autoError && <div className="mgdr-grouperr"><Icon name="warning" /> {autoError}</div>}
                   <div className="mgdr-autoconfirm-actions">
                     <button type="button" className="mgdr-autocancel" disabled={autoBusy}
                       onClick={() => { setAutoConfirmOpen(false); setAutoError(""); }}>
@@ -310,7 +310,7 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                                 {!resolved && isSuggested ? <span className="mgdr-ribbon">★ suggested keep</span> : null}
                                 {resolved ? (
                                   isKeeper
-                                    ? <span className="mgdr-keeper">KEPT</span>
+                                    ? <span className="mgdr-keeper">Kept</span>
                                     // Per-tile, not per-group: a partial Undo can restore
                                     // some members of a resolved group while others stay
                                     // quarantined (a failed backend restore, e.g. the
@@ -320,8 +320,8 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                                     // trusting the group-level `resolved` flag alone is
                                     // what keeps this label honest after a mixed result.
                                     : resolved.quarantined.some((q) => q.original_path === m.path)
-                                      ? <span className="mgdr-quarantined">QUARANTINED</span>
-                                      : <span className="mgdr-restored">RESTORED</span>
+                                      ? <span className="mgdr-quarantined">Quarantined</span>
+                                      : <span className="mgdr-restored">Restored</span>
                                 ) : (
                                   <button type="button"
                                     className={"mgdr-toggle" + (isKeeper ? " on" : "")}
@@ -349,7 +349,7 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                         }); })()}
                       </div>
 
-                      {groupErr && <div className="mgdr-grouperr">⚠ {groupErr}</div>}
+                      {groupErr && <div className="mgdr-grouperr"><Icon name="warning" /> {groupErr}</div>}
 
                       <div className="mgdr-groupfoot">
                         {resolved ? (

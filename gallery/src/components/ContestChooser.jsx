@@ -1,4 +1,5 @@
 import React from "react";
+import Icon from "../icons/Icons.jsx";
 import { fmt, countdown, dayOf } from "../hooks/useContests.js";
 import "../styles/myart-contests.css";
 
@@ -20,7 +21,8 @@ export default function ContestChooser({ contests, onPick, empty }) {
       {rows.map((c) => {
         const left = countdown(c.end_at);
         const ends = dayOf(c.end_at).slice(5) || "—";
-        const prize = c.prize_amount > 0 ? " · ♦ " + fmt(c.prize_amount) + " CR" : "";
+        const prize = c.prize_amount > 0
+          ? <> · <Icon name="coin" /> {fmt(c.prize_amount) + " CR"}</> : null;
         return (
           <button type="button" className="mgctch-row" key={c.id} onClick={() => onPick(c)}>
             {c.cover_url

@@ -26,6 +26,14 @@ import { openBrokenFiles } from "../lib/brokenFilesNav.js";
 import { reviewLabel } from "../lib/brokenFilesCore.js";
 import { trashOnlyCopyNote } from "../lib/onlyCopy.js";
 
+/* A status line that is an error carries a flag, not a glyph: errLine(text) makes one, and
+   <MsgLine> draws the warning icon where it renders. Plain strings stay plain lines. */
+const errLine = (text) => ({ err: true, text: String(text) });
+const lineIsErr = (m) => !!(m && typeof m === "object" && m.err);
+function MsgLine({ m }) {
+  return lineIsErr(m) ? <><Icon name="warning" /> {m.text}</> : <>{m}</>;
+}
+
 /* Control Panel -- design spec: Control Panel.dc.html. Ported as a MODAL, per the owner's
    live 2026-08-02 correction ("Control panel is now ALSO modal. no separate pages anymore")
    -- the DC file itself still says "the Panel is a page in the suite, not a floating
@@ -158,7 +166,7 @@ function MirrorTile() {
     setBusy(true); setMsg("");
     const d = await apiPost("/api/mirror/enable", { enabled: want });
     setBusy(false);
-    if (d && d.error) { setMsg("⚠ " + d.error); return; }
+    if (d && d.error) { setMsg(errLine(d.error)); return; }
     await refresh();                        // reflect the real persisted flag
   };
   const connect = async () => {
@@ -166,7 +174,7 @@ function MirrorTile() {
     setBusy(true); setMsg("Reading this machine's browser session…");
     const d = await apiPost("/api/mirror/connect", {});
     setBusy(false);
-    if (!d || !d.ok) { setMsg("⚠ " + ((d && d.error) || "couldn't connect")); return; }
+    if (!d || !d.ok) { setMsg(errLine((d && d.error) || "couldn't connect")); return; }
     setMsg("Connected.");
     await refresh();                        // re-read real status (enabled + connected + days)
   };
@@ -217,7 +225,7 @@ function MirrorTile() {
               <circle cx="31" cy="31" r="26" className="mgbr-ring-fg"
                 strokeDasharray="163.4" strokeDashoffset={ringOffset} />
             </svg>
-            <div className="mgbr-ring-c"><div className="mgbr-days">{days}</div><div className="mgbr-dayslbl">days</div></div>
+            <div className="mgbr-ring-c"><div className="mgbr-days">{days}</div><div className="mgbr-dayslbl">Days</div></div>
           </div>
           <div className="mgbr-session">
             <div className="mgbr-session-lbl">Web session</div>
@@ -230,7 +238,7 @@ function MirrorTile() {
             onClick={connect} disabled={busy}>↻ {connectLabel}</button>
           <div className="mgbr-jwtnote">re-reads the browser JWT</div>
         </div>
-        {msg && <div className={"mgbr-msg" + (msg[0] === "⚠" ? " err" : "")}>{msg}</div>}
+        {msg && <div className={"mgbr-msg" + (lineIsErr(msg) ? " err" : "")}><MsgLine m={msg} /></div>}
       </div>
 
       <div className="mgbr-unlocks">
@@ -334,7 +342,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
     setLibBusy(false);
     if (d.needs_create) { setLibNeedsCreate(d.path); return; }
     setLibNeedsCreate(null);
-    if (d.error) { setLibMsg("⚠ " + d.error); return; }
+    if (d.error) { setLibMsg(errLine(d.error)); return; }
     setLibMsg("✓ Saved — takes effect on the next server restart.");
     setLibInfo((prev) => ({ ...prev, stored: libInput.trim() }));
   };
@@ -545,8 +553,8 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                 <div className="mgcp-sidekick">The library</div>
                 <div className="mgcp-sidehead">At a glance</div>
                 {[
-                  ["images", summary.stats.images], ["videos", summary.stats.videos],
-                  ["collections", summary.stats.collections],
+                  ["Images", summary.stats.images], ["Videos", summary.stats.videos],
+                  ["Collections", summary.stats.collections],
                 ].map(([label, num]) => (
                   <div className="mgcp-vital" key={label}>
                     <b>{typeof num === "number" ? num.toLocaleString() : num}</b><span>{label}</span>
@@ -556,7 +564,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                     drift §37); null split -> an honest "unknown", never a fake zero. And
                     free cards is its own vital (owner priority: cards first). */}
                 <div className="mgcp-vital">
-                  <b>{credits}</b><span>credits</span>
+                  <b>{credits}</b><span>Credits</span>
                   <div className="mgcp-vitalsub">
                     {account && account.credits_paid != null && account.credits_free != null
                       ? Number(account.credits_paid).toLocaleString() + " paid · " + Number(account.credits_free).toLocaleString() + " free"
@@ -564,7 +572,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                   </div>
                 </div>
                 <div className="mgcp-vital">
-                  <b>{cards != null ? cards.toLocaleString() : "—"}</b><span>free cards</span>
+                  <b>{cards != null ? cards.toLocaleString() : "—"}</b><span>Free cards</span>
                 </div>
               </div>
 
@@ -584,7 +592,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                 <div className="mgcp-sidekick">Server</div>
                 <div className="mgcp-srvrow">
                   <span className={"mgcp-svtag" + (summary.supervised ? "" : " off")}>
-                    {summary.supervised ? "supervised" : "unsupervised"}
+                    {summary.supervised ? "Supervised" : "Unsupervised"}
                   </span>
                   <button type="button" className="mgcp-chip" onClick={() => clickPower("restart")}
                     disabled={!summary.supervised} title={summary.supervised ? "" : "Restart needs the managed launcher"}>
@@ -666,7 +674,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                         {jobResult && (
                           <div className={"mgcp-runresult" + (jobResult.ok ? "" : " warn")}>
                             <div className="mgcp-runresulthead">
-                              {jobResult.ok ? "✓ Finished" : "⚠ Finished with " + jobResult.warnCount + " warning" + (jobResult.warnCount !== 1 ? "s" : "")}
+                              {jobResult.ok ? "✓ Finished" : <><Icon name="warning" /> {"Finished with " + jobResult.warnCount + " warning" + (jobResult.warnCount !== 1 ? "s" : "")}</>}
                               <button type="button" className="mgcp-run" onClick={() => setJobResult(null)}>dismiss</button>
                             </div>
                             {jobResult.lines.length > 0 && (
@@ -721,7 +729,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                                           <select className="mgcp-standing-sel" value={row.interval_s || c.default_interval_s}
                                             onChange={async (e) => {
                                               const d = await saveLivingJob(c.action, { interval_s: Number(e.target.value) });
-                                              setSchedMsg(d.error ? "⚠ " + d.error : "");
+                                              setSchedMsg(d.error ? errLine(d.error) : "");
                                             }}>
                                             {cadences.map(([v, lbl]) => <option key={v} value={v}>{lbl}</option>)}
                                           </select>
@@ -735,7 +743,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                                       <button type="button" className={"mgcp-standing-toggle" + (row.enabled ? " on" : "")}
                                         onClick={async () => {
                                           const d = await saveLivingJob(c.action, { enabled: !row.enabled });
-                                          setSchedMsg(d.error ? "⚠ " + d.error : "");
+                                          setSchedMsg(d.error ? errLine(d.error) : "");
                                         }}>{row.enabled ? "on" : "off"}</button>
                                     ) : (
                                       <b className={row.enabled ? "ok" : ""}>{row.enabled ? "on" : "off"}</b>
@@ -901,7 +909,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                           <div className="mgcp-ledger">
                             {schedule && (
                               <div className="mgcp-standing">
-                                <b className="mgcp-standing-lab">⏱ Standing order</b>
+                                <b className="mgcp-standing-lab"><Icon name="timer" /> Standing order</b>
                                 <span className="mgcp-standing-body">
                                   run <b>{(summary.all_actions || summary.actions || []).find((a) => a.action === schedule.action)?.label || schedule.action}</b>
                                   {" every "}
@@ -909,7 +917,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                                     <select className="mgcp-standing-sel" value={schedule.interval_hours || 6}
                                       onChange={async (e) => {
                                         const d = await saveSchedule({ interval_hours: Number(e.target.value) });
-                                        setSchedMsg(d.error ? "⚠ " + d.error : "");
+                                        setSchedMsg(d.error ? errLine(d.error) : "");
                                       }}>
                                       {[1, 3, 6, 12, 24].map((h) => <option key={h} value={h}>{h} hour{h > 1 ? "s" : ""}</option>)}
                                     </select>
@@ -921,7 +929,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                                     <button type="button" className={"mgcp-standing-toggle" + (schedule.enabled ? " on" : "")}
                                       onClick={async () => {
                                         const d = await saveSchedule({ enabled: !schedule.enabled });
-                                        setSchedMsg(d.error ? "⚠ " + d.error : "");
+                                        setSchedMsg(d.error ? errLine(d.error) : "");
                                       }}>{schedule.enabled ? "on" : "off"}</button>
                                   ) : (
                                     <b className={schedule.enabled ? "ok" : ""}>{schedule.enabled ? "on" : "off"}</b>
@@ -939,7 +947,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                                 </span>
                               </div>
                             )}
-                            {schedMsg && <div className="mgcp-tilenote">{schedMsg}</div>}
+                            {schedMsg && <div className="mgcp-tilenote"><MsgLine m={schedMsg} /></div>}
                             {panelHistory.length === 0 && (
                               <div className="mgcp-ledger-empty">
                                 No maintenance runs recorded yet — jobs land here as they finish.
@@ -980,7 +988,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                         )}
                         {!isLocal && (
                           <div className="mgcp-footnote">
-                            <span>🔒 destructive stages: serving machine only</span>
+                            <span><Icon name="lock" /> destructive stages: serving machine only</span>
                           </div>
                         )}
                       </>
@@ -1027,14 +1035,14 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                         <input className="mgcp-taskinput" value={taskId} placeholder="task or media id…"
                           onChange={(e) => setTaskId(e.target.value)}
                           onKeyDown={(e) => { if (e.key === "Enter") importTask(); }} />
-                        <button type="button" className="mgcp-chip" onClick={importTask}>⬇ Import</button>
+                        <button type="button" className="mgcp-chip" onClick={importTask}><Icon name="download" /> Import</button>
                       </div>
                       <div className={"mgcp-tilenote" + (taskState === "running" ? " busy" : taskState?.done ? " ok" : "")}>
                         {taskState === "running" ? "⟳ resolving the task on PixAI…"
                           : taskState?.done ? (taskState.already
                             ? "✓ already in your library — nothing new to fetch"
                             : "✓ imported — " + taskState.saved + " added to the catalog")
-                          : taskState?.error ? "⚠ " + taskState.error
+                          : taskState?.error ? <><Icon name="warning" /> {taskState.error}</>
                           : "spends nothing — edits and Favorites strays Sync misses"}
                       </div>
                     </div>
@@ -1069,9 +1077,9 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                     <div className="mgcp-tile mgcp-tile3">
                       <div className="mgcp-mkick">Catalog &amp; files</div>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-                        <a className="mgcp-smallchip" href="/export-csv" style={{ textDecoration: "none" }}>⬇ Download catalog (CSV)</a>
+                        <a className="mgcp-smallchip" href="/export-csv" style={{ textDecoration: "none" }}><Icon name="download" /> Download catalog (CSV)</a>
                         <a className="mgcp-smallchip" href="/export-curation" style={{ textDecoration: "none" }}
-                          title="Ratings, collections and their order, smart collections, tags, marks and notes, as one file. It goes back in with --import-curation.">⬇ Download curation (JSON)</a>
+                          title="Ratings, collections and their order, smart collections, tags, marks and notes, as one file. It goes back in with --import-curation."><Icon name="download" /> Download curation (JSON)</a>
                         {isLocal && (
                           <button type="button" className="mgcp-smallchip" onClick={openLibPicker}>library folder…</button>
                         )}
@@ -1081,7 +1089,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                           <input value={libInput} onChange={(e) => { setLibInput(e.target.value); setLibNeedsCreate(null); setLibMsg(""); }}
                             placeholder={libInfo?.default || "absolute path"} disabled={libBusy}
                             style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, background: "var(--base)",
-                              border: "1px solid var(--surface1)", borderRadius: 6, color: "var(--text)", padding: "5px 8px" }} />
+                              border: "1px solid var(--surface1)", borderRadius: "var(--radius-control)", color: "var(--text)", padding: "5px 8px" }} />
                           <div style={{ display: "flex", gap: 6 }}>
                             <button type="button" className="mgcp-smallchip" disabled={libBusy}
                               onClick={() => saveLibPath(!!libNeedsCreate)}>
@@ -1090,7 +1098,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                             <button type="button" className="mgcp-smallchip" onClick={() => setLibOpen(false)}>Cancel</button>
                           </div>
                           {libNeedsCreate && <div style={{ fontSize: 10.5, color: "var(--peach)" }}>Doesn't exist yet — Create + Save makes it.</div>}
-                          {libMsg && <div style={{ fontSize: 10.5, color: libMsg[0] === "⚠" ? "var(--red)" : "var(--emerald)" }}>{libMsg}</div>}
+                          {libMsg && <div style={{ fontSize: 10.5, color: lineIsErr(libMsg) ? "var(--red)" : "var(--emerald)" }}><MsgLine m={libMsg} /></div>}
                         </div>
                       ) : (
                         isLocal && <div className="mgcp-ver" style={{ marginTop: "auto" }}>{summary.out_dir}</div>
@@ -1176,7 +1184,7 @@ function BrandingPointerTile({ state, onOpen }) {
 
 function tabStyle(on) {
   return {
-    fontSize: 13.5, padding: "8px 18px", borderRadius: 999, cursor: "pointer",
+    fontSize: 13.5, padding: "8px 18px", borderRadius: "var(--radius-control)", cursor: "pointer",
     color: on ? "var(--text)" : "var(--subtext)",
     border: "1px solid " + (on ? "var(--surface1)" : "transparent"),
     background: on ? "var(--surface0)" : "transparent",
@@ -1275,7 +1283,7 @@ export function MarkArt({ mark }) {
    Nothing here is a new capability: the mark row POSTs the same /api/branding the Branding
    tab's own picker does, and the skins come from the same roster with the same earned
    flags. What is gated stays gated, in the SAME masking idiom the skin cards already use
-   -- 🔒 in gold, named on hover, not clickable, never hidden. Post-unlock this strip is
+   -- a gold lock icon, named on hover, not clickable, never hidden. Post-unlock this strip is
    replaced (not supplemented) by the "Branding & skins" pointer tile above, so the full
    tab is the one home for all of it. */
 function IdentityStrip({ summary, onSaved, skins, activeSkin, onPickSkin, achievements }) {
@@ -1304,14 +1312,14 @@ function IdentityStrip({ summary, onSaved, skins, activeSkin, onPickSkin, achiev
     setBusy(true); setErr("");
     const d = await apiPost("/api/branding", { mark: id });
     setBusy(false);
-    if (d.error) { setErr("⚠ " + d.error); return; }
+    if (d.error) { setErr(errLine(d.error)); return; }
     onSaved();
   };
   const pickSkinHere = async (sk) => {
     if (!sk.earned || busy) return;
     setErr("");
     const d = await onPickSkin(sk.id);
-    if (d && d.error) setErr("⚠ " + sk.name + ": " + d.error);
+    if (d && d.error) setErr(errLine(sk.name + ": " + d.error));
   };
 
   return (
@@ -1320,7 +1328,7 @@ function IdentityStrip({ summary, onSaved, skins, activeSkin, onPickSkin, achiev
       <div className="mgcp-idstrip">
         <div className="mgcp-idrows">
           <div className="mgcp-idrow">
-            <span className="mgcp-idlab">MARK</span>
+            <span className="mgcp-idlab">Mark</span>
             {marks.map((m) => (
               <button type="button" key={m.id} disabled={busy || m.earned === false}
                 className={"mgcp-idmark" + (m.id === curId ? " on" : "")
@@ -1334,32 +1342,32 @@ function IdentityStrip({ summary, onSaved, skins, activeSkin, onPickSkin, achiev
             ))}
             {!greatLibrary && !customMark && (
               <span className="mgcp-idmark locked"
-                title="A mark of your own — unlocks with The Great Library">🔒</span>
+                title="A mark of your own — unlocks with The Great Library"><Icon name="lock" /></span>
             )}
           </div>
           <div className="mgcp-idrow">
-            <span className="mgcp-idlab">SKIN</span>
+            <span className="mgcp-idlab">Skin</span>
             {skins.map((sk) => {
               return (
                 <button type="button" key={sk.id}
                   className={"mgcp-idskin" + (sk.id === activeSkin ? " on" : "") + (sk.earned ? "" : " locked")}
                   style={{ background: skinSwatchGrad(sk.id) }}
                   onClick={() => pickSkinHere(sk)}
-                  title={sk.earned ? sk.name : sk.name + " — 🔒 " + (sk.unlock || "locked")}>
-                  {!sk.earned && <span className="mgcp-idlock" aria-hidden="true">🔒</span>}
+                  title={sk.earned ? sk.name : sk.name + " — locked: " + (sk.unlock || "locked")}>
+                  {!sk.earned && <span className="mgcp-idlock" aria-hidden="true"><Icon name="lock" /></span>}
                 </button>
               );
             })}
           </div>
-          <div className="mgcp-idnote">🔒 more of both unlock with achievements — masked here, named on hover</div>
-          {err && <div className="mgcp-usererr">{err}</div>}
+          <div className="mgcp-idnote"><Icon name="lock" /> more of both unlock with achievements — masked here, named on hover</div>
+          {err && <div className="mgcp-usererr"><MsgLine m={err} /></div>}
         </div>
         {/* The pairing, judged together: this repaints on either row's click. */}
         <div className="mgcp-idsample">
           <span className="mgcp-idsample-chip" style={{ background: skinGrad }}>
             <MarkArt mark={cur} />
           </span>
-          <span className="mgcp-idsample-cap">live sample</span>
+          <span className="mgcp-idsample-cap">Live sample</span>
         </div>
       </div>
     </>
@@ -1392,13 +1400,13 @@ export function SkinsRow({ skins, active, onPick }) {
               <div className="mgcp-swrow">{sw.map((c, i) => <i key={i} style={{ background: c }} />)}</div>
               <div className="mgcp-skinname">{sk.name}{on ? " ✓" : ""}</div>
               <div className="mgcp-skindesc">{sk.desc}</div>
-              {!sk.earned && <div className="mgcp-skinlock">🔒 locked</div>}
+              {!sk.earned && <div className="mgcp-skinlock"><Icon name="lock" /> locked</div>}
               {!sk.earned && sk.unlock && <div className="mgcp-skinunlock">{sk.unlock}</div>}
             </div>
           );
         })}
       </div>
-      {err && <div className="mgcp-usererr" style={{ marginTop: 6 }}>⚠ {err}</div>}
+      {err && <div className="mgcp-usererr" style={{ marginTop: 6 }}><Icon name="warning" /> {err}</div>}
     </div>
   );
 }
@@ -1415,13 +1423,13 @@ export function SkinsRow({ skins, active, onPick }) {
 /* The three banner slots, in the DC's own pill order (Control Panel.dc.html:566-573,
    BANNER_IDX = [1, 2, 5]). spec strings verbatim from the SLOTS array. */
 const BANNER_SLOTS = [
-  { slot: "banner_main", icon: "🖼", name: "Banner — main", title: "Banner — main",
+  { slot: "banner_main", icon: "image", name: "Banner — main", title: "Banner — main",
     spec: "1920 × 480 · 4:1 · subject-left", ratio: "4 / 1",
     ph: "your banner art — cropped live, subject-left honored" },
-  { slot: "banner_login", icon: "🔐", name: "Banner — login", title: "Banner — login",
+  { slot: "banner_login", icon: "key", name: "Banner — login", title: "Banner — login",
     spec: "1920 × 480 · 4:1", ratio: "4 / 1",
     ph: "the login banner — same canvas, quieter mood" },
-  { slot: "banner_loom", icon: "🎬", name: "Banner — Loom", title: "Banner — Loom",
+  { slot: "banner_loom", icon: "film", name: "Banner — Loom", title: "Banner — Loom",
     spec: "1920 × 160 · 12:1 · workspace strip", ratio: "12 / 1",
     ph: "the Loom workspace banner — wide and low" },
 ];
@@ -1519,7 +1527,7 @@ function MarksSection({
                     : (m.label || m.id)}>
                   <MarkArt mark={m} />
                   {on && <span className="mgcp-markbig-check">✓</span>}
-                  {locked && <span className="mgcp-markbig-lock">🔒</span>}
+                  {locked && <span className="mgcp-markbig-lock"><Icon name="lock" /></span>}
                 </button>
               );
             })}
@@ -1530,12 +1538,12 @@ function MarksSection({
             {!greatLibrary && !customMark && (
               <button type="button" className="mgcp-markbig locked" disabled
                 title="The Great Library — unlocks a custom mark of your own">
-                🔒
+                <Icon name="lock" />
               </button>
             )}
             {greatLibrary && !customMark && (
               <label className="mgcp-markbig upload" title="Upload a custom mark">
-                ⬆
+                <Icon name="upload" />
                 <input type="file" accept="image/*" disabled={busy} style={{ display: "none" }}
                   onChange={(e) => { uploadCustomMark(e.target.files[0]); e.target.value = ""; }} />
               </label>
@@ -1614,7 +1622,7 @@ function MarksSection({
           </button>
         </>
       )}
-      {msg && <div className="mgcp-tilenote">{msg}</div>}
+      {msg && <div className="mgcp-tilenote"><MsgLine m={msg} /></div>}
     </div>
   );
 }
@@ -1680,7 +1688,7 @@ function SkinsSection({ skins, activeSkin, onPickSkin }) {
         <div className="mgcp-skinsample-row">
           <div className="mgcp-skinsample-mark" style={{ background: v.surface0, color: v.accent }}>✦</div>
           <div style={{ flex: "1 1 auto", minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: v.text }}>Nelnamara turns to camera</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: v.text }}>Nelnamara turns to camera</div>
             <div style={{ fontSize: 11, color: v.subtext }}>R2V · 5s · queued</div>
           </div>
         </div>
@@ -1734,7 +1742,7 @@ function BannerEditor({ summary, onSaved, achievements }) {
     apiGet("/api/branding/banners/earned").then((d) => setEarnedBanners(d.banners || []));
   }, [achievements]);
 
-  const refresh = async (d) => { if (d && d.error) { setMsg("⚠ " + d.error); } else { setMsg(""); onSaved(); } };
+  const refresh = async (d) => { if (d && d.error) { setMsg(errLine(d.error)); } else { setMsg(""); onSaved(); } };
   const upload = async (file) => {
     if (!file) return;
     setBusy(true); setMsg("");
@@ -1785,7 +1793,7 @@ function BannerEditor({ summary, onSaved, achievements }) {
           <button type="button" key={b.slot}
             className={"mgcp-bannerpill" + (i === slotIdx ? " on" : "")}
             onClick={() => setSlotIdx(i)}>
-            <span className="ic">{b.icon}</span>{b.name}
+            <span className="ic"><Icon name={b.icon} /></span>{b.name}
           </button>
         ))}
       </div>
@@ -1816,14 +1824,14 @@ function BannerEditor({ summary, onSaved, achievements }) {
       </div>
       <div className="mgcp-bannerchips">
         <label className="mgcp-chip mgcp-slotcard-uploadchip">
-          ⬆ From disk
+          <Icon name="upload" /> From disk
           <input type="file" accept="image/*" disabled={busy} style={{ display: "none" }}
             onChange={(e) => { upload(e.target.files[0]); e.target.value = ""; }} />
         </label>
         {/* Rendering IS opening for <GalleryPicker> (2026-08-08 React port of the
             <mg-gallery-picker> web component -- same conditional-render pattern). */}
         <button type="button" className="mgcp-chip" disabled={busy} onClick={() => setPicking(true)}>
-          🖼 From the gallery…
+          <Icon name="image" /> From the gallery…
         </button>
         <button type="button" className="mgcp-chip" disabled={!active || busy} onClick={resetCrop}>
           <Icon name="undo" /> Reset crop
@@ -1875,7 +1883,7 @@ function BannerEditor({ summary, onSaved, achievements }) {
           </div>
         </>
       )}
-      {msg && <div className="mgcp-tilenote">{msg}</div>}
+      {msg && <div className="mgcp-tilenote"><MsgLine m={msg} /></div>}
       {picking && <GalleryPicker defaultType="image"
         onPick={(m) => { setPicking(false); fromGallery(m.media_id); }}
         onClose={() => setPicking(false)} />}
@@ -1902,14 +1910,14 @@ export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPi
     setBusy(true); setMsg("");
     const d = await apiPost("/api/branding", { mark: id });
     setBusy(false);
-    if (d.error) { setMsg("⚠ " + d.error); return; }
+    if (d.error) { setMsg(errLine(d.error)); return; }
     onSaved();
   };
   const pickAnim = async (anim) => {
     setBusy(true); setMsg("");
     const d = await apiPost("/api/branding", { anim });
     setBusy(false);
-    if (d.error) { setMsg("⚠ " + d.error); return; }
+    if (d.error) { setMsg(errLine(d.error)); return; }
     onSaved();
   };
   // The animation tuning (speed/size/glow colour/glow direction). Same partial-patch
@@ -1920,14 +1928,14 @@ export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPi
     setBusy(true); setMsg("");
     const d = await apiPost("/api/branding", patch);
     setBusy(false);
-    if (d.error) { setMsg("⚠ " + d.error); return; }
+    if (d.error) { setMsg(errLine(d.error)); return; }
     onSaved();
   };
   const setShortcut = async () => {
     setBusy(true); setMsg("");
     const d = await apiPost("/api/branding/shortcut", {});
     setBusy(false);
-    setMsg(d.error ? "⚠ " + d.error : "✓ Desktop shortcut updated");
+    setMsg(d.error ? errLine(d.error) : "✓ Desktop shortcut updated");
   };
   const uploadCustomMark = async (file) => {
     if (!file) return;
@@ -1935,14 +1943,14 @@ export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPi
     const fd = new FormData(); fd.append("file", file);
     const d = await apiUpload("/api/branding/mark/custom", fd);
     setBusy(false);
-    if (d.error) { setMsg("⚠ " + d.error); return; }
+    if (d.error) { setMsg(errLine(d.error)); return; }
     onSaved();
   };
   const removeCustomMark = async (id) => {
     setBusy(true); setMsg("");
     const d = await apiPost("/api/branding/mark/custom/remove", { id });
     setBusy(false);
-    if (d.error) { setMsg("⚠ " + d.error); return; }
+    if (d.error) { setMsg(errLine(d.error)); return; }
     onSaved();
   };
 
@@ -2043,7 +2051,7 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
     if (username === summary.current_username) body.current_password = pwCurrent;
     const d = await apiPost("/api/users/password", body);
     setPwBusy(false);
-    setPwMsg(d.error ? "⚠ " + d.error : "✓ password changed");
+    setPwMsg(d.error ? errLine(d.error) : "✓ password changed");
     if (!d.error) { setPwNew(""); setPwCurrent(""); }
   };
 
@@ -2054,7 +2062,7 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
       username, new_password: resetNew, csrf: summary.csrf,
     });
     setResetBusy(false);
-    if (d.error) { setResetMsg("⚠ " + d.error); return; }
+    if (d.error) { setResetMsg(errLine(d.error)); return; }
     setResetMsg("✓ password reset");
     setResetNew("");
     setTimeout(() => { setResetTarget(null); setResetMsg(""); }, 1200);
@@ -2095,7 +2103,7 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
                     value={resetNew} onChange={(e) => setResetNew(e.target.value)} />
                   <button type="button" className="mgcp-chip" disabled={resetBusy}
                     onClick={() => resetOtherPassword(u.username)}>Reset…</button>
-                  {resetMsg && <span className={resetMsg[0] === "⚠" ? "mgcp-usererr" : "mgcp-usermsg"}>{resetMsg}</span>}
+                  {resetMsg && <span className={lineIsErr(resetMsg) ? "mgcp-usererr" : "mgcp-usermsg"}><MsgLine m={resetMsg} /></span>}
                 </div>
               )}
             </React.Fragment>
@@ -2109,7 +2117,7 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
               value={pwNew} onChange={(e) => setPwNew(e.target.value)} />
             <button type="button" className="mgcp-chip" onClick={() => changePassword(summary.current_username)} disabled={pwBusy}>Change…</button>
           </div>
-          {pwMsg && <div className={pwMsg[0] === "⚠" ? "mgcp-usererr" : "mgcp-usermsg"}>{pwMsg}</div>}
+          {pwMsg && <div className={lineIsErr(pwMsg) ? "mgcp-usererr" : "mgcp-usermsg"}><MsgLine m={pwMsg} /></div>}
           <div className="mgcp-mkick" style={{ marginTop: 14 }}>Add user</div>
           <div className="mgcp-userform">
             <input className="mgcp-userinput" placeholder="username" value={newUser} maxLength={64}
@@ -2183,7 +2191,7 @@ export function TrashSubOverlay({ isLocal, onClose }) {
     if (!sel.size) return;
     try {
       const d = await apiPost("/api/trash/restore", { media_ids: [...sel] });
-      if (d.error) { setMsg("⚠ " + d.error); return; }
+      if (d.error) { setMsg(errLine(d.error)); return; }
       setMsg((d.restored || []).length + " restored" + ((d.errors || []).length ? ", " + d.errors.length + " failed" : ""));
       setSel(new Set());
       load(page);
@@ -2195,7 +2203,7 @@ export function TrashSubOverlay({ isLocal, onClose }) {
     const body = all ? { confirm: true } : { media_ids: ids, confirm: true };
     try {
       const d = await apiPost(all ? "/api/trash/empty" : "/api/trash/delete-forever", body);
-      if (d.error) { setMsg("⚠ " + d.error); cancelConfirm(); return; }
+      if (d.error) { setMsg(errLine(d.error)); cancelConfirm(); return; }
       setMsg((d.deleted || 0) + " deleted forever");
       setSel(new Set()); cancelConfirm();
       load(1);
@@ -2213,13 +2221,13 @@ export function TrashSubOverlay({ isLocal, onClose }) {
       <div className="mgcp-sub-host">
         <div className="mgcp-sub-slab wide" role="dialog" aria-label="Trash">
           <div className="mgcp-sub-titlerow">
-            <h3>🗑 Trash</h3>
+            <h3><Icon name="trash" /> Trash</h3>
             <button type="button" className="mgv-x" style={{ marginLeft: "auto" }} onClick={onClose} aria-label="Close">×</button>
           </div>
           <div className="mgcp-trashhead">
             {total} item{total !== 1 ? "s" : ""} in the trash
             {totalPages > 1 ? " · page " + page + " of " + totalPages : ""}
-            {msg ? " · " + msg : ""}
+            {msg ? <> · <MsgLine m={msg} /></> : ""}
           </div>
           <div className="mgcp-trashbar">
             <button type="button" className="mgcp-selectall" onClick={selectAll} disabled={confirming}>

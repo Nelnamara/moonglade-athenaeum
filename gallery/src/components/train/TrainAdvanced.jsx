@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import Icon from "../../icons/Icons.jsx";
 import TrainPool from "./TrainPool.jsx";
 import { holdTrainEscape, useAdvancedTraining } from "./useTraining.js";
 import {
@@ -73,7 +74,7 @@ function SetUp({ a, onBasic }) {
   const ready = !!a.name.trim() && !line.block && !!a.base && !!a.goal;
   return (
     <div className="mgtr-card mgtr-adv-setup">
-      <div className="mgtr-kick">1 · SET UP</div>
+      <div className="mgtr-kick">1 · Set up</div>
       <label className="mgtr-lab" htmlFor="mgtr-adv-name">Name · Trigger words</label>
       <input id="mgtr-adv-name" className="mgtr-in" value={a.name} placeholder="Name your LoRA"
         onChange={(e) => a.setName(e.target.value)} disabled={!!a.draftId} />
@@ -100,7 +101,7 @@ function SetUp({ a, onBasic }) {
         {!a.bases.length && <span className="mgtr-dim">Reading PixAI's bases…</span>}
       </div>
       <div className="mgtr-note">The base can't be changed once you continue. "Next · creates a draft" creates the draft on PixAI (free); the button says so.</div>
-      {a.err && <div className="mgtr-err">⚠ {a.err}</div>}
+      {a.err && <div className="mgtr-err"><Icon name="warning" /> {a.err}</div>}
       <div className="mgtr-row-end">
         <button type="button" className="mgtr-across" onClick={onBasic}>Use Basic instead</button>
         <button type="button" className="mgtr-go" disabled={!ready || !!a.busy} onClick={a.createDraft}>
@@ -156,7 +157,7 @@ function Descriptions({ a, title, baseName, onBasic }) {
   return (
     <div className="mgtr-card mgtr-adv-desc">
       <div className="mgtr-adv-deshead">
-        <div className="mgtr-kick">2 · DESCRIPTIONS · {ids.length} IMAGE{ids.length === 1 ? "" : "S"}</div>
+        <div className="mgtr-kick">2 · Descriptions · {ids.length} image{ids.length === 1 ? "" : "s"}</div>
         {ids.length > 0 && (
           <button type="button" className="mgtr-linkbtn" onClick={() => setFocus(!focus)}>
             {focus ? "▦ Grid (Esc)" : "⤢ Focus"}</button>
@@ -166,7 +167,7 @@ function Descriptions({ a, title, baseName, onBasic }) {
 
       <div className="mgtr-sources">
         <button type="button" className="mgtr-src" disabled={!canChangeSet || ids.length >= MAX_IMAGES}
-          onClick={() => fileRef.current && fileRef.current.click()}>⬆ Upload</button>
+          onClick={() => fileRef.current && fileRef.current.click()}><Icon name="upload" /> Upload</button>
         <button type="button" className={"mgtr-src" + (src === "history" ? " on" : "")} disabled={!canChangeSet}
           onClick={() => setSrc(src === "history" ? "" : "history")}>▦ From history</button>
         <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden
@@ -279,7 +280,7 @@ function Descriptions({ a, title, baseName, onBasic }) {
       )}
 
       {a.saving > 0 && <div className="mgtr-dim" role="status">Saving {a.saving} edit{a.saving === 1 ? "" : "s"}…</div>}
-      {a.err && <div className="mgtr-err">⚠ {a.err}</div>}
+      {a.err && <div className="mgtr-err"><Icon name="warning" /> {a.err}</div>}
       <div className="mgtr-row-end">
         <button type="button" className="mgtr-across" onClick={onBasic}>Use Basic instead</button>
         <span className="mgtr-row-go">
@@ -369,7 +370,7 @@ function Parameters({ a, title, baseName, onRuns }) {
   ];
   return (
     <div className="mgtr-card mgtr-adv-params">
-      <div className="mgtr-kick">3 · PARAMETERS → START</div>
+      <div className="mgtr-kick">3 · Parameters → start</div>
       <div className="mgtr-dim">{title}{baseName ? " · " + baseName : ""}{ask ? " · " + ask.image_count + " images, all described" : ""}</div>
       {rows.map((r) => (
         <div key={r.name} className="mgtr-param locked" aria-disabled="true">
@@ -402,7 +403,7 @@ function Parameters({ a, title, baseName, onRuns }) {
       {!ask && !a.busy && !a.started && (
         <button type="button" className="mgtr-linkbtn left" onClick={a.refreshQuote}>Ask PixAI's price again</button>
       )}
-      {a.err && <div className="mgtr-err">⚠ {a.err}</div>}
+      {a.err && <div className="mgtr-err"><Icon name="warning" /> {a.err}</div>}
       {a.maybe && (
         <div className="mgtr-warnnote">
           PixAI didn't answer clearly, so this run may have started; check Runs before starting again.

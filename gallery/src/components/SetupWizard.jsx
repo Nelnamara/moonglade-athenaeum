@@ -288,7 +288,7 @@ export default function SetupWizard({ boot }) {
         <div className="wz-wash wz-wash-a" />
         <div className="wz-wash wz-wash-b" />
         <div className="wz-card">
-          <div className="wz-toprow"><div className="wz-kicker">FIRST-TIME SETUP</div></div>
+          <div className="wz-toprow"><div className="wz-kicker">First-time setup</div></div>
           <div className="wz-syncwrap">
             <div className="wz-stepkicker">{checking ? "Preparing the Athenaeum" : "One-time download"}</div>
             <div className="wz-syncmascotbox">
@@ -307,15 +307,15 @@ export default function SetupWizard({ boot }) {
               <div className="wz-revealrow">
                 <div className="wz-reveal">
                   <b className="wz-reveal-v">{dl.received} / {dl.total} MB</b>
-                  <span className="wz-reveal-k">received</span>
+                  <span className="wz-reveal-k">Received</span>
                 </div>
                 <div className="wz-reveal">
                   <b className="wz-reveal-v">{dl.speed ? dl.speed.toFixed(1) + " MB/s" : "—"}</b>
-                  <span className="wz-reveal-k">speed</span>
+                  <span className="wz-reveal-k">Speed</span>
                 </div>
                 <div className="wz-reveal">
                   <b className="wz-reveal-v">{dl.eta == null ? "—" : dl.eta < 1 ? "<1 s" : "~" + Math.ceil(dl.eta) + " s"}</b>
-                  <span className="wz-reveal-k">remaining</span>
+                  <span className="wz-reveal-k">Remaining</span>
                 </div>
               </div>
             )}
@@ -337,7 +337,7 @@ export default function SetupWizard({ boot }) {
         <div className="wz-wash wz-wash-a" />
         <div className="wz-wash wz-wash-b" />
         <div className="wz-card">
-          <div className="wz-toprow"><div className="wz-kicker">FIRST-TIME SETUP</div></div>
+          <div className="wz-toprow"><div className="wz-kicker">First-time setup</div></div>
           <div className="wz-syncwrap">
             <div className="wz-stepkicker">One-time download</div>
             <div className="wz-syncmascotbox">
@@ -373,7 +373,7 @@ export default function SetupWizard({ boot }) {
         <div className="wz-wash wz-wash-b" />
         <div className="wz-card">
           <div className="wz-toprow">
-            <div className="wz-kicker">FIRST-TIME SETUP</div>
+            <div className="wz-kicker">First-time setup</div>
             <button type="button" className="wz-skip" onClick={skipToKey}>Skip to setup →</button>
           </div>
           <div className="wz-dots">
@@ -405,7 +405,7 @@ export default function SetupWizard({ boot }) {
         <div className="wz-wash wz-wash-a" />
         <div className="wz-wash wz-wash-b" />
         <div className="wz-card">
-          <div className="wz-toprow"><div className="wz-kicker">FIRST-TIME SETUP</div></div>
+          <div className="wz-toprow"><div className="wz-kicker">First-time setup</div></div>
           <div className="wz-stepkicker">Link your PixAI account</div>
           <div className="wz-stephead">One key. Nothing else to configure.</div>
           <div className="wz-stepslist">
@@ -418,7 +418,7 @@ export default function SetupWizard({ boot }) {
           </div>
           <button type="button" className="wz-openbtn" onClick={openPixai}>Open pixai.art/profile/edit/api ↗</button>
           <div className="wz-divider" />
-          <div className="wz-fieldlbl">YOUR API KEY</div>
+          <div className="wz-fieldlbl">Your API key</div>
           <div className="wz-keyrow">
             <input className="wz-keyinput" type={showKey ? "text" : "password"} value={apiKey}
               placeholder="paste your PixAI API key" autoFocus
@@ -448,7 +448,7 @@ export default function SetupWizard({ boot }) {
         <div className="wz-wash wz-wash-a" />
         <div className="wz-wash wz-wash-b" />
         <div className="wz-card">
-          <div className="wz-toprow"><div className="wz-kicker">FIRST-TIME SETUP</div></div>
+          <div className="wz-toprow"><div className="wz-kicker">First-time setup</div></div>
           <div className="wz-syncwrap">
             <div className="wz-syncmascotbox">
               <div className="wz-synchalo" />
@@ -498,7 +498,7 @@ export default function SetupWizard({ boot }) {
       <div className="wz-wash wz-wash-a" />
       <div className="wz-wash wz-wash-b" />
       <div className="wz-card">
-        <div className="wz-toprow"><div className="wz-kicker">FIRST-TIME SETUP</div></div>
+        <div className="wz-toprow"><div className="wz-kicker">First-time setup</div></div>
         <div className="wz-readywrap">
           <div className="wz-readyglow" />
           <div className="wz-readymark">✦</div>
