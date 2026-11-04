@@ -98,7 +98,7 @@ quality-tag prefix, prompt-helper state, control nets, LoRA parameters, priority
 seconds it took to render and on which backend, the run's own started / ended / updated
 timestamps, retry count, the moderation result, and for a video its mode and model. Derived
 pictures and videos also record their **source image** and how they were made (edit,
-upscale, image-to-video) — that's what powers Image Details' LINEAGE panel.
+upscale, image-to-video) — that's what powers Image Details' Lineage panel.
 
 All of this is captured **as a generation happens**, so a picture you make in Moonglade
 arrives complete — no backfill needed for new work.
@@ -159,7 +159,7 @@ python -m moonglade --sync-artworks --views-only         # ONLY the view counts,
 
 `--sync-artworks --with-videos` also downloads your animated artworks' video files into `videos/`.
 
-`--sync-artworks` is what fills **📈 My Art** — until it has run once, that screen has nothing
+`--sync-artworks` is what fills **My Art** — until it has run once, that screen has nothing
 to list and tells you so. The Panel has the same job under Maintenance as **Sync
 published-artwork metadata**, if you would rather not use a terminal.
 
@@ -318,7 +318,7 @@ Each runs its pass and exits; all are idempotent and safe to re-run.
 | `--fix-model-names` | re-resolves catalog rows whose model name is blank or a raw numeric id (one API call per distinct model). Also runs inside `--sync`. |
 | `--fix-model-names --relabel-removed` | additionally labels ids that **PixAI answered about and had no name for** (deleted models) as "Unknown or removed model" instead of leaving the raw number. An id whose lookup simply *failed* — timeout, 5xx, a dropped connection — is a different thing, and is now left exactly as it was and reported as `not checked`, so the next run picks it up. It used to get the "Unknown or removed model" label too, which is a permanent-looking answer to a temporary problem: a re-run then read the row as already resolved and never came back for it. |
 | `--backfill-meta` | fills missing url/width/height only (see [Full metadata](#full-metadata) for the full-meta variant) |
-| `--backfill-lineage` | fills in `source_media_id`/`derive_kind` (which image an edit, upscale or video was made **from**) for rows that predate lineage tracking, via `getTaskById`; powers Image Details' LINEAGE panel. Idempotent. |
+| `--backfill-lineage` | fills in `source_media_id`/`derive_kind` (which image an edit, upscale or video was made **from**) for rows that predate lineage tracking, via `getTaskById`; powers Image Details' Lineage panel. Idempotent. |
 | `--backfill-phash` | computes a perceptual difference-hash (dHash) for every image row that lacks one, powering the near-duplicate ("upscaled or recompressed copy") tier of the duplicates finder. Local Pillow work, no network. |
 | `--faststart-videos` | losslessly rewrites every video so iOS/Safari can stream it over HTTP (`ffmpeg -c copy +faststart`; needs ffmpeg on PATH; skips already-fixed files; safe to run while the gallery or a live watch is collecting — each remux uses its own unique temp file) |
 

@@ -55,7 +55,7 @@ Control Panel is still just the address — you sign in the normal way when you 
 
 A phone gets its own layout: three tabs along the bottom — **Gallery**, **Create** (the Generate
 dock as a screen of its own) and **Control** — and a row of icons at the top for the Folio,
-The Loom, Activity, the **?** guide and the **☰ Menu** (My Art, Collections, Publish, Train a LoRA,
+The Loom, Activity, the **?** guide and the **Menu** (My Art, Collections, Publish, Train a LoRA,
 Import, Contests, Health and Log Out). Turned sideways it is still the phone app, laid out for a
 wide, short screen. See
 [The Gallery](Gallery) for the phone's feed, pull to refresh and landscape layout.
@@ -65,7 +65,7 @@ wide, short screen. See
 metered connection, so pick **Always** rather than **Auto**.
 
 **How the phone's Back gesture behaves.** Anything the phone opens *over* your library —
-a picture full-screen, a picture's own record, anything from the **☰** menu, the Folio, the
+a picture full-screen, a picture's own record, anything from the **Menu** (three lines), the Folio, the
 contact sheet, the contest entry screen, and the composer's
 Advanced and Duplicates — closes on one Back, leaving whatever was underneath it standing.
 Two things stacked take two presses, one each. With nothing open, Back leaves the app, the

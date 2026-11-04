@@ -1,6 +1,6 @@
 # The Control Panel
 
-Reached from **⚙ Panel** in the gallery header. It runs the same maintenance commands the
+Reached from **Panel** (the gear) in the gallery header. It runs the same maintenance commands the
 CLI does, as background jobs with a live log and a progress bar, so routine upkeep never
 needs a terminal. It also holds your login accounts and Stop / Restart for the
 server itself.
@@ -11,7 +11,7 @@ it next will, and a **Run now** beside it. The buttons below it are still there 
 they are simply no longer the only way anything happens. See
 [Runs itself — the living library](#runs-itself--the-living-library).
 
-**⚙ Panel** opens the Panel as an **overlay on top of the gallery**, not a separate
+**Panel** opens the Panel as an **overlay on top of the gallery**, not a separate
 page — click it again or `Esc` to close. Its tab is **Maintenance**; **Accounts**,
 **Trash**, and **PixAI account** (your cards, coupons and credit ledger) are their own
 tiles inside Maintenance, each opening as a further overlay on top of the Panel itself.
@@ -21,7 +21,7 @@ tabs for the card roster, coupons and the credit ledger. The card history says w
 to each card — consumed, refunded, expired or revoked — and names a task only beside a card
 that was attached to one. Every figure on it is a reading:
 the window never spends, redeems, purchases, follows or unfollows anything.
-The **Runs itself** list heads the job console; the older single **⏱ Standing order** — the
+The **Runs itself** list heads the job console; the older single **Standing order** (the timer) — the
 auto-sync schedule — still lives in that console's **Ledger** view. (The old separate
 `/panel` page retired with the classic interface, 2026-08-08.)
 
@@ -35,8 +35,8 @@ itself**, **Sync now** and the version stamp (see
 ## Library at a glance
 
 Images, videos and collections in your catalog, plus your live PixAI credit balance and
-free-card count. **⬇ Download catalog (CSV)** saves the whole catalog to your browser's
-Downloads — it does *not* write a file into your backup folder. **⬇ Download curation (JSON)**
+free-card count. **Download catalog (CSV)** saves the whole catalog to your browser's
+Downloads — it does *not* write a file into your backup folder. **Download curation (JSON)**
 beside it saves just what you made of the library — ratings, collections and their order,
 smart collections, tags, keeper/reject marks and notes — as one file that goes back in with
 `--import-curation` (see [Collections → Backing up your curation](Collections)).
@@ -247,13 +247,13 @@ python -m moonglade --update
 
 ### The standing order
 
-The single **⏱ Standing order** in the console's **Ledger** view is still there and still
+The single **Standing order** in the console's **Ledger** view is still there and still
 works: one job, one cadence, chosen from the **Run** dropdown. It predates the list above,
 it is independent of it, and the list never doubles up on whatever job it names.
 
 ## Recover a task by ID
 
-Paste a numeric task id and click **⬇ Import** to pull that one generation or edit straight
+Paste a numeric task id and click **Import** to pull that one generation or edit straight
 into your gallery. Handy for edits and anything in Favorites that the normal listing skips.
 It downloads your own finished media and spends nothing; if the task is already catalogued
 it tells you and links straight to it.
@@ -302,7 +302,7 @@ palette are judged as a pair, so they are picked as one.
 
 Free marks and unlocked skins are one click each and apply everywhere immediately; the
 skin is saved to your account and follows you to every device. Anything still locked is
-shown rather than hidden — a gold 🔒 tile that names what unlocks it when you hover over
+shown rather than hidden — a gold padlock tile that names what unlocks it when you hover over
 it.
 
 ### Type

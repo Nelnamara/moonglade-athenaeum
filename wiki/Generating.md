@@ -50,7 +50,7 @@ independently.
 
 ### Tsubaki.3: context images and @image prompts
 
-On Tsubaki.3 and Tsubaki.3 Flash the settings' first panel is **MODEL & INPUTS**, and a
+On Tsubaki.3 and Tsubaki.3 Flash the settings' first panel is **Model & inputs**, and a
 **LoRAs | Context images** switch takes the place of the single reference slot (other models
 keep the reference slot and its strength slider). Each side keeps its own picks; switching
 never deletes anything.
@@ -113,7 +113,7 @@ the price.
 ### Recipes
 
 A **recipe** is PixAI's saved bundle of generation inputs (prompt words, LoRAs, pictures) made
-for one kind of model. The **RECIPES** row sits in the settings' first panel under the LoRAs |
+for one kind of model. The **Recipes** row sits in the settings' first panel under the LoRAs |
 Context images switch (on a phone, under the LoRAs on the Create screen). **+ Browse** (or
 **browse ›**) opens the recipe picker — the market, your Sets, Mine and History, plus a
 **Style code** lookup that finds the recipe an old style code became — and **+ Add** puts a
@@ -132,7 +132,7 @@ recipe in the row. The command palette's **Browse recipes** opens the full-size 
 - On Tsubaki.3, recipes run **creativity one step lower**, as PixAI's own site does: Embellished
   runs as Light touch and Light touch as As written. The cost badge names the change.
 - The cost badge prices the request **with** its recipes. If PixAI can't price it, the badge
-  says why (or *couldn't verify the price with these recipes*) and never reads FREE.
+  says why (or *couldn't verify the price with these recipes*) and never reads Free.
 
 **The recipe picker** opens small, from the row. **⤢ Market** makes it full-size (**⤡** shrinks it
 again); your tab, search and filters carry across, and the last size is remembered with your
@@ -145,7 +145,7 @@ credits: the price and any refusal are always the dock's.
 
 **Mine** lists your own recipes, each with its status — **Published**, **In review**, **Archived** or
 **Draft** — and one action (**Edit**, **View** or **Unarchive**); **⋯** has **Archive** and **Open page**.
-Recipes you started and did not finish wait above them under **UNFINISHED**, with **Continue** and
+Recipes you started and did not finish wait above them under **Unfinished**, with **Continue** and
 **Delete**.
 
 **Making a recipe.** **+ Create** in the picker (it starts from the dock's model and prompt), or
@@ -191,7 +191,7 @@ peach and blocks Send until you fix it. To send a `{a|b}` or a `__name__` as pla
 backslash before it: `\{a|b}`, `\__name__`.
 
 - **Random** draws one value per picture, ×1–4, from the run seed (the Seed field when it holds
-  a number, otherwise a draw of its own that **⚄ Reroll** changes), so the same prompt, settings
+  a number, otherwise a draw of its own that **Reroll** (the dice) changes), so the same prompt, settings
   and seed give the same run again. Each picture is its own task and its own run.
 - **Matrix** sends every combination, one picture each, queued one after another — at most 24;
   over that, Send says *narrow an axis* and nothing goes. The reel shows a matrix as a grid:
@@ -229,7 +229,7 @@ by opening the dock** — each of them is written by a click of your own, or by 
 PixAI accepted.
 
 - **A default negative for each base family.** Type a negative, then press **☆ Set as default**
-  on the NEGATIVE row (the ▲ settings must be open); the button then reads **★ Default · DiT**
+  on the Negative row (the ▲ settings must be open); the button then reads **★ Default · DiT**
   (or SDXL, Pony, Illustrious, Flux — whichever family the model belongs to), and pressing it
   again clears that family's default. When you pick a model, the negative fills in with its
   family's default **only if the box is empty or still holds the previous family's default** —
@@ -244,7 +244,7 @@ PixAI accepted.
   is no longer available the rest is still filled and the note says so. ✕ deletes one. Presets
   hold the Image tab only. On the phone, ↺ Last and Presets are two chips above the prompt and
   presets open as a sheet.
-- **Quick picks** are the MODELS and LORAS rows above the prompt: your last three sends' models
+- **Quick picks** are the Models and LoRAs rows above the prompt: your last three sends' models
   and LoRAs plus the ones you mark **★ Quick-pick** (in the **▾** menu on a card in the model
   and LoRA pickers; a small ★ on the card shows it is one), six to a row, then **+ more** into the picker. A model chip switches the model the same way
   the picker does. A LoRA chip adds that LoRA at the weight you last used, and tapping it again
@@ -394,7 +394,7 @@ it says so, with **Retry** — it is never shown as an empty list.
 
 ### Training your own LoRA
 
-**Train** in the row of destinations under the banner (on the phone: **☰ Menu → Train a LoRA**)
+**Train** in the row of destinations under the banner (on the phone: **Menu → Train a LoRA**)
 trains a LoRA on PixAI. Opening it
 only reads: nothing is sent to PixAI until you press a button that says what it does.
 
@@ -799,7 +799,7 @@ pixels.
 > spends credits and **no free card covers a panelplugin task**, so the price shows before you
 > generate. **Change Emotion** asks which expression you want, sorted into five families —
 > Bright, Soft, Dark, Startled, Playful — one family on screen at a time, so you pick from a
-> handful rather than scrolling every expression PixAI ships. A purple ♛ means that expression
+> handful rather than scrolling every expression PixAI ships. A purple crown means that expression
 > needs a PixAI membership. There is still no CLI `--workflow-id`: these are web-only and mirror-gated.
 > Separately, the Loom's box-coordinate hand/face **Fixer** (Edit → Fixer) works on any
 > credential: one kind per Fix (faces or hands, not both at once), priced by PixAI before it
@@ -970,8 +970,8 @@ confirm first. `READ_ONLY` in `config.json` refuses all of them — see
 [Trust & Safety](Trust-and-Safety).
 
 **On a phone** the same board, the same contest pages and the same entry road are all
-there — under **Contests** in the ☰ menu. The official contest sits at the top as a wide
-picture with the community ones listed below it, and **MY ENTRIES** in the corner shows
+there — under **Contests** in the Menu (the three-line button). The official contest sits at the top as a wide
+picture with the community ones listed below it, and **My entries** in the corner shows
 that same list narrowed to the contests you have a piece in, with where each one stands. A
 contest's page folds the brief, the prizes and the requirements so only the part you are
 reading is open, and keeps the deadline and **Enter this contest** at the bottom of the
@@ -1017,7 +1017,7 @@ the button comes back — the app will tell you it doesn't know rather than leav
   from your own gallery (badged `@image1…`, removable, hover to preview); typing `@image1` in
   the prompt turns into a chip; model + duration + audio, and a **Video prompt helper**
   switch (off by default — on, PixAI expands your motion prompt the way the image helper
-  does); live cost shows **FREE + "uses N of
+  does); live cost shows **Free + "uses N of
   H cards"** when a card covers it — and when it doesn't (a longer clip than your tickets
   cover), it says no card is used and shows the full price, which Generate then spends if you
   click. See [Free cards and videos](#free-cards-and-videos).

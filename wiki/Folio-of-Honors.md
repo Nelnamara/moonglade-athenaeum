@@ -1,6 +1,6 @@
 # The Folio of Honors
 
-Click **🏆 Folio** in the gallery header and **The Folio of Honors** opens as a maximized
+Click **Folio** (the trophy) in the gallery header and **The Folio of Honors** opens as a maximized
 overlay over the grid — not a separate page. `Esc` or ✕ closes it and you're back exactly
 where you were. (Renamed from "Trophy Hall" 2026-07-22, alongside a full visual redesign.)
 
@@ -48,7 +48,7 @@ and wears a **newly found** ribbon until you close the Folio, and the next riddl
 its place. Find them all and the veil gives way to a line saying so. (With reduced motion
 turned on, the card simply appears at rest with its ribbon.) The search box never matches
 the veil. On a phone the veil is a banner heading the Feats list, and new finds carry a
-**NEW** chip. Feats are worth **no points** on purpose, so your score can never quietly
+**New** chip. Feats are worth **no points** on purpose, so your score can never quietly
 hint that one is out there. They're found by playing, not by reading. Good luck.
 
 A feat's earn moment carries a **See it in the Folio** button that opens the Folio at its
@@ -165,7 +165,7 @@ sort are saved only when you click them.
 Some epic achievements unlock a **skin** — a palette swap applied across the whole
 suite. Five ship in total: two free (**Moonglade**, the lavender-and-emerald default,
 and the void-touched **Nightfallen**) and three earned. A card tells you up front if it
-unlocks one (**❖ unlocks … skin**), so the Folio itself is the map — and unlocking all
+unlocks one (**unlocks … skin**, with a small skin icon), so the Folio itself is the map — and unlocking all
 five earns **Skin-Changer**.
 
 Skins are applied from the **Control Panel**, in its **Identity** strip — all the

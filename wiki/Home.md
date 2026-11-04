@@ -50,7 +50,7 @@ Control Panel, at the bottom right of The Loom, or on a phone in the icon row at
 - **About** is the last page in the list: the version, the art pack, and what changed in this release.
   It is also reached from the Control Panel's version stamp, and on a phone from **Control → About
   Moonglade**. See [Control Panel → Updates and About](Control-Panel#updates-and-about).
-- **On a phone** the guide is a full-height sheet: **‹** goes back (or closes), and **☰** shows the
+- **On a phone** the guide is a full-height sheet: **‹** goes back (or closes), and the **three-line button** shows the
   page list.
 
 ### The first-run guide

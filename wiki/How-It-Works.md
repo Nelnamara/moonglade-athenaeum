@@ -13,8 +13,8 @@ moonglade/                the app's code (since 3.20), one package:
                           finder, and a read-only PixAI tag-suggestion tool
   recipes.py              PixAI recipes: the market, Mine and Sets, the creator, and attaching
                           recipes to a generation
-  inbox.py                PixAI's inbox (the ✉ button) and the gift box's gifts and current
-                          event (🎁), a published work's comments and your replies
+  inbox.py                PixAI's inbox (the envelope button) and the gift box's gifts and current
+                          event (the gift), a published work's comments and your replies
   runs.py                 the prompt template (`{a|b}` variables, saved lists), Random and Matrix
                           runs, and the Runs store behind Inspect
   contest_wins.py         what counts as a verified contest win and when it is checked
