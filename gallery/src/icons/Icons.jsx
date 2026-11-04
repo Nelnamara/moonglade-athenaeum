@@ -545,6 +545,21 @@ const GLYPHS = {
       <path d="M18.25 6.25l1.5-1.5" />
     </>
   ),
+  /* Sound on: the Loom's shot sound toggle and the playthrough -- speaker_line.svg */
+  speaker: (
+    <>
+      <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
+      <path d="M15.5 9a4 4 0 0 1 0 6" />
+      <path d="M18 6.5a7.5 7.5 0 0 1 0 11" />
+    </>
+  ),
+  /* Sound off: the same two, muted -- speaker-off_line.svg */
+  "speaker-off": (
+    <>
+      <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
+      <path d="M16 9.5l5 5M21 9.5l-5 5" />
+    </>
+  ),
 };
 
 const LINE = new Set([
@@ -556,7 +571,8 @@ const LINE = new Set([
   "expand", "crop", "menu", "checkbox-on", "checkbox-off", "crown",
   "swords", "skin", "flag", "scissors", "person", "brush",
   "shirt", "shapes", "music", "phone", "desktop", "ban",
-  "generate", "pencil", "file", "hourglass", "timer",
+  "generate", "pencil", "file", "hourglass", "timer", "speaker",
+  "speaker-off",
 ]);
 
 /* One icon. `title` makes it an announced image; without one it is decorative and

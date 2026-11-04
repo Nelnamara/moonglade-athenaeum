@@ -10864,7 +10864,7 @@ function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop, vide
         <button className={soundOn ? "on" : ""} onClick={() => setSoundOn((v) => !v)}
           aria-pressed={soundOn}
           title={soundOn ? "Sound on while playing (scrubbing stays silent)" : "Play this shot with sound"}>
-          {soundOn ? "\u{1F50A}" : "\u{1F507}"}</button>
+          {soundOn ? <Icon name="speaker" /> : <Icon name="speaker-off" />}</button>
         {onSplit && <button onClick={doSplit} title="Split this shot in two at the playhead"><Icon name="scissors" /> Split</button>}
         {onCrop && <button className={cropping ? "on" : ""} onClick={() => { setCropping((v) => !v); setCropDraft(null); }}
           title="Crop the frame — drag a rectangle; applied on export"><Icon name="crop" /> Crop</button>}
@@ -11256,7 +11256,7 @@ function SequencePlayer({ clips, onClose, mix }) {
               : " · bed " + (bedNow < mix.plan.db ? "ducked " : "") + (bedNow < 0 ? "\u2212" + Math.abs(bedNow) : String(bedNow)) + " dB") : ""}</span>
           <button className="sb-btn ghost sm" onClick={() => setMuted(!muted)}
             title={muted ? "Unmute — the rendered mp4 has audio" : "Mute"}
-            aria-pressed={!muted}>{muted ? "\u{1F507} muted" : "\u{1F50A} sound"}</button>
+            aria-pressed={!muted}>{muted ? <><Icon name="speaker-off" /> muted</> : <><Icon name="speaker" /> sound</>}</button>
           <button className="sb-btn ghost sm" onClick={() => setI(Math.max(0, i - 1))} disabled={i === 0}>&#9664; prev</button>
           <button className="sb-btn ghost sm" onClick={() => { if (i < clips.length - 1) setI(i + 1); else onClose(); }}>next &#9654;</button>
           <button className="sb-btn sm" onClick={onClose}>&#10005; close</button>

@@ -127,6 +127,8 @@ ICONS = [
     ('file', 'file_line', 'A file with no preview, in the import list'),
     ('hourglass', 'hourglass_line', "Still running"),
     ('timer', 'timer_line', "A standing order"),
+    ('speaker', 'speaker_line', "Sound on: the Loom's shot sound toggle and the playthrough"),
+    ('speaker-off', 'speaker-off_line', "Sound off: the same two, muted"),
 ]
 
 # Every `_line` file is the 24-unit grammar; Icon() gives these names its root attributes.
