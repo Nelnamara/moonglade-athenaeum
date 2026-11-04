@@ -4,6 +4,7 @@ import useFlavour from "../hooks/useFlavour.js";
 import { apiGet } from "../api.js";
 import MarkAnimated from "./MarkAnimated.jsx";
 import HelpButton from "../help/HelpButton.jsx";
+import Icon from "../icons/Icons.jsx";
 
 /* The banner (DC "Frontend Gallery" §1): one region owning hero/slim state.
    Hero: art + right-aligned brand block on top, a bottom band with the library
@@ -137,10 +138,10 @@ export default function Banner({
                   onError={(e) => e.currentTarget.remove()} />
               </div>
             ) : null}
-            <StatPill value={fmt(s.images)} label="IMAGES" />
-            {s.videos ? <StatPill value={fmt(s.videos)} label="VIDEOS" /> : null}
+            <StatPill value={fmt(s.images)} label="Images" />
+            {s.videos ? <StatPill value={fmt(s.videos)} label="Videos" /> : null}
             {s.coverage_pct != null ? (
-              <StatPill value={s.coverage_pct + "%"} label="BACKED UP" emerald />
+              <StatPill value={s.coverage_pct + "%"} label="Backed up" emerald />
             ) : null}
           </div>
           <div className="mgx-actrow">
@@ -161,7 +162,7 @@ export default function Banner({
             <button type="button" className="mgx-metal mgx-metal-folio mgx-metal-md"
               onClick={onFolio}
               title="The Folio of Honors">
-              🏆 Folio
+              <Icon name="folio" /> Folio
             </button>
           </div>
         </div>

@@ -66,8 +66,8 @@ describe("(b) a series||batch unit renders the stack markup + the right badge (G
   });
   test("the badge: SERIES · Nv · M (SERIES-only on a video cover); BATCH · N", () => {
     assert.ok(grid.includes(
-      '? (it.is_video ? "SERIES" : "SERIES · " + it.series.count_tasks + "v · " + it.series.count_images)'));
-    assert.ok(grid.includes(': stack === "batch" ? "BATCH · " + it.batch.count'));
+      '? (it.is_video ? "Series" : "Series · " + it.series.count_tasks + "v · " + it.series.count_images)'));
+    assert.ok(grid.includes(': stack === "batch" ? "Batch · " + it.batch.count'));
     // badge element class resolves to .mgg-series-badge / .mgg-batch-badge, top-left
     assert.ok(grid.includes('className={"mgg-" + stack + "-badge"}'));
   });

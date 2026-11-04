@@ -612,8 +612,11 @@ function Grid({
     // same corner pill, ahead of VIDEO -- the ▶ glyph still marks a video -- in the
     // default metal, no colour of its own.
     const archive = !!it.archive_only;
-    const badge = archive ? "ARCHIVE"
-      : it.is_video ? "VIDEO" : (it.source ? String(it.source).toUpperCase() : "");
+    // Sentence case since the quieted look (pick 1C); PixAI keeps its own spelling.
+    const src = it.source ? String(it.source) : "";
+    const badge = archive ? "Archive"
+      : it.is_video ? "Video"
+      : src ? (src.toLowerCase() === "pixai" ? "PixAI" : src.charAt(0).toUpperCase() + src.slice(1).toLowerCase()) : "";
     // #34 direction B: is this a STACKED unit, and if so which kind + its badge.
     const stack = stackKind(it);                       // "series" | "batch" | null
     // The stamp prefers the SERIES title (the dial's name) when this is a series
@@ -624,8 +627,8 @@ function Grid({
     // the layered shadows already say "stack"). A video-cover series shows SERIES
     // only; the VIDEO glyph keeps its own corner (review item 5).
     const stackBadge = stack === "series"
-      ? (it.is_video ? "SERIES" : "SERIES · " + it.series.count_tasks + "v · " + it.series.count_images)
-      : stack === "batch" ? "BATCH · " + it.batch.count
+      ? (it.is_video ? "Series" : "Series · " + it.series.count_tasks + "v · " + it.series.count_images)
+      : stack === "batch" ? "Batch · " + it.batch.count
       : null;
     // Sibling Strip (#30, direction E): the task's outputs, self lit, the rest dimmed.
     // Only when the task has >= 2 members (the API already omits the rest). More than
@@ -884,7 +887,7 @@ function Grid({
             ))}
           </div>
           <nav className="mgg-tl-rail" aria-label="Jump to date band">
-            <div className="mgg-tl-railhead">JUMP TO</div>
+            <div className="mgg-tl-railhead">Jump to</div>
             {bands.map((band) => (
               <button
                 key={band.key}
