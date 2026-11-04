@@ -95,7 +95,10 @@ describe("chips, stepping and the count", () => {
     const p = board();
     assert.deepEqual(FIND_STATUSES, ["todo", "wip", "done", "paused", "error"]);
     assert.deepEqual(FIND_MODES, ["I2V", "R2V", "FLF", "V2V"]);
-    assert.deepEqual(findChips(flat(p)).map((c) => c.label), ["⚠ only", "todo", "done", "error", "I2V", "R2V", "FLF"]);
+    // The warning chip's mark is drawn from its `icon` (unslop pick 2B), so its label is just "only".
+    assert.deepEqual(findChips(flat(p)).map((c) => c.label), ["only", "todo", "done", "error", "I2V", "R2V", "FLF"]);
+    assert.equal(findChips(flat(p))[0].icon, "warning");
+    assert.ok(findChips(flat(p)).slice(1).every((c) => c.icon === undefined), "only the warning chip carries an icon");
   });
   test("toggling a chip flips only it and sends the current match back to the first", () => {
     let f = { ...emptyFind(), q: "x", cur: 3 };

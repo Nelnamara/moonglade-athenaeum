@@ -195,7 +195,7 @@ test("G6: Print sheet wears ⎙ (one item -- the phone's contact sheet rides the
 });
 
 test("G9: the membership gate is a crown, in PixAI purple that no skin retints", () => {
-  assert.match(enhance, /className="mgdock-aigate" title="Membership required">♛</);
+  assert.match(enhance, /className="mgdock-aigate" title="Membership required"><Icon name="crown" \/></);
   assert.doesNotMatch(enhance, /mgdock-aigate[^>]*>★/);
   // --purple-bright is the app's only :root-fixed violet; --lavender/--mauve go peach
   // under ember and mint under verdant, which would stop a PixAI fact being PixAI's colour.
@@ -207,13 +207,13 @@ test("G9: the membership gate is a crown, in PixAI purple that no skin retints",
 });
 
 test("G10: the Arena note wears crossed swords", () => {
-  assert.match(publish, /className="mgpub-cttrack">⚔ counts toward The Arena/);
+  assert.match(publish, /className="mgpub-cttrack"><Icon name="swords" \/> counts toward The Arena/);
   assert.doesNotMatch(publish, /★ counts toward/);
 });
 
-test("G11: the Folio's reward flags are ❖ skin + ⚑ banner (the owner's pick B)", () => {
-  assert.match(folio, /className="mgfo-flag">❖ unlocks \{skinName\} skin/);
-  assert.match(folio, /className="mgfo-flag">⚑ unlocks a banner/);   // the banner keeps its flag
+test("G11: the Folio's reward flags are the skin + banner line icons (the owner's pick B, drawn by unslop pick 2B)", () => {
+  assert.match(folio, /className="mgfo-flag"><Icon name="skin" \/> unlocks \{skinName\} skin/);
+  assert.match(folio, /className="mgfo-flag"><Icon name="flag" \/> unlocks a banner/);   // the banner keeps its flag
   assert.doesNotMatch(folio, /★ unlocks/);
 });
 
@@ -254,9 +254,10 @@ test("G12: undo wears the history dial at all four sites -- and Remix still turn
 
 // ------------------------------------------------- 8-12, the post-audit rulings
 
-test("8. the palette's Collection rows wear the books, and ❖ is the skin flag ALONE", () => {
+test("8. the palette's Collection rows wear the books, and ❖ is written nowhere (the skin flag is the drawn skin icon)", () => {
   assert.match(app, /icon: <Icon name="collection" \/>,\n\s+label: "Collection: " \+ name/);
-  // ❖ survives in exactly one place in the whole app: the Folio's skin flag.
+  // ❖ used to survive in exactly one place in the whole app: the Folio's skin flag. Unslop pick 2B drew that as
+  // the `skin` line icon, so the character is now written in no component at all.
   const files = readdirSync(path.join(SRC, "components"))
     .filter((f) => f.endsWith(".jsx"))
     .map((f) => ["components/" + f, src("components/" + f)]);
@@ -265,12 +266,11 @@ test("8. the palette's Collection rows wear the books, and ❖ is the skin flag 
   for (const [name, text] of files) {
     for (const [n, t] of codeLines(text)) {
       if (!t.includes("❖")) continue;
-      if (name === "components/FolioOverlay.jsx" && /unlocks \{skinName\} skin/.test(t)) continue;
       offenders.push(name + ":" + n + "  " + t);
     }
   }
-  assert.deepEqual(offenders, [], "❖ is used for something that is not the skin flag");
-  assert.match(folio, /className="mgfo-flag">❖ unlocks \{skinName\} skin/);  // not passable by deletion
+  assert.deepEqual(offenders, [], "❖ is written in a component (the skin flag is the drawn skin icon)");
+  assert.match(folio, /className="mgfo-flag"><Icon name="skin" \/> unlocks \{skinName\} skin/);  // not passable by deletion
 });
 
 test("9. ↩ is the series window's Esc hint, and only that", () => {
@@ -304,10 +304,10 @@ test("11. the phone menu's Publish row wears ☁, the mark Publish wears everywh
   assert.match(appMobile, /\{ icon: "☁", label: "Publish", screen: "publish" \}/);
   assert.doesNotMatch(appMobile, /icon: "✎"/);
   // the surfaces it is now agreeing with
-  assert.match(app, /img\("publish", "☁", "Publish"/);
-  assert.match(details, /☁ Publish<\/button>/);
+  assert.match(app, /img\("publish", <Icon name="publish" \/>, "Publish"/);
+  assert.match(details, /<Icon name="publish" \/> Publish<\/button>/);
   assert.match(src("components/ImageDetailsMobile.jsx"), /☁ Publish<\/button>/);
-  assert.match(src("components/Lightbox.jsx"), /☁ Publish<\/button>/);
+  assert.match(src("components/Lightbox.jsx"), /<Icon name="publish" \/> Publish<\/button>/);
   // and "Edit this" still keeps ✎ (the ruling's own carve-out)
   assert.match(details, /✎ Edit this<\/button>/);
 });

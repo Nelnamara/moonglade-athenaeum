@@ -1351,7 +1351,7 @@ describe("batchGenerate sends only what was confirmed (F12, F13, F14, §3.4)", (
     await generateAll(loom, [loom.entry("c3")]);   // the caller's view is not what is sent: the board is
     const [ask] = asked();
     assert.match(ask, /^Generate 2 shot\(s\)\?/, "ONE confirm, of the shots that need a render");
-    assert.match(ask, /🎫 1 covered by free cards\n≈ 1 will spend credits — about 900 total/);
+    assert.match(ask, /\n1 covered by free cards\n≈ 1 will spend credits — about 900 total/);
     assert.equal(asked().length, 1, "no per-shot confirm after it");
     assert.deepEqual(sentTo(), ["c1", "c2"], "not the rendered shot, not the one in flight");
     const [covered, paid] = fetches("/api/loom/generate");
@@ -1449,10 +1449,10 @@ describe("issue #90: each spend ask names the engine; a shot its engine can't ta
   test("Generate all names the one engine, or each engine with its count on a mixed board", async (t) => {
     const one = await mountLoom(t, { boards: { b1: boardOf([shot("c1"), shot("c2")]) }, confirm: () => false });
     await generateAll(one);
-    assert.match(asked()[0], /^Generate 2 shot\(s\)\?\n\nEngine: V4\.0 Lite Preview\n🎫 /);
+    assert.match(asked()[0], /^Generate 2 shot\(s\)\?\n\nEngine: V4\.0 Lite Preview\n\d+ covered by free cards/);
     const mixed = await mountLoom(t, { boards: { b1: boardOf([shot("c1", TSUBAKI), shot("c2"), shot("c3", TSUBAKI)]) }, confirm: () => false });
     await generateAll(mixed);
-    assert.match(asked()[0], /^Generate 3 shot\(s\)\?\n\nEngines: 2 on Tsubaki Video, 1 on V4\.0 Lite Preview\n🎫 /,
+    assert.match(asked()[0], /^Generate 3 shot\(s\)\?\n\nEngines: 2 on Tsubaki Video, 1 on V4\.0 Lite Preview\n\d+ covered by free cards/,
       "the most-used engine first");
     assert.equal(fetches("/api/loom/generate").length, 0, "a no sends nothing");
   });
@@ -1476,7 +1476,7 @@ describe("issue #90: each spend ask names the engine; a shot its engine can't ta
     await generateAll(loom);
     const [ask] = asked();
     assert.match(ask, /^Generate 1 shot\(s\)\?/, "only the sendable shot is counted");
-    assert.match(ask, /\n⚠ 1 shot\(s\) can't be sent on their engine and are left out: A·01 \(each card says why\)\./);
+    assert.match(ask, /\n1 shot\(s\) can't be sent on their engine and are left out: A·01 \(each card says why\)\./);
     assert.equal(fetches("/api/price").length, 1, "only the sendable shot was priced");
     assert.deepEqual(fetches("/api/loom/generate").map((p) => p.body.loom_target.card_id), ["c2"]);
     assert.equal(loom.gen.genState.c1.held, true);
@@ -1514,7 +1514,7 @@ describe("issue #90: each spend ask names the engine; a shot its engine can't ta
     }
     const all = await mountLoom(t, { boards: { b1: boardOf([shot("c1", { mode: "FLF", videoModel: "v3.2" }), shot("c2")]) } });
     await generateAll(all);
-    assert.match(asked()[0], /\n⚠ 1 shot\(s\) can't be sent on their engine and are left out: A·01/, "Generate all leaves it out the same way");
+    assert.match(asked()[0], /\n1 shot\(s\) can't be sent on their engine and are left out: A·01/, "Generate all leaves it out the same way");
     assert.deepEqual(fetches("/api/loom/generate").map((p) => p.body.loom_target.card_id), ["c2"]);
   });
   test("a Tsubaki shot's video ref is held back on the card's Render: sent without it, and the ask says so -- a free quote asks too", async (t) => {
@@ -1540,7 +1540,7 @@ describe("issue #90: each spend ask names the engine; a shot its engine can't ta
     const batch = await mountLoom(t, { boards: { b1: boardOf([shot("c1", { ...TSUBAKI, refs: [VREF] }), shot("c2")]) }, confirm: () => false });
     await generateAll(batch);
     assert.match(asked()[0],
-      /\n⚠ 1 shot\(s\) go out without video references their engine can't take — held back, not sent and not deleted: A·01\./);
+      /\n1 shot\(s\) go out without video references their engine can't take — held back, not sent and not deleted: A·01\./);
   });
 });
 
