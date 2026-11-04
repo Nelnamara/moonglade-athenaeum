@@ -24,8 +24,14 @@ export const REF_RE = /@(?:image|video|audio)\d+/g;
 export const escHtml = (s) =>
   (s == null ? "" : String(s)).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+/* The audio chip's mark: the shared line set's "music" icon (gallery/src/icons/music_line.svg, same
+   paths) as an inline SVG string, because a chip is built with innerHTML, not React. aria-hidden:
+   the @audioN tag beside it is the name. */
+const MUSIC_SVG = '<svg class="mgico mgico-line" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' +
+  '<path d="M9 17.5V5.75l11-2.25v12"/><circle cx="6.5" cy="17.5" r="2.5"/><circle cx="17.5" cy="15.5" r="2.5"/></svg> ';
 const chipLead = (info) =>
-  info && info.thumb ? '<img src="' + escHtml(info.thumb) + '" alt="">' : (info && info.kind === "audio" ? "♪ " : "");
+  info && info.thumb ? '<img src="' + escHtml(info.thumb) + '" alt="">' : (info && info.kind === "audio" ? MUSIC_SVG : "");
 
 /* One chip element. hooks = {enter(mid, el), leave()} -- wired to the component's floating
    preview; absent hooks (or an audio ref) mean no hover preview. */

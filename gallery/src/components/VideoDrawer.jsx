@@ -4,6 +4,7 @@ import React, {
 import { apiUpload } from "../api.js";
 import { isPrivacyBlurOn, privacyBlurClass } from "../lib/privacyBlur.js";
 import { createPortal } from "react-dom";
+import Icon from "../icons/Icons.jsx";
 import CostBadge from "./CostBadge.jsx";
 import {
   MODELS, MODEL_VMODES, MODEL_MAXDUR, MODE_LBL, MODE_PH, CHANNEL_CAP, CAMERA_OPTS, AUDIO_LANGS,
@@ -829,7 +830,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
           title={reuse.partial
             ? "PARTIAL recipe from " + reuse.tag + ": " + reuse.partial + " — click to clear"
             : "Video recipe prefilled from run " + reuse.tag + " — click to clear"}>
-          ↺ from {reuse.tag}{reuse.partial ? " ⚠" : ""} <span>&times;</span>
+          ↺ from {reuse.tag}{reuse.partial ? <> <Icon name="warning" /></> : ""} <span>&times;</span>
         </button>
       )}
     </>
@@ -851,7 +852,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
       <div className="mgd-slabwrap">
       <div className="mgd-slabs">
         <div className="mgd-slab" style={{ animationDelay: "0ms" }}>
-          <div className="mgd-sec">SHOT MODE</div>
+          <div className="mgd-sec">Shot mode</div>
           <div className="mgd-seg" role="tablist">
             {shotModes.map((sm) => (
               <button key={sm.v} type="button" role="tab" aria-selected={s.mode === sm.v} aria-disabled={!sm.ok}
@@ -887,7 +888,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
                 ) : s.audSlot ? (
                   <div className="mgd-slot filled audio" title={"Audio reference — " + s.audSlot.filename}
                     onClick={() => { st.current.audSlot = null; rerender(); reprice(); }}>
-                    <div className="mgd-slotcap">♪</div>
+                    <div className="mgd-slotcap"><Icon name="music" title="Audio" /></div>
                     <div className="mgd-slot-tag">@audio1</div>
                   </div>
                 ) : (
@@ -909,12 +910,12 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
               44 px targets. Not in the Loom, whose shots carry no ratio of their own. */}
           {!inDock && !loomCtx && ratioOffered(s) ? (
             <div className="mgd-ratioblock">
-              <div className="mgd-sec">ASPECT RATIO</div>
+              <div className="mgd-sec">Aspect ratio</div>
               <RatioGrid value={s.ratio} onPick={pickRatio} big />
             </div>
           ) : null}
           <div className={"mgd-cam-wrap" + (isR2v ? " hid" : "")} aria-hidden={isR2v || undefined}>
-            <div className="mgd-sec">CAMERA</div>
+            <div className="mgd-sec">Camera</div>
             <select className="mgd-sel mgd-cam" value={s.camera} tabIndex={isR2v ? -1 : undefined} disabled={!modelTakes(s.model, "camera")} title={modelTakes(s.model, "camera") ? undefined : "Camera — not used by this engine (kept, not sent)"} onChange={(e) => { st.current.camera = e.target.value; rerender(); reprice(); }}>
               {CAMERA_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
@@ -931,7 +932,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
             slab in the rebalance (§45): CAMERA under SHOT MODE, DURATION under MODE & CHANNEL. */}
         <div className="mgd-slab" style={{ animationDelay: "60ms" }}>
           <div className="mgd-enghd">
-            <div className="mgd-sec">ENGINE</div>
+            <div className="mgd-sec">Engine</div>
             <div className="mgd-engcur">{chosenModel ? chosenModel.label : s.model}</div>
           </div>
           <div className="mgd-enggrid" role="radiogroup" aria-label="Video engine">
@@ -969,7 +970,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
             The second channel reads Private since PixAI renamed it (2026-08-18); the value
             behind it is still "enhanced" and still submits is_private -- display only. */}
         <div className="mgd-slab" style={{ animationDelay: "120ms" }}>
-          <div className="mgd-sec">MODE &amp; CHANNEL</div>
+          <div className="mgd-sec">Mode &amp; channel</div>
           <div className="mgd-seg mgd-quality-wrap" role="radiogroup" aria-label="Mode">
             {[["basic", "Basic"], ["professional", "Professional"]].map(([v, l]) => (
               <button key={v} type="button" role="radio" aria-checked={s.quality === v} className={"mgd-quality" + (s.quality === v ? " on" : "")} onClick={() => { if (st.current.quality === v) return; st.current.quality = v; rerender(); reprice(); }}>{l}</button>
@@ -980,7 +981,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
               <button key={v} type="button" role="radio" aria-checked={s.channel === v} className={"mgd-channel" + (s.channel === v ? " on" : "")} onClick={() => { if (st.current.channel === v) return; st.current.channel = v; rerender(); reprice(); emit("mg-channel-commit", { isPrivate: v === "enhanced" }); }}>{l}</button>
             ))}
           </div>
-          <div className="mgd-chancap">{CHANNEL_CAP[s.channel]}</div>
+          <div className="mgd-chancap">{s.channel === "enhanced" ? <><Icon name="crown" /> </> : null}{CHANNEL_CAP[s.channel]}</div>
           <label className="mgd-sw" title="Spoken lines in the prompt become voiceover">
             <input type="checkbox" className="mgd-audio" checked={s.audioGen}
               onChange={(e) => { st.current.audioGen = e.target.checked; rerender(); reprice(); emit("mg-audio-commit", { audioGen: e.target.checked, audioLanguage: st.current.audioLanguage }); }} />
@@ -1006,7 +1007,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
               engine) -- stays visible but dimmed, not-allowed, titled, and its click is
               ignored -- never removed. applyModelGating snaps onto the same rule. */}
           <div className="mgd-durhd">
-            <div className="mgd-sec">DURATION</div>
+            <div className="mgd-sec">Duration</div>
             <div className="mgd-durval">{s.duration}s</div>
           </div>
           <div className="mgd-stops mgd-dur" role="radiogroup" aria-label="Duration">

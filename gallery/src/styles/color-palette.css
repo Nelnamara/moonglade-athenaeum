@@ -41,7 +41,7 @@
   font-size: 11px; line-height: 1; cursor: pointer; font-family: inherit; }
 .cpal-rowx:hover { color: var(--text); border-color: var(--lavender); }
 .cpal-row.phone .cpal-rowx { width: 44px; height: 44px; border-radius: 12px; font-size: 16px; }
-.cpal-rownone { min-height: 28px; padding: 5px 8px; border-radius: 8px; border: 1px dashed var(--surface1);
+.cpal-rownone { min-height: 28px; padding: 5px 8px; border-radius: var(--radius-control); border: 1px dashed var(--surface1);
   background: transparent; color: var(--subtext); font-size: 10px; font-family: inherit; cursor: pointer;
   text-align: center; }
 .cpal-rownone:hover { border-color: var(--lavender); color: var(--text); }
@@ -55,20 +55,20 @@
 /* ---- shared atoms ---- */
 .cpal-sp { flex: 1 1 auto; }
 .cpal-dim { font-size: 9.5px; line-height: 1.4; color: var(--overlay0); }
-.cpal-lbl { font-size: 9.5px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); }
+.cpal-lbl { font-size: 11.5px; font-weight: 500; letter-spacing: normal; color: var(--overlay0); }
 .cpal-link { background: none; border: none; padding: 0; color: var(--lavender); font-size: 10px;
   font-family: inherit; cursor: pointer; white-space: nowrap; }
 .cpal-link:hover { color: var(--mauve); text-decoration: underline; }
 .cpal-strip { display: flex; height: 13px; overflow: hidden; }
 .cpal-strip > i { display: block; min-width: 2px; }
-.cpal-btn { font-size: 11px; padding: 7px 12px; border-radius: 9px; border: 1px solid var(--surface1);
+.cpal-btn { font-size: 11px; padding: 7px 12px; border-radius: var(--radius-control); border: 1px solid var(--surface1);
   background: transparent; color: var(--subtext); white-space: nowrap; cursor: pointer; font-family: inherit;
   transition: border-color .2s, color .2s, background .2s; }
 .cpal-btn:hover { color: var(--text); border-color: var(--overlay0); }
 .cpal-btn.on { border-color: var(--lavender); color: var(--text); background: rgba(182, 146, 230, .12); }
 .cpal-btn.ruby { border-color: var(--ruby); color: var(--ruby); }
 .cpal-btn.big { min-height: 44px; border-radius: 12px; font-size: 12.5px; flex: 1; }
-.cpal-primary { font-size: 11px; font-weight: 700; padding: 7px 14px; border-radius: 9px; border: none;
+.cpal-primary { font-size: 11px; font-weight: 600; padding: 7px 14px; border-radius: var(--radius-control); border: none;
   background: var(--lavender); color: var(--base); white-space: nowrap; cursor: pointer; font-family: inherit; }
 .cpal-primary:disabled { opacity: .45; cursor: not-allowed; }
 .cpal-primary.big { min-height: 44px; border-radius: 12px; font-size: 12.5px; flex: 1.4; }
@@ -133,11 +133,11 @@
 .cpal-card.skel { aspect-ratio: 3 / 4.3; background: var(--surface0); opacity: .5; cursor: default; }
 .cpal-cover { position: relative; aspect-ratio: 3 / 4; overflow: hidden; background: var(--mantle); }
 .cpal-cover > img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.cpal-cardname { position: absolute; left: 6px; right: 6px; bottom: 7px; font-size: 12px; font-weight: 700;
+.cpal-cardname { position: absolute; left: 6px; right: 6px; bottom: 7px; font-size: 12px; font-weight: 600;
   line-height: 1.2; color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .75); }
 .cpal-tick { position: absolute; top: 6px; right: 6px; width: 20px; height: 20px; display: grid;
   place-items: center; border-radius: 50%; background: var(--lavender); color: var(--base);
-  font-size: 11px; font-weight: 800; }
+  font-size: 11px; font-weight: 600; }
 .cpal-card > .cpal-strip { flex: none; height: 11px; }
 .cpal-new { aspect-ratio: 3 / 4.3; justify-content: center; align-items: center; gap: 6px;
   border-style: dashed; background: transparent; color: var(--subtext); font-size: 11px; }
@@ -153,7 +153,7 @@
 .cpal-selbar.phone .cpal-btn, .cpal-selbar.phone .cpal-primary { min-height: 44px; border-radius: 12px; font-size: 12px; }
 .cpal-selstrip { width: 64px; height: 12px; border-radius: 4px; flex: none; }
 .cpal-selname { display: flex; flex-direction: column; min-width: 0; font-size: 12px; }
-.cpal-selname > b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cpal-selname > b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---- the editor (frame D) ---- */
 .cpal-ed { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px; overflow-y: auto; min-height: 0; }
@@ -164,7 +164,7 @@
 .cpal-edtitle { flex: 1; min-width: 0; font-size: 17px; font-family: Georgia, serif; font-style: italic;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
 .cpal-rename { flex: 1; min-width: 0; font-size: 15px; font-family: Georgia, serif; font-style: italic;
-  padding: 3px 8px; border-radius: 8px; border: 1px solid var(--lavender); background: rgba(12, 10, 28, .8);
+  padding: 3px 8px; border-radius: var(--radius-control); border: 1px solid var(--lavender); background: rgba(12, 10, 28, .8);
   color: var(--text); }
 .cpal-edhead .cpal-link { color: var(--overlay0); }
 .cpal-edbtns { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -191,10 +191,10 @@
 .cpal-group { display: flex; flex-direction: column; gap: 5px; }
 .cpal-ghead { display: flex; align-items: center; gap: 8px; }
 .cpal-glabel { border: none; background: none; padding: 0; font-family: inherit; cursor: pointer;
-  font-size: 9.5px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); }
+  font-size: 11.5px; font-weight: 500; letter-spacing: normal; color: var(--overlay0); }
 .cpal-glabel.focus { color: var(--text); }
 .cpal-gtotal { font-size: 9.5px; color: var(--overlay0); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.cpal-gempty { height: 36px; border-radius: 8px; border: 1px dashed var(--surface1); background: transparent;
+.cpal-gempty { height: 36px; border-radius: var(--radius-control); border: 1px dashed var(--surface1); background: transparent;
   color: var(--subtext); font-size: 10.5px; font-family: inherit; cursor: pointer; }
 .cpal-gempty:hover { border-color: var(--lavender); color: var(--text); }
 .cpal-gempty.phone { height: 44px; border-radius: 10px; font-size: 12px; }
@@ -206,7 +206,7 @@
 .cpal-band:only-child { border-radius: 8px; }
 .cpal-band.sel { box-shadow: inset 0 0 0 2px var(--text); transform: translateY(-2px); }
 .cpal-pct { position: absolute; left: 0; right: 0; bottom: 3px; text-align: center; font-size: 8.5px;
-  font-weight: 700; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; pointer-events: none; }
+  font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; pointer-events: none; }
 .cpal-pct.dark { color: rgba(12, 10, 28, .8); }
 .cpal-pct.light { color: rgba(255, 255, 255, .9); }
 .cpal-handle { position: absolute; z-index: 2; right: -8px; top: 50%; margin-top: -7px; width: 14px; height: 14px;
@@ -252,7 +252,7 @@
 .cpal-pcard { display: flex; flex-direction: column; border-radius: 10px; overflow: hidden; border: 1px solid var(--surface1); }
 .cpal-pfield { position: relative; height: 170px; transition: background .3s; }
 .cpal-pfigure { position: absolute; left: 22%; right: 22%; bottom: 0; top: 30%; border-radius: 40% 40% 0 0; transition: background .3s; }
-.cpal-pcardname { position: absolute; left: 9px; bottom: 8px; right: 9px; font-size: 12px; font-weight: 700;
+.cpal-pcardname { position: absolute; left: 9px; bottom: 8px; right: 9px; font-size: 12px; font-weight: 600;
   color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .6); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cpal-pcard > .cpal-pstrip { height: 13px; }
 .cpal-foot { display: flex; gap: 8px; justify-content: flex-end; align-items: center; }

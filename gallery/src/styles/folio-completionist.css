@@ -7,7 +7,7 @@
 /* ---- O2: the completion meter, in the Folio header's title row ---- */
 .mgfo-meter { flex: 1 1 260px; min-width: 240px; max-width: 360px; display: flex; flex-direction: column; gap: 5px; }
 .mgfo-meter-top { display: flex; align-items: center; gap: 8px; }
-.mgfo-meter-lab { font-size: 11px; font-weight: 700; color: var(--text); }
+.mgfo-meter-lab { font-size: 11px; font-weight: 600; color: var(--text); }
 .mgfo-meter-track { flex: 1; height: 7px; border-radius: 4px; background: var(--surface0); overflow: hidden; }
 .mgfo-meter-track i { display: block; height: 100%; background: var(--gold); transition: width .4s; }
 .mgfo-meter-pct { font-size: 12px; font-family: ui-monospace, Menlo, monospace; color: var(--gold); font-variant-numeric: tabular-nums; }
@@ -15,7 +15,7 @@
 
 /* ---- O3: the All tab's sort chips ---- */
 .mgfo-sortrow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
-.mgfo-sortlab { font-size: 9px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); margin-right: 4px; }
+.mgfo-sortlab { font-size: 11px; font-weight: 500; letter-spacing: normal; color: var(--overlay0); margin-right: 4px; }
 .mgfo-sortchip {
   font: inherit; font-size: 10.5px; padding: 4px 10px; border-radius: 999px; cursor: pointer;
   border: 1px solid var(--surface1); background: transparent; color: var(--subtext);

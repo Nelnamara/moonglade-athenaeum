@@ -1031,7 +1031,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
                   images switch replaces the single reference slot on a context-image model) */}
               <div className="mgdock-slab" style={{ animationDelay: "0ms" }}>
                 <div className="mgdock-slabhead">
-                  <span className="mgdock-lbl">MODEL &amp; INPUTS</span>
+                  <span className="mgdock-lbl">Model &amp; inputs</span>
                   <span className="sp" />
                   <span className="mgdock-slabcount">{ctxOn
                     ? (s.ctx || []).length + " / " + contextMax(m) + " context"
@@ -1120,7 +1120,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
                         </button>
                         {s.ref && (
                           <>
-                            <span className="mgdock-lbl">STRENGTH</span>
+                            <span className="mgdock-lbl">Strength</span>
                             <input type="range" min="0.1" max="1" step="0.05" value={s.refStrength}
                               title="Reference strength"
                               onChange={(e) => set({ refStrength: e.target.value })} />
@@ -1144,20 +1144,20 @@ function GenerateDrawer({ open, onClose, account, request }) {
                   limit, and the size line -- what is sent. A model without tiers keeps the
                   long-edge stops. */}
               <div className="mgdock-slab" style={{ animationDelay: "60ms" }}>
-                <div className="mgdock-lbl">FRAME</div>
+                <div className="mgdock-lbl">Frame</div>
                 <OrientSwitch s={s} set={set} dim={autoOn} />
                 <RatioRow s={s} set={set} />
                 {tiers ? (
                   <>
                     <div className="mgdock-sizehead">
-                      <span className="mgdock-lbl">SIZE · {(m && m.title) || "MODEL"}</span>
+                      <span className="mgdock-lbl">Size · {(m && m.title) || "model"}</span>
                       <span className="mgdock-tiername">{autoOn ? "auto" : (sizeNow.tier && !custom ? sizeNow.tier.name : "custom")}</span>
                     </div>
                     <TierRow s={s} set={set} />
                   </>
                 ) : (
                   <>
-                    <div className="mgdock-lbl">SIZE · LONG EDGE</div>
+                    <div className="mgdock-lbl">Size · long edge</div>
                     <div className="mgdock-stops">
                       {SIZES.map((n, i) => {
                         const laneOff = laneRefusesFrame(s, { size: n });
@@ -1185,7 +1185,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
                   <span className="mgdock-note-sm">{tiers ? "custom · clamped to your limit" : "overrides"}</span>
                 </div>
                 <SizeLine s={s} className="mgdock-dims" />
-                <div className="mgdock-lbl">COUNT</div>
+                <div className="mgdock-lbl">Count</div>
                 <div className="mgdock-stops">
                   {[1, 2, 3, 4].map((n) => (
                     <button key={n} type="button"
@@ -1201,14 +1201,14 @@ function GenerateDrawer({ open, onClose, account, request }) {
                   Prompt helper switch (decision 5), the Pro / Ultra rows in slab 1 replace the
                   mode bars (T1a), and what the model does not take is not drawn. */}
               <div className="mgdock-slab" style={{ animationDelay: "120ms" }}>
-                <div className="mgdock-lbl">TUNING{rows ? "" : " · " + (MODES.find(([v]) => v === s.mode) || ["", s.mode])[1]}</div>
+                <div className="mgdock-lbl">Tuning{rows ? "" : " · " + (MODES.find(([v]) => v === s.mode) || ["", s.mode])[1]}</div>
                 {creative && <CreativityStops s={s} set={set} />}
                 {/* The mode bars dim, never vanish, for a profile this model does not offer
                     (ModeBars, above GenerateDrawer). */}
                 {!rows && <ModeBars s={s} set={set} />}
                 {!(creative && m && m.compat_steps === false) && (
                   <div className="mgdock-sliderrow">
-                    <span className="mgdock-lbl">STEPS</span>
+                    <span className="mgdock-lbl">Steps</span>
                     <input type="range"
                       min={stepsR.min != null ? stepsR.min : 1}
                       max={stepsR.max != null ? stepsR.max : 150}
@@ -1242,7 +1242,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
                     ColorPalette.jsx's own; this is only the mount. `ctx` holds it. */}
                 <PaletteRow s={s} set={set} ctx={ctxOn} />
                 <div className="mgdock-sliderrow">
-                  <span className="mgdock-lbl">SEED</span>
+                  <span className="mgdock-lbl">Seed</span>
                   <input className="mgdock-seed" value={s.seed} placeholder="blank = random"
                     onChange={(e) => set({ seed: e.target.value.replace(/[^\d-]/g, "").replace(/(?!^)-/g, "") })} />
                 </div>
@@ -1299,7 +1299,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
             <div className="gd-results mgdock-results">
               {g.results.map((r) => (
                 <div key={r.id} className={"gd-res " + r.kind}>
-                  {r.kind === "run" ? "⏳ " : r.kind === "ok" ? "✔ " : r.kind === "warn" ? "⚠ " : "✕ "}{r.text}
+                  {r.kind === "run" ? <><Icon name="hourglass" /> </> : r.kind === "ok" ? "✔ " : r.kind === "warn" ? <><Icon name="warning" /> </> : "✕ "}{r.text}
                   {r.media && r.media.map((mid) => (
                     <a key={mid} href={"/full/" + mid} target="_blank" rel="noreferrer">
                       <img src={"/thumbs/" + mid + ".jpg"} alt="" />
@@ -1361,7 +1361,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
                    nothing. The slab keeps the DC's heading and says so in the DC's own
                    no-knob line (1531-1533, 'Reference Pro has no quality knob — …' style). */
                 <div className="mgdock-slab" style={{ animationDelay: "120ms" }}>
-                  <div className="mgdock-lbl">QUALITY</div>
+                  <div className="mgdock-lbl">Quality</div>
                   <div className="mgdock-editcopy">
                     {sub === "fixer"
                       ? "A Fix has no quality knob — PixAI prices each Fix itself, and the price shows beside the button."
@@ -1407,7 +1407,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
                       title={reuseFrom.partial
                         ? "PARTIAL recipe from " + reuseFrom.tag + ": " + reuseFrom.partial + " — click to clear"
                         : "Prompt & core settings prefilled from run " + reuseFrom.tag + " — click to clear"}>
-                      ↺ from {reuseFrom.tag}{reuseFrom.partial ? " ⚠" : ""} <span>&times;</span>
+                      ↺ from {reuseFrom.tag}{reuseFrom.partial ? <> <Icon name="warning" /></> : ""} <span>&times;</span>
                     </button>
                   )}
                 </>
@@ -1509,7 +1509,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
                     </span>
                   ))
                 )}
-                {snipErr && <span className="mgdock-sniperr">⚠ {snipErr}</span>}
+                {snipErr && <span className="mgdock-sniperr"><Icon name="warning" /> {snipErr}</span>}
               </div>
             )}
 
@@ -1520,7 +1520,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
                 2026-08-16), so the Edit tab's composer never grows a NEGATIVE row. */}
             {expanded && (tab === "image" || tab === "video") && (
               <div className="mgdock-negrow">
-                <span className="mgdock-lbl">NEGATIVE</span>
+                <span className="mgdock-lbl">Negative</span>
                 {tab === "image" && (
                   <textarea className={"mgdock-neg" + (ctxOn ? " mgts-held" : "")} rows={1} value={s.negative}
                     placeholder="lowres, text"

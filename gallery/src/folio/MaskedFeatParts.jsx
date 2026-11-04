@@ -28,7 +28,7 @@ export function VeilCard({ maskUrl, riddle, waiting }) {
         <div className="mgfm-rim"><VeilFill maskUrl={maskUrl} /></div>
       </div>
       <div className="mgfm-veil-text">
-        <div className="mgfm-cap">A RIDDLE · MORE WAIT, UNFOUND</div>
+        <div className="mgfm-cap">A riddle · more wait, unfound</div>
         <div className="mgfm-riddle">{riddle}</div>
       </div>
     </div>
@@ -80,7 +80,7 @@ export function VeilBanner({ maskUrl, riddle, waiting }) {
     <>
       <div className="mgfm-bn-row">
         <div className="mgfm-bn-sil"><VeilFill maskUrl={maskUrl} /></div>
-        <div className="mgfm-bn-cap">A RIDDLE</div>
+        <div className="mgfm-bn-cap">A riddle</div>
       </div>
       <div className="mgfm-bn-riddle">{riddle}</div>
     </>

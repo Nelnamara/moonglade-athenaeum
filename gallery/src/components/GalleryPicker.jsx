@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import PickerCore from "../picker/pickerCore.js";
+import Icon from "../icons/Icons.jsx";
 import { apiUpload } from "../api.js";
 import { isPrivacyBlurOn, privacyBlurClass } from "../lib/privacyBlur.js";
 import "../styles/gallery-picker.css";
@@ -35,6 +36,7 @@ export default function GalleryPicker({
   const [empty, setEmpty] = useState(false);
   const [closing, setClosing] = useState(false);
   const [uploadMsg, setUploadMsg] = useState(null);
+  const [uploadBad, setUploadBad] = useState(false);   // the message is a failure: the warning icon draws before it
 
   const [type, setType] = useState(initType);
   const [collection, setCollection] = useState("");
@@ -66,7 +68,7 @@ export default function GalleryPicker({
         if (meta.append) {
           setImages((old) => old.concat(imgs));
         } else {
-          setUploadMsg(null);           // a fresh search clears any stale upload message
+          setUploadMsg(null); setUploadBad(false);           // a fresh search clears any stale upload message
           setImages(imgs);
           setEmpty(!imgs.length);
         }
@@ -134,11 +136,12 @@ export default function GalleryPicker({
   const doUpload = () => {
     const f = fileRef.current && fileRef.current.files[0];
     if (!f) return;
+    setUploadBad(false);
     setUploadMsg("Uploading " + f.name + "…");
     const fd = new FormData(); fd.append("file", f);
     apiUpload("/api/upload", fd).then((d) => {
       if (fileRef.current) fileRef.current.value = "";
-      if (d.error || !d.media_id) { setUploadMsg("⚠ Upload failed: " + (d.error || "no media id")); return; }
+      if (d.error || !d.media_id) { setUploadBad(true); setUploadMsg("Upload failed: " + (d.error || "no media id")); return; }
       setUploadMsg(null);
       pick({ media_id: d.media_id, prompt: "", thumb: URL.createObjectURL(f) });
     });
@@ -225,7 +228,7 @@ export default function GalleryPicker({
           ))}
         </div>
         {(empty || uploadMsg) && (
-          <div className="mg-pk-empty">{uploadMsg || "No matches for these filters."}</div>
+          <div className="mg-pk-empty">{uploadMsg ? <>{uploadBad ? <><Icon name="warning" /> </> : null}{uploadMsg}</> : "No matches for these filters."}</div>
         )}
       </div>
     </div>

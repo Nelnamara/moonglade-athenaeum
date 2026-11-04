@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import { submitTask, useResultLines } from "../gen/submitTask.js";
 import { ResultLines } from "./EditTab.jsx";
 import { groupFamilies } from "../gen/emotionFamilies.js";
@@ -179,7 +180,7 @@ export default function EnhanceTab({ source, armed, onOpenFilters }) {
         {/* CHANGE EMOTION (comp A3): family tabs, one family on screen, 4 across. */}
         {sel === "emotion" && (
           <div className="mgdock-emopick">
-            <div className="mgdock-enhsub">TARGET EXPRESSION</div>
+            <div className="mgdock-enhsub">Target expression</div>
             {emotions === null ? (
               <div className="mgdock-enhnote">Loading expressions…</div>
             ) : emotions.length === 0 ? (
@@ -205,9 +206,9 @@ export default function EnhanceTab({ source, armed, onOpenFilters }) {
                       title={e.membership ? e.label + " — needs a PixAI membership" : e.label}>
                       {/* the family colour is a GLYPH TINT: the tile itself stays neutral */}
                       <span className="mgdock-emoglyph" style={{ color: openFam.color }}
-                        aria-hidden="true">{openFam.glyph}</span>
+                        aria-hidden="true">{openFam.icon ? <Icon name={openFam.icon} /> : openFam.glyph}</span>
                       <span className="mgdock-emoname">{e.label}</span>
-                      {e.membership && <span className="mgdock-aigate" title="Membership required">♛</span>}
+                      {e.membership && <span className="mgdock-aigate" title="Membership required"><Icon name="crown" /></span>}
                     </button>
                   ))}
                 </div>

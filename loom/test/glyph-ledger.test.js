@@ -195,7 +195,7 @@ test("G6: Print sheet wears ⎙ (one item -- the phone's contact sheet rides the
 });
 
 test("G9: the membership gate is a crown, in PixAI purple that no skin retints", () => {
-  assert.match(enhance, /className="mgdock-aigate" title="Membership required">♛</);
+  assert.match(enhance, /className="mgdock-aigate" title="Membership required"><Icon name="crown" \/></);   // drawn, since the quieted look (was ♛)
   assert.doesNotMatch(enhance, /mgdock-aigate[^>]*>★/);
   // --purple-bright is the app's only :root-fixed violet; --lavender/--mauve go peach
   // under ember and mint under verdant, which would stop a PixAI fact being PixAI's colour.
@@ -211,9 +211,9 @@ test("G10: the Arena note wears crossed swords", () => {
   assert.doesNotMatch(publish, /★ counts toward/);
 });
 
-test("G11: the Folio's reward flags are ❖ skin + ⚑ banner (the owner's pick B)", () => {
-  assert.match(folio, /className="mgfo-flag">❖ unlocks \{skinName\} skin/);
-  assert.match(folio, /className="mgfo-flag">⚑ unlocks a banner/);   // the banner keeps its flag
+test("G11: the Folio's reward flags are the drawn skin + flag icons (the owner's pick B, drawn since the quieted look)", () => {
+  assert.match(folio, /className="mgfo-flag"><Icon name="skin" \/> unlocks \{skinName\} skin/);
+  assert.match(folio, /className="mgfo-flag"><Icon name="flag" \/> unlocks a banner/);   // the banner keeps its flag, drawn
   assert.doesNotMatch(folio, /★ unlocks/);
 });
 
@@ -254,9 +254,9 @@ test("G12: undo wears the history dial at all four sites -- and Remix still turn
 
 // ------------------------------------------------- 8-12, the post-audit rulings
 
-test("8. the palette's Collection rows wear the books, and ❖ is the skin flag ALONE", () => {
+test("8. the palette's Collection rows wear the books, and no component draws a ❖ any more (the skin flag is a drawn icon)", () => {
   assert.match(app, /icon: <Icon name="collection" \/>,\n\s+label: "Collection: " \+ name/);
-  // ❖ survives in exactly one place in the whole app: the Folio's skin flag.
+  // ❖ survives nowhere in the components: the Folio's skin flag is the drawn "skin" icon now.
   const files = readdirSync(path.join(SRC, "components"))
     .filter((f) => f.endsWith(".jsx"))
     .map((f) => ["components/" + f, src("components/" + f)]);
@@ -265,12 +265,11 @@ test("8. the palette's Collection rows wear the books, and ❖ is the skin flag 
   for (const [name, text] of files) {
     for (const [n, t] of codeLines(text)) {
       if (!t.includes("❖")) continue;
-      if (name === "components/FolioOverlay.jsx" && /unlocks \{skinName\} skin/.test(t)) continue;
       offenders.push(name + ":" + n + "  " + t);
     }
   }
-  assert.deepEqual(offenders, [], "❖ is used for something that is not the skin flag");
-  assert.match(folio, /className="mgfo-flag">❖ unlocks \{skinName\} skin/);  // not passable by deletion
+  assert.deepEqual(offenders, [], "a ❖ is back in a component");
+  assert.match(folio, /className="mgfo-flag"><Icon name="skin" \/> unlocks \{skinName\} skin/);  // not passable by deletion
 });
 
 test("9. ↩ is the series window's Esc hint, and only that", () => {

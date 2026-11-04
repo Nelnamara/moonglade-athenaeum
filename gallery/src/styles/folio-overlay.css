@@ -41,13 +41,14 @@
   border-bottom: 1px solid rgba(255, 255, 255, .06);
 }
 .mgfo-crumb {
-  font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+  font-size: 13px; font-weight: 500; letter-spacing: normal; text-transform: none;
   color: rgba(226, 222, 238, .7); cursor: pointer; white-space: nowrap; transition: color .15s;
 }
 .mgfo-crumb:hover { color: var(--text); }
 .mgfo-div { width: 1px; height: 12px; background: rgba(255, 255, 255, .14); flex: none; }
 .mgfo-label {
-  font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 500; letter-spacing: normal; text-transform: none;
   color: rgba(226, 222, 238, .5); white-space: nowrap;
 }
 .mgfo-nar-avatar {
@@ -61,12 +62,11 @@
 .mgfo-nar-avatar::after {
   content: ""; position: absolute; bottom: -1px; right: -1px; width: 7px; height: 7px;
   border-radius: 50%; background: var(--emerald); border: 1.5px solid var(--mantle);
-  animation: mgfoPulse 2.6s ease-in-out infinite;
 }
 /* "Unleash the AI" -- rendered once `triggered` (real-or-this-session, see
    FolioOverlay.jsx), a real click-to-toggle from here on, no re-poking. */
 .mgfo-unleash {
-  display: flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px;
+  display: flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: var(--radius-control-sm);
   border: 1px solid var(--red); flex: none; cursor: pointer; transition: background .15s;
 }
 .mgfo-unleash:hover { background: color-mix(in srgb, var(--red) 14%, transparent); }
@@ -75,13 +75,13 @@
   background: transparent; transition: background .15s;
 }
 .mgfo-unleash-dot.on { background: var(--red); }
-.mgfo-unleash { font-size: 10px; font-weight: 700; letter-spacing: .04em; color: var(--red); white-space: nowrap; }
+.mgfo-unleash { font-size: 12px; font-weight: 500; letter-spacing: normal; color: var(--red); white-space: nowrap; }
 .mgfo-spacer { flex: 1 1 auto; }
 .mgfo-index {
   font-size: 11px; color: rgba(214, 210, 226, .45); font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 .mgfo-search {
-  display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border-radius: 999px;
+  display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border-radius: var(--radius-control);
   border: 1px solid var(--surface1); background: var(--base); flex: none;
 }
 .mgfo-search-ic { font-size: 10px; color: rgba(226, 222, 238, .7); }
@@ -112,8 +112,8 @@
 .mgfo-title-row { display: flex; align-items: flex-end; gap: 26px; flex-wrap: wrap; }
 .mgfo-title-col { flex: 1 1 380px; min-width: 0; }
 .mgfo-eyebrow {
-  font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 10px;
-  letter-spacing: .2em; text-transform: uppercase; color: var(--overlay0);
+  font-family: ui-monospace, Menlo, monospace; font-weight: 500; font-size: 12px;
+  letter-spacing: .02em; text-transform: none; color: var(--overlay0);
 }
 .mgfo-h1 {
   font-family: var(--font-hero); font-style: italic; font-weight: 400;
@@ -126,13 +126,13 @@
 .mgfo-rule::after {
   content: ""; position: absolute; inset: 0; width: 60px;
   background: linear-gradient(90deg, transparent, #fff4d1, transparent);
-  animation: mgfoGlint 3.6s ease-in-out infinite;
+  opacity: 0;
 }
 .mgfo-stats-trio { flex: none; display: flex; gap: 26px; align-items: flex-end; }
 .mgfo-stat { text-align: right; }
 .mgfo-stat-lab {
-  font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 9.5px;
-  letter-spacing: .16em; text-transform: uppercase; color: var(--overlay0);
+  font-family: ui-monospace, Menlo, monospace; font-weight: 500; font-size: 11.5px;
+  letter-spacing: .02em; text-transform: none; color: var(--overlay0);
 }
 .mgfo-stat-lab.feat { color: var(--gunmetal); }
 .mgfo-stat-val {
@@ -146,8 +146,8 @@
 /* ---- Tabs ---- */
 .mgfo-tabs { display: flex; align-items: center; gap: 7px; margin-top: 20px; flex-wrap: wrap; }
 .mgfo-tab {
-  font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; font-weight: 600; letter-spacing: .1em;
-  text-transform: uppercase; padding: 6px 14px; border-radius: 999px; cursor: pointer;
+  font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; font-weight: 500; letter-spacing: normal;
+  text-transform: none; padding: 6px 14px; border-radius: var(--radius-control); cursor: pointer;
   transition: all .15s; color: var(--subtext); background: transparent; border: 1px solid var(--surface1);
 }
 .mgfo-tab.on {
@@ -155,16 +155,15 @@
   background: linear-gradient(180deg, color-mix(in srgb, var(--lavender) 55%, #fff) 0%,
     var(--lavender) 48%, color-mix(in srgb, var(--lavender) 72%, #000) 100%);
   border-color: color-mix(in srgb, var(--lavender) 65%, #fff);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), inset 0 -1px 0 rgba(0, 0, 0, .3),
-    0 0 10px color-mix(in srgb, var(--lavender) 45%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), inset 0 -1px 0 rgba(0, 0, 0, .3);
 }
 .mgfo-clearfilter {
-  display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
+  display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500; letter-spacing: normal;
   padding: 6px 12px; border-radius: 999px; cursor: pointer; color: var(--emerald); border: 1px solid var(--emerald);
 }
 .mgfo-flex1 { flex: 1; }
 .mgfo-hint {
-  font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .08em;
+  font-family: ui-monospace, Menlo, monospace; font-size: 12px; letter-spacing: normal;
   color: var(--overlay0); white-space: nowrap;
 }
 
@@ -174,8 +173,8 @@
   border-bottom: 1px dashed var(--surface0); margin: 20px 0 10px;
 }
 .mgfo-sec-h b {
-  font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 10px;
-  letter-spacing: .2em; text-transform: uppercase; color: var(--overlay0);
+  font-family: ui-monospace, Menlo, monospace; font-weight: 500; font-size: 12px;
+  letter-spacing: .02em; text-transform: none; color: var(--overlay0);
 }
 .mgfo-sec-h span { font-size: 11px; color: var(--subtext); }
 .mgfo-sec-h.emerald b { color: var(--emerald); }
@@ -184,7 +183,7 @@
 .mgfo-count.feat { color: var(--gunmetal); }
 .mgfo-dot {
   width: 8px; height: 8px; border-radius: 50%; background: var(--emerald); flex: none;
-  align-self: center; animation: mgfoPulse 2.6s ease-in-out infinite;
+  align-self: center;
 }
 
 /* ---- Two-column tab bodies (Summary + Statistics) ---- */
@@ -221,8 +220,8 @@
 }
 .mgfo-recside { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
 .mgfo-recmeta {
-  font-family: ui-monospace, Menlo, monospace; font-size: 9px; letter-spacing: .08em;
-  text-transform: uppercase; color: var(--overlay0); white-space: nowrap;
+  font-family: ui-monospace, Menlo, monospace; font-size: 11px; letter-spacing: normal;
+  text-transform: none; color: var(--overlay0); white-space: nowrap;
 }
 
 /* ---- Progress lists: the ledger, statistics buckets/ladder rows ---- */
@@ -235,8 +234,8 @@
    ported at all; enlarged per owner direction (24px, not just restored). */
 .mgfo-progrow-ico { width: 24px; height: 24px; border-radius: 6px; flex: none; opacity: .9; object-fit: cover; }
 .mgfo-progrow-lab {
-  flex: none; width: 118px; text-align: right; font-size: 9.5px; font-weight: 700;
-  letter-spacing: .1em; text-transform: uppercase; color: var(--overlay0);
+  flex: none; width: 118px; text-align: right; font-size: 11.5px; font-weight: 500;
+  letter-spacing: normal; text-transform: none; color: var(--overlay0);
 }
 .mgfo-progrow-lab.wide {
   width: 150px; text-align: left; font-size: 11.5px; font-weight: 400; letter-spacing: normal;
@@ -279,8 +278,8 @@
   margin: 26px 0; padding: 40px 20px; border: 1px dashed var(--surface1); border-radius: 13px; text-align: center;
 }
 .mgfo-nf-h {
-  font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 10px;
-  letter-spacing: .2em; text-transform: uppercase; color: var(--overlay0); margin-bottom: 6px;
+  font-family: ui-monospace, Menlo, monospace; font-weight: 500; font-size: 12px;
+  letter-spacing: .02em; text-transform: none; color: var(--overlay0); margin-bottom: 6px;
 }
 .mgfo-nf-sub { font-size: 12px; font-style: italic; color: var(--subtext); }
 
@@ -310,7 +309,7 @@
 .mgfo-lb-img img { width: 100%; height: 100%; object-fit: cover; }
 .mgfo-ladderbadge.zero .mgfo-lb-img { filter: grayscale(.6) brightness(.6); }
 .mgfo-lb-rung { position: absolute; right: 5px; bottom: 5px; border-radius: 4px; padding: 1px 5px;
-  font-family: ui-monospace, Menlo, monospace; font-size: 8.5px; font-weight: 800;
+  font-family: ui-monospace, Menlo, monospace; font-size: 8.5px; font-weight: 600;
   color: var(--tc); background: rgba(5, 4, 13, .8); }
 .mgfo-lb-pips { display: flex; gap: 2px; }
 .mgfo-lb-pips i { width: 5px; height: 5px; border-radius: 50%; background: var(--surface1); }
@@ -340,7 +339,7 @@
   position: absolute; inset: 0; pointer-events: none; border-radius: 13px; z-index: 3;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .14), inset 0 0 60px color-mix(in srgb, var(--purple-bright) 18%, transparent);
 }
-.mgfo-plinth-float { position: relative; z-index: 2; animation: mgfoFloat 4.2s ease-in-out infinite; }
+.mgfo-plinth-float { position: relative; z-index: 2; }
 .mgfo-plinth-badge {
   width: 246px; height: 246px; border-radius: 22px; overflow: hidden;
   filter: grayscale(.75) brightness(.4); outline: 3px solid var(--surface1); outline-offset: 5px;
@@ -358,9 +357,9 @@
 }
 .mgfo-plinth-navrow { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 .mgfo-plinth-arrow {
-  flex: none; font-family: ui-monospace, Menlo, monospace; font-size: 10px; font-weight: 600;
-  letter-spacing: .1em; text-transform: uppercase; color: var(--subtext); border: 1px solid var(--surface1);
-  background: var(--surface0); border-radius: 7px; padding: 6px 11px; cursor: pointer; transition: all .15s;
+  flex: none; font-family: ui-monospace, Menlo, monospace; font-size: 12px; font-weight: 500;
+  letter-spacing: normal; text-transform: none; color: var(--subtext); border: 1px solid var(--surface1);
+  background: var(--surface0); border-radius: var(--radius-control-sm); padding: 6px 11px; cursor: pointer; transition: all .15s;
 }
 .mgfo-plinth-arrow:hover { color: var(--text); border-color: var(--accent); }
 .mgfo-plinth-pips { flex: 1; display: flex; gap: 5px; justify-content: center; }
@@ -373,8 +372,8 @@
 
 .mgfo-plinth-detailcol { min-width: 0; display: flex; flex-direction: column; gap: 10px; justify-content: center; }
 .mgfo-plinth-eyebrow {
-  font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 10px; letter-spacing: .2em;
-  text-transform: uppercase; color: var(--tc); transition: color .4s ease;
+  font-family: ui-monospace, Menlo, monospace; font-weight: 500; font-size: 12px; letter-spacing: .02em;
+  text-transform: none; color: var(--tc); transition: color .4s ease;
 }
 .mgfo-plinth-name {
   font-family: var(--font-hero); font-style: italic; font-weight: 400;
@@ -387,7 +386,7 @@
 .mgfo-plinth-rule::after {
   content: ""; position: absolute; inset: 0; width: 60px;
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .75), transparent);
-  animation: mgfoGlint 3.6s ease-in-out infinite;
+  opacity: 0;
 }
 .mgfo-plinth-desc { font-size: 13px; font-style: italic; line-height: 1.55; color: var(--subtext); max-width: 480px; }
 .mgfo-plinth-facts { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
@@ -397,8 +396,8 @@
 }
 .mgfo-plinth-fact.last { border-bottom: none; }
 .mgfo-plinth-fact-lab {
-  flex: none; width: 118px; text-align: right; font-family: ui-monospace, Menlo, monospace; font-weight: 600;
-  font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: var(--overlay0);
+  flex: none; width: 118px; text-align: right; font-family: ui-monospace, Menlo, monospace; font-weight: 500;
+  font-size: 11px; letter-spacing: normal; text-transform: none; color: var(--overlay0);
 }
 .mgfo-plinth-fact-gold { font-size: 12px; color: var(--gold); }
 .mgfo-plinth-fact-val { font-size: 12px; color: var(--subtext); }
@@ -415,8 +414,8 @@
 .mgfo-group-h { display: flex; align-items: baseline; gap: 9px; margin-bottom: 11px; }
 .mgfo-group-icon { width: 15px; height: 15px; border-radius: 4px; flex: none; opacity: .85; object-fit: cover; align-self: center; }
 .mgfo-group-name {
-  font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 9.5px; letter-spacing: .16em;
-  text-transform: uppercase; color: var(--accent);
+  font-family: ui-monospace, Menlo, monospace; font-weight: 500; font-size: 11.5px; letter-spacing: .02em;
+  text-transform: none; color: var(--accent);
 }
 .mgfo-group-count { font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--overlay0); font-variant-numeric: tabular-nums; }
 .mgfo-group-rule { flex: 1; height: 1px; align-self: center; background: linear-gradient(90deg, rgba(255, 255, 255, .1), transparent); }
@@ -493,8 +492,8 @@
 .mgfo-card-pts { font-size: 10px; color: var(--overlay0); }
 .mgfo-card.earned .mgfo-card-pts { color: var(--gold); }
 .mgfo-card-subl {
-  font-family: ui-monospace, Menlo, monospace; font-size: 9px; font-weight: 600;
-  letter-spacing: .06em; text-transform: uppercase; color: var(--overlay0);
+  font-family: ui-monospace, Menlo, monospace; font-size: 11px; font-weight: 500;
+  letter-spacing: normal; text-transform: none; color: var(--overlay0);
 }
 
 /* ---- Tier-triad tokens: byte-for-byte the same hex values as
@@ -517,8 +516,8 @@
   display: flex; flex-direction: column; gap: 22px; scrollbar-width: thin;
 }
 .mgfo-rail-h {
-  font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 10px;
-  letter-spacing: .2em; text-transform: uppercase; color: var(--overlay0);
+  font-family: ui-monospace, Menlo, monospace; font-weight: 500; font-size: 12px;
+  letter-spacing: .02em; text-transform: none; color: var(--overlay0);
 }
 .mgfo-catlist { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
 .mgfo-catrow {
@@ -527,26 +526,23 @@
 }
 .mgfo-catrow.on { background: var(--surface0); }
 .mgfo-catlab { font-size: 12px; color: var(--subtext); }
-.mgfo-catrow.on .mgfo-catlab { font-weight: 700; color: var(--accent); }
+.mgfo-catrow.on .mgfo-catlab { font-weight: 600; color: var(--accent); }
 .mgfo-catct { font-family: ui-monospace, Menlo, monospace; font-size: 10px; font-variant-numeric: tabular-nums; color: var(--overlay0); }
 .mgfo-catrow.on .mgfo-catct { color: var(--accent); }
 .mgfo-raildiv {
   height: 1px; flex: none;
   background: linear-gradient(90deg, transparent 0%, rgba(182, 146, 230, .5) 50%, transparent 100%);
-  box-shadow: 0 0 8px rgba(182, 146, 230, .35);
 }
 .mgfo-narrator { display: flex; flex-direction: column; align-items: stretch; }
 .mgfo-narrator-h {
   display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
-  font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 10px;
-  letter-spacing: .2em; text-transform: uppercase; color: var(--emerald);
+  font-family: ui-monospace, Menlo, monospace; font-weight: 500; font-size: 12px;
+  letter-spacing: .02em; text-transform: none; color: var(--emerald);
 }
 .mgfo-narrator-img {
   width: 100%; max-height: 220px; object-fit: contain; display: block;
-  filter: drop-shadow(0 4px 22px rgba(182, 146, 230, .35));
 }
-.mgfo-narrator-img.poke { cursor: pointer; transition: filter .15s; }
-.mgfo-narrator-img.poke:hover { filter: drop-shadow(0 4px 26px rgba(182, 146, 230, .55)); }
+.mgfo-narrator-img.poke { cursor: pointer; }
 .mgfo-narrator-quote {
   text-align: center; font-size: 11.5px; font-style: italic; color: var(--subtext);
   margin-top: 10px; line-height: 1.55; padding: 9px 12px; border-radius: 9px;

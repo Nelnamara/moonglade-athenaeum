@@ -138,7 +138,7 @@ export const MODE_PH = {
 // is_private/isPrivate, so nothing about what gets submitted moved.
 export const CHANNEL_CAP = {
   normal: "Please keep creations SFW",
-  enhanced: "👑 Private — when selected, your generated works cannot be published",
+  enhanced: "Private — when selected, your generated works cannot be published",
 };
 // The CAMERA <select>'s options, value + label, in the DC's exact order (DC 1405-1411). The
 // values are PixAI's i2vPro.cameraMovement keys (unchanged); the labels are the DC's.

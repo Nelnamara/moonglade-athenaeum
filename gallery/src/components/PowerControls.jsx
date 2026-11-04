@@ -145,14 +145,14 @@ export function QuickRows({ power, ctxOn, onMoreModels, onMoreLoras }) {
     <div className="mgpow-rows">
       {models.length > 0 && (
         <div className="mgpow-row">
-          <span className="mgdock-lbl mgpow-rowlbl">MODELS</span>
+          <span className="mgdock-lbl mgpow-rowlbl">Models</span>
           {models.map((c) => <Chip key={c.id} c={c} onPick={() => power.pickModelChip(c.entry)} />)}
           <button type="button" className="mgpow-chip" title="Opens the model picker" onClick={onMoreModels}>+ more</button>
         </div>
       )}
       {loras.length > 0 && (
         <div className="mgpow-row">
-          <span className="mgdock-lbl mgpow-rowlbl">LORAS</span>
+          <span className="mgdock-lbl mgpow-rowlbl">LoRAs</span>
           {loras.map((c) => <Chip key={c.id} c={c} onPick={() => power.toggleLoraChip(c.entry)} />)}
           <button type="button" className="mgpow-chip" title="Opens the LoRA picker" onClick={onMoreLoras}>+ more</button>
         </div>

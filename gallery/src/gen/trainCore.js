@@ -35,19 +35,22 @@ export const MIN_IMAGES = 10;
 export const MAX_IMAGES = 100;
 export const CAPTION_MAX = 1000;
 // Basic's four goals and Advanced's categories: PixAI's own values (its "Something else"
-// sub-kind is never sent). `mark` was the glyph on Basic's goal tile while the app had no picture
-// for it (the owner found the flat colour square blank, walk 2026-09-29). Session T put a picture
-// in each tile (components/train/GoalTile.jsx), so nothing draws `mark` any more; it stays as
-// data until the owner says to drop it. U+FE0E keeps the three that have an emoji form drawn as
-// text.
+// sub-kind is never sent). `icon` names the drawn line icon (gallery/src/icons) that stands for the
+// goal; it was a text `mark` glyph on Basic's goal tile while the app had no picture for it (the
+// owner found the flat colour square blank, walk 2026-09-29). Session T put a picture in each tile
+// (components/train/GoalTile.jsx), so nothing draws it any more; it stays as data until the owner
+// says to drop it.
 export const GOALS = Object.freeze([
-  { value: "character", label: "Character", desc: "One specific person or character", mark: "☺︎" },
-  { value: "style", label: "Art style", desc: "One set of linework and colours", mark: "✒︎" },
-  { value: "clothing", label: "Outfit", desc: "One outfit, on any character", mark: "✂︎" },
-  { value: "other", label: "Something else", desc: "Animals, poses, backgrounds and more", mark: "✿" },
+  { value: "character", label: "Character", desc: "One specific person or character", icon: "person" },
+  { value: "style", label: "Art style", desc: "One set of linework and colours", icon: "brush" },
+  { value: "clothing", label: "Outfit", desc: "One outfit, on any character", icon: "shirt" },
+  { value: "other", label: "Something else", desc: "Animals, poses, backgrounds and more", icon: "shapes" },
 ]);
-// A tile's source mark (handoff 2a): upload, from history, an imported set.
-export const SOURCE_MARK = Object.freeze({ upload: "⬆", history: "▦", dataset: "⎘" });
+// A tile's source mark (handoff 2a): upload, from history, an imported set. The upload mark is a
+// drawn line icon (SOURCE_ICON); history and dataset stay text marks (▦ ⎘, out of the emoji pick),
+// so a tile draws `<Icon name={SOURCE_ICON[source]}>` when it has one and SOURCE_MARK[source] if not.
+export const SOURCE_ICON = Object.freeze({ upload: "upload" });
+export const SOURCE_MARK = Object.freeze({ history: "▦", dataset: "⎘" });
 
 /* Add images to the one grid, de-duplicated by media id, never past 100. `incoming` is
    [{media_id, thumb?}]; each keeps the first source it arrived by. Returns the new list and
