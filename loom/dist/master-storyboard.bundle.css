@@ -1,3 +1,81 @@
+/* ../gallery/src/styles/icons.css */
+.mgico {
+  display: inline-block;
+  vertical-align: -0.15em;
+  flex: none;
+}
+.mgico.mgico-line {
+  vertical-align: middle;
+}
+.mgma2-lorabadge .mgico,
+.mgct-entered .mgico,
+.cmb-chip .mgico,
+.cmb-entered-inline .mgico {
+  width: 1.3em;
+  height: 1.3em;
+  margin-right: 0.15em;
+}
+.mp-sub .mgico {
+  width: 1.15em;
+  height: 1.15em;
+  margin-right: 0.1em;
+}
+button.mgdock-snipbtn .mgico {
+  width: 1.25em;
+  height: 1.25em;
+  margin-right: 0.25em;
+}
+.mgl-sglyph .mgico,
+.mgdr-search-icon .mgico,
+.mgfo-search-ic .mgico {
+  width: 1.3em;
+  height: 1.3em;
+}
+.glm-search-icon .mgico {
+  width: 1.25em;
+  height: 1.25em;
+}
+.glm-iconbtn .mgico {
+  width: 16px;
+  height: 16px;
+  vertical-align: middle;
+}
+.mgx-metal-folio .mgico {
+  width: 1.2em;
+  height: 1.2em;
+  vertical-align: -0.22em;
+  margin-right: 0.1em;
+}
+.glm-navicon .mgico {
+  width: 1em;
+  height: 1em;
+  vertical-align: middle;
+}
+.fm-titlechip .mgico {
+  width: 1.3em;
+  height: 1.3em;
+  margin-right: 0.15em;
+}
+.mgpal-ico .mgico:not(.mgico-line) {
+  width: 1.15em;
+  height: 1.15em;
+  vertical-align: -0.2em;
+}
+.mgdr-undo .mgico {
+  width: 1.35em;
+  height: 1.35em;
+  margin-right: 0.2em;
+}
+button.mgdock-snip .mgico {
+  width: 1.5em;
+  height: 1.5em;
+  margin-right: 0.25em;
+}
+button.mgcp-chip .mgico {
+  width: 1.3em;
+  height: 1.3em;
+}
+
 /* ../gallery/src/styles/gallery-picker.css */
 .mg-gallery-picker {
   position: fixed;
@@ -45,7 +123,7 @@
   backdrop-filter: blur(18px) saturate(1.12);
   border: 1px solid rgba(182, 146, 230, .32);
   border-radius: 16px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, .55), 0 0 34px rgba(182, 146, 230, .14);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .55);
   padding: 14px;
   display: flex;
   flex-direction: column;
@@ -117,7 +195,7 @@
 }
 .mg-gallery-picker .mg-pk-t {
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 600;
   white-space: nowrap;
   color: var(--text,#d6d2e2);
 }
@@ -126,7 +204,7 @@
   min-width: 140px;
   background: var(--base,#0c0a1c);
   border: 1px solid var(--surface1,#3a3460);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   padding: 7px 9px;
   color: var(--text,#d6d2e2);
   font: 13px/1.2 var(--font-system,system-ui,sans-serif);
@@ -187,7 +265,7 @@
 .mg-gallery-picker .mg-pk-filters select {
   background: var(--surface0,#211f3a);
   border: 1px solid var(--surface1,#3a3460);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   color: var(--text,#d6d2e2);
   padding: 5px 9px;
   font-size: 12px;
@@ -205,7 +283,7 @@
   background: var(--surface0,#211f3a);
   border: 1px solid var(--surface1,#3a3460);
   color: var(--text,#d6d2e2);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   padding: 5px 10px;
   font-size: 12px;
   cursor: pointer;
@@ -284,75 +362,6 @@
 }
 .mg-gallery-picker.mg-blur .mg-pk-cell:hover img {
   filter: none;
-}
-
-/* ../gallery/src/styles/icons.css */
-.mgico {
-  display: inline-block;
-  vertical-align: -0.15em;
-  flex: none;
-}
-.mgma2-lorabadge .mgico,
-.mgct-entered .mgico,
-.cmb-chip .mgico,
-.cmb-entered-inline .mgico {
-  width: 1.3em;
-  height: 1.3em;
-  margin-right: 0.15em;
-}
-.mp-sub .mgico {
-  width: 1.15em;
-  height: 1.15em;
-  margin-right: 0.1em;
-}
-button.mgdock-snipbtn .mgico {
-  width: 1.25em;
-  height: 1.25em;
-  margin-right: 0.25em;
-}
-.mgl-sglyph .mgico,
-.mgdr-search-icon .mgico,
-.mgfo-search-ic .mgico {
-  width: 1.3em;
-  height: 1.3em;
-}
-.glm-search-icon .mgico {
-  width: 1.25em;
-  height: 1.25em;
-}
-.glm-iconbtn .mgico {
-  width: 16px;
-  height: 16px;
-  vertical-align: middle;
-}
-.glm-navicon .mgico {
-  width: 1em;
-  height: 1em;
-  vertical-align: middle;
-}
-.fm-titlechip .mgico {
-  width: 1.3em;
-  height: 1.3em;
-  margin-right: 0.15em;
-}
-.mgpal-ico .mgico {
-  width: 1.15em;
-  height: 1.15em;
-  vertical-align: -0.2em;
-}
-.mgdr-undo .mgico {
-  width: 1.35em;
-  height: 1.35em;
-  margin-right: 0.2em;
-}
-button.mgdock-snip .mgico {
-  width: 1.5em;
-  height: 1.5em;
-  margin-right: 0.25em;
-}
-button.mgcp-chip .mgico {
-  width: 1.3em;
-  height: 1.3em;
 }
 
 /* ../gallery/src/styles/recipes.css */
@@ -440,9 +449,9 @@ button.mgcp-chip .mgico {
   padding-top: 6px;
 }
 .rcp-kicker {
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: .1em;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: normal;
   color: var(--overlay0);
 }
 .rcp-row-count {
@@ -528,7 +537,7 @@ button.mgcp-chip .mgico {
 }
 .rcp-chip-bang {
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
 }
 .rcp-chip-tip {
   position: absolute;
@@ -561,7 +570,7 @@ button.mgcp-chip .mgico {
 .rcp-row-browse {
   font-size: 10.5px;
   padding: 5px 9px;
-  border-radius: 8px;
+  border-radius: var(--radius-control-sm);
   border: 1px dashed var(--surface1);
   color: var(--lavender);
   background: none;
@@ -593,7 +602,7 @@ button.mgcp-chip .mgico {
   display: flex;
   align-items: center;
   font-size: 10.5px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--subtext);
   min-height: 32px;
 }
@@ -637,7 +646,7 @@ button.mgcp-chip .mgico {
   right: 3px;
   top: 3px;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--peach);
   background: var(--mantle);
   border-radius: 4px;
@@ -728,7 +737,7 @@ html.mg-noblur .rcp-scrim {
   align-items: center;
   gap: 6px;
   padding: 0 10px;
-  border-radius: 9px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--surface1);
   color: var(--overlay0);
 }
@@ -751,7 +760,7 @@ html.mg-noblur .rcp-scrim {
 .rcp-btn {
   font-size: 11px;
   padding: 6px 11px;
-  border-radius: 9px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--surface1);
   background: none;
   color: var(--subtext);
@@ -770,7 +779,7 @@ html.mg-noblur .rcp-scrim {
   color: var(--text);
 }
 .rcp-btn-strong {
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text);
 }
 .rcp-size {
@@ -782,7 +791,7 @@ html.mg-noblur .rcp-scrim {
   height: 28px;
   display: grid;
   place-items: center;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   border: 0;
   background: none;
   font-size: 15px;
@@ -885,7 +894,7 @@ html.mg-noblur .rcp-scrim {
     Menlo,
     monospace;
   padding: 7px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--lavender);
   background: var(--mantle);
   color: var(--text);
@@ -905,9 +914,9 @@ html.mg-noblur .rcp-scrim {
 }
 .rcp-primary {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   padding: 7px 14px;
-  border-radius: 9px;
+  border-radius: var(--radius-control);
   border: 0;
   background: var(--lavender);
   color: var(--base);
@@ -920,7 +929,7 @@ html.mg-noblur .rcp-scrim {
 .rcp-ghost {
   font-size: 11px;
   padding: 7px 12px;
-  border-radius: 9px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--surface1);
   background: none;
   color: var(--subtext);
@@ -933,7 +942,7 @@ html.mg-noblur .rcp-scrim {
 .rcp-ghost-sm {
   font-size: 11px;
   padding: 5px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-control-sm);
   border: 1px solid var(--surface1);
   background: none;
   color: var(--subtext);
@@ -1009,9 +1018,9 @@ html.mg-noblur .rcp-scrim {
   flex-wrap: wrap;
 }
 .rcp-tab {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: .06em;
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: normal;
   padding: 0 0 6px;
   border: 0;
   border-bottom: 2px solid transparent;
@@ -1076,7 +1085,7 @@ html.mg-noblur .rcp-scrim {
   margin: 12px auto 0;
   font-size: 11px;
   padding: 7px 18px;
-  border-radius: 9px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--surface1);
   background: none;
   color: var(--subtext);
@@ -1241,7 +1250,7 @@ html.mg-noblur .rcp-scrim {
   white-space: nowrap;
 }
 .rcp-badge-strong {
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text);
 }
 .rcp-badge-mauve {
@@ -1254,7 +1263,7 @@ html.mg-noblur .rcp-scrim {
   z-index: 3;
   width: 24px;
   height: 24px;
-  border-radius: 7px;
+  border-radius: var(--radius-control-sm);
   border: 0;
   display: grid;
   place-items: center;
@@ -1290,7 +1299,7 @@ html.mg-noblur .rcp-scrim {
 }
 .rcp-card-title {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1351,14 +1360,14 @@ html.mg-noblur .rcp-scrim {
   top: 8px;
   font-size: 10px;
   padding: 3px 8px;
-  border-radius: 7px;
+  border-radius: var(--radius-control-sm);
   border: 0;
   background: color-mix(in srgb, var(--mantle) 85%, transparent);
   color: var(--subtext);
 }
 .rcp-pane-title {
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
 }
 .rcp-pane-mkt .rcp-pane-title {
   font-size: 14px;
@@ -1437,10 +1446,10 @@ html.mg-noblur .rcp-scrim {
 .rcp-add {
   flex: 1;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 600;
   text-align: center;
   padding: 8px;
-  border-radius: 9px;
+  border-radius: var(--radius-control);
   border: 0;
   background: var(--lavender);
   color: var(--base);
@@ -1462,7 +1471,7 @@ html.mg-noblur .rcp-scrim {
   flex: none;
   font-size: 11.5px;
   padding: 9px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
 }
 .rcp-foot {
   display: flex;
@@ -1478,9 +1487,9 @@ html.mg-noblur .rcp-scrim {
 }
 .rcp-done {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   padding: 7px 16px;
-  border-radius: 9px;
+  border-radius: var(--radius-control);
   border: 0;
   background: var(--lavender);
   color: var(--base);
@@ -1518,7 +1527,7 @@ html.mg-noblur .rcp-scrim {
 .rcp-page-title {
   flex: 1;
   font-size: 18px;
-  font-weight: 700;
+  font-weight: 600;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1587,7 +1596,7 @@ html.mg-noblur .rcp-scrim {
 }
 .rcp-use-title {
   font-size: 12.5px;
-  font-weight: 700;
+  font-weight: 600;
 }
 .rcp-use-note {
   font-size: 10.5px;
@@ -1636,7 +1645,7 @@ html.mg-noblur .rcp-scrim {
 }
 .rcp-shelf .rcp-primary {
   padding: 6px 13px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
 }
 .rcp-ruby-ask {
   display: flex;
@@ -1647,7 +1656,7 @@ html.mg-noblur .rcp-scrim {
 }
 .rcp-ruby {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   padding: 5px 11px;
   border-radius: 8px;
   border: 1px solid var(--ruby);
@@ -1691,7 +1700,7 @@ html.mg-noblur .rcp-scrim {
 }
 .rcp-pill {
   font-size: 9.5px;
-  font-weight: 700;
+  font-weight: 600;
   padding: 2px 7px;
   border-radius: 5px;
   white-space: nowrap;
@@ -1781,9 +1790,9 @@ html.mg-noblur .rcp-scrim {
   animation: rcpPop .2s cubic-bezier(.2, .9, .24, 1) both;
 }
 .rcp-sets-head {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: .08em;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: normal;
   color: var(--overlay0);
   padding: 4px 6px;
 }
@@ -1842,7 +1851,7 @@ html.mg-noblur .rcp-scrim {
   min-width: 0;
   font-size: 11.5px;
   padding: 6px 8px;
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--lavender);
   background: var(--mantle);
   color: var(--text);
@@ -1919,7 +1928,7 @@ html.mg-noblur .rcp-scrim {
 }
 .rcp-req {
   font-size: 8.5px;
-  font-weight: 700;
+  font-weight: 600;
   padding: 1px 6px;
   border-radius: 5px;
   background: color-mix(in srgb, var(--lavender) 16%, transparent);
@@ -2047,7 +2056,7 @@ html.mg-noblur .rcp-scrim {
   width: 100%;
   font: 11px/1.45 var(--font-system);
   padding: 7px 9px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--surface1);
   background: var(--mantle);
   color: var(--text);
@@ -2248,7 +2257,7 @@ html.mg-noblur .rcp-scrim {
 .rcp-framechip {
   font-size: 10px;
   padding: 4px 8px;
-  border-radius: 7px;
+  border-radius: var(--radius-control-sm);
   border: 1px solid var(--lavender);
   background: color-mix(in srgb, var(--lavender) 14%, transparent);
   color: var(--text);
@@ -2263,7 +2272,7 @@ html.mg-noblur .rcp-scrim {
   display: inline-flex;
   gap: 3px;
   padding: 2px;
-  border-radius: 8px;
+  border-radius: var(--radius-control-sm);
   border: 1px solid var(--surface1);
 }
 .rcp-seg button {
@@ -2504,7 +2513,7 @@ html.mg-noblur .rcp-scrim {
 }
 .rcp-confirm-t {
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
 }
 .rcp-confirm-row {
   display: flex;
@@ -2720,11 +2729,11 @@ html.mg-noblur .rcp-scrim {
   font-size: 12px;
 }
 .rcp-m-foot-solid {
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   border: 0;
   background: var(--lavender);
   color: var(--base);
-  font-weight: 700;
+  font-weight: 600;
   font-size: 13px;
 }
 .rcp-m-foot-solid:disabled {
@@ -2907,7 +2916,7 @@ html.mg-noblur .rcp-scrim {
   box-sizing: border-box;
   background: rgba(12, 10, 28, .85);
   border: 1px solid var(--surface1,#3a3460);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   padding: 6px 9px;
   color: var(--text,#d6d2e2);
   font-size: 11.5px;
@@ -2936,7 +2945,7 @@ html.mg-noblur .rcp-scrim {
   flex: 1;
   padding: 5px 0;
   font-size: 11px;
-  border-radius: 6px;
+  border-radius: var(--radius-control-sm);
   background: var(--surface0,#211f3a);
   color: var(--subtext,#9a93ab);
   border: 1px solid var(--surface1,#3a3460);
@@ -2982,7 +2991,7 @@ html.mg-noblur .rcp-scrim {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: .02em;
-  border-radius: 7px;
+  border-radius: var(--radius-control-sm);
   background: var(--surface0,#211f3a);
   color: var(--subtext,#9a93ab);
   border: 1px solid var(--surface1,#3a3460);
@@ -3004,7 +3013,7 @@ html.mg-noblur .rcp-scrim {
   min-width: 0;
   background: var(--surface0,#211f3a);
   border: 1px solid var(--surface1,#3a3460);
-  border-radius: 6px;
+  border-radius: var(--radius-control-sm);
   color: var(--subtext,#9a93ab);
   font: 10.5px/1.3 var(--font-system,system-ui,sans-serif);
   padding: 4px 6px;
@@ -3148,7 +3157,7 @@ html.mg-noblur .rcp-scrim {
   backdrop-filter: blur(18px) saturate(1.12);
   border: 1px solid rgba(182, 146, 230, .32);
   border-radius: 16px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, .55), 0 0 34px rgba(182, 146, 230, .14);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .55);
   overflow: hidden;
   opacity: 0;
   transform: translateY(4px);
@@ -3172,7 +3181,7 @@ html.mg-noblur .rcp-scrim {
   padding: 10px 12px;
 }
 .model-picker .mp-nm {
-  font-weight: 700;
+  font-weight: 600;
   font-size: 13px;
 }
 .model-picker .mp-sub {
@@ -3354,7 +3363,7 @@ html.mg-noblur .rcp-scrim {
   flex: 1;
   min-width: 0;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3473,7 +3482,7 @@ html.mg-noblur .rcp-scrim {
   border-radius: 4px;
   border: 1px solid var(--surface1);
   font:
-    700 8.5px/1.3 ui-monospace,
+    600 8.5px/1.3 ui-monospace,
     SFMono-Regular,
     Menlo,
     monospace;
@@ -3522,7 +3531,7 @@ html.mg-noblur .rcp-scrim {
   font-size: 10px;
   line-height: 1.3;
   padding: 4px 8px;
-  border-radius: 6px 0 0 6px;
+  border-radius: var(--radius-control-sm) 0 0 var(--radius-control-sm);
   white-space: nowrap;
   color: var(--subtext);
   background: none;
@@ -3534,7 +3543,7 @@ html.mg-noblur .rcp-scrim {
   font-size: 10px;
   line-height: 1.3;
   padding: 4px 6px;
-  border-radius: 0 6px 6px 0;
+  border-radius: 0 var(--radius-control-sm) var(--radius-control-sm) 0;
   border: 1px solid var(--surface1);
   border-left: 0;
   color: var(--subtext);
@@ -3701,7 +3710,7 @@ html.mg-noblur .rcp-scrim {
 }
 .cost-badge .mgc-inf {
   margin-left: .3em;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--green);
 }
 .cost-badge.compact {
@@ -3716,16 +3725,8 @@ html.mg-noblur .rcp-scrim {
   border: 1px solid rgba(255, 255, 255, .22);
   position: relative;
   z-index: 1;
-  background:
-    linear-gradient(
-      150deg,
-      rgba(222, 214, 246, .32) 0%,
-      rgba(122, 96, 178, .34) 46%,
-      rgba(24, 18, 44, .66) 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .42),
-    inset 0 -2px 4px rgba(20, 12, 40, .45),
-    0 5px 14px rgba(0, 0, 0, .4);
+  background: var(--matte-fill);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .42), 0 5px 14px rgba(0, 0, 0, .4);
 }
 .cost-badge.compact:hover {
   z-index: 7;
@@ -3784,7 +3785,7 @@ html.mg-noblur .rcp-scrim {
 }
 .cost-badge .mgc-val {
   font-size: 15.5px;
-  font-weight: 800;
+  font-weight: 600;
   letter-spacing: -.01em;
   font-variant-numeric: tabular-nums;
   color: #f2ecff;
@@ -3800,10 +3801,10 @@ html.mg-noblur .rcp-scrim {
   flex: none;
 }
 .cost-badge .mgc-lab {
-  font-size: 8.5px;
-  font-weight: 700;
-  letter-spacing: .16em;
-  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
   color: rgba(255, 255, 255, .62);
 }
 .cost-badge .mgc-dot {
@@ -3814,7 +3815,7 @@ html.mg-noblur .rcp-scrim {
   display: grid;
   place-items: center;
   font-size: 10px;
-  font-weight: 800;
+  font-weight: 600;
   line-height: 1;
   color: #2a1f06;
   border: 1px solid rgba(255, 255, 255, .4);
@@ -3870,10 +3871,10 @@ html.mg-noblur .rcp-scrim {
 .cost-badge.compact .mgc-sub {
   display: inline;
   margin: 0;
-  font-size: 8.5px;
-  font-weight: 700;
-  letter-spacing: .16em;
-  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
   color: rgba(255, 255, 255, .62);
 }
 .cost-badge.compact .mgc-sub::before {
@@ -3889,7 +3890,6 @@ html.mg-noblur .rcp-scrim {
   overflow: hidden;
   vertical-align: -1px;
   margin-right: 6px;
-  box-shadow: 0 0 7px rgba(182, 146, 230, .7);
 }
 .cost-badge .mgc-pip::after {
   content: "";
@@ -3910,6 +3910,9 @@ html.mg-noblur .rcp-scrim {
     transform: translateX(102%);
   }
 }
+.cost-badge .mgc-ico {
+  margin-right: .3em;
+}
 
 /* ../gallery/src/styles/gen-drawer.css */
 .gen-drawer {
@@ -3920,7 +3923,7 @@ html.mg-noblur .rcp-scrim {
   padding: 16px;
   border-radius: 16px;
   border: 1px solid color-mix(in srgb, var(--lavender) 32%, transparent);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, .55), 0 0 34px color-mix(in srgb, var(--lavender) 14%, transparent);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .55);
   animation: mgdDockIn .44s cubic-bezier(.2, .9, .24, 1);
   font: 13px/1.4 var(--font-system,system-ui,sans-serif);
   color: var(--text,#d6d2e2);
@@ -4024,16 +4027,16 @@ html.mg-noblur .rcp-scrim {
   }
 }
 .gen-drawer .mgd-sec {
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: .1em;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: normal;
   color: var(--overlay0,#6a6088);
 }
 .gen-drawer .mgd-seg {
   display: flex;
   gap: 4px;
   padding: 3px;
-  border-radius: 9px;
+  border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--base) 60%, transparent);
   border: 1px solid var(--surface1,#3a3460);
 }
@@ -4044,7 +4047,7 @@ html.mg-noblur .rcp-scrim {
   text-align: center;
   border-radius: 7px;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
   font-family: inherit;
   transition: background .2s, color .2s;
   cursor: pointer;
@@ -4090,10 +4093,11 @@ html.mg-noblur .rcp-scrim {
 }
 .gen-drawer .mgd-lbl {
   color: var(--overlay0,#6a6088);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: .05em;
+  font-size: 12px;
+  text-transform: none;
+  letter-spacing: normal;
   margin: 0 0 4px;
+  font-weight: 500;
 }
 .gen-drawer .mgd-note {
   text-transform: none;
@@ -4110,7 +4114,7 @@ html.mg-noblur .rcp-scrim {
   box-sizing: border-box;
   background: var(--surface0,#211f3a);
   border: 1px solid var(--surface1,#3a3460);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   color: var(--text,#d6d2e2);
   padding: 7px 9px;
   font-size: 13px;
@@ -4139,7 +4143,7 @@ html.mg-noblur .rcp-scrim {
   box-sizing: border-box;
   background: var(--surface0,#211f3a);
   border: 1px solid var(--surface1,#3a3460);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   color: var(--subtext,#9a93ab);
   padding: 6px 9px;
   font-size: 12.5px;
@@ -4184,7 +4188,7 @@ html.mg-noblur .rcp-scrim {
   background: color-mix(in srgb, var(--base) 80%, transparent);
   color: var(--text,#d6d2e2);
   border: 1px solid var(--surface1,#3a3460);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   padding: 5px 7px;
   font-size: 11px;
   font-family: inherit;
@@ -4482,7 +4486,7 @@ html.mg-noblur .rcp-scrim {
   flex: 1 1 auto;
   min-width: 0;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text,#d6d2e2);
   line-height: 1.15;
 }
@@ -4496,7 +4500,7 @@ html.mg-noblur .rcp-scrim {
 }
 .gen-drawer .mgd-applyall {
   align-self: flex-end;
-  font: 700 10.5px/1 system-ui;
+  font: 600 10.5px/1 system-ui;
   background: none;
   border: 0;
   padding: 2px 0;
@@ -4559,7 +4563,8 @@ html.mg-noblur .rcp-scrim {
       var(--mauve,#c4a6f0) 84%,
       color-mix(in oklab, var(--accent,#b692e6) 50%, #06030d) 100%);
   background-size: 220% 100%;
-  animation: mgMetal 7s ease-in-out infinite;
+  background-position: 30% 50%;
+  transition: var(--metal-sweep);
   color: color-mix(in oklab, var(--accent,#b692e6) 26%, #08040f);
   text-shadow: 0 1px 0 rgba(255, 255, 255, .45);
   box-shadow:
@@ -4567,24 +4572,22 @@ html.mg-noblur .rcp-scrim {
     inset 0 -3px 5px color-mix(in srgb, color-mix(in hsl, var(--mantle) 81%, var(--accent)) 50%, transparent),
     0 10px 26px rgba(0, 0, 0, .5);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 600;
   letter-spacing: .03em;
   white-space: nowrap;
   cursor: pointer;
+}
+.gen-drawer .mgd-go:hover:not(:disabled),
+.gen-drawer .mgd-go:focus-visible {
+  background-position: 100% 50%;
 }
 .gen-drawer .mgd-go:disabled {
   filter: saturate(.6) brightness(.82);
   cursor: not-allowed;
 }
-@keyframes mgMetal {
-  0% {
-    background-position: 0% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
-  }
-  100% {
-    background-position: 0% 50%;
+@media (prefers-reduced-motion: reduce) {
+  .gen-drawer .mgd-go {
+    transition: none;
   }
 }
 @media (max-width: 640px) {
@@ -4636,7 +4639,6 @@ html.mg-noblur .rcp-scrim {
   overflow: hidden;
   vertical-align: -3px;
   margin-right: 7px;
-  box-shadow: 0 0 9px color-mix(in srgb, var(--lavender) 75%, transparent);
 }
 .gen-drawer .mgd-moon::after {
   content: "";
@@ -5799,7 +5801,6 @@ body.mg-moment-up > #root {
 }
 .at-chip.live .at-dot {
   background: var(--accent,var(--lavender));
-  box-shadow: 0 0 10px color-mix(in srgb, var(--lavender) 80%, transparent);
   animation: mgPulse 1.5s ease-in-out infinite;
 }
 @keyframes gen-spin {
@@ -6125,19 +6126,21 @@ body.mg-moment-up > #root {
   border: 1px solid var(--surface1);
   border-radius: 999px;
   padding: 0 6px;
-  font-size: 9.5px;
+  font-size: 11.5px;
+  font-weight: 500;
   line-height: 15px;
-  letter-spacing: .07em;
-  text-transform: uppercase;
+  letter-spacing: normal;
+  text-transform: none;
 }
 .at-sub .at-src {
   border: 1px solid var(--surface1);
   border-radius: 999px;
   padding: 0 6px;
-  font-size: 9.5px;
+  font-size: 11.5px;
+  font-weight: 500;
   line-height: 15px;
-  letter-spacing: .07em;
-  text-transform: uppercase;
+  letter-spacing: normal;
+  text-transform: none;
   color: var(--subtext);
 }
 .at-errmsg {
@@ -6232,12 +6235,13 @@ body.mg-moment-up > #root {
   padding-top: 6px;
 }
 .at-dk {
-  width: 52px;
+  width: 56px;
   flex: none;
   color: var(--overlay0);
-  font-size: 9px;
-  letter-spacing: .06em;
-  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
 }
 .at-dv {
   color: var(--text);
@@ -6385,12 +6389,12 @@ body.mg-moment-up > #root {
     SFMono-Regular,
     Menlo,
     monospace;
-  font-weight: 700;
+  font-weight: 600;
 }
 .mg-toast .mt-act {
   flex: none;
   align-self: center;
-  font: 700 10.5px/1 var(--font-system,system-ui,sans-serif);
+  font: 600 10.5px/1 var(--font-system,system-ui,sans-serif);
   padding: 5px 10px;
   border-radius: 8px;
   border: 1px solid var(--lavender);
@@ -6527,9 +6531,9 @@ body.mg-moment-up > #root {
 button.mgub-go {
   flex: none;
   padding: 6px 15px;
-  border-radius: 9px;
+  border-radius: var(--radius-control);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
   cursor: pointer;
   font-family: inherit;
   color: #241a05;
@@ -6543,7 +6547,7 @@ button.mgub-go {
 button.mgub-later {
   flex: none;
   padding: 6px 11px;
-  border-radius: 9px;
+  border-radius: var(--radius-control);
   font-size: 11.5px;
   cursor: pointer;
   font-family: inherit;
@@ -6673,7 +6677,7 @@ html.mg-updbanner-on .detail-wrap {
   flex: none;
   width: 26px;
   height: 26px;
-  border-radius: 50%;
+  border-radius: var(--radius-control);
   display: grid;
   place-items: center;
   padding: 0;
@@ -6691,6 +6695,7 @@ html.mg-updbanner-on .detail-wrap {
   width: 24px;
   height: 24px;
   font-size: 11px;
+  border-radius: var(--radius-control-sm);
 }
 .mghelp-q.mgv-help {
   width: 28px;
@@ -6703,18 +6708,9 @@ html.mg-updbanner-on .detail-wrap {
 .mghelp-q.mgx-sephelp {
   border: 1px solid rgba(255, 255, 255, .26);
   color: #f2ecff;
-  font-weight: 800;
-  background:
-    linear-gradient(
-      150deg,
-      rgba(222, 214, 246, .34) 0%,
-      rgba(122, 96, 178, .36) 46%,
-      rgba(24, 18, 44, .66) 100%),
-    color-mix(in srgb, var(--base) 82%, transparent);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .4),
-    inset 0 -2px 4px rgba(20, 12, 40, .45),
-    0 5px 14px rgba(0, 0, 0, .4);
+  font-weight: 600;
+  background: linear-gradient(var(--matte-fill), var(--matte-fill)), color-mix(in srgb, var(--base) 82%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .4), 0 5px 14px rgba(0, 0, 0, .4);
   text-shadow: 0 1px 1px rgba(0, 0, 0, .45);
   transition: filter .2s, border-color .2s;
 }
@@ -6927,7 +6923,7 @@ html.mg-noblur .mghelp-scrim {
 .mghelp-search {
   font: 11px/1.2 var(--font-system, system-ui, sans-serif);
   padding: 6px 9px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--surface1);
   background: none;
   color: var(--text);
@@ -7061,7 +7057,7 @@ html.mg-noblur .mghelp-scrim {
 .mghelp-h4 {
   margin: 12px 0 4px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text);
 }
 .mghelp-p {
@@ -7387,9 +7383,9 @@ html.mg-noblur .mgab-scrim {
 }
 .mgab-updgo {
   flex: none;
-  font: 700 10.5px/1 var(--font-system, system-ui, sans-serif);
+  font: 600 10.5px/1 var(--font-system, system-ui, sans-serif);
   padding: 6px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-control-sm);
   border: 0;
   background: var(--lavender);
   color: var(--base);
@@ -7429,11 +7425,11 @@ html.mg-noblur .mgab-scrim {
   color: var(--overlay0);
 }
 .mgab-kick {
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: .1em;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: normal;
   color: var(--overlay0);
-  text-transform: uppercase;
+  text-transform: none;
 }
 .mgab-items {
   margin: 0;
@@ -7663,7 +7659,7 @@ html.mg-noblur .mgwn-scrim {
 }
 .mgwn-t {
   font-size: 11.5px;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1.35;
 }
 .mgwn-d {
@@ -7700,9 +7696,9 @@ html.mg-noblur .mgwn-scrim {
   cursor: pointer;
 }
 .mgwn-go {
-  font: 700 11px/1 var(--font-system, system-ui, sans-serif);
+  font: 600 11px/1 var(--font-system, system-ui, sans-serif);
   padding: 7px 14px;
-  border-radius: 9px;
+  border-radius: var(--radius-control-sm);
   border: 0;
   background: var(--lavender);
   color: var(--base);
@@ -7743,9 +7739,9 @@ html.mg-noblur .mgwn-scrim {
   background-size: cover;
 }
 .mgguide-primary {
-  font: 700 10.5px/1 var(--font-system, system-ui, sans-serif);
+  font: 600 10.5px/1 var(--font-system, system-ui, sans-serif);
   padding: 4px 11px;
-  border-radius: 7px;
+  border-radius: var(--radius-control-sm);
   border: 0;
   background: var(--lavender);
   color: var(--base);
@@ -7755,7 +7751,7 @@ html.mg-noblur .mgwn-scrim {
 .mgguide-ghost {
   font: 10.5px/1 var(--font-system, system-ui, sans-serif);
   padding: 4px 9px;
-  border-radius: 7px;
+  border-radius: var(--radius-control-sm);
   border: 1px solid var(--lavender);
   background: none;
   color: var(--text);
@@ -7838,10 +7834,7 @@ html.mg-noblur .mgwn-scrim {
   z-index: 443;
   border-radius: 9px;
   pointer-events: none;
-  box-shadow:
-    0 0 0 3px var(--lavender),
-    0 0 20px rgba(182, 146, 230, .7),
-    0 0 0 200vmax rgba(5, 4, 13, .72);
+  box-shadow: 0 0 0 3px var(--lavender), 0 0 0 200vmax rgba(5, 4, 13, .72);
   transition:
     left .25s ease,
     top .25s ease,
@@ -7929,7 +7922,7 @@ html.mg-noblur .mgwn-scrim {
   background: var(--lavender);
   pointer-events: none;
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--lavender) 25%, transparent);
-  animation: mgguidePulse 1.8s ease-in-out infinite;
+  animation: none;
 }
 .mgguide-note {
   position: fixed;
@@ -8066,15 +8059,6 @@ html.mg-noblur .mgwn-scrim {
 }
 .mgm[data-phase=full] .mgm-moon {
   box-shadow: 0 0 calc(var(--mgm-s) * .45) color-mix(in srgb, var(--lavender) 70%, transparent);
-  animation: mgmGlow 2.6s ease-in-out infinite alternate;
-}
-@keyframes mgmGlow {
-  from {
-    box-shadow: 0 0 calc(var(--mgm-s) * .3) color-mix(in srgb, var(--lavender) 45%, transparent);
-  }
-  to {
-    box-shadow: 0 0 calc(var(--mgm-s) * .7) color-mix(in srgb, var(--lavender) 80%, transparent);
-  }
 }
 .mgm-bar {
   flex: 1 1 auto;
@@ -8125,13 +8109,9 @@ html.mg-noblur .mgwn-scrim {
       90deg,
       color-mix(in srgb, var(--lavender) 55%, transparent),
       var(--lavender));
-  box-shadow: 0 0 calc(var(--mgm-s) * .25) color-mix(in srgb, var(--lavender) 55%, transparent);
   transition: width .4s ease;
 }
 @media (prefers-reduced-motion: reduce) {
-  .mgm[data-phase=full] .mgm-moon {
-    animation: none;
-  }
   .mgm-fill {
     transition: none;
   }
@@ -8284,9 +8264,9 @@ html.mg-noblur .mgwn-scrim {
 .mgfo-cardbtn {
   font: inherit;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   padding: 8px 13px;
-  border-radius: 9px;
+  border-radius: var(--radius-control);
   border: 0;
   background: var(--lavender);
   color: var(--base);
@@ -8304,7 +8284,7 @@ html.mg-noblur .mgwn-scrim {
   width: 22px;
   height: 22px;
   padding: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-control-sm);
   border: 0;
   background: transparent;
   color: var(--overlay0);
@@ -8347,9 +8327,9 @@ html.mg-noblur .mgwn-scrim {
 }
 .mgfo-cardpanel-lab {
   flex: 1 1 auto;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: .1em;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: normal;
   color: var(--overlay0);
 }
 .mgfo-cardbtn.ghost {
@@ -8486,11 +8466,11 @@ html.mg-noblur .mgwn-scrim {
 .fm-cardbtn {
   font: inherit;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   min-height: 44px;
   padding: 0 16px;
   margin: 0;
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   border: 0;
   background: var(--lavender);
   color: var(--base);
@@ -8584,7 +8564,7 @@ html.mg-noblur .mgwn-scrim {
 }
 .fm-sortopt b {
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
 }
 .fm-sortopt span {
   font-size: 10px;
