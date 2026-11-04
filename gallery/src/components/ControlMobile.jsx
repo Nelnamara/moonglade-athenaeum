@@ -455,6 +455,7 @@ export default function ControlMobile({ account, brandRequest }) {
                           armed={confirmArm === st.key} onRun={() => runAction(st.key)}
                           disabled={i > dedupDone}
                           title={i > dedupDone ? "Run the earlier stages first" : undefined} />
+                        {st.locked && <Icon name="lock" title="Changes files: serving machine only" />}
                         {i < DEDUP_STAGES.length - 1 && <span className="mgcp-arr">→</span>}
                       </React.Fragment>
                     ))}

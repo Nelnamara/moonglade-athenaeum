@@ -101,7 +101,7 @@ export default function ContestsMobile({ onEnter, entriesEpoch = 0 }) {
       return { cls: ends && ends.hot ? "hot" : "",
                text: "Running" + (ends && !ends.over ? " · " + ends.text : "") };
     }
-    if (st.text === "AWAITING RESULTS") {
+    if (st.state === "awaiting") {
       return { cls: "awaiting", text: "Awaiting results · " + (dayOf(row.result_at) || "—") };
     }
     return st;

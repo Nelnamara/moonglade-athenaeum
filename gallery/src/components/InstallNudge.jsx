@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import Icon from "../icons/Icons.jsx";
-import { STRIP_TEXT, bubbleText } from "../lib/installNudge.js";
+import { STRIP_TEXT, bubbleParts } from "../lib/installNudge.js";
 import "../styles/phone-u.css";
 
 /* The Home Screen nudge, drawn (Session U; Phone Paging and Nudge Handoff.dc.html sections 6 and 7). The
@@ -38,12 +38,11 @@ export function NudgeStrip({ show, onOpen, onDismiss }) {
   );
 }
 
-/* The sentence lives in lib/installNudge.js with a text arrow standing for iOS's Share button; the
-   page draws that one mark as the line icon (unslop pick 2B) and keeps the rest of the words. */
+/* The sentence's parts come from lib/installNudge.js (bubbleParts): the words before iOS's Share
+   button, the icon's name, and the words after. The page draws the line icon (unslop pick 2B). */
 function BubbleWords({ side }) {
-  const parts = bubbleText(side).split(String.fromCharCode(0x2B06));
-  if (parts.length !== 2) return bubbleText(side);
-  return <>{parts[0]}<Icon name="share" title="Share" />{parts[1]}</>;
+  const p = bubbleParts(side);
+  return <>{p.before} <Icon name={p.icon} title="Share" /> {p.after}</>;
 }
 
 export function NudgeBubble({ side }) {
