@@ -4214,7 +4214,11 @@ ${"=".repeat(48)}
     /* Still running -- hourglass_line.svg */
     hourglass: /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("path", { d: "M6.5 3.5h11" }), /* @__PURE__ */ react_global_shim_default.createElement("path", { d: "M6.5 20.5h11" }), /* @__PURE__ */ react_global_shim_default.createElement("path", { d: "M7.75 3.5c0 4.5 4.25 5.5 4.25 8.5s-4.25 4-4.25 8.5" }), /* @__PURE__ */ react_global_shim_default.createElement("path", { d: "M16.25 3.5c0 4.5-4.25 5.5-4.25 8.5s4.25 4 4.25 8.5" })),
     /* A standing order -- timer_line.svg */
-    timer: /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("circle", { cx: "12", cy: "13.5", r: "7.5" }), /* @__PURE__ */ react_global_shim_default.createElement("path", { d: "M12 13.5V9.5" }), /* @__PURE__ */ react_global_shim_default.createElement("path", { d: "M9.5 2.5h5" }), /* @__PURE__ */ react_global_shim_default.createElement("path", { d: "M18.25 6.25l1.5-1.5" }))
+    timer: /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("circle", { cx: "12", cy: "13.5", r: "7.5" }), /* @__PURE__ */ react_global_shim_default.createElement("path", { d: "M12 13.5V9.5" }), /* @__PURE__ */ react_global_shim_default.createElement("path", { d: "M9.5 2.5h5" }), /* @__PURE__ */ react_global_shim_default.createElement("path", { d: "M18.25 6.25l1.5-1.5" })),
+    /* Sound on: the Loom's shot sound toggle and the playthrough -- speaker_line.svg */
+    speaker: /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("path", { d: "M4 9.5h3.5L12 5.5v13l-4.5-4H4z" }), /* @__PURE__ */ react_global_shim_default.createElement("path", { d: "M15.5 9a4 4 0 0 1 0 6" }), /* @__PURE__ */ react_global_shim_default.createElement("path", { d: "M18 6.5a7.5 7.5 0 0 1 0 11" })),
+    /* Sound off: the same two, muted -- speaker-off_line.svg */
+    "speaker-off": /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("path", { d: "M4 9.5h3.5L12 5.5v13l-4.5-4H4z" }), /* @__PURE__ */ react_global_shim_default.createElement("path", { d: "M16 9.5l5 5M21 9.5l-5 5" }))
   };
   var LINE = /* @__PURE__ */ new Set([
     "warning",
@@ -4269,7 +4273,9 @@ ${"=".repeat(48)}
     "pencil",
     "file",
     "hourglass",
-    "timer"
+    "timer",
+    "speaker",
+    "speaker-off"
   ]);
   function Icon({ name, size = "1em", title, className, style }) {
     const glyph = GLYPHS[name];
@@ -22892,7 +22898,7 @@ ${emptyPromptShots.length} shot(s) have no prompt text yet: ${emptyPromptShots.m
         "aria-pressed": soundOn,
         title: soundOn ? "Sound on while playing (scrubbing stays silent)" : "Play this shot with sound"
       },
-      soundOn ? "\u{1F50A}" : "\u{1F507}"
+      soundOn ? /* @__PURE__ */ React.createElement(Icon, { name: "speaker" }) : /* @__PURE__ */ React.createElement(Icon, { name: "speaker-off" })
     ), onSplit && /* @__PURE__ */ React.createElement("button", { onClick: doSplit, title: "Split this shot in two at the playhead" }, /* @__PURE__ */ React.createElement(Icon, { name: "scissors" }), " Split"), onCrop && /* @__PURE__ */ React.createElement(
       "button",
       {
@@ -23328,7 +23334,7 @@ ${emptyPromptShots.length} shot(s) have no prompt text yet: ${emptyPromptShots.m
         title: muted ? "Unmute \u2014 the rendered mp4 has audio" : "Mute",
         "aria-pressed": !muted
       },
-      muted ? "\u{1F507} muted" : "\u{1F50A} sound"
+      muted ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Icon, { name: "speaker-off" }), " muted") : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Icon, { name: "speaker" }), " sound")
     ), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: () => setI(Math.max(0, i - 1)), disabled: i === 0 }, "\u25C0 prev"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: () => {
       if (i < clips.length - 1) setI(i + 1);
       else onClose();
