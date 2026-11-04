@@ -294,20 +294,22 @@ test("10. the two new icons carry their per-surface sizes, measured not guessed"
   // The books ride the palette rule the Panel's laptop-cog already rides; the history dial
   // gets its own three, one per button shape. Without these it renders at 1em -- 10-12px
   // for a drawing that inks 65% of its own box, which measured as a smudge.
-  assert.match(iconCss, /\.mgpal-ico \.mgico \{ width: 1\.15em/);
+  // (unslop pick 2B scoped the palette's bump to the duo icons: a line icon stays at 1em)
+  assert.match(iconCss, /\.mgpal-ico \.mgico:not\(\.mgico-line\) \{ width: 1\.15em/);
   assert.match(iconCss, /\.mgdr-undo \.mgico \{/);
   assert.match(iconCss, /button\.mgdock-snip \.mgico \{/);
   assert.match(iconCss, /button\.mgcp-chip \.mgico \{/);
 });
 
 test("11. the phone menu's Publish row wears ☁, the mark Publish wears everywhere else", () => {
+  // unslop pick 2B: on the desktop surfaces the ☁ is now the `publish` line icon.
   assert.match(appMobile, /\{ icon: "☁", label: "Publish", screen: "publish" \}/);
   assert.doesNotMatch(appMobile, /icon: "✎"/);
   // the surfaces it is now agreeing with
-  assert.match(app, /img\("publish", "☁", "Publish"/);
-  assert.match(details, /☁ Publish<\/button>/);
+  assert.match(app, /img\("publish", <Icon name="publish" \/>, "Publish"/);
+  assert.match(details, /<Icon name="publish" \/> Publish<\/button>/);
   assert.match(src("components/ImageDetailsMobile.jsx"), /☁ Publish<\/button>/);
-  assert.match(src("components/Lightbox.jsx"), /☁ Publish<\/button>/);
+  assert.match(src("components/Lightbox.jsx"), /<Icon name="publish" \/> Publish<\/button>/);
   // and "Edit this" still keeps ✎ (the ruling's own carve-out)
   assert.match(details, /✎ Edit this<\/button>/);
 });
@@ -409,5 +411,5 @@ test("◈ now means Similar, and only Similar, in every string the app renders",
   // ...and it is still doing its real job, so this guard cannot pass by deletion.
   assert.match(src("components/Grid.jsx"), /\n\s+◈\n/);
   assert.match(src("components/GridContextMenu.jsx"), /\["◈", "Find similar"/);
-  assert.match(details, /<span className="k">◈ SIMILAR<\/span>/);
+  assert.match(details, /<span className="k">◈ Similar<\/span>/);
 });

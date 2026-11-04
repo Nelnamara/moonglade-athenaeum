@@ -63,7 +63,8 @@ describe("two doors: ✉ Inbox, then 🎁 Gift box, then the credits chip (owner
   });
 
   test("twins: 30 x 30, radius 9, a lavender badge, a ring while open; the gift art only on the gift box", () => {
-    assert.match(css, /\.ib-door \{[^}]*width: 30px; height: 30px;[^}]*border-radius: 9px;/);
+    // (the quieted look, pick 5B: a door is a button, so it takes the control corner)
+    assert.match(css, /\.ib-door \{[^}]*width: 30px; height: 30px;[^}]*border-radius: var\(--radius-control\);/);
     assert.ok(!/\.ib-door \{[^}]*gift\.png/.test(css), "the shared door carries no gift art");
     assert.match(css, /\.ib-door\.gift \{[^}]*url\(\/branding\/rewards\/gift\.png\) center \/ 22px auto no-repeat/);
     assert.match(css, /\.ib-badge \{[^}]*background: var\(--lavender\)/);
@@ -92,7 +93,7 @@ describe("two doors: ✉ Inbox, then 🎁 Gift box, then the credits chip (owner
     assert.match(icon, /if \(!asking\) asking = /);
     // a computed background, never an <img> hole; nothing loads: the ✉ glyph
     assert.ok(!/<img/.test(icon.replace(/\/\*[\s\S]*?\*\//g, "")), "a computed background, never an <img>");
-    assert.match(icon, /aria-hidden="true">✉<\/span>/);
+    assert.match(icon, /aria-hidden="true"><Icon name="mail" \/><\/span>/);   // the mail line icon (unslop pick 2B)
     assert.match(css, /\.ib-inboxic \{[^}]*width: 22px; height: 22px;/);
     assert.match(css, /\.ib-inboxic\.small \{[^}]*width: 18px; height: 18px;/);
     assert.match(css, /\.ib-giftic\.small \{[^}]*width: 18px; height: 18px;/);
@@ -334,7 +335,7 @@ describe("gifts (R9c) and the current event (Y3a)", () => {
     // the label: its own strip under the art, 13 px, the scrim's tone
     assert.match(cards, /<span className="ib-event-art"/);
     assert.match(cards, /<span className="ib-event-t">\{e\.title\}<br \/>event ↗<\/span>/);
-    assert.match(css, /\.ib-event-t \{[^}]*font-size: 13px;[^}]*font-weight: 700;/);
+    assert.match(css, /\.ib-event-t \{[^}]*font-size: 13px;[^}]*font-weight: 600;/);
     assert.ok(!/height: 58px/.test(css), "the cramped 58 px card is gone");
   });
 });

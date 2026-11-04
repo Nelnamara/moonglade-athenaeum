@@ -74,11 +74,11 @@ export function storageBars(storage) {
     s.name, s, s.other ? OTHER_HUE : COLLECTION_HUES[i % COLLECTION_HUES.length], coll.sum_bytes,
     s.other ? null : { kind: "collection", value: s.name }, "c" + i));
   const bars = [
-    { id: "type", label: "BY TYPE", total, segments: byType },
-    { id: "model", label: "BY MODEL", total, segments: byModel },
+    { id: "type", label: "By type", total, segments: byType },
+    { id: "model", label: "By model", total, segments: byModel },
   ];
   if (byColl.length) {
-    bars.push({ id: "collection", label: "BY COLLECTION", note: "can overlap", total: coll.sum_bytes, segments: byColl });
+    bars.push({ id: "collection", label: "By collection", note: "can overlap", total: coll.sum_bytes, segments: byColl });
   }
   return bars.filter((b) => b.segments.length);
 }

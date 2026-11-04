@@ -150,7 +150,7 @@ describe("C5 / §8.7 -- the badge and the finished line know the lane", () => {
   test("the ∞ rides every form: bar, stack and chip", () => {
     const marks = badge.match(/m\.lane \? <span className="mgc-inf">∞<\/span> : null/g) || [];
     assert.equal(marks.length, 3, "one mark per form");
-    assert.match(badge, /<span className="mgc-val">\{m\.val\}\{m\.lane \?/, "the chip's value");
+    assert.match(badge, /<span className="mgc-val">\{m\.valIcon \? <Icon name=\{m\.valIcon\} className="mgc-ico" \/> : null\}\{m\.val\}\{m\.lane \?/, "the chip's value");
     assert.match(badge, /data-lane=\{m\.lane \? "unlimited" : undefined\}/);
   });
   test("the onCost detail and the text say so too", () => {

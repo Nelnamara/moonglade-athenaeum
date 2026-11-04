@@ -34,7 +34,7 @@ export default function YourLayer({ mediaId, personal, onCurate }) {
 
   return (
     <section className="mgcu-layer" aria-label="Your layer">
-      <div className="mgcu-layer-cap">YOUR LAYER</div>
+      <div className="mgcu-layer-cap">Your layer</div>
       <div className="mgcu-verdicts">
         <button type="button" className={"mgcu-verdict keeper" + (p.mark === "keeper" ? " on" : "")}
           aria-pressed={p.mark === "keeper"} onClick={() => mark("keeper")}>{"✓"} Keeper</button>
@@ -42,7 +42,7 @@ export default function YourLayer({ mediaId, personal, onCurate }) {
           aria-pressed={p.mark === "reject"} onClick={() => mark("reject")}>{"✕"} Reject</button>
       </div>
       <div className="mgcu-sub">
-        <div className="mgcu-layer-cap">TAGS</div>
+        <div className="mgcu-layer-cap">Tags</div>
         <div className="mgcu-tags">
           {p.tags.map((t) => (
             <button key={t} type="button" className="mgcu-tag" title="Remove tag"
@@ -55,7 +55,7 @@ export default function YourLayer({ mediaId, personal, onCurate }) {
         {err ? <div className="mgcu-field-err" role="alert">{err}</div> : null}
       </div>
       <div className="mgcu-sub">
-        <div className="mgcu-layer-cap">NOTE</div>
+        <div className="mgcu-layer-cap">Note</div>
         <input className="mgcu-field" value={note} maxLength={NOTE_MAX} placeholder="a note only you see"
           aria-label="Note" onChange={(e) => setNote(clampNote(e.target.value))} onBlur={saveNote}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }} />

@@ -58,17 +58,20 @@
   --mm-grad: linear-gradient(100deg, var(--mm-dark) 0%, var(--mm-mid) 18%,
     var(--mm-light) 34%, var(--mm-mid) 50%, var(--mm-mid2) 68%, var(--mm-hi) 84%,
     var(--mm-dark) 100%);
-  font-weight: 800; letter-spacing: .03em; white-space: nowrap; cursor: pointer;
+  font-weight: 600; letter-spacing: .03em; white-space: nowrap; cursor: pointer;
   border: 1px solid rgba(255, 255, 255, .3);
   color: var(--mm-ink);
   text-shadow: 0 1px 0 rgba(255, 255, 255, .35);
   background: var(--mm-grad);
   background-size: 220% 100%;
-  animation: mgMetal 7s ease-in-out infinite;
+  /* THE QUIETED LOOK (unslop pick 6B): the sheen no longer drifts at rest. It rests at
+     30% and sweeps to 100% on hover or keyboard focus only (--metal-sweep, styles.css). */
+  background-position: 30% 50%;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .65), inset 0 -3px 5px rgba(0, 0, 0, .4),
     0 8px 22px rgba(0, 0, 0, .48);
-  transition: filter .2s, box-shadow .25s;
+  transition: filter .2s, box-shadow .25s, var(--metal-sweep);
 }
+.mgx-metal:hover, .mgx-metal:focus-visible { background-position: 100% 50%; }
 /* metalBtn('#1e6f6b','#47cbc3','#d8fbf7','#2f8f89','#0a2422') — the Loom teal */
 .mgx-metal-loom { --mm-dark: #1e6f6b; --mm-mid: var(--cyan, #47cbc3); --mm-light: #d8fbf7;
   --mm-mid2: #2f8f89; --mm-hi: #d8fbf7; --mm-ink: #0a2422; }
@@ -175,7 +178,7 @@
 .mgx-bnr.slim .mgx-brand { align-items: center; }
 .mgx-brandtxt { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column;
   align-items: flex-end; gap: 3px; }
-.mgx-title { font-size: 27px; font-weight: 700; letter-spacing: -.02em; line-height: 1.05;
+.mgx-title { font-size: 27px; font-weight: 600; letter-spacing: -.02em; line-height: 1.05;
   color: var(--text); text-shadow: 0 2px 22px rgba(0, 0, 0, .85); white-space: nowrap;
   transition: font-size .5s cubic-bezier(.2, .9, .24, 1); }
 .mgx-bnr.slim .mgx-title { font-size: 16.5px; }
@@ -259,15 +262,13 @@
 /* metallic stat pills (silver-lavender; emerald variant for backed-up) */
 .mgx-statpill { display: flex; align-items: baseline; gap: 7px; padding: 6px 13px;
   border-radius: 999px; white-space: nowrap; border: 1px solid rgba(255, 255, 255, .2);
-  background: linear-gradient(150deg, rgba(222, 214, 246, .34) 0%, rgba(122, 96, 178, .36) 46%, rgba(24, 18, 44, .66) 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .4), inset 0 -2px 4px rgba(20, 12, 40, .45),
-    0 5px 14px rgba(0, 0, 0, .4); }
-.mgx-statpill.emerald { border-color: rgba(255, 255, 255, .16);
-  background: linear-gradient(150deg, rgba(126, 214, 176, .32) 0%, rgba(52, 120, 96, .34) 46%, rgba(16, 38, 32, .6) 100%); }
-.mgx-statval { font-size: 15.5px; font-weight: 800; letter-spacing: -.01em;
+  background: var(--matte-fill);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .4), 0 5px 14px rgba(0, 0, 0, .4); }
+.mgx-statpill.emerald { border-color: rgba(255, 255, 255, .16); }
+.mgx-statval { font-size: 15.5px; font-weight: 600; letter-spacing: -.01em;
   font-variant-numeric: tabular-nums; color: #f2ecff; text-shadow: 0 1px 1px rgba(0, 0, 0, .45); }
 .mgx-statpill.emerald .mgx-statval { color: #dcffee; }
-.mgx-statlab { font-size: 8.5px; font-weight: 700; letter-spacing: .16em;
+.mgx-statlab { font-size: 11px; font-weight: 500; letter-spacing: normal;
   color: rgba(255, 255, 255, .62); }
 
 /* spinning-Nel mascot while a run is live */
@@ -329,7 +330,6 @@
   .mgx-sepright { flex: 1 1 100%; justify-content: flex-start; gap: 8px; }
   .mgx-acct { margin-left: auto; }
   .mgx-sepend { display: flex; align-items: center; gap: 8px; flex: 1 0 auto; }
-  .mgx-sepright .mgx-credlab { letter-spacing: .04em; }
   .mgx-sepright .mgx-cred, .mgx-sepright .mgx-credcards { gap: 6px; }
   .mgx-sepright .mgx-cred { padding-left: 12px; padding-right: 12px; }
   .mgx-sepright .mgx-social { padding-left: 11px; padding-right: 11px; }
@@ -341,20 +341,18 @@
 /* ---- glyph-spine nav pills ---- */
 .mgx-navspine { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; }
 .mgx-nav { position: relative; display: flex; align-items: center; gap: 6px;
-  padding: 4px 0 6px; font-size: 11px; font-weight: 700; letter-spacing: .13em;
-  text-transform: uppercase; white-space: nowrap; cursor: pointer;
+  padding: 4px 0 6px; font-size: 13px; font-weight: 500; letter-spacing: normal;
+  text-transform: none; white-space: nowrap; cursor: pointer;
   background: none; border: 0; font-family: inherit;
-  color: rgba(214, 210, 226, .62); transition: color .22s, text-shadow .22s; }
-.mgx-nav:hover, .mgx-nav:focus-visible { color: #f4eeff;
-  text-shadow: 0 0 14px color-mix(in srgb, var(--accent) 75%, transparent); }
+  color: rgba(214, 210, 226, .62); transition: color .22s; }
+.mgx-nav:hover, .mgx-nav:focus-visible { color: #f4eeff; }
 .mgx-nav.soon { opacity: .55; }
 .mgx-nav-underline { position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
   border-radius: 2px; transform-origin: left center; transform: scaleX(0);
-  transition: transform .3s cubic-bezier(.2, .9, .24, 1), box-shadow .3s;
+  transition: transform .3s cubic-bezier(.2, .9, .24, 1);
   background: linear-gradient(90deg, var(--accent), var(--mauve)); }
 .mgx-nav:hover .mgx-nav-underline, .mgx-nav:focus-visible .mgx-nav-underline {
-  transform: scaleX(1);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 85%, transparent); }
+  transform: scaleX(1); }
 .mgx-nav-mark { display: inline-grid; place-items: center;
   color: rgba(214, 210, 226, .6);
   transition: transform .4s cubic-bezier(.2, .9, .24, 1), color .2s; }
@@ -378,18 +376,19 @@
    don't, so it reads as "live/unlocked" even before hover, and a one-time NEW flag. */
 .mgx-nav.ai { color: color-mix(in oklab, var(--emerald) 78%, #f4eeff); }
 .mgx-nav.ai:hover, .mgx-nav.ai:focus-visible {
-  color: var(--emerald); text-shadow: none; }
+  color: var(--emerald); }
 .mgx-nav-mark.ai { color: var(--emerald); }
 .mgx-nav.ai:hover .mgx-nav-mark.ai, .mgx-nav.ai:focus-visible .mgx-nav-mark.ai {
   color: var(--emerald); }
 .mgx-nav-underline.ai { background: var(--emerald); }
 .mgx-nav.ai .mgx-nav-underline.ai { transform: scaleX(1); opacity: .45; }
 .mgx-nav.ai:hover .mgx-nav-underline.ai, .mgx-nav.ai:focus-visible .mgx-nav-underline.ai {
-  opacity: 1; box-shadow: none; }
-/* The NEW flag as Frontend Gallery.dc.html draws it on the AI Tools button: 8px uppercase
-   text, .06em tracking, opacity .8 -- no fill, no pulse. */
-.mgx-nav-new { font-size: 8px; letter-spacing: .06em; line-height: 1;
-  text-transform: uppercase; opacity: .8; }
+  opacity: 1; }
+/* The New flag on the AI Tools button (Frontend Gallery.dc.html drew it 8px uppercase,
+   .06em tracking; the quieted look, pick 1C, sets it in sentence case at the 11px label
+   floor). Opacity .8 -- no fill, no pulse. */
+.mgx-nav-new { font-size: 11px; font-weight: 500; letter-spacing: normal; line-height: 1;
+  text-transform: none; opacity: .8; }
 
 /* ---- 26px square utility toggles (slim, blur) ---- */
 .mgx-sqbtn { display: grid; place-items: center; width: 26px; height: 26px;
@@ -407,9 +406,11 @@
     var(--mm-light) 34%, var(--mm-mid) 50%, var(--mm-mid2) 68%, var(--mm-hi) 84%,
     var(--mm-dark) 100%);
   background-size: 220% 100%;
-  animation: mgMetal 7s ease-in-out infinite;
+  background-position: 30% 50%;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .65), inset 0 -2px 4px rgba(40, 20, 70, .4),
-    0 5px 14px rgba(0, 0, 0, .4); }
+    0 5px 14px rgba(0, 0, 0, .4);
+  transition: border-color .2s, color .2s, var(--metal-sweep); }
+.mgx-sqbtn.mgx-metal:hover, .mgx-sqbtn.mgx-metal:focus-visible { background-position: 100% 50%; }
 .mgx-blur.guard { border: 1px solid rgba(255, 255, 255, .32); }
 .mgx-blur.off { border-color: color-mix(in srgb, var(--red) 50%, transparent);
   background: color-mix(in srgb, var(--red) 16%, transparent); color: var(--red); }
@@ -460,7 +461,7 @@
 .mgx-size { display: flex; align-items: center; gap: 7px; padding: 4px 11px;
   border-radius: 999px; border: 1px solid rgba(255, 255, 255, .12);
   background: rgba(7, 5, 18, .5); }
-.mgx-size-lab { font-size: 8.5px; font-weight: 700; letter-spacing: .14em;
+.mgx-size-lab { font-size: 11px; font-weight: 500; letter-spacing: normal;
   color: rgba(214, 210, 226, .45); }
 /* Custom Slider slot (drift §48): the compact slider replaced the native range;
    this fixes its track length to the old 78px feel (thumb overhang included). */
@@ -486,16 +487,15 @@
 .mgx-cred { position: relative; z-index: 1; display: flex; align-items: center; gap: 9px;
   padding: 6px 15px; border-radius: 999px; cursor: pointer; font-family: inherit;
   border: 1px solid rgba(255, 255, 255, .22);
-  background: linear-gradient(150deg, rgba(222, 214, 246, .32) 0%, rgba(122, 96, 178, .34) 46%, rgba(24, 18, 44, .66) 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .42), inset 0 -2px 4px rgba(20, 12, 40, .45),
-    0 5px 14px rgba(0, 0, 0, .4);
+  background: var(--matte-fill);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .42), 0 5px 14px rgba(0, 0, 0, .4);
   transition: filter .2s; }
 /* the chip elevates to the TOP of the component band while its tip shows */
 .mgx-cred:hover, .mgx-cred:focus-visible { z-index: 7; filter: brightness(1.08); }
-.mgx-credval { font-size: 14px; font-weight: 800; color: #f2ecff;
+.mgx-credval { font-size: 14px; font-weight: 600; color: #f2ecff;
   font-variant-numeric: tabular-nums; text-shadow: 0 1px 1px rgba(0, 0, 0, .45); }
 .mgx-credval.cards { color: #dcffee; }
-.mgx-credlab { font-size: 8.5px; font-weight: 700; letter-spacing: .16em;
+.mgx-credlab { font-size: 11px; font-weight: 500; letter-spacing: normal;
   color: rgba(255, 255, 255, .62); }
 .mgx-credlab.cards { color: rgba(220, 255, 238, .6); }
 .mgx-creddiv { width: 1px; height: 12px; background: rgba(255, 255, 255, .2); }
@@ -507,7 +507,7 @@
 .mgx-social:hover, .mgx-social:focus-visible { z-index: 1; filter: none; }
 .mgx-social .mgx-credval { font-size: 12px; }
 .mgx-warndot { flex: none; width: 15px; height: 15px; display: grid; place-items: center;
-  border-radius: 50%; font-size: 10px; font-weight: 800; color: #2a1f06;
+  border-radius: 50%; font-size: 10px; font-weight: 600; color: #2a1f06;
   border: 1px solid rgba(255, 255, 255, .4);
   background: linear-gradient(150deg, #ffe9a8 0%, #d4af37 52%, #8a6c18 100%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .6); }
@@ -525,8 +525,8 @@
 .mgx-tipwarn { font-size: 10px; color: var(--gold); font-weight: 600; margin-bottom: 4px; }
 .mgx-tiprow { display: flex; justify-content: space-between; align-items: baseline; }
 .mgx-tiprow.head { margin-top: 5px; padding-top: 6px; border-top: 1px solid rgba(212, 175, 55, .22); }
-.mgx-tipk { font-family: ui-monospace, Menlo, monospace; font-size: 8.5px; font-weight: 700;
-  letter-spacing: .12em; text-transform: uppercase; color: var(--overlay0); }
+.mgx-tipk { font-family: ui-monospace, Menlo, monospace; font-size: 11px; font-weight: 500;
+  letter-spacing: .02em; text-transform: none; color: var(--overlay0); }
 .mgx-tipv { font-family: var(--font-hero); font-weight: 400; font-size: 15px; line-height: 1;
   font-variant-numeric: tabular-nums; color: var(--text); }
 .mgx-tipdim { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; color: var(--overlay0);
@@ -601,6 +601,9 @@ button.mgx-claim .mgx-claimribbon { display: inline-block; width: 14px; height: 
 @media (prefers-reduced-motion: reduce) {
   .mgx-metal, .mgx-sqbtn.mgx-metal, .mgx-mark-tilt, .mgx-mark-sheen, .mgx-nelimg,
   .mgx-nelhalo, .mgx-flavour.fA, .mgx-flavour.fB { animation: none; }
+  /* the metal sweep (pick 6B) jumps instead of travelling */
+  .mgx-metal { transition: filter .2s, box-shadow .25s; }
+  .mgx-sqbtn.mgx-metal { transition: border-color .2s, color .2s; }
   /* .at-chip's own live dot / indeterminate ring have their own reduced-motion guard in
      notify.css (shared across every host, not gallery-specific like this block). */
   .mgx-bnr, .mgx-title, .mgx-mark { transition: none; }

@@ -79,7 +79,7 @@ export function AboutCard({ inline, lead, onClose }) {
           </div>
         </div>
       </div>
-      <div className="mgab-kick">CHANGELOG · {ver}</div>
+      <div className="mgab-kick">Changelog · {ver}</div>
       {earlierOpen && !showing ? (
         <div className="mgab-earlier">
           {(about.earlier || []).map((e) => (

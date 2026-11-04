@@ -39,7 +39,7 @@ export default function SimilarResults({ source, state, onOpenDetails, onSimilar
   const sourceTile = source ? (
     <div className="simres-card is-source" title="The picture these are compared against">
       <img src={source.thumb} alt="" loading="lazy" decoding="async" />
-      <span className="simres-mark">source</span>
+      <span className="simres-mark">Source</span>
     </div>
   ) : null;
 

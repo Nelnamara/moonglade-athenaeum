@@ -123,9 +123,6 @@ export default function CustomSlider({
             width: pct + "%",
             borderRadius: "999px",
             background: "linear-gradient(90deg, var(--mauve), var(--lavender))",
-            boxShadow: disabled
-              ? undefined
-              : "0 0 10px -1px color-mix(in srgb, var(--lavender) 65%, transparent)",
           }}
         />
       </div>

@@ -84,15 +84,14 @@ button:disabled { cursor: default; }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; row-gap: 5px; }
 .sp { flex: 1 1 auto; }
 
-.card { display: inline-flex; align-items: center; gap: 8px; border-radius: 18px;
+.card { display: inline-flex; align-items: center; gap: 8px; border-radius: var(--radius-control);
   padding: 6px 13px; font-size: 11.5px; white-space: nowrap; color: var(--text);
   text-decoration: none; background: rgba(33, 31, 58, .38);
   border: 1px solid rgba(255, 255, 255, .16); backdrop-filter: blur(12px);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .10), 0 8px 24px -12px rgba(0, 0, 0, .8); }
 .card:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
 .card.on { border-color: color-mix(in srgb, var(--accent) 70%, transparent);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .14),
-    0 0 24px -6px color-mix(in srgb, var(--accent) 60%, transparent); }
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .14); }
 .card.soon { opacity: .5; }
 .card.loom { color: var(--cyan); }
 .card.cred { color: var(--gold); }
@@ -114,13 +113,13 @@ button:disabled { cursor: default; }
 .fly { position: absolute; left: 0; top: calc(100% + 8px); width: 440px; z-index: 318;
   background: var(--mantle); border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
   border-radius: 12px; padding: 12px 13px 11px; text-align: left;
-  box-shadow: 0 18px 44px rgba(0, 0, 0, .65), 0 0 30px -10px color-mix(in srgb, var(--accent) 40%, transparent); }
-.flyhd { font: 9px ui-monospace, Menlo, monospace; letter-spacing: .16em;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .65); }
+.flyhd { font: 500 11px ui-monospace, Menlo, monospace; letter-spacing: .02em;
   color: var(--accent); margin-bottom: 9px; }
 .flylegend { margin: 0 0 10px; padding: 8px 9px; background: var(--base);
   border: 1px solid var(--surface0); border-radius: 7px; }
-.flylegend p { margin: 0 0 4px; font-size: 9px; letter-spacing: .12em;
-  text-transform: uppercase; color: var(--overlay0); }
+.flylegend p { margin: 0 0 4px; font-size: 11px; font-weight: 500; letter-spacing: normal;
+  text-transform: none; color: var(--overlay0); }
 .flylegend code { font: 11px/1.7 ui-monospace, Menlo, monospace; color: var(--accent); }
 .flylegend span { color: var(--subtext); font-size: 11px; }
 .flygrid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 12px; }
@@ -128,7 +127,7 @@ button:disabled { cursor: default; }
 .flyrow.full { grid-column: 1 / -1; }
 .flyrow label { font-size: 9.5px; color: var(--overlay0); }
 .flyrow input, .flyrow select { background: var(--base); border: 1px solid var(--surface1);
-  border-radius: 6px; color: var(--text); font-size: 11.5px; padding: 6px 8px; width: 100%;
+  border-radius: var(--radius-control); color: var(--text); font-size: 11.5px; padding: 6px 8px; width: 100%;
   color-scheme: dark; }
 .flydate { display: flex; gap: 6px; }
 .flycb { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--text); }
@@ -154,7 +153,7 @@ button:disabled { cursor: default; }
 .flysaved-del:hover { color: var(--red, #f38ba8); }
 .flysaved-save { display: flex; gap: 6px; }
 .flysaved-save input { flex: 1 1 auto; background: var(--base); border: 1px solid var(--surface1);
-  border-radius: 6px; color: var(--text); font-size: 11px; padding: 6px 8px; min-width: 0; }
+  border-radius: var(--radius-control); color: var(--text); font-size: 11px; padding: 6px 8px; min-width: 0; }
 .flysaved-save .card { flex: none; }
 .flysaved-msg { font-size: 9.5px; color: var(--red, #f38ba8); }
 
@@ -166,20 +165,20 @@ button:disabled { cursor: default; }
   background: var(--mantle); border: 1px solid color-mix(in srgb, var(--red) 50%, transparent);
   border-radius: 12px; padding: 14px 15px 12px;
   box-shadow: 0 24px 70px rgba(0, 0, 0, .8); }
-.cd-head { font: 10px ui-monospace, Menlo, monospace; letter-spacing: .14em;
-  text-transform: uppercase; color: var(--red); margin-bottom: 9px; }
+.cd-head { font: 500 12px ui-monospace, Menlo, monospace; letter-spacing: .02em;
+  text-transform: none; color: var(--red); margin-bottom: 9px; }
 .cd-summary { font-size: 12.5px; color: var(--subtext); line-height: 1.6; margin: 0 0 10px; }
 .cd-summary b { color: var(--text); }
 .cd-task { border: 1px solid var(--surface0); border-radius: 9px; padding: 8px 9px;
   margin-bottom: 8px; }
-.cd-tlbl { display: flex; gap: 10px; align-items: baseline; font-size: 10px;
-  letter-spacing: .1em; text-transform: uppercase; color: var(--overlay0); margin-bottom: 7px; }
+.cd-tlbl { display: flex; gap: 10px; align-items: baseline; font-size: 12px; font-weight: 500;
+  letter-spacing: normal; text-transform: none; color: var(--overlay0); margin-bottom: 7px; }
 .cd-tid { font-family: ui-monospace, Menlo, monospace; text-transform: none; }
 .cd-strip { display: flex; flex-wrap: wrap; gap: 5px; }
 .cd-thumb { position: relative; width: 56px; height: 74px; border-radius: 6px; overflow: hidden;
   border: 1px solid var(--surface1); opacity: .75; }
 .cd-thumb.on { border-color: var(--red); opacity: 1;
-  box-shadow: 0 0 0 1px var(--red), 0 0 14px -4px color-mix(in srgb, var(--red) 60%, transparent); }
+  box-shadow: 0 0 0 1px var(--red); }
 /* Already gone on PixAI (the preview's live check, owner 2026-09-07): this copy is the
    last one anywhere and the delete keeps it back, so it must not read as one of the files
    about to go. Greyed and struck through rather than merely dimmed -- .cd-thumb is dimmed
@@ -201,21 +200,21 @@ button:disabled { cursor: default; }
    .gd-body's staggered @keyframes gd-rise, .gd-head, .gd-tabs -- went in the
    2026-09-04 dead-code sweep. The dock is styles/dock.css's .mgdock-* now, and
    nothing rendered a .gd element any more. */
-.gd-lbl { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--overlay0); }
+.gd-lbl { font-size: 13px; font-weight: 500; letter-spacing: normal; text-transform: none; color: var(--overlay0); }
 .gd-prompt { min-height: 96px; background: rgba(20, 17, 40, .55); border: 1px solid rgba(255, 255, 255, .16);
   border-radius: 10px; color: var(--text); font: 12.5px/1.5 var(--font-system); padding: 8px 10px;
   resize: vertical; }
 .gd-prompt:disabled { opacity: .45; }
 .gd-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; row-gap: 6px; }
-.gd-sel { background: var(--base); border: 1px solid var(--surface1); border-radius: 8px;
+.gd-sel { background: var(--base); border: 1px solid var(--surface1); border-radius: var(--radius-control-sm);
   color: var(--text); font-size: 11px; padding: 5px 8px; color-scheme: dark; max-width: 190px; }
-.gd-num { background: var(--base); border: 1px solid var(--surface1); border-radius: 8px;
+.gd-num { background: var(--base); border: 1px solid var(--surface1); border-radius: var(--radius-control-sm);
   color: var(--text); font-size: 11.5px; padding: 5px 8px; width: 58px;
   font-variant-numeric: tabular-nums; }
 .gd-num.wide { width: 110px; }
 .gd-num:disabled { opacity: .45; }
 .gd-mini { border: 1px solid var(--surface1); background: none; color: var(--subtext);
-  border-radius: 9px; font-size: 10.5px; padding: 3px 9px; white-space: nowrap; }
+  border-radius: var(--radius-control-sm); font-size: 10.5px; padding: 3px 9px; white-space: nowrap; }
 .gd-mini.on { border-color: var(--accent); color: var(--text);
   background: color-mix(in srgb, var(--accent) 22%, transparent); }
 .gd-note { font-size: 10.5px; color: var(--overlay0); font-style: italic; }
@@ -268,12 +267,11 @@ button:disabled { cursor: default; }
 .stars .st.lit { color: var(--gold); }
 .stars .st:hover { color: var(--gold); transform: scale(1.2); }
 .stars.big .st { font-size: 20px; }
-.gen { border-radius: 18px; padding: 8px 18px; font-size: 12px; font-weight: 700;
+.gen { border-radius: var(--radius-control); padding: 8px 18px; font-size: 12px; font-weight: 600;
   color: #fff; white-space: nowrap;
   border: 1px solid color-mix(in srgb, var(--accent) 70%, transparent);
   background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 55%, #2a1f4d),
-    color-mix(in srgb, var(--cyan) 30%, #1a1433));
-  box-shadow: 0 0 30px -6px color-mix(in srgb, var(--accent) 75%, transparent); }
+    color-mix(in srgb, var(--cyan) 30%, #1a1433)); }
 .gen.soon { opacity: .55; }
 
 /* ---- the grid ----
@@ -377,7 +375,7 @@ button:disabled { cursor: default; }
   padding: 14px 26px; background: rgba(9, 7, 22, .5);
   -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
   border-bottom: 1px solid rgba(255, 255, 255, .06); }
-.back-link, .detail-lb { font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+.back-link, .detail-lb { font-size: 13px; font-weight: 500; letter-spacing: normal; text-transform: none;
   color: rgba(226, 222, 238, .7); cursor: pointer; text-decoration: none; white-space: nowrap;
   background: none; border: 0; padding: 0; font-family: inherit; }
 .detail-lb { color: rgba(226, 222, 238, .5); }
@@ -387,7 +385,7 @@ button:disabled { cursor: default; }
 /* navBtnStyle (DC:351): 11px/600, 6px 12px, radius 8, on the `plain` face (DC:233). The
    app's Focus toggle (last in the bar, a shipped owner feature) wears the same chip. */
 .nav-arrow, .nav-disabled, .focus-btn { font-size: 11px; font-weight: 600; padding: 6px 12px;
-  border-radius: 8px; cursor: pointer; font-family: inherit; text-decoration: none; line-height: normal;
+  border-radius: var(--radius-control); cursor: pointer; font-family: inherit; text-decoration: none; line-height: normal;
   white-space: nowrap; border: 1px solid rgba(255, 255, 255, .12); background: rgba(12, 10, 28, .72);
   color: rgba(226, 222, 238, .82); transition: border-color .2s, color .2s; }
 .nav-arrow:hover, .focus-btn:hover { border-color: rgba(255, 255, 255, .28); color: var(--text); }
@@ -426,7 +424,7 @@ button:disabled { cursor: default; }
 .placard-frame { position: relative; width: min(100%, calc(72vh * var(--ar))); height: auto;
   align-self: center; aspect-ratio: var(--ar); border-radius: 16px; overflow: hidden;
   border: 1px solid rgba(255, 255, 255, .12); background: var(--surface0);
-  box-shadow: 0 40px 110px rgba(0, 0, 0, .72), 0 0 90px rgba(100, 58, 172, .2); }
+  box-shadow: 0 40px 110px rgba(0, 0, 0, .72); }
 .placard-frame::after { content: ""; position: absolute; inset: 0; pointer-events: none;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .14), inset 0 0 60px rgba(100, 58, 172, .18); }
 .placard-media { position: absolute; inset: 0; display: block; }
@@ -450,9 +448,9 @@ button:disabled { cursor: default; }
 /* HEAD (DC:75-82): kicker (DC:361, 10px/700/.16em uppercase lavender), the headline
    (DC:365, 30px italic Georgia, 1.2, -.01em), the 2px rule with the glint. */
 .p-head { display: flex; flex-direction: column; gap: 8px; }
-.p-kicker { margin: 0; font-size: 10px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+.p-kicker { margin: 0; font-size: 12px; font-weight: 500; letter-spacing: normal; text-transform: none;
   color: var(--lavender, var(--accent)); opacity: 0; display: flex; align-items: center; gap: 8px; }
-.p-kicker-series { font-family: ui-monospace, Menlo, monospace; color: var(--overlay0); letter-spacing: .04em; }
+.p-kicker-series { font-family: ui-monospace, Menlo, monospace; color: var(--overlay0); letter-spacing: .02em; }
 /* beside the picture on a tablet the record column is narrow: "MODEL . v1" and the find-more
    button keep their size and the model name is what gives (#72). A name with no spaces in it
    (the longest word is the text's least width) breaks anywhere instead of pushing the button out. */
@@ -488,8 +486,8 @@ button:disabled { cursor: default; }
 .p-row { display: flex; gap: 12px; align-items: flex-start; padding: 5px 9px; border-radius: 8px;
   background: transparent; transition: background .18s; }
 .p-row.copied { background: rgba(79, 201, 154, .1); }
-.p-row-k { flex: none; width: 118px; text-align: right; font-size: 10px; font-weight: 700;
-  letter-spacing: .1em; text-transform: uppercase; color: var(--overlay0); padding-top: 2px; }
+.p-row-k { flex: none; width: 118px; text-align: right; font-size: 12px; font-weight: 500;
+  letter-spacing: normal; text-transform: none; color: var(--overlay0); padding-top: 2px; }
 .p-row-v { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; word-break: break-word;
   font-size: 11.5px; line-height: 1.65; color: rgba(226, 222, 238, .86); }
 .p-row-v.mono { font-family: ui-monospace, Menlo, monospace; }
@@ -507,8 +505,8 @@ button:disabled { cursor: default; }
    default (DetailsView.jsx remembers it in mg_details_more). */
 .p-more { margin: 0; }
 .p-more-sum { list-style: none; cursor: pointer; user-select: none; display: flex; align-items: center;
-  gap: 7px; padding: 5px 9px; border-radius: 8px; font-size: 10px; font-weight: 700;
-  letter-spacing: .1em; text-transform: uppercase; color: var(--overlay0); }
+  gap: 7px; padding: 5px 9px; border-radius: 8px; font-size: 12px; font-weight: 500;
+  letter-spacing: normal; text-transform: none; color: var(--overlay0); }
 .p-more-sum::-webkit-details-marker { display: none; }
 .p-more-sum:hover { color: var(--text); background: rgba(255, 255, 255, .04); }
 .p-more-caret { display: inline-block; font-size: 9px; transition: transform .18s; }
@@ -542,7 +540,7 @@ button:disabled { cursor: default; }
 .p-lineage { display: flex; flex-direction: column; gap: 9px; padding: 13px 15px; border-radius: 13px;
   border: 1px solid rgba(255, 255, 255, .08); background: rgba(9, 7, 22, .6); }
 .p-lineage-head { display: flex; align-items: baseline; gap: 9px; }
-.p-lineage-head .k { font-size: 9.5px; font-weight: 700; letter-spacing: .14em;
+.p-lineage-head .k { font-size: 11.5px; font-weight: 500; letter-spacing: normal;
   color: var(--overlay0); }
 .p-lineage-head .s { font-size: 10.5px; color: rgba(214, 210, 226, .5); }
 .p-lineage-strip { display: flex; align-items: center; gap: 10px; overflow-x: auto;
@@ -554,7 +552,7 @@ button:disabled { cursor: default; }
 .p-lin-chip.this { cursor: default; border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent), 0 8px 20px rgba(0,0,0,.5); }
 .p-lin-chip .cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 5px;
-  font-size: 8px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  font-size: 11px; font-weight: 500; letter-spacing: normal; text-transform: none;
   text-align: center; color: rgba(226,222,238,.72); background: rgba(5,4,13,.78); }
 .p-lin-chip.this .cap { color: var(--text); }
 .p-lin-arrow { flex: none; color: var(--overlay0); font-size: 12px; }
@@ -572,8 +570,8 @@ button:disabled { cursor: default; }
 .p-session { display: flex; flex-direction: column; gap: 9px; padding: 13px 15px; border-radius: 13px;
   border: 1px solid rgba(255, 255, 255, .08); background: rgba(9, 7, 22, .6); }
 .p-session-head { display: flex; align-items: baseline; gap: 9px; }
-.p-session-head .k { flex: none; font-size: 9.5px; font-weight: 700; letter-spacing: .14em;
-  text-transform: uppercase; color: var(--overlay0); }
+.p-session-head .k { flex: none; font-size: 11.5px; font-weight: 500; letter-spacing: normal;
+  text-transform: none; color: var(--overlay0); }
 .p-session-head .t { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; font-size: 12px; color: rgba(214, 210, 226, .85); }
 .p-session-head .s { flex: none; font-size: 10.5px; color: rgba(214, 210, 226, .5); white-space: nowrap; }
@@ -584,8 +582,8 @@ button:disabled { cursor: default; }
 .p-ses-step .thumb { position: relative; width: 74px; height: 74px; border-radius: 10px; overflow: hidden;
   background: var(--surface0); border: 1px solid rgba(255, 255, 255, .1); box-shadow: 0 6px 16px rgba(0, 0, 0, .4); }
 .p-ses-step .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.p-ses-step .v { position: absolute; top: 0; left: 0; padding: 2px 5px; font-size: 8px; font-weight: 700;
-  letter-spacing: .06em; color: rgba(226, 222, 238, .82); background: rgba(5, 4, 13, .78);
+.p-ses-step .v { position: absolute; top: 0; left: 0; padding: 2px 5px; font-size: 11px; font-weight: 500;
+  letter-spacing: normal; color: rgba(226, 222, 238, .82); background: rgba(5, 4, 13, .78);
   border-bottom-right-radius: 7px; }
 .p-ses-step .lab { max-width: 74px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: 8.5px; letter-spacing: .02em; text-align: center; color: rgba(214, 210, 226, .55); }
@@ -604,8 +602,8 @@ button:disabled { cursor: default; }
 .p-actions { display: flex; flex-wrap: wrap; gap: 7px; padding-top: 4px; }
 .placard-record .p-actions { opacity: 0; }
 .p-actions-primary { align-items: center; padding-top: 0; }
-.p-actions .btn { font-size: 11px; font-weight: 700; white-space: nowrap; padding: 8px 14px;
-  border-radius: 9px; transition: border-color .2s, color .2s, background .2s; }
+.p-actions .btn { font-size: 11px; font-weight: 600; white-space: nowrap; padding: 8px 14px;
+  border-radius: var(--radius-control); transition: border-color .2s, color .2s, background .2s; }
 /* the plain face (the DC's `plain` const) */
 .p-actions .btn:not(.mgx-metal):not(.btn-danger) { border: 1px solid rgba(255,255,255,.12);
   background: rgba(12,10,28,.72); color: rgba(226,222,238,.82); }
@@ -616,7 +614,11 @@ button:disabled { cursor: default; }
    .btn:hover's flat surface) would otherwise paint over. */
 .p-actions .btn.mgx-metal, .p-actions .btn.mgx-metal:hover {
   border-color: rgba(255,255,255,.3); color: var(--mm-ink);
-  background: var(--mm-grad); background-size: 220% 100%; }
+  background: var(--mm-grad); background-size: 220% 100%; background-position: 30% 50%;
+  transition: border-color .2s, color .2s, filter .2s, var(--metal-sweep); }
+/* the quieted look (pick 6B): the shorthand above resets the metal face's resting position,
+   so the hover sweep is restated here -- still at rest, sweeping on hover or keyboard focus */
+.p-actions .btn.mgx-metal:hover, .p-actions .btn.mgx-metal:focus-visible { background-position: 100% 50%; }
 .p-actions .btn.mgx-metal:hover { filter: brightness(1.08); }
 /* the danger face (the DC's red outline) */
 .p-actions .btn-danger, .p-actions .btn-danger:hover { border: 1px solid rgba(243,139,168,.35);
@@ -625,14 +627,14 @@ button:disabled { cursor: default; }
 /* More: everything the design doesn't draw, visibly second-tier -- smaller, dimmer,
    tighter; Delete from PixAI keeps its red but at the row's quieter weight */
 .p-actions-more { gap: 5px; padding-top: 2px; }
-.p-actions-more .btn { font-size: 10px; font-weight: 600; padding: 5px 10px; border-radius: 7px; }
+.p-actions-more .btn { font-size: 10px; font-weight: 600; padding: 5px 10px; border-radius: var(--radius-control-sm); }
 .p-actions-more .btn:not(.mgx-metal):not(.btn-danger) { color: var(--overlay0);
   background: rgba(12,10,28,.45); border-color: rgba(255,255,255,.08); }
 .p-actions-more .btn:not(.mgx-metal):not(.btn-danger):not(.is-off):hover { color: var(--text); }
 .p-actions-more .btn-danger { opacity: .8; }
 .p-actions-more .btn-danger:hover { opacity: 1; }
 
-.btn { border-radius: 8px; border: 1px solid var(--surface1); color: var(--text);
+.btn { border-radius: var(--radius-control); border: 1px solid var(--surface1); color: var(--text);
   background: var(--surface0); padding: 7px 13px; font-size: 12.5px; cursor: pointer;
   text-decoration: none; }
 .btn:hover { background: var(--surface1); }
@@ -650,8 +652,8 @@ button:disabled { cursor: default; }
    under the actions that open them -- nothing outside it may grow the page */
 #suggest-box { padding: 12px 14px; background: var(--surface0);
   border: 1px solid var(--surface1); border-radius: 8px; font-size: 13px; line-height: 1.5; }
-.suggest-hd { color: var(--overlay0); font-size: 11px; text-transform: uppercase;
-  letter-spacing: .05em; margin-bottom: 6px; }
+.suggest-hd { color: var(--overlay0); font-size: 13px; font-weight: 500; text-transform: none;
+  letter-spacing: normal; margin-bottom: 6px; }
 .suggest-line { padding: 6px 8px; border-radius: 6px; cursor: pointer; }
 .suggest-line:hover { background: var(--surface1); }
 .suggest-line.done { color: var(--emerald); }
@@ -689,6 +691,7 @@ button:disabled { cursor: default; }
 }
 @media (prefers-reduced-motion: reduce) {
   .p-kicker, .p-title, .p-fact, .p-tag, .p-actions { opacity: 1; }
+  .p-actions .btn.mgx-metal, .p-actions .btn.mgx-metal:hover { transition: border-color .2s, color .2s, filter .2s; }
   .placard-record .p-actions { opacity: 1; }
   .p-rule { clip-path: inset(0 0% 0 0); }
   .placard, .placard-record { transition: none; }
@@ -703,7 +706,7 @@ button:disabled { cursor: default; }
    when the similarity index can't answer. */
 .p-similar { display: flex; flex-direction: column; gap: 8px; }
 .p-similar-head { display: flex; align-items: baseline; gap: 9px; }
-.p-similar-head .k { font-size: 9.5px; font-weight: 700; letter-spacing: .14em;
+.p-similar-head .k { font-size: 11.5px; font-weight: 500; letter-spacing: normal;
   color: var(--overlay0); }
 .p-similar-head .s { font-size: 10.5px; color: rgba(214,210,226,.5); }
 .p-seeall { font: inherit; font-size: 10.5px; color: var(--lavender, var(--accent));

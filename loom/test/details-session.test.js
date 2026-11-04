@@ -38,7 +38,7 @@ describe("SESSION panel gating + placement (DetailsView.jsx)", () => {
   });
 
   test("header: the SESSION kicker + the series title + a muted N tasks / M images count", () => {
-    assert.match(dv, /<span className="k">⟲ SESSION<\/span>/);
+    assert.match(dv, /<span className="k">⟲ Session<\/span>/);
     assert.match(dv, /\{series\.title \? <span className="t" title=\{series\.title\}>\{series\.title\}<\/span> : null\}/);
     assert.match(dv, /<span className="s">\{series\.count_tasks\} tasks · \{series\.count_images\} images<\/span>/);
   });

@@ -25,7 +25,7 @@ describe("the bars", () => {
   const bars = storageBars(STORAGE);
   test("three bars, in the page's order", () => {
     assert.deepEqual(bars.map((b) => b.id), ["type", "model", "collection"]);
-    assert.deepEqual(bars.map((b) => b.label), ["BY TYPE", "BY MODEL", "BY COLLECTION"]);
+    assert.deepEqual(bars.map((b) => b.label), ["By type", "By model", "By collection"]);
   });
   test("the collection bar says it can overlap; the others do not", () => {
     assert.equal(bars[2].note, "can overlap");

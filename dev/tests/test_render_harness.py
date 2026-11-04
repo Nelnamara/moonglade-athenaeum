@@ -8804,10 +8804,10 @@ def test_the_desktop_lightbox_counts_the_whole_walk_once(paged_library_server, r
         page.locator(".mgg-card").first.click()
         page.wait_for_selector(".lbx .lbx-index b")
         read = "() => [document.querySelector('.lbx-index b').textContent, document.querySelector('.lbx-index span').textContent]"
-        assert page.evaluate(read) == ["101", "OF 120"]
+        assert page.evaluate(read) == ["101", "of 120"]
         page.keyboard.press("ArrowRight")
         page.wait_for_function("() => document.querySelector('.lbx-index b').textContent === '102'")
-        assert page.evaluate(read) == ["102", "OF 120"]
+        assert page.evaluate(read) == ["102", "of 120"]
     finally:
         ctx.close()
 
@@ -9826,7 +9826,7 @@ def test_the_inbox_and_the_gift_box_open_their_own_panels_and_one_closes_the_oth
     p = page.evaluate(_RF_PANEL_JS)
     assert p["title"] == "Inbox" and abs(p["w"] - 380) < 1 and p["z"] == "300", p
     assert p["tabs"] == ["All", "Comments", "Likes", "Follows", "PixAI"], p
-    assert "ON PIXAI NOW" not in p["labs"] and p["events"] == 0, ("no events in the inbox", p)
+    assert "On PixAI now" not in p["labs"] and p["events"] == 0, ("no events in the inbox", p)
     assert p["gifts"] == [] and p["expiry"] == [], ("no gifts and no expiring cards in the inbox", p)
     assert p["rows"] >= 3 and p["more"] == 1, p
     assert page.locator(".ib-panel .ib-new").inner_text() == "5 new"
@@ -9841,7 +9841,7 @@ def test_the_inbox_and_the_gift_box_open_their_own_panels_and_one_closes_the_oth
     assert p["count"] == 1 and p["title"] == "Gift box", p
     assert abs(p["w"] - 380) < 1 and p["z"] == "300", p
     assert p["tabs"] == [] and p["rows"] == 0 and p["more"] == 0, ("no tabs, no inbox rows, no ⋯", p)
-    assert p["labs"][:1] == ["ON PIXAI NOW"] and p["events"] == 2, p
+    assert p["labs"][:1] == ["On PixAI now"] and p["events"] == 2, p
     peach = page.evaluate(_RF_PEACH_JS)
     assert len(p["expiry"]) == 1, p
     assert re.match(r"^5 Tsubaki\.3 expire [A-Z][a-z]{2} \d{1,2} · (today|tomorrow|in \d days)$",

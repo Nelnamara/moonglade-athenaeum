@@ -60,8 +60,11 @@ describe("the inbox, by work (R2c)", () => {
 
   test("likes count the people, comments count unread as new, zeroes are omitted", () => {
     const g = groupInbox(items, "all");
-    assert.equal(workDelta(g.works[0]), "♥ +2 · ❝ 1 new");
-    assert.equal(workDelta(g.works[1]), "♥ +1");
+    // unslop pick 2B: the heart and comment are line icons the row draws, so workDelta hands
+    // back parts (icon + words) rather than a string with the glyphs written in.
+    const said = (w) => workDelta(w).map((p) => p.icon + " " + p.text).join(" · ");
+    assert.equal(said(g.works[0]), "heart +2 · comment 1 new");
+    assert.equal(said(g.works[1]), "heart +1");
   });
 
   test("the quote is the newest unread comment's first line", () => {

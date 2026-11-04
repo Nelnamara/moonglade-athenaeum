@@ -91,11 +91,11 @@ describe("a row", () => {
     assert.doesNotMatch(src("lib/brokenFilesCore.js").replace(/never the word "corrupt"|Never the word "corrupt"/gi, ""), /corrupt/i);
   });
   test("pills: RECOVERABLE, SUSPECT peach, LOST dashed, ✓ FIXED emerald", () => {
-    assert.deepEqual(pillFor(DOC.rows[0]), { label: "RECOVERABLE", tone: "" });
-    assert.deepEqual(pillFor(DOC.rows[2]), { label: "SUSPECT", tone: "peach" });
-    assert.deepEqual(pillFor(DOC.rows[3]), { label: "LOST", tone: "lost" });
+    assert.deepEqual(pillFor(DOC.rows[0]), { label: "Recoverable", tone: "" });
+    assert.deepEqual(pillFor(DOC.rows[2]), { label: "Suspect", tone: "peach" });
+    assert.deepEqual(pillFor(DOC.rows[3]), { label: "Lost", tone: "lost" });
     assert.deepEqual(pillFor(DOC.rows[0], true), { label: "✓ FIXED", tone: "ok" });
-    assert.equal(ARCHIVE_WORD, "ARCHIVE");
+    assert.equal(ARCHIVE_WORD, "Archive");
     assert.equal(ARCHIVE_TIP, "Deleted on PixAI. This is the only copy.");
   });
   test("only the action that applies; READ_ONLY takes the re-download, never the rebuild", () => {

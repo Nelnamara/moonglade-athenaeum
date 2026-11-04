@@ -30,7 +30,7 @@ const server = readFileSync(
 
 describe("a website run is marked as one, and marked nowhere else", () => {
   test("the row shows a 'website' mark when the job's source is pixai", () => {
-    assert.match(row, /\{j\.source === "pixai" \? \(\s*<span className="at-src"[^>]*>website<\/span>\s*\) : null\}/,
+    assert.match(row, /\{j\.source === "pixai" \? \(\s*<span className="at-src"[^>]*>Website<\/span>\s*\) : null\}/,
       "the source mark is gone, no longer gated on source 'pixai', or no longer says " +
       "'website' -- without it a website run and an app run are the same row, and the owner " +
       "cannot tell where a generation came from");
