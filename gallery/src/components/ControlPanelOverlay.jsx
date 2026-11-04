@@ -839,7 +839,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                               <div className="mgcp-chips">
                                 {DEDUP_STAGES.map((st, i) => (
                                   <React.Fragment key={st.key}>
-                                    <ActionChip spec={actionSpec(st.key)} label={st.label}
+                                    <ActionChip spec={actionSpec(st.key)} label={st.label} locked={!!st.locked}
                                       armed={confirmArm === st.key} onRun={() => runAction(st.key)}
                                       disabled={i > dedupDone}
                                       title={i > dedupDone ? "Run the earlier stages first" : undefined} />
@@ -1192,13 +1192,14 @@ function tabStyle(on) {
   };
 }
 
-export function ActionChip({ spec, dgr, label, armed, onRun, disabled, title }) {
+/* `locked` (a dedup stage that changes files) draws the lock icon after the words. */
+export function ActionChip({ spec, dgr, label, armed, onRun, disabled, title, locked }) {
   if (!spec) return null;
   const text = armed ? "Confirm — " + (label || spec.label) : (label || spec.label);
   return (
     <button type="button" className={"mgcp-chip" + (dgr || spec.destructive ? " dgr" : "")}
       onClick={onRun} disabled={disabled} title={title}>
-      {text}
+      {text}{locked ? <> <Icon name="lock" /></> : null}
     </button>
   );
 }

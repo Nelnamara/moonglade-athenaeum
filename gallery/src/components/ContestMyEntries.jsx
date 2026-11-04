@@ -127,7 +127,7 @@ export default function ContestMyEntries({ rows, loaded = true, syncing, err, on
                 {dayOf(r.result_at).slice(5) || "—"}{decided ? " ✓" : ""}
               </div>
               <div><span className={"mgcte-status " + status.cls}>
-                {status.cls === "won" ? <><Icon name="trophy" /> </> : null}
+                {status.icon || status.cls === "won" ? <><Icon name={status.icon || "trophy"} /> </> : null}
                 {String(status.text || "").replace(/^\u{1F3C6}\s*/u, "")}
               </span></div>
             </button>
