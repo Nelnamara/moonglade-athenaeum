@@ -8,6 +8,9 @@ import { ratioLabel } from "../curation/aspectCore.js";
 import "../styles/grid.css";
 import "../styles/curation.css";
 
+// Source badge spellings (sentence case since the quieted look; acronyms and PixAI keep their own).
+const SOURCE_BADGE = { pixai: "PixAI", api: "API", local: "Local" };
+
 /* The grid, refit to the Frontend Gallery DC (drift §9) and to LOOM MASONRY v1
    (design-side spec, grid-algorithm-spec.md / drift §18): SIZE-slider cell
    sizing via --thumb, reveal-on-hover caption slab with Open/Details chips,
@@ -616,7 +619,7 @@ function Grid({
     const src = it.source ? String(it.source) : "";
     const badge = archive ? "Archive"
       : it.is_video ? "Video"
-      : src ? (src.toLowerCase() === "pixai" ? "PixAI" : src.charAt(0).toUpperCase() + src.slice(1).toLowerCase()) : "";
+      : src ? (SOURCE_BADGE[src.toLowerCase()] || src.charAt(0).toUpperCase() + src.slice(1).toLowerCase()) : "";
     // #34 direction B: is this a STACKED unit, and if so which kind + its badge.
     const stack = stackKind(it);                       // "series" | "batch" | null
     // The stamp prefers the SERIES title (the dial's name) when this is a series

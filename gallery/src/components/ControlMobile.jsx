@@ -357,7 +357,7 @@ export default function ControlMobile({ account, brandRequest }) {
             <div className="ctm-mirrorline"><b>Live Mirror</b> {mirrorLine}</div>
             <div className="ctm-mirrorchips">
               <span className={"mgcp-svtag" + (summary.supervised ? "" : " off")}>
-                {summary.supervised ? "supervised" : "unsupervised"}
+                {summary.supervised ? "Supervised" : "Unsupervised"}
               </span>
               <button type="button" className="mgcp-chip" onClick={() => clickPower("restart")}
                 disabled={!summary.supervised} title={summary.supervised ? "" : "Restart needs the managed launcher"}>

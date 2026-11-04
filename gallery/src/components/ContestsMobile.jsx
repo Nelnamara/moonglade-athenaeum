@@ -180,7 +180,7 @@ export default function ContestsMobile({ onEnter, entriesEpoch = 0 }) {
                   return card(c, (
                     <>
                       <span className={"cmb-cardstatus " + st.cls}>
-                        {st.text} · {n} {n === 1 ? "piece" : "pieces"}
+                        {st.icon ? <><Icon name={st.icon} /> </> : null}{st.text} · {n} {n === 1 ? "piece" : "pieces"}
                       </span>
                       {win ? (
                         <span className="cmb-cardwin">{tierLabel(win.tier, win.prize_amount)}</span>

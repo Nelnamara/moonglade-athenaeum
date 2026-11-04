@@ -134,7 +134,7 @@
 .lbm-promptrows { display: flex; flex-direction: column; gap: 6px; padding-top: 9px; margin-top: 8px;
   border-top: 1px solid var(--surface1); }
 .lbm-prow { display: flex; gap: 8px; }
-.lbm-prow span { font-size: 11px; font-weight: 500; letter-spacing: normal; color: var(--overlay0); width: 52px; flex: none; }
+.lbm-prow span { font-size: 11px; font-weight: 500; letter-spacing: normal; color: var(--overlay0); min-width: 52px; flex: none; white-space: nowrap; }
 .lbm-prow i { flex: 1 1 auto; font-style: normal; font-size: 10.5px; line-height: 1.5; color: rgba(214,210,226,.7);
   overflow-wrap: anywhere; }
 .lbm-prow i.mono { font-family: ui-monospace, monospace; }

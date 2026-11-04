@@ -6563,7 +6563,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                               <div className="lm-castname">{as.name || as.kind}</div>
                               <div className="lm-casttag">{as.tag}</div>
                             </div>
-                            {missing && <span className="lm-castmissing">missing</span>}
+                            {missing && <span className="lm-castmissing">Missing</span>}
                             {liveTag || pastBudget ? (
                               <span className={"lm-castlive" + (pastBudget ? " oob" : "")}>{liveTagText(liveTag, pastBudget, c.mode)}</span>
                             ) : null}

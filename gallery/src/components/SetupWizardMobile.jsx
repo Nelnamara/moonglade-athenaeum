@@ -97,15 +97,15 @@ export default function SetupWizardMobile({ boot }) {
               <div className="wzm-revealrow">
                 <div className="wzm-reveal">
                   <b className="wzm-reveal-v">{dl.received} / {dl.total} MB</b>
-                  <span className="wzm-reveal-k">received</span>
+                  <span className="wzm-reveal-k">Received</span>
                 </div>
                 <div className="wzm-reveal">
                   <b className="wzm-reveal-v">{dl.speed ? dl.speed.toFixed(1) + " MB/s" : "—"}</b>
-                  <span className="wzm-reveal-k">speed</span>
+                  <span className="wzm-reveal-k">Speed</span>
                 </div>
                 <div className="wzm-reveal">
                   <b className="wzm-reveal-v">{dl.eta == null ? "—" : dl.eta < 1 ? "<1 s" : "~" + Math.ceil(dl.eta) + " s"}</b>
-                  <span className="wzm-reveal-k">remaining</span>
+                  <span className="wzm-reveal-k">Remaining</span>
                 </div>
               </div>
             )}

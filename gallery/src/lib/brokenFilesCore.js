@@ -99,9 +99,9 @@ export function sizeText(row) {
   return (Math.round((n / (1024 * 1024)) * 10) / 10) + " MB";
 }
 
-/* The pill: {label, tone}. A row that just finished reads ✓ FIXED (emerald) for its 2 s. */
+/* The pill: {label, tone}. A row that just finished reads ✓ Fixed (emerald) for its 2 s. */
 export function pillFor(row, fixed) {
-  if (fixed) return { label: "✓ FIXED", tone: "ok" };
+  if (fixed) return { label: "✓ Fixed", tone: "ok" };
   const st = row && row.state;
   if (st === "lost") return { label: "Lost", tone: "lost" };
   if (st === "suspect") return { label: "Suspect", tone: "peach" };

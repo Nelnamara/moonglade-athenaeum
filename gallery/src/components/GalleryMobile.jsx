@@ -585,7 +585,7 @@ export default function GalleryMobile({
 
       <MobileSheet open={sheet === "search"} closing={closing} onClose={closeSheet} title="Advanced search">
         <div className="glm-legend">
-          <div className="glm-legend-cap">these already work — nothing tells you so</div>
+          <div className="glm-legend-cap">These already work — nothing tells you so</div>
           <div className="glm-legend-line"><code>night*</code> wildcard · <code>model:tsubaki</code> by model</div>
           <div className="glm-legend-line"><code>2038314167804392533</code> a task or media id</div>
           <div className="glm-legend-line"><code>keeper</code> · <code>-reject</code> your mark · <code>tag:pose-study</code> your tag · <code>★4+</code></div>
