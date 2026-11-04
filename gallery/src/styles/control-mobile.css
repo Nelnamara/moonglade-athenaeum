@@ -21,8 +21,8 @@
   padding: 12px 14px; }
 .ctm-statnum { font-family: var(--font-hero); font-size: 22px; line-height: 1.15;
   font-variant-numeric: tabular-nums; }
-.ctm-statlabel { font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 9px;
-  letter-spacing: .14em; text-transform: uppercase; color: var(--overlay0); margin-top: 3px; }
+.ctm-statlabel { font-family: ui-monospace, Menlo, monospace; font-weight: 500; font-size: 11px;
+  letter-spacing: normal; text-transform: none; color: var(--overlay0); margin-top: 3px; }
 
 /* Duplicates/Reclaimable: mirrors desktop's own .mgh-stat-value.dup treatment
    (HealthOverlay.jsx + overlays.css) -- a real <button> (not a styled div),

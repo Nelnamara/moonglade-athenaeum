@@ -30,7 +30,7 @@
 /* ---- top bar: Back / Share ---- */
 .csm-topbar { flex: none; display: flex; align-items: center; gap: 12px;
   padding: max(14px, env(safe-area-inset-top)) 16px 10px; border-bottom: 1px solid var(--surface1); }
-.csm-back, .csm-share { font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+.csm-back, .csm-share { font-size: 13px; font-weight: 500; letter-spacing: normal; text-transform: none;
   cursor: pointer; background: none; border: none; padding: 0; font-family: inherit; }
 .csm-back { color: rgba(226,222,238,.7); }
 .csm-share { color: var(--lavender); }
@@ -69,7 +69,7 @@
 
 .csm-info { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; min-width: 0; }
 .csm-row1 { display: flex; gap: 8px; align-items: baseline; margin-bottom: 3px; min-width: 0; }
-.csm-no { font-family: ui-monospace, Menlo, monospace; font-size: 9px; font-weight: 700;
+.csm-no { font-family: ui-monospace, Menlo, monospace; font-size: 9px; font-weight: 600;
   color: var(--blue); flex: none; }
 .csm-cardtitle { font-family: var(--font-hero); font-size: 13px; color: var(--text);
   flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

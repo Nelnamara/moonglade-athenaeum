@@ -11,9 +11,9 @@
   margin: 0 auto 6px; }
 .glm-pgrow { display: flex; align-items: center; gap: 6px; height: 44px; }
 .glm-pgrow-lbl { flex: none; width: 64px; font-size: 10.5px; color: var(--subtext); }
-.glm-pgrow button { flex: 1; min-width: 0; height: 32px; font: inherit; font-size: 10.5px; border-radius: 8px;
+.glm-pgrow button { flex: 1; min-width: 0; height: 32px; font: inherit; font-size: 10.5px; border-radius: var(--radius-control);
   cursor: pointer; background: none; border: 1px solid var(--surface1); color: var(--subtext); white-space: nowrap; }
-.glm-pgrow button.on { border-color: var(--lavender); color: var(--text); font-weight: 700;
+.glm-pgrow button.on { border-color: var(--lavender); color: var(--text); font-weight: 600;
   background: color-mix(in srgb, var(--lavender) 16%, transparent); }
 .glm-pgsheet-note { font-size: 9.5px; line-height: 1.45; color: var(--overlay0); padding-top: 6px; }
 
@@ -32,7 +32,7 @@
 .ctm-paging-title span { display: block; font-size: 10px; color: var(--overlay0); line-height: 1.4; }
 .ctm-paging-modes { display: flex; gap: 4px; }
 .ctm-paging-modes button { flex: 1; text-align: center; font: inherit; font-size: 10.5px; font-weight: 600;
-  padding: 8px 4px; min-height: 36px; border-radius: 7px; cursor: pointer; color: var(--subtext);
+  padding: 8px 4px; min-height: 36px; border-radius: var(--radius-control); cursor: pointer; color: var(--subtext);
   background: none; border: 1px solid var(--surface1); }
 .ctm-paging-modes button.on { background: var(--lavender); color: var(--base); }
 

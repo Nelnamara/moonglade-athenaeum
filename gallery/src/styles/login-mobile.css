@@ -17,8 +17,6 @@
 @keyframes lgnmRise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 @keyframes lgnmSpin { to { transform: rotate(360deg); } }
 @keyframes lgnmBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
-@keyframes lgnmGlow { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
-@keyframes lgnmMetal { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
 @keyframes lgnmFieldIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
 .lgnm-stage { position: relative; min-height: 100dvh; overflow-y: auto; overflow-x: hidden;
@@ -43,7 +41,7 @@
 .lgnm-card { position: relative; z-index: 1; border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, .07);
   background: linear-gradient(180deg, rgba(25, 21, 48, .97) 0%, rgba(13, 10, 28, .99) 100%);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, .65), 0 0 70px rgba(100, 58, 172, .14);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .65);
   padding: 22px 22px 24px; animation: lgnmRise .5s cubic-bezier(.2, .9, .24, 1) both; }
 
 /* #25's banner half, mobile twin of .lgn-banner -- same call, this card's own numbers:
@@ -67,17 +65,17 @@
 .lgnm-titlewrap { text-align: center; padding: 14px 0 18px; }
 .lgnm-title { font-family: var(--font-hero); font-size: 17px;
   letter-spacing: .01em; color: #efecf8; }
-.lgnm-tagline { font-size: 8px; font-weight: 700; letter-spacing: .24em;
-  text-transform: uppercase; color: rgba(214, 210, 226, .42); padding-top: 6px;
+.lgnm-tagline { font-size: 11px; font-weight: 500; letter-spacing: normal;
+  text-transform: none; color: rgba(214, 210, 226, .42); padding-top: 6px;
   cursor: pointer; transition: opacity .5s ease; opacity: 1; }
 .lgnm-tagline.fading { opacity: 0; }
 .lgnm-framing { font-size: 10.5px; line-height: 1.5; color: var(--subtext);
   padding-top: 7px; max-width: 220px; margin: 0 auto; }
 
-.lgnm-lbl { font-size: 9px; font-weight: 700; letter-spacing: .16em;
+.lgnm-lbl { font-size: 11px; font-weight: 500; letter-spacing: normal;
   color: var(--overlay0); padding-bottom: 5px; margin-top: 12px; }
 .lgnm-input { width: 100%; box-sizing: border-box; background: rgba(7, 5, 16, .9);
-  color: var(--text); border: 1px solid var(--surface1); border-radius: 9px;
+  color: var(--text); border: 1px solid var(--surface1); border-radius: var(--radius-control);
   padding: 10px 11px; font-size: 12.5px; outline: none; transition: border-color .2s;
   font-family: inherit; }
 .lgnm-input:focus { border-color: rgba(182, 146, 230, .55); }
@@ -100,8 +98,8 @@
 
 .lgnm-signbtn { margin-top: 18px; width: 100%; display: flex; align-items: center;
   justify-content: center; gap: 8px; padding: 11px; border-radius: 10px;
-  font-size: 13px; font-weight: 800; font-family: inherit; cursor: pointer;
-  transition: filter .2s; border: 1px solid rgba(255, 255, 255, .3);
+  font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer;
+  transition: filter .2s, var(--metal-sweep); border: 1px solid rgba(255, 255, 255, .3);
   color: color-mix(in oklab, var(--accent) 26%, #08040f);
   text-shadow: 0 1px 0 rgba(255, 255, 255, .4);
   background: linear-gradient(100deg,
@@ -109,9 +107,11 @@
     color-mix(in oklab, var(--accent) 22%, #ffffff) 34%, var(--accent) 50%,
     color-mix(in oklab, var(--accent) 74%, #06030d) 68%, var(--mauve) 84%,
     color-mix(in oklab, var(--accent) 50%, #06030d) 100%);
-  background-size: 220% 100%; animation: lgnmMetal 7s ease-in-out infinite;
+  /* rests at 30%, sweeps on hover / focus only (unslop pick 6B) */
+  background-size: 220% 100%; background-position: 30% 50%;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .6), inset 0 -2px 4px rgba(10, 5, 20, .45),
     0 6px 16px rgba(0, 0, 0, .45); }
+.lgnm-signbtn:hover:not(.busy), .lgnm-signbtn:focus-visible { background-position: 100% 50%; }
 .lgnm-signbtn.busy { cursor: default; filter: saturate(.6) brightness(.82); }
 .lgnm-spin { width: 14px; height: 14px; border-radius: 50%;
   background: conic-gradient(from 0deg, rgba(20, 16, 42, 0), rgba(20, 16, 42, .85));
@@ -126,13 +126,13 @@
 .lgnm-welcome-inner { text-align: center; }
 .lgnm-welcome-title { font-family: var(--font-hero); font-size: 21px;
   color: #efecf8; }
-.lgnm-welcome-line { font-size: 9px; font-weight: 700; letter-spacing: .28em;
-  text-transform: uppercase; color: var(--mauve); padding-top: 10px;
-  animation: lgnmGlow 2.2s ease-in-out infinite; }
+.lgnm-welcome-line { font-size: 11px; font-weight: 500; letter-spacing: normal;
+  text-transform: none; color: var(--mauve); padding-top: 10px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .lgnm-card, .lgnm-welcome, .lgnm-spin, .lgnm-signbtn, .lgnm-mascot.peeked .lgnm-mascot-bob,
-  .lgnm-fieldin, .lgnm-welcome-line {
+  .lgnm-card, .lgnm-welcome, .lgnm-spin, .lgnm-mascot.peeked .lgnm-mascot-bob,
+  .lgnm-fieldin {
     animation: none; }
+  .lgnm-signbtn { transition: filter .2s; }
   .lgnm-mascot { transition: none; }
 }
