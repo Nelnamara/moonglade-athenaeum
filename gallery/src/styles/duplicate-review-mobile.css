@@ -37,7 +37,7 @@
 .mgdrm-tile { position: relative; }
 .mgdrm-tile.removed .mgdr-thumb { box-shadow: 0 0 0 2px var(--red) inset; border-radius: 8px; }
 .mgdrm-removed-x { position: absolute; inset: 0; display: grid; place-items: center;
-  background: rgba(243,139,168,.22); color: var(--red); font-size: 20px; font-weight: 700;
+  background: rgba(243,139,168,.22); color: var(--red); font-size: 20px; font-weight: 600;
   border-radius: 8px; pointer-events: none; }
 .mgdrm-tile.busy .mgdr-thumb { opacity: .55; pointer-events: none; }
 
@@ -47,7 +47,7 @@
    one reused verbatim) so it sits on the LEFT of the footer row without
    fighting .mgdr-undo's own margin-left:auto (which .mgdr-resolve, on the
    right of the same row, still needs). ---- */
-.mgdrm-clearbtn { font-size: 11.5px; font-weight: 700; padding: 7px 15px; border-radius: 8px;
+.mgdrm-clearbtn { font-size: 11.5px; font-weight: 600; padding: 7px 15px; border-radius: var(--radius-control);
   cursor: pointer; font-family: inherit; border: 1px solid var(--surface1);
   background: rgba(12,10,28,.6); color: var(--text); }
 .mgdrm-clearbtn:hover:not(:disabled) { border-color: var(--accent); }

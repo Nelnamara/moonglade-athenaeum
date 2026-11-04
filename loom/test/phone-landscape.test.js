@@ -254,7 +254,7 @@ describe("Q4 the pieces stay put across a turn", () => {
 
   test("the phone's Loom sheet no longer asks for a rotation", () => {
     const app = rd("gallery/src/components/AppMobile.jsx");
-    const sheet = app.slice(app.indexOf('title="THE LOOM"'));
+    const sheet = app.slice(app.indexOf('title="The Loom"'));
     const block = sheet.slice(0, sheet.indexOf("</MobileSheet>"));
     const note = block.slice(block.indexOf('<div className="glm-loom-note">'), block.indexOf('<div className="glm-sheet-actions">'));
     assert.doesNotMatch(note, /turn the phone/i);

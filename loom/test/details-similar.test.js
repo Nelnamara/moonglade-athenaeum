@@ -281,8 +281,8 @@ test("F: ✧ is gone from the phone, and its model filter says what it does", ()
     ["gallery tab", galleryMobile], ["shell", appMobile]]) {
     assert.doesNotMatch(code(file), /✧/, "✧ is still drawn by the phone's " + name);
   }
-  assert.match(mobile, />◈ SIMILAR</);                    // the strip head
-  assert.match(mobile, /title="◈ SIMILAR"/);              // the "see all" sheet
+  assert.match(mobile, />◈ Similar</);                    // the strip head
+  assert.match(mobile, /title="◈ Similar"/);              // the "see all" sheet
   assert.match(code(mobile), />\s*Filter by model\s*</);
   assert.doesNotMatch(code(mobile), /Find similar \(model\)/);
   // the sheet stays a SHEET -- the phone's own idiom for "the rest of these"

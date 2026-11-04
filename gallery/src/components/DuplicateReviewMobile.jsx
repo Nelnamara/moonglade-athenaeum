@@ -165,7 +165,7 @@ export default function DuplicateReviewMobile({ csrf, onResolved }) {
             ? "Quarantine every pending group's current keep/remove selection in one go"
             : "No pending group has a keeper selected"}
           onClick={() => setAutoConfirmOpen(true)}>
-          ⚡ Auto-resolve all{autoGroupCount ? " (" + autoGroupCount + ")" : ""}
+          <Icon name="bolt" /> Auto-resolve all{autoGroupCount ? " (" + autoGroupCount + ")" : ""}
         </button>
       </div>
 
@@ -206,15 +206,15 @@ export default function DuplicateReviewMobile({ csrf, onResolved }) {
                         {m.is_video ? <span className="mgdr-vglyph">▶</span> : null}
                         {resolved ? (
                           isKeeper
-                            ? <span className="mgdr-keeper">KEPT</span>
+                            ? <span className="mgdr-keeper">Kept</span>
                             // Per-tile, not per-group -- see header comment
                             // point 6: a partial Undo can restore some members
                             // of a resolved group while others stay quarantined.
                             : resolved.quarantined.some((q) => q.original_path === m.path)
-                              ? <span className="mgdr-quarantined">QUARANTINED</span>
-                              : <span className="mgdr-restored">RESTORED</span>
+                              ? <span className="mgdr-quarantined">Quarantined</span>
+                              : <span className="mgdr-restored">Restored</span>
                         ) : isKeeper ? (
-                          <span className="mgdr-keeper">KEEP</span>
+                          <span className="mgdr-keeper">Keep</span>
                         ) : (
                           <span className="mgdrm-removed-x" aria-hidden="true">✕</span>
                         )}
@@ -232,7 +232,7 @@ export default function DuplicateReviewMobile({ csrf, onResolved }) {
                 })}
               </div>
 
-              {groupErr && <div className="mgdr-grouperr">⚠ {groupErr}</div>}
+              {groupErr && <div className="mgdr-grouperr"><Icon name="warning" /> {groupErr}</div>}
 
               <div className="mgdr-groupfoot">
                 {resolved ? (
@@ -304,7 +304,7 @@ export default function DuplicateReviewMobile({ csrf, onResolved }) {
               )}
               {autoOnlyCopyCount > 0 && <> {onlyCopyNote(autoOnlyCopyCount, autoFileCount, "duplicates")}</>}
             </p>
-            {autoError && <div className="mgdr-grouperr">⚠ {autoError}</div>}
+            {autoError && <div className="mgdr-grouperr"><Icon name="warning" /> {autoError}</div>}
             <div className="mgdr-autoconfirm-actions">
               <button type="button" className="mgdr-autocancel mgdrm-wide" disabled={autoBusy}
                 onClick={() => { setAutoConfirmOpen(false); setAutoError(""); }}>

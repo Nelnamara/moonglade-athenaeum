@@ -96,7 +96,7 @@ describe("source: neither label counts the loaded page any more", () => {
   test("the viewer prints the walk's count, from the page offset and the total it is handed", () => {
     assert.match(lightbox, /lightboxCount\(index, offset, total, items\.length\)/);
     assert.match(lightbox, /<span className="lbm-index">\{count\.at\}<\/span>/);
-    assert.match(lightbox, /<span className="lbm-total">OF \{count\.of\}<\/span>/);
+    assert.match(lightbox, /<span className="lbm-total">of \{count\.of\}<\/span>/);
     assert.doesNotMatch(lightbox, /OF \{items\.length\}/);
     assert.doesNotMatch(lightbox, /<span className="lbm-index">\{index \+ 1\}<\/span>/);
   });

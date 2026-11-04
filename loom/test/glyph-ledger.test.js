@@ -178,7 +178,7 @@ test("7. BOTH of the Control Panel's doors wear the laptop-cog", () => {
   assert.doesNotMatch(app, /⛭/);
   assert.doesNotMatch(tabBar, /icon: "⚙"/);
   // CreateMobile's "⚙ Advanced" is generic settings, NOT the Panel -- it keeps its gear
-  assert.match(src("components/CreateMobile.jsx"), /⚙ Advanced/);
+  assert.match(src("components/CreateMobile.jsx"), /<Icon name="gear" \/> Advanced/);
 });
 
 // ---------------------------------------------------------------- the character picks
@@ -301,13 +301,13 @@ test("10. the two new icons carry their per-surface sizes, measured not guessed"
 });
 
 test("11. the phone menu's Publish row wears ☁, the mark Publish wears everywhere else", () => {
-  // unslop pick 2B: on the desktop surfaces the ☁ is now the `publish` line icon.
-  assert.match(appMobile, /\{ icon: "☁", label: "Publish", screen: "publish" \}/);
+  // unslop pick 2B: Publish wears the `publish` line icon on the phone menu and on every desktop surface.
+  assert.match(appMobile, /\{ icon: <Icon name="publish" \/>, label: "Publish", screen: "publish" \}/);
   assert.doesNotMatch(appMobile, /icon: "✎"/);
   // the surfaces it is now agreeing with
   assert.match(app, /img\("publish", <Icon name="publish" \/>, "Publish"/);
   assert.match(details, /<Icon name="publish" \/> Publish<\/button>/);
-  assert.match(src("components/ImageDetailsMobile.jsx"), /☁ Publish<\/button>/);
+  assert.match(src("components/ImageDetailsMobile.jsx"), /<Icon name="publish" \/> Publish<\/button>/);
   assert.match(src("components/Lightbox.jsx"), /<Icon name="publish" \/> Publish<\/button>/);
   // and "Edit this" still keeps ✎ (the ruling's own carve-out)
   assert.match(details, /✎ Edit this<\/button>/);

@@ -161,7 +161,7 @@ describe("both manual switches survive the auto-open", () => {
        board-and-reel view. The sheet was contradicting the app. Landscape advice belongs
        to the desktop board, which is a choice away, so that is where it sits now. */
     const mobileApp = rd("../gallery/src/components/AppMobile.jsx");
-    const sheet = mobileApp.slice(mobileApp.indexOf('title="THE LOOM"'));
+    const sheet = mobileApp.slice(mobileApp.indexOf('title="The Loom"'));
     const note = sheet.slice(0, sheet.indexOf("</MobileSheet>"));
     assert.doesNotMatch(note, /<b>Rotate to landscape<\/b>/,
       "the unconditional rotate instruction is no longer true on a phone");

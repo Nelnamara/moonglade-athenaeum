@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import useDataSaver from "../hooks/usePhonePrefs.js";
 import { thumbSrc } from "../lib/phoneCore.js";
 import { apiGet, apiPost } from "../api.js";
@@ -70,7 +71,7 @@ export default function ContestEntryMobile({ contest, preselectMediaId, onClose,
       setItems(d.items || []);
       const t = (d && d.csrf) || "";
       if (t) setCsrf(t);
-      else setFail({ title: "Couldn't verify this session",
+      else setFail({ iconName: "warning", title: "Couldn't verify this session",
                      copy: "Reload the page and try again — nothing was submitted." });
     });
     return () => { dead = true; };
@@ -185,7 +186,7 @@ export default function ContestEntryMobile({ contest, preselectMediaId, onClose,
 
       {fail && (
         <div className="cmb-fail">
-          <div className="t">{fail.title}</div>
+          <div className="t">{fail.iconName ? <Icon name={fail.iconName} /> : null} {fail.title}</div>
           <div>{fail.copy}</div>
         </div>
       )}

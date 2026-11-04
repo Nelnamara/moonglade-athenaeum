@@ -63,7 +63,7 @@
     justify-content: flex-start; gap: 16px; padding: 24px 0 0 var(--mg-safe-l);
     border-top: 0; border-right: 1px solid var(--surface0); overflow: hidden; }
   .glm-nav .glm-navitem { flex: none; width: 44px; height: 44px; padding: 0; gap: 0; justify-content: center;
-    border-radius: 12px; }
+    border-radius: var(--radius-control); }
   .glm-nav .glm-navitem.on { background: color-mix(in srgb, var(--lavender) 12%, transparent); }
   .glm-nav .glm-navicon { font-size: 18px; line-height: 1; }
   .glm-nav .glm-navlabel, .glm-nav .glm-navdot { display: none; }
@@ -149,7 +149,7 @@
   .lbm-foot:last-child { margin-bottom: 0; }
   .lbm-actsrow { flex-direction: column; gap: 5px; overflow: visible; padding: 0; }
   .lbm-actsrow > .lbm-chip, .lbm-actsrow > * { width: 100%; box-sizing: border-box; text-align: left;
-    padding: 6px 9px; border-radius: 9px; overflow: hidden; text-overflow: ellipsis; }
+    padding: 6px 9px; border-radius: var(--radius-control); overflow: hidden; text-overflow: ellipsis; }
   .lbm-hint { display: none; }
   .lbm-placard, .lbm-promptbox { margin-left: 0; margin-right: 0; }
   .lbm-metarow { flex-wrap: wrap; gap: 4px 10px; padding: 0 2px; white-space: normal; overflow: visible; }

@@ -78,7 +78,7 @@ export default function SetupWizardMobile({ boot }) {
         <div className="wzm-wash wzm-wash-a" />
         <div className="wzm-wash wzm-wash-b" />
         <div className="wzm-card">
-          <div className="wzm-toprow"><div className="wzm-kicker">FIRST-TIME SETUP</div></div>
+          <div className="wzm-toprow"><div className="wzm-kicker">First-time setup</div></div>
           <div className="wzm-syncwrap">
             <div className="wzm-stepkicker">{checking ? "Preparing the Athenaeum" : "One-time download"}</div>
             <div className="wzm-syncmascotbox">
@@ -127,7 +127,7 @@ export default function SetupWizardMobile({ boot }) {
         <div className="wzm-wash wzm-wash-a" />
         <div className="wzm-wash wzm-wash-b" />
         <div className="wzm-card">
-          <div className="wzm-toprow"><div className="wzm-kicker">FIRST-TIME SETUP</div></div>
+          <div className="wzm-toprow"><div className="wzm-kicker">First-time setup</div></div>
           <div className="wzm-syncwrap">
             <div className="wzm-stepkicker">One-time download</div>
             <div className="wzm-syncmascotbox">
@@ -163,7 +163,7 @@ export default function SetupWizardMobile({ boot }) {
         <div className="wzm-wash wzm-wash-b" />
         <div className="wzm-card">
           <div className="wzm-toprow">
-            <div className="wzm-kicker">FIRST-TIME SETUP</div>
+            <div className="wzm-kicker">First-time setup</div>
             <button type="button" className="wzm-skip" onClick={skipToKey}>Skip to setup →</button>
           </div>
           <div className="wzm-dots">
@@ -195,7 +195,7 @@ export default function SetupWizardMobile({ boot }) {
         <div className="wzm-wash wzm-wash-a" />
         <div className="wzm-wash wzm-wash-b" />
         <div className="wzm-card">
-          <div className="wzm-toprow"><div className="wzm-kicker">FIRST-TIME SETUP</div></div>
+          <div className="wzm-toprow"><div className="wzm-kicker">First-time setup</div></div>
           <div className="wzm-stepkicker">Link your PixAI account</div>
           <div className="wzm-stephead">One key. Nothing else to configure.</div>
           <div className="wzm-stepslist">
@@ -208,7 +208,7 @@ export default function SetupWizardMobile({ boot }) {
           </div>
           <button type="button" className="wzm-openbtn" onClick={openPixai}>Open pixai.art/profile/edit/api ↗</button>
           <div className="wzm-divider" />
-          <div className="wzm-fieldlbl">YOUR API KEY</div>
+          <div className="wzm-fieldlbl">Your API key</div>
           <div className="wzm-keyrow">
             <input className="wzm-keyinput" type={showKey ? "text" : "password"} value={apiKey}
               placeholder="paste your PixAI API key" autoFocus
@@ -238,7 +238,7 @@ export default function SetupWizardMobile({ boot }) {
         <div className="wzm-wash wzm-wash-a" />
         <div className="wzm-wash wzm-wash-b" />
         <div className="wzm-card">
-          <div className="wzm-toprow"><div className="wzm-kicker">FIRST-TIME SETUP</div></div>
+          <div className="wzm-toprow"><div className="wzm-kicker">First-time setup</div></div>
           <div className="wzm-syncwrap">
             <div className="wzm-syncmascotbox">
               <div className="wzm-synchalo" />
@@ -288,7 +288,7 @@ export default function SetupWizardMobile({ boot }) {
       <div className="wzm-wash wzm-wash-a" />
       <div className="wzm-wash wzm-wash-b" />
       <div className="wzm-card">
-        <div className="wzm-toprow"><div className="wzm-kicker">FIRST-TIME SETUP</div></div>
+        <div className="wzm-toprow"><div className="wzm-kicker">First-time setup</div></div>
         <div className="wzm-readywrap">
           <div className="wzm-readymark">✦</div>
           <div className="wzm-readyhead">Welcome home.</div>
