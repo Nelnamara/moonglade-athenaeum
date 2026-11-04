@@ -195,7 +195,7 @@ function Row({ a, ladderName, onOpen, frame }) {
       </div>
       {isFeat ? (
         <div className="fm-row-rightcol center">
-          {frame && frame.ribbon && <span className="mgfm-new">NEW</span>}
+          {frame && frame.ribbon && <span className="mgfm-new">New</span>}
           <span className="fm-row-glyph">✓</span>
         </div>
       ) : (
@@ -361,7 +361,7 @@ export default function FolioMobile({ onClose, onJump }) {
       {data && vm && (
         <div className="fm-scroll">
           <div className="fm-hero">
-            <div className="fm-kicker">THE MOONGLADE ATHENAEUM</div>
+            <div className="fm-kicker">The Moonglade Athenaeum</div>
             <div className="fm-h1">The Folio of Honors</div>
             <div className="fm-rulewrap"><div className="fm-rule" /></div>
             <div className="fm-statline">

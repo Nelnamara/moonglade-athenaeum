@@ -206,15 +206,15 @@ export default function DuplicateReviewMobile({ csrf, onResolved }) {
                         {m.is_video ? <span className="mgdr-vglyph">▶</span> : null}
                         {resolved ? (
                           isKeeper
-                            ? <span className="mgdr-keeper">KEPT</span>
+                            ? <span className="mgdr-keeper">Kept</span>
                             // Per-tile, not per-group -- see header comment
                             // point 6: a partial Undo can restore some members
                             // of a resolved group while others stay quarantined.
                             : resolved.quarantined.some((q) => q.original_path === m.path)
-                              ? <span className="mgdr-quarantined">QUARANTINED</span>
-                              : <span className="mgdr-restored">RESTORED</span>
+                              ? <span className="mgdr-quarantined">Quarantined</span>
+                              : <span className="mgdr-restored">Restored</span>
                         ) : isKeeper ? (
-                          <span className="mgdr-keeper">KEEP</span>
+                          <span className="mgdr-keeper">Keep</span>
                         ) : (
                           <span className="mgdrm-removed-x" aria-hidden="true">✕</span>
                         )}

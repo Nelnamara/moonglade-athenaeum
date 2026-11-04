@@ -114,7 +114,7 @@ export default function ContestDetailMobile({ contest, mineRow, onBack, onEnter 
             ? <img src={contest.cover_url} alt="" loading="lazy" decoding="async" />
             : null}
           <span className={"cmb-badge " + (official ? "official" : "community")}>
-            {official ? "OFFICIAL" : "COMMUNITY"}
+            {official ? "Official" : "Community"}
           </span>
           <div className="cmb-bannername">{contest.title}</div>
         </div>
@@ -127,7 +127,7 @@ export default function ContestDetailMobile({ contest, mineRow, onBack, onEnter 
             <span className="cmb-chip">{fmt(winnersN)} winner{winnersN === 1 ? "" : "s"}</span>
           )}
           {total > 0 && <span className="cmb-chip">{fmt(total)} entries</span>}
-          {!running && !decided && <span className="cmb-chip">AWAITING RESULTS</span>}
+          {!running && !decided && <span className="cmb-chip">Awaiting results</span>}
           {entered > 0 && <span className="cmb-chip entered"><Icon name="entered" />Entered ×{entered}</span>}
         </div>
 
@@ -141,7 +141,7 @@ export default function ContestDetailMobile({ contest, mineRow, onBack, onEnter 
             <>
               {prizes.map((p, i) => (
                 <div className="cmb-tier" key={p.rank || i}>
-                  <span className="r">RANK {p.rank || i + 1}</span>
+                  <span className="r">Rank {p.rank || i + 1}</span>
                   <span className="a">{fmt(p.amount)} CR{p.count > 1 ? " each" : ""}</span>
                   <span className="w">{fmt(p.count)} winner{p.count === 1 ? "" : "s"}</span>
                 </div>
@@ -214,7 +214,7 @@ export default function ContestDetailMobile({ contest, mineRow, onBack, onEnter 
           own plumbing note. */}
       <div className="cmb-enterbar">
         <div className="cmb-when">
-          <div className="cmb-whenk">{running ? "CLOSES" : "CLOSED"}</div>
+          <div className="cmb-whenk">{running ? "Closes" : "Closed"}</div>
           <div className={"cmb-whenv" + (running && ends && ends.hot ? " hot" : "")}>
             {running && ends && !ends.over ? ends.text : (dayOf(contest.end_at) || "—")}
           </div>

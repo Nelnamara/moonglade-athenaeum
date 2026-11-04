@@ -483,7 +483,7 @@ export default function CreateMobile({
 
                 {sheetHost ? createPortal(
                   <MobileSheet open={modelSheet.sheet === "model"} closing={modelSheet.closing}
-                    onClose={modelSheet.close} title="EDIT MODEL" className="cm-sheetover">
+                    onClose={modelSheet.close} title="Edit model" className="cm-sheetover">
                     {Object.entries(EDIT_CAPS).map(([k, cap]) => (
                       <button key={k} type="button" role="radio" aria-checked={edit.s.model === k}
                         className={"cm-sheetrow" + (edit.s.model === k ? " on" : "")}
@@ -758,12 +758,12 @@ export default function CreateMobile({
         </MobileSheet>,
         sheetHost)}
       {sheetHost && power && powerSheet.sheet === "presets" && createPortal(
-        <MobileSheet open closing={powerSheet.closing} onClose={powerSheet.close} title="PRESETS"
+        <MobileSheet open closing={powerSheet.closing} onClose={powerSheet.close} title="Presets"
           className="cm-sheetover">
           <PresetsSheetBody power={power} onDone={powerSheet.close} />
         </MobileSheet>, sheetHost)}
       {sheetHost && run && powerSheet.sheet === "lists" && createPortal(
-        <MobileSheet open closing={powerSheet.closing} onClose={powerSheet.close} title="LISTS"
+        <MobileSheet open closing={powerSheet.closing} onClose={powerSheet.close} title="Lists"
           className="cm-sheetover">
           <div className="pm-sheetbody">
             <ListsSheet bare lists={run.lists} onSave={run.saveLists} onClose={powerSheet.close} />
@@ -1037,7 +1037,7 @@ function EditAdvanced({ edit }) {
       </div>
       {host ? createPortal(
         <MobileSheet open={ratioSheet.sheet === "ratios"} closing={ratioSheet.closing}
-          onClose={ratioSheet.close} title="MORE RATIOS" className="cm-sheetover">
+          onClose={ratioSheet.close} title="More ratios" className="cm-sheetover">
           <div className="cm-chiprow cm-sheetchips">
             {groups.extreme.map((a) => (
               <button key={a} type="button"

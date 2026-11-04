@@ -152,7 +152,7 @@ export default function TrainMobile({ onClose, onUseLora, backRef }) {
         <PublishSheet pub={pub} body />
       </MobileSheet>
       <MobileSheet open={sheet === "retry"} closing={closing} className="trm-sheet"
-        onClose={() => { if (!retry.busy) retry.setAsk(null); }} title="RETRY A RUN">
+        onClose={() => { if (!retry.busy) retry.setAsk(null); }} title="Retry a run">
         <RetryConfirm retry={retry} />
       </MobileSheet>
     </>
@@ -232,7 +232,7 @@ function BasicPhone({ setup, csrf, stepBack, onChooser, onAdvanced, onRuns, head
   } else if (step === 2) {
     content = (
       <>
-        <div className="trm-lab">DATASET IMAGES <span className={b.enough ? "ok" : "low"}>{b.counted.length} / {MAX_IMAGES}</span></div>
+        <div className="trm-lab">Dataset images <span className={b.enough ? "ok" : "low"}>{b.counted.length} / {MAX_IMAGES}</span></div>
         <button type="button" className="trm-row" onClick={() => openSheet("sources")}>
           <span className="trm-row-main">⬆ Upload · ▦ From history · ⎘ Import a dataset</span>
         </button>
@@ -306,17 +306,17 @@ function BasicPhone({ setup, csrf, stepBack, onChooser, onAdvanced, onRuns, head
       <SourcesSheet open={sheet === "sources"} closing={closing} onClose={closeSheet} withImport
         onUpload={() => { closeSheet(); if (fileRef.current) fileRef.current.click(); }}
         onHistory={() => openSheet("history")} onImport={() => { b.loadDatasets(); openSheet("import"); }} />
-      <MobileSheet open={sheet === "history"} closing={closing} onClose={closeSheet} className="trm-sheet" title="FROM HISTORY">
+      <MobileSheet open={sheet === "history"} closing={closing} onClose={closeSheet} className="trm-sheet" title="From history">
         <PhonePool have={have} room={roomLeft(b.items)} onCancel={closeSheet}
           onAdd={(entries) => { b.addImages(entries, "history"); closeSheet(); }} />
       </MobileSheet>
-      <MobileSheet open={sheet === "import"} closing={closing} onClose={closeSheet} className="trm-sheet" title="IMPORT A DATASET">
+      <MobileSheet open={sheet === "import"} closing={closing} onClose={closeSheet} className="trm-sheet" title="Import a dataset">
         <DatasetImport datasets={b.datasets} items={b.items} imported={b.imported} phone
           onImport={(sets) => { b.importSets(sets); if (sets.length === 1) b.takeDetails(sets[0]); }}
           onClose={closeSheet} />
       </MobileSheet>
       <MobileSheet open={sheet === "confirm"} closing={closing} className="trm-sheet"
-        onClose={() => { if (!b.busy) b.setAsk(null); }} title="QUEUE TRAINING RUN">
+        onClose={() => { if (!b.busy) b.setAsk(null); }} title="Queue training run">
         {b.ask && (
           <>
             <div className="pubm-confirmmeta">
@@ -438,7 +438,7 @@ function AdvancedPhone({ setup, csrf, draftId, stepBack, onBasic, onRuns, head, 
     step = "2 / 4";
     content = (
       <>
-        <div className="trm-lab">DATASET IMAGES <span className={a.enough ? "ok" : "low"}>{ids.length} / {MAX_IMAGES}</span></div>
+        <div className="trm-lab">Dataset images <span className={a.enough ? "ok" : "low"}>{ids.length} / {MAX_IMAGES}</span></div>
         <button type="button" className="trm-row" disabled={!canChangeSet} onClick={() => openSheet("sources")}>
           <span className="trm-row-main">⬆ Upload · ▦ From history</span>
         </button>
@@ -588,12 +588,12 @@ function AdvancedPhone({ setup, csrf, draftId, stepBack, onBasic, onRuns, head, 
       <SourcesSheet open={sheet === "sources"} closing={closing} onClose={closeSheet}
         onUpload={() => { closeSheet(); if (fileRef.current) fileRef.current.click(); }}
         onHistory={() => openSheet("history")} />
-      <MobileSheet open={sheet === "history"} closing={closing} onClose={closeSheet} className="trm-sheet" title="FROM HISTORY">
+      <MobileSheet open={sheet === "history"} closing={closing} onClose={closeSheet} className="trm-sheet" title="From history">
         <PhonePool have={have} room={Math.max(0, MAX_IMAGES - ids.length)} onCancel={closeSheet}
           onAdd={(entries) => { a.addImages(entries); closeSheet(); }} />
       </MobileSheet>
       <MobileSheet open={sheet === "describe"} closing={closing} className="trm-sheet"
-        onClose={() => { if (!a.busy) closeSheet(); }} title="DESCRIBE AUTOMATICALLY">
+        onClose={() => { if (!a.busy) closeSheet(); }} title="Describe automatically">
         <div className="pubm-confirmmeta">
           <b>Describe {describeQ ? describeQ.image_count : g.left} image{describeQ && describeQ.image_count === 1 ? "" : "s"} automatically?</b>
           {describeQ && <span className="trm-gold"> {credits(describeQ.total_price)}</span>}
@@ -610,7 +610,7 @@ function AdvancedPhone({ setup, csrf, draftId, stepBack, onBasic, onRuns, head, 
         </div>
       </MobileSheet>
       <MobileSheet open={sheet === "start"} closing={closing} className="trm-sheet"
-        onClose={() => { if (!a.busy) closeSheet(); }} title="QUEUE TRAINING RUN">
+        onClose={() => { if (!a.busy) closeSheet(); }} title="Queue training run">
         {a.startAsk && (
           <>
             <div className="pubm-confirmmeta">
@@ -629,8 +629,8 @@ function AdvancedPhone({ setup, csrf, draftId, stepBack, onBasic, onRuns, head, 
           </>
         )}
       </MobileSheet>
-      <MobileSheet open={sheet === "more"} closing={closing} onClose={closeSheet} className="trm-sheet" title="DESCRIPTIONS">
-        <div className="trm-lab">SHOW</div>
+      <MobileSheet open={sheet === "more"} closing={closing} onClose={closeSheet} className="trm-sheet" title="Descriptions">
+        <div className="trm-lab">Show</div>
         <div className="trm-typerow">
           {CAPTION_FILTERS.map((fl) => (
             <button type="button" key={fl.key} className={"trm-typechip" + (filter === fl.key ? " on" : "")}
@@ -639,7 +639,7 @@ function AdvancedPhone({ setup, csrf, draftId, stepBack, onBasic, onRuns, head, 
         </div>
         {editable ? (
           <>
-            <div className="trm-lab" style={{ marginTop: 12 }}>FIND AND REPLACE · TAGS</div>
+            <div className="trm-lab" style={{ marginTop: 12 }}>Find and replace · tags</div>
             <input className="pubm-in" value={find} placeholder="⌕ find, or a tag" onChange={(e) => setFind(e.target.value)} />
             <input className="pubm-in" value={repl} placeholder="replace with…" onChange={(e) => setRepl(e.target.value)} />
             <div className="trm-txt">Changes every described image {filter === "all" ? "" : "in this filter "}and saves each one.</div>
@@ -673,7 +673,7 @@ function AdvancedPhone({ setup, csrf, draftId, stepBack, onBasic, onRuns, head, 
 /* The three sources as ONE bottom sheet (handoff F2). Advanced has no dataset import. */
 function SourcesSheet({ open, closing, onClose, onUpload, onHistory, onImport, withImport }) {
   return (
-    <MobileSheet open={open} closing={closing} onClose={onClose} className="trm-sheet" title="ADD IMAGES">
+    <MobileSheet open={open} closing={closing} onClose={onClose} className="trm-sheet" title="Add images">
       <div className="glm-sheet-list">
         <button type="button" className="trm-row" onClick={onUpload}><span className="trm-row-main">⬆ Upload from this phone</span></button>
         <button type="button" className="trm-row" onClick={onHistory}><span className="trm-row-main">▦ From history</span></button>

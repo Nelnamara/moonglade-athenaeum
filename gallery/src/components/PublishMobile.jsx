@@ -160,7 +160,7 @@ export default function PublishMobile({ mediaId, onClose, onPublished }) {
           <div className="pubm-frame" style={{ aspectRatio: aspect }}>
             {mid ? <img src={"/full/" + encodeURIComponent(mid)} alt="" /> : null}
           </div>
-          <div className="pubm-srcrow"><span className="k">SOURCE</span><span className="v">{srcLabel || "loading…"}</span></div>
+          <div className="pubm-srcrow"><span className="k">Source</span><span className="v">{srcLabel || "loading…"}</span></div>
 
           <div className="pubm-lab">Choose a different image</div>
           <div className="pubm-stripwrap">
@@ -243,7 +243,7 @@ export default function PublishMobile({ mediaId, onClose, onPublished }) {
         </>
       )}
 
-      <MobileSheet open={sheet === "confirm"} closing={closing} onClose={closeSheet} title="READY TO PUBLISH">
+      <MobileSheet open={sheet === "confirm"} closing={closing} onClose={closeSheet} title="Ready to publish">
         {ask && (
           <>
             <div className="pubm-frame small" style={{ aspectRatio: aspect }}>

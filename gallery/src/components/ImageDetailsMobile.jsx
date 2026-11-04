@@ -403,7 +403,7 @@ export default function ImageDetailsMobile({
 
         <div className="idm-similar">
           <div className="idm-similar-head">
-            <span className="idm-subhead">◈ SIMILAR</span>
+            <span className="idm-subhead">◈ Similar</span>
             <span className="idm-dimtext">closest by eye</span>
             <div className="idm-fill" />
             {similar.images.length > 8 ? (
@@ -518,7 +518,7 @@ export default function ImageDetailsMobile({
           persistent-DOM requirement, so the shared MobileSheet.jsx chrome is
           reused as-is. */}
       {moreSheet.sheet === "more" && (
-        <MobileSheet open closing={moreSheet.closing} onClose={moreSheet.close} title="MORE">
+        <MobileSheet open closing={moreSheet.closing} onClose={moreSheet.close} title="More">
           <div className="pm-sheetbody">
             <button type="button" className="pm-chip" style={{ justifyContent: "flex-start" }}
               onClick={() => moreSheet.open("inspect")}>{"{ } Inspect the request"}</button>
@@ -530,14 +530,14 @@ export default function ImageDetailsMobile({
         </MobileSheet>
       )}
       {moreSheet.sheet === "inspect" && (
-        <MobileSheet open closing={moreSheet.closing} onClose={moreSheet.close} title="INSPECT">
+        <MobileSheet open closing={moreSheet.closing} onClose={moreSheet.close} title="Inspect">
           <div className="pm-sheetbody">
             <RunInspector source={{ kind: "task", taskId: String(row.task_id) }} onClose={moreSheet.close} phone inline />
           </div>
         </MobileSheet>
       )}
       {moreSheet.sheet === "grid" && state.data.run && (
-        <MobileSheet open closing={moreSheet.closing} onClose={moreSheet.close} title="MATRIX">
+        <MobileSheet open closing={moreSheet.closing} onClose={moreSheet.close} title="Matrix">
           <div className="pm-sheetbody">
             <MatrixGrid runId={state.data.run.run_id}
               onOpenImage={(mid) => { moreSheet.close(); onNavigate(mid); }} />
@@ -545,7 +545,7 @@ export default function ImageDetailsMobile({
         </MobileSheet>
       )}
 
-      <MobileSheet open={simSheetOpen} closing={simClosing} onClose={closeSimSheet} title="◈ SIMILAR">
+      <MobileSheet open={simSheetOpen} closing={simClosing} onClose={closeSimSheet} title="◈ Similar">
         <div className="idm-simgrid">
           {similar.images.map((it) => (
             <button key={it.media_id} type="button" className="idm-simtile"

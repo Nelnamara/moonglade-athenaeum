@@ -21,7 +21,7 @@ export default function CurationSheetMobile({ count, onStar, onTag, onKeeper, on
   };
   return (
     <div className="mgcs-sheet" role="group" aria-label="Curate the selection">
-      <div className="mgcs-cap">RATE {count} {count === 1 ? "PICTURE" : "PICTURES"}</div>
+      <div className="mgcs-cap">Rate {count} {count === 1 ? "picture" : "pictures"}</div>
       <div className="mgcs-stars">
         {[1, 2, 3, 4, 5].map((n) => (
           <button key={n} type="button" className="mgcs-star" aria-label={"Rate " + n + " stars"}

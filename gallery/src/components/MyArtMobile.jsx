@@ -109,12 +109,12 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
     // subtotal off as a total, which is the job "(TOP 12)" used to do here.
     const t = d.totals || {};
     const label = d.views_synced && (t.views_rows || 0) < (t.count || 0)
-      ? "VIEWS (" + (t.views_rows || 0) + " OF " + (t.count || 0) + ")" : "TOTAL VIEWS";
+      ? "Views (" + (t.views_rows || 0) + " of " + (t.count || 0) + ")" : "Total views";
     setStats([
-      { value: fmt(t.count), label: "PUBLISHED", accent: false },
+      { value: fmt(t.count), label: "Published", accent: false },
       { value: d.views_synced ? fmt(t.views) : "—", label, accent: true },
-      { value: fmt(t.likes), label: "LIKES", accent: false },
-      { value: fmt(t.comments), label: "COMMENTS", accent: false },
+      { value: fmt(t.likes), label: "Likes", accent: false },
+      { value: fmt(t.comments), label: "Comments", accent: false },
     ]);
   }).catch(() => {});
 
@@ -422,7 +422,7 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
       </PullToRefresh>
 
       {/* Sort sheet */}
-      <MobileSheet open={sheet === "sort"} closing={closing} onClose={closeSheet} title="SORT">
+      <MobileSheet open={sheet === "sort"} closing={closing} onClose={closeSheet} title="Sort">
         {SORT_OPTS.map(([k, l]) => (
           <button type="button" key={k} className={"myam-sheetopt" + (sort === k ? " on" : "")}
             onClick={() => { setSort(k); closeSheet(); }}>{l}</button>
@@ -446,7 +446,7 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
       </MobileSheet>
 
       {/* Edit tags sheet -- same live PixAI tag search as desktop's inline editor. */}
-      <MobileSheet open={sheet === "cardtags"} closing={closing} onClose={closeSheet} title="EDIT TAGS">
+      <MobileSheet open={sheet === "cardtags"} closing={closing} onClose={closeSheet} title="Edit tags">
         <div className="myam-sheetsub">On this artwork — tap to remove</div>
         <div className="myam-tagbox">
           {tagsItem && tagsItem.tags.map((t) => (
@@ -477,7 +477,7 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
 
       {/* Bulk confirm */}
       <MobileSheet open={!!bulkAsk} closing={closing} onClose={() => setBulkAsk(null)}
-        title={bulkAsk && bulkAsk.action === "delete" ? "DELETE ARTWORK" : "CHANGE VISIBILITY"}>
+        title={bulkAsk && bulkAsk.action === "delete" ? "Delete artwork" : "Change visibility"}>
         {bulkAsk && (
           <>
             <div className="myam-sheetsub">

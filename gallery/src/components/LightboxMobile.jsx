@@ -351,7 +351,7 @@ export default function LightboxMobile({
         <button type="button" className="lbm-close" onClick={close} aria-label="Close">✕</button>
         <div className="lbm-indexwrap">
           <span className="lbm-index">{count.at}</span>
-          <span className="lbm-total">OF {count.of}</span>
+          <span className="lbm-total">of {count.of}</span>
         </div>
         <div className="lbm-starswrap">
           <Stars mediaId={it.media_id} rating={it.rating} onRate={onRate} />
@@ -428,15 +428,15 @@ export default function LightboxMobile({
         <div className={"lbm-promptbox" + (promptOpen ? " open" : "")}
           onClick={() => setPromptOpen((v) => !v)}>
           <div className="lbm-promptline">
-            <span className="lbm-kicker">PROMPT</span>
+            <span className="lbm-kicker">Prompt</span>
             <span className={"lbm-prompttext" + (promptOpen ? " full" : "")}>{promptText}</span>
             <span className="lbm-prompttoggle">{promptOpen ? "less" : "more"}</span>
           </div>
           {promptOpen ? (
             <div className="lbm-promptrows">
-              <div className="lbm-prow"><span>NEGATIVE</span><i>{field(row && row.negative_prompt)}</i></div>
-              <div className="lbm-prow"><span>LORAS</span><i>{field(row && row.loras)}</i></div>
-              <div className="lbm-prow"><span>MEDIA ID</span><i className="mono">{it.media_id}</i></div>
+              <div className="lbm-prow"><span>Negative</span><i>{field(row && row.negative_prompt)}</i></div>
+              <div className="lbm-prow"><span>LoRAs</span><i>{field(row && row.loras)}</i></div>
+              <div className="lbm-prow"><span>Media ID</span><i className="mono">{it.media_id}</i></div>
             </div>
           ) : null}
         </div>

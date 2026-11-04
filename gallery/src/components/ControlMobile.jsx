@@ -636,7 +636,7 @@ export default function ControlMobile({ account, brandRequest }) {
       <GuideHost key={brandOpen ? "branding" : "panel"} surface={brandOpen ? "branding" : "panel"} phone
         paused={!!subOverlay || !!power || updScreen} />
 
-      <MobileScreen open={brandOpen} closing={brandClosing} onClose={closeBrand} title="BRANDING">
+      <MobileScreen open={brandOpen} closing={brandClosing} onClose={closeBrand} title="Branding">
         <BrandingTab summary={summary} onSaved={fetchSummary} isLocal={isLocal} phone
           skins={skins} activeSkin={activeSkin} onPickSkin={pickSkin} achievements={achievements} />
       </MobileScreen>

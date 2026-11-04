@@ -118,7 +118,7 @@ export default function ImportMobile({ collections, onImported }) {
             )}
           </div>
 
-          <div className="cm-lbl" style={{ marginTop: 14 }}>ADD TO COLLECTION</div>
+          <div className="cm-lbl" style={{ marginTop: 14 }}>Add to collection</div>
           <select className="cm-select" value={collection}
             onChange={(e) => setCollection(e.target.value)}>
             <option value="">— none —</option>

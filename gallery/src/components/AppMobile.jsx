@@ -1611,18 +1611,18 @@ export default function AppMobile({ boot }) {
           whole phone ladder; the other three sheets here open over the app shell only and
           stay on the shared rung. */}
       <MobileSheet open={sheet === "contest"} closing={closing} onClose={closeSheet}
-        className="cmb-choosersheet" title="ENTER INTO A CONTEST">
+        className="cmb-choosersheet" title="Enter into a contest">
         <ContestChooserMobile onPick={(c) => openContestEntry(c, contestFor)} />
       </MobileSheet>
 
       {/* Sessions R + Y (RYPc): the Inbox and Gift box sheets, full height. A work card or a
           quote opens Details through the shared mg-open-details bus, which closes the sheet. Each
           title row ends in its door's picture at 40 px (owner, 2026-10-04). */}
-      <MobileSheet open={sheet === "inbox"} closing={closing} onClose={closeSheet} title="INBOX"
+      <MobileSheet open={sheet === "inbox"} closing={closing} onClose={closeSheet} title="Inbox"
         titleEnd={<InboxEmblem small />} className="ib-sheet">
         <InboxSheetBody st={inboxSt} onOpenContests={openContestsFromInbox} />
       </MobileSheet>
-      <MobileSheet open={sheet === "gifts"} closing={closing} onClose={closeSheet} title="GIFT BOX"
+      <MobileSheet open={sheet === "gifts"} closing={closing} onClose={closeSheet} title="Gift box"
         titleEnd={<GiftEmblem small />} className="ib-sheet">
         <GiftSheetBody st={inboxSt} account={account} />
       </MobileSheet>
@@ -1630,7 +1630,7 @@ export default function AppMobile({ boot }) {
       <MobileSheet open={sheet === "activity"} closing={closing} onClose={closeSheet}
         title={
           <span style={{ display: "flex", alignItems: "baseline" }}>
-            <span>ACTIVITY {jobsState.jobs.length || ""}</span>
+            <span>Activity {jobsState.jobs.length || ""}</span>
             <span style={{ flex: 1 }} />
             {jobsState.jobs.length ? (
               <span className="glm-sheet-title-action" role="button" tabIndex={0}
@@ -1661,7 +1661,7 @@ export default function AppMobile({ boot }) {
       {/* the toast a bulk change leaves behind: what happened and, for ten seconds, Undo */}
       <CurateToast toast={curate.toast} onUndo={curate.undo} onDismiss={curate.dismiss} />
 
-      <MobileSheet open={sheet === "loom"} closing={closing} onClose={closeSheet} title="THE LOOM">
+      <MobileSheet open={sheet === "loom"} closing={closing} onClose={closeSheet} title="The Loom">
         {/* THE ROTATE LINE IS GONE (Session Q, Q4). It was untrue on 2026-09-06, when the Loom began
             opening a phone layout by itself on a phone, and it is doubly so now that the phone has a
             landscape of its own: nothing here asks the owner to turn the phone. The wide four-panel
@@ -1678,7 +1678,7 @@ export default function AppMobile({ boot }) {
         </div>
       </MobileSheet>
 
-      <MobileSheet open={sheet === "menu"} closing={closing} onClose={closeSheet} title="MENU">
+      <MobileSheet open={sheet === "menu"} closing={closing} onClose={closeSheet} title="Menu">
         <div className="glm-menu-list">
           {/* RYPc: Inbox and Gift box are the Menu's first two rows when a PixAI account is
               linked; each opens its own full-height sheet. */}
