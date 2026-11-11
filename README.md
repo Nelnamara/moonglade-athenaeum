@@ -63,7 +63,7 @@ That's the whole setup. Your `USER_ID` is auto-resolved from the key, and everyt
 > **Your credentials never leave your machine.** `config.json`, `token.txt`, and your backup are git-ignored and local-only. Nothing phones home.
 
 > [!NOTE]
-> **Unofficial.** Not affiliated with or endorsed by PixAI. It uses your own API key plus PixAI's private frontend queries, so a major PixAI frontend change *can* break a feature — you'll get a clear error telling you what to recapture. PixAI's terms grant you copyright of your own generations; this tool is rate-paced to be polite to their servers.
+> **Unofficial.** Not affiliated with or endorsed by PixAI. It uses your own API key plus PixAI's private frontend queries, so a major PixAI frontend change *can* break a feature — you'll get a clear error. PixAI's terms grant you copyright of your own generations; this tool is rate-paced to be polite to their servers.
 
 ---
 

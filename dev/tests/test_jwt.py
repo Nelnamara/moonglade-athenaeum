@@ -1,10 +1,11 @@
 """Website-mirror JWT — offline logic for the zero-paste mirror (the JWT bridge).
-Lives in moonglade_backup.py alongside _make_session/gql_mutate/the persisted hashes.
+Lives in moonglade_backup.py alongside _make_session/gql_mutate.
 
 Pure/mocked only: JWT expiry decode, the refresh-decision cushion, and refresh_jwt's
-header-first/scalar-fallback parsing against a fake session. No browser, no network, no
-account — the live "read the real browser + call refreshToken" step self-verifies on the
-owner's machine (an agent sandbox can't reach the browser)."""
+body-first/header-fallback parsing of POST /v2/auth/refresh-token (#92) against a fake
+session. No browser, no network, no account — the live "read the real browser + renew" step
+self-verifies on the owner's machine (an agent sandbox can't reach the browser). The full
+credential matrix for the renewal is in test_rest_delete_and_renewal.py."""
 import base64
 import json
 import sys
@@ -31,7 +32,8 @@ def _b64(d):
 def _jwt(exp):
     """A structurally-real JWT with the given exp (signature is a dummy — we only ever
     decode the payload, never verify)."""
-    return _b64({"alg": "HS256", "typ": "JWT"}) + "." + _b64({"exp": exp, "sub": "u"}) + ".sig"
+    return (_b64({"alg": "HS256", "typ": "JWT"}) + "."
+            + _b64({"exp": exp, "sub": "u", "iss": "pixai"}) + ".sig")
 
 
 NOW = 1_800_000_000  # fixed clock
@@ -73,49 +75,67 @@ class _Resp:
 
 
 class _Session:
-    def __init__(self, resp=None, raise_post=False):
-        self._resp, self._rp, self.last = resp, raise_post, None
+    """Records the one renewal POST. `post` takes only what a body-less REST POST sends:
+    no `json`, no `data` (#92) -- a call that tried to send a body would raise TypeError."""
 
-    def post(self, url, json=None, headers=None, timeout=None):
-        self.last = {"url": url, "json": json, "headers": headers}
+    def __init__(self, resp=None, raise_post=False):
+        self._resp, self._rp, self.last, self.posts = resp, raise_post, None, 0
+
+    def post(self, url, headers=None, timeout=None, allow_redirects=True):
+        self.posts += 1
+        self.last = {"url": url, "headers": headers, "allow_redirects": allow_redirects}
         if self._rp:
             raise ConnectionError("network down")
         return self._resp
 
 
-def test_refresh_prefers_the_token_header():
-    fresh = _jwt(NOW + 27 * 86400)
-    s = _Session(_Resp(headers={"token": fresh}))
-    assert mj.refresh_jwt(s, current_jwt="old") == fresh
-    # sent the persisted refreshToken op + the bearer we had
-    assert s.last["json"]["operationName"] == "refreshToken"
-    assert s.last["json"]["extensions"]["persistedQuery"]["sha256Hash"] == mj.REFRESH_TOKEN_HASH
-    assert s.last["headers"]["Authorization"] == "Bearer old"
+# Every direct refresh_jwt call below passes now=NOW: the tokens are minted off the fixed
+# clock, and "is the token we send still live" is judged at `now` (#92 review F2).
+
+def test_refresh_rides_the_rest_route_with_the_bearer():
+    """#92: POST /v2/auth/refresh-token with no body, the Bearer we hold, nothing else, and
+    no redirect followed."""
+    cur, fresh = _jwt(NOW + 2 * 86400), _jwt(NOW + 7 * 86400)
+    s = _Session(_Resp(jd={"token": fresh}))
+    assert mj.refresh_jwt(s, current_jwt=cur, now=NOW) == fresh
+    assert s.last["url"] == mj.REST_API_BASE + "/auth/refresh-token"
+    assert s.last["headers"] == {"Authorization": "Bearer " + cur}
+    assert s.last["allow_redirects"] is False
 
 
-def test_refresh_falls_back_to_scalar_return():
-    fresh = _jwt(NOW + 27 * 86400)
-    s = _Session(_Resp(headers={}, jd={"data": {"refreshToken": fresh}}))
-    assert mj.refresh_jwt(s) == fresh
+def test_refresh_falls_back_to_the_token_header():
+    cur, fresh = _jwt(NOW + 2 * 86400), _jwt(NOW + 7 * 86400)
+    s = _Session(_Resp(headers={"token": fresh}, jd={}))
+    assert mj.refresh_jwt(s, current_jwt=cur, now=NOW) == fresh
 
 
 def test_refresh_returns_none_when_nothing_usable():
-    assert mj.refresh_jwt(_Session(_Resp(headers={}, jd={"data": {}}))) is None
-    # a token header that isn't a real jwt is not trusted
-    assert mj.refresh_jwt(_Session(_Resp(headers={"token": "not-a-jwt"}, jd={"data": {}}))) is None
+    cur = _jwt(NOW + 2 * 86400)
+
+    def _none(sess, why, **k):
+        assert mj.refresh_jwt(sess, current_jwt=k.get("cur", cur), now=NOW) is None
+        assert mj._refresh_last["reason"] == why
+
+    _none(_Session(_Resp(jd={})), "unchanged")
+    # a token that isn't a real jwt is not trusted
+    _none(_Session(_Resp(headers={"token": "not-a-jwt"}, jd={"token": "x"})), "unchanged")
     # network failure -> None, never a raise (caller keeps the current jwt)
-    assert mj.refresh_jwt(_Session(raise_post=True)) is None
+    _none(_Session(raise_post=True), "network")
     # unparseable body + no header -> None
-    assert mj.refresh_jwt(_Session(_Resp(headers={}, raise_json=True))) is None
-    fresh = _jwt(NOW + 27 * 86400)
-    # (review) a GraphQL error response still echoes the rolling `token` header -- NOT a renewal
-    assert mj.refresh_jwt(_Session(_Resp(headers={"token": fresh},
-                                         jd={"errors": [{"message": "PersistedQueryNotFound"}]}))) is None
-    # (review) non-200 -> None even with a token header
-    assert mj.refresh_jwt(_Session(_Resp(headers={"token": fresh}, jd={}, status_code=400))) is None
+    _none(_Session(_Resp(raise_json=True)), "unchanged")
+    fresh = _jwt(NOW + 7 * 86400)
+    # (review) non-200 -> None even with a fresh token
+    _none(_Session(_Resp(headers={"token": fresh}, jd={"token": fresh}, status_code=400)),
+          "http_400")
     # (review) the gateway echoes the SAME token we sent -> not a renewal
-    same = _jwt(NOW + 10 * 86400)
-    assert mj.refresh_jwt(_Session(_Resp(headers={"token": same}, jd={})), current_jwt=same) is None
+    _none(_Session(_Resp(headers={"token": cur}, jd={"token": cur})), "unchanged")
+    # no credential -> no request at all
+    s = _Session(_Resp(jd={"token": fresh}))
+    assert mj.refresh_jwt(s, now=NOW) is None and s.posts == 0
+    # a token that is live by the real clock but expired at `now` is not sent either
+    s = _Session(_Resp(jd={"token": fresh}))
+    assert mj.refresh_jwt(s, current_jwt=cur, now=NOW + 3 * 86400) is None and s.posts == 0
+    assert mj._refresh_last["reason"] == "no_credential"
 
 
 # ---- mirror session: persistence, session build, refresh, and the check command ----
@@ -191,7 +211,7 @@ def test_make_mirror_session_refreshes_when_stale(tmp_path, monkeypatch):
     monkeypatch.setattr(mj, "_make_session", _fake_make_session)
     mj.save_mirror_state({"jwt": _jwt_in(2), "cookies": {"_udt": "u"}})   # within cushion
     fresh = _jwt_in(27)
-    monkeypatch.setattr(mj, "refresh_jwt", lambda session, current_jwt=None: fresh)
+    monkeypatch.setattr(mj, "refresh_jwt", lambda session, current_jwt=None, **k: fresh)
     s = mj.make_mirror_session()
     assert s.headers["Authorization"] == "Bearer " + fresh
     assert mj.load_mirror_state()["jwt"] == fresh              # persisted the fresh one
@@ -226,7 +246,7 @@ def test_run_mirror_check_never_prints_the_token(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(mj, "_mirror_state_path", lambda: p)
     old, fresh = _jwt_in(2), _jwt_in(27)
     mj.save_mirror_state({"jwt": old, "cookies": {"_udt": "u"}})
-    monkeypatch.setattr(mj, "refresh_jwt", lambda session, current_jwt=None: fresh)
+    monkeypatch.setattr(mj, "refresh_jwt", lambda session, current_jwt=None, **k: fresh)
     res = mj.run_mirror_check(SimpleNamespace())
     out = capsys.readouterr().out
     assert res["ok"] is True and res["renewed"] is True
@@ -566,7 +586,7 @@ def test_run_mirror_check_uses_localstorage_jwt(tmp_path, monkeypatch, capsys):
     browser_jwt = _jwt_in(27)
     fresh = _jwt_in(27)
     monkeypatch.setattr(mj, "read_browser_jwt", lambda *a, **k: browser_jwt)
-    monkeypatch.setattr(mj, "refresh_jwt", lambda session, current_jwt=None: fresh)
+    monkeypatch.setattr(mj, "refresh_jwt", lambda session, current_jwt=None, **k: fresh)
     res = mj.run_mirror_check(SimpleNamespace())
     out = capsys.readouterr().out
     assert res["ok"] is True and res["source"] == "browser"
@@ -577,17 +597,17 @@ def test_mirror_check_command_runs_on_the_jwt_reader_alone(tmp_path, monkeypatch
     """The `--mirror-check` command line, end to end through main(): with no stored session
     it signs in through read_browser_jwt and nothing else. An installed browser_cookie3 is
     never asked for. Nothing is printed of the token, and nothing leaves the test:
-    refreshToken is stubbed."""
+    the renewal is stubbed."""
     monkeypatch.setattr(mj, "_mirror_state_path", lambda: tmp_path / "mirror.json")
     browser_jwt = _jwt_in(5)
     fresh = _jwt_in(27)
     monkeypatch.setattr(mj, "read_browser_jwt", lambda *a, **k: browser_jwt)
-    monkeypatch.setattr(mj, "refresh_jwt", lambda session, current_jwt=None: fresh)
+    monkeypatch.setattr(mj, "refresh_jwt", lambda session, current_jwt=None, **k: fresh)
     monkeypatch.setitem(sys.modules, "browser_cookie3", None)   # an import of it would raise
     monkeypatch.setattr(sys, "argv", ["prog", "--mirror-check", "--out", str(tmp_path)])
     mj.main()
     out = capsys.readouterr().out
-    assert "Mirror OK (source: browser)" in out
+    assert "Mirror OK (source: browser, renewed via jwt)" in out
     assert browser_jwt not in out and fresh not in out
     assert mj.load_mirror_state()["jwt"] == fresh               # the renewed token is kept
 
@@ -628,7 +648,7 @@ def test_make_mirror_session_rebootstraps_when_stored_jwt_expired(tmp_path, monk
 
 
 def test_make_mirror_session_skips_refresh_under_read_only(tmp_path, monkeypatch):
-    """Review F3: refreshToken is account-mutating -- it must not fire under READ_ONLY. A
+    """Review F3: the renewal is account-mutating -- it must not fire under READ_ONLY. A
     still-valid stored JWT is used as-is (no network) rather than refused."""
     p = tmp_path / "m.json"
     monkeypatch.setattr(mj, "_mirror_state_path", lambda: p)
@@ -637,7 +657,7 @@ def test_make_mirror_session_skips_refresh_under_read_only(tmp_path, monkeypatch
     jwt = _jwt_in(2)                                              # within cushion -> would refresh
     mj.save_mirror_state({"jwt": jwt})
     monkeypatch.setattr(mj, "refresh_jwt", lambda *a, **k: (_ for _ in ()).throw(
-        AssertionError("must not fire refreshToken under READ_ONLY")))
+        AssertionError("must not fire the renewal under READ_ONLY")))
     s = mj.make_mirror_session()
     assert s is not None and s.headers["Authorization"] == "Bearer " + jwt
 
@@ -677,7 +697,7 @@ def _armed(tmp_path, monkeypatch, *, jwt, minted_at=None, enabled=True, read_onl
 def _refresh_spy(monkeypatch, result):
     calls = []
 
-    def _fake(session, current_jwt=None):
+    def _fake(session, current_jwt=None, **k):
         calls.append(current_jwt)
         return result(len(calls)) if callable(result) else result
     monkeypatch.setattr(mj, "refresh_jwt", _fake)
@@ -785,7 +805,7 @@ def test_the_tick_and_a_connect_renew_once_between_them(tmp_path, monkeypatch):
     entered, release, b_reading = threading.Event(), threading.Event(), threading.Event()
     calls = []
 
-    def _slow_refresh(session, current_jwt=None):
+    def _slow_refresh(session, current_jwt=None, **k):
         calls.append(current_jwt)
         entered.set()
         release.wait(5)
@@ -804,7 +824,7 @@ def test_the_tick_and_a_connect_renew_once_between_them(tmp_path, monkeypatch):
     release.set()
     a.join(5)
     b.join(5)
-    assert calls == [stale]                     # ONE refreshToken between them
+    assert calls == [stale]                     # ONE renewal between them
     assert out["tick"] == "renewed"
     assert mj.load_mirror_state()["jwt"] == fresh
     assert out["s"].headers["Authorization"] == "Bearer " + fresh

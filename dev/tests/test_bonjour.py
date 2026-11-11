@@ -24,9 +24,38 @@ def test_hostname_label_is_dns_safe():
     assert mb.hostname_label("") == "moonglade"
 
 
-def test_lan_ip_is_none_or_non_loopback():
-    ip = mb.lan_ip()
-    assert ip is None or (isinstance(ip, str) and not ip.startswith("127."))
+def test_lan_ip_is_none_or_non_loopback(monkeypatch):
+    """The real function against a stand-in UDP socket, so nothing leaves the machine (#98): the
+    default-route address comes back, a loopback one means no LAN, and a socket that cannot
+    connect means no LAN. It only ever asks the OS to pick a route toward a public address."""
+    from tests.conftest import REAL_LAN_IP
+
+    class _Udp:
+        local, fail, asked = "192.168.0.5", False, []
+
+        def __init__(self, *a):
+            pass
+
+        def connect(self, addr):
+            _Udp.asked.append(addr)
+            if _Udp.fail:
+                raise OSError("no route")
+
+        def getsockname(self):
+            return (_Udp.local, 54321)
+
+        def close(self):
+            pass
+
+    from types import SimpleNamespace
+    monkeypatch.setattr(mb, "socket", SimpleNamespace(
+        socket=_Udp, AF_INET=mb.socket.AF_INET, SOCK_DGRAM=mb.socket.SOCK_DGRAM))
+    assert REAL_LAN_IP() == "192.168.0.5"
+    assert _Udp.asked and _Udp.asked[0][0] == "8.8.8.8"      # a UDP connect: no packet is sent
+    _Udp.local = "127.0.0.1"
+    assert REAL_LAN_IP() is None
+    _Udp.local, _Udp.fail = "192.168.0.5", True
+    assert REAL_LAN_IP() is None
 
 
 def test_start_is_a_no_op_without_zeroconf(monkeypatch):

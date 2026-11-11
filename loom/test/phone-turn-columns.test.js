@@ -39,12 +39,49 @@ describe("a turn is read again once it has settled", () => {
 describe("the ?turndebug readout (#75)", () => {
   const hook = read("hooks/usePhoneLandscape.js");
   test("it starts only behind ?turndebug and leaves with the gallery", () => {
-    assert.match(hook, /\/\[\?&\]turndebug\\b\/\.test\(window\.location\.search \|\| ""\) \? startTurnDebug\(\) : null/);
+    assert.match(hook, /\/\[\?&\]turndebug\\b\/\.test\(window\.location\.search \|\| ""\) \? startTurnDebug\(\(\) => safe\) : null/);
     assert.match(hook, /if \(stopDebug\) stopDebug\(\);/);
     assert.match(hook, /return \(\) => \{ clearInterval\(timer\); box\.remove\(\); \};/);
   });
   test("it shows the grid's resolved tracks, the reading that found #75", () => {
     assert.match(hook, /getComputedStyle\(grid\)\.gridTemplateColumns/);
+  });
+  test("it also shows the safe areas, the screen and whether the sides count as kept (#73)", () => {
+    assert.match(hook, /"safe L T R B " \+ sf\.l \+ " " \+ sf\.t \+ " " \+ sf\.r \+ " " \+ sf\.b/);
+    assert.match(hook, /"  screen " \+ screen\.width \+ "x" \+ screen\.height/);
+    assert.match(hook, /"  sides kept " \+ \(sf\.kept \? "yes" : "no"\)/);
+  });
+});
+
+describe("the side room is counted once (#73)", () => {
+  const hook = read("hooks/usePhoneLandscape.js");
+  test("every read sets the attribute from the window's shape, never from an angle", () => {
+    assert.match(hook, /de\.toggleAttribute\("data-mg-sides-kept", kept\)/);
+    assert.match(hook, /const sync = \(\) => \{\s*readSafe\(\);/);
+    assert.match(hook, /const landscape = read\(\)\.landscape;/);
+    assert.match(hook, /sidesKept\(\{ landscape, innerW: window\.innerWidth/);
+    assert.doesNotMatch(hook.replace(/\/\*[\s\S]*?\*\//g, ""), /screen\.orientation|window\.orientation|\.angle/);
+  });
+  test("the four insets come from one hidden probe, made once and removed with the hook", () => {
+    assert.equal((hook.match(/document\.createElement\("div"\)/g) || []).length, 1);
+    assert.match(hook, /padding:env\(safe-area-inset-top\) env\(safe-area-inset-right\) env\(safe-area-inset-bottom\) env\(safe-area-inset-left\)/);
+    assert.match(hook, /visibility:hidden;pointer-events:none/);
+    assert.match(hook, /probe\.remove\(\);/);
+  });
+  test("the attribute comes off when the last phone-shell user goes, never while another lives", () => {
+    assert.match(hook, /if \(--live === 0\) \{ de\.removeAttribute\("data-mg-sides-kept"\); de\.removeAttribute\("data-mg-slide"\); \}/);
+    assert.match(hook, /live \+= 1;/);
+  });
+  test("the slide is asked for only when the state flips while the phone was already sideways", () => {
+    assert.match(hook, /if \(wasLandscape && landscape && de\.hasAttribute\("data-mg-sides-kept"\) !== kept\) \{\s*de\.setAttribute\("data-mg-slide", ""\);/);
+    assert.match(hook, /setTimeout\(\(\) => de\.removeAttribute\("data-mg-slide"\), 700\)/);
+    assert.match(hook, /de\.removeAttribute\("data-mg-slide"\)/);
+  });
+  test("it is only ever set under the landscape query, so an upright phone never carries it", () => {
+    // sidesKept's first test is `landscape`, and the hook feeds it read().landscape (the media query's answer)
+    const core = read("lib/phoneCore.js");
+    assert.match(core, /export function sidesKept\([^)]*\) \{\s*if \(!landscape\) return false;/);
+    assert.match(read("styles/phone-landscape.css"), /:root\[data-mg-sides-kept\] \{ --mg-safe-l: 0px; --mg-safe-r: 0px; \}/);
   });
 });
 

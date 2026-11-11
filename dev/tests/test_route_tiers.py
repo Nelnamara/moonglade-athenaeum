@@ -547,7 +547,7 @@ def armed(monkeypatch):
         monkeypatch.setattr(subprocess, name, blocked("subprocess." + name),
                             raising=False)
     for name in ("gql_adhoc", "submit_generation", "submit_fixer",
-                 "delete_task_gql", "claim_reward"):
+                 "delete_task", "claim_reward"):
         monkeypatch.setattr(core, name, blocked("core." + name), raising=False)
     import requests
     monkeypatch.setattr(requests.Session, "request", blocked("outbound HTTP"),

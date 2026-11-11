@@ -1,16 +1,15 @@
-"""Auth simplification: persisted hashes ship with working defaults and USER_ID
-auto-resolves from the API key, so setup needs only PIXAI_API_KEY."""
+"""Auth simplification: no operation needs a saved hash and USER_ID auto-resolves from the
+API key, so setup needs only PIXAI_API_KEY."""
 from moonglade import backup as core
 
 
-def test_persisted_hashes_have_builtin_defaults():
-    # All the frontend-private ops we rely on must work without any config.json. (The history
-    # feed has no saved hash to default since #89, task detail and model detail since #91:
-    # each reads a full document.)
-    for retired in ("PERSISTED_QUERY_HASH", "TASK_DETAIL_HASH", "MODEL_DETAIL_HASH"):
+def test_no_saved_hash_is_left_to_configure():
+    # Every op we rely on works without any config.json. (The history feed has no saved hash
+    # since #89, task detail and model detail since #91, the whole-task delete and the Mirror's
+    # renewal since #92: each is a full document or a /v2 REST route.)
+    for retired in ("PERSISTED_QUERY_HASH", "TASK_DETAIL_HASH", "MODEL_DETAIL_HASH",
+                    "DELETE_TASK_HASH", "REFRESH_TOKEN_HASH"):
         assert not hasattr(core, retired), retired
-    assert len(core.DELETE_TASK_HASH) == 64
-    assert len(core.REFRESH_TOKEN_HASH) == 64
 
 
 def test_resolve_user_id_from_me(monkeypatch):

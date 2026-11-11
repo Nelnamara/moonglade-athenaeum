@@ -713,7 +713,7 @@ export default function ModelPicker({
 
       {/* PORTALED to <body> (owner walk 2026-09-29: hovering a card on the desktop showed
           nothing). The preview is position:fixed at viewport coordinates, but the dock's model
-          palette (.mgx-dock-host .mfly, dock.css) carries transform: translateX(-50%) and
+          palette (.mgx-dock-host .mfly, dock.css) carries a transform (its entry animation's) and
           overflow: hidden -- a transformed ancestor becomes the containing block for fixed
           descendants, so the card was placed relative to the palette and clipped by it. The
           same trap the video prompt's chip preview had (VideoDrawer's .mgd-preview). The

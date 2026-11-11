@@ -361,6 +361,46 @@ test("the badge takes the short verdict from the server's card_short only -- it 
   assert.equal(b.badge.attr("data-short"), undefined);
 });
 
+// #93: a Fix is priced per pass. The badge words a paid Fix answer's pass in its EXISTING note
+// line (block note, the dock stack's second line, the chip's tip) -- and only a settled paid one.
+test("a paid Fix answer's note line names the pass and its discount; an image answer's does not", async () => {
+  const fix = { free: false, cost: 4800, original_cost: 8000, fix_pass: "face", fix_boxes: 1 };
+  const NOTE = "face pass · 40% off 8,000";
+  const stack = await mountBadge({ stack: true, balance: 20000 });
+  stack.act((h) => h.setPrice(fix));
+  assert.equal(stack.badge.attr("data-state"), "paid");
+  assert.equal(stack.ref.current.text, "≈ 4,800 credits · " + NOTE);
+  assert.ok(stack.badge.html.includes(NOTE + " · 20,000 credits"), "the stack's second line carries it, before the balance");
+  stack.act((h) => h.setPrice({ free: false, cost: 600 }));
+  assert.doesNotMatch(stack.badge.html, /pass/, "an image answer carries no pass words");
+  assert.equal(stack.ref.current.text, "≈ 600 credits");
+
+  const block = await mountBadge({});
+  block.act((h) => h.setPrice(fix));
+  assert.equal(one(block.$.byClass("mgc-sub")).text, NOTE);
+  // equal list price: the pass, no discount
+  block.act((h) => h.setPrice({ ...fix, original_cost: undefined }));
+  assert.equal(one(block.$.byClass("mgc-sub")).text, "face pass");
+
+  const chip = await mountBadge({ compact: true });
+  chip.act((h) => h.setPrice(fix));
+  assert.ok(one(chip.$.byClass("mgc-tip")).text.includes(NOTE), "the chip carries it in its tip");
+});
+
+test("a failed Fix quote is the red couldn't-verify state -- never a stale 4,800, never pass words, never free", async () => {
+  const b = await mountBadge({ stack: true });
+  b.act((h) => h.setPrice({ free: false, cost: 4800, original_cost: 8000, fix_pass: "face", fix_boxes: 1 }));
+  assert.equal(b.badge.attr("data-state"), "paid");
+  // the next quote fails: the server answers cost null (price_fixer failed soft) with the pass still named
+  b.act((h) => h.setPrice({ free: false, cost: null, fix_pass: "face", fix_boxes: 1, cards: null }));
+  assert.equal(b.badge.attr("data-state"), "error");
+  assert.doesNotMatch(b.badge.html, /4,800|4800|pass|FREE/);
+  // and a transport failure is the same error
+  b.act((h) => h.setPrice(null));
+  assert.equal(b.badge.attr("data-state"), "error");
+  assert.doesNotMatch(b.badge.html, /4,800|4800/);
+});
+
 test("the CSS pins the short note in the amber ink (data-short), not the muted expiry grey", () => {
   const css = readFileSync(path.join(__dirname, "../../gallery/src/styles/cost-badge.css"), "utf8");
   assert.match(css, /\.cost-badge\[data-short\] \.mgc-sub \{ color: inherit; \}/);

@@ -7,26 +7,23 @@ progress, why a step was skipped, and (for `--faststart-videos`) ffmpeg's own me
 it refuses a file. It's the first thing to reach for when a run does something you don't
 expect.
 
-## "PersistedQueryNotFound" / "Cannot query field … on type Query"
-A built-in identifier went stale after a PixAI frontend update. These ship with the
-app and are shared by everyone, so when one breaks it breaks for all users.
+## "Cannot query field … on type Query"
+PixAI changed their site and a request the app sends no longer matches it. The requests ship
+with the app and are the same for everyone, so when one breaks it breaks for all users.
 
 - **First, update to the latest release** — open the **Control Panel** and click the gold
   version stamp in its sidebar footer if one is offered, then **View the update ›** in the
-  About card that opens (`git pull` by hand otherwise). Refreshed defaults usually land there
-  quickly.
-- If it's still broken on the latest version, **open an issue** so the default can be
-  updated for everyone.
+  About card that opens (`git pull` by hand otherwise). Fixes usually land there quickly.
+- If it's still broken on the latest version, **open an issue** so it can be fixed for
+  everyone.
 
-Reading the pages of your history (the list **Sync now**, `--sync`, `--update` and `--count`
-walk), a picture's full details and a model's name no longer use a built-in identifier. "Recapture"
-now applies only to the two saved operations that remain: deleting a whole generation from PixAI,
-and the Mirror to PixAI session renewal.
+Nothing the app sends rides a saved identifier any more, so "PersistedQueryNotFound" can no
+longer come from it, and there is nothing in `config.json` to recapture or override.
 
 ## "PixAI refused the history feed; nothing was changed"
 PixAI turned down the request for your history. It does this now and then, and answers the
 same request a minute later. Nothing was changed. Wait a minute and run it again
-(**Sync now**, or the same command). There is no identifier to update or recapture for this one.
+(**Sync now**, or the same command). There is nothing to update or recapture for this one.
 
 ## "401 Unauthorized"
 Your `PIXAI_API_KEY` is missing, mistyped, or expired. Regenerate at
@@ -85,6 +82,15 @@ trusted while the other isn't — which is why this used to look like a PixAI pr
 of a local one. And "once per run" is literally once per *process*: on the long-lived gallery
 server the paragraph appears on the console the first time and not again, so read the log
 there rather than waiting for it to repeat.
+
+## The gallery closed and I did not close it
+Read the last lines of `local\logs\serve.log` (it sits beside `moonglade.log`). Every run of the server writes a line there when it starts and one when it ends, and the server writes its own line just before it stops.
+
+- A `[server] ... stopping: Stop requested from ...` line, then `exit code 0` in the launcher's line after it: someone pressed Stop in the Control Panel. The line names the address the click came from, whether that was this computer or another device, the signed-in user and the browser.
+- `exit code 42` (restart): a Restart or an update. The launcher starts the gallery again by itself, and the next line says so.
+- `exit code 1` with no `[server]` line before it, and no `Windows fatal exception` block above it: the program was ended from outside, by Task Manager, an antivirus, a sign-out or a shutdown.
+- A `Windows fatal exception` block (for example `access violation`) with a list of what the program was doing, just above the launcher's line: a crash inside a library the gallery uses. The exit code beside it is often `1`, or a `0x...` number such as `0xC0000005`.
+- No `[launcher]` line after the last request at all: the whole computer stopped (a freeze or a power loss), so the program had no chance to write anything. Windows' Event Viewer, under Windows Logs, System, shows it (events 41, 1074 and 6006).
 
 ## After updating to 3.20: where did my files go?
 Nothing was lost. 3.20 gives every file one home, and the first time it starts it moves yours

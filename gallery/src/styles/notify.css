@@ -171,6 +171,14 @@
 .at-chip.open{background:color-mix(in srgb,color-mix(in hsl,var(--mantle) 83%,var(--overlay0)) 75%,transparent);border-color:var(--accent,var(--lavender));}
 .at-chip:hover{filter:brightness(1.15);}
 .at-chip .at-caret{font-size:8px;color:var(--overlay0);}
+/* The chip's tail (ActivityChip.jsx: " · nothing in the queue", " job"/" jobs") leaves the gallery
+   header below 1200 px (owner's pick B, 2026-11-01), where the bar's second line holds SIZE, the
+   status chips and the account group on one line: the chip reads "idle" or "3 running". Out of
+   sight, not out of the text -- the visually-hidden pattern, so a screen reader still hears the
+   whole sentence. Scoped to .mgx-sep: the Loom's top bar mounts the same chip and keeps it whole. */
+@media (max-width: 1199px){
+  .mgx-sep .at-chip .at-chiptail{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0;}
+}
 .at-dot{width:7px;height:7px;border-radius:50%;flex:none;background:color-mix(in srgb,var(--text) 30%,transparent);}
 .at-chip.live .at-dot{background:var(--accent,var(--lavender));box-shadow:0 0 10px color-mix(in srgb,var(--lavender) 80%,transparent);animation:mgPulse 1.5s ease-in-out infinite;}
 /* Owned here, not assumed from a host page (the Loom shell carries no gallery page CSS) --
@@ -270,7 +278,7 @@
 .at-copy.copied{color:var(--emerald);}
 
 /* ---- Toasts: small, corner-stacked, reusable ---- */
-#mg-toasts{position:fixed;right:16px;top:64px;z-index:511;display:flex;flex-direction:column;gap:9px;align-items:flex-end;pointer-events:none;font-family:var(--font-system,system-ui,sans-serif);}
+#mg-toasts{position:fixed;right:calc(16px + var(--mg-safe-r,0px));top:64px;z-index:511;display:flex;flex-direction:column;gap:9px;align-items:flex-end;pointer-events:none;font-family:var(--font-system,system-ui,sans-serif);}
 .mg-toast{pointer-events:auto;min-width:214px;max-width:340px;display:flex;align-items:flex-start;gap:10px;background:var(--mantle);border:1px solid var(--surface1);border-left:3px solid var(--lavender);border-radius:10px;padding:11px 13px;box-shadow:0 10px 30px rgba(0,0,0,.5);animation:mg-toast-in .4s cubic-bezier(.2,.9,.24,1);}
 .mg-toast.out{animation:mg-toast-out .34s cubic-bezier(.4,0,.2,1) forwards;}
 .mg-toast.ok{border-left-color:var(--emerald);} .mg-toast.err{border-left-color:var(--red);} .mg-toast.unlock{border-left-color:var(--gold);}

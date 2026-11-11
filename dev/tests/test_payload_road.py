@@ -76,6 +76,10 @@ def road(monkeypatch):
                         lambda s, params: seen["submitted"].append(params) or "task-1")
     monkeypatch.setattr(core, "submit_fixer",
                         lambda s, mid, boxes: seen["fixed"].append((mid, boxes)) or "task-2")
+    # A Fix is priced on PixAI's own Fix price route (#93), off the submit body itself.
+    monkeypatch.setattr(core, "price_fixer",
+                        lambda s, body: seen["priced"].append(body)
+                        or {"cost": 1200, "original": None})
     # _apply_kaisuuken is deliberately NOT stubbed: attaching the card is the one legal
     # difference between the priced dict and the submitted one, and the test asserts it is
     # the only one.
@@ -104,16 +108,18 @@ def test_price_and_submit_read_the_same_parameters_object(
     core.submit(sess, req)
 
     if mutation == "submit_fixer":
-        # A Fix does not submit `parameters` at all -- POST /v2/task/fixer takes
-        # {mediaId, boxes}. Same request, so the boxes that were PRICED are the boxes
-        # that go out: build_fixer_price_parameters synthesizes the chat.fixer shape from
-        # req.media_id/req.boxes, and submit sends those two directly.
+        # A Fix rides REST: POST /v2/task/fixer takes {mediaId, boxes}, and since #93 the
+        # priced `parameters` ARE that body (build_fixer_body), quoted on
+        # /v2/task/fixer/price. submit_fixer rebuilds it from req.media_id/req.boxes with
+        # the same builder -- so what it sends is what was priced.
         (sent_media, sent_boxes), = road["fixed"]
         assert sent_media == req.media_id and sent_boxes is req.boxes
         priced, = road["priced"]
         assert priced is req.parameters
-        assert priced["mediaId"] == sent_media
-        assert priced["chat"]["fixer"]["boxes"][0]["tag"] == "hand"
+        assert set(priced) == {"mediaId", "boxes"}
+        assert priced == core.build_fixer_body(sent_media, sent_boxes), (
+            "the body submit_fixer builds from what it was handed is not the priced body")
+        assert priced["boxes"][0]["tag"] == "hand"
         return
 
     submitted, = road["submitted"]
@@ -201,8 +207,9 @@ def test_submit_refuses_under_read_only_before_any_network_call(
 
     req = _build(payload)
     monkeypatch.setattr(core, "READ_ONLY", True)
-    for fn in ("match_kaisuuken", "_apply_kaisuuken", "price_task",
-               "submit_generation", "submit_fixer", "_session_for_create", "gql_mutate"):
+    for fn in ("match_kaisuuken", "_apply_kaisuuken", "price_task", "price_fixer",
+               "submit_generation", "submit_fixer", "_session_for_create", "gql_mutate",
+               "_rest_post"):
         monkeypatch.setattr(core, fn, tripwire(fn))
 
     with pytest.raises(core.PixAIError) as err:
@@ -226,8 +233,8 @@ def test_price_is_read_only_and_never_reaches_a_mutation(road):
 @pytest.mark.parametrize("asked", [True, False, None])
 def test_fix_forces_no_card_whatever_the_payload_asks(asked, road):
     """POST /v2/task/fixer takes only {mediaId, boxes} -- there is no kaisuukenId field on
-    it anywhere -- so no free card can ever cover a Fix however well /v2/kaisuuken/check
-    matches the synthesized price shape. Running the check anyway would paint the badge
+    it anywhere -- so no free card can ever cover a Fix, and price() never runs
+    /v2/kaisuuken/check for one. Running the check anyway would paint the badge
     emerald 'FREE' over an action about to charge full credits."""
     payload = {"mode": "fix", "source": "99",
                "boxes": [{"x": 1, "y": 2, "width": 30, "height": 40, "tag": "face"}]}

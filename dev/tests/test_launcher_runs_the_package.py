@@ -15,8 +15,10 @@ returns at once and the browser-opening thread never starts. conftest pins local
 config_path() to this test's own folder, so settings.json, serve.log and config.json are the
 test's, never the checkout's.
 """
+import itertools
 import json
 import os
+import re
 import runpy
 import subprocess
 import sys
@@ -47,18 +49,23 @@ class _NoThread:
 def launch(monkeypatch, tmp_path):
     import ctypes
 
-    def _launch(codes=(0,), settings=None, config=None, ours_on_port=False):
+    def _launch(codes=(0,), settings=None, config=None, ours_on_port=False, pid=None):
         if settings is not None:
             paths.settings_path().write_text(json.dumps(settings), encoding="utf-8")
         if config is not None:
             paths.config_path().write_text(json.dumps(config), encoding="utf-8")
         codes = list(codes)
-        run = types.SimpleNamespace(started=[], probed=[], opened=[], boxes=[], exit=None)
+        run = types.SimpleNamespace(started=[], probed=[], opened=[], boxes=[], exit=None,
+                                    sleeps=[], ns=None)
 
         def popen(cmd, **kw):
             run.started.append(types.SimpleNamespace(cmd=list(cmd), **kw))
             rc = codes.pop(0)
-            return types.SimpleNamespace(wait=lambda: rc)
+            if isinstance(rc, BaseException):       # a start that fails (no memory, ...)
+                raise rc
+            # the stand-in child: only `wait` (and a pid when the test asks), like the real one
+            extra = {} if pid is None else {"pid": pid}
+            return types.SimpleNamespace(wait=lambda: rc, **extra)
 
         def urlopen(url, timeout=None):
             run.probed.append(url)
@@ -69,7 +76,7 @@ def launch(monkeypatch, tmp_path):
         monkeypatch.setattr(subprocess, "Popen", popen)
         monkeypatch.setattr(urllib.request, "urlopen", urlopen)
         monkeypatch.setattr(webbrowser, "open", lambda url: run.opened.append(url))
-        monkeypatch.setattr(time, "sleep", lambda s: None)
+        monkeypatch.setattr(time, "sleep", lambda s: run.sleeps.append(s))
         monkeypatch.setattr(threading, "Thread", _NoThread)
         monkeypatch.setattr(sys, "path", list(sys.path))
         monkeypatch.setattr(deps, "missing", lambda path: [])   # see test_first_run_deps.py
@@ -79,7 +86,7 @@ def launch(monkeypatch, tmp_path):
             raising=False)
         monkeypatch.chdir(tmp_path)              # it changes directory; this puts it back
         try:
-            runpy.run_path(str(LAUNCHER), run_name="__main__")
+            run.ns = runpy.run_path(str(LAUNCHER), run_name="__main__")
         except SystemExit as e:
             run.exit = e.code
         return run
@@ -95,6 +102,7 @@ def test_it_starts_the_server_as_the_package_from_the_app_folder(launch):
     assert child.cmd == [sys.executable, "-m", "moonglade.gallery"]
     assert os.path.samefile(child.cwd, paths.APP_ROOT)
     assert child.env["MOONGLADE_SUPERVISED"] == "1"
+    assert child.env["PYTHONFAULTHANDLER"] == "1"      # a native crash leaves its stacks in serve.log
     assert child.stdin is subprocess.DEVNULL
     assert getattr(child.stdout, "name", None) == str(paths.logs_dir() / "serve.log")
     assert run.probed == ["http://localhost:5757/api/ping"]
@@ -150,3 +158,194 @@ def test_the_launcher_reads_no_old_setting():
                  'local_path("serve.log")'):
         assert gone not in src, gone
     assert '_settings.server()["port"]' in src
+
+
+# --- #95: every server start and exit says so in serve.log -------------------------------------
+STAMP = r"^\[launcher\] \d{4}-\d\d-\d\d \d\d:\d\d:\d\d "
+
+
+def _serve_log_text():
+    return (paths.logs_dir() / "serve.log").read_text(encoding="utf-8")
+
+
+def _timed_lines(text):
+    """The launcher's timed lines (what _record writes), one per element; a traceback's own
+    lines under the last one are not counted."""
+    return [ln for ln in text.splitlines() if re.match(STAMP, ln)]
+
+
+def _slow_clock(monkeypatch, step=31.0):
+    """time.monotonic that moves `step` seconds on every call: a server that ran a while."""
+    counter = itertools.count(1)
+    monkeypatch.setattr(time, "monotonic", lambda: next(counter) * step)
+
+
+def test_every_server_start_and_exit_is_recorded(launch):
+    run = launch(codes=[42, 0])
+    lines = _timed_lines(_serve_log_text())
+    assert len(run.started) == 2
+    started = [ln for ln in lines if " server pid ? started " in ln]
+    assert len(started) == 2
+    assert "(start 1, launcher pid %d)" % os.getpid() in started[0]
+    assert "(start 2, launcher pid %d)" % os.getpid() in started[1]
+    restart = [ln for ln in lines if "ended: exit code 42 (restart)" in ln]
+    assert len(restart) == 1 and restart[0].endswith("; starting it again")
+    stop = [ln for ln in lines if "ended: exit code 0 (a normal stop)" in ln]
+    assert len(stop) == 1 and "starting it again" not in stop[0]
+    assert lines[-1].endswith("launcher closing: the server has ended and was not asked to restart")
+    assert all(re.match(STAMP, ln) for ln in lines)
+
+
+def test_a_started_line_names_the_servers_pid_when_it_has_one(launch):
+    launch(codes=[0], pid=4321)
+    text = _serve_log_text()
+    assert "server pid 4321 started" in text and "server pid 4321 ended" in text
+
+
+def test_a_crash_after_the_first_half_minute_is_recorded_not_silent(launch, monkeypatch):
+    """The case that left nothing before: any exit but 42 after BOOT_S ended the launcher and
+    threw the exit code away."""
+    _slow_clock(monkeypatch)
+    run = launch(codes=[1])
+    assert run.boxes == [] and run.exit is None          # no box, ended as it always did
+    text = _serve_log_text()
+    assert "ended: exit code 1 after" in text
+    assert "launcher closing" in text
+
+
+def test_an_nt_status_exit_code_is_shown_in_hex(launch, monkeypatch):
+    _slow_clock(monkeypatch)
+    launch(codes=[3221225477])
+    assert "exit code 3221225477 (0xC0000005)" in _serve_log_text()
+
+
+def test_the_exit_words_and_the_span_words(launch):
+    ns = launch(codes=[0]).ns
+    assert ns["_exit_words"](0) == "exit code 0 (a normal stop)"
+    assert ns["_exit_words"](42) == "exit code 42 (restart)"
+    assert ns["_exit_words"](1) == "exit code 1"
+    assert ns["_exit_words"](255) == "exit code 255"
+    assert ns["_exit_words"](3221225477) == "exit code 3221225477 (0xC0000005)"
+    assert ns["_exit_words"](None) == "no exit code"
+    assert [ns["_span"](s) for s in (0, 45, 60, 185, 3600, 11525)] == [
+        "0s", "45s", "1m00s", "3m05s", "1h00m00s", "3h12m05s"]
+
+
+def test_an_error_that_ends_the_launcher_is_logged_and_still_raised(launch):
+    """A relaunch that fails (no memory, say) has no console under pythonw: it is written to
+    serve.log, then raised as before."""
+    with pytest.raises(OSError, match="no memory"):
+        launch(codes=[42, OSError("no memory")])
+    text = _serve_log_text()
+    assert "launcher stopped by an error:" in text
+    assert "OSError" in text and "no memory" in text
+    assert "launcher closing" not in text
+
+
+def test_the_child_gets_the_crash_dump_switch(launch):
+    run = launch(codes=[0])
+    assert run.started[0].env["PYTHONFAULTHANDLER"] == "1"
+    assert run.started[0].env["MOONGLADE_SUPERVISED"] == "1"
+
+
+# --- the supervise loop behaves exactly as before the lines were added -------------------------
+def test_exit_42_still_waits_point_six_seconds_each_time_then_zero_ends(launch):
+    run = launch(codes=[42, 42, 0])
+    assert len(run.started) == 3 and run.exit is None
+    assert run.sleeps.count(0.6) == 2
+    assert run.boxes == []
+
+
+def test_a_crash_inside_the_first_half_minute_still_shows_the_box_and_exits_1(launch):
+    run = launch(codes=[1])                              # the real clock: well under BOOT_S
+    assert run.exit == 1 and len(run.started) == 1
+    text = _serve_log_text()
+    assert "ended: exit code 1 after" in text            # recorded, as well as said in the box
+    assert "launcher closing" not in text                # _stop raised before the closing line
+    assert "stopped by an error" not in text             # the box's SystemExit is not an error
+    if sys.platform == "win32":
+        assert len(run.boxes) == 1 and "stopped as it started (code 1)" in run.boxes[0]
+        assert "[launcher] " not in run.boxes[0]         # the box shows the server's output only
+
+
+def test_the_loop_stays_at_module_level_with_its_handler_inside(launch):
+    """Other tests read the launcher as a tree and look for the top-level `while True:`."""
+    import ast
+    tree = ast.parse(LAUNCHER.read_text(encoding="utf-8"))
+    loops = [n for n in tree.body if isinstance(n, ast.While)]
+    assert len(loops) == 1
+    assert any(isinstance(n, ast.Try) for n in loops[0].body)
+
+
+class _FullDisk:
+    """A serve.log handle whose every write and flush fails: a full disk, a vanished share."""
+    name = "serve.log"
+
+    def __init__(self, exc):
+        self.exc = exc
+
+    def write(self, s):
+        raise self.exc
+
+    def flush(self):
+        raise self.exc
+
+    def fileno(self):
+        return 1
+
+    def close(self):
+        pass
+
+
+@pytest.mark.parametrize("exc", [OSError(28, "No space left on device"),
+                                 ValueError("I/O operation on closed file."),
+                                 UnicodeEncodeError("charmap", "x", 0, 1, "nope")])
+@pytest.mark.parametrize("codes", [[42, 42, 0], [0]])
+def test_a_live_log_handle_that_fails_on_write_changes_nothing(exc, codes, launch, monkeypatch):
+    """Not the DEVNULL fallback: the handle is open and every write raises."""
+    import builtins
+    real_open = builtins.open
+
+    def fake_open(file, mode="r", *a, **k):
+        if str(file).endswith("serve.log") and "a" in mode and "b" not in mode:
+            return _FullDisk(exc)
+        return real_open(file, mode, *a, **k)
+
+    monkeypatch.setattr(builtins, "open", fake_open)
+    run = launch(codes=list(codes))
+    assert run.exit is None and len(run.started) == len(codes)
+    assert run.sleeps.count(0.6) == codes.count(42)
+
+
+def test_a_live_log_handle_that_fails_still_shows_the_box_on_a_fast_crash(launch, monkeypatch):
+    import builtins
+    real_open = builtins.open
+
+    def fake_open(file, mode="r", *a, **k):
+        if str(file).endswith("serve.log") and "a" in mode and "b" not in mode:
+            return _FullDisk(OSError(28, "No space left on device"))
+        return real_open(file, mode, *a, **k)
+
+    monkeypatch.setattr(builtins, "open", fake_open)
+    run = launch(codes=[1])
+    assert run.exit == 1 and len(run.started) == 1
+
+
+def test_a_start_crash_after_a_restart_is_not_relaunched(launch):
+    run = launch(codes=[42, 1])
+    assert len(run.started) == 2 and run.exit == 1
+
+
+def test_a_log_that_cannot_be_written_never_stops_a_restart(launch, monkeypatch):
+    """serve.log locked or full: _record falls back to _log_line and swallows whatever fails."""
+    import builtins
+    real_open = builtins.open
+
+    def refuse_serve_log(file, *a, **k):
+        if str(file).endswith("serve.log"):
+            raise PermissionError("locked")
+        return real_open(file, *a, **k)
+
+    monkeypatch.setattr(builtins, "open", refuse_serve_log)
+    run = launch(codes=[42, 0])
+    assert len(run.started) == 2 and run.exit is None

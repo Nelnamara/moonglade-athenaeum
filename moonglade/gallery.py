@@ -8049,10 +8049,19 @@ def contest_board(core, session, force=False):
         ent = _contests_cache.get("board")
         if not force and ent and (now - ent["at"]) < CONTESTS_TTL:
             return ent["rows"]
-    rows = core.list_contests(session, active_only=False)
+    meta = {}
+    rows = core.list_contests(session, active_only=False, meta=meta)
     with _contests_cache_lock:
-        _contests_cache["board"] = {"at": time.time(), "rows": rows}
+        _contests_cache["board"] = {"at": time.time(), "rows": rows, "meta": meta}
     return rows
+
+
+def contest_board_meta():
+    """How the memoized board's walk ended (list_contests' `meta`: truncated, limit,
+    total_count ...), or {} when nothing is cached. A copy, so a caller cannot edit the memo."""
+    with _contests_cache_lock:
+        ent = _contests_cache.get("board")
+        return dict((ent or {}).get("meta") or {})
 
 # How long a completed sweep counts as recent enough to skip. The spec asked for this
 # and it never got built: opening the Contests overlay fired a full sweep EVERY time --
@@ -11201,7 +11210,7 @@ def quarantine_duplicate_file(out_dir, thumb_dir, db_path, media_id, rel_path, g
     through this function under any argument.
 
     _check_read_only() fires FIRST, before any path is even resolved -- the same
-    position submit_generation/submit_fixer/delete_task_gql/claim_reward give it
+    position submit_generation/submit_fixer/delete_task/claim_reward give it
     (moonglade/backup.py's own contract for every account/filesystem mutation
     this app makes). READ_ONLY in config.json refuses this the same way it
     refuses those.
@@ -12286,6 +12295,7 @@ def _supervised():
 # New on every server start: a notice keyed by it is said once per start in every open tab
 # (gallery/src/notify/serverNotice.js remembers the key it last showed).
 _SERVER_START = secrets.token_hex(8)
+_SERVER_BOOT = time.monotonic()      # for "up" in the line the server writes when it stops
 
 
 # THINGS OUTSIDE THE APP THAT NAME ITS OLD FILES (moonglade.outside; DECISIONS 2026-10-07,
@@ -12378,6 +12388,93 @@ def _schedule_server_exit(code):
 
 
 RESTART_EXIT_CODE = 42        # the supervisor's "relaunch me" signal (see _schedule_server_exit)
+
+
+# WHY THE SERVER ENDED (#95). A Stop, a Restart or an update leaves a request line in
+# moonglade.log and nothing in serve.log, the file the launcher points at; so each now writes its
+# reason when it asks (_note_server_exit) and main()'s `finally` writes one line saying what ended
+# it (server_exit_reason). They are kept OUT of _schedule_server_exit, whose signature and body
+# the tests pin.
+def _clean_for_log(text, limit=100):
+    """Text a client controls (a user name, a browser string) made safe for one log line: printable
+    ASCII only, so no newline can forge a second line, a double quote turned into a single one
+    so a value cannot close its own quotes, and cut to `limit`."""
+    return re.sub(r'[^\x20-\x7e]|"', lambda m: "'" if m.group() == '"' else "?",
+                  str(text or ""))[:limit]
+
+
+def _span_words(seconds):
+    """45s, 3m05s, 3h12m05s -- hours only when there are hours, minutes only when there are."""
+    try:
+        s = max(0, int(seconds))
+    except (TypeError, ValueError):
+        s = 0
+    h, rest = divmod(s, 3600)
+    m, sec = divmod(rest, 60)
+    if h:
+        return "%dh%02dm%02ds" % (h, m, sec)
+    if m:
+        return "%dm%02ds" % (m, sec)
+    return "%ds" % sec
+
+
+def _note_server_exit(why):
+    """Remember who or what asked for the exit that is about to happen, and log it. First wins,
+    like _schedule_server_exit: a second click keeps the first reason."""
+    with _EXIT_LOCK:
+        if _SERVER_CONTROL.get("exit_why"):
+            return
+        _SERVER_CONTROL["exit_why"] = why
+    import logging as _logging
+    _logging.getLogger(__name__).info("server exit requested: %s", why)
+
+
+def server_exit_reason(scheduled, code, why, interrupted, errored=True):
+    """The sentence for why the server is ending (pure): what main()'s `finally` writes.
+    `errored`: an exception is leaving the serve loop (False when the loop returned)."""
+    if scheduled and code == RESTART_EXIT_CODE:
+        return "Restart requested " + (why or "(no details recorded)")
+    if scheduled:
+        return "Stop requested " + (why or "(no details recorded)")
+    if interrupted:
+        return "Ctrl+C in a terminal"
+    if not errored:
+        return "the server loop ended on its own, with no Stop or Restart asked for"
+    return ("an unhandled error ended the server loop (its traceback follows in moonglade.log "
+            "as CRITICAL, and in this file)")
+
+
+def _install_signal_note():
+    """Off Windows only: a SIGTERM or SIGHUP is logged, then the default action runs as it
+    would have (the handler restores the default and sends the signal again). On Windows nothing
+    is installed: a pythonw process is never handed one. Main thread only."""
+    if sys.platform == "win32":
+        return
+    import signal
+    import logging as _logging
+
+    def _note(signum, frame):
+        try:
+            name = signal.Signals(signum).name
+        except Exception:                               # noqa: BLE001
+            name = str(signum)
+        try:
+            _logging.getLogger(__name__).info("server received %s", name)
+        except Exception:                               # noqa: BLE001
+            pass
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    for name in ("SIGTERM", "SIGHUP"):
+        sig = getattr(signal, name, None)
+        if sig is None:
+            continue
+        try:
+            if signal.getsignal(sig) is not signal.SIG_DFL:
+                continue                  # ignored (nohup) or handled by someone: left as it is
+            signal.signal(sig, _note)
+        except (ValueError, OSError):
+            pass
 
 
 def _power_in_progress():
@@ -14652,8 +14749,9 @@ def create_app(out_dir: Path):
             _log = _logging.getLogger(__name__)
             if out == "renewed":
                 left = _core.jwt_days_left(_core.load_mirror_state().get("jwt") or "")
-                _log.info("mirror: renewed the PixAI web session in the background "
-                          "(%s days left)", left)
+                _log.info("mirror: renewed the PixAI web session in the background via %s "
+                          "(%s days left)", _core._mirror_renewal.get("last_road") or "jwt",
+                          left)
             elif out == "failed" and _mirror_renew_seen["last"] != "failed":
                 _log.warning("mirror: couldn't renew the PixAI web session (%s); retrying "
                              "with backoff", _core._mirror_renewal.get("last_reason") or "failed")
@@ -16397,6 +16495,7 @@ def create_app(out_dir: Path):
         if busy:
             return jsonify({"error": "\"{}\" is still running — stop that job first "
                                      "(the server can't shut down while it works).".format(busy)}), 409
+        _note_power_request("Stop")
         _schedule_server_exit(0)
         return jsonify({"ok": True, "action": "stop"})
 
@@ -16496,6 +16595,7 @@ def create_app(out_dir: Path):
         if busy:
             return jsonify({"error": "\"{}\" is still running — stop that job first "
                                      "(the server can't restart while it works).".format(busy)}), 409
+        _note_power_request("Restart")
         _schedule_server_exit(42)
         return jsonify({"ok": True, "action": "restart"})
 
@@ -16663,6 +16763,7 @@ def create_app(out_dir: Path):
             if still:
                 raise RuntimeError('"%s" started while updating' % still)
             _schedule_server_exit(42)
+            _note_server_exit("by the update just applied")
 
         # The activity log is the ONLY part of this that survives the restart a successful
         # update is about to trigger -- and the only record at all of one that failed while
@@ -17186,7 +17287,7 @@ def create_app(out_dir: Path):
         save one fallback: when the live read carried no artworkIds at all, whether the
         generation is published comes from the catalog's artwork_id over the task's whole
         membership (SCOPE_2026-09-26 E5). Only the whole-task branch says anything about
-        published artwork: that branch sends deleteGenerationTask, the delete PixAI's
+        published artwork: that branch sends the whole-task delete, the delete PixAI's
         contract says takes the linked artwork with it. What a one-image deleteBatchMedia
         does to an artwork is unknown, so the per-image branch makes no claim."""
         if plan.plan == "per-image":
@@ -17819,7 +17920,7 @@ def create_app(out_dir: Path):
                     keep = (_rows_the_bulk_purge_must_keep(session, tid, rows)
                             if purge_local else set())
                     try:
-                        core.delete_task_gql(session, tid)      # cloud delete (irreversible)
+                        core.delete_task(session, tid)          # cloud delete (irreversible)
                         deleted += 1
                     except Exception:                            # noqa: BLE001
                         failed += 1
@@ -17881,9 +17982,9 @@ def create_app(out_dir: Path):
         delete_targets selection so /api/delete-preview keeps describing
         exactly what this route then does, and the same off-thread worker via
         _start_bulk_delete -- which routes every cloud delete through
-        core.delete_task_gql, the single-attempt _check_read_only'd choke point the
-        page route uses, never gql_adhoc. The page route stays until classic's
-        demolition.
+        core.delete_task (POST /v2/task/{id}/delete on the API key), the single-attempt
+        _check_read_only'd choke point the page route uses, never gql_adhoc. The page
+        route stays until classic's demolition.
 
         Body: {task_ids: [...]} OR {media_ids: [...]} (task_ids win when both are
         sent -- they are already the unit the delete operates on), plus optional
@@ -17892,7 +17993,7 @@ def create_app(out_dir: Path):
         --delete-task command used to do, and imports are then left alone entirely).
 
         _check_read_only fires HERE, before the job even starts, on top of the one
-        inside delete_task_gql: failing fast with one readable refusal beats
+        inside delete_task: failing fast with one readable refusal beats
         spawning a job whose every task then fails red on the Activity card."""
         from moonglade import backup as core   # lazy: avoid import cycle
         body = request.get_json(silent=True) or {}
@@ -18511,6 +18612,20 @@ def create_app(out_dir: Path):
     def _is_local_request():
         ra = (request.remote_addr or "").strip()
         return ra in ("127.0.0.1", "::1", "localhost")
+
+    def _note_power_request(action):
+        """Who pressed Stop or Restart, for the line the server writes when it ends (#95): the
+        address, whether it is this PC, the signed-in user and the browser string. All of it is
+        cleaned to one printable line first -- a client controls the user name and the browser.
+        No cookie, token or header dump is read."""
+        try:
+            _note_server_exit("from %s (%s), user \"%s\", browser \"%s\"" % (
+                _clean_for_log(request.remote_addr),
+                "this PC" if _is_local_request() else "another device",
+                _clean_for_log(session.get("user")),
+                _clean_for_log(request.headers.get("User-Agent"), 100)))
+        except Exception:                               # noqa: BLE001 -- a log line never gates a Stop
+            pass
 
     def _is_authorized_request():
         """THE canonical authorization gate for every network-originated request:
@@ -19895,7 +20010,7 @@ def create_app(out_dir: Path):
         click, not the exempt spend-path class /api/generate etc. sit in.
 
         READ_ONLY in config.json refuses this exactly like submit_generation/
-        submit_fixer/delete_task_gql/claim_reward -- see
+        submit_fixer/delete_task/claim_reward -- see
         quarantine_duplicate_file().
 
         ARCHIVE-ONLY MEMBERS GO WITH THE REST (#66; the owner's ruling on the 2026-10-03
@@ -20471,9 +20586,17 @@ def create_app(out_dir: Path):
         # Both variants come off the ONE snapshot -- `active` is the server's own
         # runtimeStatus flag, the same thing list_contests(active_only=True) filters on.
         contests = rows if show_all else [c for c in rows if c.get("active")]
+        # Whether the board was longer than the ceiling the reader walks to (the screens say
+        # so under the list; until now only a log line did).
+        bm = contest_board_meta()
+        board = {"truncated": bool(bm.get("truncated"))}
+        if board["truncated"]:
+            board["limit"] = int(bm.get("limit") or 0)
+            board["total_count"] = int(bm.get("total_count") or 0)
         return jsonify({"contests": contests,
                         "official": sum(1 for c in contests if c["type"] == "official"),
-                        "community": sum(1 for c in contests if c["type"] != "official")})
+                        "community": sum(1 for c in contests if c["type"] != "official"),
+                        "board": board})
 
     @app.route("/api/contest/<slug>/artworks")
     @tier(LOGIN)
@@ -22962,12 +23085,12 @@ def create_app(out_dir: Path):
     @tier(LOGIN)
     def api_mirror_connect():
         """Bootstrap/refresh the mirror session: read the pixai.art session from THIS
-        machine's browser, roll the JWT via refreshToken, store it. Reports only ok +
+        machine's browser, renew the JWT, store it. Reports only ok +
         days-left -- NEVER the token (review F13). No credential crosses the network: the
         server reads its own local browser store. LOGIN tier."""
         from moonglade import backup as core
         try:
-            core._check_read_only("connect the PixAI mirror")   # refreshToken is account-mutating
+            core._check_read_only("connect the PixAI mirror")   # the renewal is account-mutating
             # A press (#71): re-read the browser even for a usable stored token, keep the
             # later-expiring of the two, and try a due renewal even inside a failure backoff.
             s = core.make_mirror_session(bootstrap_from_browser=True, user_initiated=True)
@@ -25008,25 +25131,97 @@ def create_app(out_dir: Path):
                                   "preset": (p.get("preset") if "p" in locals() else None),
                                   "media_ct": len(locals().get("media") or [])})[:300]}), 200
 
+    # One Fix at a time (#93 review F4). Every Fix spends, and the clients' own gates (one in
+    # flight per shot) cannot see a second tab, a stale bundle or a hand-rolled POST. So an
+    # IDENTICAL Fix -- same signed-in user, same source as sent, same cleaned boxes -- inside
+    # this many seconds of the last one this app accepted is refused before any network call.
+    # The record is KEPT when that first submit's outcome is unknown or may have been charged
+    # (it succeeded, a transport error or timeout, a 5xx after the send, no task id back):
+    # the retry it invites is exactly a second spend. It is DROPPED when the first one is known
+    # to have cost nothing -- refused before anything was sent (the mirror refusing, a body
+    # the builder refuses) or refused by PixAI with a 4xx (insufficient balance and the like:
+    # nothing created) -- so a fixed-up retry goes straight through (#93 review 2, F2).
+    _FIX_REPEAT_WINDOW = 10.0
+    _FIX_REPEAT_MSG = ("The same Fix was asked for a few seconds ago; wait a moment before "
+                       "sending it again.")
+    _fix_recent = {}
+    _fix_recent_lock = threading.Lock()
+
+    def _fix_repeat_refusal(core, p):
+        """(refusal, key): the refusal text for a repeat of a recent identical Fix (key None),
+        or (None, key) with this Fix now recorded under `key` -- which the caller drops with
+        _fix_forget when the submit turns out to have cost nothing. A body build_fixer_body
+        refuses is never recorded (None, None): it cannot spend, and its own refusal is the
+        answer the caller should see."""
+        try:
+            body = core.build_fixer_body(str(p.get("source") or "").strip(), p.get("boxes"))
+        except Exception:                  # noqa: BLE001 -- the build refuses it properly below
+            return None, None
+        key = (str(session.get("user") or ""), json.dumps(body, sort_keys=True))
+        now = time.monotonic()
+        with _fix_recent_lock:
+            for k in [k for k, t in _fix_recent.items() if now - t >= _FIX_REPEAT_WINDOW]:
+                del _fix_recent[k]
+            if key in _fix_recent:
+                return _FIX_REPEAT_MSG, None
+            _fix_recent[key] = now
+        return None, key
+
+    def _fix_forget(key):
+        if key is not None:
+            with _fix_recent_lock:
+                _fix_recent.pop(key, None)
+
+    def _fix_failure_cost_nothing(core, exc):
+        """True only when a failed Fix submit is KNOWN to have charged nothing. PixAI's own
+        4xx refusal (408 aside: a timeout is an unknown outcome) created no task; a plain
+        PixAIError other than "no task id returned" is one of this app's refusals, raised
+        before the POST (the mirror unavailable, READ_ONLY, a body the builder refuses).
+        A transport error, a 5xx, a missing task id or anything else: unknown -- keep."""
+        if isinstance(exc, core.PixAIRestError):
+            status = getattr(exc, "status", None) or 0
+            return 400 <= int(status) < 500 and int(status) != 408
+        if isinstance(exc, core.requests.RequestException):
+            return False
+        if isinstance(exc, core.PixAIError):
+            return not str(exc).startswith("fixer: no task id returned")
+        return False
+
     @app.route("/api/fix", methods=["POST"])
     @tier(LOGIN)
     def api_fix():
         """Submit a hand/face fixer task from the Edit-tab canvas. `boxes` are original-image
         pixel coords. Login required; returns {task_id} for the async poller.
 
-        The Fix is the one road whose submit body is NOT `parameters`: /v2/task/fixer takes
-        {mediaId, boxes}, so the request carries those and core.submit sends them. Its
-        `parameters` are the synthesized chat.fixer shape /api/price quotes off the same
-        request -- built here too, so the badge and the spend cannot describe different
-        boxes."""
+        The Fix rides REST, not createGenerationTask: /v2/task/fixer takes {mediaId, boxes},
+        built by core.build_fixer_body -- the builder /api/price's quote uses too, so the
+        badge and the spend carry the SAME boxes (kind, count, coordinates). The media id is
+        the one deliberate difference: this route's resolver uploads the local file first and
+        sends the upload-kind id (PixAI refuses an output id as an input here), while the quote
+        names the catalog id (no upload per keystroke); PixAI's Fix price does not move with
+        the picture. Face and hand boxes together are refused before any network call (PixAI's
+        server refuses them; a Fix is one kind).
+
+        One Fix at a time: an identical submit (same user, picture and boxes) inside
+        _FIX_REPEAT_WINDOW seconds of the last one is refused before any network call -- a
+        double tap, or a client retry after a lost response, must not pay twice -- unless
+        that last one is known to have cost nothing (see _fix_failure_cost_nothing)."""
         try:
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
+            # READ_ONLY first: the submit resolver below uploads the local file (a network
+            # call), so the refusal has to come before it, not only inside submit_fixer.
+            core._check_read_only(core._SUBMIT_ACTIONS["fix"])
+            repeat, fix_key = _fix_repeat_refusal(core, p)
+            if repeat:
+                return jsonify({"error": repeat}), 409
             req = core.build_request(p, mode="fix",
                                      resolve=_submit_resolver(core, session))
             if not req.media_id:
+                _fix_forget(fix_key)
                 return jsonify({"error": "pick an image first"}), 400
             if not req.boxes:
+                _fix_forget(fix_key)
                 return jsonify({"error": "draw a box over a hand or face"}), 400
             # The exact body submit_fixer POSTs to /v2/task/fixer, named here so the failure
             # log below has the REQUEST SHAPE to report, the same way /api/generate and
@@ -25045,6 +25240,11 @@ def create_app(out_dir: Path):
             # 2026-07-26 undiagnosable decline: it returned the redacted text to the browser,
             # friendlyGenErr() replaced it with a guess, and the real error was recorded
             # nowhere at all.
+            try:
+                if _fix_failure_cost_nothing(core, e):
+                    _fix_forget(locals().get("fix_key"))
+            except Exception:                  # noqa: BLE001 -- never mask the real failure
+                pass
             return jsonify({"error": _log_gen_failure(
                 "/api/fix", e, locals().get("fix_params"))[:300]}), 200
 
@@ -29442,6 +29642,7 @@ def main():
     out_dir = Path(prepared.library)
     from moonglade import logs as moonglade_logging
     moonglade_logging.setup_logging(verbose=args.verbose)
+    _install_signal_note()
     prepared.log()
     # A fresh clone has neither the (git-ignored) output folder nor a catalog -- refusing
     # to start here used to be the ONLY thing a brand-new user saw: a console exit, before
@@ -29522,6 +29723,9 @@ def main():
     url = "{}://{}:{}/".format(
         scheme, "localhost" if args.host == "0.0.0.0" else args.host, args.port)
     print("\nGallery ready ->  {}".format(url))
+    import logging as _ready_logging
+    _ready_logging.getLogger(__name__).info("server started: pid %d, supervised %s",
+                                            os.getpid(), _supervised())
     if ssl_context:
         print("(self-signed HTTPS: your browser/phone will show a one-time 'proceed anyway' warning)")
     print("Press Ctrl+C to stop.\n")
@@ -29610,12 +29814,35 @@ def main():
     # Claude registration, a shortcut): off-thread, for the notice (server_notice).
     _outside_prime()
     clean_stop = False
+    interrupted = False
     try:
         srv.serve_forever()
         clean_stop = True
     except KeyboardInterrupt:
         clean_stop = True            # Ctrl+C on a terminal launch -> clean stop (exit 0)
+        interrupted = True
     finally:
+        # First, and wrapped: one line saying what ended the server (#95), in serve.log (a
+        # flushed print: the console handler passes warnings only) and in moonglade.log. A
+        # failure here can never stop the cleanup below.
+        try:
+            _stop_code = _SERVER_CONTROL.get("exit_code", 0)
+            _stop_sched = bool(_SERVER_CONTROL.get("exit_scheduled"))
+            if not clean_stop and not _stop_sched:
+                _stop_code = 1               # an error is leaving: Python exits with 1
+            _stop_why = server_exit_reason(_stop_sched, _stop_code,
+                                           _SERVER_CONTROL.get("exit_why", ""), interrupted,
+                                           errored=not clean_stop)
+            _stop_up = _span_words(time.monotonic() - _SERVER_BOOT)
+            import logging as _stop_logging
+            _stop_logging.getLogger(__name__).info(
+                "server stopping: %s (pid %d, up %s, exit code %d)",
+                _stop_why, os.getpid(), _stop_up, _stop_code)
+            print("[server] %s stopping: %s (pid %d, up %s, exit code %d)" % (
+                time.strftime("%Y-%m-%d %H:%M:%S"), _stop_why, os.getpid(), _stop_up,
+                _stop_code), flush=True)
+        except Exception:                    # noqa: BLE001 -- a log line only
+            pass
         _count_timer.cancel()
         # A Stop (exit 0) is a clean start's end; a Restart (42) counts only through the
         # timer, so a run of quick Restarts never deletes the snapshots.

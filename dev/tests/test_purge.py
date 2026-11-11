@@ -128,7 +128,7 @@ def test_bulk_delete_keeps_going_when_one_local_purge_fails(tmp_path, monkeypatc
         _row(media_id="400", task_id="TB", filename="400.png"),
     ], {"300.png": b"a", "400.png": b"b"})
 
-    monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: None)
+    monkeypatch.setattr(core, "delete_task", lambda sess, tid: None)
 
     real_replace = g.Path.replace
 
@@ -163,7 +163,7 @@ def test_bulk_delete_async_logs_a_job_that_completes(tmp_path, monkeypatch, pixa
     import time
     from moonglade import backup as core
     _seed(tmp_path, [_row(media_id="a1", task_id="TA", filename="a1.png")], {"a1.png": b"x"})
-    monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: None)
+    monkeypatch.setattr(core, "delete_task", lambda s, tid: None)
 
     client = login_client(tmp_path)
     client.post("/api/delete-tasks", json={"media_ids": ["a1"]})
@@ -539,7 +539,7 @@ def test_delete_preview_writes_down_what_pixai_said_so_the_delete_keeps_it(
         "only the member PixAI really dropped may be stamped")
 
     # The delete, with its own live read failing where the preview's succeeded.
-    monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: None)
+    monkeypatch.setattr(core, "delete_task", lambda sess, tid: None)
 
     def _blip(sess, tid, **k):
         raise core.PixAIError("network error reading task")

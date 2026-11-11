@@ -345,7 +345,9 @@ def test_a_whole_run_installs_the_requirements_and_starts_the_launcher_with_pyth
         "here = pathlib.Path(__file__).resolve().parent\n"
         "(here / 'started.txt').write_text(os.path.basename(sys.executable) + '\\n'"
         " + os.getcwd(), encoding='utf-8')\n", encoding="utf-8")
-    code, out = _run(app / SETUP.name)
+    # pip runs an install even for an empty requirements file, and on a machine that has not
+    # checked lately asks pypi.org whether pip itself is out of date (#98).
+    code, out = _run(app / SETUP.name, env=dict(os.environ, PIP_DISABLE_PIP_VERSION_CHECK="1"))
     if _found_path(out) is None:
         pytest.skip("no Python 3.10+ is reachable from cmd.exe on this machine")
     assert code == 0, out
@@ -372,7 +374,11 @@ def test_a_failed_pip_says_so_shows_the_command_and_stops_before_starting(tmp_pa
     (app / "Moonglade Launcher.pyw").write_text(
         "import pathlib\n"
         "(pathlib.Path(__file__).parent / 'started.txt').write_text('x')\n", encoding="utf-8")
-    code, out = _run(app / SETUP.name, timeout=600)
+    # pip must fail on its own, not by asking pypi.org about a package that does not exist
+    # (#98): --no-index makes "no such package" the answer with no network at all, and the
+    # version check pip makes after an install would be another request on a clean CI box.
+    offline = dict(os.environ, PIP_NO_INDEX="1", PIP_DISABLE_PIP_VERSION_CHECK="1")
+    code, out = _run(app / SETUP.name, timeout=600, env=offline)
     if _found_path(out) is None:
         pytest.skip("no Python 3.10+ is reachable from cmd.exe on this machine")
     assert code == 1, out

@@ -39,7 +39,7 @@ import "../styles/phone-q.css";
                          grid is cut in two at the rule (the page does the same), each half keeping the
                          two-column stagger; the feed is one list with the rule in it.
      cols (Q4)           how many columns the run of pictures is dealt across: 2 upright, 4 sideways
-                         (3 under 700 px wide), laid straight into a grid the way the page draws it.
+                         (3 under 700 px wide), each column its own stack as upright (#73).
                          Every picture wears data-mid, which is how a turn of the phone finds the one
                          at the top of the view again (hooks/useScrollAnchor.js).
      saver (Q7)          256 px thumbnails, and the page's small tag on each tile ("256 px", or
@@ -149,14 +149,19 @@ export default function GalleryGridMobile({
       pressing={pressingId === it.media_id} handlers={makeHandlers(it.media_id)} saver={saver} feed={feed} />
   );
   // One run of pictures. Upright it is the DC's own stagger: two flex columns, the second offset 22px
-  // down. Sideways (Q4) it is the Phone Handoff's landscape grid: 4 columns (3 on the narrow phones) of
-  // tiles laid straight into a CSS grid in reading order, rows aligned, no stagger -- as the page draws it.
+  // down. Sideways (Q4) it is the same idiom with more lanes: 4 stacked columns (3 on the narrow phones),
+  // the pictures dealt round-robin into them in reading order, no stagger. Each column is its own stack,
+  // so a tall picture never makes a row of holes (#73; the Phone Handoff drew lined-up rows, the owner
+  // picked stacks on 2026-10-28). The container keeps the name glm-grid-rows: the upright backstop, the
+  // turn guards and the harness key on it, and in a lagging turn four lanes in two tracks wrap down.
   const grid = (list, key) => {
     if (cols > 2) {
+      const lanes = Array.from({ length: cols }, () => []);
+      list.forEach((it, i) => lanes[i % cols].push(it));
       return (
         <div key={key} className={"glm-grid glm-grid-rows" + (loading ? " loading" : "")}
           style={{ gridTemplateColumns: "repeat(" + cols + ", minmax(0, 1fr))" }}>
-          {list.map(tile)}
+          {lanes.map((lane, n) => <div key={n} className="glm-col">{lane.map(tile)}</div>)}
         </div>
       );
     }

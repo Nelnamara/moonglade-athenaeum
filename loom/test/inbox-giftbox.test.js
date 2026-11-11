@@ -47,10 +47,18 @@ describe("two doors: ✉ Inbox, then 🎁 Gift box, then the credits chip (owner
   test("both sit in the header's right group before the credits chip, only with a linked account", () => {
     const inbox = bar.indexOf("<InboxDoor ");
     const gift = bar.indexOf("<GiftBox ");
-    const chip = bar.indexOf('className="mgx-cred" data-expiring');
+    // Since #72 the account end of the row -- the two doors, the credits chip, the claim button and
+    // the ? -- wraps as one group (.mgx-acct), so the header's row can break before the group but
+    // never inside it (the owner's iPad walk 2026-10-29 saw the ? alone on a line).
+    const chip = bar.indexOf("{creditsChip}", gift);
     assert.ok(inbox > 0 && gift > inbox && chip > gift, "✉ Inbox, then 🎁 Gift box, then the credits chip");
-    assert.match(bar, /\{linked \? <InboxDoor /);
-    assert.match(bar, /\{linked \? <GiftBox /);
+    assert.match(bar, /const creditsChip = \(\s*<button type="button" className=\{"mgx-cred" \+ \(credits === "—" \? " nobal" : ""\)\}\s*data-expiring/);
+    assert.match(bar, /<span className="mgx-acct">\s*\{linked \? <InboxDoor [^>]*\/> : null\}\s*\{linked \? <GiftBox [^>]*\/> : null\}\s*\{creditsChip\}/);
+    const help = bar.indexOf('className={"mgx-sephelp"');
+    assert.ok(help > 0, "the ? is rendered");
+    const group = bar.slice(bar.indexOf('<span className="mgx-acct">'), bar.indexOf("</span>", help) + 7);
+    assert.ok(group.includes('className="mgx-claim"') && group.includes('className={"mgx-sephelp"'),
+      "the claim button and the ? are inside the group, after the credits chip");
     assert.match(bar, /const linked = !!\(account && !account\.error && account\.credits != null\)/);
   });
 
@@ -97,7 +105,8 @@ describe("two doors: ✉ Inbox, then 🎁 Gift box, then the credits chip (owner
   });
 
   test("each panel: 380 px, z 300, scrolls inside, .42 s in and .35 s out with a 350 ms unmount", () => {
-    assert.match(css, /\.ib-panel \{[^}]*z-index: 300;[^}]*width: 380px;[^}]*max-height: calc\(100dvh - 96px\)/);
+    // #97: the room is the screen less the header the panel opens under (--mgx-chrome-h), never a fixed 96px
+    assert.match(css, /\.ib-panel \{[^}]*z-index: 300;[^}]*width: 380px;[^}]*max-height: max\(180px, calc\(100dvh - var\(--mgx-chrome-h, 81px\) - 15px\)\)/);
     assert.match(css, /animation: ibIn \.42s/);
     assert.match(css, /\.ib-panel\.closing \{ animation: ibOut \.35s/);
     assert.match(door, /export const CLOSE_MS = 350;/);

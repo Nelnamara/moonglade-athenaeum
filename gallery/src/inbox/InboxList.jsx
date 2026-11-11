@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   TABS, GLYPH, groupInbox, workDelta, timeAgo, giftMeta, giftPreview, bonusText, expiringLines, expiryText,
 } from "./inboxCore.js";
@@ -226,15 +226,64 @@ export function GiftRows({ data, error, claim, claimLocked, readOnly }) {
   );
 }
 
+/* The row the reader is looking at: the last one whose top is inside the list's box, and how far
+   below the box's top it sits. */
+function rowInView(el) {
+  /* At the very top there is nothing to hold: a new notification should show at the top. */
+  if (el.scrollTop === 0) return null;
+  const box = el.getBoundingClientRect();
+  let pick = null;
+  for (const r of el.querySelectorAll(".ib-row")) {
+    const b = r.getBoundingClientRect();
+    if (b.top >= box.top && b.top < box.bottom) pick = r;
+    else if (pick) break;
+  }
+  return pick ? { node: pick, y: pick.getBoundingClientRect().top - box.top } : null;
+}
+
+/* How many older pages the inbox reads on its own to fill a list too short to scroll (InboxBody). */
+const FILL_PAGES = 5;
+
 /* The inbox: work cards, then everything else. */
 export function InboxBody({ st, tab, now }) {
   const tip = useTip();
   const scrollRef = useRef(null);
+  const anchor = useRef(null);
   const g = groupInbox(st.items, tab);
+  /* AN OLDER PAGE LANDS WITHOUT MOVING WHAT YOU ARE READING (owner's iPad walk, 2026-10-29: "Gets to
+     bottom but bounces back up 3 lines"). Reaching the end reads the next, older page, and the list
+     is grouped -- work cards first, EVERYTHING ELSE after -- so a like or comment in that page on a
+     work not carded yet adds a card ABOVE the rows at the end, where the reader is. A browser keeps
+     the scroll offset (Safari) or the top row in view (scroll anchoring), never the end, so the rows
+     being read slid down by the cards' height. The list remembers the last row in view at every
+     scroll and, when the items change, puts that row back where it was; overflow-anchor is off on
+     .ib-scroll (inbox.css) so this is the one rule in every engine. */
   const onScroll = (e) => {
     const el = e.currentTarget;
+    anchor.current = rowInView(el);
     if (el.scrollTop + el.clientHeight >= el.scrollHeight - 40) loadMore();
   };
+  /* A FIRST PAGE THAT FITS STILL LEADS TO THE OLDER ONES (review of pick B, 2026-11-01). The end is
+     reached by scrolling, and a list that does not overflow never scrolls: on an upright iPad the
+     panel holds a whole 20-row page, so the older notifications were out of reach. Once a page lands,
+     while there are more and the list still does not fill its box, the next page is read -- page by
+     page until the list scrolls or there are no more (pickerCore.js's maybeFillPage). A failed read
+     stops it, and it reads at most FILL_PAGES pages unasked each time the panel or a tab opens. */
+  const fills = useRef(0);
+  useEffect(() => { anchor.current = null; fills.current = 0; }, [tab]);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !el.clientHeight || !st.loaded || st.loading || st.error || !st.hasMore) return;
+    if (fills.current >= FILL_PAGES || el.scrollHeight > el.clientHeight + 40) return;
+    fills.current += 1;
+    loadMore();
+  }, [st.items, st.loaded, st.loading, st.error, st.hasMore, tab]);
+  useLayoutEffect(() => {
+    const el = scrollRef.current, a = anchor.current;
+    if (!el || !a || !a.node.isConnected) return;
+    const moved = a.node.getBoundingClientRect().top - el.getBoundingClientRect().top - a.y;
+    if (Math.abs(moved) >= 1) el.scrollTop += moved;
+  }, [st.items]);
   const empty = st.loaded && !g.works.length && !g.rest.length;
   return (
     <div className="ib-scroll" ref={scrollRef} onScroll={onScroll}>

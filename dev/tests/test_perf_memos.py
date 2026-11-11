@@ -155,6 +155,35 @@ def test_the_contest_board_is_memoized(tmp_path, monkeypatch):
     assert len(calls) == 1
 
 
+def test_the_boards_ceiling_rides_the_memo_to_the_route(tmp_path, monkeypatch):
+    """list_contests reports a cut board through `meta`; the memo keeps it beside the rows,
+    so /api/contests says so on every read inside the TTL without a second pull (#94)."""
+    monkeypatch.setattr(g, "_contests_cache", {})
+    calls = []
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+
+    def _list(session, active_only=True, meta=None, **k):
+        calls.append(1)
+        if meta is not None:
+            meta.update(pages_read=20, total_page=25, total_count=1200, limit=1000,
+                        truncated=True)
+        return [{"id": "c1", "slug": "s1", "title": "One", "type": "official",
+                 "prize_amount": 0, "active": True}]
+    monkeypatch.setattr(core, "list_contests", _list)
+    cli = _client(tmp_path)
+    first = cli.get("/api/contests").get_json()
+    assert first["board"] == {"truncated": True, "limit": 1000, "total_count": 1200}
+    assert cli.get("/api/contests").get_json()["board"] == first["board"]
+    assert len(calls) == 1
+
+
+def test_a_reader_that_ignores_meta_means_an_untruncated_board(tmp_path, monkeypatch):
+    monkeypatch.setattr(g, "_contests_cache", {})
+    _board_stub(monkeypatch, [])
+    d = _client(tmp_path).get("/api/contests").get_json()
+    assert d["board"] == {"truncated": False}
+    assert d["contests"]
+
 def test_both_board_variants_come_off_the_one_snapshot(tmp_path, monkeypatch):
     """?all=1 used to be a SECOND cached read at a different depth. Since the ultrareview
     there is one board -- read at full depth, filtered per variant -- so the running-only

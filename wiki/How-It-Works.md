@@ -74,11 +74,11 @@ PixAI has no official public API for managing your own work, so some operations
 (listing your history, task detail, delete) reuse PixAI's own frontend interfaces.
 The practical upshot:
 
-- **Your API key is the only credential.** Your `USER_ID` is auto-resolved from it,
-  and the persisted-query hashes ship with working defaults — so setup is just the key.
-- **The hashes are not secrets.** They identify PixAI's own frontend operations and
-  rarely change. If a PixAI frontend update ever breaks one, you'll get a clear error
-  and can update that one value — see [Troubleshooting](Troubleshooting).
+- **Your API key is the only credential.** Your `USER_ID` is auto-resolved from it, and
+  nothing else needs capturing — so setup is just the key. Every request carries its own
+  full text, or goes to the same address pixai.art's own site uses, so no saved identifier
+  can go stale under you. If a PixAI site update ever breaks one, you'll get a clear error
+  — see [Troubleshooting](Troubleshooting).
 - **The legacy browser token is retired** — only a fallback for users without an API key.
 
 ## Media URLs

@@ -152,6 +152,8 @@ export default function ImageDetailsMobile({
   // Q7: the saver, and the full-size gate for a still (a clip has none; it just does not autoplay).
   const saver = useDataSaver().active;
   const fullGate = useFullGate(row ? row.media_id : null, saver && !!row && row.is_video !== "1");
+  // The picture's shape (width / height), when the row knows it. Sideways the frame is that shape (phone-landscape.css, #73).
+  const frameAR = row && Number(row.width) > 0 && Number(row.height) > 0 ? Number(row.width) / Number(row.height) : 0;
 
   // this component's OWN local resets on navigate (mediaOk/the see-all sheet
   // aren't shared with the desktop surface -- see useImageDetails.js for
@@ -262,7 +264,8 @@ export default function ImageDetailsMobile({
       </div>
 
       <div className="idm-body">
-        <div className={"idm-frame" + (fullGate.gated ? " gated" : "")} key={row.media_id}>
+        <div className={"idm-frame" + (fullGate.gated ? " gated" : "") + (frameAR ? " hasar" : "")} key={row.media_id}
+          style={frameAR ? { "--idm-ar": frameAR } : undefined}>
           {!mediaOk ? (
             <div className="gd-note">{row.is_video === "1" ? "Video file not found on disk." : "Image file not found on disk."}</div>
           ) : row.is_video === "1" ? (

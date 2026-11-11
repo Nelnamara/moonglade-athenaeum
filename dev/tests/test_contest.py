@@ -836,7 +836,8 @@ def _paged_board(total_page):
     """A contest board of `total_page` pages, one contest on each."""
     return {p: {"data": [{"id": str(p), "title": {"en": "C%d" % p}, "slug": "c%d" % p,
                           "type": "community", "runtimeStatus": "running", "mediaId": ""}],
-                "page": p, "pageSize": 50, "totalPage": total_page}
+                "page": p, "pageSize": 50, "totalPage": total_page,
+                "totalCount": total_page * 50}
             for p in range(1, total_page + 1)}
 
 
@@ -879,3 +880,45 @@ def test_totalpage_ending_the_walk_logs_nothing(pixai, monkeypatch, caplog):
     with caplog.at_level("WARNING"):
         core.list_contests(pixai)
     assert not [r for r in caplog.records if "ceiling" in r.getMessage()]
+
+def test_the_ceiling_is_reported_to_the_caller(pixai, monkeypatch):
+    """The walk used to tell only the log. `meta` carries it out: the caller (and so the
+    Contests screens) learns the board was cut and by how much."""
+    board = _paged_board(25)
+    pixai.on("/contest/list", lambda call: board[call.params["page"]])
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    meta = {}
+    rows = core.list_contests(pixai, meta=meta)
+    assert isinstance(rows, list) and len(rows) == 20
+    assert meta["truncated"] is True
+    assert meta["limit"] == 1000
+    assert meta["total_count"] == 25 * 50
+    assert meta["pages_read"] == 20 and meta["total_page"] == 25
+
+
+def test_a_board_that_ends_by_its_own_totalpage_is_not_truncated(pixai, monkeypatch):
+    board = _paged_board(3)
+    pixai.on("/contest/list", lambda call: board[call.params["page"]])
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    meta = {}
+    core.list_contests(pixai, meta=meta)
+    assert meta["truncated"] is False and meta["pages_read"] == 3
+
+
+def test_a_board_of_exactly_the_ceiling_is_not_truncated(pixai, monkeypatch):
+    """20 pages read, and totalPage says 20: the walk ended by the board, not the ceiling."""
+    board = _paged_board(20)
+    pixai.on("/contest/list", lambda call: board[call.params["page"]])
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    meta = {}
+    rows = core.list_contests(pixai, meta=meta)
+    assert len(rows) == 20 and meta["truncated"] is False
+
+
+def test_one_page_over_the_ceiling_is_truncated(pixai, monkeypatch):
+    board = _paged_board(21)
+    pixai.on("/contest/list", lambda call: board[call.params["page"]])
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    meta = {}
+    core.list_contests(pixai, meta=meta)
+    assert meta["truncated"] is True and meta["total_page"] == 21

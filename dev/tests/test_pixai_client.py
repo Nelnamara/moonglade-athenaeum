@@ -7,8 +7,8 @@ nothing here opens a socket, and no test in this file can spend anything: the on
 What is pinned:
 
   * each verb makes the HTTP call it claims to (`query`/`mutate` -> POST /graphql,
-    `persisted` -> GET /graphql with the Apollo persisted-query params, `rest_get` /
-    `rest_post` -> the oRPC `/v2` base);
+    `rest_get` / `rest_post` -> the oRPC `/v2` base), and no saved-request verb is left
+    (#92);
   * `mutate` retries EXACTLY 0 times and has no `retries` parameter to ask with -- the
     spend rule at the one place it now lives (dev/tests/test_spend_no_retry.py pins the same
     property from the spending paths' side);
@@ -129,40 +129,6 @@ class TestVerbsMakeTheRightCall:
         with pytest.raises(core.PixAIError, match="401 Unauthorized"):
             core.PixAIClient(s).query("query{ me{ id } }")
 
-    def test_persisted_gets_graphql_with_the_apollo_persisted_params(self):
-        s = RecordingSession(FakeResponse({"data": {"page": 1}}))
-        c = core.PixAIClient(s)
-        assert c.persisted(core.BOOKMARKED_MODELS_OP, {"first": 5},
-                           sha256=core.BOOKMARKED_MODELS_HASH) == {"page": 1}
-        (verb, url, kwargs), = s.calls
-        assert verb == "GET" and url == core.API_URL
-        p = kwargs["params"]
-        assert p["operation"] == core.BOOKMARKED_MODELS_OP
-        assert p["operationName"] == core.BOOKMARKED_MODELS_OP
-        assert json.loads(p["variables"]) == {"first": 5}
-        ext = json.loads(p["extensions"])
-        assert ext["persistedQuery"] == {"version": 1,
-                                         "sha256Hash": core.BOOKMARKED_MODELS_HASH}
-
-    def test_persisted_refuses_an_operation_with_no_known_hash(self):
-        c = core.PixAIClient(RecordingSession())
-        with pytest.raises(core.PixAIError, match="no persisted hash"):
-            c.persisted("someOperationNobodyCaptured", {})
-
-    def test_persisted_knows_no_hash_for_the_history_feed_any_more(self):
-        """The feed's saved request retired (#89): its operation name resolves no hash, and
-        nothing is sent."""
-        s = RecordingSession()
-        with pytest.raises(core.PixAIError, match="no persisted hash"):
-            core.PixAIClient(s).persisted(core.OPERATION_NAME, {})
-        assert s.calls == []
-
-    def test_persisted_names_the_recapture_step_on_a_stale_hash(self):
-        s = RecordingSession(FakeResponse({"errors": [{"message": "PersistedQueryNotFound"}]}))
-        with pytest.raises(core.PixAIError, match="Recapture"):
-            core.PixAIClient(s).persisted(core.BOOKMARKED_MODELS_OP, {},
-                                          sha256=core.BOOKMARKED_MODELS_HASH)
-
     def test_rest_get_hits_the_v2_base(self):
         s = RecordingSession(FakeResponse({"kaisuukens": []}))
         c = core.PixAIClient(s)
@@ -251,11 +217,11 @@ class TestThePrimitivesAreThinDelegates:
 
 
 class TestTheTransitionSurface:
-    """resolve_media, download, delete_task_gql, refresh_jwt and run_watch still reach for
-    the Session themselves (delete_task_gql POSTs a persisted mutation, which Apollo blocks
-    over GET, so it does not ride `persisted()`). Those calls have to keep working when what
-    they hold is a client. The persisted GETs no longer belong on this list -- they ride
-    `persisted()` now; see TestThePersistedGetsRideTheClient below."""
+    """resolve_media, download, refresh_jwt and run_watch still reach for the Session
+    themselves (refresh_jwt POSTs the Mirror's renewal with its own per-call Bearer, and must
+    not ride `rest_post`, whose error carries the response text). Those calls have to keep
+    working when what they hold is a client. The whole-task delete is no longer on this list:
+    it rides `rest_post` since #92."""
     def test_get_post_headers_cookies_delegate_to_the_session(self):
         s = RecordingSession(FakeResponse({"ok": 1}))
         s.headers["Authorization"] = "Bearer k"
@@ -264,31 +230,18 @@ class TestTheTransitionSurface:
         assert c.cookies is s.cookies
         assert c.session is s
         c.get("https://example/x", timeout=1)               # resolve_media / download
-        c.post("https://example/y", json={"a": 1})          # delete_task_gql / refresh_jwt
+        c.post("https://example/y", json={"a": 1})          # refresh_jwt
         assert [v for v, _u, _k in s.calls] == ["GET", "POST"]
 
 
-class TestThePersistedGetsRideTheClient:
-    """The persisted GET that remains (the bookmarks fallback) rides
-    `PixAIClient.persisted()` like every other PixAI call, and the task and model detail
-    reads that used to ride beside it POST their full documents now (#91). Two things are
-    pinned: none of them builds params or calls the Session itself (each delegates through
-    `_client_of`, or through `gql_adhoc`, which does), and the wire each one puts on the
-    socket is exactly the one it claims -- for the bookmarks fallback the same operationName,
-    captured `sha256Hash` and `variables` JSON as before; for the detail reads one POST of
-    their own document."""
+class TestTheDetailReadsRideTheClient:
+    """The task and model detail reads POST their full documents (#91); no saved request is
+    left at all (#92). Two things are pinned: none of them builds params or calls the Session
+    itself (each delegates through `gql_adhoc`, which goes through `_client_of`), and the wire
+    each one puts on the socket is exactly one POST of its own document."""
 
-    RIDERS = ["_bookmarks_persisted"]
     DOCUMENT_READERS = ["task_detail_gql", "_model_version_gql", "model_name_gql",
                         "resolve_model_base_id", "_resolve_model_preset"]
-
-    @pytest.mark.parametrize("name", RIDERS)
-    def test_it_delegates_through_the_client_and_speaks_no_http_itself(self, name):
-        src = inspect.getsource(getattr(core, name))
-        assert "_client_of(" in src, "{} no longer routes through the client".format(name)
-        assert ".persisted(" in src, "{} does not ride persisted()".format(name)
-        assert "session.get(" not in src and "session.post(" not in src, \
-            "{} speaks HTTP itself again -- it must delegate".format(name)
 
     @pytest.mark.parametrize("name", DOCUMENT_READERS)
     def test_a_detail_read_rides_the_document_and_speaks_no_http_itself(self, name):
@@ -298,16 +251,6 @@ class TestThePersistedGetsRideTheClient:
         assert ".persisted(" not in src, "{} rides a saved request again".format(name)
         assert "session.get(" not in src and "session.post(" not in src, \
             "{} speaks HTTP itself again -- it must delegate".format(name)
-
-    # -- the wire each one puts on the socket is byte-identical to master -----------------
-    def _get(self, driver, data):
-        """Drive `driver(client)` against a RecordingSession answering `{"data": data}`,
-        and return the params of the single GET it made."""
-        s = RecordingSession(FakeResponse({"data": data}))
-        driver(core.PixAIClient(s))
-        (verb, url, kwargs) = s.calls[0]
-        assert verb == "GET" and url == core.API_URL
-        return kwargs["params"]
 
     def _post(self, driver, data):
         """Drive `driver(client)` against a RecordingSession answering `{"data": data}`,
@@ -321,15 +264,6 @@ class TestThePersistedGetsRideTheClient:
         kw = self._post(lambda c: core.task_detail_gql(c, "T7"), {"task": {"id": "T7"}})
         assert kw["json"] == {"query": core._TASK_DETAIL_DOC, "variables": {"id": "T7"}}
         assert kw["timeout"] == 60                     # task_detail_gql's own default
-
-    def test_bookmarks_persisted_wire(self):
-        p = self._get(
-            lambda c: core._bookmarks_persisted(c, {}, False, "", "", "", 24),
-            {"me": {"bookmarkedGenerationModels": {}}})
-        assert p["operationName"] == core.BOOKMARKED_MODELS_OP == "listMyBookmarkedGenerationModels"
-        assert json.loads(p["variables"]) == {"first": 24}
-        ext = json.loads(p["extensions"])
-        assert ext["persistedQuery"]["sha256Hash"] == core.BOOKMARKED_MODELS_HASH
 
     def test_model_name_gql_wire(self):
         kw = self._post(
@@ -353,12 +287,6 @@ class TestThePersistedGetsRideTheClient:
                               "variables": {"id": "V-preset-wire-1"}}
 
     # -- FakePixAI is the second adapter on this same road -------------------------------
-    def test_fake_pixai_answers_a_registered_persisted_op(self):
-        fake = FakePixAI().on(core.BOOKMARKED_MODELS_OP,
-                              {"me": {"bookmarkedGenerationModels": {"edges": []}}})
-        assert core._bookmarks_persisted(fake, {}, False, "", "", "", 24) == {"edges": []}
-        assert fake.calls_for(core.BOOKMARKED_MODELS_OP)[0].variables == {"first": 24}
-
     def test_fake_pixai_refuses_an_unregistered_task_detail_read(self):
         """Offline-by-default: an op nobody registered is refused BY NAME, and the refusal is
         an AssertionError -- not a PixAIError -- so task_detail_gql's fail-soft catch cannot
@@ -421,13 +349,6 @@ class TestRetryPolicy:
             core.PixAIClient(s).query("query{ me{ id } }", retries=0)
         assert len(s.calls) == 1
 
-    def test_persisted_retries_four_times_by_default(self):
-        s = RecordingSession(requests.ConnectionError("connection dropped"))
-        with pytest.raises(requests.RequestException):
-            core.PixAIClient(s).persisted(core.BOOKMARKED_MODELS_OP, {},
-                                          sha256=core.BOOKMARKED_MODELS_HASH)
-        assert len(s.calls) == 5                      # the original + 4 retries
-
     def test_the_history_feed_keeps_its_four_retries(self):
         """gql's retries=4 rides onto the document POST: a dropped connection is asked five
         times, as the saved-request GET was."""
@@ -488,7 +409,7 @@ class TestForCreate:
 # ---------------------------------------------------------------------------
 
 class TestFakePixAISatisfiesTheSameInterface:
-    VERBS = ("query", "mutate", "persisted", "rest_get", "rest_post", "for_create")
+    VERBS = ("query", "mutate", "rest_get", "rest_post", "for_create")
 
     @pytest.mark.parametrize("verb", VERBS)
     def test_the_fake_offers_the_same_verb_with_the_same_signature(self, verb):

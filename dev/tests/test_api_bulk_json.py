@@ -7,7 +7,7 @@ helpers underneath, JSON contract instead of redirect-with-banner. The page rout
 stay until classic's demolition, so every test here is about the JSON routes doing
 the SAME thing the page routes do: the same trash mechanism (restorable via
 /api/trash/restore), the same collection helpers, the same task-level cloud delete
-through core.delete_task_gql. Tier enforcement (401/403 shapes) is owned by
+through core.delete_task. Tier enforcement (401/403 shapes) is owned by
 dev/tests/test_route_tiers.py; here only the contracts that go beyond a bare tier are
 re-proven (READ_ONLY).
 """
@@ -222,7 +222,7 @@ def test_delete_tasks_by_media_ids_matches_the_page_route(tmp_path, monkeypatch,
     both routes run the same _resolve_delete_targets + _start_bulk_delete."""
     db = _cloud_batch(tmp_path)
     calls = []
-    monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: calls.append(tid))
+    monkeypatch.setattr(core, "delete_task", lambda sess, tid: calls.append(tid))
 
     cli = login_client(tmp_path)
     d = cli.post("/api/delete-tasks", json={"media_ids": ["m1", "loc"]}).get_json()
@@ -241,7 +241,7 @@ def test_delete_tasks_by_media_ids_matches_the_page_route(tmp_path, monkeypatch,
 def test_delete_tasks_by_task_ids_directly(tmp_path, monkeypatch, pixai):
     db = _cloud_batch(tmp_path)
     calls = []
-    monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: calls.append(tid))
+    monkeypatch.setattr(core, "delete_task", lambda sess, tid: calls.append(tid))
 
     cli = login_client(tmp_path)
     d = cli.post("/api/delete-tasks", json={"task_ids": ["T1", "T1"]}).get_json()
@@ -261,7 +261,7 @@ def test_delete_tasks_purge_local_false_leaves_the_library_alone(tmp_path, monke
     side at all -- are dropped from the job entirely."""
     db = _cloud_batch(tmp_path)
     calls = []
-    monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: calls.append(tid))
+    monkeypatch.setattr(core, "delete_task", lambda sess, tid: calls.append(tid))
 
     cli = login_client(tmp_path)
     d = cli.post("/api/delete-tasks", json={
@@ -310,7 +310,7 @@ def test_bulk_delete_leaves_the_only_copy_left_anywhere_alone(tmp_path, monkeypa
 
     The worker reads the live task once before it purges and walks around those rows."""
     db = _keepback_batch(tmp_path)
-    monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: None)
+    monkeypatch.setattr(core, "delete_task", lambda sess, tid: None)
     monkeypatch.setattr(core, "task_detail_gql",
                         lambda sess, tid, **k: _live_task_with_one_deleted())
 
@@ -337,7 +337,7 @@ def test_bulk_delete_marks_the_row_it_kept(tmp_path, monkeypatch, pixai):
     `--backfill-full-meta` only re-fetches rows missing their prompt or model detail, so a
     complete row is never revisited and nothing else would ever write this."""
     db = _keepback_batch(tmp_path)
-    monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: None)
+    monkeypatch.setattr(core, "delete_task", lambda sess, tid: None)
     monkeypatch.setattr(core, "task_detail_gql",
                         lambda sess, tid, **k: _live_task_with_one_deleted())
 
@@ -355,7 +355,7 @@ def test_bulk_delete_keeps_a_marked_row_when_the_live_read_fails(tmp_path, monke
     takes. The catalog's own cloud_deleted_at stands on its own for exactly that case: it
     was written the last time the app read this task, and it still means the same thing."""
     db = _keepback_batch(tmp_path, cloud_deleted_at=GONE)
-    monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: None)
+    monkeypatch.setattr(core, "delete_task", lambda sess, tid: None)
 
     def _blip(sess, tid, **k):
         raise core.PixAIError("network error reading task")
@@ -378,7 +378,7 @@ def test_bulk_delete_still_takes_the_whole_task_when_nothing_was_deleted_on_pixa
     always was -- cloud and catalog stay in step, and the Activity card says nothing about
     rows kept, because none were."""
     db = _keepback_batch(tmp_path)
-    monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: None)
+    monkeypatch.setattr(core, "delete_task", lambda sess, tid: None)
     monkeypatch.setattr(core, "task_detail_gql", lambda sess, tid, **k: {
         "id": "T1", "outputs": {"batch": [{"mediaId": m} for m in ("m1", "m2", "gone")]}})
 
@@ -396,7 +396,7 @@ def test_delete_tasks_read_only_refuses_before_the_job_starts(tmp_path, monkeypa
     the Activity card, and the cloud mutation is never reached."""
     _cloud_batch(tmp_path)
     monkeypatch.setattr(core, "READ_ONLY", True)
-    monkeypatch.setattr(core, "delete_task_gql",
+    monkeypatch.setattr(core, "delete_task",
                         lambda *a, **k: pytest.fail("READ_ONLY did not stop the delete"))
 
     cli = login_client(tmp_path)

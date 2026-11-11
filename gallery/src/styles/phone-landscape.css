@@ -13,13 +13,25 @@
      - the Lightbox picture fits the HEIGHT and its actions move to a RIGHT RAIL   .lbm-root / .lbm-bottom
      - sheets open as SIDE PANELS, up to 380 px wide: Sort, Advanced, Actions and the rest of the
        shared sheets, the Upscale slabs, the model picker, and the record's foot   .glm-sheet ...
-     - the safe areas (notch on either side, the home bar) are respected on both sides.
+     - the safe areas (notch on either side, the home bar) are respected on both sides. The side ones
+       are read through --mg-safe-l / --mg-safe-r, which are env() unless the browser has already kept
+       that room itself (data-mg-sides-kept on <html>, set by hooks/usePhoneLandscape.js): then they are
+       0, so the room is counted once, never twice (#73). Top and bottom stay env().
    The page is a simplified shell with sample pictures, so where the real app has more than it shows
    (the hero, the goal chips, the search bar, the placard, the prompt slab, the film strip) the piece keeps
    its own look and simply re-flows; those choices are stated in the wiki page's Landscape section.
 
    Every colour is an app token. z-index: nothing here is raised; the bands are the ones already in use
    (components 0-7, overlays 300-500, ambient 510-520). Sizes are the page's own where it draws them. */
+
+/* The side safe areas, counted once (#73). env() unless the browser already kept that room itself; the
+   registered lengths let the change slide (see the landscape block) instead of jumping. Unregistered
+   (a browser without @property) the same values resolve, just without the slide. Outside the landscape
+   block nothing reads them. */
+@property --mg-safe-l { syntax: "<length>"; inherits: true; initial-value: 0px; }
+@property --mg-safe-r { syntax: "<length>"; inherits: true; initial-value: 0px; }
+:root { --mg-safe-l: env(safe-area-inset-left); --mg-safe-r: env(safe-area-inset-right); }
+:root[data-mg-sides-kept] { --mg-safe-l: 0px; --mg-safe-r: 0px; }
 
 /* Upright the record's wrapper has no box of its own: its children are the body's, exactly as they were. */
 .idm-rec { display: contents; }
@@ -29,20 +41,26 @@
 
 @media (orientation: landscape) and (max-height: 520px) {
 
+  /* A late correction (the hook reads again at 120 / 400 / 1000 ms after a turn, and the sides-kept state
+     can flip while the phone is already sideways) slides the side room in or out over half a second
+     instead of jumping the whole page. The turn itself never slides: the hook sets data-mg-slide only for
+     a flip after the first sideways read. */
+  :root[data-mg-slide] { transition: --mg-safe-l .5s ease, --mg-safe-r .5s ease; }
+
   /* ---- the shell: rail | (hero, tab, goal chips) ------------------------------------------------
      A grid instead of a column. The rail spans every row; the notch's inset on the left is added to
      its width (and taken off its padding) so the 56 px the page draws is the usable part; the inset on
      the right and the home bar's below are the stage's own padding, on the stage's own background. */
-  .glm-stage { display: grid; grid-template-columns: calc(56px + env(safe-area-inset-left)) minmax(0, 1fr);
+  .glm-stage { display: grid; grid-template-columns: calc(56px + var(--mg-safe-l)) minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr) auto;
-    padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) 0; }
+    padding: 0 var(--mg-safe-r) env(safe-area-inset-bottom) 0; }
   .glm-stage > .glm-hero { grid-column: 2; grid-row: 1; }
   .glm-stage > .glm-body { grid-column: 2; grid-row: 2; }
   .glm-stage > .mgg-chips { grid-column: 2; grid-row: 3; }
 
   /* ---- Q4 the rail (page: 56 px, 44 px tiles, 16 px apart, 24 px down, a hairline on its right) ---- */
   .glm-stage > .glm-nav { grid-column: 1; grid-row: 1 / -1; flex-direction: column; align-items: center;
-    justify-content: flex-start; gap: 16px; padding: 24px 0 0 env(safe-area-inset-left);
+    justify-content: flex-start; gap: 16px; padding: 24px 0 0 var(--mg-safe-l);
     border-top: 0; border-right: 1px solid var(--surface0); overflow: hidden; }
   .glm-nav .glm-navitem { flex: none; width: 44px; height: 44px; padding: 0; gap: 0; justify-content: center;
     border-radius: 12px; }
@@ -70,7 +88,7 @@
     .glm-hero-stats > span:not(.glm-saverchip) { display: none; }
   }
 
-  /* ---- the gallery: 4 columns of tiles laid straight into a grid (page: 6 px gaps, 12 px in) ---- */
+  /* ---- the gallery: 4 stacked columns (page: 6 px gaps, 12 px in) ---- */
   .glm-grid.glm-grid-rows { gap: 6px; padding: 12px 12px 12px 12px; align-items: start; }
   .glm-grid-rows .glm-tile { border-radius: 7px; }
   /* The search bar stops being sticky: on a 390 px screen the hero and a pinned bar would hold a third of
@@ -97,17 +115,17 @@
      right inset joins the padding so nothing sits under a notch on that side. */
   .glm-sheet { left: auto; right: 0; top: 0; bottom: 0; width: min(380px, 100%); max-height: none;
     border-radius: 16px 0 0 16px; border-top: 0; border-left: 1px solid var(--lavender);
-    padding: 12px calc(13px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) 13px;
+    padding: 12px calc(13px + var(--mg-safe-r)) calc(16px + env(safe-area-inset-bottom)) 13px;
     animation-name: glmPanelIn; }
   .glm-sheet.closing { animation-name: glmPanelOut; }
   .glm-sheet .glm-sheet-actions, .glm-sheet .mgdrm-confirm-actions {
-    margin-right: calc(-13px - env(safe-area-inset-right));
-    padding-right: calc(13px + env(safe-area-inset-right)); }
+    margin-right: calc(-13px - var(--mg-safe-r));
+    padding-right: calc(13px + var(--mg-safe-r)); }
 
   /* the Create tab's model / LoRA picker is a sheet too */
   .cm-modelwrap .mfly { inset: 0 0 0 auto; width: min(380px, 100%); max-width: none; height: auto; max-height: none;
     border-radius: 16px 0 0 16px; border: 1px solid var(--surface1); border-right: 0; border-top: 0; border-bottom: 0;
-    padding-right: calc(13px + env(safe-area-inset-right));
+    padding-right: calc(13px + var(--mg-safe-r));
     box-shadow: -20px 0 60px rgba(0, 0, 0, .55); animation-name: glmPanelIn; }
 
   /* ---- the Lightbox: the picture fits the HEIGHT, the actions are a right rail -------------------
@@ -115,14 +133,14 @@
      in a column. Here the rail is the whole lower panel (placard, mark, prompt, film strip and the
      actions), the actions first so they never sit past a scroll; the top bar (close, index, stars,
      slideshow) stays over the picture. */
-  .lbm-root { display: grid; grid-template-columns: minmax(0, 1fr) calc(188px + env(safe-area-inset-right));
-    grid-template-rows: auto minmax(0, 1fr); padding-left: env(safe-area-inset-left); }
+  .lbm-root { display: grid; grid-template-columns: minmax(0, 1fr) calc(188px + var(--mg-safe-r));
+    grid-template-rows: auto minmax(0, 1fr); padding-left: var(--mg-safe-l); }
   .lbm-topbar { grid-column: 1; grid-row: 1; padding: max(8px, env(safe-area-inset-top)) 12px 6px; }
   .lbm-stage { grid-column: 1; grid-row: 2; min-height: 0; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); }
   .lbm-hero { height: 100%; }
   .lbm-bottom { grid-column: 2; grid-row: 1 / -1; min-height: 0; gap: 8px; overscroll-behavior: contain;
     border-left: 1px solid var(--surface0);
-    padding: max(8px, env(safe-area-inset-top)) calc(10px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) 10px; }
+    padding: max(8px, env(safe-area-inset-top)) calc(10px + var(--mg-safe-r)) calc(12px + env(safe-area-inset-bottom)) 10px; }
   .lbm-bottom > * { min-width: 0; }
   /* the foot -- the action list -- LEADS the rail instead of being pinned under it: first in the rail it
      cannot be pushed off by the prompt slab opening below it (drift 122's promise, turned on its side),
@@ -139,15 +157,31 @@
   /* the Upscale slab: a side panel */
   .lbm-sheet-slab { left: auto; top: 0; bottom: 0; width: min(380px, 100%); max-height: none;
     border-radius: 16px 0 0 16px; border-top: 0; border-left: 1px solid var(--lavender);
-    padding-right: calc(15px + env(safe-area-inset-right)); transform: translateX(100%); }
+    padding-right: calc(15px + var(--mg-safe-r)); transform: translateX(100%); }
   .lbm-sheet-slab.open { transform: translateX(0); }
 
   /* ---- the record (Image Details): the picture beside a side panel that scrolls as one ------------ */
-  .idm-root { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+  .idm-root { padding-left: var(--mg-safe-l); padding-right: var(--mg-safe-r); }
   .idm-topbar { padding: max(8px, env(safe-area-inset-top)) 12px 6px; }
-  .idm-body { flex-direction: row; gap: 0; overflow: hidden; padding: 10px 0 0 14px; }
-  .idm-body > .idm-frame { flex: 1 1 0; min-width: 0; align-self: center; width: auto; margin-right: 14px; }
-  .idm-frame img, .idm-frame video { max-height: calc(100dvh - 70px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+  .idm-body { flex-direction: row; gap: 14px; overflow: hidden; padding: 10px 0 0 14px; }
+  /* The frame is the picture's own shape, centred left of the panel -- not a grey box stretched across all
+     the room with the picture floating in it (#73). A note-only frame ("file not found") keeps a sensible
+     width; a frame with a picture in it takes the picture's, so a narrow portrait has no bars beside it. */
+  .idm-body > .idm-frame { flex: 0 1 auto; align-self: center; width: auto; margin: 0 auto; }
+  .idm-body > .idm-frame:not(:has(img, video)) { min-width: min(240px, 100%); }
+  /* With the picture's shape known (.hasar, --idm-ar = width / height from the row) the frame is that shape,
+     as big as the room allows -- up to the height cap or the room beside the panel -- and the picture fills
+     it. So a thumbnail (Data saver's 256 px one, behind "Tap to load full size") fills the same box the
+     full picture will, instead of sitting at its natural size with the pill clipped. Without a known shape
+     the rules above stand. */
+  .idm-body > .idm-frame.hasar { --idm-h: calc(100dvh - 70px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    min-width: 0; width: min(100%, calc(var(--idm-h) * var(--idm-ar))); aspect-ratio: var(--idm-ar); }
+  .idm-body > .idm-frame.hasar:not(:has(img, video)) { width: auto; aspect-ratio: auto; min-width: min(240px, 100%); }
+  .idm-frame.hasar img, .idm-frame.hasar video { position: absolute; inset: 0; width: 100%; height: 100%;
+    max-width: none; max-height: none; object-fit: contain; }
+  /* the pill is a button of words: in a narrow tall frame it wraps instead of being clipped */
+  .idm-frame .lbm-tapfull { white-space: normal; text-align: center; max-width: calc(100% - 12px); }
+  .idm-frame img, .idm-frame video { width: auto; max-width: 100%; max-height:calc(100dvh - 70px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
   .idm-rec { display: flex; flex-direction: column; gap: 14px; flex: none; width: min(380px, 46%);
     min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
     border-left: 1px solid var(--surface0);
@@ -162,10 +196,11 @@
   /* the Upscale slab: a side panel */
   .idm-sheet-slab { left: auto; top: 0; bottom: 0; width: min(380px, 100%); max-height: none;
     border-radius: 16px 0 0 16px; border-top: 0; border-left: 1px solid var(--lavender);
-    padding-right: calc(15px + env(safe-area-inset-right)); transform: translateX(100%); }
+    padding-right: calc(15px + var(--mg-safe-r)); transform: translateX(100%); }
   .idm-sheet-slab.open { transform: translateX(0); }
 }
 
 @media (orientation: landscape) and (max-height: 520px) and (prefers-reduced-motion: reduce) {
   .glm-sheet, .cm-modelwrap .mfly { animation: none; }
+  :root, :root[data-mg-slide] { transition: none; }
 }
