@@ -19,8 +19,8 @@ CHANGELOG and the open issues on 2026-10-08.
 
 ## Now — active
 
-- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.20.5 — Loose Ends,
-  2026-10-28), per the rule at the top of this file.
+- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.20.6 — Indoor Voice,
+  2026-11-11), per the rule at the top of this file.
 
 ---
 

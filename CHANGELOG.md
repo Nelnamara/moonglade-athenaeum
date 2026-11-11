@@ -16,6 +16,16 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.20.6] - 2026-11-11 — Indoor Voice
+
+### Changed
+- **The whole app takes a quieter look, chosen from real renders of it.** Labels read in sentence case, a size larger, instead of spaced capitals. The colour emoji that stood in for icons are line icons from one set. Headings, figures and buttons are semi-bold rather than heavy. The glossy glass pills are matte. Buttons, inputs and search fields have squarer corners, while chips, counts and tags stay round. The metal buttons shine when you point at them instead of all the time, and decorations that only looped (the Folio title's glint, the full moon's breathing) hold still. A gallery card answers a hover with its border and a fade instead of lifting. The chrome has no coloured glows left. Motion that shows something live keeps moving: job spinners, the activity dot, the power card while it works, and the mark. Prompts, titles and anything you typed are untouched, and the wiki's labels and icon names now match the screen. (2026-11-03)
+- **Effects the build had added beyond the design are gone.** The AI Tools entry's glow and its pulsing NEW flag, the claim button's endless ring, the Control Panel's coloured glows and washes, and the emoji glyphs in the import overlay and the Folio. The gallery's match line is one plain line again. Each of these now looks the way its design draws it. (2026-11-02)
+
+### Fixed
+- **The Loom's top bar no longer runs into itself.** On a narrower window the goal chip shrinks before Render and Export do, and the end of the bar wraps only when even the shrunk chip does not fit. A live Activity chip leaves room for its job rings, so they no longer cover the link beside them. The right rail draws its icons from one set. (2026-11-02)
+- **The import overlay's error line is announced as an alert, and a preview tile cut short by the size cap names its file.** (2026-11-02)
+
 ## [3.20.5] - 2026-10-28 — Loose Ends
 
 ### Fixed
