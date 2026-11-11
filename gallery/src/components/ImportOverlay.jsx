@@ -88,7 +88,11 @@ export default function ImportOverlay({ onClose, collections, onImported }) {
             </div>
           ) : files.length === 0 ? (
             <div className={"mgim-drop" + (dragActive ? " hot" : "")}>
-              <div className="mgim-drop-icon">⬆</div>
+              <svg className="mgim-drop-icon" width="22" height="22" viewBox="0 0 16 16" fill="none"
+                stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                {/* the Import glyph Frontend Gallery.dc.html draws (NAV_MARKS.Import), arrow into a tray */}
+                <path d="M8 3.4v7.2m0 0L5.3 7.9M8 10.6l2.7-2.7M3 11.6V13a1 1 0 001 1h8a1 1 0 001-1v-1.4" />
+              </svg>
               <div className="mgim-drop-text">Drop images, videos, or a .zip here</div>
               <div className="mgim-drop-buttons">
                 <button type="button" className="mgim-btn" onClick={() => fileInputRef.current?.click()}>Browse files…</button>
@@ -110,13 +114,15 @@ export default function ImportOverlay({ onClose, collections, onImported }) {
                 {previewList.map((f, i) => {
                   const url = thumbUrl(f);
                   return previewCapped ? (
-                    <div className="mgim-tile" key={f.name + f.size}>
-                      {url ? <img src={url} alt="" /> : <span>{kindOf(f) === "video" ? "▶" : "📦"}</span>}
+                    <div className="mgim-tile" key={f.name + f.size} title={f.name}>
+                      {url ? <img src={url} alt="" /> : (kindOf(f) === "video" ? <span>▶</span> : (
+                        <span className="mgim-ext">{(f.name.match(/\.([^.\\/]+)$/) || [])[1]}</span>
+                      ))}
                     </div>
                   ) : (
                     <div className="mgim-row" key={f.name + f.size}>
                       <span className="mgim-thumb">
-                        {url ? <img src={url} alt="" /> : <span>{kindOf(f) === "video" ? "▶" : "📦"}</span>}
+                        {url ? <img src={url} alt="" /> : (kindOf(f) === "video" ? <span>▶</span> : null)}
                       </span>
                       <span className="mgim-nm" title={f.name}>{f.name}</span>
                       <span className="mgim-sz">{fmtSize(f.size)}</span>
@@ -153,7 +159,7 @@ export default function ImportOverlay({ onClose, collections, onImported }) {
                 )}
               </div>
 
-              {result && !result.ok && <div className="mgim-result err">⚠ {result.error}</div>}
+              {result && !result.ok && <div className="mgim-result err" role="alert">{result.error}</div>}
 
               <div className="mgim-actions">
                 <button type="button" className="mgim-cancel" onClick={onClose}>Cancel</button>

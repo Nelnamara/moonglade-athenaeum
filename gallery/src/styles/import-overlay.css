@@ -16,7 +16,7 @@
   padding: 34px 20px; border-radius: 14px; border: 1.5px dashed var(--surface1);
   background: rgba(12,10,28,.5); transition: border-color .2s, background .2s; }
 .mgim-drop.hot { border-color: var(--lavender); background: rgba(182,146,230,.08); }
-.mgim-drop-icon { font-size: 22px; color: var(--lavender); }
+.mgim-drop-icon { color: var(--lavender); }
 .mgim-drop-text { font-size: 12.5px; color: var(--subtext); }
 .mgim-drop-buttons { display: flex; gap: 10px; padding-top: 4px; }
 .mgim-btn { padding: 8px 16px; border-radius: 999px; border: 1px solid var(--surface1);
@@ -50,6 +50,8 @@ button.mgim-x:hover { color: var(--red); background: rgba(243,139,168,.1); }
 .mgim-tile { aspect-ratio: 1; border-radius: 7px; overflow: hidden; background: var(--surface0);
   display: grid; place-items: center; font-size: 13px; color: var(--overlay0); }
 .mgim-tile img { width: 100%; height: 100%; object-fit: cover; }
+.mgim-ext { max-width: 100%; padding: 0 3px; box-sizing: border-box; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--overlay0); }
 .mgim-more { aspect-ratio: 1; border-radius: 7px; background: rgba(182,146,230,.1);
   border: 1px solid rgba(182,146,230,.3); display: grid; place-items: center; text-align: center;
   font-size: 10px; font-weight: 700; color: var(--mauve); line-height: 1.3; }

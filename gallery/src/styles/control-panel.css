@@ -672,7 +672,7 @@ button.mgcp-pwr-ghost { display: inline-block; white-space: nowrap; margin-top: 
 .mgcp-bjstatus .off { color: var(--overlay0); }
 .mgcp-bjstatus code { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--subtext); }
 .mgcp-bjdot { width: 8px; height: 8px; border-radius: 50%; background: var(--surface1); flex: none; }
-.mgcp-bjdot.on { background: var(--emerald); box-shadow: 0 0 7px var(--emerald); }
+.mgcp-bjdot.on { background: var(--emerald); }
 .mgcp-bjurls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .mgcp-bjurl { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--accent); overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .mgcp-bjqr { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
@@ -741,9 +741,7 @@ button.mgcp-verup:hover { text-decoration: underline; text-underline-offset: 2px
   background: color-mix(in oklab, var(--emerald) 20%, transparent); }
 .mgcp-updphase.now .mgcp-updphase-dot { border-color: var(--lavender); }
 .mgcp-updphase.now .mgcp-updphase-dot i { width: 6px; height: 6px; border-radius: 50%;
-  background: var(--lavender); box-shadow: 0 0 8px var(--lavender);
-  animation: mgcpUpdPulse 1.4s ease-in-out infinite; }
-@keyframes mgcpUpdPulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+  background: var(--lavender); box-shadow: 0 0 8px var(--lavender); }
 .mgcp-updphase.wait .mgcp-updphase-lab { color: var(--subtext); }
 .mgcp-updphase-t { margin-left: auto; font-family: ui-monospace, Menlo, monospace;
   font-size: 10px; font-variant-numeric: tabular-nums; color: var(--overlay0); }
