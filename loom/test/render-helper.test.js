@@ -48,13 +48,13 @@ const doneJob = {
 test("ActivityRow expanded shows a COST row only when the job carries a real credit figure", async () => {
   const withCost = query(await render(ACTIVITY_ROW, "default",
     { job: { ...doneJob, paid_credit: 1200 }, expanded: true }));
-  const costKey = one(withCost.byText("COST"), "COST label");
-  assert.equal(costKey.parent.text, "COST1,200 credits");
+  const costKey = one(withCost.byText("Cost"), "Cost label");
+  assert.equal(costKey.parent.text, "Cost1,200 credits");
 
   // No figure, or a non-finite one: no row at all, never a made-up "0 credits".
   for (const paid_credit of [undefined, null, NaN, "1200"]) {
     const $ = query(await render(ACTIVITY_ROW, "default", { job: { ...doneJob, paid_credit }, expanded: true }));
-    assert.equal($.byText("COST").length, 0, "no COST row for paid_credit=" + String(paid_credit));
+    assert.equal($.byText("Cost").length, 0, "no Cost row for paid_credit=" + String(paid_credit));
     assert.equal($.byText("credits").length, 0);
   }
 });
@@ -71,8 +71,9 @@ test("ActivityRow states: a finished row offers Dismiss, a running one says it o
   const stop = one(running.byText("Stop tracking"), "stop button");
   assert.equal(stop.tag, "button");
   assert.match(stop.attr("title"), /does not cancel it on PixAI/);
-  assert.equal(running.byClass("at-phase")[0].text, "queued");
-  assert.equal(one(running.byText("Queued")).attr("class"), "at-dv");
+  // (sentence case since the unslop pass: the phase pill and the status value both say Queued)
+  assert.equal(running.byClass("at-phase")[0].text, "Queued");
+  assert.equal(running.byText("Queued").filter((e) => e.attr("class") === "at-dv").length, 1);
 });
 
 test("effects never run: a running, expanded row (whose effect starts a 1 s timer) renders with no timer or fetch", async () => {

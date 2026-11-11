@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import Icon from "../icons/Icons.jsx";
 import { recipeMeta, recipesApi } from "./recipesApi.js";
 import {
   addToDock, cacheCards, cachedCard, getSnapshot, openCreator, removeFromDock, subscribe, updateOpen,
@@ -205,14 +206,14 @@ function Market({ dock, fitOf, onBack, onOpen, onCreate }) {
           <div className="rcp-m-scrim rcp-m-scrim-top" onClick={() => setFilters(false)} aria-hidden="true" />
           <div className="rcp-m-sheet rcp-m-sheet-short rcp-m-filters" role="dialog" aria-label="Sort and filters">
             <div className="rcp-m-grab" aria-hidden="true" />
-            <div className="rcp-kicker">SORT</div>
+            <div className="rcp-kicker">Sort</div>
             <div className="rcp-chipset">{SORTS.map(([k, l]) => <button key={k} type="button" className={"rcp-pchip" + (sort === k ? " on" : "")} onClick={() => setSort(k)}>{l}</button>)}</div>
-            <div className="rcp-kicker">CATEGORY</div>
+            <div className="rcp-kicker">Category</div>
             <div className="rcp-chipset">
               <button type="button" className={"rcp-pchip" + (!category ? " on" : "")} onClick={() => setCategory("")}>All</button>
               {CATEGORIES.map(([k, l]) => <button key={k} type="button" className={"rcp-pchip" + (category === k ? " on" : "")} onClick={() => setCategory(k)}>{l}</button>)}
             </div>
-            <div className="rcp-kicker">MODEL</div>
+            <div className="rcp-kicker">Model</div>
             <div className="rcp-chipset">
               <button type="button" className={"rcp-pchip" + (!modelType ? " on" : "")} onClick={() => setModelType("")}>All</button>
               {models.map((m) => <button key={m} type="button" className={"rcp-pchip" + (modelType === m ? " on" : "")} onClick={() => setModelType(m)}>{modelTypeLabel(m)}</button>)}
@@ -236,12 +237,12 @@ function MCard({ c, mf, on, saved, onOpen, onLong }) {
       <span className="rcp-badges">
         {c.category && <span className="rcp-badge rcp-badge-strong">{categoryLabel(c.category)}</span>}
         <span className="rcp-badge">↗ {compact(c.uses)}</span>
-        {c.followers_only && <span className="rcp-badge rcp-badge-mauve">🔒</span>}
+        {c.followers_only && <span className="rcp-badge rcp-badge-mauve"><Icon name="lock" title="Followers only" /></span>}
       </span>
       {(on || saved) && <span className="rcp-tick rcp-tick-card">✓</span>}
       {mf && <span className="rcp-misfit-tag rcp-misfit-mid">{mf.tag}</span>}
       <span className="rcp-card-foot"><span className="rcp-card-title">{c.title}</span>
-        <span className="rcp-card-by"><span>{authorName(c)}</span><span>♡ {compact(c.likes)}</span></span></span>
+        <span className="rcp-card-by"><span>{authorName(c)}</span><span><Icon name="heart" /> {compact(c.likes)}</span></span></span>
     </button>
   );
 }
@@ -264,7 +265,7 @@ function RecipeScreen({ id, fitOf, inDock, note, onBack, onUse }) {
       {card && (
         <div className="rcp-m-chips">
           <button type="button" className={"rcp-m-chip" + (saved ? " on" : "")} onClick={() => setMenu(true)}>{saved ? "✓ In a set" : "⊕ Save to…"}</button>
-          <span className="rcp-m-chip rcp-static">♡ {fmt(card.likes)}</span>
+          <span className="rcp-m-chip rcp-static"><Icon name="heart" /> {fmt(card.likes)}</span>
         </div>
       )}
       <div className="rcp-m-scroll rcp-m-recipe">
@@ -272,13 +273,13 @@ function RecipeScreen({ id, fitOf, inDock, note, onBack, onUse }) {
           <>
             <span className="rcp-m-cover"><Art src={card.cover} alt={card.title} /></span>
             <div className="rcp-pane-by">{authorName(card)} · {categoryLabel(card.category) || "—"} · {card.model_title || modelTypeLabel(card.model_type)}</div>
-            <div className="rcp-pane-stats rcp-mono"><span>♡ {compact(card.likes)}</span><span>↗ {compact(card.uses)}</span><span>▦ {compact(card.artworks)}</span></div>
-            <div className="rcp-kicker">WHAT IT ADDS</div>
+            <div className="rcp-pane-stats rcp-mono"><span><Icon name="heart" /> {compact(card.likes)}</span><span>↗ {compact(card.uses)}</span><span>▦ {compact(card.artworks)}</span></div>
+            <div className="rcp-kicker">What it adds</div>
             <div className="rcp-kinds">{(card.kinds || []).map((k) => <span key={k.type} className="rcp-kind">{kindLabel(k)}</span>)}</div>
             {card.description ? <div className="rcp-page-desc">{card.description}</div> : null}
             {mf && <div className="rcp-peach rcp-pane-why">{mf.why}. {mf.fix}</div>}
             {note && !mf && <div className="rcp-peach rcp-pane-why">{note}</div>}
-            <div className="rcp-kicker">MADE WITH IT</div>
+            <div className="rcp-kicker">Made with it</div>
             <div className="rcp-m-grid3">
               {art === null ? <span className="rcp-muted">Reading…</span> : art.length ? art.map((a) => (
                 <span key={a.id || a.media_id} className={"rcp-made-cell" + (a.blur ? " blur" : "")}><Art src={a.thumb} /></span>

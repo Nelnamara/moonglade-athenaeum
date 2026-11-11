@@ -13,7 +13,7 @@
    inbox the owner's mailbox at the same 22 px (the ✉ glyph if it cannot load) ------------------ */
 .ib-wrap { position: static; display: flex; align-items: center; margin-right: -4px; }
 .ib-door { position: relative; width: 30px; height: 30px; flex: none; box-sizing: border-box; padding: 0;
-  border-radius: 9px; border: 1px solid rgba(255, 255, 255, .18); cursor: pointer;
+  border-radius: var(--radius-control); border: 1px solid rgba(255, 255, 255, .18); cursor: pointer;
   display: grid; place-items: center; color: var(--text); font: inherit; background: rgba(33, 31, 58, .6);
   transition: box-shadow .18s, filter .18s; }
 .ib-door.gift { background: url(/branding/rewards/gift.png) center / 22px auto no-repeat, rgba(33, 31, 58, .6); }
@@ -25,7 +25,7 @@
 .ib-door:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; }
 .ib-badge { position: absolute; top: -6px; right: -7px; min-width: 15px; height: 15px; padding: 0 4px;
   box-sizing: border-box; display: grid; place-items: center; border-radius: 999px; font-size: 9px;
-  font-weight: 800; line-height: 1; background: var(--lavender); color: var(--base);
+  font-weight: 600; line-height: 1; background: var(--lavender); color: var(--base);
   font-family: var(--font-system, system-ui, sans-serif); pointer-events: none; white-space: nowrap; }
 
 /* ---- the panel (§1): 380 px, under the button, right-aligned to the header --------------- */
@@ -87,7 +87,7 @@
    and Safari has none, so it is off and the one rule is the list's. */
 .ib-scroll { display: flex; flex-direction: column; gap: 7px; min-height: 0; overflow-y: auto;
   overscroll-behavior: contain; overflow-anchor: none; }
-.ib-lab { font-size: 9.5px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); }
+.ib-lab { font-size: 11.5px; font-weight: 500; letter-spacing: normal; color: var(--overlay0); }
 .ib-dim { font-size: 9.5px; line-height: 1.45; color: var(--overlay0); }
 .ib-warn { font-size: 10.5px; line-height: 1.5; color: var(--peach); }
 .ib-ok { font-size: 10.5px; line-height: 1.5; color: var(--emerald); }
@@ -134,10 +134,10 @@
 .ib-inboxglyph.small { font-size: inherit; }
 .ib-gift-t { flex: 1; min-width: 0; font-size: 10.5px; line-height: 1.45; }
 .ib-acts { display: flex; gap: 6px; justify-content: flex-end; align-items: center; }
-.ib-btn { font: inherit; font-size: 10.5px; font-weight: 700; padding: 6px 12px; border-radius: 9px; border: 0;
+.ib-btn { font: inherit; font-size: 10.5px; font-weight: 600; padding: 6px 12px; border-radius: var(--radius-control-sm); border: 0;
   background: var(--lavender); color: var(--base); white-space: nowrap; cursor: pointer; flex: none; }
 .ib-btn:disabled { opacity: .5; cursor: default; }
-.ib-ghost { font: inherit; font-size: 10.5px; padding: 6px 12px; border-radius: 9px; border: 1px solid var(--surface1);
+.ib-ghost { font: inherit; font-size: 10.5px; padding: 6px 12px; border-radius: var(--radius-control-sm); border: 1px solid var(--surface1);
   background: none; color: var(--subtext); white-space: nowrap; cursor: pointer; flex: none; }
 .ib-ghost:hover { color: var(--text); }
 .ib-link { font-size: 10.5px; color: var(--lavender); white-space: nowrap; flex: none; text-decoration: none; }
@@ -153,7 +153,7 @@
   background: var(--surface0); flex: none; }
 .ib-event-art { display: block; width: 100%; aspect-ratio: 3 / 1; background-color: var(--surface0);
   background-size: cover; background-position: center; background-repeat: no-repeat; }
-.ib-event-t { display: block; padding: 7px 10px 8px; font-size: 13px; font-weight: 700; line-height: 1.35;
+.ib-event-t { display: block; padding: 7px 10px 8px; font-size: 13px; font-weight: 600; line-height: 1.35;
   color: var(--text); background: rgba(5, 4, 13, .85); overflow-wrap: anywhere; }
 .ib-event:hover { filter: brightness(1.1); }
 .ib-event:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; }
@@ -170,5 +170,5 @@
 .ib-mrow-meta.peach { font-family: inherit; color: var(--peach); }
 .ib-menubadge { position: absolute; top: -4px; right: -6px; min-width: 15px; height: 15px; padding: 0 4px;
   box-sizing: border-box; display: grid; place-items: center; border-radius: 999px; font-size: 9px;
-  font-weight: 800; line-height: 1; background: var(--lavender); color: var(--base); pointer-events: none; }
+  font-weight: 600; line-height: 1; background: var(--lavender); color: var(--base); pointer-events: none; }
 .ib-expiry-line { font-size: 10.5px; line-height: 1.5; color: var(--peach); }

@@ -29,13 +29,13 @@
 /* ---- top bar (design's topBarStyle, back/lightbox/index/prev-next) ---- */
 .idm-topbar { flex: none; display: flex; align-items: center; gap: 10px;
   padding: max(14px, env(safe-area-inset-top)) 12px 10px; border-bottom: 1px solid var(--surface1); }
-.idm-back { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+.idm-back { font-size: 12.5px; font-weight: 500; letter-spacing: normal; text-transform: none;
   color: var(--subtext); cursor: pointer; background: none; border: none; padding: 0; font-family: inherit; }
 .idm-lb { font-size: 14px; color: var(--overlay0); cursor: pointer; background: none; border: none;
   padding: 4px; font-family: inherit; }
 .idm-fill { flex: 1 1 auto; }
 .idm-index { font-size: 10.5px; color: var(--overlay0); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.idm-navbtn { font-size: 15px; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 7px;
+.idm-navbtn { font-size: 15px; width: 26px; height: 26px; display: grid; place-items: center; border-radius: var(--radius-control);
   cursor: pointer; border: 1px solid rgba(255,255,255,.12); background: var(--surface0); color: var(--text);
   font-family: inherit; flex: none; }
 .idm-navbtn:disabled { opacity: .35; cursor: default; }
@@ -61,7 +61,7 @@
 
 /* ---- file-action chips row ---- */
 .idm-chiprow { display: flex; flex-wrap: wrap; gap: 7px; padding: 2px; }
-.idm-chip { font-size: 10.5px; font-weight: 700; white-space: nowrap; padding: 8px 13px; border-radius: 9px;
+.idm-chip { font-size: 10.5px; font-weight: 600; white-space: nowrap; padding: 8px 13px; border-radius: var(--radius-control);
   cursor: pointer; flex: none; text-decoration: none; font-family: inherit;
   border: 1px solid rgba(255,255,255,.12); background: rgba(12,10,28,.72); color: rgba(226,222,238,.82); }
 .idm-chip:disabled { opacity: .5; cursor: default; }
@@ -77,7 +77,7 @@
 
 /* ---- head block (kicker / headline / rule) ---- */
 .idm-head { display: flex; flex-direction: column; gap: 7px; }
-.idm-kicker { font-size: 9.5px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+.idm-kicker { font-size: 11.5px; font-weight: 500; letter-spacing: normal; text-transform: none;
   color: var(--lavender); display: flex; align-items: center; gap: 8px; }
 .idm-title { font-family: var(--font-hero); font-style: italic; font-size: 20px; line-height: 1.28;
   color: var(--text); margin: 0; animation: idmInscribe .5s cubic-bezier(.2,.9,.24,1) .08s both; }
@@ -98,21 +98,21 @@
 .idm-ledger { display: flex; flex-direction: column; }
 .idm-row { padding: 8px 2px; border-bottom: 1px dashed var(--surface1); transition: background .18s; }
 .idm-row.copied { background: rgba(79,201,154,.1); }
-.idm-row-label { font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+.idm-row-label { font-size: 11px; font-weight: 500; letter-spacing: normal; text-transform: none;
   color: var(--overlay0); margin-bottom: 3px; }
 .idm-row-vwrap { display: flex; align-items: flex-start; gap: 8px; }
 .idm-row-val { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-size: 11.5px; line-height: 1.55;
   color: rgba(226,222,238,.88); }
 .idm-row-val.mono { font-family: ui-monospace, Menlo, monospace; }
 .idm-row-val.dim { color: rgba(214,210,226,.5); }
-.idm-row-copy { flex: none; font-size: 11px; cursor: pointer; padding: 2px 5px; border-radius: 6px;
+.idm-row-copy { flex: none; font-size: 11px; cursor: pointer; padding: 2px 5px; border-radius: var(--radius-control-sm);
   color: var(--overlay0); background: none; border: none; font-family: inherit; }
 .idm-row.copied .idm-row-copy { color: var(--emerald); }
 
 /* ---- SIMILAR box (real /api/similar/<mid> data) ---- */
 .idm-similar { display: flex; flex-direction: column; gap: 8px; }
 .idm-similar-head { display: flex; align-items: baseline; gap: 8px; }
-.idm-subhead { font-size: 9.5px; font-weight: 700; letter-spacing: .14em; color: var(--overlay0); }
+.idm-subhead { font-size: 11.5px; font-weight: 500; letter-spacing: normal; color: var(--overlay0); }
 .idm-dimtext { font-size: 10px; color: var(--overlay0); }
 .idm-seeall { font-size: 10px; color: var(--lavender); cursor: pointer; background: none; border: none;
   font-family: inherit; padding: 0; }
@@ -160,7 +160,7 @@
 /* ---- prompt editor + suggestions (reuse desktop's #prompt-editor/#suggest-box
    shape at mobile widths -- same fields, own compact layout) ---- */
 .idm-editor { display: flex; flex-direction: column; gap: 8px; }
-.idm-editor textarea { width: 100%; box-sizing: border-box; min-height: 110px; border-radius: 9px;
+.idm-editor textarea { width: 100%; box-sizing: border-box; min-height: 110px; border-radius: var(--radius-control);
   padding: 9px 11px; font-size: 12.5px; color: var(--text); background: var(--surface0);
   border: 1px solid var(--surface1); font-family: inherit; resize: vertical; }
 .idm-editor-row { display: flex; align-items: center; gap: 8px; }
@@ -203,9 +203,9 @@
 .idm-sheet-slab.open { transform: translateY(0); pointer-events: auto;
   transition: transform .28s cubic-bezier(.2,.9,.24,1); }
 .idm-sheet-head { display: flex; align-items: center; gap: 8px; padding-bottom: 8px; }
-.idm-sheet-title { font-size: 14px; font-weight: 800; }
+.idm-sheet-title { font-size: 14px; font-weight: 600; }
 .idm-sheet-x { margin-left: auto; width: 26px; height: 26px; display: grid; place-items: center;
-  border-radius: 7px; border: 1px solid var(--surface1); background: var(--surface0);
+  border-radius: var(--radius-control); border: 1px solid var(--surface1); background: var(--surface0);
   color: var(--subtext); font-size: 12px; cursor: pointer; font-family: inherit; }
 .upscale-panel.inline { margin-top: 0 !important; }
 @media (prefers-reduced-motion: reduce) {

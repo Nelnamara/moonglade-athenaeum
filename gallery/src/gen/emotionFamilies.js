@@ -24,18 +24,18 @@
    surface, and the family's colour rides the glyph. gold = bright, lavender = soft,
    ruby = dark, cyan (--loomc) = startled, emerald = playful. No new hues. */
 
-/** The five, in tab order. `keys` is the design-time mapping; `glyph` is the family mark. */
+/** The five, in tab order. `keys` is the design-time mapping; `icon` names the drawn line icon (gallery/src/icons) and `glyph` is the text mark where there is none. */
 export const FAMILIES = [
   {
-    id: "bright", label: "Bright", glyph: "☼", color: "var(--gold)",
+    id: "bright", label: "Bright", glyph: "", icon: "sun", color: "var(--gold)",
     keys: ["happy", "laughing", "pumped", "moved", "affection", "amazed"],
   },
   {
-    id: "soft", label: "Soft", glyph: "☾", color: "var(--lavender)",
+    id: "soft", label: "Soft", glyph: "", icon: "moon", color: "var(--lavender)",
     keys: ["cute", "shy", "nervous", "sympathy", "blush-stickers", "aroused"],
   },
   {
-    id: "dark", label: "Dark", glyph: "☂", color: "var(--ruby)",
+    id: "dark", label: "Dark", glyph: "", icon: "umbrella", color: "var(--ruby)",
     keys: ["upset", "mad", "annoyed", "scowl", "sickened", "speechless", "pouting", "focused"],
   },
   {

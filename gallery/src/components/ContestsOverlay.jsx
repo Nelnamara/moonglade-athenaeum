@@ -117,7 +117,7 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
           ) : (
           <>
           <div className="mgv-titlerow">
-            <div className="mgv-title">🏅 Contests</div>
+            <div className="mgv-title"><Icon name="medal" /> Contests</div>
             {/* §8.2 -- the tab pair, with the live count of contests holding entries. */}
             <div className="mgct-tabs">
               <button type="button" className={"mgct-tab" + (tab === "contests" ? " on" : "")}
@@ -156,7 +156,7 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
 
               {featured && (
                 <>
-                  <div className="mgct-h official">☀ Official <span className="n">{fmt(official.length)}</span></div>
+                  <div className="mgct-h official"><Icon name="sun" /> Official <span className="n">{fmt(official.length)}</span></div>
                   {/* Gallery-era correction (handoff-2026-08-06 §5): one FULL-WIDTH 3:1
                       banner, title/pills/dates OVERLAID along the bottom over a gradient
                       scrim -- no separate body block below the image anymore. */}
@@ -174,11 +174,11 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
                           <div className="mgct-title big">{featured.title}</div>
                           <div className="mgct-tags">
                             {featured.prize_amount > 0 && (
-                              <span className="mgct-prize strong">♦ {fmt(featured.prize_amount)} CR</span>
+                              <span className="mgct-prize strong"><Icon name="coin" /> {fmt(featured.prize_amount)} CR</span>
                             )}
                             {featured.vote_type ? (
                               <span className={"mgct-votepick" + (featured.vote_type === "user_vote" ? " user" : "")}>
-                                {featured.vote_type === "user_vote" ? "USER VOTE" : "CREATOR PICK"}
+                                {featured.vote_type === "user_vote" ? "User vote" : "Creator pick"}
                               </span>
                             ) : null}
                             {/* list-level deadline awareness: this library's own count */}
@@ -196,7 +196,7 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
               )}
 
               {(community.length > 0 || restOfficial.length > 0) && (
-                <div className="mgct-h community">🤝 Community <span className="n">{fmt(community.length)}</span></div>
+                <div className="mgct-h community"><Icon name="community" /> Community <span className="n">{fmt(community.length)}</span></div>
               )}
               {(community.length > 0 || restOfficial.length > 0) && (
                 <div className="mgct-grid">
@@ -211,7 +211,7 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
                         <div className="mgct-body">
                           <div className="mgct-title">{c.title}</div>
                           <div className="mgct-tags">
-                            {c.prize_amount > 0 && <span className="mgct-prize">♦ {fmt(c.prize_amount)} CR</span>}
+                            {c.prize_amount > 0 && <span className="mgct-prize"><Icon name="coin" /> {fmt(c.prize_amount)} CR</span>}
                             {enteredCount(c) > 0 && (
                               <span className="mgct-entered"><Icon name="entered" />Entered ×{enteredCount(c)}</span>
                             )}
@@ -233,10 +233,10 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
                         <div className="mgct-body">
                           <div className="mgct-title">{c.title}</div>
                           <div className="mgct-tags">
-                            {c.prize_amount > 0 && <span className="mgct-prize">♦ {fmt(c.prize_amount)} CR</span>}
+                            {c.prize_amount > 0 && <span className="mgct-prize"><Icon name="coin" /> {fmt(c.prize_amount)} CR</span>}
                             {c.vote_type ? (
                               <span className={"mgct-votepick" + (c.vote_type === "user_vote" ? " user" : "")}>
-                                {c.vote_type === "user_vote" ? "USER VOTE" : "CREATOR PICK"}
+                                {c.vote_type === "user_vote" ? "User vote" : "Creator pick"}
                               </span>
                             ) : null}
                             {enteredCount(c) > 0 && (

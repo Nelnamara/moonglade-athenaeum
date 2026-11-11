@@ -66,8 +66,8 @@ describe("(b) a series||batch unit renders the stack markup + the right badge (G
   });
   test("the badge: SERIES · Nv · M (SERIES-only on a video cover); BATCH · N", () => {
     assert.ok(grid.includes(
-      '? (it.is_video ? "SERIES" : "SERIES · " + it.series.count_tasks + "v · " + it.series.count_images)'));
-    assert.ok(grid.includes(': stack === "batch" ? "BATCH · " + it.batch.count'));
+      '? (it.is_video ? "Series" : "Series · " + it.series.count_tasks + "v · " + it.series.count_images)'));
+    assert.ok(grid.includes(': stack === "batch" ? "Batch · " + it.batch.count'));
     // badge element class resolves to .mgg-series-badge / .mgg-batch-badge, top-left
     assert.ok(grid.includes('className={"mgg-" + stack + "-badge"}'));
   });
@@ -142,8 +142,8 @@ describe("(c) opening a stack: BOTH kinds -> the one stack modal", () => {
     assert.ok(modal.includes("(run < 0 || t.rn === run + 1)"));
     assert.ok(modal.includes("active.every(([, , test]) => test(t.it))"));
     // the header sort pair, and the r-number badge that makes its order legible
-    assert.ok(modal.includes(">run \u2116</button>"));
-    assert.ok(modal.includes(">newest</button>"));
+    assert.ok(modal.includes(">Run \u2116</button>"));
+    assert.ok(modal.includes(">Newest</button>"));
     assert.ok(modal.includes('badge: "r" + rn + "\u00b7" + i'));
     // Esc goes STRAIGHT back -- one key, one level
     assert.ok(modal.includes('if (e.key !== "Escape") return;'));
@@ -160,7 +160,7 @@ describe("(c) opening a stack: BOTH kinds -> the one stack modal", () => {
     assert.ok(modal.includes('const isBatch = !!stack && stack.kind === "batch";'));
     assert.ok(modal.includes("const sid = stack ? stack.id : null;"));
     // the kicker: BATCH or SERIES, inside .mgss-head, BEFORE the title
-    assert.ok(modal.includes('const kicker = isBatch ? "BATCH" : "SERIES";'));
+    assert.ok(modal.includes('const kicker = isBatch ? "Batch" : "Series";'));
     assert.ok(modal.includes('<span className="mgss-kicker">{kicker}</span>'));
     assert.ok(modal.indexOf('className="mgss-kicker"') < modal.indexOf('className="mgss-title"'));
     // the title and the meta line say which kind too
@@ -172,9 +172,9 @@ describe("(c) opening a stack: BOTH kinds -> the one stack modal", () => {
     assert.ok(ki > 0, ".mgss-kicker rule present");
     const krule = mcss.slice(ki, mcss.indexOf("}", ki));
     assert.match(krule, /font-family: ui-monospace/);
-    assert.match(krule, /font-size: 11px;/);
-    assert.match(krule, /letter-spacing: \.1em;/);
-    assert.match(krule, /text-transform: uppercase;/);
+    assert.match(krule, /font-size: 13px;/);
+    assert.match(krule, /letter-spacing: normal;/);
+    assert.match(krule, /text-transform: none;/);
     // a BATCH never asks /api/series/ anything -- its own route, its own listing param
     assert.ok(api.includes('return fetchStack("/api/batch/", "batch", taskId);'));
     assert.ok(api.includes('return fetchStack("/api/series/", "series", sid);'));

@@ -41,6 +41,16 @@ to diff the files against the private originals to find them:
      hairline the WHOLE drawing rather than most of it -- so at 10-13px it needs the
      device-constant stroke even more than a duo does, not less.
 
+THE LINE SET (2026-11-03, the owner's unslop pick 2B: "Emoji: line icons"). The `_line`
+files are NOT from the Glyphs set: they were drawn for this app, one grammar for all of them
+-- a 24-unit canvas, a 1.5 stroke, round caps and joins, `currentColor`, no fill except a
+dot that needs one (`fill="currentColor" stroke="none"`). They replace the colour emoji and
+the symbol stand-ins the app used as icons. The stroke attributes live on each file's <svg>
+root, so the generator emits the children only and Icon() puts the same root attributes
+back for every name in LINE. Neither edit above touches them: they carry no #C2CCDE, and
+none of their elements names its own stroke, so rule 2 has nothing to pin -- their stroke is
+MEANT to scale with the icon (1.5 of 24 units: 1 px at 16 px), which keeps the set one weight.
+
 Run:  python dev/tools/build_icons.py        (writes gallery/src/icons/Icons.jsx)
 """
 import pathlib
@@ -63,7 +73,66 @@ ICONS = [
     ("panel", "laptop-cog_poly", "The Control Panel"),
     ("collection", "books_path", "The command palette's \"Collection: <name>\" rows"),
     ("undo", "history_path", "Undo, everywhere it is offered"),
+    # ---- the line set (2026-11-03, unslop pick 2B), drawn for this app; see the header ----
+    ('warning', 'warning_line', 'A warning, an error, a failed or held tile'),
+    ('lock', 'lock_line', 'Locked, private, followers-only, serving-machine-only'),
+    ('unlock', 'unlock_line', "A cast member's lock, off"),
+    ('key', 'key_line', "The login screen's banner slot"),
+    ('image', 'image_line', "A picture: from the gallery, a banner slot, a poster, the Loom's Reference tab"),
+    ('video', 'video_line', "A video: a video reference, the Loom's Video tab"),
+    ('film', 'film_line', "The Loom's banner slot"),
+    ('download', 'download_line', 'Download, export or pull down a file'),
+    ('upload', 'upload_line', 'Upload or import from disk'),
+    ('share', 'share_line', "The phone's own Share button, named in the install nudge"),
+    ('gear', 'gear_line', 'Settings: the Advanced rows'),
+    ('publish', 'publish_line', 'Publish to PixAI'),
+    ('mail', 'mail_line', 'The Inbox, when its mailbox art cannot load'),
+    ('sun', 'sun_line', 'An Official contest; the Bright emotion family'),
+    ('moon', 'moon_line', 'The Soft emotion family'),
+    ('umbrella', 'umbrella_line', 'The Dark emotion family'),
+    ('community', 'community_line', 'A Community contest'),
+    ('medal', 'medal_line', 'Contests'),
+    ('trophy', 'trophy_line', "A contest's winners, a won entry"),
+    ('chart', 'chart_line', 'My Art'),
+    ('pulse', 'pulse_line', 'Collection Health'),
+    ('heart', 'heart_line', 'Likes'),
+    ('comment', 'comment_line', 'Comments'),
+    ('eye', 'eye_line', 'Views'),
+    ('trash', 'trash_line', 'Delete, and the Trash'),
+    ('ticket', 'ticket_line', 'A free card covers it'),
+    ('coin', 'coin_line', 'Credits: a price, a prize'),
+    ('bolt', 'bolt_line', "All at once, quickly: Auto-resolve all, the Loom's Draft"),
+    ('dice', 'dice_line', 'Reroll'),
+    ('flask', 'flask_line', 'Train a LoRA'),
+    ('expand', 'expand_line', 'The full-screen viewer'),
+    ('crop', 'crop_line', "Crop, and the Fixer's box"),
+    ('menu', 'menu_line', 'A page list, the More menu'),
+    ('checkbox-on', 'checkbox-on_line', 'A ticked keep box'),
+    ('checkbox-off', 'checkbox-off_line', 'An unticked keep box'),
+    ('crown', 'crown_line', 'Membership'),
+    ('swords', 'swords_line', 'The Arena'),
+    ('skin', 'skin_line', 'A skin reward'),
+    ('flag', 'flag_line', 'A banner reward'),
+    ('scissors', 'scissors_line', 'Splice or split'),
+    ('person', 'person_line', 'A LoRA of a character'),
+    ('brush', 'brush_line', "An art style: a style LoRA, the Loom's Project look"),
+    ('shirt', 'shirt_line', "A LoRA of an outfit"),
+    ('shapes', 'shapes_line', 'A LoRA of something else'),
+    ('music', 'music_line', 'Audio: an audio reference, the music bed'),
+    ('phone', 'phone_line', "The Loom's Mobile view"),
+    ('desktop', 'desktop_line', "The Loom's Desktop view"),
+    ('ban', 'ban_line', 'A closed contest'),
+    ('generate', 'generate_line', "The Loom rail's Image tab: the Generate mark, drawn"),
+    ('pencil', 'pencil_line', "The Loom rail's Edit tab"),
+    ('file', 'file_line', 'A file with no preview, in the import list'),
+    ('hourglass', 'hourglass_line', "Still running"),
+    ('timer', 'timer_line', "A standing order"),
+    ('speaker', 'speaker_line', "Sound on: the Loom's shot sound toggle and the playthrough"),
+    ('speaker-off', 'speaker-off_line', "Sound off: the same two, muted"),
 ]
+
+# Every `_line` file is the 24-unit grammar; Icon() gives these names its root attributes.
+LINE = [key for key, fname, _ in ICONS if fname.endswith("_line")]
 
 TINT = "#C2CCDE"
 # laptop-cog_poly's three drawn tones -> the duo grammar (see the header note).
@@ -96,6 +165,10 @@ HEAD = '''/* GENERATED by dev/tools/build_icons.py from the .svg files beside th
    2026-09-05). Nine icons from the Glyphs set -- glyphs.fyi, MIT, credited in the
    NOTICE file beside these -- replacing nine Unicode stand-ins: the ballot's seven, plus
    the books and the history dial the post-audit rulings added for "Collection:" and Undo.
+   And THE LINE SET (2026-11-03, the owner's unslop pick 2B): 24-unit line icons drawn
+   for this app -- 1.5 stroke, round caps and joins, currentColor -- replacing the colour
+   emoji and symbol stand-ins. They carry the class mgico-line, which seats them on the
+   x-height centre of the text beside them (styles/icons.css).
 
    HOW THEY TINT, and why there is no icon font. Each icon draws in `currentColor`, so
    `color:` paints it: every skin retints its own icons, a hover state retints on hover,
@@ -116,17 +189,23 @@ import "../styles/icons.css";
 TAIL = '''
 /* One icon. `title` makes it an announced image; without one it is decorative and
    hidden from the a11y tree, which is right wherever the label beside it already says
-   the word. */
+   the word. A LINE icon gets the line set's root attributes here, once, rather than on
+   every path of every drawing. */
 export default function Icon({ name, size = "1em", title, className, style }) {
   const glyph = GLYPHS[name];
   if (!glyph) return null;
+  const line = LINE.has(name);
   return (
     <svg
-      className={"mgico" + (className ? " " + className : "")}
-      viewBox="0 0 80 80"
+      className={"mgico" + (line ? " mgico-line" : "") + (className ? " " + className : "")}
+      viewBox={line ? "0 0 24 24" : "0 0 80 80"}
       width={size}
       height={size}
       fill="none"
+      stroke={line ? "currentColor" : undefined}
+      strokeWidth={line ? 1.5 : undefined}
+      strokeLinecap={line ? "round" : undefined}
+      strokeLinejoin={line ? "round" : undefined}
       style={style}
       role={title ? "img" : undefined}
       aria-hidden={title ? undefined : "true"}
@@ -195,9 +274,13 @@ def build():
             raw = want
         blocks.append(
             "  /* %s -- %s.svg */\n  %s: (\n    <>\n%s\n    </>\n  ),"
-            % (note, fname, key, to_jsx(inner(raw), indent="      "))
+            % (note, fname, key if key.isidentifier() else '"%s"' % key,
+               to_jsx(inner(raw), indent="      "))
         )
-    return HEAD + "const GLYPHS = {\n" + "\n".join(blocks) + "\n};\n" + TAIL
+    line = "const LINE = new Set([\n%s\n]);\n" % "\n".join(
+        "  " + ", ".join('"%s"' % k for k in LINE[i:i + 6]) + ","
+        for i in range(0, len(LINE), 6))
+    return HEAD + "const GLYPHS = {\n" + "\n".join(blocks) + "\n};\n\n" + line + TAIL
 
 
 def main():

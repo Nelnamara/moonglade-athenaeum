@@ -207,7 +207,7 @@ describe("\"Use these settings for every shot\" (J's button)", () => {
   test("styled on the Loom panel's small text action (.lv-unbind), right-aligned", () => {
     const rule = (sel) => { const m = CSS.match(new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\{([^}]*)\\}")); return m ? m[1] : ""; };
     const base = rule(".gen-drawer .mgd-applyall");
-    assert.match(base, /font:700 10\.5px\/1 system-ui/);
+    assert.match(base, /font:600 10\.5px\/1 system-ui/);
     assert.match(base, /background:none/);
     assert.match(base, /border:0/);
     assert.match(base, /color:var\(--subtext/);

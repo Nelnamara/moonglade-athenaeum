@@ -119,7 +119,7 @@ describe("Problem 3: baseType prop drives architecture-aware LoRA sort/badging",
       "a confirmed-incompatible row must carry the .incompat class (dimmed cover / .55 opacity)");
     assert.match(cssRules, /\.model-picker \.mg-card\.incompat \.mg-cov\{filter:saturate\(\.3\) brightness\(\.6\);\}/,
       "the .incompat cover dim (the DC's saturate .3 / brightness .6) must survive the port");
-    assert.match(jsx, /\{incompat && arch && <span className="mg-ibadge">&#9888; \{arch\}<\/span>\}/,
+    assert.match(jsx, /\{incompat && arch && <span className="mg-ibadge"><Icon name="warning" \/> \{arch\}<\/span>\}/,   // the warning line icon since the quieted look (was &#9888;)
       "a confirmed-incompatible row shows the warning badge with the required arch");
     assert.match(jsx, /const clickable = !incompat \|\| sel;/,
       "a fresh pick on an incompatible row must be blocked, but removing one that was " +

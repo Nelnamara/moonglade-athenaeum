@@ -51,24 +51,29 @@ export function isDecided(row, now) {
   return t !== null && t <= (now == null ? Date.now() : now);
 }
 
-/** The status pill of a My-entries row: {cls, text, sub}. Derived, never stored.
+/** The status pill of a My-entries row: {state, cls, text, sub, icon}. Derived, never stored.
     running -> awaiting results -> (verified win | checking | not placed). A contest is only
     "not placed" once the daily check has actually finished with a decided list; before that
-    the row says the app is still checking, because an empty list is undecided, not lost. */
+    the row says the app is still checking, because an empty list is undecided, not lost.
+    `state` is the machine name a caller tests (never the words, which are sentence case since
+    the unslop pass); `icon` names the line icon a won row's pill draws before its tier
+    (gallery/src/icons, unslop pick 2B) -- the tier pill itself is ART.md's and unchanged. */
 export function rowStatus(row, now) {
   const r = row || {};
-  if (r.active) return { cls: "", text: "RUNNING", sub: "" };
-  if (!isDecided(r, now)) return { cls: "awaiting", text: "AWAITING RESULTS", sub: "" };
+  if (r.active) return { state: "running", cls: "", text: "Running", sub: "" };
+  if (!isDecided(r, now)) return { state: "awaiting", cls: "awaiting", text: "Awaiting results", sub: "" };
   const w = bestWin(r);
-  if (r.won && w) return { cls: "won", text: "🏆 " + tierPill(w.tier), sub: tierLabel(w.tier, w.prize_amount) };
+  if (r.won && w) {
+    return { state: "won", cls: "won", icon: "trophy", text: tierPill(w.tier), sub: tierLabel(w.tier, w.prize_amount) };
+  }
   const st = (r.check && r.check.state) || "none";
-  if (st === "settled") return { cls: "quiet", text: "NOT PLACED", sub: "" };
+  if (st === "settled") return { state: "not-placed", cls: "quiet", text: "Not placed", sub: "" };
   if (st === "expired") {
     return r.check && r.check.decided
-      ? { cls: "quiet", text: "NOT PLACED", sub: "" }
-      : { cls: "quiet", text: "NO RESULT FOUND", sub: "" };
+      ? { state: "not-placed", cls: "quiet", text: "Not placed", sub: "" }
+      : { state: "no-result", cls: "quiet", text: "No result found", sub: "" };
   }
-  return { cls: "awaiting", text: "CHECKING RESULTS", sub: "" };
+  return { state: "checking", cls: "awaiting", text: "Checking results", sub: "" };
 }
 
 /** The state line under the Check row: {tone, text}.

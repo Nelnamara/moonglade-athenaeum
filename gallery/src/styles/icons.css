@@ -20,6 +20,15 @@
   flex: none;                /* never squeezed by a flex row it shares with a label */
 }
 
+/* ---- THE LINE SET (2026-11-03, unslop pick 2B): the 24-unit line icons that replaced the
+       colour emoji. `middle` puts the icon's centre on the baseline plus half the x-height
+       of the text it sits in -- the x-height centre the pick asks for -- so a lowercase
+       word and its icon share one optical middle at any size. In a flex row (most chips
+       and buttons) vertical-align does nothing and align-items: center does the same job.
+       Size stays 1em from the component; a site that needs another ratio sets it below,
+       as the duo icons' sites do. ---- */
+.mgico.mgico-line { vertical-align: middle; }
+
 /* ---- badges and chips: 9-10px labels, so the icon runs ~1.3em to stay legible ---- */
 .mgma2-lorabadge .mgico,          /* My Art -- USER LORA */
 .mgct-entered .mgico,             /* contests (desktop) -- Entered xN */
@@ -51,6 +60,11 @@ button.mgdock-snipbtn .mgico { width: 1.25em; height: 1.25em; margin-right: 0.25
        (a dark tint over the metal face), so it reads as struck INTO the metal. ---- */
 .glm-iconbtn .mgico { width: 16px; height: 16px; vertical-align: middle; }
 
+/* ---- the desktop banner's Folio button: the same trophy the phone's hero disc wears, at
+       13px type, so it takes the same ~16px the disc gives it (the duo body needs the room
+       a colour emoji had). ---- */
+.mgx-metal-folio .mgico { width: 1.2em; height: 1.2em; vertical-align: -0.22em; margin-right: 0.1em; }
+
 /* ---- the phone's tab bar: the Control Panel's door ---- */
 .glm-navicon .mgico { width: 1em; height: 1em; vertical-align: middle; }
 
@@ -64,7 +78,8 @@ button.mgdock-snipbtn .mgico { width: 1.25em; height: 1.25em; margin-right: 0.25
        every "Collection: <name>" row. The books are the more inset drawing of the two, and
        still read at 1.15em (14.9px): measured at 13/15/17/19px, the two upright volumes and
        the leaning one are separable from 13px up. ---- */
-.mgpal-ico .mgico { width: 1.15em; height: 1.15em; vertical-align: -0.2em; }
+.mgpal-ico .mgico:not(.mgico-line) { width: 1.15em; height: 1.15em; vertical-align: -0.2em; }
+/* a line icon in the same column stays at the component's 1em (the line set needs no bump) */
 
 /* ---- UNDO, all three of its button shapes. The history dial is a _path icon: the duo
        grammar with the 25% companion fill left off, so the hairline is the WHOLE drawing

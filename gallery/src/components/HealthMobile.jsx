@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import useHealth, { fmt } from "../hooks/useHealth.js";
 import StorageBars from "./StorageBars.jsx";
 import MobileScreen from "./MobileScreen.jsx";
@@ -255,7 +256,7 @@ export default function HealthMobile({ onModelFilter, onTagFilter, onLoraFilter,
           </button>
         ) : (
           <div className="mgh-note">
-            · {fmt(h.uncataloged)} file(s) on disk aren't in the catalog — use ⬆ Import to catalog them.
+            · {fmt(h.uncataloged)} file(s) on disk aren't in the catalog — use <Icon name="upload" /> Import to catalog them.
           </div>
         )
       )}

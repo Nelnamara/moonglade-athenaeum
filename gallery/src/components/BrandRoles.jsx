@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import GalleryPicker from "./GalleryPicker.jsx";
 import useRoleEditor from "./brandroles/useRoleEditor.js";
 import { RestoreAsk, RoleArt, RoleLoud, RolePair, RolePreview, RoleTicks } from "./brandroles/RoleParts.jsx";
@@ -127,9 +128,9 @@ function RoleRow({ role, csrf, open, onOpen, onClose, onSaved }) {
             onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; ed.pickFile(f); }} />
           <div className="mgcp-rl-btns">
             <button type="button" className="mgcp-rl-ghost" disabled={ed.busy}
-              onClick={() => fileRef.current && fileRef.current.click()}>⬆ From disk</button>
+              onClick={() => fileRef.current && fileRef.current.click()}><Icon name="upload" /> From disk</button>
             <button type="button" className="mgcp-rl-ghost" disabled={ed.busy}
-              onClick={() => setPicking(true)}>🖼 From the gallery…</button>
+              onClick={() => setPicking(true)}><Icon name="image" /> From the gallery…</button>
             <span className="mgcp-rl-spacer" />
             <button type="button" className="mgcp-rl-primary" disabled={!ed.ok || ed.busy}
               onClick={async () => { if (await ed.useThis()) fold(); }}>Use this</button>

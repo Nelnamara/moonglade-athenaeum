@@ -84,8 +84,10 @@ test("the licence ships beside the art", () => {
   assert.match(notice, /github\.com\/gorango\/glyphs/);
   assert.match(notice, /MIT License/);
   assert.match(notice, /THE SOFTWARE IS PROVIDED "AS IS"/);
-  // and the .svg files it covers are actually here
-  const svgs = readdirSync(path.join(SRC, "icons")).filter((f) => f.endsWith(".svg"));
+  // and the .svg files it covers are actually here (the _line set of 2026-11-03 is drawn
+  // for this app and is not the Glyphs set's, so it is not counted here)
+  const svgs = readdirSync(path.join(SRC, "icons"))
+    .filter((f) => f.endsWith(".svg") && !f.endsWith("_line.svg"));
   assert.equal(svgs.length, 9, "expected the nine assigned .svg files: " + svgs.join(", "));
 });
 
@@ -117,7 +119,7 @@ test("1. the model picker's uses count wears the drawn icon, not the Similar dia
 });
 
 test("2. My Art's USER LORA badge wears the palette", () => {
-  assert.match(myArt, /<Icon name="lora" \/>USER LORA/);
+  assert.match(myArt, /<Icon name="lora" \/>User LoRA/);
   assert.doesNotMatch(myArt, /◈/);
 });
 
@@ -176,7 +178,7 @@ test("7. BOTH of the Control Panel's doors wear the laptop-cog", () => {
   assert.doesNotMatch(app, /⛭/);
   assert.doesNotMatch(tabBar, /icon: "⚙"/);
   // CreateMobile's "⚙ Advanced" is generic settings, NOT the Panel -- it keeps its gear
-  assert.match(src("components/CreateMobile.jsx"), /⚙ Advanced/);
+  assert.match(src("components/CreateMobile.jsx"), /<Icon name="gear" \/> Advanced/);
 });
 
 // ---------------------------------------------------------------- the character picks
@@ -193,7 +195,7 @@ test("G6: Print sheet wears ⎙ (one item -- the phone's contact sheet rides the
 });
 
 test("G9: the membership gate is a crown, in PixAI purple that no skin retints", () => {
-  assert.match(enhance, /className="mgdock-aigate" title="Membership required">♛</);
+  assert.match(enhance, /className="mgdock-aigate" title="Membership required"><Icon name="crown" \/></);   // drawn, since the quieted look (was ♛)
   assert.doesNotMatch(enhance, /mgdock-aigate[^>]*>★/);
   // --purple-bright is the app's only :root-fixed violet; --lavender/--mauve go peach
   // under ember and mint under verdant, which would stop a PixAI fact being PixAI's colour.
@@ -205,13 +207,13 @@ test("G9: the membership gate is a crown, in PixAI purple that no skin retints",
 });
 
 test("G10: the Arena note wears crossed swords", () => {
-  assert.match(publish, /className="mgpub-cttrack">⚔ counts toward The Arena/);
+  assert.match(publish, /className="mgpub-cttrack"><Icon name="swords" \/> counts toward The Arena/);
   assert.doesNotMatch(publish, /★ counts toward/);
 });
 
-test("G11: the Folio's reward flags are ❖ skin + ⚑ banner (the owner's pick B)", () => {
-  assert.match(folio, /className="mgfo-flag">❖ unlocks \{skinName\} skin/);
-  assert.match(folio, /className="mgfo-flag">⚑ unlocks a banner/);   // the banner keeps its flag
+test("G11: the Folio's reward flags are the drawn skin + flag icons (the owner's pick B, drawn since the quieted look)", () => {
+  assert.match(folio, /className="mgfo-flag"><Icon name="skin" \/> unlocks \{skinName\} skin/);
+  assert.match(folio, /className="mgfo-flag"><Icon name="flag" \/> unlocks a banner/);   // the banner keeps its flag, drawn
   assert.doesNotMatch(folio, /★ unlocks/);
 });
 
@@ -252,9 +254,9 @@ test("G12: undo wears the history dial at all four sites -- and Remix still turn
 
 // ------------------------------------------------- 8-12, the post-audit rulings
 
-test("8. the palette's Collection rows wear the books, and ❖ is the skin flag ALONE", () => {
+test("8. the palette's Collection rows wear the books, and no component draws a ❖ any more (the skin flag is a drawn icon)", () => {
   assert.match(app, /icon: <Icon name="collection" \/>,\n\s+label: "Collection: " \+ name/);
-  // ❖ survives in exactly one place in the whole app: the Folio's skin flag.
+  // ❖ survives nowhere in the components: the Folio's skin flag is the drawn "skin" icon now.
   const files = readdirSync(path.join(SRC, "components"))
     .filter((f) => f.endsWith(".jsx"))
     .map((f) => ["components/" + f, src("components/" + f)]);
@@ -263,12 +265,11 @@ test("8. the palette's Collection rows wear the books, and ❖ is the skin flag 
   for (const [name, text] of files) {
     for (const [n, t] of codeLines(text)) {
       if (!t.includes("❖")) continue;
-      if (name === "components/FolioOverlay.jsx" && /unlocks \{skinName\} skin/.test(t)) continue;
       offenders.push(name + ":" + n + "  " + t);
     }
   }
-  assert.deepEqual(offenders, [], "❖ is used for something that is not the skin flag");
-  assert.match(folio, /className="mgfo-flag">❖ unlocks \{skinName\} skin/);  // not passable by deletion
+  assert.deepEqual(offenders, [], "a ❖ is back in a component");
+  assert.match(folio, /className="mgfo-flag"><Icon name="skin" \/> unlocks \{skinName\} skin/);  // not passable by deletion
 });
 
 test("9. ↩ is the series window's Esc hint, and only that", () => {
@@ -292,20 +293,22 @@ test("10. the two new icons carry their per-surface sizes, measured not guessed"
   // The books ride the palette rule the Panel's laptop-cog already rides; the history dial
   // gets its own three, one per button shape. Without these it renders at 1em -- 10-12px
   // for a drawing that inks 65% of its own box, which measured as a smudge.
-  assert.match(iconCss, /\.mgpal-ico \.mgico \{ width: 1\.15em/);
+  // (unslop pick 2B scoped the palette's bump to the duo icons: a line icon stays at 1em)
+  assert.match(iconCss, /\.mgpal-ico \.mgico:not\(\.mgico-line\) \{ width: 1\.15em/);
   assert.match(iconCss, /\.mgdr-undo \.mgico \{/);
   assert.match(iconCss, /button\.mgdock-snip \.mgico \{/);
   assert.match(iconCss, /button\.mgcp-chip \.mgico \{/);
 });
 
-test("11. the phone menu's Publish row wears ☁, the mark Publish wears everywhere else", () => {
-  assert.match(appMobile, /\{ icon: "☁", label: "Publish", screen: "publish" \}/);
+test("11. the phone menu's Publish row wears the publish icon, the mark Publish wears everywhere else", () => {
+  // unslop pick 2B: Publish wears the `publish` line icon on the phone menu and on every desktop surface.
+  assert.match(appMobile, /\{ icon: <Icon name="publish" \/>, label: "Publish", screen: "publish" \}/);
   assert.doesNotMatch(appMobile, /icon: "✎"/);
   // the surfaces it is now agreeing with
-  assert.match(app, /img\("publish", "☁", "Publish"/);
-  assert.match(details, /☁ Publish<\/button>/);
-  assert.match(src("components/ImageDetailsMobile.jsx"), /☁ Publish<\/button>/);
-  assert.match(src("components/Lightbox.jsx"), /☁ Publish<\/button>/);
+  assert.match(app, /img\("publish", <Icon name="publish" \/>, "Publish"/);
+  assert.match(details, /<Icon name="publish" \/> Publish<\/button>/);
+  assert.match(src("components/ImageDetailsMobile.jsx"), /<Icon name="publish" \/> Publish<\/button>/);
+  assert.match(src("components/Lightbox.jsx"), /<Icon name="publish" \/> Publish<\/button>/);
   // and "Edit this" still keeps ✎ (the ruling's own carve-out)
   assert.match(details, /✎ Edit this<\/button>/);
 });
@@ -407,5 +410,5 @@ test("◈ now means Similar, and only Similar, in every string the app renders",
   // ...and it is still doing its real job, so this guard cannot pass by deletion.
   assert.match(src("components/Grid.jsx"), /\n\s+◈\n/);
   assert.match(src("components/GridContextMenu.jsx"), /\["◈", "Find similar"/);
-  assert.match(details, /<span className="k">◈ SIMILAR<\/span>/);
+  assert.match(details, /<span className="k">◈ Similar<\/span>/);
 });

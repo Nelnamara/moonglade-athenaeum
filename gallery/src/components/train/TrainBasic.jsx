@@ -1,4 +1,5 @@
 import React, { useRef, useState } from "react";
+import Icon from "../../icons/Icons.jsx";
 import TrainPool from "./TrainPool.jsx";
 import DatasetImport from "./DatasetImport.jsx";
 import GoalTile from "./GoalTile.jsx";
@@ -41,7 +42,7 @@ export default function TrainBasic({ b, setup, step, setStep, onBack, onAdvanced
 
       {step === 1 && (
         <div className="mgtr-card">
-          <div className="mgtr-kick">1 · CHOOSE A GOAL</div>
+          <div className="mgtr-kick">1 · Choose a goal</div>
           <div className="mgtr-h">What do you want to train?</div>
           <div className="mgtr-goals">
             {GOALS.map((g) => (
@@ -58,9 +59,9 @@ export default function TrainBasic({ b, setup, step, setStep, onBack, onAdvanced
 
       {step === 2 && (
         <div className="mgtr-card">
-          <div className="mgtr-kick">2 · ADD IMAGES</div>
+          <div className="mgtr-kick">2 · Add images</div>
           <div className="mgtr-sources">
-            <button type="button" className="mgtr-src" onClick={() => fileRef.current && fileRef.current.click()}>⬆ Upload</button>
+            <button type="button" className="mgtr-src" onClick={() => fileRef.current && fileRef.current.click()}><Icon name="upload" /> Upload</button>
             <button type="button" className={"mgtr-src" + (src === "history" ? " on" : "")}
               onClick={() => setSrc(src === "history" ? "" : "history")}>▦ From history</button>
             <button type="button" className={"mgtr-src" + (src === "import" ? " on" : "")}
@@ -82,7 +83,9 @@ export default function TrainBasic({ b, setup, step, setStep, onBack, onAdvanced
               <div key={it.media_id} className={"mgtr-gtile" + (it.reject ? " reject" : "")}
                 title={it.reject ? "PixAI won't train on this one: " + it.reject : ""}>
                 <img src={it.thumb || "/api/train/thumb/" + it.media_id} alt="" />
-                <span className="mgtr-gsrc" title={it.source}>{SOURCE_MARK[it.source] || ""}</span>
+                <span className="mgtr-gsrc" title={it.source}>
+                  {it.source === "upload" ? <Icon name="upload" /> : SOURCE_MARK[it.source] || ""}
+                </span>
                 {it.reject && <span className="mgtr-greject">{it.reject}</span>}
                 <button type="button" className="mgtr-gx" onClick={() => b.removeImage(it.media_id)}
                   aria-label="Take it out" title="Take it out">×</button>
@@ -103,7 +106,7 @@ export default function TrainBasic({ b, setup, step, setStep, onBack, onAdvanced
               <button type="button" className="mgtr-linkbtn" onClick={b.clearRejects}>dismiss</button>
             </div>
           )}
-          <div className="mgtr-note">PNG, JPG or WebP, at least 512×512, no wider than 3:1. At least {MIN_IMAGES}. Rejected files show with a peach reason and aren't counted. Tiles carry a source mark (⬆ ▦ ⎘).</div>
+          <div className="mgtr-note">PNG, JPG or WebP, at least 512×512, no wider than 3:1. At least {MIN_IMAGES}. Rejected files show with a peach reason and aren't counted. Tiles carry a source mark (<Icon name="upload" /> ▦ ⎘).</div>
           <div className="mgtr-row-end">
             <button type="button" className="mgtr-across" onClick={onAdvanced}>Need to edit descriptions or parameters? Use Advanced</button>
             <button type="button" className="mgtr-go" disabled={!b.enough} onClick={() => setStep(3)}>
@@ -114,7 +117,7 @@ export default function TrainBasic({ b, setup, step, setStep, onBack, onAdvanced
 
       {step === 3 && (
         <div className="mgtr-card">
-          <div className="mgtr-kick">3 · REVIEW AND START</div>
+          <div className="mgtr-kick">3 · Review and start</div>
           <label className="mgtr-lab" htmlFor="mgtr-name">LoRA name <span>required</span></label>
           <input id="mgtr-name" className="mgtr-in" value={b.name} placeholder="Name your LoRA"
             onChange={(e) => b.setName(e.target.value)} />
@@ -169,7 +172,7 @@ export default function TrainBasic({ b, setup, step, setStep, onBack, onAdvanced
                   </label>
                 )}
               </div>
-              {b.err && <div className="mgtr-err">⚠ {b.err}</div>}
+              {b.err && <div className="mgtr-err"><Icon name="warning" /> {b.err}</div>}
               <div className="a">
                 <button type="button" className="mgtr-ghost" onClick={() => b.setAsk(null)} disabled={b.busy}>Back</button>
                 <button type="button" className="mgtr-go" disabled={b.busy || (!b.ask.is_free && !b.accepted)}
@@ -185,7 +188,7 @@ export default function TrainBasic({ b, setup, step, setStep, onBack, onAdvanced
               <div className="mgtr-foot-price">
                 <div className="p">
                   {f.free && f.struck != null && <span className="struck">{credits(f.struck)}</span>}
-                  <span className="gold">🪙 {f.price != null ? credits(f.price) : "?"}</span>
+                  <span className="gold"><Icon name="coin" /> {f.price != null ? credits(f.price) : "?"}</span>
                   {f.badge && <span className="freebadge">{f.badge}</span>}
                 </div>
                 <div className="eta">{etaText(eta)}</div>
@@ -194,7 +197,7 @@ export default function TrainBasic({ b, setup, step, setStep, onBack, onAdvanced
                 {b.busy ? "checking…" : "Start training"}</button>
             </div>
           )}
-          {!b.ask && b.err && !b.maybe && <div className="mgtr-err">⚠ {b.err}</div>}
+          {!b.ask && b.err && !b.maybe && <div className="mgtr-err"><Icon name="warning" /> {b.err}</div>}
           {b.maybe && (
             <div className="mgtr-warnnote">
               PixAI didn't answer clearly, so this run may have started; check Runs before starting again.

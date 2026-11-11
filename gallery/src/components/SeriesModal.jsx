@@ -159,7 +159,7 @@ export default function SeriesModal({ stack, onClose, onOpenDetails }) {
 
   /* The kicker (owner, 2026-09-07) -- the one thing that tells the two stack kinds
      apart at a glance, since everything below the header is identical. */
-  const kicker = isBatch ? "BATCH" : "SERIES";
+  const kicker = isBatch ? "Batch" : "Series";
   const noun = isBatch ? "batch" : "series";
   const title = (data && data.title) || (isBatch ? "Batch" : "Series");
   const nImages = data ? (data.count_images != null ? data.count_images : tiles.length) : 0;
@@ -185,9 +185,9 @@ export default function SeriesModal({ stack, onClose, onOpenDetails }) {
           {/* Sort: run № orders by run then index; newest is flat reverse-chronology. */}
           <div className="mgss-segs" role="group" aria-label="Sort">
             <button type="button" className={seg(sort === "run")} aria-pressed={sort === "run"}
-              title="By run, then by position within the run" onClick={() => setSort("run")}>run №</button>
+              title="By run, then by position within the run" onClick={() => setSort("run")}>Run №</button>
             <button type="button" className={seg(sort === "new")} aria-pressed={sort === "new"}
-              title="Newest first, across every run" onClick={() => setSort("new")}>newest</button>
+              title="Newest first, across every run" onClick={() => setSort("new")}>Newest</button>
           </div>
           <span className="mgss-esc">Esc ↩ gallery</span>
           <button type="button" className="mgss-x" onClick={onClose} aria-label="Close">✕</button>

@@ -13,14 +13,10 @@
 /* 0 %: a new-moon outline over the dark disc. */
 .mgm[data-phase="new"] .mgm-moon {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--lavender) 55%, transparent); }
-/* 100 %: the full moon glows lavender, breathing slowly. */
+/* 100 %: the full moon keeps its lavender glow, still. (It breathed until the quieted look,
+   2026-11-03: a gauge is not a live signal, so the loop went and its resting frame stayed.) */
 .mgm[data-phase="full"] .mgm-moon {
-  box-shadow: 0 0 calc(var(--mgm-s) * .45) color-mix(in srgb, var(--lavender) 70%, transparent);
-  animation: mgmGlow 2.6s ease-in-out infinite alternate; }
-@keyframes mgmGlow {
-  from { box-shadow: 0 0 calc(var(--mgm-s) * .3) color-mix(in srgb, var(--lavender) 45%, transparent); }
-  to   { box-shadow: 0 0 calc(var(--mgm-s) * .7) color-mix(in srgb, var(--lavender) 80%, transparent); }
-}
+  box-shadow: 0 0 calc(var(--mgm-s) * .45) color-mix(in srgb, var(--lavender) 70%, transparent); }
 
 /* The bar: BAR9's shield cap, a stretched rail, the crescent cap. The fill runs in the rail's
    channel, between the painted rails. */
@@ -38,10 +34,8 @@
 .mgm-fill { position: absolute; left: 0; top: var(--mgm-chan-top); height: var(--mgm-chan-h);
   max-width: 100%; border-radius: 1px;
   background: linear-gradient(90deg, color-mix(in srgb, var(--lavender) 55%, transparent), var(--lavender));
-  box-shadow: 0 0 calc(var(--mgm-s) * .25) color-mix(in srgb, var(--lavender) 55%, transparent);
   transition: width .4s ease; }
 
 @media (prefers-reduced-motion: reduce) {
-  .mgm[data-phase="full"] .mgm-moon { animation: none; }
   .mgm-fill { transition: none; }
 }

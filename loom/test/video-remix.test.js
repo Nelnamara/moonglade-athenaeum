@@ -294,7 +294,7 @@ describe("host wiring source guards (no React harness in this suite)", () => {
   });
 
   test("#28 scope-add: a video row gets a 'Rebuild poster' item; App wires it + imports the helper", () => {
-    assert.ok(ctx.includes('...(target.isVideo ? [["🖼", "Rebuild poster", () => actions.onRebuildPoster(target.mid)]] : [])'));
+    assert.ok(ctx.includes('...(target.isVideo ? [[<Icon name="image" />, "Rebuild poster", () => actions.onRebuildPoster(target.mid)]] : [])'));
     const app = src("gallery/src/App.jsx");
     assert.ok(app.includes("onRebuildPoster: (mid) => rebuildPoster(mid)"));
     assert.ok(app.includes("resolveVideoIds, rebuildPoster,"));

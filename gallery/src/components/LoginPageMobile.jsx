@@ -103,11 +103,11 @@ export default function LoginPageMobile({ boot }) {
 
           {!createMode && !lanFirstRun && (
             <>
-              <div className="lgnm-lbl" style={{ marginTop: 0 }}>USERNAME</div>
+              <div className="lgnm-lbl" style={{ marginTop: 0 }}>Username</div>
               <input aria-label="Username" className="lgnm-input" name="username" value={user} autoFocus autoComplete="username"
                 maxLength={64}
                 onChange={(e) => setUser(e.target.value)} onKeyDown={onKey} disabled={busy} />
-              <div className="lgnm-lbl">PASSWORD</div>
+              <div className="lgnm-lbl">Password</div>
               <input aria-label="Password" className="lgnm-input lgnm-pass" name="password" type="password" value={pass}
                 autoComplete="current-password"
                 onChange={(e) => setPass(e.target.value)} onKeyDown={onKey} disabled={busy} />
@@ -122,14 +122,14 @@ export default function LoginPageMobile({ boot }) {
 
           {createMode && (
             <div className="lgnm-fieldin">
-              <div className="lgnm-lbl" style={{ marginTop: 0 }}>USERNAME</div>
+              <div className="lgnm-lbl" style={{ marginTop: 0 }}>Username</div>
               <input aria-label="Username" className={"lgnm-input" + (createSubmitted && usernameErr ? " err" : "")}
                 name="username" value={createUser} autoFocus autoComplete="username" maxLength={64}
                 onChange={(e) => onCreateUserChange(e.target.value)}
                 onKeyDown={onKey} disabled={busy} />
               {createSubmitted && usernameErr ? <div className="lgnm-fielderr">{usernameErr}</div> : null}
 
-              <div className="lgnm-lbl">PASSWORD</div>
+              <div className="lgnm-lbl">Password</div>
               <input aria-label="Password" className="lgnm-input lgnm-pass" name="new-password" type="password"
                 value={createPass} autoComplete="new-password"
                 onChange={(e) => onCreatePassChange(e.target.value)}
@@ -139,7 +139,7 @@ export default function LoginPageMobile({ boot }) {
                 <div className={guessOk ? "ok" : ""}>{guessOk ? "✓" : "·"} not a common password or a simple pattern (like 12345678)</div>
               </div>
 
-              <div className="lgnm-lbl">CONFIRM PASSWORD</div>
+              <div className="lgnm-lbl">Confirm password</div>
               <input aria-label="Confirm password" className={"lgnm-input lgnm-pass" + (matchErr ? " err" : "")}
                 name="confirm-password" type="password" value={createConfirm}
                 autoComplete="new-password"

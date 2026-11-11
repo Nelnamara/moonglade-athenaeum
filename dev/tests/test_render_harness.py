@@ -1201,10 +1201,11 @@ def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
         assert m["ringAnimation"] == "none", (
             "{}: the progress ring is still spinning ({!r}) on a job PixAI has not started -- "
             "motion is what reads as work in progress".format(host, m["ringAnimation"]))
-        assert m["pillText"] == "queued", (
+        # The owner's unslop pick 1C (2026-11-03): state labels are sentence case, not uppercased by CSS.
+        assert m["pillText"] == "Queued", (
             "{}: phase pill reads {!r}".format(host, m["pillText"]))
-        assert m["pillTransform"] == "uppercase", (
-            "{}: the phase pill is not styled as a state label ({!r})".format(
+        assert m["pillTransform"] == "none", (
+            "{}: the phase pill is uppercased again ({!r}); labels are sentence case".format(
                 host, m["pillTransform"]))
         assert m["etaText"] == "est. 27s wait", (
             "{}: estimate chip reads {!r}".format(host, m["etaText"]))
@@ -1422,11 +1423,11 @@ def test_control_panel_runs_real_jobs_and_manages_a_real_account(logged_in_page,
     # that outlasts _settle (seen 2026-09-07 with a test workflow running beside the
     # harness), so wait for the summary's own text rather than a fixed pause.
     page.wait_for_function(
-        "() => /THE LIBRARY/.test(document.querySelector('[aria-label=\"Control Panel\"]')?.innerText || '')",
+        "() => /The library/.test(document.querySelector('[aria-label=\"Control Panel\"]')?.innerText || '')",
         timeout=20_000)
-    # innerText reflects the CSS text-transform:uppercase on .mgcp-sidekick, not the raw
-    # JSX literal ("The library") -- assert what actually renders.
-    assert "THE LIBRARY" in page.inner_text('[aria-label="Control Panel"]')
+    # .mgcp-sidekick renders its JSX literal as written since the quieted look (2026-11-03,
+    # sentence-case labels, no text-transform) -- assert what actually renders.
+    assert "The library" in page.inner_text('[aria-label="Control Panel"]')
 
     # --- a REAL safe job: Catalog stats, via the REAL /api/panel/run + /api/panel/status
     # this harness's own real (throwaway) catalog answers. The row's own text ("Catalog
@@ -2797,7 +2798,7 @@ def test_the_phone_my_entries_door_filters_the_same_board_and_adds_a_status_line
     assert len(got) == 2, (
         "My entries is not the board filtered to entered contests: {!r}".format(got))
     by = {g["name"]: g for g in got}
-    assert "RUNNING" in by["JoJo Pose"]["status"], by
+    assert "Running" in by["JoJo Pose"]["status"], by
     assert "2 pieces" in by["JoJo Pose"]["status"], by
     # An ENDED contest is not on the running board at all, so its card is rebuilt from the
     # entries row itself -- the only way a finished contest can still be opened in-app.
@@ -3981,15 +3982,15 @@ _TOPBAR_ROWS_JS = """() => {
 
 def test_the_loom_top_bar_is_one_row_at_the_owners_width(logged_in_page):
     """Call 5: at 1444 px the whole bar -- name ▾, find and its chips, Draft, the Generate
-    cluster, Activity and ← GALLERY -- sits on ONE row (the page's bar, The Loom.dc.html
-    :46-143). 📱 Mobile view lives in the storyboards popover now; ← Gallery wears the page's
-    uppercase form and ends the row."""
+    cluster, Activity and ← Gallery -- sits on ONE row (the page's bar, The Loom.dc.html
+    :46-143). 📱 Mobile view lives in the storyboards popover now; ← Gallery wears sentence case
+    (13 px / 500, the unslop pass, pick 1 -- it was the page's uppercase form) and ends the row."""
     page = _open_owner_loom(logged_in_page)
     m = page.evaluate(_TOPBAR_ROWS_JS)
     assert m["spread"] <= 6 and m["barHeight"] <= 62, (
         "the Loom's top bar wrapped at 1444 px: {!r}".format(m))
     assert abs(m["galleryRight"] - (m["barRight"] - 16)) <= 2, "← Gallery does not end the row: {!r}".format(m)
-    assert m["galleryUpper"] == "uppercase" and m["hasName"] and not m["mobileInBar"], m
+    assert m["galleryUpper"] == "none" and m["hasName"] and not m["mobileInBar"], m
 
     # The Mobile view switch is one click away, in the ▾ popover.
     page.click(".lv-top .lv-caret")
@@ -5688,7 +5689,7 @@ def test_the_train_goal_tiles_and_history_pool_draw_pictures_not_slivers(
         assert [round(b["x"] - a["x"] - a["w"]) for a, b in zip(geo, geo[1:])] == [8, 8, 8], "8 px apart"
         for g in geo:
             assert abs(g["w"] / g["h"] - .82) < .01, "the tile is .82 wide-to-tall: %r" % g
-            assert (g["radius"], g["pad"], g["font"]) == ("12px", "6px", "10px/700"), g
+            assert (g["radius"], g["pad"], g["font"]) == ("12px", "6px", "10px/600"), g
             assert abs(g["pw"] - (g["w"] - 2)) < 1 and abs(g["px"] - (g["x"] + 1)) < 1, "edge to edge: %r" % g
             assert abs(g["ph"] - .78 * (g["h"] - 2)) < 1.5, "the picture is the top 78 %%: %r" % g
             assert 0.95 < g["pw"] / g["ph"] < 1.15, "a square-ish picture: %r" % g
@@ -6108,7 +6109,7 @@ def test_train_continue_opens_a_draft_at_its_descriptions_and_writes_nothing(
         describe_btn = page.locator(".mgtr-adv-desc button:has-text('Describe automatically')")
         describe_btn.wait_for()
         assert describe_btn.inner_text() == "Describe automatically (24 images) · 3,600"
-        assert "24 IMAGES" in page.locator(".mgtr-adv-desc .mgtr-kick").first.inner_text()
+        assert "24 images" in page.locator(".mgtr-adv-desc .mgtr-kick").first.inner_text()
         assert posts == [], "continuing a draft sent a training POST: %r" % posts
         assert pixai.mutations() == 0
         assert not [c for c in pixai.calls if c.verb in ("rest_post", "rest_put", "rest_patch")]
@@ -8804,10 +8805,10 @@ def test_the_desktop_lightbox_counts_the_whole_walk_once(paged_library_server, r
         page.locator(".mgg-card").first.click()
         page.wait_for_selector(".lbx .lbx-index b")
         read = "() => [document.querySelector('.lbx-index b').textContent, document.querySelector('.lbx-index span').textContent]"
-        assert page.evaluate(read) == ["101", "OF 120"]
+        assert page.evaluate(read) == ["101", "of 120"]
         page.keyboard.press("ArrowRight")
         page.wait_for_function("() => document.querySelector('.lbx-index b').textContent === '102'")
-        assert page.evaluate(read) == ["102", "OF 120"]
+        assert page.evaluate(read) == ["102", "of 120"]
     finally:
         ctx.close()
 
@@ -9351,7 +9352,7 @@ def test_continuous_mounts_at_most_five_pages_with_exact_spacers_and_the_viewer_
         for _ in range(99):
             page.keyboard.press("ArrowRight")
         page.wait_for_function("() => document.querySelector('.lbm-index').textContent === '100'")
-        assert page.locator(".lbm-total").inner_text() == "OF 620"
+        assert page.locator(".lbm-total").inner_text() == "of 620"
         reads = len(_u_libs(seen))
         page.click(".lbm-next")
         page.wait_for_function("() => document.querySelector('.lbm-index').textContent === '101'")
@@ -9505,7 +9506,7 @@ def test_pages_range_select_reaches_pictures_not_loaded_and_the_confirm_counts_t
         assert not page.locator(".glm-pill-accent:has-text('Actions')").is_disabled()
         page.click(".glm-pill-accent:has-text('Actions')")
         page.wait_for_selector(".glm-sheet")
-        assert page.locator(".glm-sheet-title").first.inner_text().startswith("241 SELECTED")
+        assert page.locator(".glm-sheet-title").first.inner_text().startswith("241 selected")
         page.wait_for_selector(".glm-rangecard", state="detached", timeout=6000)
     finally:
         ctx.close()
@@ -9578,7 +9579,7 @@ def test_the_home_screen_nudge_shows_once_after_sign_in_on_ios_safari_with_a_bub
                     arrow: document.querySelector('.mgnudge-arrow').textContent, below: arrow.top >= card.bottom - 0.5,
                     centred: Math.abs((arrow.left + arrow.right) / 2 - innerWidth / 2) < 2}; }""")
         assert abs(b["gap"] - 12) < 1 and b["arrow"] == "▼" and b["below"] and b["centred"], b
-        assert b["text"] == 'Tap ⬆ below, then "Add to Home Screen".', b
+        assert b["text"] == 'Tap Share below, then "Add to Home Screen".', b
         page.mouse.click(195, 420)
         page.wait_for_selector(".mgnudge-bubble", state="detached")
 
@@ -9593,7 +9594,7 @@ def test_the_home_screen_nudge_shows_once_after_sign_in_on_ios_safari_with_a_bub
             return {top: r.top, arrow: document.querySelector('.mgnudge-arrow').textContent, above: arrow.bottom <= card.top + 0.5,
                     text: document.querySelector('.mgnudge-card').textContent}; }""")
         assert abs(t["top"] - 12) < 1 and t["arrow"] == "▲" and t["above"], t
-        assert t["text"] == 'Tap ⬆ above, then "Add to Home Screen".', t
+        assert t["text"] == 'Tap Share above, then "Add to Home Screen".', t
         page.wait_for_selector(".mgnudge-bubble", state="detached", timeout=9500)
         page.set_viewport_size(PHONE)
 
@@ -9746,6 +9747,7 @@ _RF_DOORS_JS = """() => {
           icon: (() => { const i = inbox.querySelector('.ib-inboxic'); if (!i) return null;
             const b = i.getBoundingClientRect(); return {w: b.width, h: b.height, bg: getComputedStyle(i).backgroundImage}; })(),
           glyph: (inbox.querySelector('.ib-inboxglyph') || {}).textContent || '',
+          glyphIcon: !!inbox.querySelector('.ib-inboxglyph svg'),
           inboxBadgeBg: inbox.querySelector('.ib-badge') && getComputedStyle(inbox.querySelector('.ib-badge')).backgroundColor,
           giftBadgeBg: gift.querySelector('.ib-badge') && getComputedStyle(gift.querySelector('.ib-badge')).backgroundColor,
           giftArt: getComputedStyle(gift).backgroundImage, inboxArt: getComputedStyle(inbox).backgroundImage};
@@ -9826,7 +9828,7 @@ def test_the_inbox_and_the_gift_box_open_their_own_panels_and_one_closes_the_oth
     p = page.evaluate(_RF_PANEL_JS)
     assert p["title"] == "Inbox" and abs(p["w"] - 380) < 1 and p["z"] == "300", p
     assert p["tabs"] == ["All", "Comments", "Likes", "Follows", "PixAI"], p
-    assert "ON PIXAI NOW" not in p["labs"] and p["events"] == 0, ("no events in the inbox", p)
+    assert "On PixAI now" not in p["labs"] and p["events"] == 0, ("no events in the inbox", p)
     assert p["gifts"] == [] and p["expiry"] == [], ("no gifts and no expiring cards in the inbox", p)
     assert p["rows"] >= 3 and p["more"] == 1, p
     assert page.locator(".ib-panel .ib-new").inner_text() == "5 new"
@@ -9841,7 +9843,7 @@ def test_the_inbox_and_the_gift_box_open_their_own_panels_and_one_closes_the_oth
     assert p["count"] == 1 and p["title"] == "Gift box", p
     assert abs(p["w"] - 380) < 1 and p["z"] == "300", p
     assert p["tabs"] == [] and p["rows"] == 0 and p["more"] == 0, ("no tabs, no inbox rows, no ⋯", p)
-    assert p["labs"][:1] == ["ON PIXAI NOW"] and p["events"] == 2, p
+    assert p["labs"][:1] == ["On PixAI now"] and p["events"] == 2, p
     peach = page.evaluate(_RF_PEACH_JS)
     assert len(p["expiry"]) == 1, p
     assert re.match(r"^5 Tsubaki\.3 expire [A-Z][a-z]{2} \d{1,2} · (today|tomorrow|in \d days)$",
@@ -9899,7 +9901,8 @@ _RF_ROW_ICON_JS = """() => {
   const box = (el) => { if (!el) return null; const b = el.getBoundingClientRect();
     return {w: Math.round(b.width), h: Math.round(b.height), bg: getComputedStyle(el).backgroundImage}; };
   return {inbox: box(rows[0].querySelector('.ib-inboxic')), gift: box(rows[1].querySelector('.ib-giftic')),
-          glyph: (rows[0].querySelector('.ib-inboxglyph') || {}).textContent || ''};
+          glyph: (rows[0].querySelector('.ib-inboxglyph') || {}).textContent || '',
+          glyphIcon: !!rows[0].querySelector('.ib-inboxglyph svg')};
 }"""
 
 
@@ -10071,14 +10074,15 @@ def test_the_inbox_picture_falls_back_to_the_envelope_and_the_pack_copy_wins_whe
     page, _ = _rf_desktop(logged_in_page, init=_RF_BREAK_WEBP_JS)
     page.wait_for_selector(".ib-door.inbox .ib-inboxglyph")
     g = page.evaluate(_RF_DOORS_JS)
-    assert g["glyph"] == "✉" and g["icon"] is None, g
+    # the fallback is the line-set mail icon since the owner's unslop pick 2B (2026-11-03), not the ✉ glyph
+    assert g["glyphIcon"] and g["glyph"] == "" and g["icon"] is None, g
     page.context.close()
 
     page, _ = _rf_phone(logged_in_page, init=_RF_BREAK_WEBP_JS)
     page.click(".glm-iconbtn[title=More]")
     page.wait_for_selector(".glm-menu-item .ib-inboxglyph")
     ic = page.evaluate(_RF_ROW_ICON_JS)
-    assert ic["glyph"] == "✉" and ic["inbox"] is None, ic
+    assert ic["glyphIcon"] and ic["glyph"] == "" and ic["inbox"] is None, ic
     page.context.close()
 
     # the pack has it: the pack's copy, asked for once
@@ -10213,7 +10217,7 @@ def test_each_phone_sheet_wears_its_doors_picture_in_its_title_row(logged_in_pag
     h = page.evaluate(_RF_HEAD_JS, [".glm-sheet.ib-sheet", ".glm-sheet-title"])
     assert abs(h["emblem"]["w"] - 40) < 0.5 and abs(h["emblem"]["r"] - h["head"]["r"]) < 1, h
     assert h["src"].startswith("data:image/webp;base64,") and h["alt"] == "", h
-    assert page.locator(".glm-sheet.ib-sheet").get_attribute("aria-label") == "INBOX"
+    assert page.locator(".glm-sheet.ib-sheet").get_attribute("aria-label") == "Inbox"
     page.mouse.click(195, 12)
     page.wait_for_selector(".glm-sheet.ib-sheet", state="detached")
     page.click(".glm-iconbtn[title=More]")
@@ -10223,7 +10227,7 @@ def test_each_phone_sheet_wears_its_doors_picture_in_its_title_row(logged_in_pag
     _settle(page)
     h = page.evaluate(_RF_HEAD_JS, [".glm-sheet.ib-sheet", ".glm-sheet-title"])
     assert h["src"] == "/branding/rewards/gift.png" and abs(h["emblem"]["w"] - 40) < 0.5, h
-    assert page.locator(".glm-sheet.ib-sheet").get_attribute("aria-label") == "GIFT BOX"
+    assert page.locator(".glm-sheet.ib-sheet").get_attribute("aria-label") == "Gift box"
 
 
 # ---------------------------------------------------------------------------

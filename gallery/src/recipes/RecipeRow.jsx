@@ -99,7 +99,7 @@ export default function RecipeRow({ recipes, onChange, held, loraCount, modelTyp
   return (
     <div className="rcp-row">
       <div className="rcp-row-head">
-        <span className="rcp-kicker">RECIPES</span>
+        <span className="rcp-kicker">Recipes</span>
         <span className="rcp-row-count">{list.length} / {MAX_RECIPES}</span>
       </div>
       <div className={"rcp-row-chips" + (held ? " held" : "")}>

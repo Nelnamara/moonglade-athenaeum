@@ -189,7 +189,7 @@ export default function CollectionsMobile({ csrf, onOpenCollection, onChanged, r
   return (
     <div className="mgcm">
       <div className="mgcm-bar">
-        <span className="mgcm-cap">COLLECTIONS</span>
+        <span className="mgcm-cap">Collections</span>
         <span className="mgcm-fill" />
         {all.length > 1 ? (
           <button type="button" className={"mgcm-modebtn" + (merging ? " on" : "")} onClick={toggleMerging}>

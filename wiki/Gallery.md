@@ -34,7 +34,7 @@ disabled — **`Moonglade Launcher.pyw`** is the everyday launch. All of the ser
 The banner across the top carries the big buttons at its right, and a row of smaller destinations
 sits under it. On a narrow window — an iPad, say — the banner's rows wrap onto a second line rather
 than overlapping, and the four layout marks stay visible. Below 1,200 px the bar under the banner is
-the destinations, then a row that starts with the SIZE slider, carries the status chips and ends at
+the destinations, then a row that starts with the Size slider, carries the status chips and ends at
 the right with your account (inbox, gift box, credits, **?**). On an upright 11-inch or larger iPad that
 row is one line when it is quiet (an iPad mini is narrower and takes two); a pinned goal, a claim waiting or a job running sends the end of it to one more
 line, with your account still at the right. Along the banner:
@@ -46,7 +46,7 @@ line, with your account still at the right. Along the banner:
   [Generating](Generating).
 - **▰ The Loom** — the storyboard for multi-clip video (acts, shots, cast, frame handoff),
   at `/loom`. Also [Generating](Generating); full manual on [The Loom](The-Loom).
-- **🏆 Folio** — [The Folio of Honors](Folio-of-Honors): achievements, points, and earnable
+- **Folio** (the trophy) — [The Folio of Honors](Folio-of-Honors): achievements, points, and earnable
   skins. It opens as a maximized overlay over the gallery, not a separate page (`Esc`
   closes it). A goal you pin there, and your **Vigil**, can sit beside your credits as small chips.
 
@@ -62,7 +62,7 @@ out this device only (to sign out every device, see [Trust & Safety](Trust-and-S
 - **My Art** — how your published art is doing; each
   piece shows its visibility (Public / Private) and an amber **Sensitive** mark when PixAI has
   flagged it, so a moderated work is no longer shown as a plain "Public". Every card carries
-  its **♥ likes** and **💬 comments**, and every published one its **view count** with a small
+  its **heart count** (likes) and **speech-bubble count** (comments), and every published one its **view count** with a small
   bar showing how it compares to your best. Along the top: how many pieces you have published,
   your **lifetime views**, total likes and total comments — and you can sort the whole library
   by **Most viewed** as easily as by Most liked. See
@@ -87,12 +87,12 @@ out this device only (to sign out every device, see [Trust & Safety](Trust-and-S
   Control Panel's **PixAI account** window. They are a reading, not a control — Moonglade
   never follows, unfollows or likes on your behalf, and it comments only when you write a
   reply yourself and press **Post publicly** (see [Comments](#comments-on-your-published-work)).
-- **✉ Inbox** and **🎁 Gift box** — two buttons just left of the credits chip, shown once a PixAI
+- **Inbox** (the envelope) and **Gift box** (the gift) — two buttons just left of the credits chip, shown once a PixAI
   account is linked. The inbox is everything PixAI tells you; the gift box is only what you can
   collect.
-- **✉ Inbox** (the mailbox) is your **PixAI inbox**. Its lavender badge is how many of PixAI's
+- **Inbox** (the mailbox) is your **PixAI inbox**. Its lavender badge is how many of PixAI's
   notifications you haven't read. Click it for the panel: tabs for **All · Comments · Likes · Follows ·
-  PixAI**, then one card per work of yours (*"♥ +12 · ❝ 2 new"*, with the newest unread comment
+  PixAI**, then one card per work of yours (a heart with *+12* and a quote mark with *2 new*, with the newest unread comment
   quoted), then everything else — new followers folded per day, contest results, PixAI's news.
   Finished jobs never show here: Activity already tells you those (a job PixAI finished that the
   app never saw — one started on PixAI's own site while the app was closed — joins Activity as a
@@ -107,9 +107,9 @@ out this device only (to sign out every device, see [Trust & Safety](Trust-and-S
     it), and the count is re-read when the app opens, when the window comes back to the front
     (at most every 30 seconds) and after the mirror reconnects. Only a **comment** raises a
     notice in the corner, with **Later** and **Open thread**.
-- **🎁 Gift box** is for rewards. Its lavender badge is how many gifts are waiting to be claimed.
+- **Gift box** is for rewards. Its lavender badge is how many gifts are waiting to be claimed.
   Click it for its own panel (opening one panel closes the other; each panel shows its button's
-  picture, large, in its top-right corner): **ON PIXAI NOW** (the events PixAI is running, when
+  picture, large, in its top-right corner): **On PixAI now** (the events PixAI is running, when
   there are any), then the free cards about to expire (in peach, the same lines the credits chip's
   hover shows), then your gifts. With none of the three, it says
   *Nothing waiting*. Opening it only reads.
@@ -119,25 +119,25 @@ out this device only (to sign out every device, see [Trust & Safety](Trust-and-S
     *This gift expired*. Credit-pack bonuses you hold say **Open on PixAI ↗**; the app redeems
     nothing. In the Control Panel's **PixAI account → Credit ledger**, event-gift rows show the
     gift icon.
-  - **ON PIXAI NOW** shows PixAI's live event banners as cards, one per row across the panel's
+  - **On PixAI now** shows PixAI's live event banners as cards, one per row across the panel's
     full width, each at its own shape with the event's name and *event ↗* underneath; pressing one
     opens PixAI's page in a new tab. The app never checks in, claims or plays an event for you, and
     the banner list is read without your API key (PixAI only answers it that way), at most once an
     hour.
-- **On a phone** the header stays as it was: the **☰** Menu button carries one badge (unread
+- **On a phone** the header stays as it was: the **Menu** button (three lines) carries one badge (unread
   notifications plus waiting gifts), and **Inbox** and **Gift box** are the Menu's first two rows,
-  each opening a full-height sheet. Inbox is the same list as the desktop's ✉ panel. Gift box is
-  the desktop's 🎁 panel: the event cards, the free cards about to expire and your gifts; its row
+  each opening a full-height sheet. Inbox is the same list as the desktop's Inbox panel. Gift box is
+  the desktop's Gift box panel: the event cards, the free cards about to expire and your gifts; its row
   shows the soonest expiry, or how many gifts are waiting.
 - **Free cards about to expire.** When any free card you hold expires within three days, the
-  **CARDS** half of the credits chip gets a thin peach underline, and hovering the chip lists
+  **Cards** half of the credits chip gets a thin peach underline, and hovering the chip lists
   them first, one line per kind — *"5 Tsubaki.3 expire Oct 6 · in 3 days"*, *"… tomorrow"*,
   *"… today"*; never a countdown in hours. With nothing that close, there is no underline and
   the hover reads as it always did. Free cards aren't billing, so the mark is peach, not gold.
-  The dates come from the same card summary the chip already reads. The **🎁 Gift box** lists
+  The dates come from the same card summary the chip already reads. The **Gift box** lists
   them too, and on a phone, where there is no hover, the **Menu**'s **Gift box** row shows the
   soonest one.
-- **⚙ Panel** — the Control Panel overlay: maintenance jobs with live logs and progress,
+- **Panel** (the gear) — the Control Panel overlay: maintenance jobs with live logs and progress,
   the `Runs itself` job list, server Stop/Restart, accounts, updates and **About**.
 - **Health** — the [collection health](Health) dashboard, with the storage bars.
 - **✦ AI Tools** — a browsable catalog of PixAI's one-click workflow tools. Each one is a
@@ -184,7 +184,7 @@ network: **↑ Import**, **Delete from PixAI**, **Set launcher icon** and the de
 jobs are missing, not broken. It's easy to leave a tab open on `http://<your-pc>:5000` and
 forget you're not on `localhost`, so if a button you expect is not there, check the address
 bar first. Open the gallery from the serving machine's own `localhost` address and the
-restriction lifts. (Earlier builds showed a **🌐 LAN session** chip naming what was hidden;
+restriction lifts. (Earlier builds showed a **LAN session** chip naming what was hidden;
 the current shell does not.)
 
 ## Help, About and the first-run guide
@@ -232,7 +232,7 @@ The filter bar:
   is remembered the same way your thumbnail size is. **A phone has no masonry / grid / hero /
   timeline switcher** — it lays the library out in two staggered columns — but it has its own
   two-way toggle, **▦ Grid | ▭ Feed**, in the pill row (see "The phone's reading feed" below).
-- When any filter is active, the active-filter bar shows an **⬇ Export this view (CSV)**
+- When any filter is active, the active-filter bar shows an **Export this view (CSV)**
   link that downloads exactly the rows you're looking at. (The Control Panel's **Download
   catalog (CSV)** is the whole-library dump.) **It's a complete answer even mid-sync.** It
   used to count the matching rows and then, a moment later, ask for that many — so a
@@ -301,8 +301,8 @@ like `width:tall`) isn't an error — the whole token is simply searched as prom
 the way search engines behave. Operator searches work everywhere the search box does:
 the grid, the pickers, saved views, and the filtered CSV export.
 
-Cards show a ▶ badge on videos and **AI** / **local** badges by source. A picture PixAI no
-longer has wears **ARCHIVE** in that same corner instead (hover it: *"Deleted on PixAI. This is
+Cards show a ▶ badge on videos and **PixAI** / **API** / **Local** badges by source. A picture PixAI no
+longer has wears **Archive** in that same corner instead (hover it: *"Deleted on PixAI. This is
 the only copy."*) — its task has left your PixAI history as of the last check, or PixAI dropped
 that one image, so your library holds the only copy anywhere. Its detail page says the same
 under **More details**. **Videos play
@@ -354,15 +354,15 @@ so you can bookmark one, and the browser's Back button closes it.
   and the fields the model genuinely doesn't have stay blank. If your *older* pictures
   show fewer of these rows, run the one-time
   `--backfill-full-meta --with-surface` pass described in [Backing up](Backing-Up).
-  **LINEAGE** shows where a derived picture came from — its source image and whether it
+  **Lineage** shows where a derived picture came from — its source image and whether it
   was an edit, an upscale, or turned into a video.
 - **◈ Similar** — lookalikes by *eye* rather than by model, and a different control from
   *Filter by model* above. **In the gallery on a computer, the ◈ mark is the door**: hover a
   card in the grid and press the ◈ in its corner, right-click a card and pick *Find similar*,
-  press **◈ Similar** in the lightbox, or press **◈ Similar** on the detail page's SIMILAR
+  press **◈ Similar** in the lightbox, or press **◈ Similar** on the detail page's Similar
   strip. All four do the same thing, and nowhere in the library does ◈ open a *second* kind of
   Similar. **The mark means only this now**: the two places it used to sit as decoration — a
-  model's use count in the picker, the *USER LORA* badge — wear their own drawn icons since
+  model's use count in the picker, the *User LoRA* badge — wear their own drawn icons since
   2026-09-05, so seeing ◈ anywhere always means lookalikes.
 
   What you get is a **state on your library, not a popup**: a dismissible **◈ Similar to
@@ -377,7 +377,7 @@ so you can bookmark one, and the browser's Back button closes it.
   tab, under the same **◈ Similar to [thumbnail]** token — in the search bar, on its own line
   under the field so the field is still usable, with the match count beside it. **✕ on the
   token, or the phone's Back gesture, puts your library back exactly as it was**, same search,
-  same filters, same page, same place on the page. The picture screen's own **◈ SIMILAR** row
+  same filters, same page, same place on the page. The picture screen's own **◈ Similar** row
   and the **see all** sheet behind it read the same mark; that sheet stays a sheet, because
   it is the phone's way of showing you the rest of something you are already looking at.
   *Filter by model* is called that on the phone too.
@@ -411,8 +411,8 @@ when the sheet goes. See the [FAQ](FAQ) for what the phone's Back gesture closes
 
 ### Comments on your published work
 
-A picture you have published on PixAI shows its **COMMENTS** in Details, on the desktop and the
-phone, where the ♥ / 💬 count used to carry them. They are read live from PixAI when you scroll
+A picture you have published on PixAI shows its **Comments** in Details, on the desktop and the
+phone, where the heart and comment-bubble counts used to carry them. They are read live from PixAI when you scroll
 to them — never when Details merely opens — newest first, 50 at a time with **Load older** at
 the end, and kept in memory for five minutes. They are never saved to your library, a file or a
 log: they are other people's words.

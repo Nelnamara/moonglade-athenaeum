@@ -13,6 +13,7 @@ import { closeHelp, subscribe } from "./helpStore.js";
 import { replayTour, resetGuides, setNotesHidden } from "./guideActions.js";
 import { AboutCard } from "./AboutLayers.jsx";
 import "../styles/help.css";
+import Icon from "../icons/Icons.jsx";
 
 /* THE HELP OVERLAY (Session I decision 2; the handoff's section B, "2a").
 
@@ -351,7 +352,7 @@ export default function HelpOverlay({ phone }) {
             aria-label={back.length ? "Back" : "Close the guide"}>‹</button>
           <div className="mghelp-sheettitle">{listOpen ? "Guide" : titleOf(cur.slug)}</div>
           <button type="button" className={"mghelp-44" + (listOpen ? " on" : "")}
-            onClick={() => setListOpen((v) => !v)} aria-label="Pages" aria-expanded={listOpen}>☰</button>
+            onClick={() => setListOpen((v) => !v)} aria-label="Pages" aria-expanded={listOpen}><Icon name="menu" /></button>
         </div>
         {listOpen ? list : reader}
       </div>,

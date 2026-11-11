@@ -216,8 +216,8 @@ describe("followers and following reach BOTH surfaces the owner asked for", () =
   test("the chip beside the credits chip renders both numbers", () => {
     assert.match(bar, /account\.followers/);
     assert.match(bar, /account\.following/);
-    assert.match(bar, /FOLLOWERS/);
-    assert.match(bar, /FOLLOWING/);
+    assert.match(bar, /Followers/);
+    assert.match(bar, /Following/);
   });
 
   test("it borrows the credits chip's own classes rather than inventing a chip", () => {
@@ -244,8 +244,8 @@ describe("followers and following reach BOTH surfaces the owner asked for", () =
 
   test("the account popup puts them in the balance strip it already had", () => {
     const strip = acct.slice(acct.indexOf("acct-balance"), acct.indexOf("acct-tabs"));
-    assert.match(strip, /acct-kick">followers</);
-    assert.match(strip, /acct-kick">following</);
+    assert.match(strip, /acct-kick">Followers</);
+    assert.match(strip, /acct-kick">Following</);
     assert.match(strip, /acct-midnum/);      // the strip's own idiom, no new class
   });
 });
@@ -261,7 +261,7 @@ describe("My Art draws the numbers it was already fetching", () => {
       // It was fetched for every card and summed into the COMMENTS stat, and never once
       // reached a card (MyArtOverlay drew likes only). Same glyph the app uses for a
       // comment count everywhere else.
-      assert.match(shell, /💬 \{fmt\(it\.comments\)\}/);
+      assert.match(shell, /<Icon name="comment" \/> \{fmt\(it\.comments\)\}/);   // both shells draw it since the quieted look
       assert.match(shell, /commentCol\(it\.comments\)/);
     });
 
@@ -325,12 +325,12 @@ describe("My Art draws the numbers it was already fetching", () => {
 
   test("the stat row reports a lifetime total, and says so when it is partial", () => {
     const hook = src("hooks/useMyArt.js");
-    assert.match(hook, /TOTAL VIEWS/);
+    assert.match(hook, /Total views/);
     assert.ok(!hook.includes("views_top"), "views_top was the twelve-row subtotal; it is gone");
     // A partly-swept library must not pass a subtotal off as a total -- the same job the
     // old "(TOP 12)" label was doing, kept.
-    assert.match(hook, /VIEWS \(" \+ swept \+ " OF "/);
-    assert.match(mobile, /"VIEWS \(" \+ \(t\.views_rows \|\| 0\)/);
+    assert.match(hook, /Views \(" \+ swept \+ " of "/);
+    assert.match(mobile, /"Views \(" \+ \(t\.views_rows \|\| 0\)/);
   });
 
   test("nothing on this surface fetches views live any more", () => {

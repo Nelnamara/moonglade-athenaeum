@@ -163,11 +163,11 @@ export default function SeparatorBar({
         " Buy credits or cards on PixAI."}>
       {warn ? <span className="mgx-warndot" aria-hidden="true">!</span> : null}
       <span className="mgx-credval">{credits}</span>
-      <span className="mgx-credlab">CREDITS</span>
+      <span className="mgx-credlab">Credits</span>
       <span className="mgx-creddiv" aria-hidden="true" />
       <span className="mgx-credcards">
         <span className="mgx-credval cards">{cards}</span>
-        <span className="mgx-credlab cards">CARDS</span>
+        <span className="mgx-credlab cards">Cards</span>
       </span>
       <span className="mgx-credtip" role="tooltip">
         {expiring ? (
@@ -223,7 +223,7 @@ export default function SeparatorBar({
      of the right half below. */
   const sizePill = (
     <div className="mgx-size" title="Thumbnail size">
-      <span className="mgx-size-lab">SIZE</span>
+      <span className="mgx-size-lab">Size</span>
       <div className="mgx-size-slot">
         <CustomSlider
           compact
@@ -314,10 +314,10 @@ export default function SeparatorBar({
             <span className="mgx-cred mgx-social"
               title={social.followers + " followers · " + social.following + " following on PixAI"}>
               <span className="mgx-credval">{social.followers}</span>
-              <span className="mgx-credlab">FOLLOWERS</span>
+              <span className="mgx-credlab">Followers</span>
               <span className="mgx-creddiv" aria-hidden="true" />
               <span className="mgx-credval">{social.following}</span>
-              <span className="mgx-credlab">FOLLOWING</span>
+              <span className="mgx-credlab">Following</span>
             </span>
           ) : null}
 

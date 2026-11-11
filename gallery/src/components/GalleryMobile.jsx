@@ -464,7 +464,7 @@ export default function GalleryMobile({
 
       <div className={"glm-bar2" + (continuous ? " cont" : "")}>
         {MEDIA_PILLS.map(([v, label]) => (
-          <button key={label} type="button" className={"glm-metal" + (media === v ? " on" : "")}
+          <button key={label} type="button" className={"glm-metal glm-chip" + (media === v ? " on" : "")}
             onClick={() => applyAdvanced({ media: v })}>
             {label}
           </button>
@@ -583,9 +583,9 @@ export default function GalleryMobile({
       ) : null}
       </PullToRefresh>
 
-      <MobileSheet open={sheet === "search"} closing={closing} onClose={closeSheet} title="ADVANCED SEARCH">
+      <MobileSheet open={sheet === "search"} closing={closing} onClose={closeSheet} title="Advanced search">
         <div className="glm-legend">
-          <div className="glm-legend-cap">these already work — nothing tells you so</div>
+          <div className="glm-legend-cap">These already work — nothing tells you so</div>
           <div className="glm-legend-line"><code>night*</code> wildcard · <code>model:tsubaki</code> by model</div>
           <div className="glm-legend-line"><code>2038314167804392533</code> a task or media id</div>
           <div className="glm-legend-line"><code>keeper</code> · <code>-reject</code> your mark · <code>tag:pose-study</code> your tag · <code>★4+</code></div>
@@ -677,7 +677,7 @@ export default function GalleryMobile({
       <LayoutPagingSheet open={sheet === "paging"} closing={closing} onClose={closeSheet}
         layout={layout} setLayout={setLayout} paging={paging} setPaging={setPaging} />
 
-      <MobileSheet open={sheet === "sort"} closing={closing} onClose={closeSheet} title="SORT">
+      <MobileSheet open={sheet === "sort"} closing={closing} onClose={closeSheet} title="Sort">
         <div className="glm-sheet-list">
           {sortOpts.map(([v, label]) => (
             <button key={v} type="button" className={"glm-metal glm-sheetopt" + (adv.sort === v ? " on" : "")}
@@ -695,7 +695,7 @@ export default function GalleryMobile({
       </MobileSheet>
 
       <MobileSheet open={sheet === "actions"} closing={closing} onClose={closeSheet}
-        title={selected.size + " SELECTED"}>
+        title={selected.size + " selected"}>
         {bulk ? (
           <CurationSheetMobile count={selected.size} onStar={bulk.star} onTag={bulk.tag}
             onKeeper={bulk.keeper} onReject={bulk.reject} />

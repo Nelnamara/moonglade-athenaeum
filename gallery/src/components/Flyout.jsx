@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { fetchPresets } from "../api.js";
+import Icon from "../icons/Icons.jsx";
 import { ASPECT_CHOICES, aspectIn, withAspect, parseAspect } from "../curation/aspectCore.js";
 
 /* The Advanced flyout -- ANCHORED to the search slab (rendered inside .mgl-search,
@@ -141,9 +142,9 @@ export default function Flyout({ boot, current, queryText = "", onApply, onClose
   return (
     <div className="fly" role="dialog" aria-label="Advanced search" ref={flyRef}
       style={top != null ? { "--fly-top": top + "px" } : undefined}>
-      <div className="flyhd">ADVANCED SEARCH</div>
+      <div className="flyhd">Advanced search</div>
       <div className="flylegend">
-        <p>these already work — nothing in the app tells you so</p>
+        <p>These already work — nothing in the app tells you so</p>
         <div>
           <code>night*</code> <span>wildcard</span> · <code>model:tsubaki</code>{" "}
           <span>by model</span> · <code>2038314167804392533</code> <span>a task or media id</span>
@@ -250,7 +251,7 @@ export default function Flyout({ boot, current, queryText = "", onApply, onClose
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveView(); } }} />
               <button type="button" className="card" disabled={!saveName.trim()} onClick={saveView}>Save</button>
             </div>
-            {saveMsg && <div className="flysaved-msg">⚠ {saveMsg}</div>}
+            {saveMsg && <div className="flysaved-msg"><Icon name="warning" /> {saveMsg}</div>}
           </div>
         </div>
       </div>
@@ -274,7 +275,7 @@ export default function Flyout({ boot, current, queryText = "", onApply, onClose
         {exportHref && (
           <a className="card" href={exportHref} download
             title="Download exactly this filtered view as CSV (the whole-catalog dump stays in the Control Panel)">
-            ⬇ Export view
+            <Icon name="download" /> Export view
           </a>
         )}
         <span className="sp" />

@@ -121,7 +121,7 @@ export default function ContestPicker({ contest, onCancel, onPick, onOpenPublish
               {shortlist.length > 0 && (
                 <>
                   <div className="mgct-pickh shortlist">
-                    ☆ SHORTLIST <span className="n">
+                    ☆ Shortlist <span className="n">
                       — staged for this contest · {shortlist.length}
                       {shortTotal > (shortIds ? shortIds.size : 0)
                         ? " of " + shortTotal + " (showing the newest)" : ""}
@@ -133,7 +133,7 @@ export default function ContestPicker({ contest, onCancel, onPick, onOpenPublish
               {rest.length > 0 && (
                 <>
                   <div className="mgct-pickh">
-                    ELIGIBLE PUBLISHED <span className="n">
+                    Eligible published <span className="n">
                       · made after {started || "the contest opened"} · newest first · {rest.length}
                     </span>
                   </div>

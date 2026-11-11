@@ -136,7 +136,7 @@ export default function ImportOverlay({ onClose, collections, onImported }) {
               </div>
 
               <div className="mgim-collrow">
-                <div className="mgim-colllbl">ADD TO COLLECTION</div>
+                <div className="mgim-colllbl">Add to collection</div>
                 <div className="mgim-collpick" onClick={() => setCollOpen((v) => !v)}>
                   <span>{collection === NEW_COLL ? (newCollName || "+ New collection…") : (collection || "— none —")}</span>
                   <span className="mgim-caret">▾</span>

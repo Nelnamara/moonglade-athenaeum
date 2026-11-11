@@ -180,7 +180,7 @@
   .mgx-sep .at-chip .at-chiptail{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0;}
 }
 .at-dot{width:7px;height:7px;border-radius:50%;flex:none;background:color-mix(in srgb,var(--text) 30%,transparent);}
-.at-chip.live .at-dot{background:var(--accent,var(--lavender));box-shadow:0 0 10px color-mix(in srgb,var(--lavender) 80%,transparent);animation:mgPulse 1.5s ease-in-out infinite;}
+.at-chip.live .at-dot{background:var(--accent,var(--lavender));animation:mgPulse 1.5s ease-in-out infinite;}
 /* Owned here, not assumed from a host page (the Loom shell carries no gallery page CSS) --
    same rule the old .jt-spin block stated for gen-spin, now also covering mgPulse since the
    live-dot pulse moved into this file from the old ambient-only mgx-act rule. */
@@ -248,10 +248,10 @@
 .at-lab{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .at-sub{font-size:10.5px;margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;color:var(--overlay0);}
 .at-sub .at-kind{color:var(--subtext);text-transform:capitalize;}
-.at-sub .at-phase{border:1px solid var(--surface1);border-radius:999px;padding:0 6px;font-size:9.5px;line-height:15px;letter-spacing:.07em;text-transform:uppercase;}
+.at-sub .at-phase{border:1px solid var(--surface1);border-radius:999px;padding:0 6px;font-size:11.5px;font-weight:500;line-height:15px;letter-spacing:normal;text-transform:none;}
 /* The website source mark (2026-09-07). Same quiet pill as .at-phase on purpose -- it says
    WHERE a run came from, not that anything is wrong with it, so nothing warning-coloured. */
-.at-sub .at-src{border:1px solid var(--surface1);border-radius:999px;padding:0 6px;font-size:9.5px;line-height:15px;letter-spacing:.07em;text-transform:uppercase;color:var(--subtext);}
+.at-sub .at-src{border:1px solid var(--surface1);border-radius:999px;padding:0 6px;font-size:11.5px;font-weight:500;line-height:15px;letter-spacing:normal;text-transform:none;color:var(--subtext);}
 .at-errmsg{color:var(--red);font-size:10.5px;margin-top:5px;white-space:normal;}
 /* Sessions R + Y (R2c): PixAI's word on a job Activity saw end otherwise -- dim, never a state. */
 .at-says{color:var(--overlay0);font-size:10px;margin-top:4px;white-space:normal;}
@@ -269,7 +269,7 @@
 .at-detail{margin-top:8px;padding-top:8px;border-top:1px solid var(--surface0);font-size:11px;}
 .at-drow{display:flex;align-items:center;padding:3px 0;gap:6px;}
 .at-drow.at-divider{border-top:1px solid var(--surface0);margin-top:2px;padding-top:6px;}
-.at-dk{width:52px;flex:none;color:var(--overlay0);font-size:9px;letter-spacing:.06em;text-transform:uppercase;}
+.at-dk{width:56px;flex:none;color:var(--overlay0);font-size:11px;font-weight:500;letter-spacing:normal;text-transform:none;}
 .at-dv{color:var(--text);flex:1;min-width:0;word-break:break-all;}
 .at-dv.at-mono{font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:10.5px;}
 .at-dv.good{color:var(--emerald);} .at-dv.bad{color:var(--red);} .at-dv.warn{color:var(--peach);}
@@ -295,8 +295,8 @@
    Its own card face -- the base surface with an even border, no kind stripe -- because it is
    news about the app, not a result. */
 .mg-toast .mt-avatar{width:30px;height:30px;border-radius:50%;flex:none;background-color:var(--surface0);background-position:center;background-size:cover;background-repeat:no-repeat;}
-.mg-toast .mt-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;}
-.mg-toast .mt-act{flex:none;align-self:center;font:700 10.5px/1 var(--font-system,system-ui,sans-serif);padding:5px 10px;border-radius:8px;border:1px solid var(--lavender);background:none;color:var(--text);cursor:pointer;white-space:nowrap;}
+.mg-toast .mt-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600;}
+.mg-toast .mt-act{flex:none;align-self:center;font:600 10.5px/1 var(--font-system,system-ui,sans-serif);padding:5px 10px;border-radius:8px;border:1px solid var(--lavender);background:none;color:var(--text);cursor:pointer;white-space:nowrap;}
 .mg-toast .mt-act:hover{background:color-mix(in srgb,var(--lavender) 14%,transparent);}
 /* A toast that asks (the narrator's choice): its buttons sit in a row under the text, not
    beside it, and a small foot line closes it. The ruby one is the switch's own red. */
@@ -341,10 +341,10 @@
    wizard registers no host and is already "/", so it says why instead of drawing a button
    that presses nothing (2026-09-07, later the same day). */
 .mgub-why{flex:none;font-size:11px;color:var(--subtext);font-style:italic;}
-button.mgub-go{flex:none;padding:6px 15px;border-radius:9px;font-size:12px;font-weight:800;
+button.mgub-go{flex:none;padding:6px 15px;border-radius:var(--radius-control);font-size:12px;font-weight:600;
   cursor:pointer;font-family:inherit;color:#241a05;border:1px solid rgba(212,175,55,.7);
   background:linear-gradient(180deg,#e2c04a,#a8871f);}
-button.mgub-later{flex:none;padding:6px 11px;border-radius:9px;font-size:11.5px;cursor:pointer;
+button.mgub-later{flex:none;padding:6px 11px;border-radius:var(--radius-control);font-size:11.5px;cursor:pointer;
   font-family:inherit;color:var(--subtext);border:1px solid var(--surface1);background:transparent;}
 button.mgub-later:hover{color:var(--text);border-color:var(--accent);}
 /* "Not now" folds the strip to this pill -- for this tab only, never written down. There is

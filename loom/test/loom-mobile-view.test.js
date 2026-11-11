@@ -708,10 +708,11 @@ describe("Shot Detail (mobile Deep Focus): opens from the board, edits the REAL 
     // The previous shot rendered: splice its last frame.
     browser.reply = (url) => (url === "/api/loom/handoff" ? { frame_media_id: "888" } : {});
     const h3 = phone({ sel: "c3", state: { dfOpen: true } });
-    assert.equal(textOf(extra(h3)), "✂ splice A·02's last frame");
+    // the ✂ is the scissors line icon now (unslop pick 2B): it has no text, so the words are what's asserted
+    assert.equal(textOf(extra(h3)).trim(), "splice A·02's last frame");
     h3.click(extra(h3));
     assert.deepEqual(fetched("/api/loom/handoff").map((x) => x[2]), [{ video_media_id: MID.res2, trim_out: null }]);
-    assert.equal(textOf(extra(h3)), "✂ splicing…");
+    assert.equal(textOf(extra(h3)).trim(), "splicing…");
     assert.equal(extra(h3).props.disabled, true);
     await settle();
     h3.render();
@@ -731,7 +732,7 @@ describe("Shot Detail (mobile Deep Focus): opens from the board, edits the REAL 
   test("the Cast button shows the shot's own cast count and opens the Cast & assets sheet", () => {
     const h = detail({ board: makeBoard({ c1: { cast: ["as1", "as2"] } }) });
     const cast = one(cls(df(h), "lm-df-cast"));
-    assert.equal(textOf(cast), "👥 2");
+    assert.equal(textOf(cast).trim(), "2");   // the 👥 is the community line icon now
     assert.equal(cls(h, "lm-sheet").length, 0);
     h.click(cast);
     assert.equal(cls(h, "lm-sheet").length, 1);
@@ -1537,9 +1538,9 @@ describe("Review & trim: crop-rectangle drag -- a port of the design's own _crop
   test("the Crop/Done button flips its label and the cropping state", () => {
     const h = phone({ sel: "c2", state: { reviewOpen: true } });
     const b = () => one(cls(h, "lm-review-cropbtn"));
-    assert.equal(textOf(b()), "⛶ Crop");
+    assert.equal(textOf(b()).trim(), "Crop");   // the ⛶ is the crop line icon now
     h.click(b());
-    assert.equal(textOf(b()), "⛶ Done");
+    assert.equal(textOf(b()).trim(), "Done");
     assert.ok(classOf(b()).includes("on"));
     assert.equal(cls(h, "lm-review-croprect").length, 1);
   });

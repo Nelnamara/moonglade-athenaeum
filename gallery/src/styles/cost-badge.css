@@ -30,7 +30,7 @@
    card line. */
 .cost-badge[data-lane="unlimited"] { color: var(--text);
   border-color: color-mix(in oklab, var(--green) 48%, transparent); }
-.cost-badge .mgc-inf { margin-left: .3em; font-weight: 700; color: var(--green); }
+.cost-badge .mgc-inf { margin-left: .3em; font-weight: 600; color: var(--green); }
 
 /* compact: the credits chip (gallery-era spec) — metallic violet pill face. z 1 at rest,
    z 7 while its billing tip shows (top of the 0-7 component band; the tip itself is z 5 as
@@ -47,8 +47,8 @@
   border: 1px solid rgba(255, 255, 255, .22);
   position: relative;
   z-index: 1;
-  background: linear-gradient(150deg, rgba(222, 214, 246, .32) 0%, rgba(122, 96, 178, .34) 46%, rgba(24, 18, 44, .66) 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .42), inset 0 -2px 4px rgba(20, 12, 40, .45), 0 5px 14px rgba(0, 0, 0, .4);
+  background: var(--matte-fill);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .42), 0 5px 14px rgba(0, 0, 0, .4);
 }
 .cost-badge.compact:hover { z-index: 7; }
 /* chip keeps the spec's white border/neutral ink in the settled states; the honesty
@@ -97,7 +97,7 @@
 /* value · divider · label — the chip's internal anatomy */
 .cost-badge .mgc-val {
   font-size: 15.5px;
-  font-weight: 800;
+  font-weight: 600;
   letter-spacing: -.01em;
   font-variant-numeric: tabular-nums;
   color: #f2ecff;
@@ -106,10 +106,10 @@
 .cost-badge[data-state="free"] .mgc-val { color: #dcffee; }
 .cost-badge .mgc-div { width: 1px; height: 12px; background: rgba(255, 255, 255, .2); flex: none; }
 .cost-badge .mgc-lab {
-  font-size: 8.5px;
-  font-weight: 700;
-  letter-spacing: .16em;
-  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
   color: rgba(255, 255, 255, .62);
 }
 /* gold "!" membership/expiry-warning dot */
@@ -121,7 +121,7 @@
   display: grid;
   place-items: center;
   font-size: 10px;
-  font-weight: 800;
+  font-weight: 600;
   line-height: 1;
   color: #2a1f06;
   border: 1px solid rgba(255, 255, 255, .4);
@@ -171,10 +171,10 @@
 .cost-badge.compact .mgc-sub {
   display: inline;
   margin: 0;
-  font-size: 8.5px;
-  font-weight: 700;
-  letter-spacing: .16em;
-  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
   color: rgba(255, 255, 255, .62);
 }
 .cost-badge.compact .mgc-sub::before { content: "· "; }
@@ -189,7 +189,6 @@
   overflow: hidden;
   vertical-align: -1px;
   margin-right: 6px;
-  box-shadow: 0 0 7px rgba(182, 146, 230, .7);
 }
 .cost-badge .mgc-pip::after {
   content: "";
@@ -204,3 +203,8 @@
   50% { transform: translateX(0); }
   100% { transform: translateX(102%); }
 }
+
+/* The line icon that rides a state's words (unslop pick 2B): the free card's ticket, the
+   warning on a warned or failed quote. Drawn by CostBadge.jsx beside the words, never inside
+   them, so the badge's text stays plain words. It takes the colour of the line it sits in. */
+.cost-badge .mgc-ico { margin-right: .3em; }

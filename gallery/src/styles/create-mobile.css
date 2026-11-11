@@ -14,9 +14,9 @@
 .cm-pad { padding: 12px 13px 26px; }
 
 /* ---- mode segmented control (DC seg3Style/segBtn: lines 940-941, 863) ---- */
-.cm-seg3 { display: flex; gap: 5px; background: var(--surface0); border-radius: 12px;
+.cm-seg3 { display: flex; gap: 5px; background: var(--surface0); border-radius: var(--radius-control);
   padding: 3px; margin-bottom: 12px; }
-.cm-segbtn { flex: 1; text-align: center; border-radius: 10px; padding: 7px 4px;
+.cm-segbtn { flex: 1; text-align: center; border-radius: 7px; padding: 7px 4px;
   font-size: 11.5px; cursor: pointer; color: var(--subtext); background: none;
   border: none; font-family: inherit; }
 .cm-segbtn.on { background: var(--lavender); color: var(--base); font-weight: 600; }
@@ -90,7 +90,7 @@
 .cm-browse { flex: none; font-size: 9.5px; color: var(--lavender); }
 .cm-modelrow.empty .cm-modelname { color: var(--mauve); }
 
-.cm-select { width: 100%; box-sizing: border-box; border-radius: 9px; padding: 7px 9px;
+.cm-select { width: 100%; box-sizing: border-box; border-radius: var(--radius-control); padding: 7px 9px;
   font-size: 11.5px; color: var(--text); background: var(--base); border: 1px solid var(--surface1);
   font-family: inherit; margin-bottom: 8px; }
 
@@ -173,7 +173,7 @@
   margin-bottom: 4px; }
 .cm-editmodel > span:first-child { flex: 1 1 auto; }
 .cm-editmodel-caret { color: var(--overlay0); font-size: 11px; }
-.cm-newtag { flex: none; font-size: 8.5px; font-weight: 700; padding: 1px 6px; border-radius: 4px;
+.cm-newtag { flex: none; font-size: 8.5px; font-weight: 600; padding: 1px 6px; border-radius: 4px;
   background: rgba(79, 201, 154, .16); color: var(--emerald); }
 .glm-scrim.cm-sheetover { z-index: 309; }
 .glm-sheet.cm-sheetover { z-index: 310; }
@@ -184,7 +184,7 @@
 .cm-sheetrow-main { flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; }
 .cm-sheetrow-main b { font-size: 13px; font-weight: 600; }
 .cm-sheetrow-main span { font-size: 11px; color: var(--subtext); }
-.cm-sheetrow-tick { color: var(--lavender); font-weight: 800; }
+.cm-sheetrow-tick { color: var(--lavender); font-weight: 600; }
 .cm-chip44 { min-height: 44px; min-width: 44px; font-size: 11.5px; }
 .cm-sheetchips { padding: 4px 2px 8px; }
 
@@ -205,7 +205,7 @@
    defines); this block only adds what's genuinely NEW to Advanced: section
    subheads, the per-LoRA weight row, custom W/H side-by-side inputs, and the
    slider+value row shape steps/CFG share. ---- */
-.cm-subhead { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+.cm-subhead { font-size: 12.5px; font-weight: 500; letter-spacing: normal; text-transform: none;
   color: var(--lavender); margin: 16px 0 8px; }
 .cm-subhead:first-child { margin-top: 2px; }
 
@@ -216,12 +216,12 @@
 
 .cm-customrow { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
 .cm-customrow span { font-size: 11px; color: var(--overlay0); }
-.cm-custominput { width: 68px; box-sizing: border-box; border-radius: 9px; padding: 6px 8px;
+.cm-custominput { width: 68px; box-sizing: border-box; border-radius: var(--radius-control); padding: 6px 8px;
   font-size: 11.5px; color: var(--text); background: var(--base); border: 1px solid var(--surface1);
   font-family: inherit; text-align: center; }
 .cm-custominput.on { border-color: var(--lavender); }
 
-.cm-input { width: 100%; box-sizing: border-box; border-radius: 9px; padding: 7px 9px;
+.cm-input { width: 100%; box-sizing: border-box; border-radius: var(--radius-control); padding: 7px 9px;
   font-size: 11.5px; color: var(--text); background: var(--base); border: 1px solid var(--surface1);
   font-family: inherit; margin-bottom: 8px; }
 
@@ -235,12 +235,11 @@
 .cm-results { margin-bottom: 10px; }
 
 /* ---- Generate button (DC generateBtnStyle, line 1006) ---- */
-.cm-generate { width: 100%; box-sizing: border-box; text-align: center; border-radius: 14px;
-  padding: 10px 14px; font-size: 13px; font-weight: 700; color: #1a0f2e; cursor: pointer;
+.cm-generate { width: 100%; box-sizing: border-box; text-align: center; border-radius: var(--radius-control);
+  padding: 10px 14px; font-size: 13px; font-weight: 600; color: #1a0f2e; cursor: pointer;
   border: none; font-family: inherit;
   background: linear-gradient(180deg, color-mix(in srgb, var(--lavender) 92%, #fff), var(--lavender) 52%,
-    color-mix(in srgb, var(--lavender) 76%, #000));
-  box-shadow: 0 0 20px -5px color-mix(in srgb, var(--lavender) 75%, transparent); }
+    color-mix(in srgb, var(--lavender) 76%, #000)); }
 .cm-generate.off, .cm-generate:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
 
 /* ---- Model/LoRA picker: ModelFlyout.jsx mounted AS-IS (the same
@@ -282,4 +281,4 @@
    (flex: 1), and this one sits inline at the end of a flex row, so the stretch comes
    off and it takes the head's own compact metrics. */
 .cm-modelwrap .mfly-head .mfly-done {
-  flex: none; padding: 6px 16px; border-radius: 12px; font-size: 11.5px; }
+  flex: none; padding: 6px 16px; border-radius: var(--radius-control); font-size: 11.5px; }

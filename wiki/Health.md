@@ -18,7 +18,7 @@ The **Health** overlay is your analytics dashboard over `catalog.db`:
 > no PixAI task behind them, so they can never carry a model.
 
 Reach it from **Health** in the row of destinations under the gallery's banner (on a phone,
-**☰ Menu → Health**).
+**Menu → Health**).
 
 ## Storage used
 
@@ -36,7 +36,7 @@ cutting the same pictures. Sizes are the bytes each picture's file takes on disk
 
 **Click a segment (or its name under the bar) and the gallery opens filtered to it** — the type,
 the model or the collection, starting over from the whole library. **Other** is "everything not
-named", so it doesn't open anything. On a phone the same bars are on the Health screen (☰ Menu →
+named", so it doesn't open anything. On a phone the same bars are on the Health screen (Menu →
 Health) and a tap does the same.
 
 The bars count pictures that are in your catalog *and* on disk. A file that is in the folder but
@@ -143,17 +143,17 @@ it), reading "missing · <where the catalog expects it>". Each row shows the pic
 thumbnail (or a "?"), its id, the problem and where the file is, its size ("size unknown" for a
 missing file, since the catalog doesn't record one), and a pill:
 
-- **RECOVERABLE** — a missing or empty file PixAI still has, or a missing or empty thumbnail.
-- **SUSPECT** (peach) — a file that stops before its end. "Suspect", never "corrupt": the
+- **Recoverable** — a missing or empty file PixAI still has, or a missing or empty thumbnail.
+- **Suspect** (peach) — a file that stops before its end. "Suspect", never "corrupt": the
   check reads two small pieces of the file and decodes nothing.
-- **LOST** (dashed) — a broken file PixAI no longer has, or one you marked lost. A picture
-  PixAI no longer has also wears **ARCHIVE**, the same word the gallery uses, and its row says
+- **Lost** (dashed) — a broken file PixAI no longer has, or one you marked lost. A picture
+  PixAI no longer has also wears **Archive**, the same word the gallery uses, and its row says
   "Broken here, and gone from your PixAI history as of <date>. There's no copy left to
   re-download." The date is when the archive-only flag was last rewritten by a sync. If a
-  later sync finds the picture on PixAI again, the row turns back into **RECOVERABLE**.
+  later sync finds the picture on PixAI again, the row turns back into **Recoverable**.
 
 A row offers only the fix that applies to it (**Re-download** or **Rebuild**, see below) and a
-**⋯** menu with **Open details**, **Mark lost** and **Copy path**. A LOST row never offers a
+**⋯** menu with **Open details**, **Mark lost** and **Copy path**. A Lost row never offers a
 re-download; it offers **Open details** and **Keep as is**, which quiets it.
 
 **Mark lost** and **Keep as is** are a note this app keeps for itself, in
@@ -177,13 +177,13 @@ A row's own button runs straight away, with no confirm, because it is one file:
 Nothing in the list deletes or quarantines a file. A picture PixAI no longer has is never
 re-downloaded — the app refuses it on the server whatever the screen asks — and with
 `READ_ONLY` on, re-downloads are off (thumbnails can still be rebuilt). When a fix finishes, the
-row shows **✓ FIXED** for two seconds and leaves the list, and the rows that were fixed are
+row shows **✓ Fixed** for two seconds and leaves the list, and the rows that were fixed are
 checked again so the tiles and the report follow.
 
 #### Fix all recoverable
 
 The section's **Fix all recoverable (N)** button counts the missing, empty, cut-short and thumbnail rows
-that can be fixed — never a LOST row, never a picture PixAI no longer has — and asks once:
+that can be fixed — never a Lost row, never a picture PixAI no longer has — and asks once:
 how many files it will re-download from PixAI and about how much that is, how many thumbnails
 it will rebuild here, how many lost files it leaves alone, and "Nothing is deleted." On a phone
 whose Data saver is on over a metered connection, it says that too. With `READ_ONLY` on it
@@ -198,11 +198,11 @@ couldn't be re-downloaded.") with **Show**, and Health's tiles measure again.
 
 #### On a phone
 
-In **☰ Menu → Health** the **Zero-byte files**, **Missing thumbs** and **Missing files** tiles
+In **Menu → Health** the **Zero-byte files**, **Missing thumbs** and **Missing files** tiles
 turn peach the same way, and a **Broken files** row under the tiles (with "12 · 1 lost ›") opens the list as its own
 screen; tapping a peach tile opens it at that kind. The chips scroll sideways, and tapping a row
 opens a sheet with what applies to it: **Re-download** or **Rebuild**, **Open details**, and
-**Mark lost** (a LOST row's sheet says why, and offers **Keep as is** instead). **Fix all
+**Mark lost** (a Lost row's sheet says why, and offers **Keep as is** instead). **Fix all
 recoverable (N)** stays at the foot of the screen and confirms in a sheet with the same lines as
 the desktop. While it runs, the top of the screen shows "n / N fixed" with the moon and **Stop**,
 and the Activity sheet shows the run. The phone's **Control → Check — read-only** row says

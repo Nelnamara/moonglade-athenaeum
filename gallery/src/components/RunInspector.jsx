@@ -67,7 +67,7 @@ export default function RunInspector({ source, onClose, floating, phone, inline 
   return (
     <div className={"mgrun-insp" + (floating ? " float" : "") + (inline ? " inline" : "")} role="dialog" aria-label="Inspect the request">
       <div className="mgrun-insphead">
-        <div className="mgrun-insptitle">{"{ } INSPECT · " + what}</div>
+        <div className="mgrun-insptitle">{"{ } Inspect · " + what}</div>
         {!phone && [["json", "JSON"], ["cli", "CLI"]].map(([k, l]) => (
           <button key={k} type="button" className={"mgrun-inspbtn" + (tab === k ? " on" : "")}
             onClick={() => setTab(k)}>{l}</button>

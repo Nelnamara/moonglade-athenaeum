@@ -5,7 +5,7 @@
    reacts or reports. */
 
 .cm-thread { display: flex; flex-direction: column; gap: 2px; text-align: left; }
-.cm-lab { font-size: 9.5px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); margin-bottom: 4px; }
+.cm-lab { font-size: 11.5px; font-weight: 500; letter-spacing: normal; color: var(--overlay0); margin-bottom: 4px; }
 .cm-dim { font-size: 9.5px; line-height: 1.45; color: var(--overlay0); padding: 4px 0; }
 .cm-warn { font-size: 10.5px; line-height: 1.5; color: var(--peach); }
 .cm-ok { font-size: 10.5px; line-height: 1.5; color: var(--emerald); }
@@ -19,8 +19,8 @@
 .cm-head { display: flex; align-items: center; gap: 6px; }
 .cm-av { width: 20px; height: 20px; flex: none; border-radius: 50%; background-color: var(--surface1);
   background-size: cover; background-position: center; background-repeat: no-repeat; }
-.cm-name { font-size: 10.5px; font-weight: 700; white-space: nowrap; color: var(--text); }
-.cm-you { font-size: 8.5px; font-weight: 800; padding: 1px 6px; border-radius: 4px;
+.cm-name { font-size: 10.5px; font-weight: 600; white-space: nowrap; color: var(--text); }
+.cm-you { font-size: 8.5px; font-weight: 600; padding: 1px 6px; border-radius: 4px;
   background: rgba(182, 146, 230, .18); color: var(--lavender); }
 .cm-text { padding-left: 26px; font-size: 10.5px; line-height: 1.45; color: var(--subtext);
   white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -41,7 +41,7 @@
 /* the reply box (§6): grows from 36 px, a mono counter that turns peach past 4,095 */
 .cm-box { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 8px 26px; }
 .cm-field { min-height: 36px; box-sizing: border-box; width: 100%; resize: none; overflow: hidden;
-  padding: 8px 10px; border-radius: 9px; border: 1px solid var(--lavender); background: rgba(12, 10, 28, .8);
+  padding: 8px 10px; border-radius: var(--radius-control); border: 1px solid var(--lavender); background: rgba(12, 10, 28, .8);
   font: inherit; font-size: 10.5px; line-height: 1.5; color: var(--text); }
 .cm-field:focus { outline: none; box-shadow: 0 0 0 2px rgba(182, 146, 230, .25); }
 .cm-field:disabled { opacity: .7; }
@@ -50,11 +50,11 @@
 .cm-count { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9.5px; color: var(--overlay0); white-space: nowrap; }
 .cm-count.over { color: var(--peach); }
 .cm-sp { flex: 1; }
-.cm-btn { font: inherit; font-size: 10.5px; font-weight: 700; padding: 6px 12px; border-radius: 9px; border: 0;
+.cm-btn { font: inherit; font-size: 10.5px; font-weight: 600; padding: 6px 12px; border-radius: var(--radius-control-sm); border: 0;
   background: var(--lavender); color: var(--base); white-space: nowrap; cursor: pointer; }
 .cm-btn:disabled { opacity: .45; cursor: default; }
 .cm-btn.ruby { background: var(--ruby); color: var(--text); }
-.cm-ghost { font: inherit; font-size: 10.5px; padding: 6px 12px; border-radius: 9px; border: 1px solid var(--surface1);
+.cm-ghost { font: inherit; font-size: 10.5px; padding: 6px 12px; border-radius: var(--radius-control-sm); border: 1px solid var(--surface1);
   background: none; color: var(--subtext); white-space: nowrap; cursor: pointer; }
 .cm-ghost:hover { color: var(--text); }
 

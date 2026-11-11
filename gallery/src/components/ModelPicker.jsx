@@ -629,7 +629,7 @@ export default function ModelPicker({
               {kind === "lora" ? <SavedChips value={savedBase} onPick={setSavedBase} /> : null}
               {savedLine}
             </>
-          ) : err ? <div className="mg-empty" style={{ display: "block" }}>⚠ {err}</div>
+          ) : err ? <div className="mg-empty" style={{ display: "block" }}><Icon name="warning" /> {err}</div>
             : !rows.length ? <div className="mg-empty" style={{ display: "block" }}>{emptyLine}</div>
             : <div className="mg-empty" />}
 
@@ -659,7 +659,7 @@ export default function ModelPicker({
                   <div className="mg-cov">
                     {m.preview_url && <img className={m.should_blur ? "blur" : undefined} loading="lazy" src={m.preview_url} alt="" />}
                     {m.official && <span className="mg-pill">Official</span>}
-                    {incompat && arch && <span className="mg-ibadge">&#9888; {arch}</span>}
+                    {incompat && arch && <span className="mg-ibadge"><Icon name="warning" /> {arch}</span>}
                   </div>
                   <div className="mg-meta">
                     <div className="mg-nm">{m.title}</div>
@@ -732,8 +732,8 @@ export default function ModelPicker({
                   <div className="mp-sub">
                     <span>{tyShort(p.type)}</span>
                     {p.ref_count ? <span><Icon name="uses" /> {fmtCompact(p.ref_count)} uses</span> : null}
-                    <span>♥ {fmt(p.liked_count)}</span>
-                    {p.comment_count ? <span>💬 {fmt(p.comment_count)}</span> : null}
+                    <span><Icon name="heart" /> {fmt(p.liked_count)}</span>
+                    {p.comment_count ? <span><Icon name="comment" /> {fmt(p.comment_count)}</span> : null}
                   </div>
                   {(baseLabel(p.base_model) || p.official) && (
                     <div className="mp-badges">

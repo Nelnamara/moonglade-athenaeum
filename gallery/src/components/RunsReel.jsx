@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import { apiGet } from "../api.js";
 import { costColor, costText } from "../gen/historyCore.js";
 import { WAIT_MIN_TILE, queueWaitText } from "../gen/queueWait.js";
@@ -71,7 +72,7 @@ function MatrixBlock({ runId, jobs, th, onPrefill, onInspect }) {
                 onClick={done ? () => onPrefill(j.job_id, j.media_ids[0]) : undefined}>
                 {done ? <img src={"/thumbs/" + encodeURIComponent(j.media_ids[0]) + ".jpg"} alt="" /> : null}
                 {running && !done ? <span className="mgrun-axis">…</span> : null}
-                {held && !done ? "⚠" : null}
+                {held && !done ? <Icon name="warning" /> : null}
                 {c && c.task_id && onInspect ? (
                   <button type="button" className="mgrun-cellinsp" title="Inspect the request"
                     onClick={(e) => { e.stopPropagation(); onInspect(c.task_id); }}>{"{ }"}</button>
@@ -267,7 +268,7 @@ export default function RunsReel({ jobs, reelH, onPrefill, onTip, onInspect }) {
                 {wait ? (
                   <span className={"mgdock-runwait" + (cluster ? " up" : "")}>{wait}</span>
                 ) : null}
-                {failed && <span className="mgdock-tilefail">⚠</span>}
+                {failed && <span className="mgdock-tilefail"><Icon name="warning" title="Failed" /></span>}
                 {done && (
                   <div className={"mgdock-tilehint" + (hover === hoverKey ? " show" : "")}>
                     <span>Use these settings →</span>

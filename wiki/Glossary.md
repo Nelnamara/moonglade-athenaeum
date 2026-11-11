@@ -18,7 +18,7 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
   app's icon (set for your own Windows account only). Also called the container, or just the
   pack.
 - **anchor** — where a Loom shot's spliced opening frame came from: the shot and the take before
-  it. When that shot changes take, the card says **⚠ anchor changed** and offers **Re-anchor** or
+  it. When that shot changes take, the card says **anchor changed** (with a warning icon) and offers **Re-anchor** or
   **Keep**. See [The Loom](The-Loom#re-anchor).
 - **badge** — the picture on an achievement's card in [The Folio of Honors](Folio-of-Honors), and
   the picture in the moment that plays when you earn one.
@@ -33,12 +33,12 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
 - **context images** — the Tsubaki.3 dock's **Context images** side (the other side is **LoRAs**): up
   to three pictures you name in the prompt as **@image1**, **@image2**, **@image3**. See
   [Generating](Generating#tsubaki3-context-images-and-image-prompts).
-- **the Control Panel** — the **⚙ Panel** overlay. Its tab is **Maintenance**; **Accounts**,
+- **the Control Panel** — the **Panel** (the gear) overlay. Its tab is **Maintenance**; **Accounts**,
   **Trash** and **PixAI account** open as further windows on top of it. See [Control Panel](Control-Panel).
 - **the Darkroom** — the full-screen room the art filters live in: the dock → **Edit** → **Enhance**
   → **Open the Darkroom ▸**.
 - **the detail page** — a picture's own page, reached from the lightbox's **Details**: the whole
-  generation record, **⧉ Copy prompt**, **↺ Remix**, and **LINEAGE**.
+  generation record, **⧉ Copy prompt**, **↺ Remix**, and **Lineage**.
 - **the dock** — the generate panel docked at the bottom of the screen, opened with **✦ Generate**.
   Also called the Generate drawer. See [Generating](Generating).
 - **feat** — a **Feats of the Athenaeum** achievement. Worth no points on purpose, and the whole
@@ -51,7 +51,7 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
   under **Enhance** are what do that job there. The Loom's own **Edit** tab has a Fixer, on the
   computer and the phone: it repairs faces or hands, one kind per Fix, and shows PixAI's price
   before it asks.
-- **The Folio of Honors** — the **🏆 Folio** button beside **✦ Generate** and **▰ The Loom**:
+- **The Folio of Honors** — the **Folio** (the trophy) button beside **✦ Generate** and **▰ The Loom**:
   achievements, ladders, points, relics and skins. See [The Folio of Honors](Folio-of-Honors).
 - **the Guide** — this wiki, read inside the app: the round **?** button or the **?** key opens it
   over whatever you were doing. Also called Help. See [Help inside the app](Home#help-inside-the-app).
@@ -111,7 +111,7 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
   [Generating](Generating#several-at-once-variables-random-and-matrix--and-the-one-confirm).
 - **re-cut the pack** — rebuild the art pack, so a new release carries new art.
 - **recipe** — PixAI's saved bundle of generation inputs (prompt words, LoRAs, pictures) made for one
-  kind of model: the dock's **RECIPES** row. Not the same as what **Remix** restores — that is the
+  kind of model: the dock's **Recipes** row. Not the same as what **Remix** restores — that is the
   recipe *of one picture*. See [Generating](Generating#recipes).
 - **the reel bar** — The Loom's timeline strip in the Timeline drawer: one coloured segment per
   shot, sized by its duration.
@@ -156,7 +156,7 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
 - **the Trash** — the Control Panel tile listing everything you have deleted locally, with
   **Restore selected**. See [Deleting & Sync](Deleting).
 - **Train a LoRA** — the **Train** destination in the row under the banner (on a phone,
-  **☰ Menu → Train a LoRA**): train your own LoRA on PixAI with **Basic training** or **Advanced
+  **Menu → Train a LoRA**): train your own LoRA on PixAI with **Basic training** or **Advanced
   training**, and watch your runs. See [Generating](Generating#training-your-own-lora).
 - **variable** — a `{silver|cobalt|ember}` group in a prompt: each option is one value. A `__name__`
   reads one of your saved lists. See

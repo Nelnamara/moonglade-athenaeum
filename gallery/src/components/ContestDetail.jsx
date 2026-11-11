@@ -141,10 +141,10 @@ export default function ContestDetail({ contest, mineRow, onBack, onClose, onEnt
     : "Entries closed " + (dayOf(contest.end_at) || "—")
       + (contest.result_at ? " — results " + dayOf(contest.result_at) : "");
 
-  // TIER 1 / TIER 2 / TIER 3. PixAI's `rank` on a winner is the PRIZE TIER (1, 2 or 3, shared
+  // Tier 1 / Tier 2 / Tier 3. PixAI's `rank` on a winner is the PRIZE TIER (1, 2 or 3, shared
   // by every winner in that tier), not a place in a numbered podium, so "1ST" x5 would claim
   // a position nobody holds. 0 = the row carried no placement: no chip text rather than a guess.
-  const rankLabel = (n) => ((Number(n) || 0) > 0 ? "TIER " + Number(n) : "—");
+  const rankLabel = (n) => ((Number(n) || 0) > 0 ? "Tier " + Number(n) : "—");
 
   return (
     <>
@@ -162,7 +162,7 @@ export default function ContestDetail({ contest, mineRow, onBack, onClose, onEnt
           <div className="mgct-overlaid">
             <div className="mgct-badges">
               <span className={"mgct-badge " + (official ? "official" : "community")}>
-                {official ? "☀ OFFICIAL" : "🤝 COMMUNITY"}
+                {official ? <><Icon name="sun" /> Official</> : <><Icon name="community" /> Community</>}
               </span>
               {entered > 0 && (
                 <span className="mgct-entered strong"><Icon name="entered" />Entered ×{entered}</span>
@@ -175,7 +175,7 @@ export default function ContestDetail({ contest, mineRow, onBack, onClose, onEnt
 
       <div className="mgct-chips">
         {contest.prize_amount > 0 && (
-          <span className="mgct-chip gold">♦ {fmt(contest.prize_amount)} CR total</span>
+          <span className="mgct-chip gold"><Icon name="coin" /> {fmt(contest.prize_amount)} CR total</span>
         )}
         {tiers > 0 && (
           <span className="mgct-chip">
@@ -189,7 +189,7 @@ export default function ContestDetail({ contest, mineRow, onBack, onClose, onEnt
           </span>
         )}
         {total > 0 && <span className="mgct-chip">{fmt(total)} entries</span>}
-        {!running && !decided && <span className="mgct-chip await">AWAITING RESULTS</span>}
+        {!running && !decided && <span className="mgct-chip await">Awaiting results</span>}
         {myThumbs.length > 0 && (
           <span className="mgct-mine">
             {myThumbs.map((e) => (
@@ -207,7 +207,7 @@ export default function ContestDetail({ contest, mineRow, onBack, onClose, onEnt
       {String(contest.description || "").trim() && (
         <>
           <div className="mgct-sechead">
-            <div className="mgct-sectitle">THE BRIEF</div>
+            <div className="mgct-sectitle">The brief</div>
           </div>
           <div className="mgct-brief">
             <Markdown text={contest.description} />
@@ -219,12 +219,12 @@ export default function ContestDetail({ contest, mineRow, onBack, onClose, onEnt
         {tiers > 0 && (
           <div>
             <div className="mgct-sechead">
-              <div className="mgct-sectitle">PRIZE BREAKDOWN</div>
+              <div className="mgct-sectitle">Prize breakdown</div>
             </div>
             <div className="mgct-tiers">
               {prizes.map((p, i) => (
                 <div className={"mgct-tier" + (p.rank === 1 ? " top" : "")} key={p.rank || i}>
-                  <span className="mgct-tierrank">RANK <b>{p.rank || i + 1}</b></span>
+                  <span className="mgct-tierrank">Rank <b>{p.rank || i + 1}</b></span>
                   <span className="mgct-tieramt">
                     {fmt(p.amount)}<small>CR{p.count > 1 ? " each" : ""}</small>
                   </span>
@@ -251,7 +251,7 @@ export default function ContestDetail({ contest, mineRow, onBack, onClose, onEnt
              instead, which is honest about where the name lives. ---- */}
         <div>
           <div className="mgct-sechead">
-            <div className="mgct-sectitle">REQUIREMENTS</div>
+            <div className="mgct-sectitle">Requirements</div>
           </div>
           <div className="mgct-reqs">
             {contest.tack_name ? (
@@ -313,7 +313,7 @@ export default function ContestDetail({ contest, mineRow, onBack, onClose, onEnt
 
       <div className="mgct-datebar">
         <div>
-          <div className="mgct-dk">{running ? "CLOSES" : "CLOSED"}</div>
+          <div className="mgct-dk">{running ? "Closes" : "Closed"}</div>
           {running && ends && ends.hot ? (
             <div className="mgct-dv hot">{ends.text}</div>
           ) : (
@@ -324,7 +324,7 @@ export default function ContestDetail({ contest, mineRow, onBack, onClose, onEnt
           )}
         </div>
         <div>
-          <div className="mgct-dk">RESULTS</div>
+          <div className="mgct-dk">Results</div>
           <div className={"mgct-dv" + (decided ? " dim" : "")}>
             {dayOf(contest.result_at) || "—"}
             {decided ? " ✓" : results && !results.over
@@ -343,7 +343,7 @@ export default function ContestDetail({ contest, mineRow, onBack, onClose, onEnt
       {decided && winners && winners.length > 0 && (
         <>
           <div className="mgct-winhead">
-            🏆 WINNERS <span className="n">· announced {dayOf(contest.result_at)}</span>
+            <Icon name="trophy" /> Winners <span className="n">· announced {dayOf(contest.result_at)}</span>
           </div>
           <div className="mgct-winrows">
             {winners.map((w, i) => (
@@ -356,9 +356,9 @@ export default function ContestDetail({ contest, mineRow, onBack, onClose, onEnt
                   ? <img className={"mgct-winthumb" + (w.rank > 0 && w.rank <= 3 ? " gold" : "")} src={w.thumb} alt="" />
                   : <span className="mgct-winthumb" />}
                 <span className="mgct-winname">{w.author_name || "—"}</span>
-                {w.mine && <span className="mgct-you">YOU</span>}
+                {w.mine && <span className="mgct-you">You</span>}
                 {w.prize_amount > 0 && (
-                  <span className="mgct-prize">♦ {fmt(w.prize_amount)} CR</span>
+                  <span className="mgct-prize"><Icon name="coin" /> {fmt(w.prize_amount)} CR</span>
                 )}
               </div>
             ))}
@@ -367,7 +367,7 @@ export default function ContestDetail({ contest, mineRow, onBack, onClose, onEnt
       )}
 
       <div className="mgct-sechead">
-        <div className="mgct-sectitle">ENTRIES PREVIEW</div>
+        <div className="mgct-sectitle">Entries preview</div>
         {contest.url && (
           <a className="mgct-viewall" href={contest.url} target="_blank" rel="noopener noreferrer">
             view all{total > 0 ? " " + fmt(total) : ""} on PixAI ↗

@@ -5,6 +5,7 @@ import TsubakiEditBar from "./TsubakiEditBar.jsx";
 import MakeRecipeChip from "../recipes/MakeRecipeChip.jsx";
 import { lightboxCount } from "../lib/phoneCore.js";
 import "../styles/lightbox.css";
+import Icon from "../icons/Icons.jsx";
 import useScrollLock from "../hooks/useScrollLock.js";
 
 /* Full-bleed viewer -- the DC respec (Lightbox.dc.html) over the classic's
@@ -259,7 +260,7 @@ export default function Lightbox({
         <div className="lbx-bar">
           <div className="lbx-index">
             <b>{count.at}</b>
-            <span>OF {count.of}</span>
+            <span>of {count.of}</span>
           </div>
           <div className="lbx-stars">
             <Stars mediaId={it.media_id} rating={it.rating} onRate={onRate} />
@@ -300,7 +301,7 @@ export default function Lightbox({
                 with btn(..., true) -- the PRIMARY/metal treatment, same as Slideshow -- which
                 the refit had dropped to a plain chip ("Where the Refit Broke" #6). */}
             <button className="lbx-chip lbx-chip-metal" title="Publish this image to PixAI"
-              onClick={() => onPublish && onPublish(it.media_id)}>☁ Publish</button>
+              onClick={() => onPublish && onPublish(it.media_id)}><Icon name="publish" /> Publish</button>
             <a className="lbx-chip" title="Open the full record"
               href={"/?image=" + encodeURIComponent(it.media_id)}
               onClick={(e) => {

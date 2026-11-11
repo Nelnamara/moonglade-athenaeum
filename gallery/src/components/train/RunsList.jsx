@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import Icon from "../../icons/Icons.jsx";
 import MoonGauge from "../MoonGauge.jsx";
 import { fractionFromPercent, GAUGE_SIZES } from "../../lib/moonGaugeCore.js";
 import { RUN_FILTERS, credits, etaLeftText, runMatches, runStatus, startLabel } from "../../gen/trainCore.js";
@@ -102,7 +103,7 @@ export function RetryConfirm({ retry }) {
           </label>
         )}
       </div>
-      {retry.err && <div className="mgtr-err">⚠ {retry.err}</div>}
+      {retry.err && <div className="mgtr-err"><Icon name="warning" /> {retry.err}</div>}
       <div className="a">
         <button type="button" className="mgtr-ghost" onClick={() => retry.setAsk(null)} disabled={retry.busy}>Back</button>
         <button type="button" className="mgtr-go" disabled={retry.busy || (!a.is_free && !retry.accepted)}

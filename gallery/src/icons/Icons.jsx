@@ -6,6 +6,10 @@
    2026-09-05). Nine icons from the Glyphs set -- glyphs.fyi, MIT, credited in the
    NOTICE file beside these -- replacing nine Unicode stand-ins: the ballot's seven, plus
    the books and the history dial the post-audit rulings added for "Collection:" and Undo.
+   And THE LINE SET (2026-11-03, the owner's unslop pick 2B): 24-unit line icons drawn
+   for this app -- 1.5 stroke, round caps and joins, currentColor -- replacing the colour
+   emoji and symbol stand-ins. They carry the class mgico-line, which seats them on the
+   x-height centre of the text beside them (styles/icons.css).
 
    HOW THEY TINT, and why there is no icon font. Each icon draws in `currentColor`, so
    `color:` paints it: every skin retints its own icons, a hover state retints on hover,
@@ -117,21 +121,479 @@ const GLYPHS = {
       <path d="M40.7306 36.5531L45.5317 29.7695" stroke="currentColor" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
     </>
   ),
+  /* A warning, an error, a failed or held tile -- warning_line.svg */
+  warning: (
+    <>
+      <path d="M10.27 4.5a2 2 0 0 1 3.46 0l7.5 13a2 2 0 0 1-1.73 3H4.5a2 2 0 0 1-1.73-3z" />
+      <path d="M12 9.5v4" />
+      <circle cx="12" cy="16.75" r="1" fill="currentColor" stroke="none" />
+    </>
+  ),
+  /* Locked, private, followers-only, serving-machine-only -- lock_line.svg */
+  lock: (
+    <>
+      <rect x="5" y="10.5" width="14" height="10" rx="2" />
+      <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+      <path d="M12 14.5v2" />
+    </>
+  ),
+  /* A cast member's lock, off -- unlock_line.svg */
+  unlock: (
+    <>
+      <rect x="5" y="10.5" width="14" height="10" rx="2" />
+      <path d="M8 10.5V7.5a4 4 0 0 1 7.75-1.4" />
+      <path d="M12 14.5v2" />
+    </>
+  ),
+  /* The login screen's banner slot -- key_line.svg */
+  key: (
+    <>
+      <circle cx="8" cy="16" r="4.75" />
+      <path d="M11.4 12.6 20.5 3.5" />
+      <path d="M17.25 6.75l3 3" />
+      <path d="M14.5 9.5l2.25 2.25" />
+    </>
+  ),
+  /* A picture: from the gallery, a banner slot, a poster, the Loom's Reference tab -- image_line.svg */
+  image: (
+    <>
+      <rect x="3" y="4.5" width="18" height="15" rx="2.4" />
+      <circle cx="8.4" cy="9.6" r="1.5" />
+      <path d="M3.6 17.7l5.1-4.95 3.6 3.45 3-3 5.1 4.8" />
+    </>
+  ),
+  /* A video: a video reference, the Loom's Video tab -- video_line.svg */
+  video: (
+    <>
+      <rect x="2.7" y="6" width="13.35" height="12" rx="2.4" />
+      <path d="M16.05 10.8l5.25-3v8.4l-5.25-3" />
+    </>
+  ),
+  /* The Loom's banner slot -- film_line.svg */
+  film: (
+    <>
+      <rect x="3.5" y="3" width="17" height="18" rx="2" />
+      <path d="M7.5 3v18" />
+      <path d="M16.5 3v18" />
+      <path d="M3.5 8h4" />
+      <path d="M3.5 12h17" />
+      <path d="M3.5 16h4" />
+      <path d="M16.5 8h4" />
+      <path d="M16.5 16h4" />
+    </>
+  ),
+  /* Download, export or pull down a file -- download_line.svg */
+  download: (
+    <>
+      <path d="M12 4v11" />
+      <path d="M7.5 10.5 12 15l4.5-4.5" />
+      <path d="M4.5 19.5h15" />
+    </>
+  ),
+  /* Upload or import from disk -- upload_line.svg */
+  upload: (
+    <>
+      <path d="M12 15V4" />
+      <path d="M7.5 8.5 12 4l4.5 4.5" />
+      <path d="M4.5 19.5h15" />
+    </>
+  ),
+  /* The phone's own Share button, named in the install nudge -- share_line.svg */
+  share: (
+    <>
+      <path d="M12 3.5v11" />
+      <path d="M8.5 7 12 3.5 15.5 7" />
+      <path d="M8.5 10.5h-2A1.5 1.5 0 0 0 5 12v7a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19v-7a1.5 1.5 0 0 0-1.5-1.5h-2" />
+    </>
+  ),
+  /* Settings: the Advanced rows -- gear_line.svg */
+  gear: (
+    <>
+      <path d="M10.14 5.05 L10.51 2.62 L13.49 2.62 L13.86 5.05 A7.2 7.2 0 0 1 15.6 5.76 L17.58 4.31 L19.69 6.42 L18.24 8.4 A7.2 7.2 0 0 1 18.95 10.14 L21.38 10.51 L21.38 13.49 L18.95 13.86 A7.2 7.2 0 0 1 18.24 15.6 L19.69 17.58 L17.58 19.69 L15.6 18.24 A7.2 7.2 0 0 1 13.86 18.95 L13.49 21.38 L10.51 21.38 L10.14 18.95 A7.2 7.2 0 0 1 8.4 18.24 L6.42 19.69 L4.31 17.58 L5.76 15.6 A7.2 7.2 0 0 1 5.05 13.86 L2.62 13.49 L2.62 10.51 L5.05 10.14 A7.2 7.2 0 0 1 5.76 8.4 L4.31 6.42 L6.42 4.31 L8.4 5.76 A7.2 7.2 0 0 1 10.14 5.05 Z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  ),
+  /* Publish to PixAI -- publish_line.svg */
+  publish: (
+    <>
+      <path d="M7 18.5 A4 4 0 1 1 7.5 10.53 A5 5 0 1 1 17.47 11.01 A3.75 3.75 0 0 1 17.25 18.5 Z" />
+      <path d="M12 17v-5" />
+      <path d="M9.75 14.25 12 12l2.25 2.25" />
+    </>
+  ),
+  /* The Inbox, when its mailbox art cannot load -- mail_line.svg */
+  mail: (
+    <>
+      <rect x="3" y="5.5" width="18" height="13" rx="2" />
+      <path d="M3.75 7.5 12 13l8.25-5.5" />
+    </>
+  ),
+  /* An Official contest; the Bright emotion family -- sun_line.svg */
+  sun: (
+    <>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 5.5L12 3.25" />
+      <path d="M16.6 7.4L18.19 5.81" />
+      <path d="M18.5 12L20.75 12" />
+      <path d="M16.6 16.6L18.19 18.19" />
+      <path d="M12 18.5L12 20.75" />
+      <path d="M7.4 16.6L5.81 18.19" />
+      <path d="M5.5 12L3.25 12" />
+      <path d="M7.4 7.4L5.81 5.81" />
+    </>
+  ),
+  /* The Soft emotion family -- moon_line.svg */
+  moon: (
+    <>
+      <path d="M10.93 4.02 A8.5 8.5 0 1 0 19.89 13.88 A7 7 0 0 1 10.93 4.02 Z" />
+    </>
+  ),
+  /* The Dark emotion family -- umbrella_line.svg */
+  umbrella: (
+    <>
+      <path d="M3 12a9 9 0 0 1 18 0z" />
+      <path d="M12 3v-.5" />
+      <path d="M12 12v6.5a2 2 0 0 1-4 0" />
+    </>
+  ),
+  /* A Community contest -- community_line.svg */
+  community: (
+    <>
+      <circle cx="9" cy="8" r="3.25" />
+      <path d="M3 19.5a6 6 0 0 1 12 0" />
+      <path d="M15.5 4.9a3 3 0 0 1 0 5.7" />
+      <path d="M17.5 13.9a5.5 5.5 0 0 1 3.5 5.6" />
+    </>
+  ),
+  /* Contests -- medal_line.svg */
+  medal: (
+    <>
+      <circle cx="12" cy="15.25" r="5.25" />
+      <circle cx="12" cy="15.25" r="1.25" fill="currentColor" stroke="none" />
+      <path d="M9.6 10.6 7 3.5h3l2 5.25 2-5.25h3l-2.6 7.1" />
+    </>
+  ),
+  /* A contest's winners, a won entry -- trophy_line.svg */
+  trophy: (
+    <>
+      <path d="M7 4h10v5a5 5 0 0 1-10 0z" />
+      <path d="M7 5.5H4.5V7a3 3 0 0 0 2.8 3" />
+      <path d="M17 5.5h2.5V7a3 3 0 0 1-2.8 3" />
+      <path d="M12 14v6" />
+      <path d="M8 20.5h8" />
+    </>
+  ),
+  /* My Art -- chart_line.svg */
+  chart: (
+    <>
+      <path d="M4 4v16h16" />
+      <path d="M7.5 15.5l3.5-4 3 2.5 5-6.5" />
+      <path d="M15.5 7.5H19V11" />
+    </>
+  ),
+  /* Collection Health -- pulse_line.svg */
+  pulse: (
+    <>
+      <path d="M3 12h4l2.5-6.5 4 13 2.5-6.5H21" />
+    </>
+  ),
+  /* Likes -- heart_line.svg */
+  heart: (
+    <>
+      <path d="M12 20s-8.5-5-8.5-11c0-2.8 2.1-4.5 4.4-4.5 1.8 0 3.3 1 4.1 2.5.8-1.5 2.3-2.5 4.1-2.5 2.3 0 4.4 1.7 4.4 4.5 0 6-8.5 11-8.5 11z" />
+    </>
+  ),
+  /* Comments -- comment_line.svg */
+  comment: (
+    <>
+      <path d="M5 4.5h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-8l-4.5 3.5v-3.5H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2z" />
+    </>
+  ),
+  /* Views -- eye_line.svg */
+  eye: (
+    <>
+      <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  ),
+  /* Delete, and the Trash -- trash_line.svg */
+  trash: (
+    <>
+      <path d="M4 6.5h16" />
+      <path d="M9.5 6.5v-2h5v2" />
+      <path d="M6 6.5l.9 12.6A1.5 1.5 0 0 0 8.4 20.5h7.2a1.5 1.5 0 0 0 1.5-1.4L18 6.5" />
+      <path d="M10 10.5v6" />
+      <path d="M14 10.5v6" />
+    </>
+  ),
+  /* A free card covers it -- ticket_line.svg */
+  ticket: (
+    <>
+      <path d="M3 8a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v2.25a1.75 1.75 0 0 0 0 3.5V16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-2.25a1.75 1.75 0 0 0 0-3.5z" />
+      <path d="M14.5 7.5v1.5" />
+      <path d="M14.5 11.25v1.5" />
+      <path d="M14.5 15v1.5" />
+    </>
+  ),
+  /* Credits: a price, a prize -- coin_line.svg */
+  coin: (
+    <>
+      <ellipse cx="12" cy="7.5" rx="7.5" ry="3" />
+      <path d="M4.5 7.5v9c0 1.66 3.36 3 7.5 3s7.5-1.34 7.5-3v-9" />
+      <path d="M4.5 12c0 1.66 3.36 3 7.5 3s7.5-1.34 7.5-3" />
+    </>
+  ),
+  /* All at once, quickly: Auto-resolve all, the Loom's Draft -- bolt_line.svg */
+  bolt: (
+    <>
+      <path d="M13.5 2.5 5 13.5h6.5l-1 8 8.5-11h-6.5z" />
+    </>
+  ),
+  /* Reroll -- dice_line.svg */
+  dice: (
+    <>
+      <rect x="4" y="4" width="16" height="16" rx="3" />
+      <circle cx="8.5" cy="8.5" r="1" fill="currentColor" stroke="none" />
+      <circle cx="15.5" cy="8.5" r="1" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
+      <circle cx="8.5" cy="15.5" r="1" fill="currentColor" stroke="none" />
+      <circle cx="15.5" cy="15.5" r="1" fill="currentColor" stroke="none" />
+    </>
+  ),
+  /* Train a LoRA -- flask_line.svg */
+  flask: (
+    <>
+      <path d="M9 3.5h6" />
+      <path d="M10.25 3.5v5.75L4.7 18.3a1.5 1.5 0 0 0 1.3 2.2h12a1.5 1.5 0 0 0 1.3-2.2L13.75 9.25V3.5" />
+      <path d="M7.25 14.5h9.5" />
+    </>
+  ),
+  /* The full-screen viewer -- expand_line.svg */
+  expand: (
+    <>
+      <path d="M4 9V4h5" />
+      <path d="M15 4h5v5" />
+      <path d="M20 15v5h-5" />
+      <path d="M9 20H4v-5" />
+    </>
+  ),
+  /* Crop, and the Fixer's box -- crop_line.svg */
+  crop: (
+    <>
+      <path d="M6.5 2.5V16A1.5 1.5 0 0 0 8 17.5h13.5" />
+      <path d="M2.5 6.5H16A1.5 1.5 0 0 1 17.5 8v13.5" />
+    </>
+  ),
+  /* A page list, the More menu -- menu_line.svg */
+  menu: (
+    <>
+      <path d="M4 6.5h16" />
+      <path d="M4 12h16" />
+      <path d="M4 17.5h16" />
+    </>
+  ),
+  /* A ticked keep box -- checkbox-on_line.svg */
+  "checkbox-on": (
+    <>
+      <rect x="4" y="4" width="16" height="16" rx="3" />
+      <path d="M8.5 12.25l2.5 2.5 4.75-5" />
+    </>
+  ),
+  /* An unticked keep box -- checkbox-off_line.svg */
+  "checkbox-off": (
+    <>
+      <rect x="4" y="4" width="16" height="16" rx="3" />
+    </>
+  ),
+  /* Membership -- crown_line.svg */
+  crown: (
+    <>
+      <path d="M3.5 8l4.5 4 4-7 4 7 4.5-4-2 11h-13z" />
+    </>
+  ),
+  /* The Arena -- swords_line.svg */
+  swords: (
+    <>
+      <path d="M4 4h2.5l9 9" />
+      <path d="M4 4v2.5l9 9" />
+      <path d="M12 17l5-5" />
+      <path d="M15.5 15.5l4 4" />
+      <path d="M20 4h-2.5l-4.25 4.25" />
+      <path d="M20 4v2.5l-4.25 4.25" />
+      <path d="M7 12l5 5" />
+      <path d="M8.5 15.5l-4 4" />
+    </>
+  ),
+  /* A skin reward -- skin_line.svg */
+  skin: (
+    <>
+      <path d="M5 3.5h4.5a1 1 0 0 1 1 1V17a3.75 3.75 0 0 1-7.5 0V4.5a1 1 0 0 1 1-1z" />
+      <circle cx="6.75" cy="17" r="1" fill="currentColor" stroke="none" />
+      <path d="M10.5 8.75l3.6-3.6a1 1 0 0 1 1.4 0l3.35 3.35a1 1 0 0 1 0 1.4L10 18.75" />
+      <path d="M6.75 20.75H19.5a1 1 0 0 0 1-1v-5a1 1 0 0 0-1-1h-2.75" />
+    </>
+  ),
+  /* A banner reward -- flag_line.svg */
+  flag: (
+    <>
+      <path d="M5.5 21V3.5" />
+      <path d="M5.5 4.5h12l-2.5 4.25 2.5 4.25h-12" />
+    </>
+  ),
+  /* Splice or split -- scissors_line.svg */
+  scissors: (
+    <>
+      <circle cx="6" cy="6.5" r="2.75" />
+      <circle cx="6" cy="17.5" r="2.75" />
+      <path d="M8.25 15.9 20 5.5" />
+      <path d="M8.25 8.1 20 18.5" />
+    </>
+  ),
+  /* A LoRA of a character -- person_line.svg */
+  person: (
+    <>
+      <circle cx="12" cy="8" r="3.75" />
+      <path d="M4.75 20.5a7.25 7.25 0 0 1 14.5 0" />
+    </>
+  ),
+  /* An art style: a style LoRA, the Loom's Project look -- brush_line.svg */
+  brush: (
+    <>
+      <path d="M20.6 3.4a1.9 1.9 0 0 0-2.7 0l-8 8 2.7 2.7 8-8a1.9 1.9 0 0 0 0-2.7z" />
+      <path d="M9.9 11.4C7.6 11.2 6 12.9 6 15c0 1.6-1 2.9-2.5 3.5 1.2 1.3 2.9 2 4.8 2 2.8 0 4.6-2 4.3-6.4" />
+    </>
+  ),
+  /* A LoRA of an outfit -- shirt_line.svg */
+  shirt: (
+    <>
+      <path d="M9 3.5 3.5 6.5l2 4 2.25-1V20.5h8.5V9.5l2.25 1 2-4L15 3.5c-.4 1.6-1.6 2.5-3 2.5s-2.6-.9-3-2.5z" />
+    </>
+  ),
+  /* A LoRA of something else -- shapes_line.svg */
+  shapes: (
+    <>
+      <circle cx="7.5" cy="7.5" r="4" />
+      <rect x="13" y="3.5" width="7.5" height="7.5" rx="1.5" />
+      <path d="M12 13.25l4.75 7.75h-9.5z" />
+    </>
+  ),
+  /* Audio: an audio reference, the music bed -- music_line.svg */
+  music: (
+    <>
+      <path d="M9 17.5V5.75l11-2.25v12" />
+      <circle cx="6.5" cy="17.5" r="2.5" />
+      <circle cx="17.5" cy="15.5" r="2.5" />
+    </>
+  ),
+  /* The Loom's Mobile view -- phone_line.svg */
+  phone: (
+    <>
+      <rect x="6.5" y="2.5" width="11" height="19" rx="2.5" />
+      <path d="M10.5 18.5h3" />
+    </>
+  ),
+  /* The Loom's Desktop view -- desktop_line.svg */
+  desktop: (
+    <>
+      <rect x="2.5" y="4" width="19" height="12.5" rx="2" />
+      <path d="M8.5 20.5h7" />
+      <path d="M12 16.5v4" />
+    </>
+  ),
+  /* A closed contest -- ban_line.svg */
+  ban: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M6 6l12 12" />
+    </>
+  ),
+  /* The Loom rail's Image tab: the Generate mark, drawn -- generate_line.svg */
+  generate: (
+    <>
+      <path d="M12 2.25l2.4 7.35 7.35 2.4-7.35 2.4L12 21.75l-2.4-7.35L2.25 12l7.35-2.4z" />
+    </>
+  ),
+  /* The Loom rail's Edit tab -- pencil_line.svg */
+  pencil: (
+    <>
+      <path d="M15.3 4.95l3.75 3.75L8.1 19.65l-4.8 1.05 1.05-4.8z" />
+      <path d="M13.05 7.2l3.75 3.75" />
+    </>
+  ),
+  /* A file with no preview, in the import list -- file_line.svg */
+  file: (
+    <>
+      <path d="M13.5 3H7a1.5 1.5 0 0 0-1.5 1.5v15A1.5 1.5 0 0 0 7 21h10a1.5 1.5 0 0 0 1.5-1.5V8z" />
+      <path d="M13.5 3v5h5" />
+    </>
+  ),
+  /* Still running -- hourglass_line.svg */
+  hourglass: (
+    <>
+      <path d="M6.5 3.5h11" />
+      <path d="M6.5 20.5h11" />
+      <path d="M7.75 3.5c0 4.5 4.25 5.5 4.25 8.5s-4.25 4-4.25 8.5" />
+      <path d="M16.25 3.5c0 4.5-4.25 5.5-4.25 8.5s4.25 4 4.25 8.5" />
+    </>
+  ),
+  /* A standing order -- timer_line.svg */
+  timer: (
+    <>
+      <circle cx="12" cy="13.5" r="7.5" />
+      <path d="M12 13.5V9.5" />
+      <path d="M9.5 2.5h5" />
+      <path d="M18.25 6.25l1.5-1.5" />
+    </>
+  ),
+  /* Sound on: the Loom's shot sound toggle and the playthrough -- speaker_line.svg */
+  speaker: (
+    <>
+      <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
+      <path d="M15.5 9a4 4 0 0 1 0 6" />
+      <path d="M18 6.5a7.5 7.5 0 0 1 0 11" />
+    </>
+  ),
+  /* Sound off: the same two, muted -- speaker-off_line.svg */
+  "speaker-off": (
+    <>
+      <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
+      <path d="M16 9.5l5 5M21 9.5l-5 5" />
+    </>
+  ),
 };
+
+const LINE = new Set([
+  "warning", "lock", "unlock", "key", "image", "video",
+  "film", "download", "upload", "share", "gear", "publish",
+  "mail", "sun", "moon", "umbrella", "community", "medal",
+  "trophy", "chart", "pulse", "heart", "comment", "eye",
+  "trash", "ticket", "coin", "bolt", "dice", "flask",
+  "expand", "crop", "menu", "checkbox-on", "checkbox-off", "crown",
+  "swords", "skin", "flag", "scissors", "person", "brush",
+  "shirt", "shapes", "music", "phone", "desktop", "ban",
+  "generate", "pencil", "file", "hourglass", "timer", "speaker",
+  "speaker-off",
+]);
 
 /* One icon. `title` makes it an announced image; without one it is decorative and
    hidden from the a11y tree, which is right wherever the label beside it already says
-   the word. */
+   the word. A LINE icon gets the line set's root attributes here, once, rather than on
+   every path of every drawing. */
 export default function Icon({ name, size = "1em", title, className, style }) {
   const glyph = GLYPHS[name];
   if (!glyph) return null;
+  const line = LINE.has(name);
   return (
     <svg
-      className={"mgico" + (className ? " " + className : "")}
-      viewBox="0 0 80 80"
+      className={"mgico" + (line ? " mgico-line" : "") + (className ? " " + className : "")}
+      viewBox={line ? "0 0 24 24" : "0 0 80 80"}
       width={size}
       height={size}
       fill="none"
+      stroke={line ? "currentColor" : undefined}
+      strokeWidth={line ? 1.5 : undefined}
+      strokeLinecap={line ? "round" : undefined}
+      strokeLinejoin={line ? "round" : undefined}
       style={style}
       role={title ? "img" : undefined}
       aria-hidden={title ? undefined : "true"}

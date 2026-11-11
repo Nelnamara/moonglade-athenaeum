@@ -155,7 +155,7 @@ describe("the desktop goal tile, as frame 01 draws it", () => {
     assert.match(t, /flex-direction:\s*column/);
     assert.match(t, /justify-content:\s*flex-end/);
     assert.match(t, /font-size:\s*10px/);
-    assert.match(t, /font-weight:\s*700/);
+    assert.match(t, /font-weight:\s*600/);
     assert.match(t, /background:\s*rgba\(33,\s*31,\s*58,\s*\.45\)/);
   });
   test("the picture fills the top 78 % edge to edge, cover; the rest is the label's strip", () => {

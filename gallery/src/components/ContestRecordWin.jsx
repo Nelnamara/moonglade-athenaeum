@@ -81,7 +81,7 @@ export default function ContestRecordWin({ rows, initialContestId, csrfToken, on
         automatically — this is the fallback. Only PixAI's own pages count.
       </div>
 
-      <label className="mgcrw-lab" htmlFor="mgcrw-contest">CONTEST</label>
+      <label className="mgcrw-lab" htmlFor="mgcrw-contest">Contest</label>
       {options.length ? (
         <select id="mgcrw-contest" className="mgcrw-input sel" value={cid}
           onChange={(e) => { setCid(e.target.value); setResult(null); }}>
@@ -93,7 +93,7 @@ export default function ContestRecordWin({ rows, initialContestId, csrfToken, on
         <div className="mgcrw-input sel dim">No entries yet</div>
       )}
 
-      <label className="mgcrw-lab" htmlFor="mgcrw-url">EVIDENCE URL</label>
+      <label className="mgcrw-lab" htmlFor="mgcrw-url">Evidence URL</label>
       <div className="mgcrw-row">
         <input id="mgcrw-url" className="mgcrw-input url" type="text" inputMode="url"
           autoComplete="off" autoCapitalize="off" spellCheck={false}

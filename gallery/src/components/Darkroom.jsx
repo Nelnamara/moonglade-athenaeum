@@ -208,7 +208,7 @@ export default function Darkroom({ open, onClose, source, onSendToEdit }) {
     <div className="mgdk" role="dialog" aria-label="The Darkroom">
       <div className="mgdk-head">
         <span className="mgdk-name">The Darkroom</span>
-        <span className="mgdk-free">free · offline · no credits</span>
+        <span className="mgdk-free">Free · offline · no credits</span>
         <span className="sp" />
         <button type="button" className="mgdk-x" onClick={onClose} aria-label="Close">✕ Esc</button>
       </div>
@@ -241,7 +241,7 @@ export default function Darkroom({ open, onClose, source, onSendToEdit }) {
               <div className="mgdk-pane">
                 {src ? <img alt="the unfiltered original" src={src} />
                   : <span className="mgdk-ph">pick a source image above</span>}
-                <span className="mgdk-badge">source</span>
+                <span className="mgdk-badge">Source</span>
               </div>
               <div className="mgdk-pane on">
                 {/* the stage IS the engine's preview host: overlay divs at inset 0 over

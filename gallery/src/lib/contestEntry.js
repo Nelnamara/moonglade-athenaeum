@@ -22,18 +22,20 @@ const CLOSED = /closed|ended|expired/i;
    was submitted": a read timeout after PixAI accepted the entry looks identical from
    here, and telling someone their entry did not land when it may have is how they enter
    twice. Same shape gen/submitTask.js uses for the same ambiguity on the spend path. */
+// `iconName` names the line icon (gallery/src/icons, unslop pick 2B) the render site draws
+// beside the title: warning, or ban for a closed contest.
 export function classifyEntryError(msg) {
   const m = String(msg || "");
   if (NOT_ELIGIBLE.test(m)) {
-    return { icon: "⚠", title: "Not eligible",
+    return { iconName: "warning", title: "Not eligible",
              copy: "PixAI refused this piece for this contest — usually because it was "
                  + "published before the contest opened. Nothing was submitted." };
   }
   if (CLOSED.test(m)) {
-    return { icon: "🚫", title: "Contest closed",
+    return { iconName: "ban", title: "Contest closed",
              copy: "Entries are closed for this contest. Nothing was submitted." };
   }
-  return { icon: "⚠", title: "Something went wrong on PixAI's side",
+  return { iconName: "warning", title: "Something went wrong on PixAI's side",
            copy: "The entry MAY still have been submitted — check My entries before "
                + "trying again. " + m };
 }

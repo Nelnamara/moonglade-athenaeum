@@ -316,7 +316,7 @@ function Editor({ ed, setEd, lib, ctx, phone, onBack, onClose, onSave, saveNote 
         <div className="cpal-ghead">
           <button type="button" className={"cpal-glabel" + (fk === k && on ? " focus" : "")}
             onClick={() => on && setEd((cur) => focusBand(cur, k, 0))}>
-            {phone ? GROUP_LABEL[k] : GROUP_LABEL[k].toUpperCase()}
+            {GROUP_LABEL[k]}
           </button>
           <span className="cpal-gtotal">{on ? list.length + " · " + groupTotal(list) + "%" : "off"}</span>
           <span className="cpal-sp" />
@@ -417,7 +417,7 @@ function Editor({ ed, setEd, lib, ctx, phone, onBack, onClose, onSave, saveNote 
           {ed.on[fk] ? (
             <div className="cpal-list">
               <div className="cpal-listhead">
-                <span className="cpal-lbl">{fk.toUpperCase()} · COLOURS</span>
+                <span className="cpal-lbl">{GROUP_LABEL[fk] || fk} · colours</span>
                 <span className="cpal-sp" />
                 <CountStepper ed={ed} setEd={setEd} k={fk} />
               </div>
@@ -428,7 +428,7 @@ function Editor({ ed, setEd, lib, ctx, phone, onBack, onClose, onSave, saveNote 
           ) : null}
         </div>
         <div className="cpal-preview">
-          <div className="cpal-lbl">PREVIEW</div>
+          <div className="cpal-lbl">Preview</div>
           <div className="cpal-pcard">
             <div className="cpal-pfield" style={{ background: pv.field }}>
               <div className="cpal-pfigure" style={{ background: pv.figure }} />
@@ -678,7 +678,7 @@ export function PaletteRow({ s, set, ctx, phone }) {
   return (
     <div ref={rowRef} className={"cpal-row" + (phone ? " phone" : "")}>
       <div className="cpal-rowhead">
-        {!phone ? <span className="mgdock-lbl">PALETTE</span> : null}
+        {!phone ? <span className="mgdock-lbl">Palette</span> : null}
         <span className="cpal-sp" />
         <button type="button" className={"cpal-link" + (ctxHeld ? " held" : "")} onClick={show}
           title={ctxHeld ? "Held · not sent with context images — a palette picked here is used when you switch back"

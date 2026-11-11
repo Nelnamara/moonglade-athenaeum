@@ -21,7 +21,7 @@ import HonorsCardPanel from "../folio/HonorsCardPanel.jsx";
 import "../styles/folio-completionist.css";
 
 /* The Folio of Honors -- the seventh designed nav overlay to port, opened from
-   Banner.jsx's gold "🏆 Folio" button (App.jsx's onFolio -> openOverlay("folio"),
+   Banner.jsx's gold "Folio" button (the drawn trophy) (App.jsx's onFolio -> openOverlay("folio"),
    already wired). Data/narrator/glitch-reveal/replay engine lives in
    useFolio.js (gallery/src/hooks/), lifted out 2026-08-03 -- the SAME hook the
    new mobile Folio screen (FolioMobile.jsx) now consumes, so there is ONE
@@ -144,8 +144,8 @@ function AchCard({ a, ladderName, date, skinsById, reveal, onReplay, frame, onJu
             ))}
           </div>
         )}
-        {a.skin && <div className="mgfo-flag">❖ unlocks {skinName} skin</div>}
-        {a.banner_reward && <div className="mgfo-flag">⚑ unlocks a banner</div>}
+        {a.skin && <div className="mgfo-flag"><Icon name="skin" /> unlocks {skinName} skin</div>}
+        {a.banner_reward && <div className="mgfo-flag"><Icon name="flag" /> unlocks a banner</div>}
         {prog && (
           <div className="mgfo-goto">
             <MoonGauge fraction={prog.fraction} size={GAUGE_SIZES.folio} className="mgfo-goto-gauge"
@@ -179,7 +179,7 @@ function AchCard({ a, ladderName, date, skinsById, reveal, onReplay, frame, onJu
         </span>
         <span className="mgfo-card-subl">{sub}</span>
       </div>
-      {frame && frame.ribbon && <div className="mgfm-ribbon">NEWLY FOUND</div>}
+      {frame && frame.ribbon && <div className="mgfm-ribbon">Newly found</div>}
     </div>
   );
 }
@@ -322,7 +322,7 @@ export default function FolioOverlay({ onClose, onJump }) {
           <div className="mgfo-head">
             <div className="mgfo-crumb" onClick={handleClose} title="Back to the library — Esc closes the overlay">← Library</div>
             <div className="mgfo-div" />
-            <div className="mgfo-label">🏆 The Folio of Honors</div>
+            <div className="mgfo-label"><Icon name="folio" /> The Folio of Honors</div>
             {/* The server counts the pokes and answers with a line; the pill below
                 appears once the feat behind it is earned, and stays. */}
             <div className="mgfo-nar-avatar" title="…" onClick={pokeNarrator} />
@@ -500,7 +500,7 @@ export default function FolioOverlay({ onClose, onJump }) {
                     {/* O3: the All tab's sort, remembered on this device. Feats are in none of
                         the orders; their section stays below, in the order they were found. */}
                     <div className="mgfo-sortrow">
-                      <span className="mgfo-sortlab">ALL · SORT</span>
+                      <span className="mgfo-sortlab">All · sort</span>
                       {SORTS.map((c) => (
                         <button type="button" key={c.key} className={"mgfo-sortchip" + (sortKey === c.key ? " on" : "")}
                           aria-pressed={sortKey === c.key} onClick={() => chooseSort(c.key)}>{c.label}</button>

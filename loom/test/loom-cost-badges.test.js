@@ -115,7 +115,7 @@ test("confirmSpend and generateShot branch short-vs-unmatched, and still fail cl
 test("batchGenerate tallies tickets against the held pool (tallyPricesDetailed) and words the overflow before the confirm", () => {
   assert.match(src, /const \{ free, paid, credits, unknown, overflow, pools, overflowIndexes \} = tallyPricesDetailed\(prices\);/,
     "the batch confirm must use the pool-aware tally (incl. overflowIndexes), not the per-shot buckets");
-  assert.match(src, /🎫 \$\{free\} covered by free cards\\n` \+\s*\n\s*`≈ \$\{paid\} will spend credits — about \$\{credits\.toLocaleString\(\)\} total`/,
+  assert.match(src, /\$\{free\} covered by free cards\\n` \+\s*\n\s*`≈ \$\{paid\} will spend credits — about \$\{credits\.toLocaleString\(\)\} total`/,
     "the batch confirm must state covered vs will-spend with the credit total");
   assert.match(src, /overflowNote \+/, "the overflow explanation must be part of the confirm message");
   assert.match(src, /Once the cards run out, no card is used and each remaining shot spends its full price/,

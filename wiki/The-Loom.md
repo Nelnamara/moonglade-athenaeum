@@ -36,8 +36,8 @@ for. The header button is there at every screen width, phones included.
 
 **On a phone the Loom opens its phone layout by itself** — a board-and-reel view built for
 the narrow screen. Tablets are unaffected and still get the full desktop tool. Both switches
-still work and always win: untick **📱 Mobile view** (in the storyboards **▾** menu) to get the wide board on
-a phone, or tap **🖥 Desktop** in the phone bar, and the Loom remembers your choice in that
+still work and always win: untick **Mobile view** (in the storyboards **▾** menu) to get the wide board on
+a phone, or tap **Desktop** in the phone bar, and the Loom remembers your choice in that
 browser from then on. A phone that is already **held sideways** when the Loom opens gets the
 wide four-panel board straight away; held upright it gets the board-and-reel view.
 
@@ -72,11 +72,11 @@ which act a shot is in and where it falls.
 ## The layout
 
 The **top bar** is one row: the open storyboard's **name** with its **▾** (see
-[Storyboards](#storyboards)), the **find in storyboard** field and its chips, **⚡ Draft**, then
+[Storyboards](#storyboards)), the **find in storyboard** field and its chips, **Draft** (the lightning bolt), then
 **▶ Generate all** with its cost estimate, **▶▶ Play**, **⇧ Render** and **Export ▾**, and at the far
 end the **spent** figure, a goal you have pinned in the Folio, **Activity** and **← Gallery**. On a
 narrow window the bar wraps, but **← Gallery** never sits alone on a row. A banner sits above it;
-**⌄ Hide banner** folds it away and **🖼 Banner** brings it back.
+**⌄ Hide banner** folds it away and **Banner** brings it back.
 
 Four fixed regions:
 
@@ -119,8 +119,8 @@ that shot's [anchor changed](#re-anchor).
 **⌘F** (Mac) or **Ctrl F** puts you in the **find in storyboard** field in the top bar (it only
 takes over the browser's own find while the Loom's board is on screen). Type anything and it
 looks through each shot's **code** (`A·01`, `A01` and `a1` all work), **title**, **prompt**,
-the **@tags** of its cast and its **notes**. The chips beside the field narrow it: **⚠ only**
-(a changed anchor, or a ⚠ the card itself is showing), then the statuses and the modes that
+the **@tags** of its cast and its **notes**. The chips beside the field narrow it: **only** (after a warning icon)
+(a changed anchor, or a warning the card itself is showing), then the statuses and the modes that
 are actually on this board. Chips in one group widen each other (**todo** and **error** finds
 both); the groups and the text narrow together.
 
@@ -166,7 +166,7 @@ drawer. When there's a shot before this one anywhere in the project (across acts
 inside one), a button appears under the open slot:
 
 - **↳ inherit `A·01` close** — copies the previous shot's stored close-frame forward.
-- **✂ splice `A·01`'s last frame** — once that previous shot has actually rendered, the
+- **splice `A·01`'s last frame** (with a scissors icon) — once that previous shot has actually rendered, the
   same button extracts the real last frame from its clip (honoring the trim) and uploads it.
 
 Splice and Re-anchor upload the frame to your PixAI account (free, never a render) and save its
@@ -187,10 +187,10 @@ A spliced frame remembers where it came from: which shot, which of its takes, an
 take was cut. If that shot later uses a **different take** (or is cut at a different point),
 the frame no longer matches what plays before it. The dependent shot says so — a peach
 underline on its reel segment, a peach dot on its pair in the [continuity
-ribbon](#the-continuity-ribbon), and on its card **⚠ anchor changed · its open frame came from
+ribbon](#the-continuity-ribbon), and on its card **anchor changed · its open frame came from
 A·01 take 1; A·01 now uses take 2** — with two buttons:
 
-- **Re-anchor** takes the new close frame, exactly as **✂ splice** does (the still is cut from
+- **Re-anchor** takes the new close frame, exactly as **splice** does (the still is cut from
   the clip on this machine and uploaded free). **Nothing is rendered**: the card then says
   **Open frame updated. Render a new take to match it.**, and that render is your own click.
 - **Keep** accepts the mismatch for this pair of takes only. If that shot changes take again,
@@ -224,7 +224,7 @@ rather than referenced by a tag with nothing behind it. The shot card says so �
 **"…: no image"** badge naming who — so it is visible while you build rather than discovered
 in the output.
 
-**🎨 Project look** is a collapsible textarea at the top of the panel. Whatever you write
+**Project look** (the brush) is a collapsible textarea at the top of the panel. Whatever you write
 there is appended to *every* shot's assembled prompt as `Look (consistent across the film):
 …` — a style or grade you want held across the whole piece, written once.
 
@@ -233,7 +233,7 @@ there is appended to *every* shot's assembled prompt as `Look (consistent across
 Your cast members live in one **library** that all your storyboards share, and each storyboard
 **ticks** the ones it uses — so a series keeps "Nelnamara" in one place while a one-off doesn't
 inherit everyone. The **Library** tab (beside Cast & assets and Footage) lists them: a tick box,
-the member's picture, its name (🔒 when its appearance is locked), and a line like
+the member's picture, its name (with a padlock when its appearance is locked), and a line like
 **@image1 · in 3 storyboards · A·02 A·03** — its tag here, how many storyboards use it, and
 the shots on this board that cast it.
 
@@ -242,7 +242,7 @@ the shots on this board that cast it.
 - **Untick** takes it out of this storyboard. If shots here cast it, you're asked first, by name
   (**Nelnamara is used by A·02, A·03. Remove from this storyboard anyway?**), and it is taken out
   of those shots' cast too. The library keeps the member.
-- **Change its picture** (click the round picture) or its **🔒**, here or in the Cast & assets
+- **Change its picture** (click the round picture) or its **padlock**, here or in the Cast & assets
   rows, and it changes **everywhere it's used**: in the library, on this storyboard and on every
   other storyboard that ticks it. Each of those is saved carefully — one that changed in
   another tab meanwhile is re-read and updated once more — and any storyboard that couldn't be
@@ -301,7 +301,7 @@ website, still spends if you do. See [Generating → Free cards and videos](Gene
 
 Other controls in the top bar:
 
-- **⚡ Draft** — project-wide: render every shot at the cheaper *basic* quality. Block out
+- **Draft** (the lightning bolt) — project-wide: render every shot at the cheaper *basic* quality. Block out
   the animatic in Draft, then turn it off and re-generate the keepers.
 - **▶ Generate all (N)** — renders every shot that has no take yet, one after another, with a
   running batch tally (a shot whose last re-render failed keeps its ★ take and is not re-sent). The pill beside it is a standing cost-to-finish estimate (click to
@@ -318,7 +318,7 @@ Other controls in the top bar:
   since been deleted ride alongside as **(+N unk)**, because an unknown is not a zero; and a
   clip you brought in from your library rather than rendered here is left out entirely — that
   money was spent elsewhere — and named on hover. Nothing is fetched from PixAI to work it out.
-- **💾 Use an existing video instead** (Video tab) — skip generation entirely and attach a
+- **Use an existing video instead** (Video tab) — skip generation entirely and attach a
   video you already have as this shot's clip.
 
 ### A shot's own settings
@@ -432,8 +432,8 @@ clip (its ★ take) actually plays, with the shot's [take list](#takes) beside i
 
 - Hover the preview to scrub; **⏸/▶** toggles playback, **⏪ / ⏩** nudge by 0.25s.
 - Drag the in/out handles to **trim** non-destructively — both Play and Render honor it.
-- **✂ Split** cuts the shot in two at the playhead.
-- **⛶ Crop** — drag a rectangle over the preview; it's applied on export.
+- **Split** cuts the shot in two at the playhead.
+- **Crop** — drag a rectangle over the preview; it's applied on export.
 
 **▶▶ Play** in the top bar plays every finished shot back-to-back, trims and all — a rough
 cut with nothing rendered. The full view also holds the [music bed](#the-music-bed) and the
@@ -441,7 +441,7 @@ cut with nothing rendered. The full view also holds the [music bed](#the-music-b
 
 ### The music bed
 
-One audio file can sit under the whole cut. **♪ Add a music bed** (under the reel in the full
+One audio file can sit under the whole cut. **Add a music bed** (under the reel in the full
 view) picks an mp3, wav, m4a, aac, ogg or flac file of up to 50 MB. It is **kept on this machine
 and never uploaded** — nothing about it reaches PixAI. Its waveform sits under the reel.
 
@@ -502,7 +502,7 @@ picking"** checkbox — useful for carrying source-image context along while you
 
 Click the storyboard's name in the top bar (or its **▾**) and the **Storyboards** list opens,
 with every saved board and its shot count. From there: **open** one, **+ New** a blank one,
-**⎘ Duplicate** the open one, or delete one with ✕; **📱 Mobile view** is the last row. Boards
+**⎘ Duplicate** the open one, or delete one with ✕; **Mobile view** is the last row. Boards
 are fully independent — their own acts, cast, look and Draft setting — so you can keep several
 pieces in flight.
 
@@ -606,14 +606,14 @@ The phone layout carries the same work, sized for a finger:
   **Swipe the still** sideways to use the next or previous take; **hold a take** to make it ★; tap
   one for **★ Use this take**, **Reuse settings** and **Delete…** (the same rules as the desktop —
   its clip stays in your library). Swiping never renders.
-- **Re-anchor** — a changed anchor shows as a peach underline on the scrub reel and **⚠ anchor
-  changed** on the card; **Re-anchor** and **Keep** are in the shot's screen.
+- **Re-anchor** — a changed anchor shows as a peach underline on the scrub reel and **anchor
+  changed** (with a warning icon) on the card; **Re-anchor** and **Keep** are in the shot's screen.
 - **Engine** — a shot's screen shows the shot's own engine (read-only; change it on the desktop,
   where the [shot's own settings](#a-shots-own-settings) live), and the price preview follows
   that engine, the channel and the helper.
-- **Music bed** — **♪ Bed** in **Review & trim** picks the file; with one on the storyboard it
+- **Music bed** — **Bed** in **Review & trim** picks the file; with one on the storyboard it
   opens a sheet with the level, the fades, a different file, and remove.
-- **Cast library** — the cast sheet (👥 in a shot's screen) has a **Library** tab beside Cast &
+- **Cast library** — the cast sheet (the person button in a shot's screen) has a **Library** tab beside Cast &
   assets and Footage: tap a member to tick or untick it (the same question when shots use it).
 - **Find** — **⌕** in the header opens the find field and its chips; matches ring on the scrub
   reel, the rest dim, and the arrows step through them.

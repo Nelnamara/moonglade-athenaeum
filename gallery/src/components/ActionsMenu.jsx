@@ -6,6 +6,7 @@ import { askCloudDelete } from "../lib/cloudDeleteCore.js";
 import { onlyCopyNote } from "../lib/onlyCopy.js";
 import { planShotsSend } from "../curation/loomSend.js";
 import "../styles/librarybar.css";
+import Icon from "../icons/Icons.jsx";
 
 /* The bulk Actions menu, refit per the Frontend Gallery DC (drift §10):
 
@@ -171,8 +172,8 @@ function CloudDeleteModal({ data, ids, onCancel, onProceed }) {
      the strip already marks it with ▶ and calling it an image under its own ▶ is the same
      mistake one size smaller. */
   const taskLabel = (media) => {
-    if (media.length !== 1) return "whole batch";
-    return media[0] && media[0].is_video ? "single video" : "single image";
+    if (media.length !== 1) return "Whole batch";
+    return media[0] && media[0].is_video ? "Single video" : "Single image";
   };
   return (
     <div className="lb" role="dialog" aria-modal="true" onClick={onCancel}>
@@ -211,7 +212,7 @@ function CloudDeleteModal({ data, ids, onCancel, onProceed }) {
           ))}
           {data.local_only.length > 0 && (
             <div className="cd-task">
-              <div className="cd-tlbl">no PixAI task · removed locally only
+              <div className="cd-tlbl">No PixAI task · removed locally only
                 <span>{plural(t.local_only, "file", "files")}</span>
               </div>
               {strip(data.local_only)}
@@ -495,7 +496,7 @@ export default function ActionsMenu({
             {item("▮ Send to The Loom · as shots, in order", sendShots,
               { title: "A new act of image-to-video shots, one per picture, in order. Nothing is rendered." })}
             {item("⎙ Print sheet", printSheet)}
-            {item("⬇ Download ZIP", downloadZip)}
+            {item(<><Icon name="download" /> Download ZIP</>, downloadZip)}
             {item("Find / replace in prompts", replacePrompt)}
             {item("Delete locally", deleteLocal,
               { danger: true, sep: true,

@@ -27,6 +27,6 @@
    instead of un-setting each one inline. */
 .mnu-notebtn { display: block; width: 100%; box-sizing: border-box; text-align: left;
   font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--subtext);
-  background: rgba(12,10,28,.6); border: 1px solid var(--surface1); border-radius: 9px;
+  background: rgba(12,10,28,.6); border: 1px solid var(--surface1); border-radius: var(--radius-control);
   padding: 9px 13px; margin-top: 14px; cursor: pointer; }
 .mnu-notebtn:hover { border-color: var(--accent); color: var(--text); }

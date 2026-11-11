@@ -216,9 +216,9 @@ describe("the inline detail is wired into the row, click/keyboard handling, and 
   });
 
   test("the row renders all three original detail fields with the right source data", () => {
-    assert.match(rowSrc, />TASK</, "row detail is missing the TASK label");
-    assert.match(rowSrc, />SENT</, "row detail is missing the SENT label");
-    assert.match(rowSrc, />SPENT</, "row detail is missing the SPENT label");
+    assert.match(rowSrc, />Task</, "row detail is missing the Task label");
+    assert.match(rowSrc, />Sent</, "row detail is missing the Sent label");
+    assert.match(rowSrc, />Spent</, "row detail is missing the Spent label");
     assert.match(rowSrc, /const startedAt = j\.started_at \|\| j\.ts \|\| 0;/,
       "row does not read started_at (falling back to ts for pre-fix log lines)");
     assert.match(rowSrc, /navigator\.clipboard\.writeText\(j\.job_id \|\| ""\)/,
@@ -286,7 +286,7 @@ describe("inline detail cost row", () => {
   test("shows the actual cost when the job recorded one", () => {
     assert.ok(costShown({ job_id: "4242", ts: 1000, started_at: 1000, status: "done", paid_credit: 3700 }),
       "no Cost row for a job that recorded paid_credit");
-    assert.match(costRow, />COST</, "the gated row is not the COST row");
+    assert.match(costRow, />Cost</, "the gated row is not the Cost row");
     assert.match(costRow, /groupThousands\(j\.paid_credit\)\} credits/,
       "the Cost row does not render a thousands-separated credit figure");
     assert.equal(groupThousands(3700), "3,700", "cost not thousands-separated");

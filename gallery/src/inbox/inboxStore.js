@@ -119,7 +119,7 @@ function pullPushed(after) {
     fresh.filter(toasts).forEach((it) => {
       const words = commentToast(it);
       toastShow({
-        kind: "", icon: "❝", title: words.title, msg: words.msg, sticky: true,
+        kind: "", iconName: "comment", title: words.title, msg: words.msg, sticky: true,
         actions: [
           { label: "Later", run: () => {} },
           { label: "Open thread", run: () => openItem({ kind: "work", ids: [it.id], artwork: it.artwork,

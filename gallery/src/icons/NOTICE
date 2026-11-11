@@ -1,6 +1,8 @@
 Glyphs
 ======
-The nine .svg files in this folder are from **Glyphs**, an open icon set.
+The nine .svg files in this folder WITHOUT a `_line` suffix are from **Glyphs**,
+an open icon set. (The `*_line.svg` files -- the line set of 2026-11-03 -- were drawn
+for this app and carry no third-party licence; see dev/tools/build_icons.py.)
 
     Home:    https://glyphs.fyi
     Source:  https://github.com/gorango/glyphs

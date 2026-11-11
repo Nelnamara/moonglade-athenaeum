@@ -7,6 +7,10 @@ import { classifyEntryError } from "../lib/contestEntry.js";
 import { show as toast } from "../notify/toastStore.js";
 import "../styles/myart-contests.css";
 
+/* A refusal's mark. classifyEntryError (lib/contestEntry.js) names its line icon in
+   `iconName`; an older build carried the glyph in `icon`, which this maps onto the set. */
+const FAIL_ICON = { "⚠": "warning", "🚫": "ban" };
+
 /* THE CONFIRM — Contest Surface v2.dc.html D2/D3/D4, the one door every direct entry
    goes through (owner ruling F4: always a confirm, no exceptions). The publish path has
    its own D1 face inside PublishOverlay, because that entry rides the publish mutation
@@ -40,7 +44,7 @@ export default function ContestConfirm({ contest, art, onClose, onEntered, onPic
     apiGet("/api/myart/items").then((d) => {
       const t = (d && d.csrf) || "";
       if (t) setCsrf(t);
-      else setFail({ icon: "⚠", title: "Couldn't verify this session",
+      else setFail({ iconName: "warning", title: "Couldn't verify this session",
                      copy: "Reload the page and try again — nothing was submitted." });
     });
   }, [csrfToken]);
@@ -109,7 +113,7 @@ export default function ContestConfirm({ contest, art, onClose, onEntered, onPic
               {fail ? (
                 <>
                   <div className="mgctc-fail">
-                    <div className="i">{fail.icon}</div>
+                    <div className="i"><Icon name={fail.iconName || FAIL_ICON[fail.icon] || "warning"} /></div>
                     <div>
                       <div className="t">{fail.title}</div>
                       <div className="c">{fail.copy}</div>
@@ -148,7 +152,7 @@ export default function ContestConfirm({ contest, art, onClose, onEntered, onPic
                       </div>
                     </div>
                     <span className={"mgct-badge " + (official ? "official" : "community")}>
-                      {official ? "☀ OFFICIAL" : "🤝 COMMUNITY"}
+                      {official ? <><Icon name="sun" /> Official</> : <><Icon name="community" /> Community</>}
                     </span>
                   </div>
                   <div className="mgctc-acts">

@@ -31,12 +31,13 @@
   position: relative; margin: 0; border-radius: 12px; overflow: hidden;
   cursor: pointer; background: var(--base);
   border: 1px solid transparent;
-  transition: box-shadow .22s, border-color .22s,
-    transform .22s cubic-bezier(.2, .9, .24, 1);
+  transition: box-shadow .22s, border-color .22s;
 }
-.mgg-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, .55);
+/* THE QUIETED LOOK (unslop pick 7B): a card answers hover and keyboard focus with its edge
+   alone -- the border lights to the accent at 70% -- and never lifts, casts a shadow or
+   zooms its art. Selection keeps its own full-accent ring below. */
+.mgg-card:hover, .mgg-card:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
 }
 .mgg-card.sel {
   border-color: var(--accent);
@@ -57,9 +58,8 @@
 .mgg-art {
   position: absolute; inset: 0; width: 100%; height: 100%;
   display: block; object-fit: cover;
-  transition: transform .35s cubic-bezier(.2, .9, .24, 1), filter .3s;
+  transition: filter .3s;
 }
-.mgg-card:hover .mgg-art { transform: scale(1.05); }
 
 /* Privacy blur — CLASSIC strengths kept on purpose (App.jsx: one localStorage
    key, both surfaces, "exactly the classic semantics"): eye ON blurs all thumbs
@@ -75,18 +75,18 @@
 .mgg-top {
   position: absolute; top: 7px; left: 7px; z-index: 2;
   display: flex; align-items: center; gap: 6px;
-  opacity: 0; transform: translateY(-3px);
-  transition: opacity .2s, transform .2s cubic-bezier(.2, .9, .24, 1);
+  opacity: 0;
+  transition: opacity .2s;
 }
 .mgg-card:hover .mgg-top,
 .mgg-card.sel .mgg-top,
-.mgg-selecting .mgg-top { opacity: 1; transform: none; }
+.mgg-selecting .mgg-top { opacity: 1; }
 
 /* 15×15 checkbox — ALWAYS single-toggles, no mode needed (drift §9) */
 .mgg-check {
   width: 15px; height: 15px; flex: none; padding: 0;
   display: grid; place-items: center;
-  border-radius: 4px; font-size: 10px; font-weight: 800; line-height: 1;
+  border-radius: 4px; font-size: 10px; font-weight: 600; line-height: 1;
   color: color-mix(in oklab, var(--accent) 26%, #08040f);
   border: 1px solid rgba(255, 255, 255, .4);
   background: rgba(5, 4, 13, .6);
@@ -99,7 +99,7 @@
    hue family) · LOCAL silver (DC metal stops) · default accent-mix metal, so it
    follows the skin like the shell's own metal recipe. */
 .mgg-pill {
-  font-size: 8px; font-weight: 800; letter-spacing: .06em;
+  font-size: 11px; font-weight: 500; letter-spacing: normal;
   padding: 2px 7px; border-radius: 999px; white-space: nowrap;
   text-shadow: 0 1px 0 rgba(255, 255, 255, .3);
   border: 1px solid rgba(255, 255, 255, .3);
@@ -155,12 +155,12 @@
   color: var(--lavender);
   border: 1px solid color-mix(in srgb, var(--lavender) 55%, transparent);
   background: color-mix(in srgb, var(--mantle) 80%, transparent);
-  opacity: 0; transform: translateY(-3px);
-  transition: opacity .2s, transform .2s cubic-bezier(.2, .9, .24, 1), background .18s;
+  opacity: 0;
+  transition: opacity .2s, background .18s;
 }
 .mgg-card:hover .mgg-door,
 .mgg-card:focus-within .mgg-door,
-.mgg-door:focus-visible { opacity: 1; transform: none; }
+.mgg-door:focus-visible { opacity: 1; }
 .mgg-door:hover { background: color-mix(in srgb, var(--lavender) 22%, var(--mantle)); }
 .mgg-card:hover .mgg-vglyph,
 .mgg-card:focus-within .mgg-vglyph { opacity: 0; }
@@ -208,7 +208,7 @@
 .mgg-series-badge, .mgg-batch-badge {
   position: absolute; top: 7px; left: 7px; z-index: 3;
   font-family: ui-monospace, Menlo, Consolas, monospace;
-  font-size: 9px; font-weight: 700; letter-spacing: .09em; white-space: nowrap;
+  font-size: 11px; font-weight: 500; letter-spacing: .02em; white-space: nowrap;
   padding: 3px 8px; border-radius: 999px;
   color: #eae6f6; background: rgba(5, 4, 13, .74);
   border: 1px solid color-mix(in srgb, var(--lavender, var(--accent)) 55%, transparent);
@@ -222,12 +222,12 @@
   display: flex; flex-direction: column; gap: 1px; padding: 9px 9px 8px;
   background: linear-gradient(to top,
     rgba(5, 4, 13, .94) 0%, rgba(5, 4, 13, .72) 62%, rgba(5, 4, 13, 0) 100%);
-  opacity: 0; transform: translateY(8px);
-  transition: opacity .24s, transform .24s cubic-bezier(.2, .9, .24, 1);
+  opacity: 0;
+  transition: opacity .24s;
 }
 .mgg-card:hover .mgg-cap,
 .mgg-card.sel .mgg-cap,
-.mgg-selecting .mgg-cap { opacity: 1; transform: none; }
+.mgg-selecting .mgg-cap { opacity: 1; }
 
 /* ---- Accession Stamp + Sibling Strip (#30) ----------------------------------
    Pixel source: the owner's locked "Placard identity -- five directions"
@@ -273,10 +273,12 @@
 .mgg-caprow .stars { flex: 1 1 auto; display: flex; gap: 2px; letter-spacing: 0; }
 .mgg-caprow .stars .st { font-size: 9px; }
 
-/* Open (accent metal) + Details (ghost) chips — 9px/700 uppercase, radius 999 */
+/* Open (accent metal) + Details (ghost) -- the card's two buttons. The quieted look (picks
+   1C, 3B, 5B): sentence case at the 11px label floor, weight 500, and a button's squarer
+   corner (they stand ~21px tall, so the small control radius). */
 .mgg-chip {
-  font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
-  padding: 3px 8px; border-radius: 999px; cursor: pointer; flex: none;
+  font-size: 11px; font-weight: 500; letter-spacing: normal; text-transform: none;
+  padding: 3px 8px; border-radius: var(--radius-control-sm); cursor: pointer; flex: none;
   white-space: nowrap; line-height: 1.2;
 }
 .mgg-chip.open {
@@ -340,9 +342,9 @@
   display: flex; align-items: baseline; gap: 10px; padding: 7px 0 8px;
   background: linear-gradient(180deg, var(--base) 62%, transparent);
 }
-.mgg-tl-title { font-size: 14px; font-weight: 800; color: var(--text); }
+.mgg-tl-title { font-size: 14px; font-weight: 600; color: var(--text); }
 .mgg-tl-count {
-  font-size: 10px; font-weight: 700; letter-spacing: .06em;
+  font-size: 12px; font-weight: 500; letter-spacing: normal;
   color: var(--overlay0, rgba(214, 210, 226, .5));
 }
 .mgg-tl-rule { flex: 1 1 auto; height: 1px; background: var(--surface1); }
@@ -357,12 +359,12 @@
   display: flex; flex-direction: column; gap: 4px;
 }
 .mgg-tl-railhead {
-  font-size: 8px; font-weight: 800; letter-spacing: .12em;
+  font-size: 11px; font-weight: 500; letter-spacing: normal;
   color: var(--overlay0, rgba(214, 210, 226, .5)); padding: 2px 6px 4px;
 }
 .mgg-tl-jump {
-  font-size: 10px; font-weight: 700; text-align: center; padding: 6px;
-  border-radius: 7px; cursor: pointer; white-space: nowrap; font-family: inherit;
+  font-size: 10px; font-weight: 600; text-align: center; padding: 6px;
+  border-radius: var(--radius-control); cursor: pointer; white-space: nowrap; font-family: inherit;
   color: var(--subtext, rgba(214, 210, 226, .78));
   border: 1px solid var(--surface1); background: transparent;
   overflow: hidden; text-overflow: ellipsis;
@@ -375,8 +377,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .mgg-card, .mgg-art, .mgg-top, .mgg-cap, .mgg-door, .mgg-vglyph { transition: none; }
-  .mgg-card:hover { transform: none; }
-  .mgg-card:hover .mgg-art { transform: none; }
   .mgg-tl-jump { transition: none; }
   .mgg-tl-cols { scroll-behavior: auto; }
 }

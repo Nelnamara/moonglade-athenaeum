@@ -50,12 +50,13 @@ describe("the primary group: the DC's fileActions, under the hero in the picture
   const g = group("primary");
 
   test("(a) exactly the five designed labels, in the designed order", () => {
-    assert.deepEqual(labels(g).filter((l) => l !== "☁ Published"), [
-      "⬇ Download", "☁ Publish", "⧉ Copy prompt", "⇱ Upscale", "Delete locally",
+    // (unslop pick 2B: Download's and Publish's marks are line icons, drawn beside the words)
+    assert.deepEqual(labels(g).filter((l) => l !== "Published"), [
+      "Download", "Publish", "⧉ Copy prompt", "⇱ Upscale", "Delete locally",
     ]);
   });
   test("(c) Download carries the shared metal face; Delete locally is the danger chip", () => {
-    assert.match(g, /<a className="btn mgx-metal"[\s\S]*?>⬇ Download<\/a>/);
+    assert.match(g, /<a className="btn mgx-metal"[\s\S]*?><Icon name="download" \/> Download<\/a>/);
     assert.match(g, /<button className="btn btn-danger" disabled=\{busy\}[\s\S]*?onClick=\{deleteLocal\}>Delete locally<\/button>/);
     // the metal recipe is shell.css's one class, not a second gradient in styles.css
     const shell = src("gallery/src/styles/shell.css");
@@ -116,7 +117,7 @@ describe("the More row: the app's actions the DC never drew, every handler kept"
       // this row is still the same action with the same handler, which is what (d) guards.
       ["Edit this", /onClick=\{\(\) => \{ onClose\(\); onEdit\(row\.media_id\); \}\}>✎ Edit this<\/button>/],
       ["Remix", /onClick=\{\(\) => \{ onClose\(\); onRemix && onRemix\(row\.media_id\); \}\}>↺ Remix<\/button>/],
-      ["Rebuild poster", /const d = await rebuildPoster\(row\.media_id\);[\s\S]*?"🖼 Rebuild poster"\}<\/button>/],
+      ["Rebuild poster", /const d = await rebuildPoster\(row\.media_id\);[\s\S]*?<Icon name="image" \/> Rebuild poster<\/>\}<\/button>/],
       ["Delete from PixAI", /<button className="btn btn-danger" disabled=\{busy\} onClick=\{deleteCloud\}>Delete from PixAI<\/button>/],
     ];
     for (const [name, re] of kept) assert.match(g, re, name + " kept its handler in the More row");
@@ -145,12 +146,13 @@ describe("the strip is gone: three groups, styled as groups, and the reveal stil
     // hero are drawn unanimated (DC:56-60) and must never sit at opacity 0
     assert.match(css, /\.placard-record \.p-actions \{ opacity: 0; \}/);
     assert.doesNotMatch(css, /\n\.p-actions \{[^}]*opacity: 0/);
-    assert.match(css, /\.p-actions \.btn \{ font-size: 11px; font-weight: 700; white-space: nowrap; padding: 8px 14px;\r?\n\s*border-radius: 9px;/);
+    // the quieted look: 600 (pick 3B) and the control corner (pick 5B)
+    assert.match(css, /\.p-actions \.btn \{ font-size: 11px; font-weight: 600; white-space: nowrap; padding: 8px 14px;\r?\n\s*border-radius: var\(--radius-control\);/);
     assert.match(css, /\.p-actions \.btn-danger[^{]*\{ border: 1px solid rgba\(243,139,168,\.35\);\r?\n\s*background: rgba\(243,139,168,\.1\); color: var\(--red\);/);
     assert.match(css, /\.p-actions-more \.btn \{ font-size: 10px;/);
     assert.match(css, /\.p-actions-more \.btn:not\(\.mgx-metal\):not\(\.btn-danger\) \{ color: var\(--overlay0\);/);
     // the existing .btn base is untouched
-    assert.match(css, /\n\.btn \{ border-radius: 8px; border: 1px solid var\(--surface1\); color: var\(--text\);/);
+    assert.match(css, /\n\.btn \{ border-radius: var\(--radius-control\); border: 1px solid var\(--surface1\); color: var\(--text\);/);
   });
   test("the reveal's closing beat pops every group in (and reduced-motion/print cover them)", () => {
     assert.match(details, /qa\("\.p-actions"\)\.forEach\(\(g, i\) => play\(g, \[/);

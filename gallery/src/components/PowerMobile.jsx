@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import { apiGet } from "../api.js";
 import { matrixGrid } from "../gen/templateCore.js";
 import { PresetsPanel } from "./PowerControls.jsx";
@@ -139,7 +140,7 @@ export function MatrixGrid({ runId, onOpenImage }) {
                   onClick={done ? () => onOpenImage(j.media_ids[0]) : undefined}>
                   {done ? <img src={"/thumbs/" + encodeURIComponent(j.media_ids[0]) + ".jpg"} alt="" /> : null}
                   {running && !done ? "…" : null}
-                  {held && !done ? "⚠" : null}
+                  {held && !done ? <Icon name="warning" /> : null}
                 </button>
               );
             })}

@@ -104,7 +104,7 @@ which puts *each picture back to the values it had*, not one value for all.
 
 ## On a phone
 
-**☰ Menu → Collections** is the phone's version of Manage. **Tap** a collection to open it in the
+**Menu → Collections** is the phone's version of Manage. **Tap** a collection to open it in the
 Gallery. **Swipe a row to the left** for **Rename** and **Delete** (or tap the **⋯** at the end of the
 row, for the same two buttons). **Merge…** turns on tick boxes: tick two or more hand-picked
 collections and the button at the bottom says what it will do; the first one you ticked keeps the
@@ -128,7 +128,7 @@ this as **Rate 1–5**.
 ## Backing up your curation
 
 Your ratings, collections (and their manual order), smart collections, tags, keeper/reject
-marks and notes live only in `catalog.db`. **Control Panel → ⬇ Download curation (JSON)**, or
+marks and notes live only in `catalog.db`. **Control Panel → Download curation (JSON)**, or
 `python -m moonglade --export-curation [FILE]`, saves them as one small file keyed by
 media id. If you ever rebuild the catalog from a fresh pull, put them back:
 

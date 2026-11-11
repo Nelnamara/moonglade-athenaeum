@@ -71,16 +71,16 @@ export default function useMyArt() {
   // exactly the job the old "(TOP 12)" was doing.
   const swept = totals.views_rows || 0;
   const published = totals.count || 0;
-  const viewsLabel = !d || !d.views_synced ? "TOTAL VIEWS"
-    : swept < published ? "VIEWS (" + swept + " OF " + published + ")"
-      : "TOTAL VIEWS";
+  const viewsLabel = !d || !d.views_synced ? "Total views"
+    : swept < published ? "Views (" + swept + " of " + published + ")"
+      : "Total views";
   // Frontend Gallery.dc.html:2425-2426 -- design order is PUBLISHED, VIEWS (accent-
   // highlighted), LIKES, COMMENTS; was PUBLISHED, LIKES, COMMENTS, VIEWS with no accent.
   const stats = d ? [
-    { value: fmt(totals.count), label: "PUBLISHED" },
+    { value: fmt(totals.count), label: "Published" },
     { value: d.views_synced ? fmt(totals.views) : "—", label: viewsLabel, accent: true },
-    { value: fmt(totals.likes), label: "TOTAL LIKES" },
-    { value: fmt(totals.comments), label: "COMMENTS" },
+    { value: fmt(totals.likes), label: "Total likes" },
+    { value: fmt(totals.comments), label: "Comments" },
   ] : [];
 
   // The comparison bar's denominator. Unchanged in shape from the original ranked list

@@ -99,10 +99,10 @@ export default function ContestsMobile({ onEnter, entriesEpoch = 0 }) {
     const ends = row.active ? countdown(row.end_at) : null;
     if (row.active) {
       return { cls: ends && ends.hot ? "hot" : "",
-               text: "RUNNING" + (ends && !ends.over ? " · " + ends.text : "") };
+               text: "Running" + (ends && !ends.over ? " · " + ends.text : "") };
     }
-    if (st.text === "AWAITING RESULTS") {
-      return { cls: "awaiting", text: "AWAITING RESULTS · " + (dayOf(row.result_at) || "—") };
+    if (st.state === "awaiting") {
+      return { cls: "awaiting", text: "Awaiting results · " + (dayOf(row.result_at) || "—") };
     }
     return st;
   };
@@ -146,7 +146,7 @@ export default function ContestsMobile({ onEnter, entriesEpoch = 0 }) {
         <button type="button" className={"cmb-door" + (view === "mine" ? " on" : "")}
           aria-pressed={view === "mine"}
           onClick={() => setView((v) => (v === "mine" ? "board" : "mine"))}>
-          {view === "mine" ? "‹ ALL CONTESTS" : <>MY ENTRIES <span className="n">· {mineRows.length}</span></>}
+          {view === "mine" ? "‹ All contests" : <>My entries <span className="n">· {mineRows.length}</span></>}
         </button>
       </div>
 
@@ -180,7 +180,7 @@ export default function ContestsMobile({ onEnter, entriesEpoch = 0 }) {
                   return card(c, (
                     <>
                       <span className={"cmb-cardstatus " + st.cls}>
-                        {st.text} · {n} {n === 1 ? "piece" : "pieces"}
+                        {st.icon ? <><Icon name={st.icon} /> </> : null}{st.text} · {n} {n === 1 ? "piece" : "pieces"}
                       </span>
                       {win ? (
                         <span className="cmb-cardwin">{tierLabel(win.tier, win.prize_amount)}</span>
@@ -213,7 +213,7 @@ export default function ContestsMobile({ onEnter, entriesEpoch = 0 }) {
                 ? <img src={featured.cover_url} alt="" loading="lazy" decoding="async" />
                 : null}
               <span className="cmb-heroveil" />
-              <span className="cmb-badge official">OFFICIAL</span>
+              <span className="cmb-badge official">Official</span>
               <span className="cmb-herofoot">
                 <span className="cmb-heroname">{featured.title}</span>
                 <span className="cmb-herometa">
@@ -251,7 +251,7 @@ export default function ContestsMobile({ onEnter, entriesEpoch = 0 }) {
       )}
 
       <MobileSheet open={recordSheet.sheet === "record"} closing={recordSheet.closing}
-        onClose={recordSheet.close} title="RECORD A WIN">
+        onClose={recordSheet.close} title="Record a win">
         <ContestRecordWin phone rows={mineRows} initialContestId={defaultContestId(mineRows)}
           onClose={recordSheet.close} onDone={() => reloadMine()} />
       </MobileSheet>

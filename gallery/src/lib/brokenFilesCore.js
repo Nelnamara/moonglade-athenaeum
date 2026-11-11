@@ -31,7 +31,7 @@ export function tileChip(label, counts) {
 
 // ARCHIVE: the grid's word for a picture PixAI no longer has, with the grid's own tooltip
 // (Grid.jsx, Lane C, the owner's ruling 2026-10-02).
-export const ARCHIVE_WORD = "ARCHIVE";
+export const ARCHIVE_WORD = "Archive";
 export const ARCHIVE_TIP = "Deleted on PixAI. This is the only copy.";
 
 const PROBLEM_WORDS = {
@@ -99,13 +99,13 @@ export function sizeText(row) {
   return (Math.round((n / (1024 * 1024)) * 10) / 10) + " MB";
 }
 
-/* The pill: {label, tone}. A row that just finished reads ✓ FIXED (emerald) for its 2 s. */
+/* The pill: {label, tone}. A row that just finished reads ✓ Fixed (emerald) for its 2 s. */
 export function pillFor(row, fixed) {
-  if (fixed) return { label: "✓ FIXED", tone: "ok" };
+  if (fixed) return { label: "✓ Fixed", tone: "ok" };
   const st = row && row.state;
-  if (st === "lost") return { label: "LOST", tone: "lost" };
-  if (st === "suspect") return { label: "SUSPECT", tone: "peach" };
-  return { label: "RECOVERABLE", tone: "" };
+  if (st === "lost") return { label: "Lost", tone: "lost" };
+  if (st === "suspect") return { label: "Suspect", tone: "peach" };
+  return { label: "Recoverable", tone: "" };
 }
 
 /* The row's own action, if one applies right now: "redownload" | "rebuild" | null. READ_ONLY

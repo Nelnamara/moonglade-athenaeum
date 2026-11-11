@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { inbox_icon } from "../art/inboxIcon.js";
 import { resolveInboxIcon } from "./inboxCore.js";
+import Icon from "../icons/Icons.jsx";
 
 /* The ✉ Inbox button's mailbox (owner's art, 2026-10-04), drawn the way the gift box draws
    gift.png: at 22 px in the header's 30 px button, and at 18 px (`small`) in the phone's Menu row.
@@ -42,7 +43,7 @@ export default function InboxIcon({ small }) {
     return () => { live = false; };
   }, []);
   const cls = small ? " small" : "";
-  if (art === null) return <span className={"ib-inboxglyph" + cls} aria-hidden="true">✉</span>;
+  if (art === null) return <span className={"ib-inboxglyph" + cls} aria-hidden="true"><Icon name="mail" /></span>;
   return (
     <span className={"ib-inboxic" + cls} aria-hidden="true"
       style={art ? { backgroundImage: 'url("' + art.src + '")' } : undefined} />

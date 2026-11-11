@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import { createPortal } from "react-dom";
 import {
   SIZES, STEPS_FALLBACK, MODES as GEN_MODES, UNLIMITED_PRO,
@@ -478,12 +479,12 @@ export default function CreateMobile({
                 )}
 
                 <button type="button" className="cm-advrow" onClick={openAdv}>
-                  ⚙ Advanced — resolution, quality, aspect
+                  <Icon name="gear" /> Advanced — resolution, quality, aspect
                 </button>
 
                 {sheetHost ? createPortal(
                   <MobileSheet open={modelSheet.sheet === "model"} closing={modelSheet.closing}
-                    onClose={modelSheet.close} title="EDIT MODEL" className="cm-sheetover">
+                    onClose={modelSheet.close} title="Edit model" className="cm-sheetover">
                     {Object.entries(EDIT_CAPS).map(([k, cap]) => (
                       <button key={k} type="button" role="radio" aria-checked={edit.s.model === k}
                         className={"cm-sheetrow" + (edit.s.model === k ? " on" : "")}
@@ -522,7 +523,7 @@ export default function CreateMobile({
 
             {editSub === "fixer" && (
               <div className="glm-placeholder cm-soon">
-                <div className="glm-placeholder-icon" aria-hidden="true">⛶</div>
+                <div className="glm-placeholder-icon" aria-hidden="true"><Icon name="crop" /></div>
                 <div className="glm-placeholder-title">Fixer</div>
                 <div className="glm-placeholder-note">
                   Drag a box over the hand or face on the source. A fix can't
@@ -695,7 +696,7 @@ export default function CreateMobile({
             )}
 
             <button type="button" className="cm-advrow" onClick={openAdv}>
-              ⚙ Advanced — LoRA, size, tuning, palette, negative
+              <Icon name="gear" /> Advanced — LoRA, size, tuning, palette, negative
             </button>
 
             <span className="gd-cost cm-cost">
@@ -708,7 +709,7 @@ export default function CreateMobile({
               <div className="gd-results cm-results">
                 {results.map((r) => (
                   <div key={r.id} className={"gd-res " + r.kind}>
-                    {r.kind === "run" ? "⏳ " : r.kind === "ok" ? "✔ " : r.kind === "warn" ? "⚠ " : "✕ "}{r.text}
+                    {r.kind === "run" ? <><Icon name="hourglass" /> </> : r.kind === "ok" ? "✔ " : r.kind === "warn" ? <><Icon name="warning" /> </> : "✕ "}{r.text}
                     {r.media && r.media.map((mid) => (
                       <a key={mid} href={"/full/" + mid} target="_blank" rel="noreferrer">
                         <img src={"/thumbs/" + mid + ".jpg"} alt="" />
@@ -758,12 +759,12 @@ export default function CreateMobile({
         </MobileSheet>,
         sheetHost)}
       {sheetHost && power && powerSheet.sheet === "presets" && createPortal(
-        <MobileSheet open closing={powerSheet.closing} onClose={powerSheet.close} title="PRESETS"
+        <MobileSheet open closing={powerSheet.closing} onClose={powerSheet.close} title="Presets"
           className="cm-sheetover">
           <PresetsSheetBody power={power} onDone={powerSheet.close} />
         </MobileSheet>, sheetHost)}
       {sheetHost && run && powerSheet.sheet === "lists" && createPortal(
-        <MobileSheet open closing={powerSheet.closing} onClose={powerSheet.close} title="LISTS"
+        <MobileSheet open closing={powerSheet.closing} onClose={powerSheet.close} title="Lists"
           className="cm-sheetover">
           <div className="pm-sheetbody">
             <ListsSheet bare lists={run.lists} onSave={run.saveLists} onClose={powerSheet.close} />
@@ -1037,7 +1038,7 @@ function EditAdvanced({ edit }) {
       </div>
       {host ? createPortal(
         <MobileSheet open={ratioSheet.sheet === "ratios"} closing={ratioSheet.closing}
-          onClose={ratioSheet.close} title="MORE RATIOS" className="cm-sheetover">
+          onClose={ratioSheet.close} title="More ratios" className="cm-sheetover">
           <div className="cm-chiprow cm-sheetchips">
             {groups.extreme.map((a) => (
               <button key={a} type="button"

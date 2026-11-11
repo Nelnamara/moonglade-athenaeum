@@ -5,11 +5,11 @@ in the gallery:
 
 - **Delete locally** — removes from your local catalog only (the cloud task is
   untouched). **Pictures PixAI no longer has go with the rest, and the confirm names them
-  first** — the ones the gallery badges **ARCHIVE**: their task has left your PixAI history as
+  first** — the ones the gallery badges **Archive**: their task has left your PixAI history as
   of the last check, or PixAI dropped that one image. Your library holds the only copy of
   those, so the question says how many are in the selection (*"3 of these are the only copy —
   PixAI no longer has them."*). Like every local delete they go to the Trash, and **Restore**
-  there brings each one back with its catalog row — the ARCHIVE badge, rating and collections
+  there brings each one back with its catalog row — the Archive badge, rating and collections
   included.
 - **Delete from PixAI** — deletes the whole **task** from your account *and* removes it
   locally, so they never drift. Requires a request from the machine running the server, even
@@ -68,7 +68,7 @@ batch and keep its siblings, open that image and use the buttons on its own page
 
 - **Delete locally** — moves the file to `_deleted/` and clears the catalog row. PixAI
   still has the image, so a later sync brings it back. This is the recoverable one. On a
-  picture PixAI no longer has (badged **ARCHIVE**), it says first that this is the last copy
+  picture PixAI no longer has (badged **Archive**), it says first that this is the last copy
   anywhere and that a sync will not bring it back; the file still goes to the Trash, where
   **Restore** puts it back.
 - **Delete from PixAI** — removes the image from your account. Irreversible on their side,
@@ -165,7 +165,7 @@ prune those orphans:
 1. Run **`python -m moonglade --reconcile-deleted`** (it's also the last step of
    `--sync`, and one of the jobs that runs itself weekly). It pages your live feed (~1–2 min) and flags catalog
    rows whose task is gone.
-2. Gallery → **Source → "Deleted on PixAI"** lists them, each badged **ARCHIVE**.
+2. Gallery → **Source → "Deleted on PixAI"** lists them, each badged **Archive**.
 
 It skips imports and anything generated in the last ~2 days (so a fresh generation
 isn't false-flagged), and aborts if the feed comes back empty.

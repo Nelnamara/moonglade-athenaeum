@@ -73,7 +73,7 @@ export default function CollectionOrderMobile({ name, csrf, onBack }) {
     <div className="mgco-m">
       <div className="mgco-m-bar">
         <button type="button" className="mgco-m-back" onClick={onBack}>{"‹ Collections"}</button>
-        <span className="mgco-cap"><Icon name="collection" /> {name}{" · MANUAL ORDER"}</span>
+        <span className="mgco-cap"><Icon name="collection" /> {name}{" · Manual order"}</span>
       </div>
       <div className={"mgco-m-hint" + (o.msg.err ? " err" : "")} role="status">
         {o.msg.text || (list.length > 1 ? "Long-press a picture to drag it · ▲ ▼ move it one place" : note)}</div>
