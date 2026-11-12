@@ -90,6 +90,7 @@ import base64
 import json
 import re
 import threading
+from pathlib import Path
 
 import os
 import pytest
@@ -396,7 +397,7 @@ def render_server(tmp_path_factory):
 
 
 @pytest.fixture()
-def logged_in_page(render_server, render_browser, monkeypatch):
+def logged_in_page(render_server, render_browser, monkeypatch, request):
     """Factory: `logged_in_page(**viewport)` -> a fresh authenticated page.
 
     Re-pins `core._config_path` at the harness's own config, undoing conftest's
@@ -442,8 +443,36 @@ def logged_in_page(render_server, render_browser, monkeypatch):
     try:
         yield _open
     finally:
+        # #99: a failed call phase leaves its evidence behind (CI uploads the folder).
+        rep = getattr(request.node, "rep_call", None)
+        if rep is not None and rep.failed:
+            _save_failure_evidence(request.node.name, contexts)
         for ctx in contexts:
             ctx.close()
+
+
+def _save_failure_evidence(test_name, contexts):
+    """Save a full-page screenshot and the HTML of each open page to dev/tests/_failures/.
+    Best effort with short timeouts: it must never raise or mask the real failure (#99)."""
+    try:
+        out = Path(__file__).resolve().parent / "_failures"
+        out.mkdir(exist_ok=True)
+        stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", test_name)[:120]
+        n = 0
+        for ctx in contexts:
+            for page in ctx.pages:
+                n += 1
+                name = stem if n == 1 else "%s_%d" % (stem, n)
+                try:
+                    page.screenshot(path=str(out / (name + ".png")), full_page=True, timeout=5_000)
+                except Exception:
+                    pass
+                try:
+                    (out / (name + ".html")).write_text(page.content(), encoding="utf-8")
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
 
 # The one route in this app that must never fire for real from a test. Named once so the

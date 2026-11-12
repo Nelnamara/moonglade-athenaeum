@@ -91,7 +91,7 @@ no matter who is signed in: the
 destructive Control Panel jobs (organize, undo-organize, dedup-apply, dedup-delete,
 restore-orphans, rebuild-thumbnails) plus cancelling a job or editing the schedule; emptying the
 Trash or deleting from it forever; deleting from your PixAI account, per-image or in bulk;
-setting the API key, the library folder, or the launcher icon; importing local files (**↑ Import**
+setting the API key, the library folder, or the launcher icon; importing local files (**Import**
 / `--import-local`); and changing the account roster — adding an account, removing someone
 *else's*, or resetting someone else's password.
 
@@ -100,7 +100,7 @@ and a signed-in session on a shared network can spend your credits.
 
 **How do I add another person, or get back in if I'm locked out?**
 
-Add accounts from **Panel → Users**, signed in **on the machine running the gallery** — the
+Add accounts from **Panel → Accounts → Manage…**, signed in **on the machine running the gallery** — the
 **Add user** form only appears there, and the route refuses a LAN request outright. Any account
 may do it; none may do it from across the network. There's no admin role — all accounts are
 equal-trust, and the gate asks *where you're sitting*, never *who you are*, so this stops your own
@@ -114,7 +114,7 @@ design — it's your library and your PixAI account behind it, not a public sign
 extra account is another key to both.
 
 Locked out with an account already there? On the server machine,
-The Control Panel's **Users** tab handles this in the browser — change your own password from
+The Control Panel's **Accounts** tile (**Manage…**) handles this in the browser — change your own password from
 anywhere, or reset another account's when you're on the server machine. The CLI is the
 fallback for being locked out of the only account:
 `python -m moonglade --add-web-user` prompts (hidden) for a username and password and
@@ -136,9 +136,9 @@ No. Lookups are by `media_id`, so files can live in any subfolder.
 
 **How do I update?**
 **Moonglade tells you when there is something to update to.** While it runs it checks for a
-new release about once an hour, and when one turns up a notice appears in the corner —
-*"Moonglade v3.7.3 is ready — open the Control Panel to update"* — once per version, wherever
-in the app you are. **Open the Control Panel** (it re-checks on the spot) and the version
+new release about once an hour, and when one turns up a strip appears across the top of the screen —
+*"Moonglade v3.7.3 is ready"*, with **Update** and **Not now** — once per version, wherever
+in the app you are. **Update** opens the update window; or **open the Control Panel** (it re-checks on the spot) and the version
 stamp at the bottom of its sidebar is gold: *"v3.7.3 available — view"*. Click it and **About**
 opens leading with *"v3.7.3 is out"* and **View the update ›**; that opens the confirm, which
 tells you what will happen — the update is pulled atomically, dependencies install

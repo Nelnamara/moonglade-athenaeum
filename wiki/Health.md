@@ -50,8 +50,8 @@ numbers?* below).
 **Uncataloged** counts media files that physically exist in your backup folder but have
 no row in `catalog.db` at all — the mirror image of "missing files" (a catalog row with
 no file). This happens when files land on disk outside the normal backup flow. When the
-count is nonzero, Health shows a note pointing at the fix: the gallery's **↑ Import**
-button, or `python -m moonglade --import-local` from the CLI — both catalog
+count is nonzero, Health shows a note pointing at the fix: the gallery's **Import**
+button (on the host machine only), or `python -m moonglade --import-local` from the CLI — both catalog
 any not-yet-known file it finds (see [Backing Up → Importing your own media](Backing-Up)).
 
 **Opening a row whose file is gone tells you that.** A catalog row can outlive its file —

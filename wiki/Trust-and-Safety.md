@@ -65,7 +65,7 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   behind a flag, not commented out, not planned. `--account` only ever *reads* your
   credits/membership status.
 - **Touch anyone's account but yours.** Every request rides your own API key — or, if you
-  turn on **Mirror to PixAI website** (Control Panel ▸ Maintenance), your own logged-in
+  turn on **Mirror to PixAI** (Control Panel ▸ Maintenance), your own logged-in
   browser session, read from a browser signed in to PixAI on the server machine. That
   session is read locally and never leaves that machine; the tile shows how many days it has
   left, never the credential itself. And it's a hard switch, not a preference: when
@@ -95,7 +95,7 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   are signed cookies over scrypt-hashed passwords,
   rate-limited per address. **Log Out** signs out the device you pressed it on and nothing
   else — your other devices stay signed in. If a device is lost, or you think a session was
-  captured, **change your password** in **Control Panel → Users**: that signs out every other
+  captured, **change your password** in **Control Panel → Accounts → Manage…**: that signs out every other
   device on your account at once and keeps the one you changed it from. (Nothing that merely
   *links* to the sign-out address can sign anyone out — it only answers the button's own
   request.) **Log Out also clears anything your browser
@@ -104,7 +104,7 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   borrowed device doesn't keep showing them after you log out.
   Account creation is **closed after the first local bootstrap**: the login page mints the very
   first account (only from the server's own machine, only while none exist), then never offers
-  signup again. New accounts come only from **Panel → Users** *on the machine running the
+  signup again. New accounts come only from **Panel → Accounts → Manage…** *on the machine running the
   server* or the `--add-web-user` CLI there — never a public registration form, and never from
   across the network even with a valid session. A minted account is a lasting key to the whole
   library and to your PixAI spend, so it takes more than an open tab to create one. The lockout
@@ -138,8 +138,8 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   restore-orphans, rebuild-thumbnails), plus cancelling a running job and editing the schedule;
   **emptying the Trash, or deleting from it forever** — the one Trash action with no way back;
   **deleting from your PixAI account**, per-image or in bulk; writing the **API key**, the
-  **library folder**, or the launcher icon; **importing local files** (the **↑ Import**
-  drop-zone / `--import-local`, which copies files onto the server machine); and **changing who
+  **library folder**, or the launcher icon; **importing local files** (the **Import**
+  drop-zone, host only / `--import-local`, which copies files onto the server machine); and **changing who
   has an account** — creating one, removing an account other than your own, or resetting another
   account's password.
 

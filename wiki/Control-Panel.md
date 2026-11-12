@@ -34,119 +34,123 @@ itself**, **Sync now** and the version stamp (see
 
 ## Library at a glance
 
-Images, videos and collections in your catalog, plus your live PixAI credit balance and
-free-card count. **Download catalog (CSV)** saves the whole catalog to your browser's
+The sidebar's **The library → At a glance** list shows the images, videos and collections in
+your catalog, plus your live PixAI credit balance (with how much is paid and how much free)
+and free-card count. The **Catalog & files** tile holds the downloads and the library folder.
+**Download catalog (CSV)** saves the whole catalog to your browser's
 Downloads — it does *not* write a file into your backup folder. **Download curation (JSON)**
 beside it saves just what you made of the library — ratings, collections and their order,
 smart collections, tags, keeper/reject marks and notes — as one file that goes back in with
-`--import-curation` (see [Collections → Backing up your curation](Collections)).
+`--import-curation` (see [Collections → Backing up your curation](Collections)). The
+**library folder…** chip, drawn only on the machine running the gallery, sets where the
+library lives (see [Backing Up](Backing-Up#where-the-library-lives)).
 
 ## Running a maintenance job
 
-Click a button and the job starts as a background run of the command-line tool (`python -m moonglade`):
+The job console has two views, **Pipelines** (the buttons) and **Ledger** (the history).
+Click a button and the job starts as a background run of the command-line tool
+(`python -m moonglade`):
 
-- **One job runs at a time.** While one is running the other buttons are disabled, and a
-  second request comes back with *"a job is already running"*.
+- **One job runs at a time.** While one is running, the console shows that job — its name, a
+  progress bar and the live log — in place of the buttons, and a second request comes back
+  with *"a job is already running"*.
 - The **live log** streams the command's output when you're signed in locally; a LAN
   session sees a placeholder line instead — job output is shown only on the server's own
   screen. A **progress bar** shows done / total (and how many are new) for jobs that
   report progress, for both.
-- When it ends you get *finished (exit 0)*, *failed*, or *stopped by you*.
+- When it ends the console shows **✓ Finished** (or **Finished with N warnings**) with the
+  last lines of the log, and the run lands in the **Ledger**.
 - **■ Stop this job** terminates the run. Like the destructive jobs below, stopping is
   restricted to the machine hosting the gallery.
 
-The buttons are grouped exactly as the risk splits.
+The buttons are in three groups: **Sync — the daily pull**, **Tend — care for the files** and
+**Check — read-only**.
 
-### Safe · read-only or reversible
+### Sync — the daily pull
 
-- **Sync now — pull new + fill metadata** — the one-shot refresh (`--sync`): incremental
-  pull with full metadata, re-resolve unlabeled model names, fill rows still missing
-  prompts/seeds/models, build missing thumbnails, and flag rows deleted on PixAI. This is
-  the button you'll use most. See [Backing Up](Backing-Up).
-- **Catalog stats** — counts summarized straight from `catalog.db`.
-- **Duplicate audit (fast, read-only)** — the location-only duplicate report, written to
-  `audit_report.csv` in the library's `_moonglade/records/` folder. The **full (byte-compare — slower)** checkbox on the button runs the
-  content-hashing pass instead, which also catches byte-identical files saved under
-  different ids.
-- **Verify `_duplicates/` is safe to delete** — confirms every quarantined file is
-  byte-identical to a surviving copy, and flags orphans, before you empty the folder.
-- **Verify library integrity** — the read-only integrity check (`--verify-library
-  --verify-deep`): missing and empty files, files cut short, missing or empty thumbnails.
-  Its row under **Check — read-only** shows when it last ran; the log shows the summary and the
-  first lines of `integrity_report.csv`. After a check that found broken files the row also
-  says **N broken · Review ▸**, which opens Health at the **Broken files** list. See
-  [Health → Library integrity](Health).
-- **Top up the Similar index (adds only what's missing)** — embeds any images the
-  visual-similarity index doesn't have yet and leaves everything already in it alone.
+**↻ Sync now** (*pull new + fill metadata*) is the one-shot refresh (`--sync`): incremental
+pull with full metadata, re-resolve unlabeled model names, fill rows still missing
+prompts/seeds/models, build missing thumbnails, and flag rows deleted on PixAI. This is
+the button you'll use most. See [Backing Up](Backing-Up). Under it, a line shows when it last
+ran and how that went, and the standing order's state — *auto on — every 6 hours · safe jobs
+only*.
+
+### Tend — care for the files
+
+Three rows. Anything that moves or overwrites files asks first: the first click turns the
+button into **Confirm — …** with its name, and a second click runs it. These only run for a
+request from the machine hosting the gallery. Signed in from a tablet on your LAN you can
+browse, generate and run the read-only checks, but a job that changes files returns *"this
+action changes files; localhost-only"* — deliberate, because they move or overwrite files on
+the server's own disk.
+
+- **Organize into month folders** — **Organize — preview (dry run)** shows the plan without
+  moving anything, and what it found appears beside it. **Organize into month folders** then
+  normalizes the backup into `YYYY-MM/` folders with readable filenames, writing an undo
+  manifest. **Undo** replays that manifest backwards, then deletes it. There's no second
+  manifest to undo the undo.
+- **Dedup** — a chain of five steps: **Audit → Preview → Quarantine → Verify → Delete**.
+  Each step is greyed out until the one before it has finished (hover it: *Run the earlier
+  stages first*), so you can't reach the end by accident. **Audit** writes the location-only
+  duplicate report to `audit_report.csv` in the library's `_moonglade/records/` folder; the
+  slower byte-compare pass is `python -m moonglade --audit` on the command line. **Preview**
+  shows the plan without moving anything. **Quarantine** (marked with a lock) moves redundant
+  copies aside to `_duplicates/`, keeping the most-organized one. **Verify** confirms every
+  quarantined file is byte-identical to a surviving copy, and flags orphans, before you
+  empty the folder. **Delete** (also locked) removes the redundant copies outright instead —
+  no `_duplicates/` safety net, no undo. Run Preview and Verify first.
+- **Thumbnails & Similar index** — **Rebuild ALL thumbnails** regenerates every thumbnail at
+  current settings, extracts posters for poster-less videos, and sweeps orphans. It
+  overwrites in place, so the gallery never goes blank. **Top up Similar** embeds any images
+  the visual-similarity index doesn't have yet and leaves everything already in it alone.
   **This is the one you normally want.** It can't lose existing work, and if a previous
   build was interrupted it carries on from where that stopped instead of starting over.
-  No network; needs the optional `pixeltable` install. Heavy: don't run it beside GPU- or
-  RAM-heavy programs.
-- **Rebuild the Similar index (slow, needs pixeltable)** — drops the index and re-embeds
-  **every** image from scratch. Reach for this only when the index is actually *broken*
-  (wrong or duplicated results), not merely incomplete — on a large library it takes
-  roughly three times as long as a top-up and discards whatever was already there. Heavy
-  as well: don't run it beside GPU- or RAM-heavy programs.
-- **Organize — preview (dry run)** and **Dedup — preview (dry run)** — show the plan
-  without moving anything.
-- **Sync published-artwork metadata (full re-walk)** — merges titles, tags, likes and
-  aesthetic scores onto matching rows. You rarely need it now: the **Published-artwork
-  sweep** in [Runs itself](#runs-itself--the-living-library) keeps this current on its own.
-  This button is the *whole* re-read, for when you want every work refreshed this instant.
-- **Sync i2v videos — back up mp4s (full re-walk)** — finds image-to-video tasks and
-  downloads their mp4s.
+  No network; needs the optional `pixeltable` install. **Rebuild Similar (slow)** drops the
+  index and re-embeds **every** image from scratch. Reach for it only when the index is
+  actually *broken* (wrong or duplicated results), not merely incomplete — on a large
+  library it takes roughly three times as long as a top-up and discards whatever was already
+  there. Both Similar jobs are heavy: don't run them beside GPU- or RAM-heavy programs.
+  **Backfill perceptual hashes** computes the fingerprint for every image that lacks one,
+  which powers the near-duplicate tier of the duplicates finder (local work, no network).
 
-The two labelled *(full re-walk)* re-scan your whole history every run rather than stopping
-at what's already downloaded, so they take much longer than **Sync now**. That's why the
-label says so — and why the automatic versions of both are in
-[Runs itself](#runs-itself--the-living-library) rather than being a click after every
-generation.
+### Check — read-only
 
-### Changes files · asks first
+Each row shows when it last ran, with a **run ▸** beside it:
 
-- **Organize into month folders** — normalizes the backup into `YYYY-MM/` folders with
-  readable filenames, writing an undo manifest.
-- **Undo organize — move files back to their old paths** — replays that manifest backwards,
-  then deletes it. There's no second manifest to undo the undo.
-- **Dedup — quarantine dupes to `_duplicates/`** — moves redundant copies aside, keeping
-  the most-organized one. The **DELETE instead of quarantining** checkbox on that button
-  deletes them outright instead — no `_duplicates/` safety net, no undo. Run the preview
-  and the verify job first.
-- **Verify quarantine + restore orphans to `images/`** — the write-enabled version of the
-  verify job: quarantined files with no surviving keeper are moved back.
-- **Rebuild ALL thumbnails — uniform quality + video posters** — regenerates every
-  thumbnail at current settings, extracts posters for poster-less videos, and sweeps
-  orphans. It overwrites in place, so the gallery never goes blank.
+- **Catalog stats** — counts summarized straight from `catalog.db`.
+- **Inventory count** — counts what's on your account so you can compare it to what's
+  local. Downloads nothing.
+- **Verify _duplicates/** — the same read-only check as the Dedup chain's **Verify**.
+- **Verify library integrity** — the read-only integrity check (`--verify-library
+  --verify-deep`): missing and empty files, files cut short, missing or empty thumbnails.
+  Its row shows when it last ran; the log shows the summary and the first lines of
+  `integrity_report.csv`. After a check that found broken files the row also says
+  **N broken · Review ▸**, which opens Health at the **Broken files** list. See
+  [Health → Library integrity](Health).
+- **Sync published-artwork metadata** — merges titles, tags, likes and aesthetic scores onto
+  matching rows. It re-reads your whole published list, so it takes much longer than
+  **Sync now**. You rarely need it: the **Published-artwork sweep** in
+  [Runs itself](#runs-itself--the-living-library) keeps this current on its own. This is
+  the *whole* re-read, for when you want every work refreshed this instant.
+- **Sync i2v videos** — finds image-to-video tasks and downloads their mp4s. It also
+  re-scans your whole history, which is why the automatic version is in
+  [Runs itself](#runs-itself--the-living-library).
 
-Each of these asks you to confirm in a dialog before it runs, **and** only runs for a
-request from the machine hosting the gallery. Signed in from a tablet on your LAN you can
-browse, generate and run the safe jobs, but clicking one of these returns *"this action
-changes files; localhost-only"* — deliberate, because they move or overwrite files on the
-server's own disk.
+Below the rows, **Test pull** takes a number — the box (1–200, default 20; anything outside
+that range is clamped) — and **Fetch N recent** pulls that many of your most recent tasks.
+Good for a quick smoke test after changing settings.
 
-### Advanced · sync variants the one-click Sync doesn't cover
-
-Collapsed behind **Advanced** in the Maintenance card. All three are read/append (they never
-delete), but each re-walks the full account instead of stopping at what you already have:
-
-- **Full re-walk — re-pull ALL history + metadata (non-incremental)** — for filling gaps in
-  the *middle* of your history, which an incremental sync can't reach.
-- **Inventory count — tally account vs. backup (read-only, no download)** — counts what's on
-  your account so you can compare it to what's local. Downloads nothing.
-- **Test pull — fetch the N most-recent tasks** — the one job that takes a number. Set **N**
-  in the box on the button (1–200, default 20); anything outside that range is clamped.
-  Good for a quick smoke test after changing settings.
-
-These are manual-run only. None of them is on a cadence, and none can be put on one — the
-**Full re-walk** appears in [Runs itself](#runs-itself--the-living-library) purely as a
-sixty-day floor, never as a timer.
+The full re-walk (re-pull ALL history + metadata) has no button of its own. It appears in
+[Runs itself](#runs-itself--the-living-library) purely as a sixty-day floor, never as a timer,
+and its **Run now** starts it by hand.
 
 ## Download workers
 
-The selector under the job buttons (1–16, default 4) sets how many images download in
-parallel. It's saved alongside the job list and used by **both** your button clicks and
-every automatic run. More workers mainly speed up a big metadata backfill or a first
-catch-up; **Sync now** only pulls what's new, so it rarely needs many.
+How many images download in parallel (1–16, default 4) is part of the standing order. The
+**Ledger** view shows it at the end of the **Standing order** line (*· 4 workers*) — it is shown
+there, not changed there. The number is used by **both** your button clicks and every
+automatic run. More workers mainly speed up a big metadata backfill or a first catch-up;
+**Sync now** only pulls what's new, so it rarely needs many.
 
 ## Runs itself — the living library
 
@@ -189,7 +193,7 @@ Two consequences worth knowing:
 - **Older** works refresh at most **once every 48 hours**. Every two days the sweep walks
   the whole history once to collect them, and is quiet again after that.
 
-The **Sync published-artwork metadata** button below is unchanged and still does the full
+The **Sync published-artwork metadata** row under **Check — read-only** is unchanged and still does the full
 re-walk, for when you want every work re-read this instant.
 
 ### View counts have their own row, on purpose
@@ -210,8 +214,8 @@ of anything that runs unattended:
 
 ### What never runs itself
 
-**Nothing destructive, ever — not now, and not as an option.** Organize, undo organize,
-dedup (quarantine or delete) and restore orphans have no row here and cannot be given one:
+**Nothing destructive, ever — not now, and not as an option.** Organize, undo organize
+and dedup (quarantine or delete) have no row here and cannot be given one:
 they stay buttons, with their confirm and their server's-own-machine gate exactly as before.
 
 ### The rest of the rules
@@ -333,11 +337,11 @@ reads back your most recent generations, collecting anything that finished while
 away. A connection that keeps failing straight away waits a little longer each time, up to a
 minute, so a PixAI outage never turns into a flood of retries.
 
-> Not to be confused with **Mirror to PixAI website** (Maintenance tab, below), which goes the
+> Not to be confused with **Mirror to PixAI** (Maintenance tab, below), which goes the
 > *other* direction. Live Mirror pulls what you make on PixAI *into* your local library;
-> Mirror to PixAI website files what you make *in Moonglade* out to your PixAI web library.
+> Mirror to PixAI files what you make *in Moonglade* out to your PixAI web library.
 
-## Mirror to PixAI website
+## Mirror to PixAI
 
 *(Maintenance tab.)* Off by default. When it's on, each new generation you make in Moonglade
 is also filed into your **pixai.art web library** — the same place things land when you
@@ -374,11 +378,13 @@ Things worth knowing:
 
 ## Server
 
-- **↻ Restart server** — needs the managed launcher, **`Moonglade Launcher`** (it relaunches the
-  process); the button is disabled when the server was started headlessly.
-- **■ Stop server** — shuts it down cleanly from the browser. No Task Manager.
+- **⟳ Restart** — needs the managed launcher, **`Moonglade Launcher`** (it relaunches the
+  process); the button is disabled when the server was started headlessly, and the tile
+  says *Unsupervised* instead of *Supervised*.
+- **■ Stop** — shuts it down cleanly from the browser. No Task Manager.
 
-Both are available to any signed-in session. A reconnect overlay waits for the server to
+Each asks first: the button turns into **Confirm — Restart?** or **Confirm — Stop?**, and a
+second click does it. Both are available to any signed-in session. A reconnect overlay waits for the server to
 come back after a restart. If you close the Panel (or the page reloads it) while that wait is
 running, reopening it picks the wait back up instead of showing an idle Panel.
 
@@ -387,8 +393,10 @@ running, reopening it picks the wait back up instead of showing an idle Panel.
 Moonglade watches for new releases **while it is running** — it asks about once an hour, so
 you find out that a version is out without having to come and look. When one turns up it
 says so in three places at once: the **version stamp** at the foot of this sidebar turns
-gold and reads *"v3.7.3 available — view"*, a single notice appears in the corner of
-whatever screen you are on, and the stamp opens **About** when you click it.
+gold and reads *"v3.7.3 available — view"*, a strip appears across the top of
+whatever screen you are on — *"Moonglade v3.7.3 is ready"*, with **Update** and **Not now** —
+and the stamp opens **About** when you click it. **Not now** folds the strip into a small
+*v3.7.3 ready* pill.
 
 **It never installs anything by itself.** The check tells you a release exists and stops
 there; the update is pulled, applied and restarted only when you press **Update now** in
@@ -427,39 +435,39 @@ sheet — About keeps the changelog a click away — and it is shown once per ve
 after any achievement notices from the same sign-in. A brand-new account is never told it was
 "updated": it was just made.
 
-The corner notice that a release is *available* appears **once per version** — not once an hour, and not again the next
+The strip that says a release is *available* appears **once per version** — not once an hour, and not again the next
 time you load the page. Opening this Panel asks GitHub for a fresh answer rather than
 showing you one that could be half an hour old; opening and closing it repeatedly costs
 nothing, and neither does the hourly check (roughly two dozen requests a day against an
 allowance of sixty an hour). A machine that is offline simply doesn't hear anything — the
 check is deliberately quiet about its own failures.
 
-## Users
+## Accounts
 
-The **Users** tab lists your gallery login accounts.
+The **Accounts** tile in the Maintenance tab lists your gallery login accounts; its
+**Manage…** button opens them.
 
-- **Add user** — username, password, confirm. Appears **only when you're using the browser on
+- **Add user** — username, password, confirm, then **+ Add**. Appears **only when you're using the browser on
   the server machine itself**; a LAN session gets a short note where the form would be, and a
   request made by hand comes back `localhost-only` (403). A new account is a permanent key to
   the whole library and can spend your PixAI credits, so creating one is an
   owner-at-the-keyboard action rather than something any open tab can do. Duplicate usernames
   are refused outright rather than quietly resetting an existing account's password.
-- **Remove** — takes effect immediately: that account is signed out on every device at once.
+- **remove** — takes effect immediately: that account is signed out on every device at once.
   Removing **your own** account works from anywhere *unless it's the only account left* (see the
-  next bullet — the button is still drawn on your own row, so on a single-account install this is
-  the refusal you'll actually meet); removing **someone else's** is restricted to the server
-  machine, for the same reason **Add user** is. (Signing yourself out of your own account can
+  next bullet); the window draws **remove** only beside the *other* accounts, and removing
+  **someone else's** is restricted to the server machine, for the same reason **Add user** is. (Signing yourself out of your own account can
   only cost you; evicting another account is the other half of the same mint-yourself-a-login
   problem.)
 - The **last remaining account can't be removed** from here — from *any* address, loopback
   included, because that would leave the gallery with nobody able to sign in. To deliberately
   take the count to zero and re-open the first-run bootstrap, use `--remove-web-user` on the
   server machine; that's the escape hatch, and it's CLI-only on purpose.
-- **Your password** — change your own from anywhere, including a tablet on the LAN. You have
+- **Change your password** — change your own from anywhere, including a tablet on the LAN. You have
   to enter your current password to prove it's you. Changing it signs out every other device
   on your account and keeps the one you're using — the way to sign out everywhere if a device
   is lost (**Log Out** signs out only the device you press it on).
-- **Reset password** — appears next to each *other* account, and only when you're using the
+- **reset password…** — appears next to each *other* account, and only when you're using the
   browser **on the server machine itself**. It sets a new password without needing the old
   one, which is what makes it a recovery path rather than a convenience.
 
@@ -486,8 +494,8 @@ no *"forgot password?"* link on the login page and no email anywhere in Moonglad
 out-of-band channel, a logged-out reset would let anything on your network reset your account.
 So recovery is three cases:
 
-- **You know your password** → change it from anywhere, here in **Users → Your password**.
-- **You forgot it** → someone at the server machine resets it, **Users → Reset password**.
+- **You know your password** → change it from anywhere, here in **Accounts → Change your password**.
+- **You forgot it** → someone at the server machine resets it, **Accounts → reset password…**.
 - **It's the only account and you forgot it** → `--add-web-user` on the server machine, whose
   add-or-update behaviour still doubles as a reset. See [Setup](Setup).
 
@@ -499,7 +507,7 @@ Nothing is corrupted when that happens — just start it again. (A top-up will p
 interrupted one left off.)
 
 Every panel job also writes to the shared activity log, so the paper trail survives a page
-reload: open the **Activity** button in the gallery (bottom-left, also in The Loom) to see
+reload: open the **Activity** control in the header (it sits at the right end of the row by default, and the panel has a switch to move it to the left end; it is also in The Loom) to see
 runs from the panel, the CLI, and your generations in one newest-first list. It keeps the
 50 most recent, ages finished entries out after a day, and lets you dismiss a finished or
 failed row.

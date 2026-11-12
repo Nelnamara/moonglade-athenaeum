@@ -13,7 +13,7 @@ waiting), **Needs a call** (an owner decision), **Waiting on design**, **Waiting
 on something outside** (another piece of work, a date, PixAI, a device), and **Later** (parked or
 banked). Each item says what it is, why, and what it touches. When an item ships, delete it here and
 add a CHANGELOG line — never annotate "done" in place. Reconciled against the code, git, the
-CHANGELOG and the open issues on 2026-10-08.
+CHANGELOG and the open issues on 2026-11-12.
 
 ---
 
@@ -30,7 +30,9 @@ Every branch that is built but not on `master` is listed here with its review sh
 flight is never invisible. On 2026-09-06 six built branches existed that nothing named, which is
 why this section exists.
 
-- Nothing in review.
+- **`docs/stepback-prep`**: the wiki, README and roadmap pass before 3.21.0. It also makes the render
+  harness take a screenshot and save the page when a test fails, so a one-off timeout like the one in
+  [#99](https://github.com/Nelnamara/moonglade-athenaeum/issues/99) leaves something to look at.
 
 ---
 
@@ -39,14 +41,20 @@ why this section exists.
 In the recommended order.
 
 - **Split the two megamodules, phases 0-3 (`moonglade/backup.py` / `moonglade/gallery.py`).** The
-  last open part of Wave 4 (owner, 2026-10-04), planned as 3.21.0. They are the repo's two largest,
-  most-churned modules and its top regression risk. Phase 0 maps the seams in a test and retargets the
-  test patches; phases 1-3 move whole sections verbatim into their own modules (library scan,
-  duplicates, organize and series; health, account state, the job log, training, the PixAI client,
-  the updater; the mirror, media tools, achievements), with no internal re-exports and a full test
-  gate per phase. `create_app`'s route families and the spend path are NOT in this split (see Later).
+  last open part of Wave 4 (owner, 2026-10-04), planned as 3.21.0, and 3.21.0 is the split only: the
+  stand-in cleanup the old plan put there was already done in the 3.20 rebuild. They are the repo's
+  two largest, most-churned modules (`gallery.py` is 29,875 lines, `backup.py` 18,827) and its top
+  regression risk. Phase 0 maps the seams in a test and retargets the test patches, and it matters
+  most: tests patch these two modules through import aliases about 2,000 times, so a stale patch
+  after a move would pass without testing anything. Phases 1-3 move whole sections verbatim into
+  their own modules (library scan, duplicates, organize and series; health, account state, the job
+  log, training, the PixAI client, the updater; the mirror, media tools, achievements), with no
+  internal re-exports and a full test gate per phase. Phase 3's branding-and-pack module needs a
+  name other than container (`moonglade/container.py` is already the pack format). `create_app`'s
+  route families and the spend path are NOT in this split (see Later).
 
-- **App security review.** A read-only audit that ends in a ranked list: the threat model, login and
+- **App security review.** Runs AFTER the split, on the new layout (owner, 2026-11-12); its fixes go
+  in a 3.21.x release. A read-only audit that ends in a ranked list: the threat model, login and
   the no-accounts mode, session cookie handling, the localhost and LAN trust model, request
   integrity (the CSRF debt the 3.16.0 coverage guard lists, headers, CSP), file and input handling,
   credentials at rest. Owner's go of 2026-10-02 ("after Wave 1"); Wave 1 shipped in 3.16.0. Already
@@ -64,6 +72,11 @@ In the recommended order.
   drawer's layout. The tests that cover only older-version fallbacks retire with those fallbacks (see
   the expiry rule under Needs a call).
 
+- **Unlimited Mode: confirm it is gone, then remove the switch.** Its end date (2026-10-25) has
+  passed and the switch is still in the code (`moonglade/backup.py`: the lane constants and
+  `_attach_unlimited`). Check on PixAI that the mode is gone, then remove the switch and its
+  tests. Small.
+
 - **Honor counts after an edit.** The memo behind the achievements' counts is keyed on the catalog's
   row count and newest picture, so rating, tagging or publishing an existing picture may not move a
   count until a new picture arrives (found by the 2026-10-02 code-map pass). The writers that change a
@@ -76,7 +89,8 @@ In the recommended order.
 - **Small tidy-ups.** Four telemetry counters are written and never read (trash restored, purged
   forever, duplicates resolved, duplicates undone): delete them or say why they stay. The Loom's
   Import-collection dialog uses its own three catalog fetches instead of the shared picker helper.
-  The goal tiles' unused glyph data goes (owner-approved 2026-10-05). Small each.
+  The goal tiles' unused glyph data goes (owner-approved 2026-10-05). Retire the `present_*` mascot rung, which only 404s into
+  "no mascot" (`gallery/src/notify/ach.js` ~475, the comment at `moonglade/gallery.py` ~4098). Small each.
 
 - **Claude tools: library analytics.** A read-only tool over the catalog: top models and LoRAs, prompt
   keywords, cadence by day and month, credit spend over time, with a test. From the 2026-09-09
@@ -106,7 +120,7 @@ Each is a decision only the owner can make; most carry a recommendation.
 
 - **The full mobile-surface audit against the designs.** *(owner, 2026-09-05)* About 85 phone and
   iPad-size screens checked against their design sources in batches on seeded data, then one pass on
-  the real library. Its own scope says "run on the owner's go", and it is the input for #73.
+  the real library. Its own scope says "run on the owner's go", and it is the input for the phone layouts.
   Needs the go.
 
 - **The sign-in welcome hold under reduced motion.** Today the welcome holds about 5.6 s even with
@@ -196,18 +210,13 @@ A visible change gets a design or workshop step first.
 - **Remember this device** (opt-in longer LAN session, designed as Session V): waits on the security
   review's rulings (lifetime, whether a remembered device may spend). The "Log Out signs out only this
   device" half shipped in 3.16.0.
-- **The phone layouts ([#73](https://github.com/Nelnamara/moonglade-athenaeum/issues/73))** wait on
-  the mobile-surface audit's defect list; **Chrome on iPhone after a turn
-  ([#75](https://github.com/Nelnamara/moonglade-athenaeum/issues/75))** needs a measurement on the
-  device itself.
+- **The phone layouts** wait on the mobile-surface audit's defect list; the Chrome-on-iPhone column
+  jump after a turn needs a measurement on the device itself.
 - **Windows Explorer's Network folder** *(scoped 2026-10-02)*. Moonglade shows up for phones through
   Bonjour, but Explorer's Network folder lists UPnP/SSDP and WS-Discovery devices, not mDNS. A
   half-day spike needs the owner at a second Windows PC; drop it if Explorer won't list it. Then a
   switch beside Bonjour (off by default, after a design step) and a wiki page. Cosmetic, not
   reachability.
-- **Unlimited Mode ends 2026-10-25.** After that date, check that the switch goes away and a stale
-  lane request is refused. (Extending Unlimited Mode to the Loom, the command line or a history
-  marker is only worth it if the entitlement is renewed.)
 - **Video v4.0.3** joins the model list once PixAI offers it (the monthly probe watches).
 - **First real use, nothing to build:** claiming a real PixAI gift, the first real publish with a
   contest picked, and the first real Edit Pro V2.0 edit each confirm a path that was built against
@@ -227,7 +236,7 @@ A visible change gets a design or workshop step first.
   NORTH_STAR (locked 2026-08-25) the seam comes *before* the second provider and follows the
   Loom-in-the-gallery decision. After the seam: a provider chooser on the backup and generate
   surfaces (design first), and the dial-in series' optional local-VLM naming (rerolls only), the last
-  remnant of [#34](https://github.com/Nelnamara/moonglade-athenaeum/issues/34).
+  remnant of the dial-in series work.
 - **The Loom's structure, after the Loom-in-the-gallery answer.** Moving the Loom onto the gallery's
   build ("one build, two entries", deleting the two React bridges), and splitting
   `loom/master-storyboard.jsx` into smaller files. Spend-path code, each its own reviewed effort.
@@ -238,11 +247,11 @@ A visible change gets a design or workshop step first.
   cards and price, models, deleting one image), after phases 0-3; each its own design and adversarial
   review. Then revisit where `gallery/`, `loom/`, `wiki/` and `static/` live.
 - **Does a tablet tier exist?** *(tabled until the owner's iPad walk of the
-  [#72](https://github.com/Nelnamara/moonglade-athenaeum/issues/72) fixes)* Today one hook
+  iPad fixes)* Today one hook
   (`MOBILE_QUERY` 520px plus a coarse-pointer fallback) routes every tablet to the desktop build.
   Three answers: raise the breakpoint, add a real third tier, or keep the split and port touch
   affordances into the desktop components. Input: the private `QA_tablet-2026-08-23.md` poke list and
-  the owner's iPad walk. The #72 audit found the desktop build holds at 744 to 1366 px with small
+  the owner's iPad walk. The iPad audit found the desktop build holds at 744 to 1366 px with small
   wrapping fixes; what is left is feel (the sticky header's height in landscape) and touch
   affordances (hover-only card controls).
 - **A warning-free `.local` certificate and an iPad home-screen app.** A certificate carrying the

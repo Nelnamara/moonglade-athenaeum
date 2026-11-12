@@ -23,7 +23,9 @@ it, and `python -m pip` installs for the `python` you typed.
 | `pillow` | thumbnails, conversion, metadata embedding |
 | `flask` | the local web gallery (`moonglade/gallery.py`) |
 | `websockets` | `--watch` / `--watch-backup`, and the web gallery's auto-starting live-mirror thread |
-| `truststore` | optional — fixes HTTPS cert errors behind corporate proxies / AV |
+| `truststore` | fixes HTTPS cert errors behind corporate proxies / AV (`requirements.txt` installs it on Python 3.10+) |
+| `numpy` | the "more like this" picture search (`moonglade/similar.py`) |
+| `zeroconf` | the Bonjour name on your network, so devices can find Moonglade (the app runs without it, just not announced) |
 | `cryptography` (**not** in `requirements.txt` — `pip install cryptography` separately) | optional — only for the gallery's `--https` mode |
 | `ffmpeg` (on PATH) | optional — posters for backed-up/imported videos; required for The Loom's video export, last-frame splice, re-anchor and music bed, and it cuts the frames the Loom's continuity ribbon shows |
 | `pytest`, `pytest-mock`, `pytest-cov`, `pytest-xdist` | dev only — running the test suite (`requirements-dev.txt`, which includes `requirements.txt`) |
@@ -54,7 +56,7 @@ overrides. What you set in the Control Panel (the library folder, the port, LAN 
 Mirror switch, branding) the app keeps in `local\settings.json` beside the program. See
 [Where Things Live](Where-Things-Live).
 
-Generate a key at [pixai.art → Profile → Settings → API](https://pixai.art) (requires
+Generate a key at [platform.pixai.art](https://platform.pixai.art) (requires
 membership; lifetime up to ~2 years). It's the Bearer credential for **every** call, and:
 
 - **`USER_ID` is auto-resolved** from the key (via the `me` query) — no DevTools.
@@ -90,8 +92,8 @@ any device.
 **Adding more accounts.** The login page offers to *create* an account only during that
 first-run bootstrap; once one account exists it goes back to sign-in only, so nobody on your
 network can register themselves — deliberate, since it's your library and your PixAI account
-behind it. To add a person or a second device after that, open **Panel → Users** *on the
-machine running the gallery* and add them there. **Adding an account is localhost-only.** The
+behind it. To add a person or a second device after that, open **Panel → Accounts → Manage…** *on the
+machine running the gallery* and add them under **Add user**. **Adding an account is localhost-only.** The
 **Add user** form isn't even drawn for a browser that reached the Panel across the network,
 and a request made by hand comes back `localhost-only` (403). The reason is real rather than
 bureaucratic: a new account is a permanent key to your whole library and can spend your PixAI
@@ -111,8 +113,9 @@ account from anywhere — unless it's the last one, which is refused everywhere.
 privilege tier either; it's the difference between acting on yourself and acting on someone else.
 
 **Resetting a password.** Usually you don't need the command line for this: the Control
-Panel's **Users** tab can change your own password from anywhere, and can reset any other
-account when you're browsing from the server machine itself — see
+Panel's **Accounts** tile (**Manage…**) can change your own password from anywhere
+(**Change your password**), and can reset any other
+account (**reset password…**) when you're browsing from the server machine itself — see
 [Control Panel](Control-Panel). The CLI below is the fallback for the one case the browser
 can't cover: you're locked out of the *only* account, so you can't sign in to reach the
 Panel at all.

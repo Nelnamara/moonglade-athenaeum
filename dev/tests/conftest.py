@@ -206,6 +206,11 @@ def pytest_runtest_makereport(item, call):
             message = "%s\n\n%s\n%s" % (report.longrepr, "-" * 60, message)
         report.outcome = "failed"
         report.longrepr = message
+    # #99: a render-harness test timed out once on GitHub and nothing was saved, so the cause
+    # was never found. Stash each phase's report on the item so the harness's page fixture
+    # (test_render_harness.py::logged_in_page) can tell at teardown that the call phase
+    # failed (timeouts included) and save a screenshot + the page HTML to dev/tests/_failures/.
+    setattr(item, "rep_" + call.when, report)
 
 
 _NOT_FIRST_PARTY = frozenset({"tests", "node_modules", ".git", "__pycache__"})

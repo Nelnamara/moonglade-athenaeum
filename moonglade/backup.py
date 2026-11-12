@@ -18016,7 +18016,7 @@ def main():
                     help="library folder for this run (default: the library folder set in "
                          "the Control Panel, or pixai_backup beside the app)")
     ap.add_argument("--page-size", type=int, default=250,
-                    help="tasks per API page (default 250; fewer round-trips. Keep <~8000)")
+                    help="tasks per API page (default 250; fewer round-trips. Keep it at 2,000 or below)")
     ap.add_argument("--workers", type=int, default=4,
                     help="parallel download workers (default 4). 1 = serial/polite. "
                          "Higher saturates bandwidth on bulk first-time pulls; ignored for "

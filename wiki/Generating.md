@@ -416,8 +416,8 @@ still asks in the **Queue training run** sheet, whose button names the price.
    tiles in a row, each named underneath (hover one for its description; on the phone each is a
    row with the picture beside the name). The pictures come with the app; if one can't load, the
    square stays a flat colour.
-2. **Add images** — from **Upload** (your device), **From history** (your library, Grouped by
-   generation or All pictures, with the library's search; it keeps loading as you scroll) or
+2. **Add images** — from **Upload** (your device), **From history** (your library, **Grouped**
+   by generation or **All** pictures, with the library's search; it keeps loading as you scroll) or
    **Import a dataset** (the image sets of your earlier Basic runs, with their counts; a set
    that won't fit what's left of 100 is dimmed, and importing one fills in its old name,
    trigger words and goal where those are still empty). Everything lands in one grid, each
@@ -775,7 +775,7 @@ Three actions sit under the stage:
 - **Save to library** — bake the result at full resolution into `imported/`, with a thumbnail and
   a catalog row, exactly as importing any local file does. Nothing is uploaded to PixAI.
 - **Send to Edit** — upload the filtered image to PixAI (free, the same handshake as
-  **↑ Import**) and load it straight into the Edit tab as the source, so you can generate *from*
+  **Import**) and load it straight into the Edit tab as the source, so you can generate *from*
   the filtered version. The upload spends nothing; only the generation you then run costs.
 - **Reset to source** — clear the filter. Your strength and angle stay where you set them.
 

@@ -83,7 +83,7 @@ library once with its own install's launcher (updated to 3.20), then run the com
 
 **It says an older Moonglade is still using the library.**
 Something wrote to the library's old places after the move: usually an older install pointed at
-the same library. Stop it with **Stop server** in its Control Panel, or end its `python` or
+the same library. Stop it with **■ Stop** in its Control Panel (then **Confirm**), or end its `python` or
 `pythonw` process: closing its browser tab doesn't stop it. Turn off its scheduled tasks (and any
 service that starts it on Linux or macOS) and close its Claude tools, then start this one again.
 It brings in what the older one wrote, and nothing is lost. When it says another program has the
@@ -121,8 +121,8 @@ Any install from 3.10 onward updates this way.
   to a Loom exports folder, say) would be left pointing at the emptied old place, so on every
   system the start stops before anything moves and says how to make it again afterwards.
 - **A library two installs share:** update both before using it again. If an older Moonglade is
-  still running on the library, 3.20 stops and asks you to stop it (**Stop server** in its
-  Control Panel). Moonglade can tell only when both installs run on Windows and open the same
+  still running on the library, 3.20 stops and asks you to stop it (**■ Stop** in its
+  Control Panel, then **Confirm**). Moonglade can tell only when both installs run on Windows and open the same
   folder (a shared folder or a NAS share). If either runs on Linux or macOS, close every older
   install on the library yourself before the first start. A library kept in step by OneDrive,
   Dropbox or another sync tool is a separate copy on each PC, so close every older install on it
