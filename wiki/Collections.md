@@ -2,21 +2,21 @@
 
 ## Select mode (fast multi-select)
 
-Toggle the **Select** button in the gallery's bulk bar to enter selection mode:
+Switch on the **Select: OFF** pill in the gallery's library bar (it then reads **Select: ON**) to enter selection mode:
 
 - **Tap/click** an image to toggle it.
 - **Drag across images** to *paint* a selection (mouse or touch/stylus) — great on a
   tablet.
 - While Select mode is on, **tapping never opens the lightbox**, so there are no
-  accidental opens. Drag on the gaps between cards to scroll; toggle Select off for
+  accidental opens. Drag on the gaps between cards to scroll; switch Select off for
   normal browsing.
 
-You can also **Select All (page)** and **Clear**. The selection persists across pages
+**Clear**, beside it in the library bar, empties the selection. The selection persists across pages
 and survives the browser Back button.
 
 ## Collections
 
-Select images/videos → **+ Add to Collection** → name it. This groups them into a
+Select images/videos → **Actions** → **+ Add to collection** → name it. This groups them into a
 named collection **without moving any files** — it's stored in `catalog.db`, so it
 **survives [Organize](Backing-Up)** (unlike physical sub-folders).
 
@@ -97,7 +97,7 @@ Open a picture's **Details** and the **Your layer** card edits all three. Search
 ## Bulk curation, and Undo
 
 Tick pictures and a bar appears over the grid: **★ 1–5**, **+ Tag**, **✓ Keeper**, **✕ Reject**
-and **+ collection**, each applied to every ticked picture at once. A note at the bottom of
+and the **+** collection button, each applied to every ticked picture at once. A note at the bottom of
 the screen says what changed — and it counts **only the pictures that really changed**, so
 rating a picture that already has that rating is not counted. For ten seconds it carries **Undo**,
 which puts *each picture back to the values it had*, not one value for all.
@@ -179,6 +179,6 @@ holding everything below, rather than a row of separate buttons:
 - **Print sheet** opens a print-ready contact sheet of the selection. On a phone it opens as a
   list, one card per picture with its thumbnail, title, model and stars; **Share** hands the
   print-ready page to your phone's share menu.
-- **Find/replace in prompts** across the selection.
+- **Find / replace in prompts** across the selection.
 - **Download ZIP** of the selected full-res images.
 - **Delete locally** / **Delete from PixAI** — see [Deleting & Sync](Deleting).

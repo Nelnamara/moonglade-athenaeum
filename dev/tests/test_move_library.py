@@ -587,7 +587,7 @@ def test_the_stop_sentences_name_what_actually_stops_an_older_install(r):
     said = [held] + [migrate._older_live_words(r.lib, [r.lib / "jobs.jsonl"], look, moving)
                      for moving in (True, False)]
     for text in said:
-        assert "Stop server in its Control Panel" in text, text
+        assert "■ Stop in its Control Panel (then Confirm)" in text, text
         assert "python or pythonw process" in text, text
         assert "closing its browser tab doesn't stop it" in text, text
         assert "scheduled tasks" in text and "service that starts it" in text, text
@@ -625,16 +625,16 @@ def test_the_release_notes_and_the_move_s_own_rules_say_the_same():
         assert want in rules, want
 
 
-def test_the_pages_name_stop_server_and_the_held_log_has_its_own_entry():
+def test_the_pages_name_stop_and_the_held_log_has_its_own_entry():
     for name in ("Where-Things-Live.md", "Troubleshooting.md"):
         text = _page(name)
-        assert "**Stop server** in its Control Panel" in text, name
+        assert "**■ Stop** in its Control Panel (then **Confirm**)" in text, name
         assert "closing its browser tab doesn't stop it" in text, name
         assert "its window" not in text, name
     trouble = _page("Troubleshooting.md")
     entry = trouble[trouble.index("*\"Another program has …\\logs\\moonglade.log open …\"*"):]
     entry = entry[:entry.index(" - *")] if " - *" in entry else entry
-    for want in ("older Moonglade still running", "scheduled tasks", "**Stop server**",
+    for want in ("older Moonglade still running", "scheduled tasks", "**■ Stop**",
                  "close the program that has the log open",
                  # #15: how to find which program it is
                  "**Resource Monitor**", "**Associated Handles**", "search for `moonglade.log`"):

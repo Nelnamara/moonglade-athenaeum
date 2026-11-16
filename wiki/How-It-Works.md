@@ -32,6 +32,15 @@ moonglade/                the app's code (since 3.20), one package:
   outside.py              finds and fixes what outside the app still names the old files
                           (scheduled tasks, Claude tools registrations, shortcuts)
   logs.py                 the always-on log file, local/logs/moonglade.log
+  assets.py               fetches the art pack: the manifest, the version marker, and the
+                          download job (start, verify, swap, poll)
+  container.py            the art pack's packed file format (`moonglade.mgpack`)
+  deps.py                 finds the packages Moonglade needs that are missing and installs them
+                          before the app starts (standard library only)
+  bonjour.py              the optional Bonjour (mDNS) name, so devices on your network can find
+                          the gallery
+  narrator.py             the narrator's poke ladder: the counts and clocks that decide which
+                          line shows (no I/O)
   manifest.json           which art pack this build wants, and where to fetch it
 loom/                     The Loom's JS surface: esbuild bundle + its own `node --test` suite
 ```

@@ -61,6 +61,8 @@ __pycache__/
 venv/
 env/
 .pytest_cache/
+# Render-harness failure evidence (screenshot + HTML, #99); CI uploads it as an artifact.
+/dev/tests/_failures/
 .coverage
 .coverage.*
 htmlcov/

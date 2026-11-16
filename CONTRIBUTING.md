@@ -8,10 +8,10 @@ review loop than a big OSS repo, but real contributions are genuinely welcome.
 For anything beyond a small fix, open an issue first describing what you want to change.
 It saves both of us the work of a PR that doesn't fit the project's direction.
 
-**Please don't build against `private/`.** A few files under `private/` (reverse-engineering
-notes, the full PixAI operation catalog) are git-ignored on purpose — they're the
-owner's own research notes, not a stable contract. If you need something from there to
-build a feature, ask in an issue instead of trying to reconstruct it.
+**Please don't build against the private notes.** The reverse-engineering notes and the full
+PixAI operation catalog are not in this checkout; they live in a private companion repo, on
+purpose — they're the owner's own research notes, not a stable contract. If you need something
+from there to build a feature, ask in an issue instead of trying to reconstruct it.
 
 ## Setup
 

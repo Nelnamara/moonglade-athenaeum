@@ -12,7 +12,8 @@ python -m moonglade                       # download everything (parallel; full 
 ### Where the library lives
 
 By default everything goes in `pixai_backup/` next to the app. To keep it somewhere else — a
-big drive, an external disk — set the folder in **Control Panel ▸ Library at a glance**. It
+big drive, an external disk — set the folder with the **library folder…** chip in the **Catalog & files** tile of the Control Panel
+(it shows only on the machine running the gallery). It
 takes effect when the server next starts, and it offers to restart for you.
 
 **Changing it never moves files from one folder to another.** It points Moonglade at a different
@@ -20,7 +21,7 @@ folder; whatever is in the old one stays exactly where it is. If you want to bri
 library along, move the folder yourself first, then point the setting at its new home. If the
 folder you point it at is a library from an older Moonglade, the next start brings it into the
 3.20 layout (its records go into its `_moonglade` folder). So don't point it at a library an
-older install is still using: update that install first, or stop it with **Stop server** in its
+older install is still using: update that install first, or stop it with **■ Stop** in its
 Control Panel (closing its browser tab doesn't stop it).
 
 The gallery picks its folder in this order:
@@ -231,14 +232,14 @@ python -m moonglade --import-local                # catalog files dropped into t
 python -m moonglade --import-local <DIR>          # copy an external folder in
 ```
 
-Or from the **gallery** — click **↑ Import** in the header (next to Generate) to open the
+Or from the **gallery** — click **Import** in the row under the banner (between **Train** and **Contests**) to open the
 drop-zone window. Drop images, a folder, or a `.zip` (or browse), review the preview, optionally
 add everything to a collection, and import. A big drop previews a capped grid, but the whole
 selection is imported — a folder of thousands is sent in batches and added up, and if the server
 ever leaves files out, the finished message says how many. Web import writes files onto the machine the gallery is hosted from, so
-the **↑ Import** button is visible to everyone signed in, but the import itself is refused for
+the **Import** pill is drawn only on that machine, and the import itself is refused for
 anyone connecting from another device on the LAN — only a session on the server's own machine
-can actually complete it. A LAN device can browse and generate, just not write files onto the host.
+can complete it. A LAN device can browse and generate, just not write files onto the host.
 
 Where the files end up depends on where they came from. A folder from **outside** your backup
 is copied in — pictures into `imported/`, videos into `videos/`. Files already **inside** the
@@ -335,8 +336,7 @@ whether the file is salvageable.
 ### Thumbnails and the Similar index
 
 Two more one-shots keep what the gallery shows in step with your files. Each has a button in
-the Control Panel too (**Rebuild ALL thumbnails**, **Top up the Similar index**, **Rebuild the
-Similar index**).
+the Control Panel too (**Rebuild ALL thumbnails**, **Top up Similar**, **Rebuild Similar (slow)**).
 
 | Command | What it does |
 |---|---|

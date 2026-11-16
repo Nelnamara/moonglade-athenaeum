@@ -122,14 +122,14 @@ ten minutes or was stopped from the Control Panel). Nothing is left for you to d
   set `library_dir` in `local\settings.json` to that library and start the server once without
   `--out`: it moves the library, and the unit can carry on as before.
 - *"An older Moonglade is still using the library …"* An older install wrote to the library's
-  old places after the move. Stop it with **Stop server** in its Control Panel, or end its
+  old places after the move. Stop it with **■ Stop** in its Control Panel (then **Confirm**), or end its
   `python` or `pythonw` process: closing its browser tab doesn't stop it. Turn off its scheduled
   tasks (and any service that starts it on Linux or macOS) and close its Claude tools, then start
   again: the move brings in what it wrote.
 - *"Another program has …\logs\moonglade.log open …"* That is the library's old log, and
   what holds it is usually an older Moonglade still running on the library, on this PC or another
-  Windows PC, or one of its scheduled tasks. Stop it the same way (**Stop server** in its Control
-  Panel; closing its browser tab doesn't stop it) and stop its scheduled tasks. If it isn't
+  Windows PC, or one of its scheduled tasks. Stop it the same way (**■ Stop** in its Control
+  Panel, then **Confirm**; closing its browser tab doesn't stop it) and stop its scheduled tasks. If it isn't
   Moonglade, close the program that has the log open. Then start again. Nothing was moved. To
   see which program has it, open **Resource Monitor** (search for it in the Start menu), go to
   the **CPU** tab, and under **Associated Handles** search for `moonglade.log`.

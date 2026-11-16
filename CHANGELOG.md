@@ -16,6 +16,16 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.20.7] - 2026-11-16 — Fresh Ink
+
+### Changed
+- **The wiki and the README match the app's labels and layout again.** The Control Panel's job buttons, Accounts, Stop and Restart, Import and the setup package list read the way the screen does now. (2026-11-12)
+
+### Fixed
+- **`--page-size`'s help text no longer suggests a page size PixAI can fail on.** It said to keep the page under about 8,000; PixAI answered every read at 2,000 and under, so it now says 2,000 or below. Text only. (2026-11-12)
+- **The message about an older Moonglade still using your library names the right button.** It said "Stop server"; the Control Panel's button reads "■ Stop" and asks you to Confirm, so the message now says that. (2026-11-12)
+- **A render test that fails saves a screenshot and the page.** A one-off timeout like the one in [#99](https://github.com/Nelnamara/moonglade-athenaeum/issues/99) now leaves something to look at, on disk and as a download from the GitHub test run. (2026-11-12)
+
 ## [3.20.6] - 2026-11-11 — Indoor Voice
 
 ### Changed
@@ -26,7 +36,7 @@ git tags. Full prose notes for tagged versions live on
 - **The Loom's top bar no longer runs into itself.** On a narrower window the goal chip shrinks before Render and Export do, and the end of the bar wraps only when even the shrunk chip does not fit. A live Activity chip leaves room for its job rings, so they no longer cover the link beside them. The right rail draws its icons from one set. (2026-11-02)
 - **The import overlay's error line is announced as an alert, and a preview tile cut short by the size cap names its file.** (2026-11-02)
 
-## [3.20.5] - 2026-10-28 — Loose Ends
+## [3.20.5] - 2026-11-11 — Loose Ends
 
 ### Fixed
 - **Generate's model picker opens in the middle of the screen again, whole.** It was centred by a shift that its own opening motion undid as soon as it finished, so the picker's left edge settled at the middle of the screen: on an iPad, upright or sideways, and on any window narrower than about 1,440 px, its right half was cut off, and on a wide screen it sat right of centre. It is now centred without that shift. (2026-10-29)

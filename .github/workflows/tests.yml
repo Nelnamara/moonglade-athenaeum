@@ -2,7 +2,7 @@ name: Tests
 
 on:
   push:
-    branches: [master, loom-v2]
+    branches: [master]
   pull_request:
   # Run by hand on any branch (Actions > Tests > Run workflow), so a release branch's CI can
   # go green before it is merged.
@@ -99,6 +99,15 @@ jobs:
       # render_browser and render_server are module-scoped, so per worker).
       - name: Run the render harness
         run: python -m pytest -q dev/tests --ignore=dev/tests/test_similar.py -m render -n auto
+
+      # #99: a failing render test saves a screenshot + the page HTML here (dev/tests/conftest.py).
+      - name: Upload the failure screenshots and HTML
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: render-failures
+          path: dev/tests/_failures/
+          if-no-files-found: ignore
 
   loom-node-tests:
     runs-on: ubuntu-latest

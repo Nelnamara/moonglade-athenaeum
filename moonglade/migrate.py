@@ -89,7 +89,7 @@ The rules (each one is a test in dev/tests/test_move_*.py):
     first move, and at every later bring-in. Once a library's move has finished, an old-layout
     file written after it also means an older Moonglade is still using that library: the start
     stops and says so, rather than sweep its records out from under it. Started again with
-    nothing more written there and no old log held (the person stopped it: Stop server in its
+    nothing more written there and no old log held (the person stopped it: ■ Stop in its
     Control Panel, since closing its browser tab leaves it serving), the move brings in what it
     wrote, and the new homes keep everything they hold. Before the first move has finished (one
     cut short), an old-layout file written after the move made its own new home counts the
@@ -4264,9 +4264,9 @@ def _names(paths, half, most=3):
 
 # How to stop an older Moonglade that is still using a library. Its server (3.10-3.19, started
 # from that version's launcher) runs under pythonw with no window of its own: closing its
-# browser tab leaves it serving. Control Panel -> Server -> Stop server is what stops it.
+# browser tab leaves it serving. Control Panel -> Server -> ■ Stop (then Confirm) is what stops it.
 STOP_OLDER_WORDS = (
-    "Stop that Moonglade with Stop server in its Control Panel, or end its python or pythonw "
+    "Stop that Moonglade with ■ Stop in its Control Panel (then Confirm), or end its python or pythonw "
     "process (closing its browser tab doesn't stop it). Turn off its scheduled tasks, and any "
     "service that starts it on Linux or macOS, and close its Claude tools.")
 
@@ -4304,7 +4304,7 @@ def _refusal_words(out, named):
 OLDER_RUNNING_WORDS = (
     "Another program has %s open, so Moonglade can't tidy the library %s yet. It may be an "
     "older Moonglade still running on that library, on this PC or another Windows PC: stop it "
-    "with Stop server in its Control Panel, or end its python or pythonw process (closing its "
+    "with ■ Stop in its Control Panel (then Confirm), or end its python or pythonw process (closing its "
     "browser tab doesn't stop it), and stop its scheduled tasks and any service that starts "
     "it. Otherwise close the program that has the file open. Then start Moonglade again.")
 

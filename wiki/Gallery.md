@@ -14,7 +14,7 @@ python -m moonglade.gallery --host 0.0.0.0 --https   # LAN + PWA
 python -m moonglade.gallery --rebuild-thumbs         # regenerate thumbnails
 ```
 
-Started this way the server is not managed, so the Control Panel's **↻ Restart server** is
+Started this way the server is not managed, so the Control Panel's **⟳ Restart** is
 disabled — **`Moonglade Launcher.pyw`** is the everyday launch. All of the server's options:
 
 | Flag | Default | Meaning |
@@ -180,7 +180,7 @@ key or launcher icon still require a request from the server's own machine, beca
 touch local files or delete from PixAI irreversibly.
 
 Those controls are simply **not drawn** for a browser that reached the gallery across the
-network: **↑ Import**, **Delete from PixAI**, **Set launcher icon** and the destructive Panel
+network: **Import**, **Delete from PixAI**, **Set launcher icon** and the destructive Panel
 jobs are missing, not broken. It's easy to leave a tab open on `http://<your-pc>:5000` and
 forget you're not on `localhost`, so if a button you expect is not there, check the address
 bar first. Open the gallery from the serving machine's own `localhost` address and the
@@ -232,8 +232,8 @@ The filter bar:
   is remembered the same way your thumbnail size is. **A phone has no masonry / grid / hero /
   timeline switcher** — it lays the library out in two staggered columns — but it has its own
   two-way toggle, **▦ Grid | ▭ Feed**, in the pill row (see "The phone's reading feed" below).
-- When any filter is active, the active-filter bar shows an **Export this view (CSV)**
-  link that downloads exactly the rows you're looking at. (The Control Panel's **Download
+- The **Advanced search** panel (the ▾ beside the search field) ends with an **Export view**
+  link that downloads exactly the rows you're looking at, as a CSV. (The Control Panel's **Download
   catalog (CSV)** is the whole-library dump.) **It's a complete answer even mid-sync.** It
   used to count the matching rows and then, a moment later, ask for that many — so a
   "Sync now" job inserting rows in between meant the file shipped the old count out of the

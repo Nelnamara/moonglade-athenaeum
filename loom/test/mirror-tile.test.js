@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-// The Control Panel's "Mirror to PixAI website" tile (MirrorTile in ControlPanelOverlay.jsx).
+// The Control Panel's "Mirror to PixAI" tile (MirrorTile in ControlPanelOverlay.jsx).
 // No jsdom/React harness in this runner (same as CostBadge.jsx / ModelPicker.jsx / master-
 // storyboard.jsx) -- source-presence assertions are the established pattern here; the live
 // interaction was verified in a real browser (the tile connected off localStorage and mirrored

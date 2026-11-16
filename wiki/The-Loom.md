@@ -290,7 +290,8 @@ by the time the render goes out, it is refused rather than charged: **Nothing wa
 Render again to see the new price.** A shot that is already rendering can't be started a
 second time, whether from a double click, a second tab or the drawer. A shot whose open frame
 is a picture you imported into your library (not a PixAI picture) is marked **imported picture —
-can't be sent to PixAI yet**, and rendering it is refused before anything is priced.
+can't be sent to PixAI yet**, and rendering it is refused before anything is priced, with
+"Imported picture — it can't be sent to PixAI yet. Nothing was sent."
 
 **It's free when a V4.0 video card covers it** — cards auto-apply, same as everywhere else
 in the suite; otherwise the credit price applies. A video card is a book of **tickets**, and
