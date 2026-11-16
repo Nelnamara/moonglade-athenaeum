@@ -19,8 +19,8 @@ CHANGELOG and the open issues on 2026-11-12.
 
 ## Now — active
 
-- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.20.6 — Indoor Voice,
-  2026-11-11), per the rule at the top of this file.
+- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.20.7 — Fresh Ink,
+  2026-11-16), per the rule at the top of this file.
 
 ---
 
@@ -30,9 +30,7 @@ Every branch that is built but not on `master` is listed here with its review sh
 flight is never invisible. On 2026-09-06 six built branches existed that nothing named, which is
 why this section exists.
 
-- **`docs/stepback-prep`**: the wiki, README and roadmap pass before 3.21.0. It also makes the render
-  harness take a screenshot and save the page when a test fails, so a one-off timeout like the one in
-  [#99](https://github.com/Nelnamara/moonglade-athenaeum/issues/99) leaves something to look at.
+- Nothing waiting.
 
 ---
 
