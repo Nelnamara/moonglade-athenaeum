@@ -39,6 +39,7 @@ from tests.move_layouts import (KEY_GONE, KEY_NEL, KEY_NEL_LOWER, db_rows, layou
                                 write_config)
 from moonglade import scan as scan_mod
 from moonglade import account_prefs as account_prefs_mod
+from moonglade import jobs as jobs_mod
 
 
 @pytest.fixture
@@ -131,7 +132,7 @@ def test_the_readers_find_the_moved_records(r):
     from moonglade import runs
     assert runs.RunsStore(r.lib).path.is_file()
     from moonglade import backup as core
-    assert core._jobs_path(r.lib).read_text().count("\n") == 2
+    assert jobs_mod._jobs_path(r.lib).read_text().count("\n") == 2
 
 
 def test_the_shared_presets_go_to_each_login_with_none_of_its_own(r):

@@ -15,6 +15,7 @@ from moonglade.account_prefs import _account_key
 from tests.conftest import login_client, login_existing_client, with_csrf
 from tests.csshelp import css_rules, element, winning
 from moonglade import scan as scan_mod
+from moonglade import jobs as jobs_mod
 
 
 def _row(**kw):
@@ -1780,12 +1781,12 @@ def test_import_task_closes_the_original_orphaned_job_entry(tmp_path, monkeypatc
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli = login_existing_client(cli)
     tid = "2037215124834251576"
-    core.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
+    jobs_mod.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
 
     d = cli.post("/api/import-task", json={"task_id": tid}).get_json()
     assert d["ok"] and d["saved"] == 1
 
-    by_id = {j["job_id"]: j for j in core.read_jobs(tmp_path)}
+    by_id = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}
     assert by_id[tid]["status"] == "done", "the original orphaned entry was never closed"
     assert by_id[tid]["media_ids"] == ["m1"]
     # the recovery's own new job_id still exists too -- this closes the orphan
@@ -1800,7 +1801,7 @@ def test_import_task_closes_orphan_on_the_already_cataloged_path_too(tmp_path):
     entry must still get closed. Without this, a recovery landing on the
     already-cataloged branch does nothing for the stuck Activity card at all."""
     tid = "999"
-    core.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
+    jobs_mod.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
     save_catalog(tmp_path / "catalog.db", [_row(media_id="ex1", filename="e.png", task_id=tid,
                                                 created_at="2025-01-02T00:00:00")])
     cli = login_client(tmp_path)
@@ -1808,7 +1809,7 @@ def test_import_task_closes_orphan_on_the_already_cataloged_path_too(tmp_path):
     d = cli.post("/api/import-task", json={"task_id": tid}).get_json()
     assert d.get("already") is True
 
-    by_id = {j["job_id"]: j for j in core.read_jobs(tmp_path)}
+    by_id = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}
     assert by_id[tid]["status"] == "done", "the already-cataloged path left the orphan spinning"
 
 
@@ -1821,12 +1822,12 @@ def test_import_task_leaves_a_dismissed_orphan_alone(tmp_path, monkeypatch, pixa
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli = login_existing_client(cli)
     tid = "2222"
-    core.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
-    core.append_job_event(tmp_path, tid, dismissed=True)
+    jobs_mod.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
+    jobs_mod.append_job_event(tmp_path, tid, dismissed=True)
 
     cli.post("/api/import-task", json={"task_id": tid})
 
-    from moonglade.backup import _reconstruct_jobs
+    from moonglade.jobs import _reconstruct_jobs
     jobs_by_id, _order, _n = _reconstruct_jobs(tmp_path)
     assert jobs_by_id[tid]["status"] == "running"       # untouched
     assert jobs_by_id[tid]["dismissed"] is True

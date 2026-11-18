@@ -38,6 +38,7 @@ from moonglade import container as moonglade_container
 from moonglade import contest_wins
 from moonglade import dupes as _dupes
 from moonglade import health as _health
+from moonglade import jobs as _jobs
 from moonglade import organize as _organize
 from moonglade import paths as _paths
 from moonglade import scan as _scan
@@ -12076,7 +12077,7 @@ def create_app(out_dir: Path):
     import logging as _logging
     try:
         from moonglade import backup as _core
-        _swept = _core.resolve_interrupted_local_jobs(out_dir)
+        _swept = _jobs.resolve_interrupted_local_jobs(out_dir)
         if _swept:
             _logging.getLogger(__name__).info(
                 "Marked %d interrupted job(s) from a previous session as failed.", _swept)
@@ -12606,7 +12607,7 @@ def create_app(out_dir: Path):
         activity logging must never break the request that triggered it."""
         try:
             from moonglade import backup as _core
-            _core.append_job_event(out_dir, job_id, **fields)
+            _jobs.append_job_event(out_dir, job_id, **fields)
         except Exception:
             pass
 
@@ -13245,7 +13246,7 @@ def create_app(out_dir: Path):
             mids = (got or {}).get("media_ids") or []
             if not mids:
                 return
-            jobs_by_id, _order, _n = _core._reconstruct_jobs(out_dir)
+            jobs_by_id, _order, _n = _jobs._reconstruct_jobs(out_dir)
             j = jobs_by_id.get(str(tid))
             if not j or j.get("dismissed") or (j.get("media_ids") or []):
                 return
@@ -13321,7 +13322,7 @@ def create_app(out_dir: Path):
         from moonglade import backup as core
         try:
             term = "failed" if ws_status in core._GEN_FAIL else "done"
-            j = next((x for x in core.read_jobs(out_dir)
+            j = next((x for x in _jobs.read_jobs(out_dir)
                       if str(x.get("job_id")) == str(tid)), None)
             if j and j.get("status") not in ("done", "failed"):
                 _log_job(str(tid), status=term,
@@ -13421,7 +13422,7 @@ def create_app(out_dir: Path):
             if not tid:
                 return
             started = str(ws_status or "").lower() not in _WEBSITE_QUEUED_STATUSES
-            jobs_by_id, _order, _n = core._reconstruct_jobs(out_dir)
+            jobs_by_id, _order, _n = _jobs._reconstruct_jobs(out_dir)
             j = jobs_by_id.get(tid)
             if j is None:
                 if terminal:
@@ -13439,7 +13440,7 @@ def create_app(out_dir: Path):
             # and only when the phase actually changed -- the terminal writers (_reconcile_job,
             # _log_mirrored_media) own everything from done/failed onward.
             if (j.get("source") != _WEBSITE_JOB_SOURCE or j.get("dismissed")
-                    or j.get("status") in core._JOBS_TERMINAL
+                    or j.get("status") in _jobs._JOBS_TERMINAL
                     or bool(j.get("started")) == started):
                 return
             _log_job(tid, status="running", started=started)
@@ -13485,7 +13486,7 @@ def create_app(out_dir: Path):
             # real endpoint rather than the library function.
             return core.generation_status(box["s"], tid)
         try:
-            core.resolve_orphan_jobs(out_dir, _status, min_age=min_age)
+            _jobs.resolve_orphan_jobs(out_dir, _status, min_age=min_age)
         except Exception:                          # noqa: BLE001
             pass
 
@@ -15171,9 +15172,9 @@ def create_app(out_dir: Path):
         itself must succeed even if this bookkeeping doesn't."""
         try:
             from moonglade import backup as _core
-            jobs_by_id, _order, _n = _core._reconstruct_jobs(out_dir)
+            jobs_by_id, _order, _n = _jobs._reconstruct_jobs(out_dir)
             orig = jobs_by_id.get(tid)
-            if orig and not orig.get("dismissed") and orig.get("status") not in _core._JOBS_TERMINAL:
+            if orig and not orig.get("dismissed") and orig.get("status") not in _jobs._JOBS_TERMINAL:
                 _log_job(tid, status="done", media_ids=media_ids, is_video=is_video)
         except Exception:                          # noqa: BLE001 -- bookkeeping must not break recovery
             pass
@@ -21842,8 +21843,8 @@ def create_app(out_dir: Path):
         not in it; PixAI's refusal covers that case, and nothing is spent."""
         try:
             return any(j.get("lane") == core.UNLIMITED_LANE
-                       and j.get("status") not in core._JOBS_TERMINAL
-                       for j in core.read_jobs(out_dir))
+                       and j.get("status") not in _jobs._JOBS_TERMINAL
+                       for j in _jobs.read_jobs(out_dir))
         except Exception:
             return False
 
@@ -24439,7 +24440,7 @@ __DESIGN_TOKENS__
         # generate job). Jobs are always the dock's own runs (source 'api'), so a
         # feed narrowed to backed-up or imported rows has no live rows to add.
         try:
-            jobs = core.read_jobs(out_dir)
+            jobs = _jobs.read_jobs(out_dir)
         except Exception:
             jobs = []
         tasks_in_window = {str(r["task_id"] or "") for r in rows if r["task_id"]}
@@ -26524,8 +26525,8 @@ __DESIGN_TOKENS__
             # and fifty registered rows plus one real phase used to read as fifty-one.
             with _gen_phase_lock:
                 _confirmed = set(_gen_phase_seen)
-            _live = sum(1 for j in core.read_jobs(out_dir)
-                        if j.get("status") not in core._JOBS_TERMINAL
+            _live = sum(1 for j in _jobs.read_jobs(out_dir)
+                        if j.get("status") not in _jobs._JOBS_TERMINAL
                         and (j.get("type") or "generate") == "generate"
                         and str(j.get("job_id") or "") in _confirmed)
             telem_max("jobs_concurrent", _live, out_dir=out_dir)
@@ -26762,9 +26763,9 @@ __DESIGN_TOKENS__
         Update button and its confirm."""
         from moonglade import backup as core
         try:
-            _reconcile_orphan_jobs(min_age=core.JOBS_ORPHAN_SWEEP_AGE)
-            jobs = core.read_jobs(out_dir)
-            core.maybe_compact_jobs(out_dir)   # keep the append-only log bounded
+            _reconcile_orphan_jobs(min_age=_jobs.JOBS_ORPHAN_SWEEP_AGE)
+            jobs = _jobs.read_jobs(out_dir)
+            _jobs.maybe_compact_jobs(out_dir)   # keep the append-only log bounded
         except Exception:
             jobs = []
         # Sessions R + Y: the gift box's live count (R4b) rides this same poll, and a job this
@@ -26839,8 +26840,8 @@ __DESIGN_TOKENS__
         body = request.get_json(silent=True) or {}
         if body.get("finished"):
             try:
-                for j in core.read_jobs(out_dir):
-                    if j.get("status") in core._JOBS_TERMINAL:
+                for j in _jobs.read_jobs(out_dir):
+                    if j.get("status") in _jobs._JOBS_TERMINAL:
                         _log_job(j.get("job_id"), dismissed=True)
             except Exception:
                 pass
@@ -27373,7 +27374,7 @@ __DESIGN_TOKENS__
             return
         try:
             from moonglade import backup as core
-            jobs_by_id, _order, _n = core._reconstruct_jobs(out_dir)
+            jobs_by_id, _order, _n = _jobs._reconstruct_jobs(out_dir)
             for add in _inbox().task_activity(tasks, jobs_by_id):
                 _log_job(add["job_id"], status="done", type="generate", label=add["label"],
                          source="pixai", via="inbox")

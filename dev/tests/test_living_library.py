@@ -32,6 +32,7 @@ from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog, load_cat
 
 from tests.conftest import login_test_client
 from tests.fake_pixai import FakePixAI
+from moonglade import jobs as jobs_mod
 
 SRC = Path(__file__).resolve().parents[2]
 DAY = 86400.0
@@ -675,7 +676,7 @@ def test_a_job_the_tick_started_says_so_and_a_clicked_one_does_not(tmp_path):
         """The row for `action` once its TERMINAL event has landed (rc is not None) --
         the same wait test_panel.py uses, for the same loaded-runner race."""
         for _ in range(200):                  # up to ~4s, breaks the instant it lands
-            row = next((j for j in core.read_jobs(tmp_path)
+            row = next((j for j in jobs_mod.read_jobs(tmp_path)
                         if j.get("action") == action and j["job_id"] not in exclude
                         and j.get("rc") is not None), None)
             if row is not None:
@@ -694,7 +695,7 @@ def test_a_job_the_tick_started_says_so_and_a_clicked_one_does_not(tmp_path):
         "a job the library started by itself must say so, or the browser toasts it"
 
     # THE CLICK -- the same job, the same argv, the same log.
-    seen = {j["job_id"] for j in core.read_jobs(tmp_path)}
+    seen = {j["job_id"] for j in jobs_mod.read_jobs(tmp_path)}
     with _mock.patch.object(_sp, "Popen", lambda argv, **kw: _FakeProc()):
         assert cli.post("/api/panel/run", json={"action": "sync-videos"}
                         ).get_json()["ok"] is True
@@ -749,7 +750,7 @@ def test_only_run_now_leaves_a_sweep_row_the_browser_will_toast(tmp_path, monkey
         go()
 
     def _row(job_id):
-        return next((j for j in core.read_jobs(tmp_path) if j["job_id"] == job_id), None)
+        return next((j for j in jobs_mod.read_jobs(tmp_path) if j["job_id"] == job_id), None)
 
     # RUN NOW -- the owner's own button, and the only trigger of the four that toasts.
     cli = _client(tmp_path)

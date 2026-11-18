@@ -32,6 +32,7 @@ import pytest
 from moonglade import backup as core
 
 from tests.conftest import login_client
+from moonglade import jobs as jobs_mod
 
 ROOT = Path(__file__).resolve().parents[2]
 NODE = shutil.which("node")
@@ -1394,16 +1395,16 @@ def test_api_generate_runs_one_lane_task_at_a_time_off_its_own_job_log(monkeypat
     monkeypatch.setattr(core, "gql_mutate",
                         lambda s, q, v=None: sent.append(v["parameters"])
                         or {"createGenerationTask": {"id": "4242"}})
-    core.append_job_event(tmp_path, "4141", status="running", type="generate",
+    jobs_mod.append_job_event(tmp_path, "4141", status="running", type="generate",
                           lane="infinite")
     r = cli.post("/api/generate", json=dict(LANE_OK, unlimited=True))
     assert r.get_json() == {"error": core.UNLIMITED_BUSY} and sent == []
     # once that task has finished, the next one goes out
-    core.append_job_event(tmp_path, "4141", status="done")
+    jobs_mod.append_job_event(tmp_path, "4141", status="done")
     d = cli.post("/api/generate", json=dict(LANE_OK, unlimited=True)).get_json()
     assert d == {"task_id": "4242"}, d
     assert sent[0]["lane"] == "infinite" and calls == []
-    job = next(j for j in core.read_jobs(tmp_path) if j["job_id"] == "4242")
+    job = next(j for j in jobs_mod.read_jobs(tmp_path) if j["job_id"] == "4242")
     assert job["lane"] == "infinite" and job["status"] == "running"
     r = cli.post("/api/generate", json=dict(LANE_OK, unlimited=True))
     assert r.get_json() == {"error": core.UNLIMITED_BUSY} and len(sent) == 1

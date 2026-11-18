@@ -14,6 +14,7 @@ from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_test_client
 from moonglade import backup as core
+from moonglade import jobs as jobs_mod
 
 
 def _row(**kw):
@@ -738,7 +739,7 @@ def test_the_update_records_a_line_in_the_real_activity_log(tmp_path, monkeypatc
     monkeypatch.setattr(g.threading, "Thread", _inline)
     assert _apply(cli).status_code == 200
     monkeypatch.setattr(g.threading, "Thread", real_thread)
-    rows = [j for j in core.read_jobs(tmp_path) if j.get("type") == "update"]
+    rows = [j for j in jobs_mod.read_jobs(tmp_path) if j.get("type") == "update"]
     assert len(rows) == 1 and rows[0]["status"] == "done"
     assert rows[0]["label"] == "Updated Moonglade"
 
@@ -759,7 +760,7 @@ def test_the_log_line_records_the_untracked_files_the_update_stepped_around(
     monkeypatch.setattr(g.threading, "Thread", _inline)
     assert _apply(cli).status_code == 200
     monkeypatch.setattr(g.threading, "Thread", real_thread)
-    rows = [j for j in core.read_jobs(tmp_path) if j.get("type") == "update"]
+    rows = [j for j in jobs_mod.read_jobs(tmp_path) if j.get("type") == "update"]
     assert len(rows) == 1 and rows[0]["label"] == "Updated Moonglade (ignored untracked: 2)"
 
 

@@ -29,6 +29,7 @@ from moonglade import integrity as integ
 from moonglade import paths
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 from moonglade import health as health_mod
+from moonglade import jobs as jobs_mod
 
 
 def _row(**kw):
@@ -282,6 +283,6 @@ def test_the_cli_flag_runs_the_pass_and_logs_a_job(tmp_path, monkeypatch, capsys
     assert "suspect" in printed and "missing" in printed
     doc = json.loads((paths.records_path(out, "integrity_report.json")).read_text(encoding="utf-8"))
     assert doc["deep"] is True and doc["counts"]["suspect"] == 3
-    jobs = [j for j in core.read_jobs(out) if j.get("type") == "cli"]
+    jobs = [j for j in jobs_mod.read_jobs(out) if j.get("type") == "cli"]
     assert [j["label"] for j in jobs] == ["Verify library integrity"]
     assert jobs[0]["status"] == "done"

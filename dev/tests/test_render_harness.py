@@ -4825,6 +4825,7 @@ def test_each_tab_keeps_its_own_scroll(
 # literal: pack v5 moved the hidden-feat ids out of public source). None without the donor.
 from tests.conftest import donor_feat as _donor_feat
 from moonglade import account_prefs as account_prefs_mod
+from moonglade import jobs as jobs_mod
 _UNDER_THE_HOOD = _donor_feat(unlocks="branding_tab")
 _DROP_RGB = (200, 40, 90)              # a colour nothing else in this harness paints, so a
 #                                        served pixel PROVES it came from this exact drop
@@ -7333,7 +7334,7 @@ class _MatrixFixture:
         store.put_jobs(self.run_id, self.cells)
         for c in self.cells:
             if c["task_id"]:
-                core.append_job_event(root, c["task_id"], status="done", type="generate", label="Matrix",
+                jobs_mod.append_job_event(root, c["task_id"], status="done", type="generate", label="Matrix",
                                       media_ids=["100"], count=1, run=self.run_id, cell=c["cell"],
                                       run_mode="matrix", source="web", started_at=time.time() - 30)
 

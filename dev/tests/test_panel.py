@@ -9,6 +9,7 @@ from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_test_client, login_existing_client
 from moonglade import scan as scan_mod
+from moonglade import jobs as jobs_mod
 
 
 def _csrf(html):
@@ -236,7 +237,7 @@ def test_panel_job_events_carry_action_and_rc(tmp_path, monkeypatch):
     # event carries the machine action key and the terminal event carries rc.
     job = None
     for _ in range(200):                      # up to ~4s; breaks the instant the terminal event lands
-        jobs = [j for j in core.read_jobs(tmp_path)
+        jobs = [j for j in jobs_mod.read_jobs(tmp_path)
                 if j.get("type") == "panel" and j.get("action") == "sync"]
         if jobs and jobs[0].get("rc") is not None:
             job = jobs[0]

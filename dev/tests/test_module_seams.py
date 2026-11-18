@@ -84,6 +84,12 @@ SEAMS = {
         "account_prefs_get", "account_prefs_update", "ACCOUNT_STATE_NAME", "_ACCOUNT_STATE_LOCK",
         "account_state_path", "account_state_locked", "_narrator_clock", "account_state_read",
         "account_state_write", "_account_prefs_set_aside"]},
+    "moonglade.jobs": {"from": "moonglade.backup", "names": [
+        "JOBS_LOG_NAME", "JOBS_KEEP", "JOBS_MAX_AGE", "_JOBS_TERMINAL", "_JOBS_COMPACT_AT",
+        "JOBS_ORPHAN_SWEEP_AGE", "_jobs_compact_lock", "_jobs_path", "append_job_event",
+        "_cli_job_start", "_cli_job_finish", "_reconstruct_jobs", "_job_expired", "_select_jobs",
+        "read_jobs", "resolve_orphan_jobs", "_JOBS_SERVER_OWNED_PREFIXES",
+        "resolve_interrupted_local_jobs", "maybe_compact_jobs"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -347,6 +353,27 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_telemetry.py', 'moonglade.account_prefs'),
     ('tests/test_watch.py', 'moonglade.account_prefs'),
     ('tools/export_design_kit.py', 'moonglade.account_prefs'),
+    ('loom/test/ledger-known-reasons.test.js', 'moonglade.jobs'),
+    ('loom/test/video-roster-parity.test.js', 'moonglade.jobs'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.jobs'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.jobs'),
+    ('tests/test_config_path_routing.py', 'moonglade.jobs'),
+    ('tests/test_csrf_coverage.py', 'moonglade.jobs'),
+    ('tests/test_enhance.py', 'moonglade.jobs'),
+    ('tests/test_evidence_counters.py', 'moonglade.jobs'),
+    ('tests/test_gen_surface.py', 'moonglade.jobs'),
+    ('tests/test_history_feed_document.py', 'moonglade.jobs'),
+    ('tests/test_jwt.py', 'moonglade.jobs'),
+    ('tests/test_living_library.py', 'moonglade.jobs'),
+    ('tests/test_loom_notify.py', 'moonglade.jobs'),
+    ('tests/test_network.py', 'moonglade.jobs'),
+    ('tests/test_settings_store.py', 'moonglade.jobs'),
+    ('tests/test_setup_prepare.py', 'moonglade.jobs'),
+    ('tests/test_spend_no_retry.py', 'moonglade.jobs'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.jobs'),
+    ('tests/test_training_advanced.py', 'moonglade.jobs'),
+    ('tests/test_training_parity.py', 'moonglade.jobs'),
+    ('tests/test_web_auth.py', 'moonglade.jobs'),
 }
 
 

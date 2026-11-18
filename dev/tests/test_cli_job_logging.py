@@ -14,6 +14,7 @@ import sys
 import pytest
 
 from moonglade import backup as core
+from moonglade import jobs as jobs_mod
 
 
 def _patch_sync_chain(monkeypatch, calls, *, download_exc=None):
@@ -34,7 +35,7 @@ def _patch_sync_chain(monkeypatch, calls, *, download_exc=None):
 
 
 def _cli_jobs(tmp_path, label=None):
-    jobs = [j for j in core.read_jobs(tmp_path) if j.get("type") == "cli"]
+    jobs = [j for j in jobs_mod.read_jobs(tmp_path) if j.get("type") == "cli"]
     if label is not None:
         jobs = [j for j in jobs if j.get("label") == label]
     return jobs
@@ -282,7 +283,7 @@ def test_panel_spawned_run_does_not_double_log_a_cli_job(monkeypatch, tmp_path):
     core.main()
 
     assert calls == ["download", "backfill", "fix_models", "thumbnails", "reconcile"]
-    assert core.read_jobs(tmp_path) == []               # no cli-* job written
+    assert jobs_mod.read_jobs(tmp_path) == []               # no cli-* job written
 
 
 # --------------------------------------------------------------------------- catalog-stats
@@ -295,4 +296,4 @@ def test_catalog_stats_is_not_instrumented(monkeypatch, tmp_path):
 
     core.main()
 
-    assert core.read_jobs(tmp_path) == []
+    assert jobs_mod.read_jobs(tmp_path) == []
