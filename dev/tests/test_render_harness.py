@@ -144,7 +144,7 @@ def _seed_guide_seen(root, username=_USERNAME):
     click an ordinary test makes on a tile. A test that is ABOUT the guide opts in to a
     never-guided account instead: logged_in_page(fresh_account=True)."""
     from moonglade import gallery as _gallery
-    _gallery.account_prefs_update(
+    account_prefs_mod.account_prefs_update(
         root, username, set_={"guide." + s: "done" for s in _guide_surfaces()})
 
 # 1280x900 desktop: what every threshold below was measured at.
@@ -4824,6 +4824,7 @@ def test_each_tab_keeps_its_own_scroll(
 # The feat the custom-file flag arms, found by the roster flag it carries (never an id
 # literal: pack v5 moved the hidden-feat ids out of public source). None without the donor.
 from tests.conftest import donor_feat as _donor_feat
+from moonglade import account_prefs as account_prefs_mod
 _UNDER_THE_HOOD = _donor_feat(unlocks="branding_tab")
 _DROP_RGB = (200, 40, 90)              # a colour nothing else in this harness paints, so a
 #                                        served pixel PROVES it came from this exact drop
@@ -7110,7 +7111,7 @@ def _seed_power_account(root, extra_models=0):
     models = [{"id": "unl-t3", "title": "Tsubaki.3", "thumb": "", "type": "MMDIT26B_MODEL", "hint": ""}]
     favs = [{"id": "fav-%d" % i, "title": "Fav model %d" % i, "thumb": "", "type": "SDXL_MODEL", "hint": ""}
             for i in range(extra_models)]
-    _gallery.account_prefs_update(root, _USERNAME, set_={
+    account_prefs_mod.account_prefs_update(root, _USERNAME, set_={
         "gen.quick": {
             "models": {"recent": models, "fav": favs},
             "loras": {"recent": [{"id": "l-glade", "title": "Glade light", "thumb": "", "base": "SDXL_MODEL"},
@@ -7132,7 +7133,7 @@ def _seed_power_account(root, extra_models=0):
 
 def _clear_power_account(root):
     from moonglade import gallery as _gallery
-    _gallery.account_prefs_update(root, _USERNAME, unset=list(_POWER_KEYS))
+    account_prefs_mod.account_prefs_update(root, _USERNAME, unset=list(_POWER_KEYS))
 
 
 def _power_writes(seen):

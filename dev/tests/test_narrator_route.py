@@ -21,6 +21,7 @@ from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests import synthetic_feats as sf
 from tests.conftest import _SEALED_DONOR, login_client, login_test_client
+from moonglade import account_prefs as account_prefs_mod
 
 URL = "/api/narrator/poke"
 LINES = {
@@ -48,7 +49,7 @@ class Clock:
 @pytest.fixture()
 def clock(monkeypatch):
     c = Clock()
-    monkeypatch.setattr(g, "_narrator_clock", c)
+    monkeypatch.setattr(account_prefs_mod, "_narrator_clock", c)
     yield c
 
 
@@ -78,12 +79,12 @@ def _poke(cli, csrf=None):
 def _state_dir(tmp_path, user="tester"):
     """The login's server-only state file (accounts/<key>/state.json): "nothing was
     written" means it does not exist."""
-    return g.account_state_path(tmp_path, user)
+    return account_prefs_mod.account_state_path(tmp_path, user)
 
 
 def _ladder(tmp_path, user="tester"):
-    p = g.account_state_path(tmp_path, user)
-    return g.account_state_read(p).get("ladder")
+    p = account_prefs_mod.account_state_path(tmp_path, user)
+    return account_prefs_mod.account_state_read(p).get("ladder")
 
 
 def _count(tmp_path, user="tester"):
@@ -224,7 +225,7 @@ def test_the_beacon_is_not_a_second_road_to_the_count(tmp_path, clock):
 def test_the_state_file_holds_no_line_text_and_survives_a_restart(tmp_path, clock):
     cli = _client(tmp_path)
     _poke(cli)
-    raw = g.account_state_path(tmp_path, "tester").read_text(encoding="utf-8")
+    raw = account_prefs_mod.account_state_path(tmp_path, "tester").read_text(encoding="utf-8")
     assert "test line" not in raw and "test spam" not in raw, "ids, never the words"
     # a fresh app on the same library keeps the count
     cli2 = login_test_client(g.create_app(tmp_path))
@@ -236,7 +237,7 @@ def test_the_state_file_holds_no_line_text_and_survives_a_restart(tmp_path, cloc
 def test_a_torn_state_file_reads_as_fresh_and_the_poke_still_works(tmp_path, clock):
     cli = _client(tmp_path)
     _poke(cli)
-    p = g.account_state_path(tmp_path, "tester")
+    p = account_prefs_mod.account_state_path(tmp_path, "tester")
     p.write_text("{not json", encoding="utf-8")
     clock.advance(3)
     r = _poke(cli)
@@ -250,7 +251,7 @@ def test_nothing_else_is_written(tmp_path, clock):
     _poke(cli)
     after = {p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file()}
     new = sorted(after - before)
-    key = g._account_key("tester")
+    key = account_prefs_mod._account_key("tester")
     # the library's app folder: the login's own folder, and the records
     assert set(new) <= {"_moonglade/accounts/%s/state.json" % key,
                         "_moonglade/records/telemetry.json",
@@ -261,7 +262,7 @@ def test_nothing_else_is_written(tmp_path, clock):
 
 def test_the_day_is_the_servers_local_day_the_app_uses_elsewhere():
     import datetime
-    t, day = g._narrator_clock()
+    t, day = account_prefs_mod._narrator_clock()
     assert day == datetime.date.today().isoformat()
     assert abs(t - datetime.datetime.now().timestamp()) < 5
 
@@ -294,7 +295,7 @@ def test_many_pokes_at_one_instant_count_once(tmp_path, clock):
 def _at_the_edge(tmp_path, cli, clock, user="tester"):
     """Put the account one counted poke from the end, as the ladder itself would have."""
     st = dict(nar.new_state(), count=nar.FINAL - 1, last_at=clock.t - 10 ** 6, day="day-0")
-    g.account_state_write(g.account_state_path(tmp_path, user), {"ladder": st})
+    account_prefs_mod.account_state_write(account_prefs_mod.account_state_path(tmp_path, user), {"ladder": st})
     g.telem_max("narrator_pokes", nar.FINAL - 1, out_dir=tmp_path)
 
 
@@ -327,7 +328,7 @@ def test_the_final_carries_the_packs_choice_words_and_only_those(tmp_path, clock
     cli2 = _client(tmp_path, ladder_feat=True)            # a pack with no choice words
     clock.advance(nar.SLOW_GAP_S)
     st = dict(nar.new_state(), count=nar.FINAL - 1, last_at=clock.t - 10 ** 6, day="d")
-    g.account_state_write(g.account_state_path(tmp_path, "tester"), {"ladder": st})
+    account_prefs_mod.account_state_write(account_prefs_mod.account_state_path(tmp_path, "tester"), {"ladder": st})
     assert "choice" not in _poke(cli2).get_json()["final"]
 
 
@@ -362,7 +363,7 @@ def test_a_pack_whose_feat_is_not_wired_to_the_ladder_still_ends_cleanly(tmp_pat
 def test_the_metric_is_repaired_by_a_later_poke_if_the_first_write_was_lost(tmp_path, clock):
     cli = _client(tmp_path, ladder_feat=True)
     st = dict(nar.new_state(), count=nar.FINAL, last_at=clock.t - 10 ** 6, day="day-0")
-    g.account_state_write(g.account_state_path(tmp_path, "tester"), {"ladder": st})
+    account_prefs_mod.account_state_write(account_prefs_mod.account_state_path(tmp_path, "tester"), {"ladder": st})
     assert "narrator_pokes" not in g.telemetry_metrics(tmp_path)
     _poke(cli)
     assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == nar.FINAL

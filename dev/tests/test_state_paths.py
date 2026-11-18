@@ -25,6 +25,7 @@ from moonglade import paths
 from moonglade import runs
 from tests.conftest import first_party_sources
 from moonglade import scan as scan_mod
+from moonglade import account_prefs as account_prefs_mod
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -71,21 +72,21 @@ def test_asking_never_makes_a_folder_outside_a_library(tmp_path):
 
 
 def test_the_app_resolvers_are_in_the_new_homes(tmp_path):
-    key = g._account_key("alice")
+    key = account_prefs_mod._account_key("alice")
     app = tmp_path / "_moonglade"
     assert g._ach_state_path(tmp_path) == app / "records" / "achievements.json"
     assert g._telemetry_path(tmp_path) == app / "records" / "telemetry.json"
     assert core._jobs_path(tmp_path) == app / "records" / "jobs.jsonl"
-    assert g.account_prefs_path(tmp_path, "alice") == app / "accounts" / key / "prefs.json"
-    assert g.account_prefs_path(tmp_path, g.ACCOUNT_LOCAL) == \
+    assert account_prefs_mod.account_prefs_path(tmp_path, "alice") == app / "accounts" / key / "prefs.json"
+    assert account_prefs_mod.account_prefs_path(tmp_path, account_prefs_mod.ACCOUNT_LOCAL) == \
         app / "accounts" / "_local" / "prefs.json"
-    assert g.account_state_path(tmp_path, "alice") == app / "accounts" / key / "state.json"
+    assert account_prefs_mod.account_state_path(tmp_path, "alice") == app / "accounts" / key / "state.json"
     assert runs.RunsStore(tmp_path).path == app / "records" / "runs.db"
     assert mlog.log_path() == paths.logs_dir() / "moonglade.log"     # the install's, not a library's
 
 
 def test_the_account_key_is_the_paths_rule():
-    assert g._account_key("Nel") == paths.account_key("Nel") != paths.account_key("nel")
+    assert account_prefs_mod._account_key("Nel") == paths.account_key("Nel") != paths.account_key("nel")
     assert len(paths.account_key("Nel")) == 16
 
 

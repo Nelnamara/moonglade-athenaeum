@@ -9,7 +9,8 @@ from pathlib import Path
 
 from moonglade import backup as core
 from moonglade import paths
-from moonglade.gallery import CATALOG_FIELDS, _account_key, create_app, save_catalog
+from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.account_prefs import _account_key
 
 from tests.conftest import login_client, login_existing_client, with_csrf
 from tests.csshelp import css_rules, element, winning

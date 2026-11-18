@@ -38,6 +38,7 @@ from tests.move_layouts import (KEY_GONE, KEY_NEL, KEY_NEL_LOWER, db_rows, layou
                                 layout_317, layout_c_copy_first, rig, start, write,
                                 write_config)
 from moonglade import scan as scan_mod
+from moonglade import account_prefs as account_prefs_mod
 
 
 @pytest.fixture
@@ -276,7 +277,7 @@ def test_two_logins_get_two_folders_and_another_install_s_login_moves_too(r):
     with zipfile.ZipFile(zips[0]) as zf:
         assert "account_prefs/%s.json" % KEY_GONE in zf.namelist()
     # and the app reads each login's own folder
-    assert g.account_prefs_path(r.lib, "nel") == acc / KEY_NEL_LOWER / "prefs.json"
+    assert account_prefs_mod.account_prefs_path(r.lib, "nel") == acc / KEY_NEL_LOWER / "prefs.json"
 
 
 def test_with_config_unreadable_no_login_s_files_are_dropped(r):

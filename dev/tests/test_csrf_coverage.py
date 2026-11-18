@@ -41,7 +41,8 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import paths
-from moonglade.gallery import LOCALHOST, _account_key, create_app, route_tier
+from moonglade.gallery import LOCALHOST, create_app, route_tier
+from moonglade.account_prefs import _account_key
 from tests.conftest import login_test_client, session_csrf, with_csrf
 
 _GALLERY = Path(__file__).resolve().parents[2] / "moonglade" / "gallery.py"

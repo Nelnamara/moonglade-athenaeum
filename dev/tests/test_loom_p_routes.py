@@ -36,7 +36,8 @@ import pytest
 from moonglade import paths as _paths
 from moonglade import backup as core
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, _account_key, create_app, save_catalog
+from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.account_prefs import _account_key
 from tests.conftest import _TEST_USERNAME, login_test_client
 
 REPO = Path(__file__).resolve().parents[2]

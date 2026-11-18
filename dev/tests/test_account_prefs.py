@@ -17,18 +17,10 @@ import pytest
 from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade import paths
-from moonglade.gallery import (
-    ACCOUNT_LOCAL,
-    ACCOUNT_PREF_VALUE_MAX,
-    ACCOUNT_PREFS_DOC_MAX,
-    AccountPrefsBusy,
-    AccountPrefsError,
-    _account_key,
-    account_prefs_get,
-    account_prefs_path,
-    account_prefs_update,
-    create_app,
-)
+from moonglade.gallery import create_app
+from moonglade.account_prefs import (ACCOUNT_LOCAL, ACCOUNT_PREF_VALUE_MAX, ACCOUNT_PREFS_DOC_MAX,
+                                     AccountPrefsBusy, AccountPrefsError, _account_key,
+                                     account_prefs_get, account_prefs_path, account_prefs_update)
 from tests.conftest import login_client, login_test_client
 
 URL = "/api/account/prefs"

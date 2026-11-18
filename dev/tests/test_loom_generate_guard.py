@@ -15,7 +15,8 @@ import pytest
 
 from moonglade import paths as _paths
 from moonglade import backup as core
-from moonglade.gallery import _account_key, create_app
+from moonglade.gallery import create_app
+from moonglade.account_prefs import _account_key
 from tests.conftest import _TEST_PASSWORD, _TEST_USERNAME, _do_login, login_test_client
 
 MID = "733917871331404290"

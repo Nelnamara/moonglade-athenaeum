@@ -14,7 +14,7 @@ from tests.conftest import CODE_PACKAGE, REPO_ROOT, first_party_sources
 # instead of every guard that trusts it passing over nothing.
 _TODAY = (
     "Moonglade Launcher.pyw",
-    "moonglade/__init__.py", "moonglade/__main__.py",
+    "moonglade/__init__.py", "moonglade/__main__.py", "moonglade/account_prefs.py",
     "moonglade/assets.py", "moonglade/backup.py", "moonglade/bonjour.py",
     "moonglade/container.py", "moonglade/contest_wins.py", "moonglade/curation_io.py", "moonglade/dupes.py",
     "moonglade/gallery.py", "moonglade/health.py", "moonglade/inbox.py", "moonglade/integrity.py",
