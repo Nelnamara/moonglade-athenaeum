@@ -29,7 +29,7 @@ describe("splitImportBatches", () => {
 
   test("the batch size sits well under the route's per-request cap of 1,000", () => {
     assert.ok(IMPORT_BATCH_FILES <= 500);
-    const py = src("moonglade/gallery.py");
+    const py = src("moonglade/scan.py");
     const cap = Number(/^IMPORT_REQUEST_CAP = (\d+)$/m.exec(py)[1]);
     assert.equal(cap, 1000);
     assert.ok(IMPORT_BATCH_FILES < cap);
