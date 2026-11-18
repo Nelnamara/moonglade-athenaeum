@@ -44,6 +44,7 @@ from urllib.parse import urlparse
 import requests
 
 from moonglade import backup as core
+from moonglade import pixai_client as _pixai_client
 
 # ---------------------------------------------------------------------------------------
 # The credential
@@ -60,7 +61,7 @@ def pixai_session():
 
 def _user_id(session):
     """The account's own PixAI user id: who "you" is in a thread."""
-    uid = str(getattr(core._client_of(session), "user_id", "") or "")
+    uid = str(getattr(_pixai_client._client_of(session), "user_id", "") or "")
     if not uid:
         uid = str(core.resolve_user_id(session) or "")
     return uid
@@ -927,7 +928,7 @@ def _rest_delete(session, path, params=None, timeout=30):
     """DELETE a /v2 route. Single attempt (no loop; pinned by
     dev/tests/test_inbox_comments.py); raises like the transport's other verbs on a non-2xx.
     Blocked in tests by conftest."""
-    client = core._client_of(session)
+    client = _pixai_client._client_of(session)
     r = client.session.delete(core.REST_API_BASE + path, params=params, timeout=timeout)
     if not r.ok:
         raise core._rest_error("DELETE", path, r)

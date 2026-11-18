@@ -55,6 +55,7 @@ from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client
 from tests.fake_pixai import FakePixAI
+from moonglade import pixai_client as pixai_client_mod
 
 REPO = Path(__file__).resolve().parents[2]
 TID = "2065852033099888102"
@@ -183,7 +184,7 @@ class TestTheDeleteFiresOnce:
 
     def test_the_wire_is_one_post_to_the_task_route(self, no_read_only):
         s = _Recorder(_Resp(body={"success": True}))
-        assert core.delete_task(core.PixAIClient(s), TID) is True
+        assert core.delete_task(pixai_client_mod.PixAIClient(s), TID) is True
         (verb, url, kwargs), = s.calls
         assert verb == "POST" and url == core.REST_API_BASE + DELETE_PATH
         assert kwargs["json"] == {}
@@ -195,7 +196,7 @@ class TestTheDeleteFiresOnce:
         the message says deleting again is safe (the route is idempotent)."""
         s = _Recorder(requests.exceptions.ReadTimeout("Read timed out"))
         with pytest.raises(core.PixAIError) as ei:
-            core.delete_task(core.PixAIClient(s), TID)
+            core.delete_task(pixai_client_mod.PixAIClient(s), TID)
         msg = str(ei.value)
         assert "network error deleting task " + TID in msg
         assert "may or may not have deleted it" in msg and "Deleting it again is safe" in msg
@@ -207,7 +208,7 @@ class TestTheDeleteFiresOnce:
         base = requests.Session()
         base.headers["Authorization"] = "Bearer " + APIKEY
         s, wire = _wired(base, body={"success": True})
-        assert core.delete_task(core.PixAIClient(s), TID) is True
+        assert core.delete_task(pixai_client_mod.PixAIClient(s), TID) is True
         (req,) = wire.sent
         assert req.method == "POST" and req.url == core.REST_API_BASE + DELETE_PATH
         assert req.headers["Authorization"] == "Bearer " + APIKEY
@@ -230,7 +231,7 @@ class TestTheDeleteFiresOnce:
         RequestException too, so the order of the except clauses is what decides this."""
         s = _Recorder(_Resp(status=200, text="<html>ok</html>", json_exc=exc))
         with pytest.raises(core.PixAIError) as ei:
-            core.delete_task(core.PixAIClient(s), TID)
+            core.delete_task(pixai_client_mod.PixAIClient(s), TID)
         assert "not deleted" in str(ei.value) and "network error" not in str(ei.value)
         assert len(s.calls) == 1
 
@@ -247,13 +248,13 @@ class TestTheDeleteFiresOnce:
     def test_a_500_on_the_wire_is_one_post(self, no_read_only):
         s = _Recorder(_Resp(status=500, text="Internal Server Error"))
         with pytest.raises(core.PixAIError, match="HTTP 500"):
-            core.delete_task(core.PixAIClient(s), TID)
+            core.delete_task(pixai_client_mod.PixAIClient(s), TID)
         assert len(s.calls) == 1
 
     def test_a_network_error_is_one_post(self, no_read_only):
         s = _Recorder(requests.ConnectionError("connection dropped"))
         with pytest.raises(core.PixAIError, match="network error deleting task " + TID):
-            core.delete_task(core.PixAIClient(s), TID)
+            core.delete_task(pixai_client_mod.PixAIClient(s), TID)
         assert len(s.calls) == 1
 
     @pytest.mark.parametrize("bad", ["", "  ", "1/2", "../x", "1?a=1", "a b", "1#x", "%2e%2e",
@@ -709,7 +710,7 @@ def test_a_307_308_never_resends_the_delete_to_another_task(no_read_only, code):
     s, wire = _api_key_session((code, None, {"Location": other}, None),
                                (200, {"success": True}, {}, None))
     with pytest.raises(core.PixAIError, match=r"HTTP 30[78] deleting task 111"):
-        core.delete_task(core.PixAIClient(s), "111")
+        core.delete_task(pixai_client_mod.PixAIClient(s), "111")
     posts = [r for r in wire.sent if r.method == "POST"]
     assert len(posts) == 1, [r.url for r in posts]
     assert all(r.url.endswith("/task/111/delete") for r in wire.sent)
@@ -722,7 +723,7 @@ def test_a_301_302_303_is_not_a_delete(no_read_only, code):
                                 None),
                                (200, {"success": True}, {}, None))
     with pytest.raises(core.PixAIError, match=r"HTTP 30[123] deleting task 111"):
-        core.delete_task(core.PixAIClient(s), "111")
+        core.delete_task(pixai_client_mod.PixAIClient(s), "111")
     assert len(wire.sent) == 1
 
 
@@ -762,7 +763,7 @@ def test_the_retired_names_are_gone():
                  "REFRESH_TOKEN_HASH", "BOOKMARKED_MODELS_OP", "BOOKMARKED_MODELS_HASH",
                  "_bookmarks_persisted", "CLIENT_LIBRARY", "PersistedQueryNotRecognized"):
         assert not hasattr(core, name), name
-    assert not hasattr(core.PixAIClient, "persisted")
+    assert not hasattr(pixai_client_mod.PixAIClient, "persisted")
     assert not hasattr(FakePixAI, "persisted")
 
 

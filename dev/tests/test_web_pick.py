@@ -16,6 +16,7 @@ from tests.conftest import login_client, login_existing_client, with_csrf
 from tests.csshelp import css_rules, element, winning
 from moonglade import scan as scan_mod
 from moonglade import jobs as jobs_mod
+from moonglade import pixai_client as pixai_client_mod
 
 
 def _row(**kw):
@@ -2066,7 +2067,7 @@ def test_mine_tab_search_walks_the_authors_own_list_and_matches_every_word(tmp_p
 
     class _C:
         user_id = "u1"
-    monkeypatch.setattr(core, "_client_of", lambda s: _C())
+    monkeypatch.setattr(pixai_client_mod, "_client_of", lambda s: _C())
     cli = login_client(tmp_path)
     d = cli.get("/api/model-search?kind=lora&size=24&q=beautiful%20eyes&src=mine").get_json()
     assert [r["model_id"] for r in d["results"]] == ["4"], d

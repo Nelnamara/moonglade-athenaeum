@@ -30,6 +30,7 @@ from types import SimpleNamespace
 from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
+from moonglade import pixai_client as pixai_client_mod
 
 
 def _row(**kw):
@@ -298,7 +299,7 @@ def test_the_view_sweep_never_re_reads_a_page_after_a_lost_response(mocker):
     incomplete, which is the honest answer -- the alternative is a silent double-read."""
     sess = _FlakyPost({"artworks": {"edges": [{"node": {"id": "aw1", "views": 10}}],
                                     "pageInfo": {"hasNextPage": False}}})
-    client = core.PixAIClient.__new__(core.PixAIClient)
+    client = pixai_client_mod.PixAIClient.__new__(pixai_client_mod.PixAIClient)
     client._session = sess
     client._user_id = "u1"
 

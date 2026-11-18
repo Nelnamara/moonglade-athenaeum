@@ -105,10 +105,10 @@ class TestPageVariablesTakesTheIdFromTheClient:
     def test_two_clients_thread_their_own_ids(self):
         # The call-site idiom is page_variables(size, _client_of(session).user_id, ...):
         # build two clients with different ids and confirm each threads its own.
-        a = core.PixAIClient(object(), user_id="acct-A")
-        b = core.PixAIClient(object(), user_id="acct-B")
-        assert core.page_variables(30, core._client_of(a).user_id)["userId"] == "acct-A"
-        assert core.page_variables(30, core._client_of(b).user_id)["userId"] == "acct-B"
+        a = pixai_client_mod.PixAIClient(object(), user_id="acct-A")
+        b = pixai_client_mod.PixAIClient(object(), user_id="acct-B")
+        assert core.page_variables(30, pixai_client_mod._client_of(a).user_id)["userId"] == "acct-A"
+        assert core.page_variables(30, pixai_client_mod._client_of(b).user_id)["userId"] == "acct-B"
 
     def test_before_cursor_still_threads(self):
         assert core.page_variables(50, "acct-A", before="cur-1") == {
@@ -296,6 +296,7 @@ class TestQuickCount:
 # ---------------------------------------------------------------------------
 
 from types import SimpleNamespace
+from moonglade import pixai_client as pixai_client_mod
 
 
 def _dl_args(out, **kw):

@@ -352,7 +352,7 @@ def test_catchup_sweep_is_bounded_rate_limited_and_off_thread():
     # so the catchup threads it explicitly rather than leaning on a module global.
     assert "WATCH_CATCHUP_TASKS = 30" in text
     assert "core.page_variables(" in body
-    assert "WATCH_CATCHUP_TASKS, core._client_of(session).user_id" in body
+    assert "WATCH_CATCHUP_TASKS, _pixai_client._client_of(session).user_id" in body
 
     # Rate-limited: a reconnect storm must not become a request storm. Since #60 the decision
     # is the pure catchup_plan (driven as a table in test_catchup_plan_table), applied by the

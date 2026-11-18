@@ -90,6 +90,8 @@ SEAMS = {
         "_cli_job_start", "_cli_job_finish", "_reconstruct_jobs", "_job_expired", "_select_jobs",
         "read_jobs", "resolve_orphan_jobs", "_JOBS_SERVER_OWNED_PREFIXES",
         "resolve_interrupted_local_jobs", "maybe_compact_jobs"]},
+    "moonglade.pixai_client": {"from": "moonglade.backup", "names": [
+        "_is_mutation_document", "PixAIClient", "_client_of"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -374,6 +376,30 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_training_advanced.py', 'moonglade.jobs'),
     ('tests/test_training_parity.py', 'moonglade.jobs'),
     ('tests/test_web_auth.py', 'moonglade.jobs'),
+    ('loom/test/ledger-known-reasons.test.js', 'moonglade.pixai_client'),
+    ('loom/test/video-roster-parity.test.js', 'moonglade.pixai_client'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.pixai_client'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.pixai_client'),
+    ('tests/test_community_surface.py', 'moonglade.pixai_client'),
+    ('tests/test_config_path_routing.py', 'moonglade.pixai_client'),
+    ('tests/test_csrf_coverage.py', 'moonglade.pixai_client'),
+    ('tests/test_edit_upload.py', 'moonglade.pixai_client'),
+    ('tests/test_enhance.py', 'moonglade.pixai_client'),
+    ('tests/test_evidence_counters.py', 'moonglade.pixai_client'),
+    ('tests/test_gen_surface.py', 'moonglade.pixai_client'),
+    ('tests/test_history_feed_document.py', 'moonglade.pixai_client'),
+    ('tests/test_jwt.py', 'moonglade.pixai_client'),
+    ('tests/test_living_library.py', 'moonglade.pixai_client'),
+    ('tests/test_loom_notify.py', 'moonglade.pixai_client'),
+    ('tests/test_network.py', 'moonglade.pixai_client'),
+    ('tests/test_pixai_client.py', 'moonglade.pixai_client'),
+    ('tests/test_settings_store.py', 'moonglade.pixai_client'),
+    ('tests/test_setup_prepare.py', 'moonglade.pixai_client'),
+    ('tests/test_spend_no_retry.py', 'moonglade.pixai_client'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.pixai_client'),
+    ('tests/test_training_advanced.py', 'moonglade.pixai_client'),
+    ('tests/test_training_parity.py', 'moonglade.pixai_client'),
+    ('tests/test_web_auth.py', 'moonglade.pixai_client'),
 }
 
 

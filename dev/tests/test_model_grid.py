@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from moonglade import gallery as moonglade_gallery
 from moonglade import backup as core
+from moonglade import pixai_client as pixai_client_mod
 
 _SEARCH = {"data": [
     {"id": "1982880136609467518", "title": "Tsubaki.2", "type": "MMDIT26A_MODEL",
@@ -883,7 +884,7 @@ def test_task_image_media_single_and_legacy():
 def _stub_generate_network(monkeypatch, outputs):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: "")
-    monkeypatch.setattr(core.PixAIClient, "_graphql_post", lambda s, q, v=None, retries=None: {"createGenerationTask": {"id": "T1"}})
+    monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", lambda s, q, v=None, retries=None: {"createGenerationTask": {"id": "T1"}})
     monkeypatch.setattr(core, "_poll_task_status", lambda *a, **k: None)
     monkeypatch.setattr(core, "task_detail_gql",
                         lambda s, t: {"createdAt": "2026-07-22T00:00:00Z", "outputs": outputs})
@@ -935,7 +936,7 @@ def test_run_generate_still_self_heals_after_delegating_to_submit_generation(mon
                 'for model type \\"SDXL_MODEL\\""}]')
         return {"createGenerationTask": {"id": "T1"}}
 
-    monkeypatch.setattr(core.PixAIClient, "_graphql_post", fake_gql)
+    monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", fake_gql)
     args = SimpleNamespace(
         out=str(tmp_path),
         params_json='{"prompts": "x", "modelId": "v", "inferenceProfile": "ultra"}',
@@ -977,13 +978,13 @@ def test_task_detail_query_reads_the_full_document(monkeypatch):
 
 
 def test_submit_generation(monkeypatch):
-    monkeypatch.setattr(core.PixAIClient, "_graphql_post", lambda s, q, v=None, retries=None: {"createGenerationTask": {"id": "T9"}})
+    monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", lambda s, q, v=None, retries=None: {"createGenerationTask": {"id": "T9"}})
     assert core.submit_generation(object(), {"x": 1}) == "T9"
 
 
 def test_submit_generation_raises(monkeypatch):
     import pytest
-    monkeypatch.setattr(core.PixAIClient, "_graphql_post", lambda s, q, v=None, retries=None: {"createGenerationTask": {}})
+    monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", lambda s, q, v=None, retries=None: {"createGenerationTask": {}})
     with pytest.raises(core.PixAIError):
         core.submit_generation(object(), {})
 
@@ -1008,7 +1009,7 @@ def test_submit_generation_retries_on_inferenceprofile_rejection(monkeypatch):
                 'for model type \\"SDXL_MODEL\\""}]')
         return {"createGenerationTask": {"id": "T10"}}
 
-    monkeypatch.setattr(core.PixAIClient, "_graphql_post", fake_gql)
+    monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", fake_gql)
     params = {"prompts": "x", "modelId": "v", "inferenceProfile": "ultra"}
     assert core.submit_generation(object(), params) == "T10"
     assert len(calls) == 2                              # rejected once, retried once
@@ -1026,7 +1027,7 @@ def test_submit_generation_does_not_retry_unrelated_errors(monkeypatch):
     def fake_gql(s, q, v=None, retries=None):
         raise core.PixAIError("GraphQL error: something else entirely")
 
-    monkeypatch.setattr(core.PixAIClient, "_graphql_post", fake_gql)
+    monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", fake_gql)
     with pytest.raises(core.PixAIError, match="something else entirely"):
         core.submit_generation(object(), {"prompts": "x", "inferenceProfile": "ultra"})
 
@@ -1042,7 +1043,7 @@ def test_submit_generation_no_retry_when_param_absent(monkeypatch):
         calls.append(1)
         raise core.PixAIError("GraphQL error: inferenceProfile is unsupported here")
 
-    monkeypatch.setattr(core.PixAIClient, "_graphql_post", fake_gql)
+    monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", fake_gql)
     with pytest.raises(core.PixAIError):
         core.submit_generation(object(), {"prompts": "x"})   # no inferenceProfile key
     assert len(calls) == 1                               # never retried

@@ -41,6 +41,7 @@ from moonglade import health as _health
 from moonglade import jobs as _jobs
 from moonglade import organize as _organize
 from moonglade import paths as _paths
+from moonglade import pixai_client as _pixai_client
 from moonglade import scan as _scan
 from moonglade import series as _series
 from moonglade import settings as _settings
@@ -7724,7 +7725,7 @@ def _contest_detection_sync(out_dir, force=False):
     try:
         from moonglade import backup as core
         session = core._make_session(None)
-        uid = str(core._client_of(session).user_id or "")
+        uid = str(_pixai_client._client_of(session).user_id or "")
         if not uid:
             log.info("contest sweep: no account id resolved -- nothing to poll")
             return False
@@ -7914,7 +7915,7 @@ def contest_win_pass(out_dir, now=None, pause=None):
         return out
     try:
         session = core._make_session(None)
-        uid = str(core._client_of(session).user_id or "")
+        uid = str(_pixai_client._client_of(session).user_id or "")
     except Exception as e:                                    # noqa: BLE001
         log.warning("contest win check: no session: %s: %s", type(e).__name__,
                     _redact_host_paths_cli(out_dir, str(e))[:200])
@@ -8081,7 +8082,7 @@ def contest_win_check(out_dir, body, now=None):
     entry = ids[0] if ids and len(ids) == 1 else ""
     try:
         session = core._make_session(None)
-        uid = str(core._client_of(session).user_id or "")
+        uid = str(_pixai_client._client_of(session).user_id or "")
         if not uid:
             raise ValueError("no account id resolved")
         rows = core.contest_winners(session, slug)              # one GET, nothing else
@@ -8310,7 +8311,7 @@ def artworks_sweep(out_dir, db_path, force=False, now=None, log_event=None):
     deep = (now - _artworks_state["deep_at"]) >= ARTWORKS_DEEP_S
     try:
         session = core._make_session(None)
-        if not core._client_of(session).user_id:
+        if not _pixai_client._client_of(session).user_id:
             log.info("artworks sweep: no account id resolved -- nothing to read")
             return None
     except Exception as e:                                   # noqa: BLE001
@@ -13544,7 +13545,7 @@ def create_app(out_dir: Path):
             session = core._make_session(None)
             # The feed's one road (core.gql: the full document, #89), as every other reader.
             data = core.gql(session, core.page_variables(
-                WATCH_CATCHUP_TASKS, core._client_of(session).user_id))
+                WATCH_CATCHUP_TASKS, _pixai_client._client_of(session).user_id))
             conn = core.find_connection(data)
             edges = (conn or {}).get("edges") or []
             missed = []
@@ -17154,7 +17155,7 @@ def create_app(out_dir: Path):
                         session, keyword=q, category=category, sort=sort, usage=usage,
                         limit=size, after=after,
                         lora_base_type=server_lora_type,
-                        author_id=core._client_of(session).user_id or "")
+                        author_id=_pixai_client._client_of(session).user_id or "")
                 payload = _hunt_by_name(_mine_page, q, size) if q else _mine_page(cursor or None)
             # GraphQL whenever ANY market filter or sort is in play. The owner reported that
             # under Popular the Model Type and Posted-at filters did nothing: base+Popular used
@@ -18824,7 +18825,7 @@ def create_app(out_dir: Path):
         try:
             core, session = _gen_session()
             rows = core.contest_winners(session, slug)
-            uid = str(core._client_of(session).user_id or "")
+            uid = str(_pixai_client._client_of(session).user_id or "")
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "winners": []}), 200
         winners = []
@@ -26887,7 +26888,7 @@ __DESIGN_TOKENS__
         return jsonify(out), 200
 
     def _recipe_user_id(core, gsession):
-        uid = str(core._client_of(gsession).user_id or "")
+        uid = str(_pixai_client._client_of(gsession).user_id or "")
         if not uid:
             uid = core.resolve_user_id(gsession)
         return uid

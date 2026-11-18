@@ -26,6 +26,7 @@ from moonglade import backup as core
 from moonglade import paths
 from moonglade.gallery import CATALOG_FIELDS, TrainGuard, create_app, save_catalog
 from tests.conftest import login_test_client
+from moonglade import pixai_client as pixai_client_mod
 
 T3 = "2024383379556065549"          # Tsubaki.3 (MMDIT26B), Recommended
 T2 = "1983308862240288769"          # Tsubaki.2 (MMDIT26A)
@@ -176,7 +177,7 @@ def test_the_one_rest_error_serves_the_training_refusals_and_the_recipe_code():
     assert len(re.findall(r"^def _rest_error\(", inspect.getsource(moonglade_backup), re.M)) == 1
     body = {"code": "INSUFFICIENT_BALANCE", "data": {"mediaIds": ["5"]}}
     for verb in ("rest_get", "rest_post", "rest_put", "rest_patch"):
-        client = core.PixAIClient(_Sess(_Resp(403, body)))
+        client = pixai_client_mod.PixAIClient(_Sess(_Resp(403, body)))
         call = getattr(client, verb)
         with pytest.raises(core.PixAIRestError) as ei:
             call("/training-task/1") if verb == "rest_get" else call("/training-task/1", {})
@@ -185,7 +186,7 @@ def test_the_one_rest_error_serves_the_training_refusals_and_the_recipe_code():
         assert e.code == "INSUFFICIENT_BALANCE" and e.data == {"mediaIds": ["5"]}
         assert core.definite_refusal(e)
         assert core.training_error_words(e).startswith("there aren't enough credits")
-    client = core.PixAIClient(_Sess(_Resp(502, "<html>bad gateway</html>")))
+    client = pixai_client_mod.PixAIClient(_Sess(_Resp(502, "<html>bad gateway</html>")))
     with pytest.raises(core.PixAIRestError) as ei:
         client.rest_put("/training-task/1/media", {})
     assert ei.value.body is None and ei.value.code == "" and ei.value.data == {}
@@ -786,7 +787,7 @@ def test_the_paid_guard_lapses_after_its_window_and_only_on_the_same_status(tmp_
 
 def _graphql_error(body):
     """The error the REAL transport raises for `body` (PixAIClient._graphql_post)."""
-    client = core.PixAIClient(_Sess(_Resp(200, body)))
+    client = pixai_client_mod.PixAIClient(_Sess(_Resp(200, body)))
     with pytest.raises(core.PixAIError) as ei:
         client.mutate("mutation { createTrainingTask(input: {}) { id } }", {})
     return ei.value

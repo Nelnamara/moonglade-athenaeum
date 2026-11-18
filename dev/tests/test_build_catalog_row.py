@@ -31,6 +31,7 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.conftest import login_test_client
+from moonglade import pixai_client as pixai_client_mod
 
 
 # --------------------------------------------------------------------------------------
@@ -492,7 +493,7 @@ def _stub_sync_videos(monkeypatch, out):
         return {"edges": [{"node": dict(SV_NODE)}], "pageInfo": {"hasPreviousPage": False}}
 
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "_client_of",
+    monkeypatch.setattr(pixai_client_mod, "_client_of",
                         lambda s: types.SimpleNamespace(user_id="u1"))
     monkeypatch.setattr(core, "gql", lambda s, v: {})
     monkeypatch.setattr(core, "find_connection", _find_connection)

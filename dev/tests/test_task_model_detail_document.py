@@ -46,6 +46,7 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.fake_pixai import FakePixAI, UnregisteredOperation, operation_name
+from moonglade import pixai_client as pixai_client_mod
 
 REPO = Path(__file__).resolve().parents[2]
 RECORDED = json.loads((Path(__file__).resolve().parent / "fixtures" /
@@ -167,7 +168,7 @@ def fresh_model_caches():
 def test_the_task_document_is_the_query_the_probe_validated():
     doc = " ".join(core._TASK_DETAIL_DOC.split())
     assert doc == RECORDED["documents"]["TaskDetail"]
-    assert core._is_mutation_document(doc) is False
+    assert pixai_client_mod._is_mutation_document(doc) is False
     assert TASK_DETAIL == "TaskDetail"
 
 
@@ -185,7 +186,7 @@ def test_the_task_document_selects_every_key_the_saved_answer_carried(kind):
 def test_the_model_document_is_the_query_the_probe_validated():
     doc = " ".join(core._MODEL_VERSION_DOC.split())
     assert doc == RECORDED["documents"]["ModelVersion"]
-    assert core._is_mutation_document(doc) is False
+    assert pixai_client_mod._is_mutation_document(doc) is False
     assert MODEL_VERSION == "ModelVersion"
     assert {"name", "extra", "model"} <= set(_top_fields(doc, "generationModelVersion"))
 
@@ -205,7 +206,7 @@ def test_a_task_read_is_one_post_of_the_full_document_never_a_saved_get():
     """The mutation proof for the task road: with task_detail_gql back on the saved
     request, the GET below raises and this fails."""
     s = _Session(_Response({"data": {"task": _document("lone")}}))
-    task = core.task_detail_gql(core.PixAIClient(s), "T1")
+    task = core.task_detail_gql(pixai_client_mod.PixAIClient(s), "T1")
     assert task == _document("lone")
     [post] = s.posts
     assert post.url == core.API_URL
@@ -225,7 +226,7 @@ def test_through_the_fake_it_is_a_query_of_the_named_document(pixai):
 def test_the_timeout_reaches_every_attempt(no_backoff):
     """The delete preview hands its remaining budget down; every attempt gets it."""
     s = _Session(requests.ConnectionError("reset"), _Response({"data": {"task": {"id": "T1"}}}))
-    assert core.task_detail_gql(core.PixAIClient(s), "T1", retries=1,
+    assert core.task_detail_gql(pixai_client_mod.PixAIClient(s), "T1", retries=1,
                                 timeout=2.5) == {"id": "T1"}
     assert [p.timeout for p in s.posts] == [2.5, 2.5]
 
@@ -238,7 +239,7 @@ def test_the_delete_preview_s_budget_reaches_the_read(pixai):
 
 def test_a_5xx_is_asked_three_more_times_then_fails_soft(no_backoff, capsys):
     s = _Session(_Response({"message": "bad gateway"}, status=502))
-    assert core.task_detail_gql(core.PixAIClient(s), "T5") is None
+    assert core.task_detail_gql(pixai_client_mod.PixAIClient(s), "T5") is None
     assert len(s.posts) == 4                                  # the original + 3 retries
     out = capsys.readouterr().out
     assert "could not read task T5 back from PixAI" in out and SENTENCE in out
@@ -246,7 +247,7 @@ def test_a_5xx_is_asked_three_more_times_then_fails_soft(no_backoff, capsys):
 
 def test_a_5xx_that_passes_is_read_on_the_retry(no_backoff):
     s = _Session(_Response({}, status=503), _Response({"data": {"task": {"id": "T5"}}}))
-    assert core.task_detail_gql(core.PixAIClient(s), "T5") == {"id": "T5"}
+    assert core.task_detail_gql(pixai_client_mod.PixAIClient(s), "T5") == {"id": "T5"}
     assert len(s.posts) == 2
 
 
@@ -265,7 +266,7 @@ def test_a_failed_read_is_none_with_the_sentence_never_a_raise(pixai, capsys, er
 def test_a_graphql_refusal_on_the_wire_is_not_retried_and_fails_soft(capsys):
     s = _Session(_Response({"errors": [{"message": "Cannot query field \"x\" on \"Task\"."}],
                             "data": None}))
-    assert core.task_detail_gql(core.PixAIClient(s), "T7") is None
+    assert core.task_detail_gql(pixai_client_mod.PixAIClient(s), "T7") is None
     assert len(s.posts) == 1
     assert SENTENCE in capsys.readouterr().out
 
@@ -276,7 +277,7 @@ def test_an_answer_that_is_not_graphql_is_a_failed_read_not_a_task(status, capsy
     from the ad-hoc POST as {}. The saved road raised on it, and so does this one: None, with
     the sentence."""
     s = _Session(_Response({"message": "Forbidden"}, status=status))
-    assert core.task_detail_gql(core.PixAIClient(s), "T8") is None
+    assert core.task_detail_gql(pixai_client_mod.PixAIClient(s), "T8") is None
     assert len(s.posts) == 1
     out = capsys.readouterr().out
     assert "no task in it" in out and SENTENCE in out
@@ -469,7 +470,7 @@ def test_a_model_read_is_one_post_of_the_full_document_never_a_saved_get(fresh_m
     the GET below raises, the lookup is a failure, and the name is not this one."""
     t = MODELS["tsubaki"]
     s = _Session(_Response({"data": t["document"]}))
-    assert core.model_name_gql(core.PixAIClient(s), t["version_id"]) == "Tsubaki.2 v1"
+    assert core.model_name_gql(pixai_client_mod.PixAIClient(s), t["version_id"]) == "Tsubaki.2 v1"
     [post] = s.posts
     assert post.json == {"query": core._MODEL_VERSION_DOC,
                          "variables": {"id": t["version_id"]}}
@@ -519,7 +520,7 @@ def test_a_lookup_that_answered_nothing_is_a_failure_memoised_as_one(body, what,
                                                                      fresh_model_caches):
     vid = "918273645591000001"
     s = _Session(_Response(body))
-    client = core.PixAIClient(s)
+    client = pixai_client_mod.PixAIClient(s)
     assert core.model_name_gql(client, vid) == vid, what        # a soft caller: the label
     assert fresh_model_caches[vid] is core._MODEL_LOOKUP_FAILED, what
     with pytest.raises(core.PixAIError, match="failed earlier this run"):
@@ -530,14 +531,14 @@ def test_a_lookup_that_answered_nothing_is_a_failure_memoised_as_one(body, what,
 def test_strict_raises_on_a_failed_lookup(fresh_model_caches):
     s = _Session(_Response({"errors": [{"message": "nope"}], "data": None}))
     with pytest.raises(core.PixAIError, match="lookup failed"):
-        core.model_name_gql(core.PixAIClient(s), "918273645591000002", strict=True)
+        core.model_name_gql(pixai_client_mod.PixAIClient(s), "918273645591000002", strict=True)
 
 
 def test_a_network_error_is_a_failure_asked_once(fresh_model_caches):
     s = _Session(requests.ConnectionError("reset"))
     vid = "918273645591000003"
     with pytest.raises(core.PixAIError, match="lookup failed"):
-        core.model_name_gql(core.PixAIClient(s), vid, strict=True)
+        core.model_name_gql(pixai_client_mod.PixAIClient(s), vid, strict=True)
     assert len(s.posts) == 1 and fresh_model_caches[vid] is core._MODEL_LOOKUP_FAILED
 
 
@@ -605,7 +606,7 @@ def test_the_reuse_reader_and_the_preset_fail_soft(pixai, answer, fresh_model_ca
 def test_each_model_reader_asks_once_on_a_5xx(read, fresh_model_caches, no_backoff):
     """retries=0 for all three, as on the saved road: a name lookup drives no backoff loop."""
     s = _Session(_Response({}, status=502))
-    read(core.PixAIClient(s))
+    read(pixai_client_mod.PixAIClient(s))
     assert len(s.posts) == 1
 
 

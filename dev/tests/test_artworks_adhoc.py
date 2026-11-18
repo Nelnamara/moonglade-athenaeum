@@ -36,6 +36,7 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.fake_pixai import FakePixAI
+from moonglade import pixai_client as pixai_client_mod
 
 REPO = Path(__file__).resolve().parents[2]
 DAY = 86400.0
@@ -182,7 +183,7 @@ def test_the_document_pages_backward_from_the_newest_end():
 
 def test_the_document_never_selects_views():
     assert not VIEWS.search(core._ARTWORK_LIST_DOC)
-    assert core._is_mutation_document(core._ARTWORK_LIST_DOC) is False
+    assert pixai_client_mod._is_mutation_document(core._ARTWORK_LIST_DOC) is False
 
 
 def test_the_document_asks_for_exactly_what_the_readers_consume():
@@ -241,7 +242,7 @@ def test_a_page_is_one_post_of_the_full_document():
             raise AssertionError("the list is not a saved-request GET any more")
 
     s = Session()
-    conn = core.artwork_list_gql(core.PixAIClient(s, user_id="u-wire"), before="c9", last=50)
+    conn = core.artwork_list_gql(pixai_client_mod.PixAIClient(s, user_id="u-wire"), before="c9", last=50)
     assert conn["pageInfo"] == {"hasPreviousPage": False}
     [(verb, url, kw)] = s.calls
     assert (verb, url) == ("POST", core.API_URL)
@@ -424,13 +425,13 @@ def test_a_failed_later_page_marks_the_sync_incomplete_and_says_why(pixai, tmp_p
 def test_the_retired_saved_request_leaves_nothing_behind():
     assert not hasattr(core, "ARTWORK_LIST_HASH")
     assert not hasattr(core, "CLIENT_LIBRARY_ARTWORK")
-    assert not hasattr(core.PixAIClient, "persisted")   # the saved-request road itself (#92)
+    assert not hasattr(pixai_client_mod.PixAIClient, "persisted")   # the saved-request road itself (#92)
     assert "ARTWORK_LIST_HASH" not in (REPO / "config.example.json").read_text(encoding="utf-8")
     live_docs = [REPO / "README.md", REPO / "CLAUDE.md", REPO / "CONTRIBUTING.md",
                  *sorted((REPO / "wiki").glob("*.md"))]
     for doc in live_docs:
         assert "ARTWORK_LIST_HASH" not in doc.read_text(encoding="utf-8"), doc.name
-    for module in (core, g):
+    for module in (core, g, pixai_client_mod):     # the transport moved out of core
         assert "ARTWORK_LIST_HASH" not in inspect.getsource(module)
 
 
@@ -446,7 +447,7 @@ def test_the_sweep_reads_each_page_once_and_the_command_keeps_the_retries(monkey
         seen.append(retries)
         return {"artworks": {"edges": [], "pageInfo": {"hasPreviousPage": False, "startCursor": None}}}
     monkeypatch.setattr(core, "gql_adhoc", fake_adhoc)
-    monkeypatch.setattr(core, "_client_of", lambda s: type("C", (), {"user_id": "1"})())
+    monkeypatch.setattr(pixai_client_mod, "_client_of", lambda s: type("C", (), {"user_id": "1"})())
     core.artwork_list_gql(object())
     assert seen == [None]
     src = inspect.getsource(gallery.artworks_sweep)
