@@ -21,15 +21,27 @@ WHAT IT RECOGNISES (per test file, aliases derived from the file's own imports, 
     and a receiver chain rooted at the module: monkeypatch.setattr(core.Client, "get", ...)
 An alias is any name bound to the module by `import moonglade.backup as x`, `from moonglade
 import gallery as x`, `import moonglade.gallery` (then `moonglade.gallery.name`),
-`x = importlib.import_module("moonglade.backup")`, or `x = <another alias>`.
+`x = importlib.import_module("moonglade.backup")`, or `x = <another alias>`. Two more ways in:
+  - a PARAMETER every in-file call fills with the same module (`def _line_for(r, check, g)`,
+    always called as `_line_for(..., g)` with g the gallery): it is that module. Calls that
+    disagree, a function used other than by calling it, or a decorated one make it ambiguous.
+  - another moonglade module's attribute (`m.g`, with `m` the MCP server, whose top level says
+    `from moonglade import gallery as g`): read off that module's own file.
 
 CONSERVATIVE. Text-level edits of exactly the alias expression (or the dotted string), checked
 by re-parsing the result. A site whose receiver it cannot resolve to a module (a fixture
 parameter, a name bound two ways, a computed string, `patch.multiple`) is REPORTED, never
 guessed -- except a computed name that is the variable of an enclosing `for name in ("a",
-"b")` over string literals, which is checked against those literals (reported only if one of
-them moved). `--dry-run` (the default) prints `file:line old_target -> new_target`; `--apply`
+"b")`, or a parameter filled by `@pytest.mark.parametrize("name", [...])`, over string literals
+(directly or through a name bound once to them), which is checked against those literals
+(reported only if one of them moved). `getattr(<old module>, name)` / `hasattr(...)` with a
+computed name is a site the same way (a moved name read that way fails late or, for hasattr,
+silently). `--dry-run` (the default) prints `file:line old_target -> new_target`; `--apply`
 rewrites and adds `from moonglade import <mod> as <alias>` to each touched file.
+
+scan_reference_gaps() is the production-side twin: attribute uses on a name the file binds to
+an old module somewhere but that does not resolve where it is used (`core, s = _gen_session()`,
+a parameter no call pins), so a move cannot strand one silently.
 
     py dev/tools/retarget_patches.py                 # dry run over dev/tests
     py dev/tools/retarget_patches.py --apply
@@ -91,10 +103,15 @@ class _Scope:
         self.node = node
         self.parent = parent
         self.is_class = isinstance(node, ast.ClassDef)
-        self.bindings = {}        # name -> set of ("mod", "moonglade.x") | ("copy", "alias") | ("other", None)
+        self.bindings = {}        # name -> set of ("mod", "moonglade.x") | ("copy", "alias") |
+                                  # ("other", None) | ("param", None)
+        self.counts = {}          # name -> how many statements bind it here
+        self.assigns = {}         # name -> the value of a plain `name = <value>` here
+        self.params = {}          # parameter name -> its bindings other than being a parameter
 
     def bind(self, name, kind):
         self.bindings.setdefault(name, set()).add(kind)
+        self.counts[name] = self.counts.get(name, 0) + 1
 
 
 def _direct_children(node):
@@ -124,26 +141,84 @@ def _bind_target(scope, target):
         _bind_target(scope, target.value)
 
 
-class FileModel:
-    """One parsed file: its scope tree and a resolver from expressions to module names."""
+_MODULE_MODELS = {}
 
-    def __init__(self, text, package_hint="moonglade"):
+
+def repo_module_binding(modname, attr, repo=None):
+    """What `<modname>.<attr>` is, read off that module's own file under the repo: a dotted
+    module name, AMBIGUOUS (bound as a module and as something else, or only through a
+    `global` statement), or None (not a module, or no such file). One hop: the file read here
+    resolves its own names only."""
+    repo = repo or REPO
+    key = (str(repo), modname)
+    if key not in _MODULE_MODELS:
+        path = Path(repo, *modname.split(".")).with_suffix(".py")
+        try:
+            _MODULE_MODELS[key] = FileModel(path.read_text(encoding="utf-8"),
+                                            module_binding=None, infer=False)
+        except (OSError, SyntaxError, ValueError):
+            _MODULE_MODELS[key] = None
+    model = _MODULE_MODELS[key]
+    if model is None:
+        return None
+    top = model.scopes[0]
+    if attr in top.bindings:
+        return model.resolve_name(attr, top)
+    for node in ast.walk(model.tree):
+        if isinstance(node, ast.Global) and attr in node.names:
+            return AMBIGUOUS
+    return None
+
+
+def source_module_binding(sources):
+    """A module_binding over {modname: source text} (the synthetic cases' stand-in)."""
+    models = {}
+
+    def binding(modname, attr):
+        if modname not in sources:
+            return None
+        if modname not in models:
+            models[modname] = FileModel(sources[modname], module_binding=None, infer=False)
+        model = models[modname]
+        return model.resolve_name(attr, model.scopes[0]) if attr in model.scopes[0].bindings \
+            else None
+    return binding
+
+
+class FileModel:
+    """One parsed file: its scope tree and a resolver from expressions to module names.
+
+    module_binding(modname, attr) answers what another moonglade module's attribute is (default:
+    read off its file under the repo; None: never look). infer=False skips the parameter
+    inference (enough when only top-level names are wanted)."""
+
+    def __init__(self, text, package_hint="moonglade", module_binding=repo_module_binding,
+                 infer=True):
         self.text = text
         self.tree = ast.parse(text)
         self.package_hint = package_hint
+        self.module_binding = module_binding
         self.scope_of = {}            # id(node) -> _Scope the node's code runs in
+        self.scope_by_node = {}       # id(scope node) -> its _Scope
         self.scopes = []
+        self.parents = {}
+        for node in ast.walk(self.tree):
+            for child in ast.iter_child_nodes(node):
+                self.parents[id(child)] = node
         self._build(self.tree, None)
+        if infer:
+            self._infer_params()
 
     # -- building ------------------------------------------------------------------------
     def _build(self, scope_node, parent):
         scope = _Scope(scope_node, parent)
         self.scopes.append(scope)
+        self.scope_by_node[id(scope_node)] = scope
         if isinstance(scope_node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
             a = scope_node.args
             for arg in a.posonlyargs + a.args + a.kwonlyargs + [a.vararg, a.kwarg]:
                 if arg is not None:
-                    scope.bind(arg.arg, ("other", None))
+                    scope.bind(arg.arg, ("param", None))
         stack = [scope_node.body] if isinstance(scope_node, ast.Lambda) else list(scope_node.body)
         while stack:
             node = stack.pop()
@@ -193,6 +268,7 @@ class FileModel:
             target_mod = _import_module_target(node.value)
             for t in node.targets:
                 if isinstance(t, ast.Name):
+                    scope.assigns[t.id] = node.value
                     if target_mod:
                         scope.bind(t.id, ("mod", target_mod))
                     elif isinstance(node.value, ast.Name):
@@ -257,10 +333,159 @@ class FileModel:
                 full = base + "." + expr.attr
                 if full in OLD_MODULES or base == self.package_hint:
                     return full
+                if self.module_binding is not None and base.startswith(self.package_hint + "."):
+                    return self.module_binding(base, expr.attr)
         return None
 
     def scope_for(self, node):
         return self.scope_of.get(id(node), self.scopes[0])
+
+    def alias_modules(self, old_modules=OLD_MODULES):
+        """{name: old modules it is bound to in SOME scope of this file}: the names a reader
+        would take for a module alias even where this file's scoping says otherwise."""
+        out = {}
+        for s in self.scopes:
+            for name, kinds in s.bindings.items():
+                for kind, val in kinds:
+                    if kind == "mod" and val in old_modules:
+                        out.setdefault(name, set()).add(val)
+        return out
+
+    # -- parameters that carry a module ----------------------------------------------------
+    def _callee(self, name, scope, by_def):
+        for s in self._chain(scope):
+            if name in s.bindings:
+                return by_def.get((id(s), name))
+        return None
+
+    def _infer_params(self):
+        """Bind a parameter to a module when every call in this file fills it with that one
+        module. A function referenced other than as a call's callee (handed out as a callback,
+        decorated) can be called from elsewhere, so its parameters also see an unknown value.
+        A parameter that sees a module AND something else resolves as AMBIGUOUS."""
+        by_def = {}
+        for s in self.scopes:
+            node = s.node
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and s.parent is not None:
+                if s.parent.counts.get(node.name) == 1:
+                    by_def[(id(s.parent), node.name)] = s
+        if not by_def:
+            return
+        calls, escaped = [], set()
+        for s in by_def.values():
+            if s.node.decorator_list:
+                escaped.add(id(s))
+            for name, kinds in s.bindings.items():
+                if ("param", None) in kinds:
+                    s.params[name] = set(kinds) - {("param", None)}
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.Name):
+                scope = self.scope_for(node)
+                callee = self._callee(node.id, scope, by_def)
+                if callee is None:
+                    continue
+                parent = self.parents.get(id(node))
+                if isinstance(parent, ast.Call) and parent.func is node:
+                    calls.append((parent, scope, callee))
+                else:
+                    escaped.add(id(callee))
+        for _ in range(10):
+            obs = {}
+            for call, scope, callee in calls:
+                a = callee.node.args
+                positional = [p.arg for p in a.posonlyargs + a.args]
+                every = positional + [p.arg for p in a.kwonlyargs]
+                seen = set()
+                unknown = False
+                for i, arg in enumerate(call.args):
+                    if isinstance(arg, ast.Starred):
+                        unknown = True
+                        break
+                    if i < len(positional):
+                        obs.setdefault((id(callee), positional[i]), set()).add(
+                            self.resolve_expr(arg, scope))
+                        seen.add(positional[i])
+                for k in call.keywords:
+                    if k.arg is None:
+                        unknown = True
+                    elif k.arg in every:
+                        obs.setdefault((id(callee), k.arg), set()).add(
+                            self.resolve_expr(k.value, scope))
+                        seen.add(k.arg)
+                if unknown:
+                    for p in every:
+                        obs.setdefault((id(callee), p), set()).add(None)
+                defaults = dict(zip(positional[len(positional) - len(a.defaults):], a.defaults))
+                defaults.update({p.arg: d for p, d in zip(a.kwonlyargs, a.kw_defaults)
+                                 if d is not None})
+                for p, d in defaults.items():
+                    if p not in seen:
+                        obs.setdefault((id(callee), p), set()).add(
+                            self.resolve_expr(d, self.scope_for(callee.node)))
+            changed = False
+            for s in by_def.values():
+                for p, base in s.params.items():
+                    seen_vals = set(obs.get((id(s), p), set()))
+                    if id(s) in escaped:
+                        seen_vals.add(None)
+                    mods = {v for v in seen_vals if v not in (None, AMBIGUOUS)}
+                    if len(mods) == 1 and not seen_vals - mods:
+                        inferred = {("mod", next(iter(mods)))}
+                    elif mods & set(OLD_MODULES):        # maybe an old module: ambiguous
+                        inferred = {("mod", m) for m in mods} | {("param", None)}
+                    else:                                # never an old module: a plain value
+                        inferred = {("param", None)}
+                    new = base | inferred
+                    if new != s.bindings[p]:
+                        s.bindings[p] = new
+                        changed = True
+            if not changed:
+                break
+
+    # -- literal names -----------------------------------------------------------------------
+    def literal_strings(self, expr, scope, _depth=0):
+        """The strings a tuple/list/set of string literals holds -- directly, through a name
+        bound once to one, or a `+` of two of them -- else None."""
+        if _depth > 5:
+            return None
+        if isinstance(expr, (ast.Tuple, ast.List, ast.Set)):
+            if expr.elts and all(_str_const(e) is not None for e in expr.elts):
+                return tuple(e.value for e in expr.elts)
+            return None
+        if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Add):
+            left = self.literal_strings(expr.left, scope, _depth + 1)
+            right = self.literal_strings(expr.right, scope, _depth + 1)
+            return left + right if left is not None and right is not None else None
+        if isinstance(expr, ast.Name):
+            for s in self._chain(scope):
+                if expr.id in s.bindings:
+                    if s.counts.get(expr.id) == 1 and expr.id in s.assigns:
+                        return self.literal_strings(s.assigns[expr.id], s, _depth + 1)
+                    return None
+        return None
+
+    def literal_names(self, name_node, node):
+        """The literals a computed name takes: the variable of the nearest enclosing `for` over
+        literal strings, or a parameter filled by `@pytest.mark.parametrize("<it>", <literal
+        strings>)`. None when neither pins it."""
+        if not isinstance(name_node, ast.Name):
+            return None
+        cur = self.parents.get(id(node))
+        while cur is not None and not isinstance(cur, _SCOPE_TYPES):
+            if (isinstance(cur, (ast.For, ast.AsyncFor)) and isinstance(cur.target, ast.Name)
+                    and cur.target.id == name_node.id):
+                return self.literal_strings(cur.iter, self.scope_for(cur))
+            cur = self.parents.get(id(cur))
+        if isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            a = cur.args
+            if name_node.id in [p.arg for p in a.posonlyargs + a.args + a.kwonlyargs]:
+                for d in cur.decorator_list:
+                    if (isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
+                            and d.func.attr == "parametrize" and len(d.args) >= 2
+                            and _str_const(d.args[0]) is not None
+                            and [n.strip() for n in d.args[0].value.split(",")] == [name_node.id]):
+                        return self.literal_strings(d.args[1], self.scope_for(d))
+        return None
 
     def segment(self, node):
         return ast.get_source_segment(self.text, node)
@@ -368,22 +593,14 @@ def _is_path_read(const, parents):
     return False
 
 
-def _loop_literals(name_node, node, parents):
-    """The string literals a computed patch name takes when it is the variable of the nearest
-    enclosing `for <name> in ("a", "b", ...)` (a tuple or list of string literals only), else
-    None. Stops at the enclosing def/lambda/class."""
-    if not isinstance(name_node, ast.Name):
-        return None
-    cur = parents.get(id(node))
-    while cur is not None and not isinstance(cur, _SCOPE_TYPES):
-        if (isinstance(cur, (ast.For, ast.AsyncFor)) and isinstance(cur.target, ast.Name)
-                and cur.target.id == name_node.id):
-            elts = cur.iter.elts if isinstance(cur.iter, (ast.Tuple, ast.List)) else []
-            if elts and all(_str_const(e) is not None for e in elts):
-                return tuple(e.value for e in elts)
-            return None
-        cur = parents.get(id(cur))
-    return None
+def _root_and_first_attr(expr):
+    """For `a.b.c` / `a.b[k]`: ("a", "b"); (name, None) for a bare name; (None, None) else."""
+    first = None
+    while isinstance(expr, (ast.Attribute, ast.Subscript)):
+        if isinstance(expr, ast.Attribute):
+            first = expr.attr
+        expr = expr.value
+    return (expr.id if isinstance(expr, ast.Name) else None), first
 
 
 def _root_name(expr):
@@ -392,11 +609,11 @@ def _root_name(expr):
     return expr.id if isinstance(expr, ast.Name) else None
 
 
-def scan_text(path, text, old_modules=OLD_MODULES):
+def scan_text(path, text, old_modules=OLD_MODULES, module_binding=repo_module_binding):
     """Scan one file's text. Never raises on a syntax error (recorded in .error)."""
     out = FileScan(path=str(path))
     try:
-        model = FileModel(text)
+        model = FileModel(text, module_binding=module_binding)
     except SyntaxError as exc:
         out.error = "syntax error: %s" % exc
         return out
@@ -426,7 +643,7 @@ def scan_text(path, text, old_modules=OLD_MODULES):
                         add(node, form, mod, name, "expr", span_node)
                     elif name_node is not None:
                         add(node, form, mod, "", "dynamic", None,
-                            _loop_literals(name_node, node, parents))
+                            model.literal_names(name_node, node))
             elif mod == AMBIGUOUS:
                 name = _str_const(name_node) if name_node is not None else None
                 add(node, form, AMBIGUOUS, attr or name or "", "dynamic", None)
@@ -464,11 +681,16 @@ def scan_text(path, text, old_modules=OLD_MODULES):
                 span_node, mod, attr = hit
                 if mod in old_modules and attr is not None:
                     add(node, form, mod, attr, "expr", span_node)
+                return
+            # `core.name = ...` on a `core` that is not a module HERE (a fixture parameter, a
+            # tuple-bound name) although the file binds that name to one elsewhere
+            root, first = _root_and_first_attr(target)
+            if (root in likely and first
+                    and model.resolve_name(root, scope) in (None, AMBIGUOUS)):
+                add(node, form, None, first, "dynamic", None)
 
-    parents = {}
-    for node in ast.walk(model.tree):
-        for child in ast.iter_child_nodes(node):
-            parents[id(child)] = node
+    likely = model.alias_modules(old_modules)
+    parents = model.parents
 
     for node in ast.walk(model.tree):
         scope = model.scope_for(node)
@@ -493,6 +715,15 @@ def scan_text(path, text, old_modules=OLD_MODULES):
                     for k in node.keywords:
                         if k.arg:
                             add(node, kind, None, k.arg, "dynamic", None)
+            elif (isinstance(node.func, ast.Name) and node.func.id in ("getattr", "hasattr")
+                  and len(args) >= 2 and _str_const(args[1]) is None):
+                # getattr(core, name): a moved name read this way fails late (hasattr: never)
+                mod = model.resolve_expr(args[0], scope)
+                if mod in old_modules:
+                    add(node, node.func.id, mod, "", "dynamic", None,
+                        model.literal_names(args[1], node))
+                elif mod == AMBIGUOUS:
+                    add(node, node.func.id, AMBIGUOUS, "", "dynamic", None)
             # Source readers: inspect.getsource(core.x), getsource(g), getsource(fn) ...
             fname = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", None)
             if fname in _SOURCE_FUNCS and args:
@@ -571,6 +802,35 @@ def scan_references(text, old_modules=OLD_MODULES):
     return refs
 
 
+def scan_reference_gaps(text, old_modules=OLD_MODULES, module_binding=repo_module_binding):
+    """What scan_references cannot pin, so a move cannot pass it silently. -> sorted list of
+    (line, receiver, name, modules):
+      - `<x>.name` / getattr(<x>, "name") where the file binds <x> to an old module in SOME
+        scope but <x> does not resolve to one where it is used (`core, s = _gen_session()`, a
+        parameter its calls do not pin, a name bound two ways). modules: what <x> is bound to
+        elsewhere in the file.
+      - getattr/hasattr(<old module>, <computed>): name is "" and modules the one module."""
+    model = FileModel(text, module_binding=module_binding)
+    likely = model.alias_modules(old_modules)
+    gaps = set()
+    for node in ast.walk(model.tree):
+        scope = model.scope_for(node)
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            recv = node.value.id
+            if recv in likely and model.resolve_name(recv, scope) in (None, AMBIGUOUS):
+                gaps.add((node.lineno, recv, node.attr, tuple(sorted(likely[recv]))))
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+              and node.func.id in ("getattr", "hasattr") and len(node.args) >= 2):
+            recv, name = node.args[0], _str_const(node.args[1])
+            mod = model.resolve_expr(recv, scope)
+            if mod in old_modules and name is None:
+                gaps.add((node.lineno, model.segment(recv), "", (mod,)))
+            elif (isinstance(recv, ast.Name) and recv.id in likely and name is not None
+                  and mod in (None, AMBIGUOUS)):
+                gaps.add((node.lineno, recv.id, name, tuple(sorted(likely[recv.id]))))
+    return sorted(gaps)
+
+
 # ---------------------------------------------------------------------------------------------
 # Planning and applying the retarget
 # ---------------------------------------------------------------------------------------------
@@ -612,18 +872,18 @@ def _identifiers(model):
     return names
 
 
-def plan_file(path, text, seams, aliases=None):
+def plan_file(path, text, seams, aliases=None, module_binding=repo_module_binding):
     """(edits, unresolved, alias_for) for one file. unresolved: [(line, message)]."""
     aliases = aliases or {}
     moved = moved_index(seams)
     moved_names = {}
     for (old, name), new in moved.items():
         moved_names.setdefault(name, []).append((old, new))
-    scan = scan_text(path, text)
+    scan = scan_text(path, text, module_binding=module_binding)
     edits, unresolved, alias_for = [], [], {}
     if scan.error:
         return edits, [(0, scan.error)], alias_for
-    model = FileModel(text)
+    model = FileModel(text, module_binding=module_binding)
     idents = _identifiers(model)
     for s in scan.sites:
         if s.module in OLD_MODULES and (s.module, s.name) in moved and s.kind in ("expr", "string"):

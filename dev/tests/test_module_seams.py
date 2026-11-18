@@ -20,6 +20,9 @@ What a move must satisfy:
      (setattr / delattr / mock.patch / patch.object / plain `alias.name = ...`), and no patch of
      a moved name sits on a receiver the scanner cannot resolve. The scanner lives in
      dev/tools/retarget_patches.py so the lint and the codemod can never disagree.
+     Production code gets the same treatment: a `core.name` on a `core` the scanner cannot pin
+     to a module there (tuple-bound, a parameter its calls disagree about) is listed, and one
+     naming a moved name fails (check_production_gaps).
   5. The tests that read a megamodule's SOURCE (inspect.getsource, opening the file by path,
      AST walks of create_app) are a known set, SOURCE_READERS. A move that touches what one of
      them reads must be acknowledged in SOURCE_READERS_REVIEWED after someone looked.
@@ -358,15 +361,36 @@ def check_lazy_imports(seams, source_of):
     return problems
 
 
-def lint_patches(seams, files):
+def lint_patches(seams, files, module_binding=rp.repo_module_binding):
     """files: {path: text}. -> (stale, unresolved) as 'path:line ...' strings."""
     stale, unresolved = [], []
     for path, text in sorted(files.items()):
-        edits, unres, _ = rp.plan_file(path, text, seams)
+        edits, unres, _ = rp.plan_file(path, text, seams, module_binding=module_binding)
         stale += ["%s:%d %s (moved to %s)" % (path, e.site.line, e.old_target, e.new_module)
                   for e in edits]
         unresolved += ["%s:%d %s" % (path, line, msg) for line, msg in unres]
     return stale, unresolved
+
+
+def check_production_gaps(seams, files, module_binding=rp.repo_module_binding):
+    """files: {path: production source}. A production reach the scanner cannot pin (see
+    rp.scan_reference_gaps) that may name a moved name through its old module, or a computed
+    getattr on an old module something moved out of. Point it at the new module."""
+    moved = rp.moved_index(seams)
+    moved_from = {old for old, _ in moved}
+    problems = []
+    for path, text in sorted(files.items()):
+        for line, recv, name, mods in rp.scan_reference_gaps(text, module_binding=module_binding):
+            if name:
+                hit = [(m, moved[(m, name)]) for m in mods if (m, name) in moved]
+                if hit:
+                    problems.append("%s:%d %s.%s may be %s.%s, which moved to %s: reach it "
+                                    "through the new module" % (path, line, recv, name,
+                                                                hit[0][0], name, hit[0][1]))
+            elif set(mods) & moved_from:
+                problems.append("%s:%d getattr(%s, <computed>) on %s, which names have moved "
+                                "out of: check by hand" % (path, line, recv, mods[0]))
+    return problems
 
 
 def detect_source_readers(files):
@@ -447,6 +471,12 @@ def test_no_test_patches_a_moved_name_through_its_old_module():
     assert stale == [], ("patches still aimed at the old module -- run "
                          "`py dev/tools/retarget_patches.py`:\n" + "\n".join(stale))
     assert unresolved == [], "patches of moved names to check by hand:\n" + "\n".join(unresolved)
+
+
+def test_production_reaches_no_moved_name_through_an_unpinned_receiver():
+    files = {p.relative_to(REPO).as_posix(): p.read_text(encoding="utf-8")
+             for p in production_files()}
+    assert check_production_gaps(SEAMS, files) == []
 
 
 def test_the_scanner_sees_the_suites_patches():
@@ -613,6 +643,107 @@ def test_patch_lint_on_the_real_suite_flags_a_synthetic_move():
     stale, _ = lint_patches({"moonglade.fake_seam": {"from": "moonglade.backup",
                                                      "names": ["_make_session"]}}, files)
     assert len(stale) > 10
+
+
+GAP_SRC = """\
+from moonglade import backup as core
+
+
+def _session():
+    from moonglade import backup as core
+    return core, object()
+
+
+def _uses(g, row):
+    return g.get_row(row)
+
+
+def caller():
+    from moonglade import gallery as g
+    return _uses(g, 1)
+
+
+def route():
+    core, session = _session()
+    core.scan_library(session)                    # line 20: tuple-bound, unpinned
+    getattr(core, "scan_library")                 # line 21: the same, by name
+
+
+def mixed(mod):
+    return mod.scan_library()                     # line 25: sometimes the gallery
+
+
+def calls_mixed():
+    from moonglade import gallery as mod
+    mixed(mod)
+    mixed(None)
+
+
+def computed(name):
+    from moonglade import gallery as g
+    return getattr(g, name)                       # line 36: computed name
+"""
+
+
+def test_reference_gaps_resolve_parameters_and_list_what_they_cannot():
+    """integrity.py hands the gallery to its helpers as a parameter: a call pinning it makes it
+    a reference (g.get_row); a tuple-bound `core`, a parameter its calls disagree about, and a
+    computed getattr are listed, never dropped."""
+    refs = rp.scan_references(GAP_SRC)
+    assert ("moonglade.gallery", "get_row") in refs
+    gaps = rp.scan_reference_gaps(GAP_SRC)
+    assert [(line, name) for line, _, name, _ in gaps] == [
+        (20, "scan_library"), (21, "scan_library"), (25, "scan_library"), (36, "")], gaps
+    seams = {"moonglade.fake_seam": {"from": "moonglade.backup", "names": ["scan_library"]}}
+    problems = check_production_gaps(seams, {"moonglade/fake.py": GAP_SRC})
+    assert [p.split()[0] for p in problems] == ["moonglade/fake.py:20", "moonglade/fake.py:21"]
+    problems = check_production_gaps(SYNTH_SEAMS, {"moonglade/fake.py": GAP_SRC})
+    assert [p.split()[0] for p in problems] == ["moonglade/fake.py:25", "moonglade/fake.py:36"]
+    assert check_production_gaps({}, {"moonglade/fake.py": GAP_SRC}) == []
+
+
+PARAM_TEST = """\
+import inspect
+import pytest
+from moonglade import gallery as gg
+from moonglade import mcp_server as m
+NAMES = ("load_catalog", "scan_library")
+
+
+def _helper(monkeypatch, mod):
+    monkeypatch.setattr(mod, "scan_library", None)              # line 9: stale, via the call
+
+
+def test_a(monkeypatch):
+    monkeypatch.setattr(m.g, "scan_library", None)              # line 13: stale, m.g
+    _helper(monkeypatch, gg)
+    for name in NAMES:
+        inspect.getsource(getattr(gg, name))                    # line 16: loop name
+    for name in ("load_catalog",):
+        hasattr(gg, name)                                       # not moved
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_b(name):
+    getattr(gg, name)                                           # line 23: parametrized
+
+
+def test_c(gg):
+    gg.scan_library = None                                      # line 27: fixture parameter
+"""
+
+
+def test_patch_lint_resolves_another_modules_attribute_and_parameters():
+    """`monkeypatch.setattr(m.g, ...)` with m the MCP server patches the gallery (read off the
+    server's own top level); a helper handed a module patches that module; getattr loops,
+    parametrized names and an assignment through a fixture parameter are checked too."""
+    binding = rp.source_module_binding({"moonglade.mcp_server":
+                                        "from moonglade import gallery as g\n"})
+    files = {"tests/test_x.py": PARAM_TEST}
+    stale, unresolved = lint_patches(SYNTH_SEAMS, files, module_binding=binding)
+    assert sorted(int(s.split(":")[1].split()[0]) for s in stale) == [9, 13], stale
+    assert sorted(int(u.split(":")[1].split()[0]) for u in unresolved) == [16, 23, 27], unresolved
+    assert lint_patches({}, files, module_binding=binding) == ([], [])
 
 
 def test_scan_references_sees_production_reach():
