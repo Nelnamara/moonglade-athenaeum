@@ -59,6 +59,11 @@ SEAMS = {
     "moonglade.dupes": {"from": "moonglade.gallery", "names": [
         "DHASH_SIZE", "duplicate_groups", "same_seed_groups", "NEAR_DUP_HAMMING_THRESHOLD",
         "near_duplicate_groups"]},
+    "moonglade.series": {"from": "moonglade.gallery", "names": [
+        "_series_text", "_series_clause_list", "_series_ts", "_SERIES_SCAFFOLD",
+        "_series_is_scaffold", "_series_cap_first", "_series_title", "_series_delta_label",
+        "compute_series", "_SERIES_CACHE", "_SERIES_CACHE_LOCK", "_SERIES_RECOMPUTE_FLOOR_S",
+        "series_index", "_series_cover_row", "fold_series_units"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -181,6 +186,35 @@ SOURCE_READERS_REVIEWED = {
     ("tests/test_tsubaki3_image_gate.py", "moonglade.dupes"),
     ("tests/test_watch.py", "moonglade.dupes"),
     ("tools/export_design_kit.py", "moonglade.dupes"),
+    ("tests/test_app_paths.py", "moonglade.series"),
+    ("tests/test_artworks_adhoc.py", "moonglade.series"),
+    ("tests/test_bonjour.py", "moonglade.series"),
+    ("tests/test_branding.py", "moonglade.series"),
+    ("tests/test_catalog_verbs.py", "moonglade.series"),
+    ("tests/test_catchup_query.py", "moonglade.series"),
+    ("tests/test_csrf_coverage.py", "moonglade.series"),
+    ("tests/test_design_kit_sync.py", "moonglade.series"),
+    ("tests/test_doc_truth_residuals.py", "moonglade.series"),
+    ("tests/test_enhance.py", "moonglade.series"),
+    ("tests/test_evidence_counters.py", "moonglade.series"),
+    ("tests/test_first_party_sources.py", "moonglade.series"),
+    ("tests/test_gen_surface.py", "moonglade.series"),
+    ("tests/test_history_feed_document.py", "moonglade.series"),
+    ("tests/test_library_dir.py", "moonglade.series"),
+    ("tests/test_living_library.py", "moonglade.series"),
+    ("tests/test_logging.py", "moonglade.series"),
+    ("tests/test_loom_generate_guard.py", "moonglade.series"),
+    ("tests/test_loom_notify.py", "moonglade.series"),
+    ("tests/test_loom_p_routes.py", "moonglade.series"),
+    ("tests/test_media_tools.py", "moonglade.series"),
+    ("tests/test_network.py", "moonglade.series"),
+    ("tests/test_settings_store.py", "moonglade.series"),
+    ("tests/test_setup_prepare.py", "moonglade.series"),
+    ("tests/test_task_model_detail_document.py", "moonglade.series"),
+    ("tests/test_telemetry.py", "moonglade.series"),
+    ("tests/test_tsubaki3_image_gate.py", "moonglade.series"),
+    ("tests/test_watch.py", "moonglade.series"),
+    ("tools/export_design_kit.py", "moonglade.series"),
 }
 
 

@@ -16,6 +16,7 @@ replicated server-side, plus the two LOGIN-tier reads that expose it
     cap).
 """
 from moonglade import gallery as G
+from moonglade import series as series_mod
 
 
 def _seed(tmp_path, rows):
@@ -50,10 +51,10 @@ def test_clause_tokenizer_replicates_the_validated_js():
     trim, lowercase, keep len > 3 -- the exact rule the owner validated."""
     s = ("Masterpiece, best quality; Frost Queen.\n"
          "<lora:ice palace:0.8> glacial crown, ice, a b")
-    assert set(G._series_clause_list(s)) == {
+    assert set(series_mod._series_clause_list(s)) == {
         "masterpiece", "best quality", "frost queen", "glacial crown"}
     # reorderings are the SAME set (the differ drops them for free)
-    assert set(G._series_clause_list("a snow fox, b moon")) == set(G._series_clause_list(
+    assert set(series_mod._series_clause_list("a snow fox, b moon")) == set(series_mod._series_clause_list(
         "b moon, a snow fox"))
 
 
@@ -61,9 +62,9 @@ def test_series_text_is_the_library_apis_capped_prompt_expression():
     """#34's binding engine requirement: the engine reads the SAME expression
     the owner validated on -- (prompt_full or prompt_preview or '')[:1200]."""
     long = "x" * 2000
-    assert G._series_text({"prompt_full": long, "prompt_preview": ""}) == "x" * 1200
-    assert G._series_text({"prompt_full": "", "prompt_preview": "pv"}) == "pv"
-    assert G._series_text({"prompt_full": None, "prompt_preview": None}) == ""
+    assert series_mod._series_text({"prompt_full": long, "prompt_preview": ""}) == "x" * 1200
+    assert series_mod._series_text({"prompt_full": "", "prompt_preview": "pv"}) == "pv"
+    assert series_mod._series_text({"prompt_full": None, "prompt_preview": None}) == ""
 
 
 # ---- (a) the frost-queen fixture ------------------------------------------------------
@@ -143,7 +144,7 @@ def test_prompts_differing_only_past_1200_chars_chain_as_rerolls(tmp_path):
     assert p1[:1200] == p2[:1200] and p1 != p2
     _seed(tmp_path, _task("B1", p1, "2026-08-20T10:00:00Z", ["921"])
           + _task("B2", p2, "2026-08-20T10:30:00Z", ["922"]))
-    by_task, by_sid = G.compute_series(tmp_path / "catalog.db")
+    by_task, by_sid = series_mod.compute_series(tmp_path / "catalog.db")
     assert set(by_task) == {"B1", "B2"} and set(by_sid) == {"B1"}
     assert by_sid["B1"]["steps"][1]["reroll"] is True
 
@@ -154,7 +155,7 @@ def test_prompts_differing_before_1200_chars_are_not_rerolls(tmp_path):
     p2 = _CAP_HEAD + "golden gown, " + "w" * 1200
     _seed(tmp_path, _task("B1", p1, "2026-08-20T10:00:00Z", ["931"])
           + _task("B2", p2, "2026-08-20T10:30:00Z", ["932"]))
-    by_task, by_sid = G.compute_series(tmp_path / "catalog.db")
+    by_task, by_sid = series_mod.compute_series(tmp_path / "catalog.db")
     assert set(by_sid) == {"B1"}                    # still one series (4/6 shared)
     step = by_sid["B1"]["steps"][1]
     assert step["reroll"] is False
@@ -174,7 +175,7 @@ def test_model_change_splits_series_and_blank_id_falls_back_to_name(tmp_path):
     rows += _task("C5", prompt, "2026-08-20T12:00:00Z", ["945"], "", "Gamma")
     rows += _task("C6", prompt, "2026-08-20T12:30:00Z", ["946"], "", "Gamma")
     _seed(tmp_path, rows)
-    by_task, by_sid = G.compute_series(tmp_path / "catalog.db")
+    by_task, by_sid = series_mod.compute_series(tmp_path / "catalog.db")
     assert set(by_sid) == {"C1", "C3", "C5"}        # never merged across models
     assert all(s["count_tasks"] == 2 for s in by_sid.values())
     assert by_task["C4"] == ("C3", 2)
@@ -190,7 +191,7 @@ def test_a_9h_gap_splits_two_series_a_7h_gap_does_not(tmp_path):
             + _task("D3", prompt, "2026-08-20T19:30:00Z", ["953"])   # 9h after D2
             + _task("D4", prompt, "2026-08-20T20:00:00Z", ["954"]))
     _seed(tmp_path, rows)
-    by_task, by_sid = G.compute_series(tmp_path / "catalog.db")
+    by_task, by_sid = series_mod.compute_series(tmp_path / "catalog.db")
     assert set(by_sid) == {"D1", "D3"}
     assert by_task["D2"] == ("D1", 2) and by_task["D4"] == ("D3", 2)
 
@@ -202,7 +203,7 @@ def test_a_7h_gap_chains_one_series(tmp_path):
             + _task("D3", prompt, "2026-08-20T17:30:00Z", ["963"])   # 7h after D2
             + _task("D4", prompt, "2026-08-20T18:00:00Z", ["964"]))
     _seed(tmp_path, rows)
-    by_task, by_sid = G.compute_series(tmp_path / "catalog.db")
+    by_task, by_sid = series_mod.compute_series(tmp_path / "catalog.db")
     assert set(by_sid) == {"D1"}
     assert by_sid["D1"]["count_tasks"] == 4
 
@@ -213,7 +214,7 @@ def test_two_empty_clause_sets_chain_as_identical(tmp_path):
     rows = (_task("E1", "ice", "2026-08-20T10:00:00Z", ["971"])
             + _task("E2", "ice", "2026-08-20T10:30:00Z", ["972"]))
     _seed(tmp_path, rows)
-    by_task, by_sid = G.compute_series(tmp_path / "catalog.db")
+    by_task, by_sid = series_mod.compute_series(tmp_path / "catalog.db")
     assert set(by_sid) == {"E1"}
     assert by_sid["E1"]["steps"][1]["reroll"] is True
 
@@ -248,7 +249,7 @@ def test_blank_task_id_rows_are_excluded_and_blank_created_at_starts_fresh(tmp_p
             + [{"media_id": "998", "task_id": "", "prompt_full": prompt},
                {"media_id": "999", "task_id": "", "prompt_full": prompt}])
     _seed(tmp_path, rows)
-    by_task, by_sid = G.compute_series(tmp_path / "catalog.db")
+    by_task, by_sid = series_mod.compute_series(tmp_path / "catalog.db")
     assert set(by_sid) == {"G1"} and by_sid["G1"]["count_tasks"] == 2
     assert "G3" not in by_task and "G4" not in by_task
     assert "" not in by_task
@@ -261,19 +262,19 @@ def test_cache_floor_holds_then_a_key_change_recomputes(tmp_path, monkeypatch):
     _seed(tmp_path, _task("H1", prompt, "2026-08-20T10:00:00Z", ["901"])
           + _task("H2", prompt, "2026-08-20T10:30:00Z", ["902"]))
     db = tmp_path / "catalog.db"
-    by_task, _ = G.series_index(db)
+    by_task, _ = series_mod.series_index(db)
     assert set(by_task) == {"H1", "H2"}
     # the live mirror writes a new task mid-sync...
     _seed(tmp_path, _task("H3", prompt, "2026-08-20T11:00:00Z", ["903"]))
     # ...the key changed, but the 30s floor holds: stale-but-recent is served
-    by_task2, _ = G.series_index(db)
+    by_task2, _ = series_mod.series_index(db)
     assert set(by_task2) == {"H1", "H2"}, "the 30s recompute floor did not hold"
     # floor off: the changed key now recomputes and the new state is served
-    monkeypatch.setattr(G, "_SERIES_RECOMPUTE_FLOOR_S", 0.0)
-    by_task3, _ = G.series_index(db)
+    monkeypatch.setattr(series_mod, "_SERIES_RECOMPUTE_FLOOR_S", 0.0)
+    by_task3, _ = series_mod.series_index(db)
     assert set(by_task3) == {"H1", "H2", "H3"}
     # unchanged key: even with no floor, the cache is served (no recompute)
-    assert G.series_index(db)[0] is by_task3
+    assert series_mod.series_index(db)[0] is by_task3
 
 
 # ---- (h) route hygiene (mirrors /api/siblings) ----------------------------------------

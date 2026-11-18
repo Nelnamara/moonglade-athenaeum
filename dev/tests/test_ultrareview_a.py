@@ -12,6 +12,7 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_test_client
+from moonglade import series as series_mod
 
 
 def _row(**kw):
@@ -188,7 +189,7 @@ def test_a_meta_of_a_meta_earns_in_one_pass():
 def test_series_ts_parses_a_date_only_value():
     """A contest end date with no time component read as NO DATE -- no countdown, and the
     recency window skipped it entirely."""
-    ts = g._series_ts("2026-09-20")
+    ts = series_mod._series_ts("2026-09-20")
     assert ts is not None
     import datetime as _dt
     got = _dt.datetime.fromtimestamp(ts, _dt.timezone.utc)
@@ -197,16 +198,16 @@ def test_series_ts_parses_a_date_only_value():
 
 def test_series_ts_respects_a_utc_offset():
     """The offset was truncated and the time read as UTC -- a deadline wrong by hours."""
-    plus = g._series_ts("2026-09-20T12:00:00+09:00")
-    utc = g._series_ts("2026-09-20T12:00:00Z")
+    plus = series_mod._series_ts("2026-09-20T12:00:00+09:00")
+    utc = series_mod._series_ts("2026-09-20T12:00:00Z")
     assert plus is not None and utc is not None
     assert utc - plus == 9 * 3600, "+09:00 is nine hours AHEAD of UTC"
-    minus = g._series_ts("2026-09-20T12:00:00-05:00")
+    minus = series_mod._series_ts("2026-09-20T12:00:00-05:00")
     assert minus - utc == 5 * 3600
     # the existing shapes are untouched
-    assert abs(g._series_ts("2026-09-20T12:00:00.545Z") - utc - 0.545) < 1e-6
-    assert g._series_ts("2026-09-20T12:00:00") == utc
-    assert g._series_ts("") is None and g._series_ts("nonsense") is None
+    assert abs(series_mod._series_ts("2026-09-20T12:00:00.545Z") - utc - 0.545) < 1e-6
+    assert series_mod._series_ts("2026-09-20T12:00:00") == utc
+    assert series_mod._series_ts("") is None and series_mod._series_ts("nonsense") is None
 
 
 # ---- finding 8: publish-and-enter records its own entry ----------------------

@@ -25,6 +25,7 @@ from moonglade import gallery as G
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_test_client
+from moonglade import series as series_mod
 
 
 def _seed(tmp_path, rows):
@@ -317,7 +318,7 @@ def test_fold_series_units_keys_and_order():
         {"media_id": "e", "task_id": "", "created_at": "t0", "is_video": ""},   # import
         {"media_id": "f", "task_id": "", "created_at": "t0", "is_video": ""},   # import
     ]
-    unit_order, members = G.fold_series_units(rows, by_task)
+    unit_order, members = series_mod.fold_series_units(rows, by_task)
     assert unit_order == [("series", "X1"), ("task", "Z"), ("row", "e"), ("row", "f")]
     assert len(members[("series", "X1")]) == 2   # a + d
     assert len(members[("task", "Z")]) == 2      # b + c (batch collapses)
@@ -333,7 +334,7 @@ def test_fold_skips_blank_media_id_rows_like_the_ungrouped_path():
         {"media_id": "", "task_id": "", "created_at": "t0", "is_video": ""},   # no id
         {"media_id": None, "task_id": "", "created_at": "t0", "is_video": ""},  # no id
     ]
-    unit_order, members = G.fold_series_units(rows, {})
+    unit_order, members = series_mod.fold_series_units(rows, {})
     assert unit_order == [("task", "Z")]          # only the real row; no ('row','') unit
     assert ("row", "") not in members
 
