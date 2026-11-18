@@ -71,6 +71,9 @@
   text-transform: none; color: var(--emerald); border: 1px solid rgba(79,201,154,.4); border-radius: 999px; padding: 4px 9px; }
 .mgcp-svtag.off { color: var(--overlay0); border-color: var(--surface1); }
 .mgcp-ver { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; line-height: 1.6; color: var(--overlay0); margin-top: auto; }
+/* The About row at the foot (reuses .mghelp-aboutrow from help.css); the library folder sits under it. */
+.mgcp-ver .mghelp-aboutrow { margin: 0 0 8px; }
+.mgcp-verdir { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .mgcp-main { padding: 20px 26px; display: flex; flex-direction: column; gap: 16px; min-width: 0; overflow-y: auto; }
 .mgcp-tabs { display: flex; align-items: center; gap: 12px; }
@@ -122,6 +125,11 @@ button.mgcp-run { margin-left: auto; color: var(--accent); font-size: 11px; curs
 .mgcp-runresulthead { display: flex; align-items: center; gap: 10px; font-size: 12.5px;
   font-weight: 600; color: var(--emerald); }
 .mgcp-runresult.warn .mgcp-runresulthead { color: var(--gold); }
+.mgcp-runsentence { color: var(--text); font-weight: 600; }
+.mgcp-runfold { display: block; margin-top: 7px; padding: 0; border: 0; background: none; cursor: pointer;
+  font: 11.5px/1.4 var(--font-system, system-ui, sans-serif); color: var(--lavender); text-align: left; }
+.mgcp-runfold:hover { color: var(--mauve); }
+.mgcp-runresultlog.mgcp-runfiles { max-height: 160px; }
 .mgcp-runresultlog { font-family: ui-monospace, Menlo, monospace; font-size: 11px;
   line-height: 1.6; color: var(--subtext); margin-top: 7px; max-height: 90px; overflow-y: auto; }
 
@@ -708,15 +716,10 @@ button.mgcp-pwr-ghost { display: inline-block; white-space: nowrap; margin-top: 
    scaling a 56px chrome copy up. */
 .mgcp-markprevbox > .mgx-mark { margin: 0 auto; }
 
-/* The auto-updater (2026-09-01). Variant A: the existing footer version stamp WAKES UP
-   when a newer release is out -- gold, a leading dot, and a click that opens the confirm.
-   Up to date it renders the plain stamp exactly as before, so the quiet state is
-   byte-identical to what shipped. */
-button.mgcp-verup { font: inherit; font-size: inherit; padding: 0; border: 0; background: none;
-  color: var(--gold); cursor: pointer; text-align: left; display: inline-flex;
-  align-items: baseline; gap: 5px; }
-button.mgcp-verup .dot { font-size: 8px; line-height: 1; }
-button.mgcp-verup:hover { text-decoration: underline; text-underline-offset: 2px; }
+/* The auto-updater (2026-09-01): with a newer release out, the About row at the foot of the
+   left column shows a gold dot and "<latest> available" in place of the version. */
+.mgcp-ver .mghelp-aboutrow .v.mgcp-verup { color: var(--gold); display: inline-flex; align-items: baseline; gap: 5px; }
+.mgcp-verup .dot { font-size: 8px; line-height: 1; }
 /* The confirm modal reuses the power modal's card/scrim/host verbatim -- same z-rung, same
    slab motion; only its innards are new. */
 .mgcp-updver { display: flex; align-items: baseline; gap: 9px; padding: 10px 0 2px;

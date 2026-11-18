@@ -339,7 +339,7 @@ def test_run_argv_is_whitelisted_flags_only(tmp_path, monkeypatch):
     argv = captured["argv"]
     assert argv[:3] == [sys.executable, "-m", "moonglade"]
     assert captured["cwd"] == str(paths.APP_ROOT)
-    assert "--audit" in argv and "--no-content" in argv and "--out" in argv
+    assert "--audit" in argv and "--no-content" not in argv and "--out" in argv
     assert all(isinstance(a, str) for a in argv)
 
 
@@ -907,6 +907,7 @@ def test_new_parity_actions_spawn_the_right_whitelisted_argv(tmp_path, monkeypat
 
     cli = _authed_client(tmp_path)
     cases = [
+        ("audit",           ["--audit"],                              False),
         ("audit-full",      ["--audit"],                              False),
         ("verify-dupes",    ["--verify-dupes"],                       False),
         # The integrity pass: read-only; a click runs the structural checks too.
@@ -942,9 +943,9 @@ def test_new_parity_actions_spawn_the_right_whitelisted_argv(tmp_path, monkeypat
         argv = captured[0]
         for flag in expected:
             assert flag in argv, "{} argv missing {}: {}".format(action, flag, argv)
-        # The full audit must NOT carry --no-content -- that flag is what makes the
+        # Neither audit may carry --no-content -- that flag is what makes the
         # default audit the fast pass, so keeping it would make "full" a no-op.
-        if action == "audit-full":
+        if action in ("audit", "audit-full"):
             assert "--no-content" not in argv
 
 

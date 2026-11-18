@@ -193,7 +193,7 @@ G.panel = {
       { id: "living", at: ".mgcp-living",
         tour: "Runs itself: the jobs the app does on its own, how often, and Run now." },
       { id: "sync", at: ".mgcp-syncbtn", tour: "Sync now pulls new work and fills in what's missing." },
-      { id: "version", at: ".mgcp-ver", tour: "The version stamp. Click it for About and what changed." },
+      { id: "version", at: ".mgcp-ver", tour: "The About row. Click it for the version and what changed." },
       { id: "ledger", at: ".mgcp-seg", note: "Ledger lists every run the console has recorded." },
       { id: "server", at: ".mgcp-srvrow", note: "Restart or stop the server from here." },
       { id: "lan", at: ".mgcp-bonjour", note: "Let phones on your Wi-Fi find the gallery." },

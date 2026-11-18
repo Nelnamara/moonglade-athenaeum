@@ -138,8 +138,8 @@ No. Lookups are by `media_id`, so files can live in any subfolder.
 **Moonglade tells you when there is something to update to.** While it runs it checks for a
 new release about once an hour, and when one turns up a strip appears across the top of the screen —
 *"Moonglade v3.7.3 is ready"*, with **Update** and **Not now** — once per version, wherever
-in the app you are. **Update** opens the update window; or **open the Control Panel** (it re-checks on the spot) and the version
-stamp at the bottom of its sidebar is gold: *"v3.7.3 available — view"*. Click it and **About**
+in the app you are. **Update** opens the update window; or **open the Control Panel** (it re-checks on the spot) and the About row
+at the bottom of its sidebar carries a gold dot: *"About Moonglade · ● 3.7.3 available"*. Click it and **About**
 opens leading with *"v3.7.3 is out"* and **View the update ›**; that opens the confirm, which
 tells you what will happen — the update is pulled atomically, dependencies install
 only if they changed, the server restarts, and the tab reloads itself.

@@ -5743,7 +5743,7 @@ def create_app(out_dir: Path):
     PANEL_ACTIONS = {
         "sync":          {"args": ["--sync"], "label": "Sync now — pull new + fill metadata", "destructive": False},
         "stats":         {"args": ["--catalog-stats"], "label": "Catalog stats", "destructive": False},
-        "audit":         {"args": ["--audit", "--no-content"], "label": "Duplicate audit (fast, read-only)", "destructive": False},
+        "audit":         {"args": ["--audit"], "label": "Duplicate audit (read-only)", "destructive": False},
         # The "full audit" checkbox in the UI does NOT append a flag to the action above --
         # it selects this separate whitelisted entry. Same for dedup-delete below. Keeping
         # the client to a fixed set of action KEYS is what preserves the property the

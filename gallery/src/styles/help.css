@@ -232,11 +232,7 @@ html.mg-noblur .mgab-scrim { -webkit-backdrop-filter: none !important; backdrop-
 .mgab-btns button:hover, .mgab-btns a:hover { color: var(--text); border-color: var(--lavender); }
 .mgab-modal.phone .mgab-btns button, .mgab-modal.phone .mgab-btns a { padding: 10px 12px; font-size: 12px; }
 
-/* The Control Panel's version stamp, now a button (it keeps its footer text exactly). */
-.mgcp-verbtn { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer;
-  text-align: left; }
-.mgcp-verbtn:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
-/* The phone Control tab's About row. */
+/* The About row: the phone's Control tab, and the foot of the desktop Control Panel's left column. */
 .mghelp-aboutrow { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px;
   padding: 10px 14px; border-radius: 12px; border: 1px solid var(--surface1); background: none;
   color: var(--text); font: 13px/1.3 var(--font-system, system-ui, sans-serif); cursor: pointer; text-align: left; }
