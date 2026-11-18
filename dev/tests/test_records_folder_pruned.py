@@ -19,6 +19,7 @@ from moonglade import gallery as g
 from moonglade import integrity
 from moonglade import paths
 from moonglade import scan as scan_mod
+from moonglade import dupes as dupes_mod
 
 # moonglade.similar imports numpy and pixeltable at module level, and CI installs a curated list
 # without them (it ignores dev/tests/test_similar.py for the same reason), so only the test that
@@ -78,7 +79,7 @@ def test_a_picture_lookup_never_answers_from_it(library):
 def test_the_audit_and_dedup_never_see_it(library):
     seen = {str(rel).replace("\\", "/") for _, rel, _, _ in core._scan_media_files(library)}
     assert seen == {"images/real_100.png"}
-    assert g.duplicate_groups(library) == []                     # the MCP's and the browser's
+    assert dupes_mod.duplicate_groups(library) == []                     # the MCP's and the browser's
 
 
 def test_the_disk_count_never_counts_it(library):

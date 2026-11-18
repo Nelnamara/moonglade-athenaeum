@@ -7,7 +7,8 @@ rows, is_keeper/reclaimable_bytes) is covered in dev/tests/test_duplicates_api.p
 from types import SimpleNamespace
 
 from moonglade import backup as core
-from moonglade.gallery import CATALOG_FIELDS, compute_dhash, near_duplicate_groups, save_catalog
+from moonglade.gallery import CATALOG_FIELDS, compute_dhash, save_catalog
+from moonglade.dupes import near_duplicate_groups
 
 
 def _row(**kw):

@@ -99,7 +99,7 @@ def test_search_catalog_new_filters(catalog):
 def test_find_duplicates_wraps_the_helper(monkeypatch):
     fake = [{"media_id": "d1", "keeper": "a/d1.webp",
              "copies": [{"rel": "b/d1.webp", "bucket": "month", "size": 10}]}]
-    monkeypatch.setattr(m.g, "duplicate_groups", lambda out, limit=100: fake)
+    monkeypatch.setattr(m._dupes, "duplicate_groups", lambda out, limit=100: fake)
     assert m.find_duplicates() == {"count": 1, "groups": fake}
 
 

@@ -37,6 +37,7 @@ from fastmcp.utilities.types import Image
 
 from moonglade import gallery as g   # catalog helpers -- the single source of truth for SQL
 from moonglade.backup import __version__   # gallery already imports backup: no new cost
+from moonglade import dupes as _dupes
 
 # The library the tools read: bound by main() once the move has run and the library is
 # resolved (bind_library). Importing this module reads nothing.
@@ -317,7 +318,7 @@ def find_duplicates(limit: int = 100) -> dict:
     """Class-A duplicate groups in the LOCAL library -- a media_id whose file sits in
     more than one folder bucket -- so you can thin or quarantine them. Cheap (no hashing),
     read-only, local (no session). Returns {count, groups:[{media_id, keeper, copies}]}."""
-    groups = g.duplicate_groups(OUT, limit=max(1, min(limit, 500)))
+    groups = _dupes.duplicate_groups(OUT, limit=max(1, min(limit, 500)))
     return {"count": len(groups), "groups": groups}
 
 

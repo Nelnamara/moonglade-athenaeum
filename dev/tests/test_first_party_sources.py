@@ -16,7 +16,7 @@ _TODAY = (
     "Moonglade Launcher.pyw",
     "moonglade/__init__.py", "moonglade/__main__.py",
     "moonglade/assets.py", "moonglade/backup.py", "moonglade/bonjour.py",
-    "moonglade/container.py", "moonglade/contest_wins.py", "moonglade/curation_io.py",
+    "moonglade/container.py", "moonglade/contest_wins.py", "moonglade/curation_io.py", "moonglade/dupes.py",
     "moonglade/gallery.py", "moonglade/inbox.py", "moonglade/integrity.py",
     "moonglade/logs.py", "moonglade/mcp_server.py", "moonglade/migrate.py",
     "moonglade/narrator.py", "moonglade/outside.py", "moonglade/paths.py", "moonglade/recipes.py", "moonglade/runs.py", "moonglade/scan.py",
