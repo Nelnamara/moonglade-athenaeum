@@ -97,8 +97,11 @@ import pytest
 
 from tests.conftest import _SEALED_DONOR, stub_code_module
 
+from moonglade import account_prefs as account_prefs_mod
 from moonglade import backup as core
+from moonglade import jobs as jobs_mod
 from moonglade import paths as moonglade_paths
+from moonglade import updater as updater_mod
 from moonglade.gallery import (
     CATALOG_FIELDS, create_app, load_catalog, save_catalog,
     achievement_metrics, compute_achievements, save_ach_state,
@@ -540,7 +543,7 @@ def _put_the_outside_world_offline(mp):
     mp.setattr(_inbox, "_public_get", _blocked)
     mp.setattr(_inbox, "_rest_delete", _blocked, raising=False)
     mp.setattr(_recipes, "_rest_delete", _blocked, raising=False)
-    mp.setattr(_gallery, "fetch_releases", _no_release_list)
+    mp.setattr(updater_mod, "fetch_releases", _no_release_list)
     mp.setattr(_bonjour, "lan_ip", lambda: None)
     stub_code_module(mp, "similar", SimpleNamespace(similar=_no_index, count=_no_index))
 
@@ -4824,8 +4827,6 @@ def test_each_tab_keeps_its_own_scroll(
 # The feat the custom-file flag arms, found by the roster flag it carries (never an id
 # literal: pack v5 moved the hidden-feat ids out of public source). None without the donor.
 from tests.conftest import donor_feat as _donor_feat
-from moonglade import account_prefs as account_prefs_mod
-from moonglade import jobs as jobs_mod
 _UNDER_THE_HOOD = _donor_feat(unlocks="branding_tab")
 _DROP_RGB = (200, 40, 90)              # a colour nothing else in this harness paints, so a
 #                                        served pixel PROVES it came from this exact drop

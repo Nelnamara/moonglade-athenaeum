@@ -16,6 +16,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import gallery as g
 from tests.conftest import login_client
+from moonglade import updater as updater_mod
 
 
 def _wiki(tmp_path, files):
@@ -309,7 +310,7 @@ def test_page_route_serves_a_listed_page_and_refuses_anything_else(tmp_path):
 
 
 def test_online_route_answers_without_asking_while_up_to_date(tmp_path, monkeypatch):
-    monkeypatch.setattr(g, "_update_cache", {"at": 0, "payload": {"behind": False}, "ttl": 1})
+    monkeypatch.setattr(updater_mod, "_update_cache", {"at": 0, "payload": {"behind": False}, "ttl": 1})
 
     def boom(*a, **k):
         raise AssertionError("no network while up to date")

@@ -15,6 +15,7 @@ from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 from tests.conftest import login_test_client
 from moonglade import backup as core
 from moonglade import jobs as jobs_mod
+from moonglade import updater as updater_mod
 
 
 def _row(**kw):
@@ -52,13 +53,13 @@ def _fake_opener(payload):
 def _fresh_cache(monkeypatch):
     """The check cache is a module singleton -- reset it per test, the same isolation the
     suite gives every other module-level cache."""
-    monkeypatch.setattr(g, "_update_cache", {"at": 0.0, "payload": None})
+    monkeypatch.setattr(updater_mod, "_update_cache", {"at": 0.0, "payload": None})
 
 
 def _idle_state(monkeypatch):
-    monkeypatch.setattr(g, "_update_state", {"phase": "idle", "error": "", "at": 0.0})
+    monkeypatch.setattr(updater_mod, "_update_state", {"phase": "idle", "error": "", "at": 0.0})
     # The real 2s handover pause exists for the browser poll; a test does not need it.
-    monkeypatch.setattr(g, "UPDATE_RESTART_DELAY", 0)
+    monkeypatch.setattr(updater_mod, "UPDATE_RESTART_DELAY", 0)
 
 
 # ---- version arithmetic ----------------------------------------------------
@@ -66,25 +67,25 @@ def _idle_state(monkeypatch):
 def test_versions_compare_numerically_not_as_text():
     """The bug this exists to prevent: "3.10.0" sorts BEFORE "3.9.0" as text, which would
     tell a 3.9 install it is current forever and a 3.10 install it is behind forever."""
-    assert g.version_tuple("v3.10.0") > g.version_tuple("v3.9.0")
-    assert g.version_tuple("3.6.0") == (3, 6, 0)          # a bare version parses too
-    assert g.version_tuple("v3.6.0") == (3, 6, 0)         # ...identically to its tag
+    assert updater_mod.version_tuple("v3.10.0") > updater_mod.version_tuple("v3.9.0")
+    assert updater_mod.version_tuple("3.6.0") == (3, 6, 0)          # a bare version parses too
+    assert updater_mod.version_tuple("v3.6.0") == (3, 6, 0)         # ...identically to its tag
     for junk in ("assets-2026-08-21", "v3.6", "v3.6.0-rc1", "", None, "latest"):
-        assert g.version_tuple(junk) is None, junk
+        assert updater_mod.version_tuple(junk) is None, junk
 
 
 def test_the_release_picker_takes_the_highest_version_not_the_first_listed():
     """GitHub orders by creation date. A hotfix cut on an old line AFTER a newer release
     lists FIRST -- and first-listed would then offer a 3.6.0 install a "newer" 3.5.1."""
-    picked = g.pick_latest_release([_rel("v3.5.1"), _rel("v3.6.0"), _rel("v3.4.9")])
+    picked = updater_mod.pick_latest_release([_rel("v3.5.1"), _rel("v3.6.0"), _rel("v3.4.9")])
     assert picked["tag_name"] == "v3.6.0"
     # ...and the comparison is numeric there too
-    assert g.pick_latest_release([_rel("v3.9.0"), _rel("v3.10.0")])["tag_name"] == "v3.10.0"
+    assert updater_mod.pick_latest_release([_rel("v3.9.0"), _rel("v3.10.0")])["tag_name"] == "v3.10.0"
 
 
 def test_the_release_picker_skips_prereleases():
     """"Update me" does not mean "put me on a release candidate"."""
-    picked = g.pick_latest_release([
+    picked = updater_mod.pick_latest_release([
         {"tag_name": "v4.0.0", "prerelease": True, "html_url": "", "name": ""},
         _rel("v3.6.0")])
     assert picked["tag_name"] == "v3.6.0"
@@ -94,13 +95,13 @@ def test_the_release_picker_skips_asset_packs():
     """The whole correctness of the check. Asset packs are FULL releases and can be the
     newest thing in the repo -- /releases/latest would happily offer one as an app
     update."""
-    picked = g.pick_latest_release([
+    picked = updater_mod.pick_latest_release([
         _rel("assets-2026-08-30"), _rel("assets-2026-08-21"), _rel("v3.6.0"), _rel("v3.5.0")])
     assert picked["tag_name"] == "v3.6.0"
-    assert g.pick_latest_release([_rel("assets-2026-08-30")]) is None
-    assert g.pick_latest_release([]) is None
+    assert updater_mod.pick_latest_release([_rel("assets-2026-08-30")]) is None
+    assert updater_mod.pick_latest_release([]) is None
     # a draft is not a release anyone can pull
-    assert g.pick_latest_release([_rel("v9.9.9", draft=True), _rel("v3.6.0")])["tag_name"] == "v3.6.0"
+    assert updater_mod.pick_latest_release([_rel("v9.9.9", draft=True), _rel("v3.6.0")])["tag_name"] == "v3.6.0"
 
 
 # ---- the check route -------------------------------------------------------
@@ -116,7 +117,7 @@ def _one_minor_ahead():
 def test_check_reports_behind_with_the_release_details(tmp_path, monkeypatch):
     _fresh_cache(monkeypatch)
     ahead = _one_minor_ahead()
-    monkeypatch.setattr(g, "fetch_releases", lambda **k: [
+    monkeypatch.setattr(updater_mod, "fetch_releases", lambda **k: [
         _rel("assets-2026-08-30"), _rel(ahead, "The Tenth", "https://example.invalid/v3100")])
     cli = _client(tmp_path)
     d = cli.get("/api/update/check").get_json()
@@ -129,7 +130,7 @@ def test_check_reports_behind_with_the_release_details(tmp_path, monkeypatch):
 def test_check_reports_up_to_date_on_its_own_version(tmp_path, monkeypatch):
     from moonglade import backup as core
     _fresh_cache(monkeypatch)
-    monkeypatch.setattr(g, "fetch_releases", lambda **k: [_rel("v" + core.__version__)])
+    monkeypatch.setattr(updater_mod, "fetch_releases", lambda **k: [_rel("v" + core.__version__)])
     d = _client(tmp_path).get("/api/update/check").get_json()
     assert d["behind"] is False and d["latest"] == "v" + core.__version__
 
@@ -143,13 +144,13 @@ def test_check_is_cached_for_the_ttl(tmp_path, monkeypatch):
     def _fetch(**k):
         calls["n"] += 1
         return [_rel("v9.9.9")]
-    monkeypatch.setattr(g, "fetch_releases", _fetch)
+    monkeypatch.setattr(updater_mod, "fetch_releases", _fetch)
     cli = _client(tmp_path)
     for _ in range(5):
         assert cli.get("/api/update/check").get_json()["latest"] == "v9.9.9"
     assert calls["n"] == 1
     # ...and the cache genuinely expires rather than being permanent
-    g._update_cache["at"] -= (g.UPDATE_CHECK_TTL + 1)
+    updater_mod._update_cache["at"] -= (updater_mod.UPDATE_CHECK_TTL + 1)
     cli.get("/api/update/check")
     assert calls["n"] == 2
 
@@ -164,7 +165,7 @@ def test_check_fails_soft_and_memoizes_the_failure_briefly(tmp_path, monkeypatch
     def _boom(**k):
         calls["n"] += 1
         raise OSError("getaddrinfo failed")
-    monkeypatch.setattr(g, "fetch_releases", _boom)
+    monkeypatch.setattr(updater_mod, "fetch_releases", _boom)
     cli = _client(tmp_path)
     r = cli.get("/api/update/check")
     assert r.status_code == 200
@@ -172,18 +173,18 @@ def test_check_fails_soft_and_memoizes_the_failure_briefly(tmp_path, monkeypatch
     assert d["behind"] is False and "getaddrinfo failed" in d["error"]
     cli.get("/api/update/check")                      # a second open costs nothing
     assert calls["n"] == 1
-    assert g._update_cache["ttl"] == g.UPDATE_FAILURE_TTL
-    assert g.UPDATE_FAILURE_TTL < g.UPDATE_CHECK_TTL  # ...and it is the SHORT one
+    assert updater_mod._update_cache["ttl"] == updater_mod.UPDATE_FAILURE_TTL
+    assert updater_mod.UPDATE_FAILURE_TTL < updater_mod.UPDATE_CHECK_TTL  # ...and it is the SHORT one
     # once that short window passes, it really does try again
-    g._update_cache["at"] -= (g.UPDATE_FAILURE_TTL + 1)
-    monkeypatch.setattr(g, "fetch_releases", lambda **k: [_rel("v9.9.9")])
+    updater_mod._update_cache["at"] -= (updater_mod.UPDATE_FAILURE_TTL + 1)
+    monkeypatch.setattr(updater_mod, "fetch_releases", lambda **k: [_rel("v9.9.9")])
     assert cli.get("/api/update/check").get_json()["behind"] is True
-    assert g._update_cache["ttl"] == g.UPDATE_CHECK_TTL   # a success caches the long way
+    assert updater_mod._update_cache["ttl"] == updater_mod.UPDATE_CHECK_TTL   # a success caches the long way
 
 
 def test_check_handles_a_release_list_with_no_versions(tmp_path, monkeypatch):
     _fresh_cache(monkeypatch)
-    monkeypatch.setattr(g, "fetch_releases", lambda **k: [_rel("assets-2026-08-30")])
+    monkeypatch.setattr(updater_mod, "fetch_releases", lambda **k: [_rel("assets-2026-08-30")])
     d = _client(tmp_path).get("/api/update/check").get_json()
     assert d["behind"] is False and d["error"] == "no versioned release found"
 
@@ -196,7 +197,7 @@ def test_fetch_releases_asks_github_for_the_list_not_latest(monkeypatch):
         seen["url"] = req.full_url
         seen["ua"] = req.get_header("User-agent")
         return _fake_opener([_rel("v3.6.0")])(req, timeout)
-    assert g.fetch_releases(opener=_opener)[0]["tag_name"] == "v3.6.0"
+    assert updater_mod.fetch_releases(opener=_opener)[0]["tag_name"] == "v3.6.0"
     assert "/releases?per_page=" in seen["url"] and "/releases/latest" not in seen["url"]
     assert "moonglade" in (seen["ua"] or "").lower()
 
@@ -225,7 +226,7 @@ def _apply_ready(monkeypatch, branch="master", dirty="", supervised=True,
         if args[:1] == ["rev-parse"]:
             return 0, "abc123"
         return 0, ""
-    monkeypatch.setattr(g, "_git", _git)
+    monkeypatch.setattr(updater_mod, "_git", _git)
     return _git
 
 
@@ -386,8 +387,8 @@ def test_a_clean_tree_never_pays_for_the_fetch(tmp_path, monkeypatch):
     the pre-check asks the network nothing and the pull does its own fetch as before."""
     calls = []
     _apply_ready(monkeypatch, dirty="")
-    real = g._git
-    monkeypatch.setattr(g, "_git", lambda args, **k: (calls.append(args[0]), real(args, **k))[1])
+    real = updater_mod._git
+    monkeypatch.setattr(updater_mod, "_git", lambda args, **k: (calls.append(args[0]), real(args, **k))[1])
     cli = _client(tmp_path)
     _started(monkeypatch)
     assert _apply(cli).status_code == 200
@@ -404,7 +405,7 @@ def test_apply_starts_the_update_when_every_gate_passes(tmp_path, monkeypatch):
     r = _apply(cli)
     assert r.status_code == 200 and r.get_json()["ok"] is True
     assert started["n"] == 1
-    assert g.update_state()["phase"] == "pulling"
+    assert updater_mod.update_state()["phase"] == "pulling"
     # single-flight: a second click while one runs is refused, not queued
     r2 = _apply(cli)
     assert r2.status_code == 409 and "already running" in r2.get_json()["error"]
@@ -531,13 +532,13 @@ def test_run_update_skips_pip_when_requirements_did_not_move(monkeypatch):
         if args[:1] == ["diff"]:
             return 0, "moonglade_gallery.py\ngallery/dist/app.js"
         return 0, "Updating abc..def"
-    monkeypatch.setattr(g, "_git", _git)
+    monkeypatch.setattr(updater_mod, "_git", _git)
     pip = {"n": 0}
     restarted = {"n": 0}
-    assert g.run_update(lambda: restarted.update(n=1),
+    assert updater_mod.run_update(lambda: restarted.update(n=1),
                         pip_fn=lambda: pip.update(n=pip["n"] + 1) or (0, "")) is True
     assert pip["n"] == 0 and restarted["n"] == 1
-    assert g.update_state()["phase"] == "restarting"
+    assert updater_mod.update_state()["phase"] == "restarting"
 
 
 def test_run_update_installs_deps_when_requirements_moved(monkeypatch):
@@ -551,9 +552,9 @@ def test_run_update_installs_deps_when_requirements_moved(monkeypatch):
         if args[:1] == ["diff"]:
             return 0, "requirements.txt\nmoonglade_backup.py"
         return 0, ""
-    monkeypatch.setattr(g, "_git", _git)
+    monkeypatch.setattr(updater_mod, "_git", _git)
     pip = {"n": 0}
-    assert g.run_update(lambda: None, pip_fn=lambda: pip.update(n=1) or (0, "ok")) is True
+    assert updater_mod.run_update(lambda: None, pip_fn=lambda: pip.update(n=1) or (0, "ok")) is True
     assert pip["n"] == 1
 
 
@@ -561,23 +562,23 @@ def test_an_unreadable_diff_installs_rather_than_guessing(monkeypatch):
     """Can't tell whether deps moved -> install. Guessing "no" can leave the app running
     new code against old dependencies; guessing "yes" only costs time."""
     _idle_state(monkeypatch)
-    monkeypatch.setattr(g, "_git", lambda args, **k: (0, "HEAD") if args[:1] == ["rev-parse"]
+    monkeypatch.setattr(updater_mod, "_git", lambda args, **k: (0, "HEAD") if args[:1] == ["rev-parse"]
                         else (1, "fatal: bad object") if args[:1] == ["diff"] else (0, ""))
-    assert g._requirements_changed("OLD", "NEW") is True
+    assert updater_mod._requirements_changed("OLD", "NEW") is True
 
 
 def test_a_failed_pull_stops_and_keeps_the_error_verbatim(monkeypatch):
     """--ff-only either fast-forwards or refuses, so a failed pull changed nothing -- and
     git's own words are what the person watching needs."""
     _idle_state(monkeypatch)
-    monkeypatch.setattr(g, "_git", lambda args, **k:
+    monkeypatch.setattr(updater_mod, "_git", lambda args, **k:
                         (0, "HEAD") if args[:1] == ["rev-parse"]
                         else (1, "fatal: Not possible to fast-forward, aborting."))
     pip = {"n": 0}
     restarted = {"n": 0}
-    assert g.run_update(lambda: restarted.update(n=1),
+    assert updater_mod.run_update(lambda: restarted.update(n=1),
                         pip_fn=lambda: pip.update(n=1) or (0, "")) is False
-    st = g.update_state()
+    st = updater_mod.update_state()
     assert st["phase"] == "failed" and "fast-forward" in st["error"]
     assert pip["n"] == 0 and restarted["n"] == 0        # nothing after the failure ran
 
@@ -592,30 +593,30 @@ def test_a_failed_pip_stops_before_restarting(monkeypatch):
         if args[:1] == ["diff"]:
             return 0, "requirements.txt"
         return 0, ""
-    monkeypatch.setattr(g, "_git", _git)
+    monkeypatch.setattr(updater_mod, "_git", _git)
     restarted = {"n": 0}
-    assert g.run_update(lambda: restarted.update(n=1),
+    assert updater_mod.run_update(lambda: restarted.update(n=1),
                         pip_fn=lambda: (1, "ERROR: could not install")) is False
-    st = g.update_state()
+    st = updater_mod.update_state()
     assert st["phase"] == "failed" and "could not install" in st["error"]
     assert restarted["n"] == 0
 
 
 def test_a_refused_restart_is_reported_not_swallowed(monkeypatch):
     _idle_state(monkeypatch)
-    monkeypatch.setattr(g, "_git", lambda args, **k: (0, "SAME"))
+    monkeypatch.setattr(updater_mod, "_git", lambda args, **k: (0, "SAME"))
 
     def _restart():
         raise RuntimeError("the managed launcher is gone")
-    assert g.run_update(_restart, pip_fn=lambda: (0, "")) is False
-    assert "launcher is gone" in g.update_state()["error"]
+    assert updater_mod.run_update(_restart, pip_fn=lambda: (0, "")) is False
+    assert "launcher is gone" in updater_mod.update_state()["error"]
 
 
 def test_status_route_reports_the_phase(tmp_path, monkeypatch):
     _idle_state(monkeypatch)
     cli = _client(tmp_path)
     assert cli.get("/api/update/status").get_json()["phase"] == "idle"
-    g._set_update_state("failed", "git pull failed:\nfatal: whatever")
+    updater_mod._set_update_state("failed", "git pull failed:\nfatal: whatever")
     d = cli.get("/api/update/status").get_json()
     assert d["phase"] == "failed" and "fatal: whatever" in d["error"]
 
@@ -637,11 +638,11 @@ def test_a_failed_pip_rolls_the_pull_back(monkeypatch):
         if args[:1] == ["diff"]:
             return 0, "requirements.txt"
         return 0, ""
-    monkeypatch.setattr(g, "_git", _git)
-    assert g.run_update(lambda: None,
+    monkeypatch.setattr(updater_mod, "_git", _git)
+    assert updater_mod.run_update(lambda: None,
                         pip_fn=lambda: (1, "ERROR: no matching distribution")) is False
     assert ["reset", "--hard", "OLD"] in seen, seen
-    st = g.update_state()
+    st = updater_mod.update_state()
     assert "no matching distribution" in st["error"]     # pip's own words, kept
     assert "Rolled back to OLD" in st["error"]           # ...and what was done about it
 
@@ -651,13 +652,13 @@ def test_a_failed_rollback_says_so_loudly(monkeypatch):
     to say which -- with the command to fix it by hand."""
     _idle_state(monkeypatch)
     heads = iter(["OLD", "NEW"])
-    monkeypatch.setattr(g, "_git", lambda args, **k:
+    monkeypatch.setattr(updater_mod, "_git", lambda args, **k:
                         (0, next(heads, "NEW")) if args[:1] == ["rev-parse"]
                         else (0, "requirements.txt") if args[:1] == ["diff"]
                         else (1, "fatal: cannot reset") if args[:1] == ["reset"]
                         else (0, ""))
-    assert g.run_update(lambda: None, pip_fn=lambda: (1, "boom")) is False
-    err = g.update_state()["error"]
+    assert updater_mod.run_update(lambda: None, pip_fn=lambda: (1, "boom")) is False
+    err = updater_mod.update_state()["error"]
     assert "ROLLBACK ALSO FAILED" in err and "git reset --hard OLD" in err
 
 
@@ -686,12 +687,12 @@ def test_retrying_after_a_pip_failure_really_re_runs_pip(monkeypatch):
     def _pip():
         pip["n"] += 1
         return (0, "ok") if pip["ok"] else (1, "ERROR: transient")
-    monkeypatch.setattr(g, "_git", _git)
+    monkeypatch.setattr(updater_mod, "_git", _git)
 
-    assert g.run_update(lambda: None, pip_fn=_pip) is False
+    assert updater_mod.run_update(lambda: None, pip_fn=_pip) is False
     assert pip["n"] == 1 and repo["head"] == "OLD"        # rolled back, so...
     pip["ok"] = True
-    assert g.run_update(lambda: None, pip_fn=_pip) is True
+    assert updater_mod.run_update(lambda: None, pip_fn=_pip) is True
     assert pip["n"] == 2, "the retry must actually re-run pip"
 
 
@@ -700,33 +701,33 @@ def test_both_outcomes_are_written_to_the_activity_log(monkeypatch):
     record at all of one that failed while nobody was watching the modal."""
     _idle_state(monkeypatch)
     logged = []
-    monkeypatch.setattr(g, "_git", lambda args, **k: (0, "SAME"))
-    assert g.run_update(lambda: None, pip_fn=lambda: (0, ""),
+    monkeypatch.setattr(updater_mod, "_git", lambda args, **k: (0, "SAME"))
+    assert updater_mod.run_update(lambda: None, pip_fn=lambda: (0, ""),
                         log_fn=lambda status, error="": logged.append((status, error))) is True
     assert logged == [("done", "")]
 
     logged.clear()
-    monkeypatch.setattr(g, "_git", lambda args, **k:
+    monkeypatch.setattr(updater_mod, "_git", lambda args, **k:
                         (0, "HEAD") if args[:1] == ["rev-parse"] else (1, "fatal: refusing"))
-    assert g.run_update(lambda: None,
+    assert updater_mod.run_update(lambda: None,
                         log_fn=lambda status, error="": logged.append((status, error))) is False
     assert logged[0][0] == "failed" and "fatal: refusing" in logged[0][1]
 
 
 def test_a_logging_failure_never_breaks_the_update(monkeypatch):
     _idle_state(monkeypatch)
-    monkeypatch.setattr(g, "_git", lambda args, **k: (0, "SAME"))
+    monkeypatch.setattr(updater_mod, "_git", lambda args, **k: (0, "SAME"))
 
     def _boom(status, error=""):
         raise OSError("disk full")
-    assert g.run_update(lambda: None, pip_fn=lambda: (0, ""), log_fn=_boom) is True
+    assert updater_mod.run_update(lambda: None, pip_fn=lambda: (0, ""), log_fn=_boom) is True
 
 
 def test_the_update_records_a_line_in_the_real_activity_log(tmp_path, monkeypatch):
     """End to end through the route: the jobs.jsonl line the activity tracker serves."""
     from moonglade import backup as core
     _apply_ready(monkeypatch)
-    monkeypatch.setattr(g, "_git", lambda args, **k:
+    monkeypatch.setattr(updater_mod, "_git", lambda args, **k:
                         (0, "master") if args[:2] == ["rev-parse", "--abbrev-ref"]
                         else (0, "") if args[:1] == ["status"]
                         else (0, "SAME"))
@@ -767,7 +768,7 @@ def test_the_log_line_records_the_untracked_files_the_update_stepped_around(
 # ---- mutual exclusion, both directions ---------------------------------------
 
 def _mid_update(monkeypatch, phase="pulling"):
-    monkeypatch.setattr(g, "_update_state", {"phase": phase, "error": "", "at": 0.0})
+    monkeypatch.setattr(updater_mod, "_update_state", {"phase": phase, "error": "", "at": 0.0})
 
 
 def test_restart_and_stop_refuse_while_an_update_runs(tmp_path, monkeypatch):
@@ -823,7 +824,7 @@ def test_the_status_route_redacts_host_paths(tmp_path, monkeypatch):
     on the LAN. The unredacted copy stays in the server's own log."""
     _idle_state(monkeypatch)
     cli = _client(tmp_path)
-    g._set_update_state("failed", "error: cannot open %s/thing" % str(tmp_path))
+    updater_mod._set_update_state("failed", "error: cannot open %s/thing" % str(tmp_path))
     d = cli.get("/api/update/status").get_json()
     assert str(tmp_path) not in d["error"] and "cannot open" in d["error"]
 
@@ -846,9 +847,9 @@ T0 = 1800000000.0
 def _fresh_tick(monkeypatch, at=0.0, floor_at=0.0):
     """Reset the background cadence's module singletons -- the same per-test isolation
     _fresh_cache gives the check cache."""
-    monkeypatch.setattr(g, "_update_tick", {"at": at})
-    monkeypatch.setattr(g, "_update_floor", {"at": floor_at})
-    monkeypatch.setattr(g, "_update_notice",
+    monkeypatch.setattr(updater_mod, "_update_tick", {"at": at})
+    monkeypatch.setattr(updater_mod, "_update_floor", {"at": floor_at})
+    monkeypatch.setattr(updater_mod, "_update_notice",
                         {"version": "", "seq": 0, "at": 0.0, "payload": None})
 
 
@@ -859,7 +860,7 @@ def _counting_fetch(monkeypatch, releases):
     def _fetch(**k):
         calls["n"] += 1
         return list(releases)
-    monkeypatch.setattr(g, "fetch_releases", _fetch)
+    monkeypatch.setattr(updater_mod, "fetch_releases", _fetch)
     return calls
 
 
@@ -869,17 +870,17 @@ def test_the_background_tick_asks_about_once_an_hour(monkeypatch):
     _fresh_cache(monkeypatch)
     _fresh_tick(monkeypatch)
     calls = _counting_fetch(monkeypatch, [_rel("v9.9.9")])
-    assert g.run_update_tick("3.0.0", now=T0)["latest"] == "v9.9.9"
+    assert updater_mod.run_update_tick("3.0.0", now=T0)["latest"] == "v9.9.9"
     assert calls["n"] == 1
     # ...and no tick in the next hour is due at all
     for minute in (1, 5, 30, 59):
-        assert g.run_update_tick("3.0.0", now=T0 + minute * 60) is None
+        assert updater_mod.run_update_tick("3.0.0", now=T0 + minute * 60) is None
     assert calls["n"] == 1
     # An hour on it runs again -- and the 30-minute TTL has long expired by then, so that
     # run is a real request. One an hour, which is the number the budget was written for.
-    assert g.run_update_tick("3.0.0", now=T0 + g.UPDATE_TICK_SECONDS)["latest"] == "v9.9.9"
+    assert updater_mod.run_update_tick("3.0.0", now=T0 + updater_mod.UPDATE_TICK_SECONDS)["latest"] == "v9.9.9"
     assert calls["n"] == 2
-    assert g.UPDATE_TICK_SECONDS >= 2 * g.UPDATE_CHECK_TTL   # the cache can never outlive a tick
+    assert updater_mod.UPDATE_TICK_SECONDS >= 2 * updater_mod.UPDATE_CHECK_TTL   # the cache can never outlive a tick
 
 
 def test_the_tick_reuses_a_recent_panel_answer_rather_than_re_asking(monkeypatch):
@@ -888,10 +889,10 @@ def test_the_tick_reuses_a_recent_panel_answer_rather_than_re_asking(monkeypatch
     _fresh_cache(monkeypatch)
     _fresh_tick(monkeypatch)
     calls = _counting_fetch(monkeypatch, [_rel("v9.9.9")])
-    g._update_cache.update(at=T0 - 60, ttl=g.UPDATE_CHECK_TTL,
+    updater_mod._update_cache.update(at=T0 - 60, ttl=updater_mod.UPDATE_CHECK_TTL,
                            payload={"current": "3.0.0", "latest": "v9.9.9",
                                     "behind": True, "checked_at": T0 - 60})
-    assert g.run_update_tick("3.0.0", now=T0)["latest"] == "v9.9.9"
+    assert updater_mod.run_update_tick("3.0.0", now=T0)["latest"] == "v9.9.9"
     assert calls["n"] == 0                       # the cache answered
 
 
@@ -900,33 +901,33 @@ def test_a_new_release_is_announced_once_not_on_every_tick(monkeypatch):
     once one is out; announcing that every hour is how you teach someone to ignore it."""
     _fresh_cache(monkeypatch)
     _fresh_tick(monkeypatch)
-    monkeypatch.setattr(g, "fetch_releases", lambda **k: [_rel("v9.9.9", "The Ninth")])
-    assert g.run_update_tick("3.0.0", now=T0) is not None
-    first = g.update_notice()
+    monkeypatch.setattr(updater_mod, "fetch_releases", lambda **k: [_rel("v9.9.9", "The Ninth")])
+    assert updater_mod.run_update_tick("3.0.0", now=T0) is not None
+    first = updater_mod.update_notice()
     assert first["latest"] == "v9.9.9" and first["behind"] is True
     assert first["title"] == "The Ninth"
     seq = first["seq"]
     for hour in (1, 2, 3):                       # three more hours of finding the same thing
         _fresh_cache(monkeypatch)                # ...each one really asking
-        g.run_update_tick("3.0.0", now=T0 + hour * g.UPDATE_TICK_SECONDS)
-    assert g.update_notice()["seq"] == seq, "the same release must not re-announce"
+        updater_mod.run_update_tick("3.0.0", now=T0 + hour * updater_mod.UPDATE_TICK_SECONDS)
+    assert updater_mod.update_notice()["seq"] == seq, "the same release must not re-announce"
     _fresh_cache(monkeypatch)                    # a HIGHER release IS a new event
-    monkeypatch.setattr(g, "fetch_releases", lambda **k: [_rel("v9.10.0")])
-    g.run_update_tick("3.0.0", now=T0 + 4 * g.UPDATE_TICK_SECONDS)
-    assert g.update_notice()["latest"] == "v9.10.0"
-    assert g.update_notice()["seq"] == seq + 1
+    monkeypatch.setattr(updater_mod, "fetch_releases", lambda **k: [_rel("v9.10.0")])
+    updater_mod.run_update_tick("3.0.0", now=T0 + 4 * updater_mod.UPDATE_TICK_SECONDS)
+    assert updater_mod.update_notice()["latest"] == "v9.10.0"
+    assert updater_mod.update_notice()["seq"] == seq + 1
 
 
 def test_the_announcement_clears_once_the_release_is_no_longer_newer(monkeypatch):
     """After the update lands, the stamp must stop offering it."""
     _fresh_cache(monkeypatch)
     _fresh_tick(monkeypatch)
-    monkeypatch.setattr(g, "fetch_releases", lambda **k: [_rel("v9.9.9")])
-    g.run_update_tick("3.0.0", now=T0)
-    assert g.update_notice()["latest"] == "v9.9.9"
+    monkeypatch.setattr(updater_mod, "fetch_releases", lambda **k: [_rel("v9.9.9")])
+    updater_mod.run_update_tick("3.0.0", now=T0)
+    assert updater_mod.update_notice()["latest"] == "v9.9.9"
     _fresh_cache(monkeypatch)
-    assert g.run_update_tick("9.9.9", now=T0 + g.UPDATE_TICK_SECONDS)["behind"] is False
-    assert g.update_notice() is None
+    assert updater_mod.run_update_tick("9.9.9", now=T0 + updater_mod.UPDATE_TICK_SECONDS)["behind"] is False
+    assert updater_mod.update_notice() is None
 
 
 def test_a_failed_background_check_announces_nothing(monkeypatch):
@@ -937,9 +938,9 @@ def test_a_failed_background_check_announces_nothing(monkeypatch):
 
     def _boom(**k):
         raise OSError("getaddrinfo failed")
-    monkeypatch.setattr(g, "fetch_releases", _boom)
-    assert "getaddrinfo failed" in g.run_update_tick("3.0.0", now=T0)["error"]
-    assert g.update_notice() is None
+    monkeypatch.setattr(updater_mod, "fetch_releases", _boom)
+    assert "getaddrinfo failed" in updater_mod.run_update_tick("3.0.0", now=T0)["error"]
+    assert updater_mod.update_notice() is None
 
 
 def test_a_blip_does_not_take_a_standing_announcement_off_every_tab(monkeypatch):
@@ -952,31 +953,31 @@ def test_a_blip_does_not_take_a_standing_announcement_off_every_tab(monkeypatch)
     one release, against a ruling that says one."""
     _fresh_cache(monkeypatch)
     _fresh_tick(monkeypatch)
-    monkeypatch.setattr(g, "fetch_releases", lambda **k: [_rel("v9.9.9", "The Ninth")])
-    g.run_update_tick("3.0.0", now=T0)
-    seq = g.update_notice()["seq"]
+    monkeypatch.setattr(updater_mod, "fetch_releases", lambda **k: [_rel("v9.9.9", "The Ninth")])
+    updater_mod.run_update_tick("3.0.0", now=T0)
+    seq = updater_mod.update_notice()["seq"]
 
     def _boom(**k):
         raise OSError("getaddrinfo failed")
-    monkeypatch.setattr(g, "fetch_releases", _boom)
+    monkeypatch.setattr(updater_mod, "fetch_releases", _boom)
     _fresh_cache(monkeypatch)                    # the blip really goes out and really fails
-    blip = g.run_update_tick("3.0.0", now=T0 + g.UPDATE_TICK_SECONDS)
+    blip = updater_mod.run_update_tick("3.0.0", now=T0 + updater_mod.UPDATE_TICK_SECONDS)
     assert "getaddrinfo failed" in blip["error"] and blip["behind"] is False
-    after = g.update_notice()
+    after = updater_mod.update_notice()
     assert after is not None, "a blip must not take the standing announcement down"
     assert after["latest"] == "v9.9.9" and after["title"] == "The Ninth"
     assert after["seq"] == seq, "and must not move the counter the client dedupes on"
 
     # ...so the good tick behind it is not a second announcement of the same release.
-    monkeypatch.setattr(g, "fetch_releases", lambda **k: [_rel("v9.9.9", "The Ninth")])
+    monkeypatch.setattr(updater_mod, "fetch_releases", lambda **k: [_rel("v9.9.9", "The Ninth")])
     _fresh_cache(monkeypatch)
-    assert g.run_update_tick("3.0.0", now=T0 + 2 * g.UPDATE_TICK_SECONDS)["behind"] is True
-    assert g.update_notice()["seq"] == seq, "the same release must not re-announce"
+    assert updater_mod.run_update_tick("3.0.0", now=T0 + 2 * updater_mod.UPDATE_TICK_SECONDS)["behind"] is True
+    assert updater_mod.update_notice()["seq"] == seq, "the same release must not re-announce"
 
     # A GENUINE up-to-date answer -- no error, the update was applied -- still clears.
-    assert g.note_update_transition({"current": "9.9.9", "latest": "v9.9.9", "behind": False},
-                                    now=T0 + 3 * g.UPDATE_TICK_SECONDS) is False
-    assert g.update_notice() is None
+    assert updater_mod.note_update_transition({"current": "9.9.9", "latest": "v9.9.9", "behind": False},
+                                    now=T0 + 3 * updater_mod.UPDATE_TICK_SECONDS) is False
+    assert updater_mod.update_notice() is None
 
 
 def test_a_panel_open_gets_a_fresh_answer_past_the_cache(monkeypatch):
@@ -985,13 +986,13 @@ def test_a_panel_open_gets_a_fresh_answer_past_the_cache(monkeypatch):
     _fresh_cache(monkeypatch)
     _fresh_tick(monkeypatch)
     calls = _counting_fetch(monkeypatch, [_rel("v9.9.9")])
-    assert g.check_for_update_fresh("3.0.0", now=T0)["latest"] == "v9.9.9"
+    assert updater_mod.check_for_update_fresh("3.0.0", now=T0)["latest"] == "v9.9.9"
     assert calls["n"] == 1
     # the cache is minutes old and answers a normal caller...
-    assert g.check_for_update("3.0.0", now=T0 + 300)["latest"] == "v9.9.9"
+    assert updater_mod.check_for_update("3.0.0", now=T0 + 300)["latest"] == "v9.9.9"
     assert calls["n"] == 1
     # ...but a Panel open past the floor asks again
-    assert g.check_for_update_fresh("3.0.0", now=T0 + 300)["latest"] == "v9.9.9"
+    assert updater_mod.check_for_update_fresh("3.0.0", now=T0 + 300)["latest"] == "v9.9.9"
     assert calls["n"] == 2
 
 
@@ -1001,13 +1002,13 @@ def test_rapid_panel_opens_cost_github_nothing(monkeypatch):
     _fresh_cache(monkeypatch)
     _fresh_tick(monkeypatch)
     calls = _counting_fetch(monkeypatch, [_rel("v9.9.9")])
-    g.check_for_update_fresh("3.0.0", now=T0)
+    updater_mod.check_for_update_fresh("3.0.0", now=T0)
     for second in (1, 5, 20, 59):
-        assert g.check_for_update_fresh("3.0.0", now=T0 + second)["latest"] == "v9.9.9"
+        assert updater_mod.check_for_update_fresh("3.0.0", now=T0 + second)["latest"] == "v9.9.9"
     assert calls["n"] == 1, "inside the floor a Panel open reads the cache"
-    g.check_for_update_fresh("3.0.0", now=T0 + g.UPDATE_PANEL_FLOOR)
+    updater_mod.check_for_update_fresh("3.0.0", now=T0 + updater_mod.UPDATE_PANEL_FLOOR)
     assert calls["n"] == 2
-    assert g.UPDATE_PANEL_FLOOR < g.UPDATE_CHECK_TTL          # ...and it IS the short one
+    assert updater_mod.UPDATE_PANEL_FLOOR < updater_mod.UPDATE_CHECK_TTL          # ...and it IS the short one
 
 
 def test_the_check_route_asks_fresh_only_when_the_panel_says_so(tmp_path, monkeypatch):
@@ -1019,7 +1020,7 @@ def test_the_check_route_asks_fresh_only_when_the_panel_says_so(tmp_path, monkey
     assert calls["n"] == 1
     assert cli.get("/api/update/check").get_json()["latest"] == "v9.9.9"
     assert calls["n"] == 1                       # a plain re-read inside the TTL, as before
-    g._update_floor["at"] -= (g.UPDATE_PANEL_FLOOR + 1)
+    updater_mod._update_floor["at"] -= (updater_mod.UPDATE_PANEL_FLOOR + 1)
     assert cli.get("/api/update/check?fresh=1").get_json()["latest"] == "v9.9.9"
     assert calls["n"] == 2                       # the Panel open is the one that goes back
 
@@ -1034,7 +1035,7 @@ def test_the_jobs_poll_carries_the_announcement_and_never_fetches(tmp_path, monk
     cli = _client(tmp_path)
     assert cli.get("/api/jobs").get_json()["update"] is None      # nothing found yet
     assert calls["n"] == 0
-    g.run_update_tick("3.0.0", now=T0)
+    updater_mod.run_update_tick("3.0.0", now=T0)
     assert calls["n"] == 1
     for _ in range(5):
         d = cli.get("/api/jobs").get_json()
@@ -1070,7 +1071,7 @@ def test_the_background_path_has_no_route_into_applying_an_update():
     forbidden = FORBIDDEN_APPLY_NAMES
     for name in ("run_update_tick", "note_update_transition", "update_notice",
                  "check_for_update_fresh", "check_for_update"):
-        tree = ast.parse(textwrap.dedent(inspect.getsource(getattr(g, name))))
+        tree = ast.parse(textwrap.dedent(inspect.getsource(getattr(updater_mod, name))))
         used = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Name):
@@ -1142,10 +1143,10 @@ def test_a_tick_that_finds_a_release_does_not_touch_the_updater(monkeypatch):
 
     def _never(*a, **k):
         raise AssertionError("the background check applied an update")
-    monkeypatch.setattr(g, "run_update", _never)
-    monkeypatch.setattr(g, "_git", _never)
+    monkeypatch.setattr(updater_mod, "run_update", _never)
+    monkeypatch.setattr(updater_mod, "_git", _never)
     monkeypatch.setattr(g, "_schedule_server_exit", _never)
-    monkeypatch.setattr(g, "fetch_releases", lambda **k: [_rel("v9.9.9")])
-    assert g.run_update_tick("3.0.0", now=T0)["behind"] is True
-    assert g.update_notice()["latest"] == "v9.9.9"
-    assert g.update_state()["phase"] == "idle"        # nothing ever started
+    monkeypatch.setattr(updater_mod, "fetch_releases", lambda **k: [_rel("v9.9.9")])
+    assert updater_mod.run_update_tick("3.0.0", now=T0)["behind"] is True
+    assert updater_mod.update_notice()["latest"] == "v9.9.9"
+    assert updater_mod.update_state()["phase"] == "idle"        # nothing ever started

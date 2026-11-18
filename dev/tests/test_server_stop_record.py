@@ -21,6 +21,7 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_test_client
+from moonglade import updater as updater_mod
 
 
 def _client(tmp_path, user="tester"):
@@ -135,12 +136,12 @@ def test_a_refused_click_is_not_a_stop(tmp_path, monkeypatch, caplog, fresh_exit
     monkeypatch.setattr(g, "_schedule_server_exit", lambda c: codes.append(c))
     monkeypatch.setattr(g, "_supervised", lambda: True)
     cli = _client(tmp_path)
-    monkeypatch.setattr(g, "_update_state", {"phase": "deps", "error": "", "at": 0.0})
+    monkeypatch.setattr(updater_mod, "_update_state", {"phase": "deps", "error": "", "at": 0.0})
     with caplog.at_level(logging.INFO, logger="moonglade.gallery"):
         assert cli.post("/api/server/stop").status_code == 409        # an update is running
         assert cli.post("/api/server/restart").status_code == 409
         monkeypatch.setattr(g, "_supervised", lambda: False)
-        monkeypatch.setattr(g, "_update_state", {"phase": "idle", "error": "", "at": 0.0})
+        monkeypatch.setattr(updater_mod, "_update_state", {"phase": "idle", "error": "", "at": 0.0})
         assert cli.post("/api/server/restart").status_code == 409     # not supervised
     assert codes == [] and _requests_logged(caplog) == []
     assert "exit_why" not in g._SERVER_CONTROL

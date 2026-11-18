@@ -33,6 +33,7 @@ from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog, load_cat
 from tests.conftest import login_test_client
 from tests.fake_pixai import FakePixAI
 from moonglade import jobs as jobs_mod
+from moonglade import updater as updater_mod
 
 SRC = Path(__file__).resolve().parents[2]
 DAY = 86400.0
@@ -867,7 +868,7 @@ def test_an_update_mid_flight_stops_the_tick_starting_anything(tmp_path, monkeyp
     _due_schedule(tmp_path, ["sync-videos"])
     cli = _client(tmp_path)
     started = []
-    monkeypatch.setattr(g, "update_state", lambda *a, **k: {"phase": "pulling"})
+    monkeypatch.setattr(updater_mod, "update_state", lambda *a, **k: {"phase": "pulling"})
 
     import subprocess as _sp
     with _mock.patch.object(_sp, "Popen", lambda argv, **kw: started.append(argv)):
