@@ -14,6 +14,7 @@ from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 from tests.conftest import login_test_client
 from moonglade import series as series_mod
 from moonglade import telemetry as telemetry_mod
+from moonglade import contest_sync as contest_sync_mod
 
 
 def _row(**kw):
@@ -89,15 +90,15 @@ def test_a_nested_artwork_id_survives_normalization():
 
 def test_the_sweep_keys_entries_by_artwork_not_entry_id(tmp_path, monkeypatch, pixai):
     """End to end: the sweep must produce the SAME key the enter path would."""
-    monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": 0.0})
-    monkeypatch.setattr(g, "_CONTEST_SYNC_PAUSE", 0)
+    monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": 0.0})
+    monkeypatch.setattr(contest_sync_mod, "_CONTEST_SYNC_PAUSE", 0)
     monkeypatch.setattr(core, "list_contests", lambda s, **k: [
         {"id": "c1", "slug": "s1", "active": True, "result_at": "", "end_at": ""}])
     monkeypatch.setattr(core, "contest_my_entries",
                         lambda s, slug, uid: core._contest_rows(
                             [{"id": "entry-1", "artwork": {"id": "art-9"}}]))
     monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
-    g._contest_detection_sync(tmp_path)
+    contest_sync_mod._contest_detection_sync(tmp_path)
     assert telemetry_mod.load_telemetry(tmp_path)["sets"]["contest_entry_keys"] == ["c1:art-9"]
 
 
@@ -109,8 +110,8 @@ def test_the_sweep_heals_a_legacy_double_key(tmp_path, monkeypatch, pixai):
     in a set that only grows. It cannot be untangled from the keys alone. But when upstream
     hands back a row carrying BOTH ids, it has just told us they name the same entry, and
     that is the moment -- the only moment -- the stale key can be discarded honestly."""
-    monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": 0.0})
-    monkeypatch.setattr(g, "_CONTEST_SYNC_PAUSE", 0)
+    monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": 0.0})
+    monkeypatch.setattr(contest_sync_mod, "_CONTEST_SYNC_PAUSE", 0)
     # a store poisoned the old way: the entry id, from a pre-fix sweep
     telemetry_mod.telem_set_add("contest_entry_keys", "c1:entry-1", out_dir=tmp_path)
     assert telemetry_mod.telemetry_metrics(tmp_path)["contest_entries"] == 1
@@ -120,7 +121,7 @@ def test_the_sweep_heals_a_legacy_double_key(tmp_path, monkeypatch, pixai):
                         lambda s, slug, uid: core._contest_rows(
                             [{"id": "entry-1", "artwork": {"id": "art-9"}}]))
     monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
-    g._contest_detection_sync(tmp_path)
+    contest_sync_mod._contest_detection_sync(tmp_path)
     # one entry, one key -- the true one
     assert telemetry_mod.load_telemetry(tmp_path)["sets"]["contest_entry_keys"] == ["c1:art-9"]
     assert telemetry_mod.telemetry_metrics(tmp_path)["contest_entries"] == 1
@@ -130,15 +131,15 @@ def test_the_sweep_leaves_an_unpaired_key_alone(tmp_path, monkeypatch, pixai):
     """The limit of the migration, asserted rather than assumed: with only one id on the
     row there is nothing to prove, so nothing is discarded. An entry made on another device
     is not evidence that some other key is stale."""
-    monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": 0.0})
-    monkeypatch.setattr(g, "_CONTEST_SYNC_PAUSE", 0)
+    monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": 0.0})
+    monkeypatch.setattr(contest_sync_mod, "_CONTEST_SYNC_PAUSE", 0)
     telemetry_mod.telem_set_add("contest_entry_keys", "c1:somebody-else", out_dir=tmp_path)
     monkeypatch.setattr(core, "list_contests", lambda s, **k: [
         {"id": "c1", "slug": "s1", "active": True, "result_at": "", "end_at": ""}])
     monkeypatch.setattr(core, "contest_my_entries",
                         lambda s, slug, uid: [{"artworkId": "art-9"}])   # no entry id
     monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
-    g._contest_detection_sync(tmp_path)
+    contest_sync_mod._contest_detection_sync(tmp_path)
     assert sorted(telemetry_mod.load_telemetry(tmp_path)["sets"]["contest_entry_keys"]) == [
         "c1:art-9", "c1:somebody-else"]
 
@@ -226,7 +227,7 @@ def test_publish_and_enter_records_the_entry_itself(tmp_path, monkeypatch):
          "prize_amount": 0, "active": True}])
     monkeypatch.setattr(core, "contest_enter", lambda s, slug, aid: {"success": True})
     # hold the sweep lock: the kick MUST no-op, which is exactly the case that lost the record
-    assert g._contest_sync_lock.acquire(False)
+    assert contest_sync_mod._contest_sync_lock.acquire(False)
     try:
         cli = _client(tmp_path, [_row(media_id="m1", task_id="t1", filename="x_m1.png",
                                       created_at="2026-07-01T00:00:00")])
@@ -235,7 +236,7 @@ def test_publish_and_enter_records_the_entry_itself(tmp_path, monkeypatch):
                            "challenge": "c7", "csrf": _csrf(cli)}).get_json()
         assert d["published"] is True and d["entered"] is True
     finally:
-        g._contest_sync_lock.release()
+        contest_sync_mod._contest_sync_lock.release()
     assert telemetry_mod.load_telemetry(tmp_path)["sets"]["contest_entry_keys"] == ["c7:newart1"]
 
 
@@ -252,7 +253,7 @@ def test_sync_requires_csrf(tmp_path, monkeypatch):
 def test_sync_returns_immediately_and_runs_off_thread(tmp_path, monkeypatch):
     """It ran a 30-90s paced sweep INSIDE the request, holding the connection. Now it
     answers at once and the work happens on its own thread."""
-    monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": 0.0})
+    monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": 0.0})
     started = {"n": 0}
     real = g.threading.Thread
 
@@ -275,16 +276,16 @@ def test_sync_reports_recent_and_busy_without_starting_work(tmp_path, monkeypatc
     monkeypatch.setattr(core, "list_contests", lambda s, **k: [])
     cli = _client(tmp_path)
     token = _csrf(cli)
-    monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": time.time()})
+    monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": time.time()})
     d = cli.post("/api/contest/sync", json={"csrf": token}).get_json()
     assert d["started"] is False and d["skipped"] == "recent"
-    monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": 0.0})
-    assert g._contest_sync_lock.acquire(False)
+    monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": 0.0})
+    assert contest_sync_mod._contest_sync_lock.acquire(False)
     try:
         d = cli.post("/api/contest/sync", json={"csrf": token}).get_json()
         assert d["started"] is False and d["busy"] is True
     finally:
-        g._contest_sync_lock.release()
+        contest_sync_mod._contest_sync_lock.release()
 
 
 def test_mine_exposes_the_sync_watch_flags(tmp_path, monkeypatch):
@@ -294,11 +295,11 @@ def test_mine_exposes_the_sync_watch_flags(tmp_path, monkeypatch):
     cli = _client(tmp_path)
     d = cli.get("/api/contest/mine").get_json()
     assert d["sync_running"] is False and "last_sync_at" in d
-    assert g._contest_sync_lock.acquire(False)
+    assert contest_sync_mod._contest_sync_lock.acquire(False)
     try:
         assert cli.get("/api/contest/mine").get_json()["sync_running"] is True
     finally:
-        g._contest_sync_lock.release()
+        contest_sync_mod._contest_sync_lock.release()
 
 
 # ---- finding: READ_ONLY on the entry paths (verification, not a fix) --------

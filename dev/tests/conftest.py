@@ -940,8 +940,8 @@ def _fresh_perf_memos():
     and earned-ids caches above already get, and for the same reason."""
     def _clear():
         gallery._ACH_METRICS_CACHE.clear()
-        gallery._contests_cache.clear()
-        gallery._contest_sync_last_ok.update(at=0.0)
+        contest_sync_mod._contests_cache.clear()
+        contest_sync_mod._contest_sync_last_ok.update(at=0.0)
         health_mod._HEALTH_CACHE.update(key=None, payload=None, at=0.0)
         health_mod._HEALTH_BUSY["on"] = False
     _clear()
@@ -1082,6 +1082,7 @@ def _no_live_config(monkeypatch):
 
 from moonglade import bonjour as _bonjour_mod   # noqa: E402 -- beside the fixture that stubs it
 from moonglade import telemetry as telemetry_mod
+from moonglade import contest_sync as contest_sync_mod
 
 # Captured at import, before `_no_lan_probe` swaps it, for the one test that is about it.
 REAL_LAN_IP = _bonjour_mod.lan_ip

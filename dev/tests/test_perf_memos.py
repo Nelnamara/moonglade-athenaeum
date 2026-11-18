@@ -16,6 +16,7 @@ from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 from tests.conftest import login_test_client
 from moonglade import health as health_mod
 from moonglade import telemetry as telemetry_mod
+from moonglade import contest_sync as contest_sync_mod
 
 
 def _row(**kw):
@@ -147,7 +148,7 @@ def _board_stub(monkeypatch, calls):
 
 def test_the_contest_board_is_memoized(tmp_path, monkeypatch):
     """Four surfaces mount this on open. They must share one pull, not take one each."""
-    monkeypatch.setattr(g, "_contests_cache", {})
+    monkeypatch.setattr(contest_sync_mod, "_contests_cache", {})
     calls = []
     _board_stub(monkeypatch, calls)
     cli = _client(tmp_path)
@@ -160,7 +161,7 @@ def test_the_contest_board_is_memoized(tmp_path, monkeypatch):
 def test_the_boards_ceiling_rides_the_memo_to_the_route(tmp_path, monkeypatch):
     """list_contests reports a cut board through `meta`; the memo keeps it beside the rows,
     so /api/contests says so on every read inside the TTL without a second pull (#94)."""
-    monkeypatch.setattr(g, "_contests_cache", {})
+    monkeypatch.setattr(contest_sync_mod, "_contests_cache", {})
     calls = []
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
 
@@ -180,7 +181,7 @@ def test_the_boards_ceiling_rides_the_memo_to_the_route(tmp_path, monkeypatch):
 
 
 def test_a_reader_that_ignores_meta_means_an_untruncated_board(tmp_path, monkeypatch):
-    monkeypatch.setattr(g, "_contests_cache", {})
+    monkeypatch.setattr(contest_sync_mod, "_contests_cache", {})
     _board_stub(monkeypatch, [])
     d = _client(tmp_path).get("/api/contests").get_json()
     assert d["board"] == {"truncated": False}
@@ -190,7 +191,7 @@ def test_both_board_variants_come_off_the_one_snapshot(tmp_path, monkeypatch):
     """?all=1 used to be a SECOND cached read at a different depth. Since the ultrareview
     there is one board -- read at full depth, filtered per variant -- so the running-only
     view and the everything view can never disagree about what exists."""
-    monkeypatch.setattr(g, "_contests_cache", {})
+    monkeypatch.setattr(contest_sync_mod, "_contests_cache", {})
     calls = []
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "list_contests", lambda s, **k: calls.append(1) or [
@@ -206,19 +207,19 @@ def test_both_board_variants_come_off_the_one_snapshot(tmp_path, monkeypatch):
 
 
 def test_the_board_memo_expires(tmp_path, monkeypatch):
-    monkeypatch.setattr(g, "_contests_cache", {})
+    monkeypatch.setattr(contest_sync_mod, "_contests_cache", {})
     calls = []
     _board_stub(monkeypatch, calls)
     cli = _client(tmp_path)
     cli.get("/api/contests")
-    g._contests_cache["board"]["at"] -= (g.CONTESTS_TTL + 1)
+    contest_sync_mod._contests_cache["board"]["at"] -= (contest_sync_mod.CONTESTS_TTL + 1)
     cli.get("/api/contests")
     assert len(calls) == 2
 
 
 def test_a_board_failure_is_not_cached(tmp_path, monkeypatch):
     """An offline blip must not pin an empty board for the whole TTL."""
-    monkeypatch.setattr(g, "_contests_cache", {})
+    monkeypatch.setattr(contest_sync_mod, "_contests_cache", {})
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "list_contests",
                         lambda s, **k: (_ for _ in ()).throw(core.PixAIError("board down")))
@@ -236,40 +237,40 @@ def test_a_board_failure_is_not_cached(tmp_path, monkeypatch):
 def test_a_recent_sweep_short_circuits(tmp_path, monkeypatch, pixai):
     """The guard the spec asked for and never got: opening the overlay fired a full paced
     sweep every time."""
-    monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": 0.0})
-    monkeypatch.setattr(g, "_CONTEST_SYNC_PAUSE", 0)
+    monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": 0.0})
+    monkeypatch.setattr(contest_sync_mod, "_CONTEST_SYNC_PAUSE", 0)
     calls = []
     monkeypatch.setattr(core, "list_contests", lambda s, **k: calls.append(1) or [])
-    assert g._contest_detection_sync(tmp_path) is True     # the real one
+    assert contest_sync_mod._contest_detection_sync(tmp_path) is True     # the real one
     assert len(calls) == 1
-    assert g._contest_detection_sync(tmp_path) is True     # ...and the skip
+    assert contest_sync_mod._contest_detection_sync(tmp_path) is True     # ...and the skip
     assert len(calls) == 1, "a sweep inside the window must not walk the board again"
 
 
 def test_force_bypasses_the_recency_guard(tmp_path, monkeypatch, pixai):
     """The publish kick is confirming an entry it was just told about -- it can never be
     answered with 'we looked recently'."""
-    monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": time.time()})
-    monkeypatch.setattr(g, "_CONTEST_SYNC_PAUSE", 0)
+    monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": time.time()})
+    monkeypatch.setattr(contest_sync_mod, "_CONTEST_SYNC_PAUSE", 0)
     calls = []
     monkeypatch.setattr(core, "list_contests", lambda s, **k: calls.append(1) or [])
-    assert g._contest_detection_sync(tmp_path, force=True) is True
+    assert contest_sync_mod._contest_detection_sync(tmp_path, force=True) is True
     assert len(calls) == 1
 
 
 def test_a_failed_sweep_does_not_count_as_recent(tmp_path, monkeypatch, pixai):
     """Only a completed sweep buys the quiet window; a failure must be retried."""
-    monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": 0.0})
-    monkeypatch.setattr(g, "_CONTEST_SYNC_PAUSE", 0)
+    monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": 0.0})
+    monkeypatch.setattr(contest_sync_mod, "_CONTEST_SYNC_PAUSE", 0)
 
     def _boom(*a, **k):
         raise core.PixAIError("the board is unreachable")
     monkeypatch.setattr(core, "list_contests", _boom)
-    assert g._contest_detection_sync(tmp_path) is False
-    assert g._contest_sync_last_ok["at"] == 0.0
+    assert contest_sync_mod._contest_detection_sync(tmp_path) is False
+    assert contest_sync_mod._contest_sync_last_ok["at"] == 0.0
     calls = []
     monkeypatch.setattr(core, "list_contests", lambda s, **k: calls.append(1) or [])
-    assert g._contest_detection_sync(tmp_path) is True
+    assert contest_sync_mod._contest_detection_sync(tmp_path) is True
     assert len(calls) == 1
 
 
@@ -277,8 +278,8 @@ def test_the_sync_route_tells_the_client_it_skipped(tmp_path, monkeypatch, pixai
     """The client's re-pull is pointless after a skip, and it should be told rather than
     left to infer it from an unchanged number. (The route answers immediately now, so the
     first call is run inline to make the sweep actually happen.)"""
-    monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": 0.0})
-    monkeypatch.setattr(g, "_CONTEST_SYNC_PAUSE", 0)
+    monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": 0.0})
+    monkeypatch.setattr(contest_sync_mod, "_CONTEST_SYNC_PAUSE", 0)
     monkeypatch.setattr(core, "list_contests", lambda s, **k: [])
     cli = _client(tmp_path)
     token = cli.get("/api/myart/items").get_json()["csrf"]

@@ -27,6 +27,7 @@ from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client, record_own_sleeps
 from moonglade import telemetry as telemetry_mod
+from moonglade import contest_sync as contest_sync_mod
 
 
 def _row(**kw):
@@ -287,7 +288,7 @@ def _kick_recorder(monkeypatch):
         seen["calls"].append(force)
         seen["fired"].set()
         return True
-    monkeypatch.setattr(g, "_contest_detection_sync", _fake)
+    monkeypatch.setattr(contest_sync_mod, "_contest_detection_sync", _fake)
     return seen
 
 
@@ -328,12 +329,12 @@ def test_failed_publish_kicks_nothing(tmp_path, monkeypatch):
 def _no_pause(monkeypatch):
     """Drop the politeness pause for the tests. The pacing itself is a constant, asserted
     once below rather than waited on in every sweep test."""
-    monkeypatch.setattr(g, "_CONTEST_SYNC_PAUSE", 0)
+    monkeypatch.setattr(contest_sync_mod, "_CONTEST_SYNC_PAUSE", 0)
 
 
 def test_sweep_is_paced():
-    assert g._CONTEST_SYNC_PAUSE > 0        # paced: be polite to their servers
-    assert g._CONTEST_SYNC_MAX > 0          # and bounded
+    assert contest_sync_mod._CONTEST_SYNC_PAUSE > 0        # paced: be polite to their servers
+    assert contest_sync_mod._CONTEST_SYNC_MAX > 0          # and bounded
 
 
 def test_sweep_records_entries_and_reads_no_winners(tmp_path, monkeypatch, pixai):
@@ -353,14 +354,14 @@ def test_sweep_records_entries_and_reads_no_winners(tmp_path, monkeypatch, pixai
                         or [{"id": "e-" + slug}])
     monkeypatch.setattr(core, "contest_winners",
                         lambda s, slug: pytest.fail("the entry sweep must not read winners"))
-    assert g._contest_detection_sync(tmp_path) is True
+    assert contest_sync_mod._contest_detection_sync(tmp_path) is True
     m = telemetry_mod.telemetry_metrics(tmp_path)
     assert m["contest_entries"] == 2
     assert m["contest_wins"] == 0
     assert "contest_win_keys" not in telemetry_mod.load_telemetry(tmp_path)["sets"]
     assert all(c[2] == pixai.user_id for c in seen if c[0] == "entries")
     # re-sweeping is free: the same rows produce the same keys, which the set already holds
-    g._contest_detection_sync(tmp_path)
+    contest_sync_mod._contest_detection_sync(tmp_path)
     assert telemetry_mod.telemetry_metrics(tmp_path)["contest_entries"] == 2
 
 
@@ -370,7 +371,7 @@ def test_sweep_skips_contests_outside_the_window(tmp_path, monkeypatch, pixai):
     seen = []
     _no_pause(monkeypatch)
     monkeypatch.setattr(core, "list_contests", lambda s, **k: [
-        _contest("c1", "s1", result_at=_iso(g._CONTEST_SYNC_RECENT_DAYS + 10)),
+        _contest("c1", "s1", result_at=_iso(contest_sync_mod._CONTEST_SYNC_RECENT_DAYS + 10)),
         _contest("c2", "s2"),                                   # ended, no dates at all
         _contest("c3", "s3", end_at="not-a-date"),
         _contest("c4", "s4", end_at=_iso(1)),                   # ended, but recently
@@ -378,7 +379,7 @@ def test_sweep_skips_contests_outside_the_window(tmp_path, monkeypatch, pixai):
     monkeypatch.setattr(core, "contest_my_entries",
                         lambda s, slug, uid: seen.append(slug) or [{"id": "e-" + slug}])
     monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
-    g._contest_detection_sync(tmp_path)
+    contest_sync_mod._contest_detection_sync(tmp_path)
     assert seen == ["s4"]
     assert telemetry_mod.telemetry_metrics(tmp_path)["contest_entries"] == 1
 
@@ -395,7 +396,7 @@ def test_sweep_survives_one_bad_contest(tmp_path, monkeypatch, pixai):
         return [{"id": "e-" + slug}]
     monkeypatch.setattr(core, "contest_my_entries", _my_entries)
     monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
-    g._contest_detection_sync(tmp_path)
+    contest_sync_mod._contest_detection_sync(tmp_path)
     assert telemetry_mod.telemetry_metrics(tmp_path)["contest_entries"] == 2   # the sweep carried on
 
 
@@ -412,7 +413,7 @@ def test_sweep_prefers_the_explicit_artwork_field(tmp_path, monkeypatch, pixai):
         {"artworkId": ""},                          # nothing usable -> skipped
     ])
     monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
-    g._contest_detection_sync(tmp_path)
+    contest_sync_mod._contest_detection_sync(tmp_path)
     assert sorted(_entry_keys(tmp_path)) == ["c1:art-1", "c1:row-2"]
 
 
@@ -422,13 +423,13 @@ def test_sweep_force_ignores_the_recent_window(tmp_path, monkeypatch, pixai):
     seen = []
     _no_pause(monkeypatch)
     monkeypatch.setattr(core, "list_contests", lambda s, **k: [
-        _contest("c1", "s1", result_at=_iso(g._CONTEST_SYNC_RECENT_DAYS + 10))])
+        _contest("c1", "s1", result_at=_iso(contest_sync_mod._CONTEST_SYNC_RECENT_DAYS + 10))])
     monkeypatch.setattr(core, "contest_my_entries",
                         lambda s, slug, uid: seen.append(slug) or [{"artworkId": "a1"}])
     monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
-    g._contest_detection_sync(tmp_path)                       # windowed: not looked at
+    contest_sync_mod._contest_detection_sync(tmp_path)                       # windowed: not looked at
     assert seen == []
-    g._contest_detection_sync(tmp_path, force=True)           # forced: looked at
+    contest_sync_mod._contest_detection_sync(tmp_path, force=True)           # forced: looked at
     assert seen == ["s1"]
     assert telemetry_mod.telemetry_metrics(tmp_path)["contest_entries"] == 1
 
@@ -438,14 +439,14 @@ def test_sweep_cap_never_drops_a_running_contest(tmp_path, monkeypatch, pixai):
     the only kind an entry can still land in, so it is exempt."""
     seen = []
     _no_pause(monkeypatch)
-    monkeypatch.setattr(g, "_CONTEST_SYNC_MAX", 1)
+    monkeypatch.setattr(contest_sync_mod, "_CONTEST_SYNC_MAX", 1)
     monkeypatch.setattr(core, "list_contests", lambda s, **k: (
         [_contest("a%d" % i, "run%d" % i, active=True) for i in range(4)]
         + [_contest("e%d" % i, "end%d" % i, end_at=_iso(1)) for i in range(3)]))
     monkeypatch.setattr(core, "contest_my_entries",
                         lambda s, slug, uid: seen.append(slug) or [])
     monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
-    g._contest_detection_sync(tmp_path)
+    contest_sync_mod._contest_detection_sync(tmp_path)
     assert [s for s in seen if s.startswith("run")] == ["run0", "run1", "run2", "run3"]
     assert len([s for s in seen if s.startswith("end")]) == 1
 
@@ -459,7 +460,7 @@ def test_sweep_never_raises_and_reports_it_gave_up(tmp_path, monkeypatch, pixai)
     def _boom(*a, **k):
         raise core.PixAIError("the board is unreachable")
     monkeypatch.setattr(core, "list_contests", _boom)
-    assert g._contest_detection_sync(tmp_path) is False       # no exception escapes
+    assert contest_sync_mod._contest_detection_sync(tmp_path) is False       # no exception escapes
     assert telemetry_mod.telemetry_metrics(tmp_path)["contest_entries"] == 0
 
 
@@ -469,7 +470,7 @@ def test_sweep_without_an_account_id_does_nothing(tmp_path, monkeypatch, pixai):
     pixai.user_id = ""
     monkeypatch.setattr(core, "list_contests",
                         lambda s, **k: seen.append("board") or [])
-    g._contest_detection_sync(tmp_path)
+    contest_sync_mod._contest_detection_sync(tmp_path)
     assert not seen                                    # nothing to look up, so nothing asked
 
 
@@ -482,7 +483,7 @@ def test_sync_route_reports_one_count_and_never_the_win(tmp_path, monkeypatch, p
     The route ANSWERS IMMEDIATELY since 2026-09-03 (the sweep moved off-thread), so the
     sweep is run inline here and the counts are read afterwards."""
     _no_pause(monkeypatch)
-    monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": 0.0})
+    monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": 0.0})
     monkeypatch.setattr(core, "list_contests",
                         lambda s, **k: [_contest("c1", "s1", result_at=_iso(1))])
     monkeypatch.setattr(core, "contest_my_entries",
@@ -508,7 +509,7 @@ def test_sync_route_answers_even_when_the_sweep_gives_up(tmp_path, monkeypatch, 
     """The route no longer waits for the outcome, so a doomed sweep does not make it fail:
     it reports that one STARTED, and the sweep's own failure is logged and left behind."""
     _no_pause(monkeypatch)
-    monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": 0.0})
+    monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": 0.0})
 
     def _boom(*a, **k):
         raise core.PixAIError("the board is unreachable")
@@ -521,32 +522,32 @@ def test_sync_route_answers_even_when_the_sweep_gives_up(tmp_path, monkeypatch, 
     d = cli.post("/api/contest/sync", json={"csrf": _csrf(cli)}).get_json()
     monkeypatch.setattr(g.threading, "Thread", real)
     assert d["started"] is True and d["contest_entries"] == 0
-    assert g._contest_sync_last_ok["at"] == 0.0        # a failure buys no quiet window
+    assert contest_sync_mod._contest_sync_last_ok["at"] == 0.0        # a failure buys no quiet window
 
 
 def test_sync_route_reports_a_concurrent_sweep_as_busy(tmp_path, monkeypatch):
     """Still single-flight. Since the sweep went off-thread the answer is a state rather
     than a refusal -- there is nothing for the caller to retry, one is already running."""
-    monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": 0.0})
+    monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": 0.0})
     cli = _client(tmp_path)
-    assert g._contest_sync_lock.acquire(False)
+    assert contest_sync_mod._contest_sync_lock.acquire(False)
     try:
         d = cli.post("/api/contest/sync", json={"csrf": _csrf(cli)}).get_json()
         assert d["started"] is False and d["busy"] is True
     finally:
-        g._contest_sync_lock.release()
+        contest_sync_mod._contest_sync_lock.release()
 
 
 def test_sync_kick_skips_when_a_sweep_is_already_running(tmp_path, monkeypatch):
     """Every background trigger goes through the one wrapper: the loser of the race has
     nothing to do, because the sweep in flight reads the same account off the same board."""
-    monkeypatch.setattr(g, "_contest_detection_sync", lambda out_dir, force=False: True)
-    assert g._contest_sync_kick(tmp_path) is True
-    assert g._contest_sync_lock.acquire(False)
+    monkeypatch.setattr(contest_sync_mod, "_contest_detection_sync", lambda out_dir, force=False: True)
+    assert contest_sync_mod._contest_sync_kick(tmp_path) is True
+    assert contest_sync_mod._contest_sync_lock.acquire(False)
     try:
-        assert g._contest_sync_kick(tmp_path) is False
+        assert contest_sync_mod._contest_sync_kick(tmp_path) is False
     finally:
-        g._contest_sync_lock.release()
+        contest_sync_mod._contest_sync_lock.release()
 
 
 # ---- GET /api/contest/<slug>/artworks ---------------------------------------
@@ -643,7 +644,7 @@ def test_mine_is_telemetry_derived_with_one_board_read(tmp_path, monkeypatch, pi
     _seed_entries(tmp_path, ["c1:aw1", "c1:aw2", "c2:aw9", "c3:aw7"], wins=["c2"])
     # c2 carries only the OLD sweep's flat win key (believed, never verified); c3 carries a
     # VERIFIED win (a check matched the entry's artwork id to an integer tier).
-    g._cw_edit(tmp_path, lambda w, ch: g.contest_wins.record_win(
+    contest_sync_mod._cw_edit(tmp_path, lambda w, ch: g.contest_wins.record_win(
         w, "c3", {"artwork_id": "aw7", "tier": 2, "prize": 200000}, "auto", 1.0,
         "https://pixai.art/en/artwork/aw7"))
     cli = _client(tmp_path, [_row(media_id="m1", artwork_id="aw1", filename="a_m1.png",
@@ -712,7 +713,7 @@ def test_metrics_are_the_set_cardinalities(tmp_path):
     m = telemetry_mod.telemetry_metrics(tmp_path)
     assert (m["contest_entries"], m["contest_wins"]) == (3, 0)
     for cid, aid in (("c1", "a1"), ("c1", "a2"), ("c2", "a1")):   # two contests, three entries
-        g._cw_edit(tmp_path, lambda w, ch, cid=cid, aid=aid: g.contest_wins.record_win(
+        contest_sync_mod._cw_edit(tmp_path, lambda w, ch, cid=cid, aid=aid: g.contest_wins.record_win(
             w, cid, {"artwork_id": aid, "tier": 1, "prize": 1}, "auto", 1.0))
     m = telemetry_mod.telemetry_metrics(tmp_path)
     assert (m["contest_entries"], m["contest_wins"]) == (3, 2)
