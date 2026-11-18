@@ -951,13 +951,13 @@ def mirror_renew_tick(now=None):
     small file reads); the renewal itself is _mirror_try_renew, one renewal POST at most. An
     expired token is left for Connect -- the tick does not try it. Never raises, never logs or
     returns the token."""
-    from moonglade.backup import READ_ONLY, _read_only_now
     now = time.time() if now is None else now
     r = _mirror_renewal
     if r["tick_at"] is not None and now - r["tick_at"] < MIRROR_RENEW_TICK_S:
         return "cadence"
     r["tick_at"] = now
     try:
+        from moonglade.backup import READ_ONLY, _read_only_now
         if not mirror_enabled():
             return "mirror_off"
         if READ_ONLY or _read_only_now():
