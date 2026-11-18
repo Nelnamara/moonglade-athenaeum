@@ -3,6 +3,8 @@ into the panelplugin submit (and only for that one preset)."""
 from moonglade import backup as core
 from moonglade import gallery as g
 from tests.conftest import login_client
+from moonglade import mirror as mirror_mod
+from moonglade import branding as branding_mod
 
 
 def _client(tmp_path):
@@ -13,7 +15,7 @@ def _client(tmp_path):
 def _stage(key):
     # Staged art lives in the CODED emotion dir (bundle-v2: paths built from the
     # role map, never retyped); the emitted URL stays the public role form.
-    d = g._role_dir("emotion")
+    d = branding_mod._role_dir("emotion")
     d.mkdir(parents=True, exist_ok=True)
     (d / (key + ".webp")).write_bytes(b"fake-webp-bytes")   # endpoint lists by extension
 
@@ -43,8 +45,8 @@ def _arm(monkeypatch):
         return "T-1"
 
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "mirror_enabled", lambda: True)
-    monkeypatch.setattr(core, "make_mirror_session", lambda *a, **k: object())
+    monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
+    monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "submit_generation", _submit)
     return calls

@@ -97,13 +97,14 @@ import pytest
 
 from tests.conftest import _SEALED_DONOR, stub_code_module
 
+from moonglade import account_prefs as account_prefs_mod
 from moonglade import backup as core
+from moonglade import jobs as jobs_mod
 from moonglade import paths as moonglade_paths
-from moonglade.gallery import (
-    CATALOG_FIELDS, create_app, load_catalog, save_catalog,
-    achievement_metrics, compute_achievements, save_ach_state,
-    telem_flag, telemetry_metrics, load_telemetry,
-)
+from moonglade import updater as updater_mod
+from moonglade.gallery import CATALOG_FIELDS, create_app, load_catalog, save_catalog
+from moonglade.achievements import achievement_metrics, compute_achievements, save_ach_state
+from moonglade.telemetry import telem_flag, telemetry_metrics, load_telemetry
 
 # No playwright (or no browser) => this whole module skips. .github/workflows/tests.yml installs
 # playwright + chromium, so on CI this module runs; a checkout without them skips it cleanly.
@@ -144,7 +145,7 @@ def _seed_guide_seen(root, username=_USERNAME):
     click an ordinary test makes on a tile. A test that is ABOUT the guide opts in to a
     never-guided account instead: logged_in_page(fresh_account=True)."""
     from moonglade import gallery as _gallery
-    _gallery.account_prefs_update(
+    account_prefs_mod.account_prefs_update(
         root, username, set_={"guide." + s: "done" for s in _guide_surfaces()})
 
 # 1280x900 desktop: what every threshold below was measured at.
@@ -293,12 +294,12 @@ def render_server(tmp_path_factory):
     mp.setattr(core, "_cfg", {})
     # BEFORE anything below reads achievement state (and before create_app() builds a
     # coded tree): this fixture's own coded tree, and its own sealed pack beside it.
-    mp.setattr(_gallery, "branding_root", lambda: root / "branding")
+    mp.setattr(branding_mod, "branding_root", lambda: root / "branding")
     mp.setattr(moonglade_paths, "local_path", lambda name: root / name)
     # ...and before the server can answer a single request: the clock this install reads,
     # pinned to a fixed daytime weekday instant (dev/tests/conftest.py::pin_daytime_clock).
     pin_daytime_clock(mp)
-    seed_sealed_container(_gallery._container_path())
+    seed_sealed_container(branding_mod._container_path())
 
     save_catalog(root / "catalog.db", [
         {f: "" for f in CATALOG_FIELDS} | {
@@ -540,7 +541,7 @@ def _put_the_outside_world_offline(mp):
     mp.setattr(_inbox, "_public_get", _blocked)
     mp.setattr(_inbox, "_rest_delete", _blocked, raising=False)
     mp.setattr(_recipes, "_rest_delete", _blocked, raising=False)
-    mp.setattr(_gallery, "fetch_releases", _no_release_list)
+    mp.setattr(updater_mod, "fetch_releases", _no_release_list)
     mp.setattr(_bonjour, "lan_ip", lambda: None)
     stub_code_module(mp, "similar", SimpleNamespace(similar=_no_index, count=_no_index))
 
@@ -1819,9 +1820,9 @@ def fresh_install_server(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(core, "_cfg", {})
     # BEFORE create_app() builds a coded tree, and before anything reads achievement
     # state: this fixture's own coded tree, and its own sealed pack beside it.
-    monkeypatch.setattr(_gallery, "branding_root", lambda: root / "branding")
+    monkeypatch.setattr(branding_mod, "branding_root", lambda: root / "branding")
     monkeypatch.setattr(moonglade_paths, "local_path", lambda name: root / name)
-    seed_sealed_container(_gallery._container_path())
+    seed_sealed_container(branding_mod._container_path())
     # ...and the clock, before the server can answer anything. "Fresh" here means no key and
     # no catalog, which is what the Setup Wizard is measured against; it also has to mean an
     # install that reads none of its state off the wall clock (conftest::pin_daytime_clock).
@@ -4824,6 +4825,8 @@ def test_each_tab_keeps_its_own_scroll(
 # The feat the custom-file flag arms, found by the roster flag it carries (never an id
 # literal: pack v5 moved the hidden-feat ids out of public source). None without the donor.
 from tests.conftest import donor_feat as _donor_feat
+from moonglade import telemetry as telemetry_mod
+from moonglade import branding as branding_mod
 _UNDER_THE_HOOD = _donor_feat(unlocks="branding_tab")
 _DROP_RGB = (200, 40, 90)              # a colour nothing else in this harness paints, so a
 #                                        served pixel PROVES it came from this exact drop
@@ -4906,13 +4909,14 @@ def test_a_branding_drop_is_adopted_and_the_browser_wears_it(
     way.
     """
     from moonglade import gallery as _g
-    from moonglade.gallery import list_slot_assets, load_ach_state
+    from moonglade.branding import list_slot_assets
+    from moonglade.achievements import load_ach_state
 
     slot = "banner_main"
-    sdir = _g._slot_dir(slot)          # asked of the app's own ROLE_CODE map, never retyped
+    sdir = branding_mod._slot_dir(slot)          # asked of the app's own ROLE_CODE map, never retyped
     assert tmp_path in sdir.parents, (
         "branding_root() is {} -- not under this test's tmp_path. Refusing to write a "
-        "drop into a real branding tree.".format(_g.branding_root()))
+        "drop into a real branding tree.".format(branding_mod.branding_root()))
     sdir.mkdir(parents=True, exist_ok=True)
 
     root = render_server.root
@@ -4922,7 +4926,7 @@ def test_a_branding_drop_is_adopted_and_the_browser_wears_it(
 
     try:
         # --- put the feat back to genuinely-unearned, and open the celebration gate ---
-        _g._telem_mutate(root, lambda d: d["flags"].pop("branding_custom_file", None))
+        telemetry_mod._telem_mutate(root, lambda d: d["flags"].pop("branding_custom_file", None))
         telem_flag("first_sync_done", out_dir=root)
         save_ach_state(root, dict(
             ach_before,
@@ -5017,7 +5021,7 @@ def test_a_branding_drop_is_adopted_and_the_browser_wears_it(
     finally:
         # The module's shared out_dir goes back byte-for-byte, pass or fail: the flags this
         # test cleared and set, and the `seen`/`earned_at` the ?mark=1 above rewrote.
-        _g._telem_mutate(root, lambda d: d.__setitem__("flags", dict(flags_before)))
+        telemetry_mod._telem_mutate(root, lambda d: d.__setitem__("flags", dict(flags_before)))
         save_ach_state(root, ach_before)
 
 
@@ -6711,11 +6715,11 @@ def _dress_role_pack():
         Image.new("RGBA", (96, 96), rgb + (255,)).save(buf, "PNG")
         return buf.getvalue()
     assets = dict(_seed_assets())
-    for slot, role in _g.ROLE_SLOTS.items():
+    for slot, role in branding_mod.ROLE_SLOTS.items():
         for key, img in role["images"].items():
-            assets[_g._public_rel_to_coded(img["public"])] = _pic((60, 120, 90))
+            assets[branding_mod._public_rel_to_coded(img["public"])] = _pic((60, 120, 90))
     defs = _json.loads(_SEALED_DONOR.read_text(encoding="utf-8"))
-    _mc.write_container(_g._container_path(), assets,
+    _mc.write_container(branding_mod._container_path(), assets,
                         {"achievements": _json.dumps(defs, separators=(",", ":")).encode("utf-8")})
     clear_sealed_caches()
 
@@ -6734,7 +6738,7 @@ def test_the_branding_roles_section_checks_a_file_before_it_sends_and_keeps_the_
         logged_in_page, tmp_path, sealed_donor_present):
     from moonglade import gallery as _g
     _dress_role_pack()
-    pack_before = _g._container_path().read_bytes()
+    pack_before = branding_mod._container_path().read_bytes()
     page = logged_in_page(**DESKTOP)
     sent = []
     page.on("request", lambda r: sent.append((r.method, r.url)) if "/api/branding/role" in r.url else None)
@@ -6768,7 +6772,7 @@ def test_the_branding_roles_section_checks_a_file_before_it_sends_and_keeps_the_
         "Refused: the Login companion must be about square. This one is 3:4. Your current art is unchanged.")
     assert use.is_disabled()
     assert not [s for s in sent if s[0] == "POST"], "a refused file sends nothing: %r" % sent
-    assert not _g._role_override_path("login_companion", "companion").exists()
+    assert not branding_mod._role_override_path("login_companion", "companion").exists()
 
     # a JPEG for a PNG role: two rules at once, in pairs
     page.locator('.mgcp-rl[data-role="power_poses"] .mgcp-rl-ghost:has-text("Change")').click()
@@ -6790,9 +6794,9 @@ def test_the_branding_roles_section_checks_a_file_before_it_sends_and_keeps_the_
     assert [s[0] for s in sent if s[0] == "POST"] == ["POST"], sent
     poses = page.locator('.mgcp-rl[data-role="power_poses"]')
     assert "1 of 2 yours" in poses.inner_text()
-    assert _g._role_override_path("power_poses", "restart").is_file()
+    assert branding_mod._role_override_path("power_poses", "restart").is_file()
     served = page.request.get("/branding/mascots/nel_restart.png")
-    assert served.status == 200 and served.body() == _g._role_override_path("power_poses", "restart").read_bytes()
+    assert served.status == 200 and served.body() == branding_mod._role_override_path("power_poses", "restart").read_bytes()
 
     # default -> yours on a single-image row, and the one-time ask
     login.locator(".mgcp-rl-ghost:has-text('Change')").click()
@@ -6818,15 +6822,15 @@ def test_the_branding_roles_section_checks_a_file_before_it_sends_and_keeps_the_
     assert page.evaluate("() => getComputedStyle(document.querySelector('.mgcp-rl-art.def')).opacity") == "0.45"
     assert ask.inner_text().startswith("Go back to the default Login companion?\nYour image is removed from this install.")
     ask.locator("button:has-text('Keep mine')").click()
-    assert _g._role_override_path("login_companion", "companion").is_file(), "Keep mine changes nothing"
+    assert branding_mod._role_override_path("login_companion", "companion").is_file(), "Keep mine changes nothing"
     login.locator("button.mgcp-rl-art.def").click()
     page.locator(".mgcp-rl-ask button:has-text('Use default')").click()
     page.wait_for_selector('.mgcp-rl[data-role="login_companion"] .mgcp-rl-art.yours', state="detached")
-    assert not _g._role_override_path("login_companion", "companion").exists()
-    assert _g._container_path().read_bytes() == pack_before, "the pack is never touched"
+    assert not branding_mod._role_override_path("login_companion", "companion").exists()
+    assert branding_mod._container_path().read_bytes() == pack_before, "the pack is never touched"
 
     # fail-soft: a stored override that will not decode -> the default is shown and the row says so
-    _g._role_override_path("power_poses", "restart").write_bytes(b"not a picture")
+    branding_mod._role_override_path("power_poses", "restart").write_bytes(b"not a picture")
     page.reload()
     _settle(page)
     _open_roles_section(page)
@@ -6868,7 +6872,7 @@ def test_the_login_companion_editor_accepts_an_animated_webp_and_refuses_a_movin
         "\u2713 WEBP", "\u2713 transparent", "\u2713 animated", "\u2713 about square", "\u2713 \u2265 360 px"]
     page.click(".mgcp-rl-primary:has-text('Use this')")
     page.wait_for_selector('.mgcp-rl[data-role="login_companion"] .mgcp-rl-art.yours')
-    with Image.open(_g._role_override_path("login_companion", "companion")) as im:
+    with Image.open(branding_mod._role_override_path("login_companion", "companion")) as im:
         assert im.format == "WEBP" and im.is_animated, "the companion stayed animated"
 
     page.locator('.mgcp-rl[data-role="power_poses"] .mgcp-rl-ghost:has-text("Change")').click()
@@ -6886,7 +6890,7 @@ def test_the_login_companion_editor_accepts_an_animated_webp_and_refuses_a_movin
     assert page.locator(".mgcp-rl-loud").inner_text() == (
         "Refused: the Power poses must be a still picture. This one is animated. Your current art is unchanged.")
     assert page.locator(".mgcp-rl-primary:has-text('Use this')").is_disabled()
-    assert not _g._role_override_path("power_poses", "restart").exists()
+    assert not branding_mod._role_override_path("power_poses", "restart").exists()
 
 
 def test_the_phones_use_default_is_off_when_the_pack_has_no_default_to_go_back_to(
@@ -7110,7 +7114,7 @@ def _seed_power_account(root, extra_models=0):
     models = [{"id": "unl-t3", "title": "Tsubaki.3", "thumb": "", "type": "MMDIT26B_MODEL", "hint": ""}]
     favs = [{"id": "fav-%d" % i, "title": "Fav model %d" % i, "thumb": "", "type": "SDXL_MODEL", "hint": ""}
             for i in range(extra_models)]
-    _gallery.account_prefs_update(root, _USERNAME, set_={
+    account_prefs_mod.account_prefs_update(root, _USERNAME, set_={
         "gen.quick": {
             "models": {"recent": models, "fav": favs},
             "loras": {"recent": [{"id": "l-glade", "title": "Glade light", "thumb": "", "base": "SDXL_MODEL"},
@@ -7132,7 +7136,7 @@ def _seed_power_account(root, extra_models=0):
 
 def _clear_power_account(root):
     from moonglade import gallery as _gallery
-    _gallery.account_prefs_update(root, _USERNAME, unset=list(_POWER_KEYS))
+    account_prefs_mod.account_prefs_update(root, _USERNAME, unset=list(_POWER_KEYS))
 
 
 def _power_writes(seen):
@@ -7332,7 +7336,7 @@ class _MatrixFixture:
         store.put_jobs(self.run_id, self.cells)
         for c in self.cells:
             if c["task_id"]:
-                core.append_job_event(root, c["task_id"], status="done", type="generate", label="Matrix",
+                jobs_mod.append_job_event(root, c["task_id"], status="done", type="generate", label="Matrix",
                                       media_ids=["100"], count=1, run=self.run_id, cell=c["cell"],
                                       run_mode="matrix", source="web", started_at=time.time() - 30)
 

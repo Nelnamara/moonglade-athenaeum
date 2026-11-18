@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from moonglade import gallery as g
 from moonglade import backup as core
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade import media_tools as media_tools_mod
 
 
 def _row(**kw):
@@ -49,7 +50,7 @@ def test_build_thumbnails_video_fallback(tmp_path, monkeypatch):
 
 def test_make_video_thumbnail_fail_soft(tmp_path, monkeypatch):
     from moonglade import backup as core
-    monkeypatch.setattr(core, "ffmpeg_path", lambda: "")    # no ffmpeg anywhere
+    monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "")    # no ffmpeg anywhere
     assert g.make_video_thumbnail(tmp_path / "nope.mp4",
                                   tmp_path / "t.jpg") is False
     assert not (tmp_path / "t.jpg").exists()

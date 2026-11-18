@@ -15,6 +15,7 @@ from moonglade import backup as core
 from moonglade import inbox
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 from tests.conftest import login_test_client
+from moonglade import jobs as jobs_mod
 
 
 @pytest.fixture(autouse=True)
@@ -110,7 +111,7 @@ def test_a_finished_job_activity_never_saw_joins_activity_as_pixais(tmp_path, pi
     pixai.on("/user/me/notifications/", _page(_task("n1", "2062832974899841293")))
     cli = login_test_client(_app(tmp_path))
     assert cli.get("/api/inbox").get_json()["items"] == []            # never an inbox row
-    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["2062832974899841293"]
+    job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["2062832974899841293"]
     assert job["status"] == "done" and job["source"] == "pixai" and job["via"] == "inbox"
     # Review nit 7: the notification's own words never reach the disk; the label is fixed.
     assert job["label"] == "Generation"
@@ -125,12 +126,12 @@ def test_an_old_finished_job_is_not_resurrected(tmp_path, pixai, monkeypatch):
                                                     at="2026-09-01T00:00:00Z")))
     cli = login_test_client(_app(tmp_path))
     cli.get("/api/inbox")
-    assert "2062832974899841293" not in {j["job_id"] for j in core.read_jobs(tmp_path)}
+    assert "2062832974899841293" not in {j["job_id"] for j in jobs_mod.read_jobs(tmp_path)}
 
 
 def test_a_job_activity_calls_failed_that_pixai_finished_gets_a_note(tmp_path, pixai, monkeypatch):
     monkeypatch.setattr(inbox, "_now_ts", lambda: 1791025200.0)
-    core.append_job_event(tmp_path, "2062832974899841293", status="failed", type="generate",
+    jobs_mod.append_job_event(tmp_path, "2062832974899841293", status="failed", type="generate",
                           label="a quiet library", source="web", error="timed out")
     pixai.on("/user/me/notifications/", _page(_task("n1", "2062832974899841293")))
     cli = login_test_client(_app(tmp_path))

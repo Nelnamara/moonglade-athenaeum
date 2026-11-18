@@ -55,6 +55,8 @@ from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client
 from tests.fake_pixai import FakePixAI
+from moonglade import pixai_client as pixai_client_mod
+from moonglade import mirror as mirror_mod
 
 REPO = Path(__file__).resolve().parents[2]
 TID = "2065852033099888102"
@@ -183,7 +185,7 @@ class TestTheDeleteFiresOnce:
 
     def test_the_wire_is_one_post_to_the_task_route(self, no_read_only):
         s = _Recorder(_Resp(body={"success": True}))
-        assert core.delete_task(core.PixAIClient(s), TID) is True
+        assert core.delete_task(pixai_client_mod.PixAIClient(s), TID) is True
         (verb, url, kwargs), = s.calls
         assert verb == "POST" and url == core.REST_API_BASE + DELETE_PATH
         assert kwargs["json"] == {}
@@ -195,7 +197,7 @@ class TestTheDeleteFiresOnce:
         the message says deleting again is safe (the route is idempotent)."""
         s = _Recorder(requests.exceptions.ReadTimeout("Read timed out"))
         with pytest.raises(core.PixAIError) as ei:
-            core.delete_task(core.PixAIClient(s), TID)
+            core.delete_task(pixai_client_mod.PixAIClient(s), TID)
         msg = str(ei.value)
         assert "network error deleting task " + TID in msg
         assert "may or may not have deleted it" in msg and "Deleting it again is safe" in msg
@@ -207,7 +209,7 @@ class TestTheDeleteFiresOnce:
         base = requests.Session()
         base.headers["Authorization"] = "Bearer " + APIKEY
         s, wire = _wired(base, body={"success": True})
-        assert core.delete_task(core.PixAIClient(s), TID) is True
+        assert core.delete_task(pixai_client_mod.PixAIClient(s), TID) is True
         (req,) = wire.sent
         assert req.method == "POST" and req.url == core.REST_API_BASE + DELETE_PATH
         assert req.headers["Authorization"] == "Bearer " + APIKEY
@@ -230,7 +232,7 @@ class TestTheDeleteFiresOnce:
         RequestException too, so the order of the except clauses is what decides this."""
         s = _Recorder(_Resp(status=200, text="<html>ok</html>", json_exc=exc))
         with pytest.raises(core.PixAIError) as ei:
-            core.delete_task(core.PixAIClient(s), TID)
+            core.delete_task(pixai_client_mod.PixAIClient(s), TID)
         assert "not deleted" in str(ei.value) and "network error" not in str(ei.value)
         assert len(s.calls) == 1
 
@@ -247,13 +249,13 @@ class TestTheDeleteFiresOnce:
     def test_a_500_on_the_wire_is_one_post(self, no_read_only):
         s = _Recorder(_Resp(status=500, text="Internal Server Error"))
         with pytest.raises(core.PixAIError, match="HTTP 500"):
-            core.delete_task(core.PixAIClient(s), TID)
+            core.delete_task(pixai_client_mod.PixAIClient(s), TID)
         assert len(s.calls) == 1
 
     def test_a_network_error_is_one_post(self, no_read_only):
         s = _Recorder(requests.ConnectionError("connection dropped"))
         with pytest.raises(core.PixAIError, match="network error deleting task " + TID):
-            core.delete_task(core.PixAIClient(s), TID)
+            core.delete_task(pixai_client_mod.PixAIClient(s), TID)
         assert len(s.calls) == 1
 
     @pytest.mark.parametrize("bad", ["", "  ", "1/2", "../x", "1?a=1", "a b", "1#x", "%2e%2e",
@@ -313,7 +315,7 @@ class TestTheGalleryRoads:
                                                                   monkeypatch):
         """`pixai` IS what `_make_session(None)` hands back here, so a call recorded on it
         is a call on the API-key client -- and the mirror is never asked for."""
-        monkeypatch.setattr(core, "make_mirror_session", lambda *a, **k: pytest.fail(
+        monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: pytest.fail(
             "the delete reached for the mirror session"))
         _one_task_library(tmp_path)
         pixai.on("/task/T1/delete", {"success": True})
@@ -362,7 +364,7 @@ class TestTheGalleryRoads:
         (tmp_path / "solo.png").write_bytes(b"x")
         monkeypatch.setattr(core, "task_detail_gql", lambda s, tid, **k: {
             "id": "T1", "status": "completed", "outputs": {"mediaId": "solo"}})
-        monkeypatch.setattr(core, "make_mirror_session", lambda *a, **k: pytest.fail(
+        monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: pytest.fail(
             "the delete reached for the mirror session"))
         pixai.on("/task/T1/delete", {"success": True})
         d = login_client(tmp_path).post("/api/delete-image", json={
@@ -388,7 +390,7 @@ class TestTheRenewalRoad:
     def test_one_body_less_post_with_the_bearer_and_no_cookie(self):
         cur, fresh = _jwt(2), _jwt(7, salt="new")
         s = _Recorder(_Resp(body={"token": fresh}))
-        assert core.refresh_jwt(s, current_jwt=cur) == fresh
+        assert mirror_mod.refresh_jwt(s, current_jwt=cur) == fresh
         (verb, url, kwargs), = s.calls
         assert verb == "POST" and url == RENEW_URL
         assert "json" not in kwargs and "data" not in kwargs
@@ -402,7 +404,7 @@ class TestTheRenewalRoad:
         base = requests.Session()
         base.headers["Authorization"] = "Bearer " + APIKEY
         s, wire = _wired(base, body={"token": fresh})
-        assert core.refresh_jwt(s, current_jwt=cur) == fresh
+        assert mirror_mod.refresh_jwt(s, current_jwt=cur) == fresh
         (req,) = wire.sent
         assert req.method == "POST" and req.url == RENEW_URL
         assert req.headers["Authorization"] == "Bearer " + cur
@@ -412,72 +414,72 @@ class TestTheRenewalRoad:
 
     def test_the_api_key_is_never_sent(self, api_key_configured):
         s = _Recorder(_Resp(body={"token": _jwt(7)}))
-        assert core.refresh_jwt(s, current_jwt=APIKEY) is None
-        assert core._refresh_last["reason"] == "no_credential" and s.calls == []
+        assert mirror_mod.refresh_jwt(s, current_jwt=APIKEY) is None
+        assert mirror_mod._refresh_last["reason"] == "no_credential" and s.calls == []
 
     def test_an_api_key_that_looks_like_a_live_jwt_is_still_never_sent(self, monkeypatch):
         jwtish = _jwt(30, sub="key-holder")
         core._config_path().write_text(json.dumps({"PIXAI_API_KEY": jwtish}),
                                        encoding="utf-8")
         s = _Recorder(_Resp(body={"token": _jwt(7)}))
-        assert core.refresh_jwt(s, current_jwt=jwtish) is None
-        assert core._refresh_last["reason"] == "no_credential" and s.calls == []
+        assert mirror_mod.refresh_jwt(s, current_jwt=jwtish) is None
+        assert mirror_mod._refresh_last["reason"] == "no_credential" and s.calls == []
 
     @pytest.mark.parametrize("cur", [None, "", "not-a-jwt", "expired"])
     def test_no_live_jwt_means_no_request(self, cur):
         if cur == "expired":
             cur = _jwt(-1)
         s = _Recorder(_Resp(body={"token": _jwt(7)}))
-        assert core.refresh_jwt(s, current_jwt=cur) is None
-        assert core._refresh_last["reason"] == "no_credential" and s.calls == []
+        assert mirror_mod.refresh_jwt(s, current_jwt=cur) is None
+        assert mirror_mod._refresh_last["reason"] == "no_credential" and s.calls == []
 
     def test_the_body_token_wins_over_a_differing_header(self):
         cur, body_tok, head_tok = _jwt(2), _jwt(7, salt="body"), _jwt(7, salt="head")
         s = _Recorder(_Resp(body={"token": body_tok}, headers={"token": head_tok}))
-        assert core.refresh_jwt(s, current_jwt=cur) == body_tok
+        assert mirror_mod.refresh_jwt(s, current_jwt=cur) == body_tok
 
     def test_the_header_is_the_fallback(self):
         cur, head_tok = _jwt(2), _jwt(7, salt="head")
         s = _Recorder(_Resp(body={}, headers={"token": head_tok}))
-        assert core.refresh_jwt(s, current_jwt=cur) == head_tok
+        assert mirror_mod.refresh_jwt(s, current_jwt=cur) == head_tok
 
     def test_the_same_token_back_is_unchanged(self):
         cur = _jwt(2)
         s = _Recorder(_Resp(body={"token": cur}, headers={"token": cur}))
-        assert core.refresh_jwt(s, current_jwt=cur) is None
-        assert core._refresh_last["reason"] == "unchanged"
+        assert mirror_mod.refresh_jwt(s, current_jwt=cur) is None
+        assert mirror_mod._refresh_last["reason"] == "unchanged"
 
     def test_a_token_not_issued_by_pixai_is_unchanged(self):
         cur = _jwt(2)
         s = _Recorder(_Resp(body={"token": _jwt(7, iss="someone-else")}))
-        assert core.refresh_jwt(s, current_jwt=cur) is None
-        assert core._refresh_last["reason"] == "unchanged"
+        assert mirror_mod.refresh_jwt(s, current_jwt=cur) is None
+        assert mirror_mod._refresh_last["reason"] == "unchanged"
 
     def test_a_fresh_token_for_another_account_is_discarded(self):
         cur, other = _jwt(2, sub="S-main"), _jwt(7, sub="S-dev")
         s = _Recorder(_Resp(body={"token": other}))
-        assert core.refresh_jwt(s, current_jwt=cur, expected_sub="S-main") is None
-        assert core._refresh_last["reason"] == "identity_mismatch"
+        assert mirror_mod.refresh_jwt(s, current_jwt=cur, expected_sub="S-main") is None
+        assert mirror_mod._refresh_last["reason"] == "identity_mismatch"
         mine = _jwt(7, sub="S-main", salt="n")
         s = _Recorder(_Resp(body={"token": mine}))
-        assert core.refresh_jwt(s, current_jwt=cur, expected_sub="S-main") == mine
+        assert mirror_mod.refresh_jwt(s, current_jwt=cur, expected_sub="S-main") == mine
 
     @pytest.mark.parametrize("status", [401, 404, 500])
     def test_a_non_200_is_http_code_even_with_a_fresh_token(self, status):
         fresh = _jwt(7, salt="x")
         s = _Recorder(_Resp(status=status, body={"token": fresh}, headers={"token": fresh}))
-        assert core.refresh_jwt(s, current_jwt=_jwt(2)) is None
-        assert core._refresh_last["reason"] == "http_{}".format(status)
+        assert mirror_mod.refresh_jwt(s, current_jwt=_jwt(2)) is None
+        assert mirror_mod._refresh_last["reason"] == "http_{}".format(status)
 
     def test_a_body_that_is_not_json_with_no_header_is_none(self):
         s = _Recorder(_Resp(status=200, text="<html>", json_exc=ValueError("x")))
-        assert core.refresh_jwt(s, current_jwt=_jwt(2)) is None
-        assert core._refresh_last["reason"] == "unchanged"
+        assert mirror_mod.refresh_jwt(s, current_jwt=_jwt(2)) is None
+        assert mirror_mod._refresh_last["reason"] == "unchanged"
 
     def test_a_network_error_is_network(self):
         s = _Recorder(requests.ConnectionError("down"))
-        assert core.refresh_jwt(s, current_jwt=_jwt(2)) is None
-        assert core._refresh_last["reason"] == "network" and len(s.calls) == 1
+        assert mirror_mod.refresh_jwt(s, current_jwt=_jwt(2)) is None
+        assert mirror_mod._refresh_last["reason"] == "network" and len(s.calls) == 1
 
     @pytest.mark.parametrize("ok", [True, False])
     def test_the_cookie_jar_is_empty_afterwards(self, ok):
@@ -486,7 +488,7 @@ class TestTheRenewalRoad:
                          set_cookie=("_bsid", "cookie-value-from-pixai"))
         s.cookies.set("_udt", "stale-cookie", domain="api.pixai.art")
         assert len(s.cookies) == 1
-        out = core.refresh_jwt(s, current_jwt=_jwt(2))
+        out = mirror_mod.refresh_jwt(s, current_jwt=_jwt(2))
         assert (out is not None) is ok
         assert len(s.cookies) == 0
 
@@ -496,7 +498,7 @@ class TestTheRenewalRoad:
         (Invariant #7) whatever session it is handed."""
         s, wire = _wired(body={"token": _jwt(7, salt="c")})
         s.cookies.set("_bsid", "a-cookie-in-the-jar", domain="api.pixai.art")
-        assert core.refresh_jwt(s, current_jwt=_jwt(2)) is not None
+        assert mirror_mod.refresh_jwt(s, current_jwt=_jwt(2)) is not None
         assert "Cookie" not in wire.sent[0].headers
 
 
@@ -504,11 +506,11 @@ class TestTheRenewalRoad:
 
 def _armed(tmp_path, monkeypatch, jwt, enabled=True):
     p = tmp_path / "mirror_session.json"
-    monkeypatch.setattr(core, "_mirror_state_path", lambda: p)
-    monkeypatch.setattr(core, "mirror_enabled", lambda: enabled)
+    monkeypatch.setattr(mirror_mod, "_mirror_state_path", lambda: p)
+    monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: enabled)
     monkeypatch.setattr(core, "READ_ONLY", False)
     monkeypatch.setattr(core, "_read_only_now", lambda: False)
-    core.save_mirror_state({"jwt": jwt})
+    mirror_mod.save_mirror_state({"jwt": jwt})
     return p
 
 
@@ -522,7 +524,7 @@ def _transport(monkeypatch, *answers):
         s.headers["Authorization"] = "Bearer " + jwt
         made.append(s)
         return s
-    monkeypatch.setattr(core, "_mirror_session_from", _from)
+    monkeypatch.setattr(mirror_mod, "_mirror_session_from", _from)
     return made
 
 
@@ -532,9 +534,9 @@ class TestTheRoadIsRecorded:
         due, fresh = _jwt(2), _jwt(7, salt="f")
         _armed(tmp_path, monkeypatch, due)
         made = _transport(monkeypatch, _Resp(body={"token": fresh}))
-        jwt, outcome = core._mirror_try_renew()
+        jwt, outcome = mirror_mod._mirror_try_renew()
         assert (jwt, outcome) == (fresh, "renewed")
-        assert core._mirror_renewal["last_road"] == "jwt"
+        assert mirror_mod._mirror_renewal["last_road"] == "jwt"
         (verb, url, kw), = made[0].calls
         assert url == RENEW_URL and kw["headers"] == {"Authorization": "Bearer " + due}
         got = json.loads((tmp_path / "mirror_session.json").read_text(encoding="utf-8"))
@@ -544,20 +546,20 @@ class TestTheRoadIsRecorded:
         due = _jwt(2, sub="S-main")
         _armed(tmp_path, monkeypatch, due)
         _transport(monkeypatch, _Resp(body={"token": _jwt(7, sub="S-dev")}))
-        assert core._mirror_try_renew()[1] == "failed"
-        assert core.load_mirror_state()["jwt"] == due
-        assert core._mirror_renewal["last_reason"] == "identity_mismatch"
-        assert core._mirror_renewal["last_road"] == ""
+        assert mirror_mod._mirror_try_renew()[1] == "failed"
+        assert mirror_mod.load_mirror_state()["jwt"] == due
+        assert mirror_mod._mirror_renewal["last_reason"] == "identity_mismatch"
+        assert mirror_mod._mirror_renewal["last_road"] == ""
 
     def test_the_reset_clears_the_road(self):
-        core._mirror_renewal["last_road"] = "jwt"
-        core._mirror_renewal_reset()
-        assert core._mirror_renewal["last_road"] == ""
+        mirror_mod._mirror_renewal["last_road"] = "jwt"
+        mirror_mod._mirror_renewal_reset()
+        assert mirror_mod._mirror_renewal["last_road"] == ""
 
     def test_the_check_says_which_road_renewed(self, tmp_path, monkeypatch, capsys):
         _armed(tmp_path, monkeypatch, _jwt(2))
         _transport(monkeypatch, _Resp(body={"token": _jwt(7, salt="f")}))
-        res = core.run_mirror_check(SimpleNamespace())
+        res = mirror_mod.run_mirror_check(SimpleNamespace())
         out = capsys.readouterr().out
         assert res["renewed"] is True and res["road"] == "jwt"
         assert "renewed via jwt" in out and "PixAI renewed the session" in out
@@ -566,7 +568,7 @@ class TestTheRoadIsRecorded:
     def test_an_expired_stored_jwt_is_still_left_for_connect(self, tmp_path, monkeypatch):
         _armed(tmp_path, monkeypatch, _jwt(-1))
         made = _transport(monkeypatch, _Resp(body={"token": _jwt(7)}))
-        assert core.mirror_renew_tick() == "expired"
+        assert mirror_mod.mirror_renew_tick() == "expired"
         assert made == []
 
     def test_the_check_refuses_under_read_only_and_sends_nothing(self, tmp_path, monkeypatch,
@@ -574,7 +576,7 @@ class TestTheRoadIsRecorded:
         _armed(tmp_path, monkeypatch, _jwt(2))
         monkeypatch.setattr(core, "READ_ONLY", True)
         made = _transport(monkeypatch, _Resp(body={"token": _jwt(7)}))
-        assert core.run_mirror_check(SimpleNamespace())["source"] == "read_only"
+        assert mirror_mod.run_mirror_check(SimpleNamespace())["source"] == "read_only"
         assert "renewing the session changes your account" in capsys.readouterr().out
         assert made == []
 
@@ -583,13 +585,13 @@ class TestTheRoadIsRecorded:
         due = _jwt(2)
         _armed(tmp_path, monkeypatch, due)
         made = _transport(monkeypatch, _Resp(status=500, body={}))
-        assert core._mirror_try_renew(now=now)[1] == "failed"
-        assert core._mirror_try_renew(now=now + 60)[1] == "backoff"
+        assert mirror_mod._mirror_try_renew(now=now)[1] == "failed"
+        assert mirror_mod._mirror_try_renew(now=now + 60)[1] == "backoff"
         assert len(made) == 1
         made2 = _transport(monkeypatch, _Resp(body={"token": _jwt(7, salt="f")}))
-        assert core._mirror_try_renew(now=now + 601)[1] == "renewed"
-        core.save_mirror_state({"jwt": _jwt(2, salt="again")})
-        assert core._mirror_try_renew(now=now + 700)[1] == "floor"
+        assert mirror_mod._mirror_try_renew(now=now + 601)[1] == "renewed"
+        mirror_mod.save_mirror_state({"jwt": _jwt(2, salt="again")})
+        assert mirror_mod._mirror_try_renew(now=now + 700)[1] == "floor"
         assert len(made2) == 1
 
 
@@ -610,13 +612,13 @@ class TestNoCredentialLeaks:
         core.set_verbose(True)
         try:
             with caplog.at_level(logging.DEBUG):
-                res = core.run_mirror_check(SimpleNamespace())
+                res = mirror_mod.run_mirror_check(SimpleNamespace())
         finally:
             core.set_verbose(False)
         cap = capsys.readouterr()
         emitted = "\n".join([cap.out, cap.err, caplog.text, json.dumps(res),
-                             json.dumps(core._refresh_last),
-                             json.dumps(core._mirror_renewal, default=str)])
+                             json.dumps(mirror_mod._refresh_last),
+                             json.dumps(mirror_mod._mirror_renewal, default=str)])
         for secret in (old, fresh, old.split(".")[1], fresh.split(".")[1]):
             assert secret not in emitted
         if case == "ok":
@@ -642,9 +644,9 @@ class TestNoCredentialLeaks:
         """An expired stored JWT and no browser token: nothing is sent, so the check must not
         claim PixAI answered (#92 review F5)."""
         _armed(tmp_path, monkeypatch, _jwt(-1))
-        monkeypatch.setattr(core, "read_browser_jwt", lambda *a, **k: "")
+        monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: "")
         made = _transport(monkeypatch, _Resp(body={"token": _jwt(7)}))
-        res = core.run_mirror_check(SimpleNamespace())
+        res = mirror_mod.run_mirror_check(SimpleNamespace())
         out = capsys.readouterr().out
         assert res["reason"] == "no_credential" and made[0].calls == []
         assert "no saved website session to renew (nothing was sent)" in out
@@ -709,7 +711,7 @@ def test_a_307_308_never_resends_the_delete_to_another_task(no_read_only, code):
     s, wire = _api_key_session((code, None, {"Location": other}, None),
                                (200, {"success": True}, {}, None))
     with pytest.raises(core.PixAIError, match=r"HTTP 30[78] deleting task 111"):
-        core.delete_task(core.PixAIClient(s), "111")
+        core.delete_task(pixai_client_mod.PixAIClient(s), "111")
     posts = [r for r in wire.sent if r.method == "POST"]
     assert len(posts) == 1, [r.url for r in posts]
     assert all(r.url.endswith("/task/111/delete") for r in wire.sent)
@@ -722,23 +724,23 @@ def test_a_301_302_303_is_not_a_delete(no_read_only, code):
                                 None),
                                (200, {"success": True}, {}, None))
     with pytest.raises(core.PixAIError, match=r"HTTP 30[123] deleting task 111"):
-        core.delete_task(core.PixAIClient(s), "111")
+        core.delete_task(pixai_client_mod.PixAIClient(s), "111")
     assert len(wire.sent) == 1
 
 
 def test_a_renewal_redirect_carries_no_cookie_and_is_not_followed():
     """Invariant #7: no cookie is sent with the renewal, and a 3xx is a failed renewal."""
     cur, fresh = _jwt(2), _jwt(7, salt="f")
-    s = core._mirror_session_from(cur)
+    s = mirror_mod._mirror_session_from(cur)
     wire = _Script((307, None, {"Location": core.REST_API_BASE + "/auth/refresh-token"},
                     "_bsid=cookie-from-pixai; Domain=api.pixai.art; Path=/"),
                    (200, {"token": fresh}, {}, None))
     s.mount("https://", wire)
-    out = core.refresh_jwt(s, current_jwt=cur, expected_sub="S-main")
+    out = mirror_mod.refresh_jwt(s, current_jwt=cur, expected_sub="S-main")
     assert not any("Cookie" in r.headers for r in wire.sent), [
         dict(r.headers).get("Cookie") for r in wire.sent]
     assert len(wire.sent) == 1
-    assert out is None and core._refresh_last["reason"] == "http_307"
+    assert out is None and mirror_mod._refresh_last["reason"] == "http_307"
     assert len(s.cookies) == 0
 
 
@@ -761,8 +763,9 @@ def test_the_retired_names_are_gone():
     for name in ("DELETE_TASK_HASH", "DELETE_OPERATION", "delete_task_gql",
                  "REFRESH_TOKEN_HASH", "BOOKMARKED_MODELS_OP", "BOOKMARKED_MODELS_HASH",
                  "_bookmarks_persisted", "CLIENT_LIBRARY", "PersistedQueryNotRecognized"):
-        assert not hasattr(core, name), name
-    assert not hasattr(core.PixAIClient, "persisted")
+        for mod in (core, mirror_mod):        # mirror_mod holds the renewal since 3.21.0
+            assert not hasattr(mod, name), (mod.__name__, name)
+    assert not hasattr(pixai_client_mod.PixAIClient, "persisted")
     assert not hasattr(FakePixAI, "persisted")
 
 

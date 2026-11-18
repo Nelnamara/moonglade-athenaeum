@@ -32,6 +32,8 @@ import pytest
 from moonglade import backup as core
 
 from tests.conftest import login_client
+from moonglade import jobs as jobs_mod
+from moonglade import mirror as mirror_mod
 
 ROOT = Path(__file__).resolve().parents[2]
 NODE = shutil.which("node")
@@ -692,7 +694,7 @@ def test_price_and_submit_card_match_and_send_the_gated_dict(rest, monkeypatch):
     matched, sent = [], []
     monkeypatch.setattr(core, "match_kaisuuken",
                         lambda s, params, **k: matched.append(params) or dict(CARD))
-    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     monkeypatch.setattr(core, "gql_mutate",
                         lambda s, q, v=None: sent.append(v["parameters"])
                         or {"createGenerationTask": {"id": "T1"}})
@@ -733,7 +735,7 @@ class _Stop(Exception):
 def test_run_generate_card_matches_and_submits_the_gated_dict(rest, monkeypatch, tmp_path):
     matched, sent = [], []
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     monkeypatch.setattr(core, "match_kaisuuken",
                         lambda s, params, **k: matched.append(params) or dict(CARD))
     monkeypatch.setattr(core, "submit_generation",
@@ -1190,7 +1192,7 @@ def test_price_answers_a_lane_request_free_with_no_card_check(lane, monkeypatch)
 def test_submit_sends_the_lane_once_with_no_card_whatever_no_card_says(lane, monkeypatch):
     calls = _no_card(monkeypatch)
     sent = []
-    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     monkeypatch.setattr(core, "gql_mutate",
                         lambda s, q, v=None: sent.append(v["parameters"])
                         or {"createGenerationTask": {"id": "T9"}})
@@ -1216,7 +1218,7 @@ def test_a_refused_lane_request_is_never_resubmitted_as_anything_else(refusal, m
     def _refuse(s, q, v=None):
         sent.append(dict(v["parameters"]))
         raise core.PixAIError(refusal)
-    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     monkeypatch.setattr(core, "_gate_params_for_model", lambda s, p: p)
     monkeypatch.setattr(core, "gql_mutate", _refuse)
     monkeypatch.setitem(core._turbo_refused, "seen", False)
@@ -1308,18 +1310,18 @@ def test_status_is_read_and_cached_under_the_identity_that_creates(lane, monkeyp
     API key's."""
     mirror = object()
     assert core.infinite_mode_status("api-session", T3)["owned"] is True
-    monkeypatch.setattr(core, "mirror_enabled", lambda: True)
-    monkeypatch.setattr(core, "load_mirror_state", lambda: {"jwt": "<jwt>"})
-    monkeypatch.setattr(core, "_jwt_usable", lambda jwt: jwt == "<jwt>")
-    monkeypatch.setattr(core, "_mirror_session_from", lambda jwt: mirror)
-    monkeypatch.setattr(core, "make_mirror_session",
+    monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
+    monkeypatch.setattr(mirror_mod, "load_mirror_state", lambda: {"jwt": "<jwt>"})
+    monkeypatch.setattr(mirror_mod, "_jwt_usable", lambda jwt: jwt == "<jwt>")
+    monkeypatch.setattr(mirror_mod, "_mirror_session_from", lambda jwt: mirror)
+    monkeypatch.setattr(mirror_mod, "make_mirror_session",
                         lambda *a, **k: pytest.fail("a status read must not refresh the token"))
     assert core.infinite_mode_status("api-session", T3)["owned"] is True
     assert lane.sessions == ["api-session", mirror]
     assert set(core._unlimited_cache) == {(T3, "key"), (T3, "mirror")}
     # an unusable stored token is a failed read, not an API-key fallback
     core._unlimited_cache.clear()
-    monkeypatch.setattr(core, "_jwt_usable", lambda jwt: False)
+    monkeypatch.setattr(mirror_mod, "_jwt_usable", lambda jwt: False)
     assert core.infinite_mode_status("api-session", T3) is None
     assert len(lane.sessions) == 2
 
@@ -1390,20 +1392,20 @@ def test_api_generate_runs_one_lane_task_at_a_time_off_its_own_job_log(monkeypat
     monkeypatch.setattr(core, "_rest_get", lane)
     calls = _no_card(monkeypatch)
     sent = []
-    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     monkeypatch.setattr(core, "gql_mutate",
                         lambda s, q, v=None: sent.append(v["parameters"])
                         or {"createGenerationTask": {"id": "4242"}})
-    core.append_job_event(tmp_path, "4141", status="running", type="generate",
+    jobs_mod.append_job_event(tmp_path, "4141", status="running", type="generate",
                           lane="infinite")
     r = cli.post("/api/generate", json=dict(LANE_OK, unlimited=True))
     assert r.get_json() == {"error": core.UNLIMITED_BUSY} and sent == []
     # once that task has finished, the next one goes out
-    core.append_job_event(tmp_path, "4141", status="done")
+    jobs_mod.append_job_event(tmp_path, "4141", status="done")
     d = cli.post("/api/generate", json=dict(LANE_OK, unlimited=True)).get_json()
     assert d == {"task_id": "4242"}, d
     assert sent[0]["lane"] == "infinite" and calls == []
-    job = next(j for j in core.read_jobs(tmp_path) if j["job_id"] == "4242")
+    job = next(j for j in jobs_mod.read_jobs(tmp_path) if j["job_id"] == "4242")
     assert job["lane"] == "infinite" and job["status"] == "running"
     r = cli.post("/api/generate", json=dict(LANE_OK, unlimited=True))
     assert r.get_json() == {"error": core.UNLIMITED_BUSY} and len(sent) == 1
@@ -1413,9 +1415,12 @@ def test_no_code_path_requests_the_claim_route():
     """The app never claims Unlimited Mode (§1: an account action the owner takes on PixAI's
     site). Grep over every shipped module and client source: the only road to the entitlement
     is the status GET, and no path under it -- the claim among them -- is ever built."""
-    shipped = [ROOT / n for n in ("moonglade/backup.py", "moonglade/gallery.py",
-                                  "moonglade/mcp_server.py", "moonglade/similar.py",
-                                  "moonglade/container.py", "moonglade/assets.py")]
+    # every module of the package (it once named six), so a section split out of backup or
+    # gallery stays covered
+    modules = sorted((ROOT / "moonglade").glob("*.py"))
+    assert {p.name for p in modules} >= {"backup.py", "gallery.py", "mcp_server.py",
+                                         "similar.py", "container.py", "assets.py"}
+    shipped = list(modules)
     for folder, globs in ((ROOT / "gallery" / "src", ("*.js", "*.jsx")),
                           (ROOT / "loom", ("*.jsx",)), (ROOT / "loom" / "src", ("*.js",))):
         for g in globs:
@@ -1427,6 +1432,6 @@ def test_no_code_path_requests_the_claim_route():
         hits += ["{}:{}".format(f.name, i) for i, line in enumerate(text.splitlines(), 1)
                  if route.search(line)]
     assert hits == [], "a path under the Unlimited Mode route is built: {}".format(hits)
-    src = (ROOT / "moonglade" / "backup.py").read_text(encoding="utf-8")
-    assert src.count('"/infinite-mode"') == 1, "the status GET is the one read of the route"
+    reads = sum(p.read_text(encoding="utf-8").count('"/infinite-mode"') for p in modules)
+    assert reads == 1, "the status GET is the one read of the route, in any module"
 

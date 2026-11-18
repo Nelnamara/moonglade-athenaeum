@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from moonglade import backup as core
+from moonglade import pixai_client as pixai_client_mod
 
 
 # ---- build_chat_edit_parameters (pinned to the captured Edit-Pro submit) ----
@@ -72,7 +73,7 @@ def test_upload_media_three_step_flow(tmp_path, monkeypatch):
         put_calls.append((url, data, headers))
         return SimpleNamespace(status_code=200, text="")
 
-    monkeypatch.setattr(core.PixAIClient, "_graphql_post", fake_gql)
+    monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", fake_gql)
     monkeypatch.setattr(core.requests, "put", fake_put)
 
     mid = core.upload_media(object(), str(f))

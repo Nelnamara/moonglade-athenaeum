@@ -35,7 +35,7 @@ QUICK START
   python -m moonglade --max 40           # small test first
 """
 
-__version__ = "3.20.7"
+__version__ = "3.21.0"
 
 import argparse
 import base64
@@ -56,8 +56,14 @@ from collections import defaultdict, namedtuple, Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from moonglade import jobs as _jobs
+from moonglade import media_tools as _media_tools
+from moonglade import mirror as _mirror
+from moonglade import organize as _organize
 from moonglade import paths as _paths
-from moonglade.gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, migrate, load_catalog,
+from moonglade import pixai_client as _pixai_client
+from moonglade import telemetry as _telemetry
+from moonglade.gallery import (CATALOG_FIELDS, init_db, migrate, load_catalog,
                             save_catalog, _db_is_empty, rows_for_media_ids,
                             # The row-level artwork write (see run_sync_artworks): one
                             # narrow UPDATE of the eleven PixAI-owned columns, keyed by
@@ -68,12 +74,10 @@ from moonglade.gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, migrate, lo
                             # by their own narrow UPDATE because they are read once per
                             # deliberate sync, not on the fifteen-minute sweep's cadence.
                             apply_artwork_views,
-                            media_id_of, find_files_for_media_id, build_thumbnails,
-                            _NO_WINDOW, DELETED_DIRNAME, _redact_host_paths_cli,
-                            # The one library scan (see moonglade/gallery.py's
-                            # "LIBRARY SCAN" section) -- imported the same way the
-                            # SQLite catalog helpers above are, because the gallery
-                            # is the shared base module and this file imports it.
+                            build_thumbnails,
+                            _NO_WINDOW, _redact_host_paths_cli)
+# The one library scan (moonglade/scan.py, out of the gallery since 3.21.0).
+from moonglade.scan import (_IMAGE_EXTS, media_id_of, find_files_for_media_id, DELETED_DIRNAME,
                             scan_library, bucket_of, _VIDEO_EXTS,
                             GALLERY_DIRNAME, DUPLICATES_DIRNAME,
                             QUARANTINE_EXCLUDE, QUARANTINE_EXCLUDE_ANYWHERE,
@@ -915,38 +919,6 @@ USER_ID = _cfg.get("USER_ID", "")  # auto-resolved from the API key (me{id}) if 
 # path segment (no "/", "?", "#", "%", "." or space).
 _TASK_ID_RE = re.compile(r"^[0-9A-Za-z_-]{1,64}$")
 TASK_DELETE_PATH = "/task/{}/delete"
-# The Mirror renews its website session the way pixai.art does: POST /v2/auth/refresh-token, no body
-# (the GET recorded on 2026-08-17 answers 404 today). PixAI's contract (09-26 bundle): "Requires an
-# existing session (bearer token or session cookie). The token is returned in the body and also written
-# to the `token` response header and the session cookie." Credentials: the mirror JWT as Bearer, and
-# nothing else -- never the API key, never a cookie (MIRROR-SUBMIT INVARIANTS #7, below).
-# The mirror helpers live just after _make_session below.
-MIRROR_REFRESH_PATH = "/auth/refresh-token"
-# A renewal mints a token that expires 7 days after the renewal (PROBE 2026-10-02: the site's
-# own renewal and the app's old GraphQL renewal alike; the ~27 days measured in August no longer
-# holds). Renew once fewer than this many days are left -- measured in the token's real
-# seconds, not floored whole days -- which leaves the background tick (mirror_renew_tick) three
-# days of retries before a failing renewal could let the token lapse (#71).
-MIRROR_REFRESH_WHEN_DAYS_LEFT = 3
-# What one renewal grants. Only the Control Panel's ring reads it: a token the app did not mint
-# itself (a browser read on Connect, or one stored before #71) has no known start, so its ring
-# is drawn out of max(seconds left, this) -- see mirror_token_span.
-MIRROR_TOKEN_LIFE_S = 7 * 86400
-# The localStorage key the pixai.art frontend keeps the live JWT under (confirmed on a
-# logged-in tab 2026-08-15). localStorage is NOT app-bound(v20)-encrypted the way modern
-# Chrome cookies are, so reading THIS is how the mirror bootstraps on a current Chrome
-# where the cookie store can't be decrypted. Note the trailing ":token" is exact -- the
-# sibling ":intercom-user-jwt" key must never be mistaken for it.
-LOCALSTORAGE_JWT_KEY = b"https://api.pixai.art:token"
-# The mirror must file generations as the WEB client so PixAI applies the website's content
-# policy, not the stricter mobile-app (Apple-compliance) one. Confirmed 2026-08-15: the same
-# account + prompt succeeds on pixai.art (task 2045416767743558052) but 403s "against PixAI's
-# policy" through the mirror. The tell is the HTTP identity -- our non-browser User-Agent and missing Origin/Referer.
-# So the mirror session presents a desktop-browser identity. A stable modern Chrome UA is
-# enough: PixAI classifies the client FAMILY (browser vs app), not the version.
-MIRROR_WEB_USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                         "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36")
-MIRROR_WEB_ORIGIN = "https://pixai.art"
 # ===========================================================================
 
 # Media URL: https://api.pixai.art/v1/media/<id>
@@ -1043,7 +1015,7 @@ def _make_progress(out_dir=None, job_id=None):
             return
         _last_pct["v"] = pct
         try:
-            append_job_event(out_dir, job_id, status="running",
+            _jobs.append_job_event(out_dir, job_id, status="running",
                              done=int(done), total=int(total))
         except Exception:                                  # noqa: BLE001 -- fail-soft logging
             pass
@@ -1065,421 +1037,6 @@ def _make_progress(out_dir=None, job_id=None):
     return _cb
 
 
-# ---------------------------------------------------------------------------
-# Job log: an APPEND-ONLY activity registry that the web "Jobs" card reads.
-# Several processes write it -- the Flask server, panel subprocesses, and the
-# CLI run straight from a terminal -- so every writer just opens in "a" mode
-# and appends ONE json line recording a job's current state. Readers replay the
-# tail and collapse by job_id (last event wins; a terminal done/failed never
-# reverts to running). Append-only sidesteps the read-modify-write races a
-# single mutated JSON blob would have across processes. It doubles as a plain
-# debug dump -- open jobs.jsonl and read it. Consumed by moonglade/gallery.py.
-# ---------------------------------------------------------------------------
-JOBS_LOG_NAME = "jobs.jsonl"
-JOBS_KEEP = 50                 # show at most this many most-recent jobs
-JOBS_MAX_AGE = 24 * 3600       # drop FINISHED jobs older than this (seconds)
-_JOBS_TERMINAL = ("done", "failed", "done_with_errors")
-_JOBS_COMPACT_AT = 2000        # rewrite the raw log once it passes this many lines
-
-# How stale a 'running' job has to be before the ongoing /api/jobs reconciliation
-# sweep (resolve_orphan_jobs, called with min_age=this from moonglade/gallery.py's
-# api_jobs()) will re-ask PixAI for its real status. This is a *different* clock
-# from --poll-timeout: --poll-timeout (300s generate / 600s video, see argparse
-# defaults) bounds how long the CLI waits on ONE task it's actively watching --
-# it's "the task itself timed out". This bounds something else: "the client
-# stopped watching" (a closed tab, a dead Generate card, a crashed browser) while
-# the task itself may still be legitimately in flight. Picking --poll-timeout's
-# own 300s here would false-flag any real generation slower than 5 minutes --
-# ordinary for video -- as an orphan on every single /api/jobs poll (the web
-# generate path never re-stamps a running job's `ts` past its initial submit
-# event, so nothing else naturally resets that clock). 1800s (30 minutes) is
-# comfortably past every known real generation time (routine within minutes;
-# --poll-timeout only waits up to 600s even for video) while still surfacing a
-# genuine orphan same-day, far short of JOBS_MAX_AGE's 24h silent drop-from-view.
-JOBS_ORPHAN_SWEEP_AGE = 30 * 60
-
-# Serializes the ONE non-append writer of jobs.jsonl (maybe_compact_jobs' whole-file
-# rewrite) against every other thread in this process, exactly like _accounts_lock does
-# for AUTH_USERS and for the same reproduced reason: moonglade/gallery.py runs
-# threaded=True, so two /api/jobs polls (two tabs, or the gallery plus the Loom) can both
-# see the log cross _JOBS_COMPACT_AT and start rewriting it at the same moment. Appends
-# don't need this -- they're one "a"-mode line and safe across processes by design.
-_jobs_compact_lock = threading.Lock()
-
-
-def _jobs_path(out_dir):
-    return _paths.records_path(out_dir, JOBS_LOG_NAME)
-
-
-def append_job_event(out_dir, job_id, status=None, **fields):
-    """Append ONE job event to jobs.jsonl (append-only; safe from many processes).
-    Each call records a job's CURRENT state; readers collapse by job_id. Known
-    fields: type, label, done, total, media_ids, error, source, dismissed, count
-    (requested image count, image-gen registrations only). `ts` is stamped here.
-    Fails soft -- logging a job must never break the job.
-
-    Every STRING field is capped at 200 chars here, at the one write choke point
-    every job event from every source funnels through (web routes' own _log_job
-    wrapper, the Panel's subprocess reader, the CLI's own job logging). Found
-    2026-07-21: _cli_job_finish wrote a caught exception's str(e) here with NO cap
-    at all -- the only error-write in either module missing one -- fed by blanket
-    `except Exception` wrappers around whole download/sync runs, so an unbounded
-    message (a long traceback, an arbitrarily large error string) could land here
-    verbatim and later get served back to any LOGIN caller via /api/jobs. 200
-    matches the str(e)[:200] convention already used at every other error-serving
-    site in this app, rather than inventing a new limit.
-
-    This bounds SIZE, not CONTENT -- a short message can still contain a host path
-    (`C:\\Users\\...` easily fits in 200 chars). Redacting host detail out of error
-    text generally is a separate, larger, deliberately deferred piece of work (see
-    the 2026-07-21 audit, S3) -- a first attempt at that used a regex that
-    stopped redacting at the first space, silently leaving a spaced username
-    exposed, which is exactly the kind of narrow-looking fix that is easy to get
-    subtly wrong. This closes the "totally unbounded" half safely tonight without
-    reopening that harder problem."""
-    if not job_id:
-        return
-    rec = {"ts": time.time(), "job_id": str(job_id)}
-    if status is not None:
-        rec["status"] = status
-    for k, v in fields.items():
-        if v is None:
-            continue
-        rec[k] = v[:200] if isinstance(v, str) else v
-    try:
-        with _jobs_path(out_dir).open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(rec, separators=(",", ":")) + "\n")
-    except OSError:
-        pass
-
-
-# ---------------------------------------------------------------------------
-# CLI-side job logging: gives a command run straight from a terminal
-# (python -m moonglade --sync / --update / --generate / ...) the SAME
-# jobs.jsonl activity trail a panel-spawned subprocess already gets from
-# moonglade/gallery.py's _panel_run/_panel_reader (job_id "panel-<uuid>") and
-# delete_tasks_bulk (job_id "bulkdel-<uuid>") -- this is the "cli-<uuid>" flavor.
-# Deliberately a no-op under the Control Panel itself (MOONGLADE_PROGRESS=1): the
-# panel already logs its OWN "panel-<uuid>" job for that exact subprocess, so
-# creating a second "cli-<uuid>" job here would just double the Jobs card entry
-# for one real run. Every call is fail-soft -- a logging problem must NEVER
-# crash, block, or change the outcome of the real command.
-# ---------------------------------------------------------------------------
-
-def _cli_job_start(out_dir, label):
-    """Start a 'cli-<uuid>' job for a bare-terminal run. Returns the job_id, or None
-    when under the panel (see module note above) or if logging itself fails."""
-    if os.environ.get("MOONGLADE_PROGRESS") == "1":
-        return None
-    try:
-        import uuid
-        job_id = "cli-" + uuid.uuid4().hex[:12]
-        append_job_event(out_dir, job_id, status="running", type="cli", label=label)
-        return job_id
-    except Exception:                                       # noqa: BLE001 -- fail-soft logging
-        return None
-
-
-def _cli_job_finish(out_dir, job_id, error=None, warn=0, warn_detail=None):
-    """Terminal event for a _cli_job_start job. No-op if no job was started.
-
-    `warn` (D-4): a partial-failure count from a run that otherwise completed (some
-    files failed to download after retries, but the run itself didn't raise). Logged
-    as its own terminal status, "done_with_errors", distinct from both "done" (clean)
-    and "failed" (the run itself raised) -- so a scheduled/automated caller, or the
-    Panel's Jobs tray, can tell "ran but lost files" apart from either extreme instead
-    of everything but a hard crash collapsing into a silent "done".
-
-    `warn_detail` (B15): overrides the default "file(s) failed to download" noun
-    phrase for a caller whose `warn` count isn't about downloaded files -- e.g.
-    run_sync_artworks, where it can mean a page fetch that failed mid-pagination or
-    a failed video download. The done_with_errors status/marker mechanism itself is
-    unchanged; only the human-readable detail text differs."""
-    if not job_id:
-        return
-    try:
-        if error is not None:
-            append_job_event(out_dir, job_id, status="failed",
-                             error=_redact_host_paths_cli(out_dir, str(error))[:200])
-        elif warn:
-            detail = warn_detail or "file(s) failed to download"
-            append_job_event(out_dir, job_id, status="done_with_errors",
-                             error="{} {}".format(warn, detail))
-        else:
-            append_job_event(out_dir, job_id, status="done")
-    except Exception:                                       # noqa: BLE001 -- fail-soft logging
-        pass
-
-
-def _reconstruct_jobs(out_dir):
-    """Replay the whole log, collapsing by job_id. Returns (jobs_by_id, first_seen_order,
-    raw_line_count). A terminal (done/failed) job is sticky: a later non-terminal event (a
-    stale/interleaved heartbeat) can neither revert its status nor inject progress fields
-    onto it -- only an explicit dismiss is honored once a job has finished.
-
-    `started_at` (owner field-report 2026-07-23: two stuck generations, no way to recover
-    their task id without server access) -- the FIRST event's `ts` is the job's true
-    registration time, but every later event's `cur.update(rec)` used to blindly overwrite
-    `ts` with its own, so by the time a job reached a terminal state the original start
-    time was gone, and "time spent" was not reconstructable client-side. Stamped here, once,
-    off the first event seen for a job_id, and never touched again by later merges (later
-    events don't carry their own `started_at` key, so `cur.update(rec)` can't clobber it).
-    `rec.setdefault` (not a plain assignment) also makes this correct across compaction: a
-    compacted log's single surviving line for a job already HAS a real `started_at` baked
-    in from a prior reconstruction, and re-deriving it from that line's own `ts` (the last
-    known event, not the true start) would be wrong -- setdefault leaves an already-present
-    value alone."""
-    jobs, order, n = {}, [], 0
-    try:
-        with _jobs_path(out_dir).open("r", encoding="utf-8") as fh:
-            for raw in fh:
-                raw = raw.strip()
-                if not raw:
-                    continue
-                n += 1
-                try:
-                    rec = json.loads(raw)
-                except ValueError:
-                    continue
-                jid = rec.get("job_id")
-                if not jid:
-                    continue
-                cur = jobs.get(jid)
-                if cur is None:
-                    rec.setdefault("started_at", rec.get("ts"))
-                    jobs[jid] = rec
-                    order.append(jid)
-                elif cur.get("status") in _JOBS_TERMINAL and rec.get("status") not in _JOBS_TERMINAL:
-                    # finished job + a stale heartbeat: ignore all of it EXCEPT an explicit
-                    # dismiss (which is exactly how a done/failed job gets cleared).
-                    if "dismissed" in rec:
-                        cur["dismissed"] = rec["dismissed"]
-                else:
-                    cur.update(rec)
-    except OSError:
-        return {}, [], 0
-    return jobs, order, n
-
-
-def _job_expired(job, now, max_age):
-    """A job is expired once there's been no activity (its last event's ts) for max_age.
-    This applies to RUNNING jobs too: a 'running' entry with no heartbeat for a full day is
-    a zombie (the tab closed, or a blip hit before the done poll) -- ageing it out keeps the
-    card honest and stops orphaned entries leaking into the log forever."""
-    return bool(max_age) and (now - float(job.get("ts") or 0)) > max_age
-
-
-def _select_jobs(jobs, order, now, keep, max_age):
-    """The single canonical selection used by BOTH read_jobs and maybe_compact_jobs, so the
-    card and the on-disk compaction can never disagree about which jobs survive. Drops
-    dismissed + expired; keeps ALL surviving running jobs (never capped away mid-flight);
-    caps only the FINISHED history to `keep`. Returns newest-first; ties break by first-seen
-    order (stable), which is identical at both call sites."""
-    live, done = [], []
-    for jid in order:                       # order = first-seen -> a stable, shared tiebreak
-        j = jobs[jid]
-        if j.get("dismissed") or _job_expired(j, now, max_age):
-            continue
-        (live if j.get("status") not in _JOBS_TERMINAL else done).append(j)
-    live.sort(key=lambda j: float(j.get("ts") or 0), reverse=True)
-    done.sort(key=lambda j: float(j.get("ts") or 0), reverse=True)
-    if keep:
-        done = done[:keep]                  # cap the finished history only, never running
-    merged = live + done
-    merged.sort(key=lambda j: float(j.get("ts") or 0), reverse=True)
-    return merged
-
-
-def read_jobs(out_dir, keep=JOBS_KEEP, max_age=JOBS_MAX_AGE, now=None):
-    """Current job list for the web card: newest-first, collapsed by job_id, dismissed
-    removed, stale jobs aged out, finished history capped to keep (running never capped).
-    Each job carries both `ts` (its most recent event) and `started_at` (its registration
-    event -- see `_reconstruct_jobs`), so a caller can compute elapsed time for a running
-    job (now - started_at) or a finished one (ts - started_at) without a backend change."""
-    jobs, order, _n = _reconstruct_jobs(out_dir)
-    if not jobs:
-        return []
-    return _select_jobs(jobs, order, time.time() if now is None else now, keep, max_age)
-
-
-def resolve_orphan_jobs(out_dir, status_fn, min_age=0, now=None):
-    """Resolve jobs stuck at 'running' by asking `status_fn(task_id)` for their true state
-    and appending a terminal event when it has finished. Only PixAI-task-keyed generate
-    jobs (job_id is the numeric task id) are checked -- panel/delete jobs are local and
-    self-report. `status_fn` returns 'running' | 'done' | 'failed' (a raised exception on
-    one job is skipped, not fatal). Fixes jobs orphaned when a Generate card was closed
-    before its poll resolved. Returns the number of jobs resolved to a terminal state.
-
-    `min_age` (seconds, default 0): skip jobs whose last event is younger than this --
-    don't even call `status_fn`. 0 means "ask about every non-terminal generate job right
-    now", which is what the ONE-SHOT call at live-mirror watcher startup wants (catch
-    anything left stuck from a prior server session, immediately). A real `min_age`
-    (JOBS_ORPHAN_SWEEP_AGE) is for the ONGOING reconciliation sweep api_jobs() runs on
-    every poll -- see that constant's comment for why 300s/--poll-timeout is the wrong
-    number to reuse here.
-
-    Two behaviors below are gated on `min_age` being truthy, so the min_age=0 (startup)
-    call keeps its exact original behavior -- unchanged from before this parameter
-    existed, still exactly what every pre-existing test pins:
-
-    - A `status_fn` call that comes back genuinely still 'running' for an aged-in job
-      writes a lightweight 'running' heartbeat, refreshing that job's `ts`. This is the
-      only RECURRING writer for a web-submitted generate job: api_task_status()'s own
-      'running' branch writes at most twice per job (once when it first sees it queued,
-      once when a worker starts it -- the queue/render phase the Activity tray renders),
-      deliberately de-duped so it can never become a per-poll heartbeat. So without this,
-      once a job crosses min_age it would get re-asked on literally every subsequent
-      /api/jobs poll for as long as it keeps genuinely running -- a real video generation
-      easily outlives 30 minutes. The heartbeat resets the min_age clock, so a
-      still-genuinely-running job is only re-checked once per min_age, not once per poll.
-    - A `status_fn` call that RAISES for an aged-in job is recorded as 'stale' -- a
-      distinct, visible, non-terminal status meaning "still stuck, and we couldn't reach
-      PixAI to find out why" -- instead of silently left untouched. Un-gated (min_age=0),
-      a single transient blip on a job that's merely SECONDS old would immediately get
-      branded 'stale', which is wrong -- that's exactly the "transient blip" case
-      api_task_status()'s own except-clause deliberately declines to treat as terminal.
-      Gating on min_age means only a job that has ALREADY been stuck a while, and is now
-      ALSO unreachable, gets the marker."""
-    resolved = 0
-    now = time.time() if now is None else now
-    for j in read_jobs(out_dir):
-        if j.get("status") in _JOBS_TERMINAL:
-            continue
-        jid = str(j.get("job_id") or "")
-        if j.get("type") != "generate" or not jid.isdigit():
-            continue
-        if min_age and (now - float(j.get("ts") or 0)) < min_age:
-            continue
-        try:
-            phase = status_fn(jid)
-        except Exception:                          # noqa: BLE001 -- one bad lookup must not stop the rest
-            if min_age:
-                append_job_event(out_dir, jid, status="stale",
-                                 error="couldn't reach PixAI to verify this job's real status")
-            continue
-        started = None
-        if isinstance(phase, dict):
-            # Tolerate a caller handing us generation_status()'s whole
-            # {status, phase, paid_credit} dict rather than the phase string. A real
-            # caller did exactly that and this loop silently matched nothing for every
-            # job, every time. Raising instead would not have helped -- the per-job
-            # `except Exception` above swallows errors by design, so a contract
-            # violation here is INVISIBLE rather than loud. Accepting both shapes is
-            # what actually makes that failure mode impossible.
-            started = phase.get("started")
-            phase = phase.get("phase")
-        if phase in _JOBS_TERMINAL:
-            append_job_event(out_dir, jid, status=phase,
-                             error=("task " + phase if phase == "failed" else None))
-            resolved += 1
-        elif started is False:
-            # A task PixAI accepted, queued, and never assigned a worker. It stays
-            # NON-TERMINAL for ~60 minutes before being reaped, so the branch above never
-            # fires and the heartbeat below would keep the card spinning as though work
-            # were happening -- which is exactly how five of the owner's generations died
-            # unnoticed between 2026-07-21 and 07-24 (all `cancelled`, all
-            # outputs.reason="waiting timeout", none ever dispatched).
-            #
-            # `stale` is reused rather than inventing a state: it already renders a warning
-            # glyph + message in the tracker, and it is deliberately NOT in _JOBS_TERMINAL,
-            # so if PixAI does eventually start the task a later done/failed still wins.
-            # Tested `started is False`, never `not started`: a caller that omits the field
-            # reports None, and "unknown" must not brand every in-flight job stale.
-            append_job_event(out_dir, jid, status="stale",
-                             error="PixAI accepted this job but has not started it -- no "
-                                   "worker has picked it up. Unstarted tasks are cancelled "
-                                   "and refunded at about 60 minutes.")
-        elif min_age:
-            append_job_event(out_dir, jid, status="running")   # refresh ts; see docstring
-    return resolved
-
-
-# Job-id prefixes for work the SERVER PROCESS itself owns -- it spawns these and nothing else
-# will ever report them finished. Deliberately EXCLUDES "cli-": a CLI job belongs to a separate
-# process with its own lifetime that the server knows nothing about, so sweeping one would mark a
-# genuinely-running terminal command as dead. Numeric ids are PixAI generate tasks and belong to
-# resolve_orphan_jobs() instead. "integrity-" is the Broken files list's fix run (a thread in
-# the server, moonglade.integrity.FixRunner).
-_JOBS_SERVER_OWNED_PREFIXES = ("panel-", "import-", "bulkdel-", "integrity-")
-
-
-def resolve_interrupted_local_jobs(out_dir, now=None):
-    """Mark server-owned jobs left non-terminal by a previous process as failed. Returns the count.
-
-    Call this ONCE at server startup. The rule needs no age heuristic and no clock comparison,
-    which is what makes it reliable: at the moment the server boots it has not yet created any
-    job of its own, so every server-owned job still sitting at a non-terminal status necessarily
-    belongs to a process that is gone. There is nothing left to ask, and nothing will ever arrive.
-
-    This closes a real gap. resolve_orphan_jobs() reaps only PixAI-task-keyed generate jobs -- its
-    docstring notes that panel/delete jobs "are local and self-report", which is true right up
-    until the process is killed. Then the terminal event is simply never written, and the Job
-    Tracker shows "running" forever. Owner's production case (2026-07-26): `panel-3d49d9bffea2`,
-    a Similar-index rebuild killed by a machine-wide memory exhaustion, still displaying as
-    running after the reboot. The silent-death detection shipped 2026-07-25 does not cover this
-    class at all, because it is built around asking PixAI about a task id that these jobs do not
-    have.
-
-    Uses the existing "failed" status and an `error` message rather than inventing an
-    "interrupted" state: failed is already terminal, already rendered by the tracker, and already
-    carries a message -- and the job did, in fact, fail. A new status would need matching UI in
-    mg-notify.js and a new entry in _JOBS_TERMINAL for no gain.
-
-    ONE known imprecision, stated rather than hidden: a panel job runs as a SUBPROCESS, so if the
-    server is restarted while one is genuinely still running, this marks it failed early. That
-    self-corrects -- _reconstruct_jobs() only blocks a NON-terminal record from overwriting a
-    terminal one, so the subprocess's own later "done" still lands (verified at the
-    `cur.get("status") in _JOBS_TERMINAL` branch). Recording the owning pid on each event would
-    remove the imprecision entirely; it is not worth the extra surface for a case that resolves
-    itself."""
-    n = 0
-    for j in read_jobs(out_dir, now=now):
-        if j.get("status") in _JOBS_TERMINAL:
-            continue
-        jid = str(j.get("job_id") or "")
-        if not jid.startswith(_JOBS_SERVER_OWNED_PREFIXES):
-            continue
-        append_job_event(
-            out_dir, jid, status="failed",
-            error="Interrupted -- the app stopped before this finished. Nothing was corrupted; "
-                  "run it again when you're ready.")
-        n += 1
-    return n
-
-
-def maybe_compact_jobs(out_dir, keep=JOBS_KEEP, max_age=JOBS_MAX_AGE):
-    """Opportunistically rewrite jobs.jsonl down to exactly the records _select_jobs keeps,
-    so the append-only log can't grow without bound. Only fires once the raw file passes
-    _JOBS_COMPACT_AT lines. Uses the SAME selection as read_jobs, so compaction can never
-    delete a job the card is currently showing, nor drop an in-flight running job. A
-    concurrent append from another process during the rewrite could be lost -- acceptable
-    for a display/paper-trail log, and rare (compaction only). Called by the web reader."""
-    # Whole thing under _jobs_compact_lock: the count check and the rewrite have to be one
-    # step, or two concurrent pollers both pass the threshold test and rewrite together. The
-    # scratch file is pid-stamped like _save_config's for the cross-PROCESS half of the same
-    # race -- a panel subprocess compacting at the same instant would otherwise be writing
-    # into the very file this one is about to rename, truncating the log to a hybrid.
-    with _jobs_compact_lock:
-        jobs, order, n = _reconstruct_jobs(out_dir)
-        if n <= _JOBS_COMPACT_AT:
-            return
-        kept = _select_jobs(jobs, order, time.time(), keep, max_age)
-        kept.reverse()                      # write oldest-first so append order stays chronological
-        path = _jobs_path(out_dir)
-        tmp = path.with_name(path.name + ".tmp-{}".format(os.getpid()))
-        try:
-            with tmp.open("w", encoding="utf-8") as fh:
-                for j in kept:
-                    fh.write(json.dumps(j, separators=(",", ":")) + "\n")
-            _atomic_replace(tmp, path)      # transient Windows sharing violation != lost compaction
-        except OSError:
-            try:
-                if tmp.exists():
-                    tmp.unlink()
-            except OSError:
-                pass
-
-
 def _quick_count(session, page_size=500):
     """Paginate through the library to count total images for the progress meter.
     Uses a conservative page size (default 500) to avoid server-side Prisma
@@ -1491,7 +1048,7 @@ def _quick_count(session, page_size=500):
         total = 0
         while True:
             conn = find_connection(gql(session, page_variables(
-                page_size, _client_of(session).user_id, before)))
+                page_size, _pixai_client._client_of(session).user_id, before)))
             if not conn:
                 break
             for edge in conn.get("edges", []):
@@ -1506,294 +1063,6 @@ def _quick_count(session, page_size=500):
     except PixAIError as e:
         print("  (count failed: {}) -- progress bar will show running total only\n".format(e))
         return 0
-
-
-# ===========================================================================
-# pixai_client -- the ONE PixAI transport seam
-# ===========================================================================
-# Every byte this app exchanges with PixAI leaves through a PixAIClient. Before
-# this section existed there was no transport MODULE at all: a bare
-# requests.Session was threaded through seventy-odd functions as a positional
-# argument, and the five primitives that actually spoke to PixAI --
-# gql/gql_adhoc/gql_mutate/_rest_get/_rest_post -- were module functions that
-# each re-derived the rules from that Session. The rules that matter are not
-# stylistic:
-#
-#   * the retry policy, and the ONE place the spend rule lives. `mutate()` has
-#     no `retries` parameter -- not defaulted to 0, ABSENT -- so a spending call
-#     site cannot ask for the unsafe value. `query()`'s `retries=None` is
-#     document-aware (3 for a query, 0 for a mutation) as the backstop for a
-#     call site that reaches past `mutate()`. A lost RESPONSE is
-#     indistinguishable from a lost REQUEST, and re-POSTing createGenerationTask
-#     after PixAI already created and CHARGED for the task pays twice.
-#   * the two roads to PixAI -- the ad-hoc GraphQL POST (`query()`/`mutate()`),
-#     which sends a full document and is everything the API key can ask for over
-#     GraphQL, and the oRPC `/v2` REST road (`rest_get()`/`rest_post()`/`rest_put()`/
-#     `rest_patch()`). No saved (hash-only) request remains (#88, #89, #91, #92).
-#   * WHICH credential a create rides (`for_create()`): the browser-JWT mirror
-#     session when the Mirror toggle is on, the API key otherwise, and a refusal
-#     rather than a silent fall-back to the key when the mirror is unavailable.
-#
-# There is a second adapter: `dev/tests/fake_pixai.py`'s FakePixAI answers the same
-# interface from registered responses and refuses any operation nobody
-# registered, so "the suite never touches the network" is structural instead of
-# a habit maintained by 300-odd private monkeypatches.
-#
-# TRANSITION SURFACE. `get`/`post`/`headers`/`cookies` on the client delegate
-# straight to the inner requests.Session, because a handful of call sites still
-# reach for the Session themselves rather than through a verb: refresh_jwt's
-# mirror POST (which must not ride rest_post: _rest_error would carry r.text, and the
-# renewal's body is the token), resolve_media and download
-# (which are not GraphQL at all -- a media object and a file body), and run_watch
-# reading the Authorization header off to hand to the WebSocket. `.session` is the escape
-# hatch those will eventually stop needing; it exists for the transition, not
-# forever.
-#
-# NOT everything gets a client. A pasted API key is validated by hand-building a
-# Session with that key as the sole credential (moonglade.gallery's
-# /api/setup/save-key) precisely BECAUSE the normal path prefers the cached
-# config -- a garbage key once verified because the real cached key answered.
-# `_client_of()` therefore wraps whatever Session it is handed without reading
-# config, resolving a user id, or touching a credential, so that route keeps its
-# guarantee while still reaching account_info through the same verb.
-# ===========================================================================
-
-
-def _is_mutation_document(query):
-    """True when `query` is a GraphQL MUTATION document rather than a query.
-
-    Deliberately a dumb leading-keyword check: every document in this module is a plain
-    string literal that starts with its operation type. Anything it cannot classify falls
-    back to False (treated as a query), which is the behaviour that existed before it."""
-    return str(query or "").lstrip().lower().startswith("mutation")
-
-
-class PixAIClient:
-    """The transport seam: everything this app asks PixAI, asked here.
-
-    Six verbs (`query`, `mutate`, `rest_get`, `rest_post`, `rest_put`, `rest_patch`), one
-    credential
-    choice (`for_create`), and the underlying requests.Session on `.session` for the call
-    sites still mid-transition. `auth_kind` is `"api-key"` or `"web-jwt"`; `user_id` is the
-    resolved account id.
-
-    The class holds no PixAI knowledge that the module does not already own -- endpoints,
-    documents and the Apollo headers stay module-level -- so a client can be built around ANY
-    session (a hand-built one, a test double) without that session inheriting the config
-    cache."""
-
-    #: Marks an object as a PixAI transport adapter, so `_client_of` hands it straight
-    #: back instead of wrapping it. Checked with `is True` on purpose: a MagicMock answers
-    #: every attribute with a truthy mock, and a mock standing in for a *Session* must
-    #: still be wrapped or its `.post` would never be reached. This is what lets
-    #: dev/tests/fake_pixai.py's FakePixAI be a real second adapter rather than a subclass --
-    #: it satisfies the interface, it does not inherit the implementation.
-    _is_pixai_client = True
-
-    def __init__(self, session, auth_kind="api-key", user_id=None):
-        self._session = session
-        self._auth_kind = auth_kind
-        self._user_id = user_id
-
-    # -- identity ----------------------------------------------------------
-    @property
-    def session(self):
-        """The underlying requests.Session. For the transition only -- prefer a verb."""
-        return self._session
-
-    @property
-    def auth_kind(self):
-        """`"api-key"` (the official credential) or `"web-jwt"` (the website mirror)."""
-        return self._auth_kind
-
-    @property
-    def user_id(self):
-        """The authenticated account's PixAI id."""
-        return self._user_id or USER_ID
-
-    def __repr__(self):
-        return "<PixAIClient {} user={}>".format(self._auth_kind, self.user_id or "?")
-
-    # -- the transition surface: the raw Session, delegated ------------------
-    def get(self, *args, **kwargs):
-        return self._session.get(*args, **kwargs)
-
-    def post(self, *args, **kwargs):
-        return self._session.post(*args, **kwargs)
-
-    @property
-    def headers(self):
-        return self._session.headers
-
-    @property
-    def cookies(self):
-        return self._session.cookies
-
-    # -- ad-hoc GraphQL POST -------------------------------------------------
-    def query(self, document, variables=None, retries=None, timeout=120):
-        """Run an ad-hoc (non-persisted) GraphQL operation by POSTing the full document.
-
-        `retries=None` (the default) means "the safe default for THIS document": **3 for a
-        query, 0 for a mutation**. A retry re-POSTs on a RequestException or a 429/5xx, and
-        that is only free when the operation is idempotent. An explicit integer wins, so a
-        caller can still ask for anything on purpose. `timeout` is the per-ATTEMPT socket
-        timeout in seconds (120, this road's long-standing value, unless a caller says
-        otherwise): a caller under a wall-clock ceiling of its own passes the time it has left
-        -- the delete preview's live check does, through `task_detail_gql`. Returns the `data`
-        dict; raises PixAIError on GraphQL/HTTP error."""
-        if retries is None:
-            retries = 0 if _is_mutation_document(document) else 3
-        return self._graphql_post(document, variables, retries, timeout)
-
-    def mutate(self, document, variables=None):
-        """`query()` for a mutation that MUST NOT fire twice: SINGLE ATTEMPT, always, and it
-        NEVER FOLLOWS A REDIRECT (a 307/308 would re-send the mutation to a URL the answering
-        server chose; #92 review F1) -- a 3xx raises with nothing re-sent.
-
-        It takes **no `retries` argument on purpose** -- there is no correct value above 0
-        for a spending path, so the knob is not offered rather than offered with a safe
-        default a call site can override by accident. Pinned by
-        dev/tests/test_pixai_client.py and dev/tests/test_spend_no_retry.py."""
-        return self._graphql_post(document, variables, 0)
-
-    def _graphql_post(self, document, variables, retries, timeout=120):
-        """The one ad-hoc POST loop. `retries` is already resolved to an integer by the
-        verb that called in -- this function never chooses it, which is what keeps the
-        spend rule readable in exactly two places above. `timeout` is each attempt's socket
-        timeout: whatever `query` was handed, and always 120 for `mutate`.
-
-        A MUTATION document (`_is_mutation_document`, whichever verb sent it -- `mutate`, or
-        `query` as the backstop) never follows a redirect (#92 review F1): it is sent with
-        `allow_redirects=False`, and a 3xx raises before its body is read, with nothing
-        re-sent. A query document keeps requests' default."""
-        body = {"query": document, "variables": variables or {}}
-        follow_redirects = not _is_mutation_document(document)
-        send = {} if follow_redirects else {"allow_redirects": False}
-        delay = 2.0
-        for attempt in range(retries + 1):
-            try:
-                r = self._session.post(API_URL, json=body, timeout=timeout, **send)
-            except requests.exceptions.SSLError:
-                raise PixAIError(_ssl_help())
-            except requests.RequestException:
-                if attempt == retries:
-                    raise
-                time.sleep(delay); delay *= 2; continue
-            if not follow_redirects and _is_redirect_status(r):
-                raise PixAIError("HTTP {} -- PixAI redirected this request; nothing was "
-                                 "re-sent.".format(r.status_code))
-            if r.status_code == 401:
-                raise PixAIError("401 Unauthorized -- API key missing/expired.")
-            if r.status_code == 429 or r.status_code >= 500:
-                if attempt == retries:
-                    r.raise_for_status()
-                time.sleep(delay); delay *= 2; continue
-            try:
-                data = r.json()
-            except ValueError:
-                raise PixAIError("HTTP {} non-JSON response:\n{}".format(
-                    r.status_code, r.text[:400]))
-            if data.get("errors"):
-                err = PixAIError("GraphQL error: " + json.dumps(data["errors"])[:500])
-                # The WHOLE list rides on the error: the message keeps 500 characters, and a
-                # structured refusal (a recipe's RECIPE_* with its ids and reason) can be
-                # longer. Reading it changes nothing about what was sent or retried.
-                err.graphql_errors = data["errors"]
-                # A GraphQL answer may carry `errors` AND `data` at once: a partial success,
-                # where the root field DID resolve (a run created and charged) and something
-                # beneath it failed. The data rides on the error so a spend guard can tell
-                # that apart from a refusal (definite_refusal; waves 2+3 review, F2).
-                err.graphql_data = data.get("data")
-                raise err
-            return data.get("data") or {}
-        raise RuntimeError("unreachable")
-
-    # -- the oRPC /v2 REST road ----------------------------------------------
-    def rest_get(self, path, params=None, timeout=30):
-        """GET a /v2 oRPC REST route. Returns parsed JSON. Raises PixAIError on non-2xx.
-
-        Single-attempt by construction, like `rest_post` -- see its note."""
-        r = self._session.get(REST_API_BASE + path, params=params, timeout=timeout)
-        if not r.ok:
-            raise _rest_error("GET", path, r)
-        return r.json()
-
-    def rest_post(self, path, body=None, timeout=60):
-        """POST JSON to a /v2 oRPC REST route. Returns parsed JSON. Raises on non-2xx.
-
-        NO retry loop, deliberately: `submit_fixer`, `claim_reward` and `delete_task` ride
-        this, and the session mounts no urllib3 Retry adapter (requests' default HTTPAdapter
-        is max_retries=0), so all are single-attempt. Pinned by
-        dev/tests/test_spend_no_retry.py::test_rest_post_has_no_retry_loop.
-
-        NEVER FOLLOWS A REDIRECT (#92 review F1; the same on every write verb): requests would
-        re-send a 307/308 -- body, API-key Bearer and all -- to a URL the answering server
-        chose, and turn a 301/302/303 into a GET whose answer then decides "it worked". So
-        redirects are off, and a 3xx raises (`_refuse_redirect`) before anything reads its
-        body."""
-        r = self._session.post(REST_API_BASE + path, json=body, timeout=timeout,
-                               allow_redirects=False)
-        _refuse_redirect("POST", path, r)
-        if not r.ok:
-            raise _rest_error("POST", path, r)
-        return r.json()
-
-    def rest_patch(self, path, body=None, timeout=60):
-        """PATCH JSON to a /v2 oRPC REST route. Single attempt, like rest_post / rest_put:
-        its one caller (joining a LoRA to the rebate programme) cannot be undone. Never
-        follows a redirect, like rest_post."""
-        r = self._session.patch(REST_API_BASE + path, json=body, timeout=timeout,
-                                allow_redirects=False)
-        _refuse_redirect("PATCH", path, r)
-        if not r.ok:
-            raise _rest_error("PATCH", path, r)
-        return r.json()
-
-    def rest_put(self, path, body=None, timeout=60):
-        """PUT JSON to a /v2 oRPC REST route. Returns parsed JSON. Raises on non-2xx.
-
-        Single-attempt like `rest_post`, and by the same reasoning: the training routes that
-        ride it (a dataset replace, a description save) change the account, and a re-send
-        after a lost response can land on a task that has already moved on. Pinned alongside
-        rest_post by dev/tests/test_spend_no_retry.py. Never follows a redirect, like
-        rest_post."""
-        r = self._session.put(REST_API_BASE + path, json=body, timeout=timeout,
-                              allow_redirects=False)
-        _refuse_redirect("PUT", path, r)
-        if not r.ok:
-            raise _rest_error("PUT", path, r)
-        return r.json()
-
-    # -- which credential a create rides -------------------------------------
-    def for_create(self):
-        """The client a CREATE must POST through: the browser-JWT mirror when the 'Mirror
-        to PixAI' toggle is on (so the generation lands in the pixai.art web library),
-        this same client otherwise. Refuses (raises) rather than falling back to the API
-        key when the mirror is armed but unavailable. Callers must have already passed
-        `_check_read_only` -- building the mirror session may make a renewal call."""
-        chosen = _session_for_create(self)
-        if chosen is self:
-            return self
-        return PixAIClient(chosen, auth_kind="web-jwt")
-
-
-def _client_of(session):
-    """The transport adapter for `session`: itself when it already is one, a thin
-    PixAIClient wrapper around it otherwise.
-
-    "Already is one" is the `_is_pixai_client is True` marker rather than an isinstance
-    check, so a second adapter (dev/tests/fake_pixai.py's FakePixAI) passes through without
-    inheriting this class's implementation.
-
-    Wrapping reads NO config and resolves NO credential -- that is what lets the pasted-
-    API-key validation route hand its own hand-built Session to account_info and still
-    get the guarantee it was built for."""
-    if getattr(session, "_is_pixai_client", False) is True:
-        return session
-    return PixAIClient(session)
-
-
-# --- end pixai_client ------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
@@ -2962,7 +2231,7 @@ def delete_task(session, task_id):
             "refusing to delete task {!r}: not a PixAI task id. Nothing was sent.".format(tid))
     _t = time.monotonic()
     try:
-        answer = _client_of(session).rest_post(TASK_DELETE_PATH.format(tid), {})
+        answer = _pixai_client._client_of(session).rest_post(TASK_DELETE_PATH.format(tid), {})
     except requests.exceptions.SSLError:
         raise PixAIError(_ssl_help())
     except PixAIRestError as e:
@@ -3123,7 +2392,7 @@ def gql_adhoc(session, query, variables=None, retries=None, timeout=120):
     survives under this name because seventy-odd callers still hand it a `session`
     positionally (a raw requests.Session, a PixAIClient, or a test double are all fine)
     and because the suite patches it here."""
-    return _client_of(session).query(query, variables, retries=retries, timeout=timeout)
+    return _pixai_client._client_of(session).query(query, variables, retries=retries, timeout=timeout)
 
 
 def gql_mutate(session, query, variables=None):
@@ -3154,7 +2423,7 @@ def gql_mutate(session, query, variables=None):
 
     THIN DELEGATE onto `PixAIClient.mutate`, which likewise offers no `retries`
     parameter -- the rule now has ONE home rather than being re-argued at each helper."""
-    return _client_of(session).mutate(query, variables)
+    return _pixai_client._client_of(session).mutate(query, variables)
 
 
 def resolve_user_id(session):
@@ -5038,656 +4307,6 @@ def cmd_convert_existing(args, out):
 
 
 # ---------------------------------------------------------------------------
-# Duplicate audit + dedup (filesystem-truth; independent of catalog.db)
-# ---------------------------------------------------------------------------
-# Keeper priority when the same image lives in several buckets: lower wins
-# (i.e. we KEEP the most-organized copy and remove the rest). This reinforces
-# --organize's layout instead of fighting it. "batches" ranks first as LEGACY
-# ONLY -- no reachable code path creates a batches/ folder anymore (the old
-# live-organize-into-batches mode lived behind an `organize_adv_live` runtime
-# flag that no CLI argument has ever set since; --organize's real, current
-# output is month folders only, and its own run tidies up leftover legacy
-# batches/ dirs -- see below). A batches/ folder found here is pre-existing
-# data from an older run, still worth preferring as a keeper if one exists.
-_BUCKET_PRIORITY = {"batches": 0, "month": 1, "images": 2, "other": 3}
-
-
-# The bucket classifier is `moonglade.gallery.bucket_of` -- the LIBRARY SCAN
-# section's one copy. This alias keeps the private name every caller (and
-# dev/tests/test_dedup.py's `core._bucket_of` assertions) already uses.
-_bucket_of = bucket_of
-
-
-def _scan_media_files(out_dir):
-    """One walk of the tree. Yields (path, rel, bucket, media_id) for every image
-    file outside gallery/, _duplicates/, and _deleted/. The audit's view (and, via
-    verify_quarantine, the dedup-verify pass) onto the shared scan.
-
-    _deleted/ exclusion is B11 (audit 2026-07-21): without it, a locally-purged
-    image is a valid audit hit -- reported back as a live Class A duplicate of its
-    own quarantined self, and (via verify_quarantine's survivor index) potentially
-    treated as the "surviving keeper" a _duplicates/ copy is compared against.
-
-    Deliberately does NOT drop zero-byte files (named disagreement 3): the audit
-    has to SEE one in order to never choose it as a keeper -- dev/tests/test_dedup.py
-    pins that, and it is why the scan reports `size` rather than deciding."""
-    for e in scan_library(out_dir, kinds=("image",), exclude=QUARANTINE_EXCLUDE):
-        yield e.path, e.rel, e.bucket, e.media_id
-
-
-def audit_collection(out_dir, content=True, progress=None):
-    """Filesystem-truth duplicate audit. Returns a dict:
-        per_bucket       : {bucket: count}
-        class_a          : [ {media_id, files:[(rel,bucket,size)], keeper, losers} ]
-        class_b          : [ {sha, files:[(rel,bucket,size,media_id)], keeper, losers} ]
-        totals           : counts + reclaimable bytes
-    Class A = same media_id in >1 location (no hashing needed).
-    Class B = byte-identical content under DIFFERENT media_ids (size-bucketed hash).
-    """
-    by_mid = defaultdict(list)      # mid -> [(path, rel, bucket, size)]
-    by_size = defaultdict(list)     # size -> [(path, rel, bucket, mid)]
-    per_bucket = Counter()
-    all_files = list(_scan_media_files(out_dir))
-    total = len(all_files)
-    for i, (p, rel, bucket, mid) in enumerate(all_files):
-        try:
-            size = p.stat().st_size
-        except OSError:
-            continue
-        if size == 0:
-            # A 0-byte file (an interrupted download, same failure mode as invariant 3's
-            # resume-index bug) must never enter by_mid/by_size: with bucket priority as
-            # the ONLY keeper-selection signal, an empty file in the "batches" bucket
-            # outranks a real image in "images" and gets chosen as the survivor. Under
-            # plain --dedup that is recoverable (the auto-verify pass below flags it,
-            # "REVIEW NEEDED"); under --dedup --apply --dedup-delete there is no verify
-            # step at all, so it silently hard-deletes the only real copy. Excluding it
-            # here means it can never become a keeper OR a loser -- it simply isn't part
-            # of any duplicate group, which is also correct: an empty file isn't a
-            # duplicate of anything.
-            continue
-        per_bucket[bucket] += 1
-        by_mid[mid].append((p, rel, bucket, size))
-        by_size[size].append((p, rel, bucket, mid))
-        if progress and (i % 500 == 0 or i + 1 == total):
-            progress(i + 1, total, 0)
-
-    def _keeper(items, key_bucket):
-        # items: list of tuples; key_bucket(item) -> bucket name. Prefer organized,
-        # then shortest path (stable), so the canonical copy is deterministic.
-        # A zero-byte item (it[3] is size on the by_mid tuple shape) can never win --
-        # False < True, so "is empty" sorts before every real bucket/path comparison.
-        # Defense in depth: the loop above already excludes zero-byte files from ever
-        # reaching `items` at all, so this branch should be unreachable in practice.
-        return min(items, key=lambda it: (it[3] == 0,
-                                          _BUCKET_PRIORITY.get(key_bucket(it), 9),
-                                          len(str(it[1]))))
-
-    # ---- Class A: same media_id across >1 distinct bucket -------------------
-    class_a = []
-    for mid, items in by_mid.items():
-        buckets = {b for (_, _, b, _) in items}
-        if len(items) > 1 and len(buckets) > 1:
-            keeper = _keeper(items, lambda it: it[2])
-            losers = [it for it in items if it[0] != keeper[0]]
-            class_a.append({"media_id": mid, "files": items,
-                            "keeper": keeper, "losers": losers})
-
-    # ---- Class B: identical bytes, different media_id -----------------------
-    class_b = []
-    if content:
-        # Only hash within same-size groups that span >1 distinct media_id.
-        candidates = [(s, grp) for s, grp in by_size.items()
-                      if len({m for (_, _, _, m) in grp}) > 1]
-        hashed = 0
-        n_to_hash = sum(len(grp) for _, grp in candidates)
-        by_sha = defaultdict(list)
-        for s, grp in candidates:
-            for (p, rel, bucket, mid) in grp:
-                sha = _file_sha(p)
-                hashed += 1
-                if sha:
-                    by_sha[sha].append((p, rel, bucket, s, mid))
-                if progress and (hashed % 200 == 0 or hashed == n_to_hash):
-                    progress(hashed, max(n_to_hash, 1), 1)
-        for sha, items in by_sha.items():
-            mids = {m for (_, _, _, _, m) in items}
-            if len(items) > 1 and len(mids) > 1:
-                keeper = _keeper(items, lambda it: it[2])
-                losers = [it for it in items if it[0] != keeper[0]]
-                class_b.append({"sha": sha, "files": items,
-                                "keeper": keeper, "losers": losers})
-
-    reclaim_a = sum(sz for g in class_a for (_, _, _, sz) in g["losers"])
-    reclaim_b = sum(it[3] for g in class_b for it in g["losers"])
-    return {
-        "per_bucket": dict(per_bucket),
-        "class_a": class_a,
-        "class_b": class_b,
-        "totals": {
-            "files": total,
-            "class_a_groups": len(class_a),
-            "class_a_redundant": sum(len(g["losers"]) for g in class_a),
-            "class_b_groups": len(class_b),
-            "class_b_redundant": sum(len(g["losers"]) for g in class_b),
-            "reclaimable_bytes": reclaim_a + reclaim_b,
-        },
-    }
-
-
-def _fmt_bytes(n):
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if n < 1024 or unit == "TB":
-            return "{:.1f} {}".format(n, unit)
-        n /= 1024
-
-
-def cmd_audit(args, out):
-    """Read-only duplicate audit. Prints a summary and writes audit_report.csv.
-    Touches nothing on disk. Independent of catalog.db."""
-    content = not getattr(args, "no_content", False)
-    print("Auditing {} (content hashing: {})...".format(
-        out, "on" if content else "off"))
-    _prog = getattr(args, "progress", None)
-    rep = audit_collection(out, content=content, progress=_prog)
-    t = rep["totals"]
-
-    print("\nFiles per bucket:")
-    for b, c in sorted(rep["per_bucket"].items(), key=lambda kv: -kv[1]):
-        print("  {:<10} {:,}".format(b, c))
-
-    print("\nClass A  - same media_id in >1 folder : {:,} groups, {:,} redundant files"
-          .format(t["class_a_groups"], t["class_a_redundant"]))
-    print("Class B  - identical bytes, diff id   : {:,} groups, {:,} redundant files"
-          .format(t["class_b_groups"], t["class_b_redundant"]))
-    print("Reclaimable if deduped                : {}".format(
-        _fmt_bytes(t["reclaimable_bytes"])))
-
-    # Write detailed CSV
-    report_path = _paths.records_path(out, "audit_report.csv")
-    with open(report_path, "w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow(["class", "group_key", "role", "bucket", "media_id", "size", "path"])
-        for g in rep["class_a"]:
-            kp, kr, kb, ksz = g["keeper"]
-            w.writerow(["A", g["media_id"], "keep", kb, g["media_id"], ksz, str(kr)])
-            for (_, rel, b, sz) in g["losers"]:
-                w.writerow(["A", g["media_id"], "remove", b, g["media_id"], sz, str(rel)])
-        for g in rep["class_b"]:
-            kp, kr, kb, ksz, kmid = g["keeper"]
-            w.writerow(["B", g["sha"][:12], "keep", kb, kmid, ksz, str(kr)])
-            for (_, rel, b, sz, mid) in g["losers"]:
-                w.writerow(["B", g["sha"][:12], "remove", b, mid, sz, str(rel)])
-    print("\nDetailed report -> {}".format(report_path.relative_to(out.parent)
-                                            if out.parent else report_path))
-    print("Run --dedup to act on this (quarantine by default; nothing deleted yet).")
-    return rep
-
-
-def cmd_dedup(args, out, db_path):
-    """Act on the audit: move redundant copies to _duplicates/ (default) or delete
-    them (--dedup-delete). Keeps the most-organized copy. Dry-run by default.
-    Reconciles catalog.db with what's left on disk afterward."""
-    # Dedup is filesystem-truth: it does not need a catalog to run. Reconcile is
-    # a bonus, applied only if a catalog exists.
-    try:
-        db_path = _ensure_db(out)
-        have_catalog = True
-    except PixAIError:
-        have_catalog = False
-    content = not getattr(args, "no_content", False)
-    delete = getattr(args, "dedup_delete", False)
-    apply = getattr(args, "apply", False)  # default is dry-run unless --apply
-
-    rep = audit_collection(out, content=content, progress=getattr(args, "progress", None))
-    losers = []  # (rel_path, abs_path, what it is a copy of -- the Great Sweep's key)
-    for g in rep["class_a"]:
-        for (p, rel, b, sz) in g["losers"]:
-            losers.append((rel, p, "dup-media:%s" % g["media_id"]))
-    for g in rep["class_b"]:
-        for (p, rel, b, sz, mid) in g["losers"]:
-            losers.append((rel, p, "dup-sha:%s" % g["sha"]))
-
-    action = "DELETE" if delete else "quarantine to _duplicates/"
-    print("\nDedup plan: {:,} redundant files to {} ({})".format(
-        len(losers), action, _fmt_bytes(rep["totals"]["reclaimable_bytes"])))
-    for rel, _, _ in losers[:8]:
-        print("  {}".format(rel))
-    if len(losers) > 8:
-        print("  ... and {:,} more".format(len(losers) - 8))
-
-    if not apply:
-        print("\nDry run -- nothing changed. Re-run with --apply to perform it.")
-        return rep
-
-    quarantine_root = out / "_duplicates"
-    moved = removed = failed = 0
-    culled_keys = []
-    _prog = getattr(args, "progress", None)
-    for i, (rel, p, key) in enumerate(losers):
-        try:
-            if delete:
-                p.unlink()
-                removed += 1
-            else:
-                dest = quarantine_root / rel
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                if dest.exists():
-                    dest = dest.with_name(dest.stem + "_dup" + dest.suffix)
-                p.replace(dest)
-                moved += 1
-            culled_keys.append(key)
-        except OSError as e:
-            print("  failed {} ({})".format(rel, e))
-            failed += 1
-        if _prog:
-            _prog(i + 1, len(losers), 0)
-
-    if delete:
-        print("\nDeleted {:,} files, {:,} failed.".format(removed, failed))
-    else:
-        print("\nQuarantined {:,} files to {}, {:,} failed.".format(
-            moved, quarantine_root.relative_to(out.parent) if out.parent else quarantine_root,
-            failed))
-
-    if culled_keys:
-        try:      # The Great Sweep: each redundant copy once, keyed by what it duplicated --
-            # copying a file back and deduping it again is not a second piece swept
-            from moonglade.gallery import telem_set_add_many
-            telem_set_add_many("culled_keys", culled_keys, out_dir=out)
-        except Exception:
-            pass
-
-    if have_catalog:
-        n = reconcile_catalog_with_disk(out, db_path)
-        print("Reconciled catalog: updated {:,} filename/batch entries to match disk.".format(n))
-
-    # Auto-verify after quarantining. Dedup chose losers by media_id WITHOUT
-    # comparing bytes, so this is the only step that confirms each quarantined
-    # file truly matches a surviving keeper. Never auto-deletes -- the human does.
-    if not delete and moved:
-        print("\n--- Verifying the quarantine (confirming every moved file is "
-              "redundant) ---")
-        vr = verify_quarantine(out, progress=getattr(args, "progress", None))
-        ok = vr["safe"] + vr["meta_only"]
-        print("Verify: {:,} confirmed safe ({:,} byte-identical + {:,} metadata-only), "
-              "{:,} differ, {:,} orphan.".format(
-                  ok, vr["safe"], vr["meta_only"], len(vr["differs"]), len(vr["orphan"])))
-        if vr["differs"] or vr["orphan"]:
-            print("REVIEW NEEDED before deleting _duplicates/ -- run --verify-dupes "
-                  "to write verify_report.csv with the flagged items.")
-        else:
-            print("All quarantined files confirmed redundant -- _duplicates/ is safe "
-                  "to delete to reclaim the space.")
-    return rep
-
-
-def verify_quarantine(out_dir, restore_orphans=False, progress=None):
-    """Final-pass safety check on _duplicates/ BEFORE you delete it.
-
-    For every quarantined file, find the surviving keeper with the same media_id
-    (outside _duplicates/) and compare bytes. Classifies each as:
-      * safe    - a keeper exists AND bytes are identical -> truly redundant
-      * differs - a keeper exists but bytes DIFFER -> same media_id, different
-                  content (a naming collision the sort/backfill missed) -> REVIEW
-      * orphan  - no surviving keeper at all -> quarantining it lost the only copy
-    Optionally restores orphans back to images/. Returns a result dict.
-    """
-    quarantine_root = out_dir / "_duplicates"
-    if not quarantine_root.exists():
-        return {"safe": 0, "differs": [], "orphan": [], "total": 0}
-
-    files = [p for p in quarantine_root.rglob("*")
-             if p.is_file() and p.suffix.lower() in _IMAGE_EXTS]
-    # Index surviving keepers (everything outside _duplicates/ and gallery/) once,
-    # in a single walk, so we don't rglob the whole tree per quarantined file.
-    survivors = defaultdict(list)
-    for p, rel, bucket, mid in _scan_media_files(out_dir):
-        survivors[mid].append(p)
-
-    safe = 0
-    meta_only = 0  # bytes differ but pixels identical (e.g. embedded PNG metadata)
-    differs = []   # (quarantined_path, keeper_path) - genuinely different pixels
-    orphan = []    # quarantined_path
-    total = len(files)
-    for i, q in enumerate(files):
-        keepers = survivors.get(media_id_of(q), [])
-        if not keepers:
-            orphan.append(q)
-        elif _same_bytes(q, keepers[0]):
-            safe += 1
-        else:
-            # Bytes differ. Fall back to a pixel compare: identical pixels mean the
-            # difference is just container/metadata (the keeper has prompt text
-            # embedded), so it's still safe to delete the quarantined copy.
-            px = _same_pixels(q, keepers[0])
-            if px is True:
-                meta_only += 1
-            else:
-                differs.append((q, keepers[0]))
-        if progress and (i % 200 == 0 or i + 1 == total):
-            progress(i + 1, total, 0)
-
-    restored = 0
-    if restore_orphans and orphan:
-        images_dir = out_dir / "images"
-        images_dir.mkdir(parents=True, exist_ok=True)
-        for q in orphan:
-            dest = images_dir / q.name
-            try:
-                q.replace(dest)
-                restored += 1
-            except OSError as e:
-                print("  restore failed {} ({})".format(q.name, e))
-
-    return {"safe": safe, "meta_only": meta_only, "differs": differs,
-            "orphan": orphan, "total": total, "restored": restored}
-
-
-def cmd_verify_dupes(args, out):
-    """Verify the _duplicates/ quarantine is safe to delete. Read-only unless
-    --restore-orphans is passed."""
-    restore = getattr(args, "restore_orphans", False)
-    print("Verifying quarantine in {}/_duplicates ...".format(out))
-    res = verify_quarantine(out, restore_orphans=restore,
-                            progress=getattr(args, "progress", None))
-    if res["total"] == 0:
-        print("No _duplicates/ folder (nothing quarantined yet).")
-        return res
-
-    print("\nQuarantined files checked : {:,}".format(res["total"]))
-    print("  safe - byte-identical keeper exists       : {:,}".format(res["safe"]))
-    print("  safe - pixels identical (metadata-only)   : {:,}".format(res["meta_only"]))
-    print("  DIFFERS - same id, DIFFERENT pixels       : {:,}".format(len(res["differs"])))
-    print("  ORPHAN  - no surviving keeper             : {:,}".format(len(res["orphan"])))
-
-    if res["differs"] or res["orphan"]:
-        report = _paths.records_path(out, "verify_report.csv")
-        with open(report, "w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
-            w.writerow(["status", "quarantined_file", "surviving_keeper"])
-            for q, k in res["differs"]:
-                w.writerow(["differs", str(q.relative_to(out)), str(k.relative_to(out))])
-            for q in res["orphan"]:
-                w.writerow(["orphan", str(q.relative_to(out)), ""])
-        print("\nFlagged items written to {}".format(report.relative_to(out.parent)
-                                                     if out.parent else report))
-
-    if res.get("restored"):
-        print("Restored {:,} orphaned files to images/.".format(res["restored"]))
-
-    if not res["differs"] and not res["orphan"]:
-        print("\nAll clear: every quarantined file is byte-identical to a surviving "
-              "copy. Safe to delete _duplicates/.")
-    else:
-        print("\nDo NOT blanket-delete yet -- review the flagged items above first.")
-        if res["orphan"] and not restore:
-            print("Re-run with --restore-orphans to move orphans back to images/.")
-    return res
-
-
-def reconcile_catalog_with_disk(out_dir, db_path):
-    """After files move/disappear, point each catalog row's filename+batch at the
-    surviving on-disk file for that media_id. Rows whose file is gone keep their
-    last-known filename but are left intact (the image may be re-downloadable)."""
-    rows = load_catalog(db_path)
-    updated = 0
-    for r in rows:
-        mid = r.get("media_id")
-        if not mid:
-            continue
-        matches = find_files_for_media_id(out_dir, mid)
-        if not matches:
-            continue
-        survivor = matches[0]
-        rel = survivor.relative_to(out_dir)
-        bucket = _bucket_of(rel)
-        new_batch = rel.parts[1] if bucket == "batches" and len(rel.parts) > 2 else (
-            "" if bucket != "batches" else r.get("batch", ""))
-        if r.get("filename") != survivor.name or r.get("batch", "") != new_batch:
-            r["filename"] = survivor.name
-            r["batch"] = new_batch
-            updated += 1
-    if updated:
-        save_catalog(db_path, rows)
-    return updated
-
-
-ORGANIZE_MANIFEST = "organize_manifest.csv"
-
-
-def cmd_organize(args, out, img_dir, db_path):
-    """Normalize PixAI images into YYYY-MM/ month folders with descriptive,
-    readable filenames (prompt_taskid_mediaid) -- one flat scheme, NO batch
-    subfolders. Scans the WHOLE backup (flat images/, existing month folders, and
-    any legacy batches/), so a single run brings everything to the same layout for
-    easy Explorer browsing.
-
-    Safety: writes a reversible move-manifest (organize_manifest.csv: old->new) so
-    every move can be undone with --undo-organize. Idempotent (files already at
-    their target are skipped), byte-safe (never overwrites a differing file), and
-    dry-runnable. Metadata embedding (--embed-metadata) and conversion (--convert)
-    are opt-in. Imported (source='local') files, videos, and _deleted/ quarantine
-    are left untouched (B11, audit 2026-07-21: this is the only one of B11's five
-    quarantine-blind walks that actually MOVES files -- a stale _deleted/ remnant
-    sharing a media_id with the live catalogued copy collided with it in the move
-    plan, either hard-deleting one outright as a spurious "redundant" duplicate or
-    resurrecting the quarantined copy into the organized tree in its place)."""
-    db_path = _ensure_db(out)
-    meta_by_mid = {}
-    for row in load_catalog(db_path):
-        mid = row.get("media_id")
-        if mid:
-            meta_by_mid[mid] = row
-
-    # This walker's own exclusion (named disagreement 6): the shared quarantine set
-    # plus videos/ and imported/, which organize must leave alone because they are
-    # not PixAI images to normalize.
-    skip_dirs = QUARANTINE_EXCLUDE + ("videos", "imported")
-
-    def _target(mid, row, ext):
-        month = (row.get("created_at") or "")[:7] or "unknown-date"
-        stem = build_stem_name(row.get("prompt_preview", ""), row.get("task_id", ""),
-                               mid, args.name_length, args.name_sep)
-        return out / month / (stem + ext)
-
-    # Sources: every PixAI image on disk (catalog media), wherever it currently is.
-    plan, in_place = [], 0
-    for e in scan_library(out, kinds=("image",), exclude=skip_dirs):
-        p = e.path
-        if p.name.startswith("_"):
-            continue                       # organize's own rule, about files not folders
-        row = meta_by_mid.get(e.media_id)
-        if not row or (row.get("source") or "") == "local":
-            continue                       # unknown file or user import: leave it
-        dst = _target(e.media_id, row, p.suffix.lower())
-        if p.resolve() == dst.resolve():
-            in_place += 1
-            continue
-        plan.append((p, dst, e.media_id, row))
-
-    print("Organize plan: {} file(s) -> YYYY-MM/ with descriptive names; "
-          "{} already in place.".format(len(plan), in_place))
-    for src, dst, mid, row in plan[:6]:
-        print("  {}  ->  {}".format(src.relative_to(out), dst.relative_to(out)))
-    if len(plan) > 6:
-        print("  ... and {} more".format(len(plan) - 6))
-    if args.convert:
-        print("Will also convert to {}.".format(args.convert))
-    if getattr(args, "embed_metadata", False):
-        print("Will embed prompt metadata into PNG/JPEG (WebP skipped).")
-
-    if args.dry_run:
-        print("\nDry run -- nothing moved. Re-run without --dry-run to apply.")
-        return
-    if not plan:
-        print("Nothing to do -- everything already organized.")
-        return
-
-    manifest_path = _paths.decisions_path(out, ORGANIZE_MANIFEST)
-    mf_new = not manifest_path.exists()
-    mf = open(manifest_path, "a", newline="", encoding="utf-8")
-    mw = csv.writer(mf)
-    if mf_new:
-        mw.writerow(["old_path", "new_path", "ts"])
-    ts = time.strftime("%Y-%m-%dT%H:%M:%S")
-
-    moved = converted = embedded = skipped = deduped = 0
-    catalog_updates = {}                   # media_id -> new basename
-    month_index = defaultdict(list)
-    _prog = getattr(args, "progress", None)
-
-    for n, (src, dst, mid, row) in enumerate(plan):
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        if dst.exists() and dst.resolve() != src.resolve():
-            # Target already holds this media. Byte-identical -> drop the redundant
-            # source (this is the INVARIANT-7 protection). Differ -> keep both.
-            if _same_bytes(src, dst):
-                try:
-                    src.unlink(); deduped += 1
-                except OSError:
-                    pass
-            else:
-                print("  KEPT both (differ): {} vs {}".format(src.name, dst.relative_to(out)))
-            skipped += 1
-            final = dst
-        else:
-            try:
-                src.replace(dst)
-                mw.writerow([str(src.relative_to(out)).replace("\\", "/"),
-                             str(dst.relative_to(out)).replace("\\", "/"), ts])
-                mf.flush()
-                moved += 1
-                final = dst
-                catalog_updates[mid] = final.name
-            except OSError as e:
-                print("  move failed {} ({})".format(src.name, e))
-                continue
-        if args.convert:
-            final, note = convert_image(final, args.convert, args.jpeg_quality,
-                                        args.jpeg_bg, keep_original=args.keep_webp)
-            if note == "pillow-missing":
-                raise PixAIError("--convert needs Pillow:  pip install pillow")
-            if note == "ok":
-                converted += 1
-            catalog_updates[mid] = final.name
-        if getattr(args, "embed_metadata", False):
-            note = embed_metadata(final, {
-                "prompt": row.get("prompt_preview", ""), "task_id": row.get("task_id", ""),
-                "media_id": mid, "width": row.get("width", ""), "height": row.get("height", ""),
-                "created_at": row.get("created_at", ""), "status": row.get("status", ""),
-                "source": "PixAI"})
-            if note == "ok":
-                embedded += 1
-        month_index[final.parent.name].append({
-            "filename": final.name, "media_id": mid, "task_id": row.get("task_id", ""),
-            "prompt_preview": row.get("prompt_preview", ""), "width": row.get("width", ""),
-            "height": row.get("height", ""), "created_at": row.get("created_at", ""),
-            "status": row.get("status", "")})
-
-        if _prog:
-            _prog(n + 1, len(plan), 0)
-        else:
-            sys.stdout.write("\r  {:,}/{:,}  moved {:,}  ".format(n + 1, len(plan), moved))
-            sys.stdout.flush()
-    mf.close()
-    if not _prog:
-        print()
-
-    for month, entries in month_index.items():
-        idx_path = out / month / "_index.csv"
-        new = not idx_path.exists()
-        with open(idx_path, "a", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=["filename", "media_id", "task_id",
-                                              "prompt_preview", "width", "height",
-                                              "created_at", "status"])
-            if new:
-                w.writeheader()
-            for e in entries:
-                w.writerow(e)
-
-    # Tidy up now-empty legacy batches/ folders (drop their _prompt.txt first).
-    batches_root = out / "batches"
-    if batches_root.exists():
-        for f in batches_root.rglob("_prompt.txt"):
-            try:
-                f.unlink()
-            except OSError:
-                pass
-        for d in sorted([p for p in batches_root.rglob("*") if p.is_dir()],
-                        key=lambda p: len(p.parts), reverse=True):
-            try:
-                d.rmdir()
-            except OSError:
-                pass
-        try:
-            batches_root.rmdir()
-        except OSError:
-            pass
-
-    if catalog_updates:
-        rows = load_catalog(db_path)
-        for r in rows:
-            if r["media_id"] in catalog_updates:
-                r["filename"] = catalog_updates[r["media_id"]]
-                r["batch"] = ""            # batches are gone
-        save_catalog(db_path, rows)
-        print("Updated {:,} catalog entries.".format(len(catalog_updates)))
-
-    print("\nOrganized: moved {:,}, already-in-place {:,}.".format(moved, in_place))
-    if deduped:
-        print("Removed {:,} redundant byte-identical copies.".format(deduped))
-    if args.convert:
-        print("Converted to {}: {:,}.".format(args.convert, converted))
-    if embedded:
-        print("Embedded metadata into {:,} images.".format(embedded))
-    print("Reversible manifest: {}  (run --undo-organize to revert)".format(manifest_path))
-    try:      # Keeper of Order: a real (non-dry-run) organize completed
-        from moonglade.gallery import telem_bump
-        telem_bump("organize_runs", out_dir=out)
-    except Exception:
-        pass
-
-
-def cmd_undo_organize(args, out):
-    """Reverse the moves recorded in organize_manifest.csv (newest run first):
-    each new_path is moved back to its old_path. Safe (skips already-reverted),
-    then clears the manifest. Lets a re-normalize be undone if you don't like it."""
-    db_path = _ensure_db(out)
-    manifest_path = _paths.decisions_path(out, ORGANIZE_MANIFEST)
-    if not manifest_path.exists():
-        print("No organize manifest found ({}); nothing to undo.".format(manifest_path))
-        return
-    with open(manifest_path, newline="", encoding="utf-8") as f:
-        rows = [r for r in csv.DictReader(f) if r.get("new_path")]
-    print("Reverting {} recorded move(s)...".format(len(rows)))
-    if getattr(args, "dry_run", False):
-        for r in rows[:8]:
-            print("  {}  ->  {}".format(r["new_path"], r["old_path"]))
-        print("\nDry run -- nothing moved.")
-        return
-    reverted = miss = 0
-    for r in reversed(rows):               # undo newest first
-        new_p, old_p = out / r["new_path"], out / r["old_path"]
-        if old_p.exists() and not new_p.exists():
-            continue                       # already reverted
-        if not new_p.exists():
-            miss += 1
-            continue
-        old_p.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            new_p.replace(old_p)
-            reverted += 1
-        except OSError as e:
-            print("  revert failed {} ({})".format(new_p, e))
-    # The gallery resolves files by media id (find_files_for_media_id matches both
-    # naming layouts), so restored files still resolve without rewriting the
-    # catalog. Clear the manifest now that it's been applied.
-    manifest_path.unlink()
-    print("Reverted {} file(s); {} already gone. Manifest cleared.".format(reverted, miss))
-
-
-# ---------------------------------------------------------------------------
 # Callable API (used by the GUI; also called by main() for the CLI)
 # ---------------------------------------------------------------------------
 def _make_session(token_val, resolve_user=True):
@@ -5748,1058 +4367,7 @@ def _make_session(token_val, resolve_user=True):
     # Hand the resolved account id to the client so `client.user_id` carries it directly.
     # The module global stays as the config seed / resolution home and the client's own
     # `or USER_ID` fallback, but business logic now reads the id off the client, not here.
-    return PixAIClient(session, auth_kind="api-key", user_id=USER_ID)
-
-
-# ===========================================================================
-# Website-mirror JWT: zero-paste acquisition + self-renewal.
-#
-# The API key files a generation under the account but does NOT make it appear in
-# the pixai.art web LIBRARY -- only a browser-session submission does. The Control
-# Panel "Mirror to PixAI" toggle uses the helpers below to hold a live browser
-# session with NO manual pastes, the way the site keeps itself logged in.
-#
-# Mechanism (confirmed from a live getMyInfo capture 2026-08-14):
-#   - The session rides short cookies on .pixai.art that the server rolls forward
-#     on every response: _bsid (~30m) + _udt (~60m; _udt IS the u3t value) + .sig
-#     pairs (cache-control:no-store, vary:Origin,Authorization).
-#   - The JWT rides as Authorization: Bearer (7 days since 2026-10-02).
-#   - Renewal is POST /v2/auth/refresh-token with no body (MIRROR_REFRESH_PATH, #92), the
-#     route pixai.art itself calls: the fresh token comes back in the response body and in
-#     the `token` response header.
-# So: read the live JWT from the local browser's localStorage ONCE (read_browser_jwt), then
-# the renewal rolls it -- zero paste. A one-time paste field is the break-glass fallback
-# only.
-#
-# SAFETY: only touched when the mirror toggle is ON (pure API-key mode never calls
-# these). The credential never leaves this machine and is never printed, logged, or
-# committed (same rule as PIXAI_API_KEY); diagnostics report only non-secret
-# derivatives (expiry date, days-left, ok/None). The live "read the real browser +
-# first renewal" step self-verifies at runtime on the owner's machine.
-# ===========================================================================
-def _b64url_decode(seg):
-    """Decode one base64url JWT segment, tolerant of missing padding."""
-    seg = seg + "=" * (-len(seg) % 4)
-    return base64.urlsafe_b64decode(seg.encode("ascii"))
-
-
-def jwt_claims(token):
-    """The JWT payload claims as a dict, or {} if unparseable. Decodes the payload
-    ONLY (never verifies the signature -- we don't hold the key and don't need to;
-    PixAI validates it, we just read `exp`). Never raises."""
-    try:
-        parts = str(token or "").split(".")
-        if len(parts) != 3:
-            return {}
-        claims = json.loads(_b64url_decode(parts[1]))
-        return claims if isinstance(claims, dict) else {}   # a non-object payload is not claims
-    except Exception:
-        return {}
-
-
-def jwt_expiry(token):
-    """Unix `exp` (seconds) or None. Offline."""
-    exp = jwt_claims(token).get("exp")
-    return int(exp) if isinstance(exp, (int, float)) else None
-
-
-def jwt_days_left(token, now=None):
-    """Whole days until the JWT expires, or None. Offline -- what the Panel countdown
-    ('PixAI mirror: N days left') renders, decoded at startup with no network call."""
-    exp = jwt_expiry(token)
-    if exp is None:
-        return None
-    now = time.time() if now is None else now
-    return int((exp - now) // 86400)
-
-
-def mirror_needs_refresh(token, now=None, threshold_days=MIRROR_REFRESH_WHEN_DAYS_LEFT):
-    """True when the JWT is missing, unparseable, expired, or has `threshold_days` or fewer
-    left -- i.e. the Mirror should renew its session. Measured on the token's real seconds
-    left (exp - now), not on jwt_days_left's floored whole days: the floor made the old 5-day
-    rule renew with up to 6 days left. Pure; the scheduler's decision."""
-    exp = jwt_expiry(token)
-    if exp is None:
-        return True
-    now = time.time() if now is None else now
-    return exp - now <= threshold_days * 86400
-
-
-# --- localStorage JWT reader ------------------------------------------------------
-# Modern Chrome (>=127) wraps the cookie store in app-bound "v20" encryption a normal
-# user process can't decrypt, so a cookie read comes back empty there (the app no longer
-# reads cookies at all). The pixai.art frontend keeps the live JWT in localStorage, and
-# localStorage's on-disk store (Local Storage/leveldb) is NOT app-bound-encrypted -- so we
-# read the JWT straight out of it. That's the whole reason "Connect" can work on a current
-# Chrome without a paste. The Bearer JWT alone authenticates the mirror (create rides
-# Authorization: Bearer; the renewal, POST /v2/auth/refresh-token, renews off the Bearer),
-# so no cookie is needed.
-#
-# We parse leveldb properly (a minimal pure-Python reader -- no C dep, no third-party
-# library). A raw byte-scan is NOT enough: an established profile compacts its writes into
-# .ldb SSTables whose keys are PREFIX-COMPRESSED (the literal "https://api.pixai.art:token"
-# never appears contiguously) and whose data blocks are usually SNAPPY-COMPRESSED (the JWT
-# bytes aren't even there in the clear). So we reconstruct real key->value pairs from both
-# the .ldb SSTables and the .log write-ahead log, match the exact localStorage key, and
-# validate the decoded token's issuer is "pixai" before trusting it. The freshest (max
-# `exp`) wins across every file/profile. Read-only; NEVER raises, NEVER logs a value.
-def _read_file_shared(path):
-    """Read a file Chrome may hold open. Direct read first (Chromium opens leveldb files
-    share-read on Windows); on failure, copy to temp and read the copy. b'' on failure,
-    never raises."""
-    import shutil
-    import tempfile
-    try:
-        with open(path, "rb") as f:
-            return f.read()
-    except OSError:
-        pass
-    tmp = os.path.join(tempfile.gettempdir(),
-                       "mg_ls_%d_%s_%s" % (os.getpid(), secrets.token_hex(4),
-                                           os.path.basename(path)))
-    try:
-        shutil.copy2(path, tmp)
-        with open(tmp, "rb") as f:
-            return f.read()
-    except OSError:
-        return b""
-    finally:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-
-
-def _lvarint(buf, pos):
-    """Decode a leveldb base-128 varint at buf[pos:]. Returns (value, next_pos). Raises
-    IndexError if it runs off the end (callers treat that as a malformed block)."""
-    result = 0
-    shift = 0
-    while True:
-        b = buf[pos]
-        pos += 1
-        result |= (b & 0x7F) << shift
-        if not (b & 0x80):
-            return result, pos
-        shift += 7
-        if shift > 63:
-            raise ValueError("varint too long")
-
-
-def _snappy_decompress(data):
-    """Pure-Python Snappy block decompression (the codec leveldb uses for SSTable blocks).
-    Returns the decompressed bytes, or None on malformed input. No dependency."""
-    try:
-        expect, pos = _lvarint(data, 0)
-        out = bytearray()
-        n = len(data)
-        while pos < n:
-            tag = data[pos]
-            pos += 1
-            kind = tag & 0x03
-            if kind == 0:                       # literal
-                length = tag >> 2
-                if length >= 60:
-                    nbytes = length - 59        # 60->1 .. 63->4 extra length bytes
-                    length = 0
-                    for i in range(nbytes):
-                        length |= data[pos + i] << (8 * i)
-                    pos += nbytes
-                length += 1
-                out += data[pos:pos + length]
-                pos += length
-            else:
-                if kind == 1:                   # copy, 1-byte offset
-                    length = 4 + ((tag >> 2) & 0x07)
-                    offset = ((tag >> 5) << 8) | data[pos]
-                    pos += 1
-                elif kind == 2:                 # copy, 2-byte offset
-                    length = 1 + (tag >> 2)
-                    offset = data[pos] | (data[pos + 1] << 8)
-                    pos += 2
-                else:                           # kind == 3, copy, 4-byte offset
-                    length = 1 + (tag >> 2)
-                    offset = (data[pos] | (data[pos + 1] << 8)
-                              | (data[pos + 2] << 16) | (data[pos + 3] << 24))
-                    pos += 4
-                if offset <= 0 or offset > len(out):
-                    return None
-                start = len(out) - offset
-                for i in range(length):         # byte-by-byte: copies may overlap
-                    out.append(out[start + i])
-        return bytes(out) if len(out) == expect else None
-    except (IndexError, ValueError):
-        return None
-
-
-def _lvldb_decompress_block(data, offset, size):
-    """The block at [offset, offset+size), decompressed per its 1-byte compression-type
-    trailer (0 none, 1 snappy, 2 zlib, 4 zstd). None if unreadable/unknown."""
-    if offset < 0 or offset + size + 1 > len(data):
-        return None
-    raw = data[offset:offset + size]
-    comp = data[offset + size]
-    if comp == 0:
-        return raw
-    if comp == 1:
-        return _snappy_decompress(raw)
-    if comp == 2:
-        try:
-            import zlib
-            return zlib.decompress(raw)
-        except Exception:
-            return None
-    if comp == 4:
-        try:
-            from compression import zstd        # Python 3.14+ stdlib
-            return zstd.decompress(raw)
-        except Exception:
-            try:
-                import zstandard                 # optional third-party fallback
-                return zstandard.ZstdDecompressor().decompress(raw)
-            except Exception:
-                return None
-    return None
-
-
-def _lvldb_block_pairs(block):
-    """Yield (key, value) from one decompressed leveldb block, undoing prefix compression.
-    The block ends with a restart array: [restart offsets...][num_restarts as uint32 LE].
-    A malformed block yields nothing rather than raising."""
-    n = len(block)
-    if n < 4:
-        return
-    try:
-        num_restarts = int.from_bytes(block[n - 4:n], "little")
-        entries_end = n - 4 - num_restarts * 4
-        if entries_end < 0:
-            return
-        pos = 0
-        last_key = b""
-        while pos < entries_end:
-            shared, pos = _lvarint(block, pos)
-            non_shared, pos = _lvarint(block, pos)
-            value_len, pos = _lvarint(block, pos)
-            key = last_key[:shared] + block[pos:pos + non_shared]
-            pos += non_shared
-            value = block[pos:pos + value_len]
-            pos += value_len
-            last_key = key
-            yield key, value
-    except (IndexError, ValueError):
-        return
-
-
-_LVLDB_SSTABLE_MAGIC = 0xDB4775248B80FB57
-
-
-def _lvldb_sstable_entries(data):
-    """Yield (user_key, value, seq, is_deletion) from a leveldb .ldb SSTable. Reads the footer
-    -> index block -> each data block (decompressing as needed) -> prefix-decoded entries. The
-    8-byte internal-key trailer encodes (seq<<8 | type) little-endian; type 0 is a deletion
-    tombstone. Yields nothing on any structural surprise (never raises)."""
-    n = len(data)
-    if n < 48:
-        return
-    try:
-        footer = data[n - 48:n]
-        if int.from_bytes(footer[40:48], "little") != _LVLDB_SSTABLE_MAGIC:
-            return
-        p = 0
-        _, p = _lvarint(footer, p)                # metaindex handle offset (skip)
-        _, p = _lvarint(footer, p)                # metaindex handle size   (skip)
-        idx_off, p = _lvarint(footer, p)
-        idx_size, p = _lvarint(footer, p)
-    except (IndexError, ValueError):
-        return
-    index_block = _lvldb_decompress_block(data, idx_off, idx_size)
-    if index_block is None:
-        return
-    for _sep, handle in _lvldb_block_pairs(index_block):
-        try:
-            b_off, hp = _lvarint(handle, 0)
-            b_size, _hp = _lvarint(handle, hp)
-        except (IndexError, ValueError):
-            continue
-        blk = _lvldb_decompress_block(data, b_off, b_size)
-        if blk is None:
-            continue
-        for key, value in _lvldb_block_pairs(blk):
-            if len(key) >= 8:                    # internal-key trailer = seq<<8 | type
-                trailer = int.from_bytes(key[-8:], "little")
-                yield key[:-8], value, trailer >> 8, (trailer & 0xFF) == 0
-
-
-def _lvldb_log_entries(data):
-    """Yield (key, value, seq, is_deletion) from a leveldb .log write-ahead log. Each
-    WriteBatch header carries the sequence number of its first entry; entry i has seq = base+i.
-    Reassembles physical record fragments across 32 KiB blocks. Deletions are yielded as
-    tombstones (empty value, is_deletion=True) so a later logout can suppress an earlier PUT.
-    Yields nothing on malformed input (never raises)."""
-    BLOCK = 32768
-    n = len(data)
-    pos = 0
-    frag = b""
-    try:
-        while pos + 7 <= n:
-            block_left = BLOCK - (pos % BLOCK)
-            if block_left < 7:                   # zero-padded block trailer -> next block
-                pos += block_left
-                continue
-            length = data[pos + 4] | (data[pos + 5] << 8)
-            rtype = data[pos + 6]
-            pos += 7
-            chunk = data[pos:pos + length]
-            pos += length                        # ALWAYS consume the payload, even for a
-            if rtype == 0 or length == 0:        # zero/padding record -- else a kZeroType
-                continue                         # record with a payload desyncs every record
-            if rtype == 1:                       # FULL
-                rec = chunk
-            elif rtype == 2:                     # FIRST
-                frag = chunk
-                continue
-            elif rtype == 3:                     # MIDDLE
-                frag += chunk
-                continue
-            elif rtype == 4:                     # LAST
-                rec = frag + chunk
-                frag = b""
-            else:
-                frag = b""
-                continue
-            # WriteBatch: header seq(8)+count(4)=12, then entries; entry i has seq base+i
-            if len(rec) < 12:
-                continue
-            base_seq = int.from_bytes(rec[0:8], "little")
-            rp = 12
-            rn = len(rec)
-            idx = 0
-            while rp < rn:
-                tag = rec[rp]
-                rp += 1
-                if tag == 1:                     # kTypeValue: key, value
-                    klen, rp = _lvarint(rec, rp)
-                    key = rec[rp:rp + klen]
-                    rp += klen
-                    vlen, rp = _lvarint(rec, rp)
-                    value = rec[rp:rp + vlen]
-                    rp += vlen
-                    yield key, value, base_seq + idx, False
-                    idx += 1
-                elif tag == 0:                   # kTypeDeletion: key only
-                    klen, rp = _lvarint(rec, rp)
-                    key = rec[rp:rp + klen]
-                    rp += klen
-                    yield key, b"", base_seq + idx, True
-                    idx += 1
-                else:
-                    break                        # unknown tag -> stop this batch
-    except (IndexError, ValueError):
-        return
-
-
-def _lvldb_value_to_jwt(value):
-    """A Chromium localStorage value (encoding byte + payload) -> JWT string, or ''. 0x00 is
-    UTF-16LE, 0x01 is Latin-1 (a JWT is ASCII, so ours is 0x01)."""
-    if not value:
-        return ""
-    enc, body = value[0], value[1:]
-    try:
-        if enc == 0:
-            s = body.decode("utf-16-le", "ignore")
-        elif enc == 1:
-            s = body.decode("latin-1", "ignore")
-        else:
-            s = value.decode("latin-1", "ignore")
-    except Exception:
-        return ""
-    s = s.strip()
-    return s if s.startswith("eyJ") and s.count(".") == 2 else ""
-
-
-def _pick_pixai_token(entries):
-    """THE pixai.art auth token from ONE profile's leveldb entries, honoring leveldb's own
-    last-writer-wins-by-sequence semantics. `entries` are (user_key, value, seq, is_deletion)
-    tuples from that profile's .ldb + .log (which share one sequence space). Among entries for
-    the token key (ends with LOCALSTORAGE_JWT_KEY, contains 'pixai'), the HIGHEST sequence
-    number is the live state: if it's a deletion tombstone (logout) -> '' (not a stale token);
-    otherwise decode it and require iss=='pixai' (the definitive guard -- the Local Storage
-    store is shared across every origin, so unrelated JWTs live beside it). Returns '' if none.
-    Sequence numbers are unique per write, so ties are effectively impossible; if two values
-    tie (bottom-level seq-zeroing), the later `exp` wins, and any tombstone at the top wins."""
-    best_seq = -1
-    deleted_at_top = False
-    values_at_top = []                           # (exp, jwt) for value entries at best_seq
-    for key, value, seq, is_del in entries:
-        if b"pixai" not in key or not key.endswith(LOCALSTORAGE_JWT_KEY):
-            continue
-        if seq > best_seq:
-            best_seq = seq
-            deleted_at_top = False
-            values_at_top = []
-        if seq == best_seq:
-            if is_del:
-                deleted_at_top = True
-            else:
-                jwt = _lvldb_value_to_jwt(value)
-                if jwt and jwt_claims(jwt).get("iss") == "pixai":
-                    exp = jwt_expiry(jwt)
-                    values_at_top.append((exp if exp is not None else -1, jwt))
-    if best_seq < 0 or deleted_at_top or not values_at_top:
-        return ""
-    values_at_top.sort()
-    return values_at_top[-1][1]                   # freshest value at the top sequence
-
-
-def read_browser_jwt(browsers=("chrome", "edge", "brave")):
-    """The live pixai.art JWT read from a local browser's localStorage, across ALL profiles
-    (Default, Profile N, ...) of the given Chromium browsers. Each profile is resolved on its
-    own sequence space (a logout tombstone there suppresses that profile's older token); the
-    freshest LIVE token (max `exp`) across profiles wins. Returns '' if none. This is what lets
-    'Connect' bootstrap the mirror on a current Chrome whose cookie store is
-    app-bound-encrypted. NEVER raises, NEVER logs the value."""
-    la = os.environ.get("LOCALAPPDATA", "")
-    roots = {
-        "chrome": os.path.join(la, r"Google\Chrome\User Data"),
-        "edge": os.path.join(la, r"Microsoft\Edge\User Data"),
-        "brave": os.path.join(la, r"BraveSoftware\Brave-Browser\User Data"),
-    }
-
-    def _profile_entries(ldb):
-        try:
-            files = os.listdir(ldb)
-        except OSError:
-            return
-        for fn in files:
-            path = os.path.join(ldb, fn)
-            if fn.endswith(".ldb"):
-                blob = _read_file_shared(path)
-                if blob:
-                    yield from _lvldb_sstable_entries(blob)
-            elif fn.endswith(".log"):
-                blob = _read_file_shared(path)
-                if blob:
-                    yield from _lvldb_log_entries(blob)
-
-    candidates = []
-    for name in browsers:
-        udir = roots.get(name)
-        if not udir or not os.path.isdir(udir):
-            continue
-        try:
-            profiles = os.listdir(udir)
-        except OSError:
-            continue
-        for prof in profiles:
-            ldb = os.path.join(udir, prof, "Local Storage", "leveldb")
-            if not os.path.isdir(ldb):
-                continue
-            tok = _pick_pixai_token(_profile_entries(ldb))   # per-profile, tombstone-aware
-            if tok:
-                candidates.append(tok)
-
-    best, best_exp = "", -1                       # freshest live token across profiles
-    for j in candidates:
-        e = jwt_expiry(j)
-        if e is not None and e > best_exp:
-            best, best_exp = j, e
-    return best
-
-
-def _is_api_key(token):
-    """True when `token` is the configured PIXAI_API_KEY (the import-time snapshot or the live
-    file). Compared in memory only; the key is never logged, returned or kept."""
-    if not token:
-        return False
-    try:
-        live = (_load_config() or {}).get("PIXAI_API_KEY")
-    except Exception:                              # noqa: BLE001 -- an unreadable file is "no key"
-        live = None
-    for key in (_cfg.get("PIXAI_API_KEY"), live):
-        if isinstance(key, str) and key.strip() and token == key.strip():
-            return True
-    return False
-
-
-def _renewal_headers(cur, now=None):
-    """The credential headers for ONE renewal POST, or None when there is nothing safe to send.
-
-    JWT-only (Invariant #7): `Authorization: Bearer <cur>` when `cur` is present, unexpired
-    and not the API key; otherwise None (the caller sends nothing). A per-call dict, so the
-    credential never lands on a session's defaults and always wins over them. A same-session
-    cookie road, if it is ever built (the 2026-08-17 ruling's read_browser_session), would add
-    its `Cookie` header HERE and only here -- see refresh_jwt."""
-    now = time.time() if now is None else now
-    if not cur or _is_api_key(cur):
-        return None
-    exp = jwt_expiry(cur)
-    if exp is None or exp - now <= 0:
-        return None                                   # an expired Bearer cannot renew itself
-    return {"Authorization": "Bearer " + cur}
-
-
-def _fresh_pixai_token(tok, cur):
-    """A token that counts as a renewal: a str that differs from the one sent, has a parseable
-    `exp`, and was issued by PixAI (`iss == "pixai"`). The gateway rolls the SAME token back on
-    ordinary authenticated responses, so an unchanged token is not a renewal."""
-    return (isinstance(tok, str) and tok and tok != cur and jwt_expiry(tok) is not None
-            and jwt_claims(tok).get("iss") == "pixai")
-
-
-def refresh_jwt(session, current_jwt=None, expected_sub=None, now=None):
-    """Renew the Mirror's website session and return a genuinely FRESH JWT, or None.
-
-    The road (#92) is the one pixai.art itself uses: `POST /v2/auth/refresh-token`
-    (MIRROR_REFRESH_PATH) with NO body. PixAI's contract: "Requires an existing session (bearer
-    token or session cookie). The token is returned in the body and also written to the
-    `token` response header and the session cookie." It replaces the saved GraphQL renewal the
-    site stopped sending. Renews our own token only -- it does not spend. Returns None (never
-    raises) on any failure, so the caller keeps the current jwt until it truly expires.
-
-    CREDENTIAL. The stored mirror JWT as Bearer, sent only when it is present and unexpired,
-    and NEVER the API key: this route issues a session token for whatever bearer it is handed,
-    so a `current_jwt` equal to the configured PIXAI_API_KEY is refused before anything is
-    sent. With nothing safe to send, no request is made. "Unexpired" is judged at `now`
-    (default: the clock), which the scheduler passes down so its own clock decides. The header
-    is per call, so it wins over any Authorization the session carries by default. No cookie
-    is sent (Invariant #7, JWT-only), and a redirect is never followed: a 3xx is `http_3xx`.
-
-    FRESHNESS (the review-proven guard). Status 200, then the body's `token` (the route's
-    declared output) first and the `token` response header as the fallback; the winner must be
-    a str that differs from the one sent, with a parseable `exp` and `iss == "pixai"`. When
-    `expected_sub` is given, the fresh token's `sub` must equal it, or it is discarded: a
-    renewal can never switch the Mirror to another account.
-
-    CLEANUP. `session`'s cookie jar is emptied before the POST (so nothing it held rides the
-    request) and again in `finally`, on success and failure alike, so whatever PixAI writes
-    back (its session cookie among them) is held by no session.
-
-    Why it returned None lands in `_refresh_last["reason"]`: network | http_<code> | unchanged |
-    no_credential | identity_mismatch, for the Control Panel's "couldn't renew" line (#71). A
-    fixed word, never a header, body, cookie or token; nothing here logs. A side channel rather
-    than a second return value, so every caller and every test fake keeps the one-value
-    contract.
-
-    Where a same-session cookie road would slot in (the 2026-08-17 ruling; not built, see
-    Invariant #7): a `cookies=` dict read with the JWT from ONE browser profile, turned into a
-    `Cookie` header by _renewal_headers for this one request, with the Bearer dropped when that
-    profile's JWT has lapsed; _mirror_try_renew would pick that road ("session") before the
-    JWT-only one ("jwt")."""
-    _refresh_last["reason"] = ""
-    cur = str(current_jwt or "")
-    headers = _renewal_headers(cur, now)
-    if headers is None:
-        _refresh_last["reason"] = "no_credential"
-        return None
-    try:
-        _drop_cookies(session)              # JWT-only: nothing a jar holds rides this request
-        try:
-            # Never follow a redirect (#92 review F1): requests would merge a 3xx's Set-Cookie
-            # into the next hop, sending a cookie with the JWT. A 3xx is http_3xx below.
-            r = session.post(REST_API_BASE + MIRROR_REFRESH_PATH, headers=headers, timeout=30,
-                             allow_redirects=False)
-        except Exception:                                    # noqa: BLE001 -- never raises
-            _refresh_last["reason"] = "network"
-            return None
-        if r.status_code != 200:
-            _refresh_last["reason"] = "http_{}".format(r.status_code)
-            return None
-        try:
-            payload = r.json()
-        except Exception:                                    # noqa: BLE001 -- not JSON
-            payload = None
-        body_tok = payload.get("token") if isinstance(payload, dict) else None
-        try:
-            header_tok = r.headers.get("token")
-        except Exception:                                    # noqa: BLE001
-            header_tok = None
-        fresh = None
-        if _fresh_pixai_token(body_tok, cur):
-            fresh = body_tok
-        elif _fresh_pixai_token(header_tok, cur):
-            fresh = header_tok
-        if fresh is None:
-            _refresh_last["reason"] = "unchanged"
-            return None
-        got_sub = jwt_claims(fresh).get("sub")
-        if expected_sub is not None and (got_sub is None or str(got_sub) != str(expected_sub)):
-            _refresh_last["reason"] = "identity_mismatch"
-            return None
-        return fresh
-    finally:
-        _drop_cookies(session)              # what PixAI wrote back is held by no session
-        headers = None
-
-
-def _drop_cookies(session):
-    """Empty `session`'s cookie jar (getattr-guarded; never raises)."""
-    jar = getattr(session, "cookies", None)
-    if jar is not None:
-        try:
-            jar.clear()
-        except Exception:                                    # noqa: BLE001
-            pass
-
-
-_refresh_last = {"reason": ""}
-
-
-# --- Mirror session state: a dedicated git-ignored store (NOT config.json) --------
-# Single-flight lock: serializes the refresh->persist critical section so two threads can't
-# both fire the renewal and race their writes. The SLOW work (the leveldb/localStorage
-# browser read and the no-network fast path) runs OUTSIDE the lock so a Connect can't block
-# every Generate -- an earlier version held the lock across a ~12 s scan plus a 30 s POST
-# (adversarial review 2026-08-15). The gallery serves threaded=True.
-_mirror_lock = threading.Lock()
-# THE RENEWAL RECORD (#71) -- one home for everything about renewing, shared by the create
-# path (make_mirror_session), a press of Connect, and the background tick (mirror_renew_tick):
-#   fails / next_try   a failing renewal backs off _MIRROR_REFRESH_COOLDOWN, doubling, capped
-#                      at MIRROR_RENEW_BACKOFF_CAP_S -- for the token that failed (failed_exp);
-#                      a different token is not held behind another token's failures;
-#   failed_exp         the exp of the token the last failure was against: the Panel reports
-#                      "couldn't renew" only while THAT token is still the stored one and due;
-#   last_ok_at         the last successful renewal; none again within MIRROR_RENEW_FLOOR_S, so
-#                      a token PixAI mints already inside the cushion can never loop;
-#   last_attempt_at, last_reason   for the status line; tick_at   the tick's own cadence;
-#   last_road          which road the last successful renewal rode, a fixed word: "jwt" (the
-#                      Bearer-only renewal, the only road built) -- "" until one succeeds (#92).
-# Module state: dev/tests/conftest.py resets it around every test (_mirror_renewal_reset).
-_MIRROR_REFRESH_COOLDOWN = 600      # the first backoff step after a failed renewal (seconds)
-MIRROR_RENEW_BACKOFF_CAP_S = 7200   # the longest step: a failing renewal retries every 2 h
-MIRROR_RENEW_FLOOR_S = 6 * 3600     # at most one successful renewal per 6 h, whatever is due
-MIRROR_RENEW_TICK_S = 900           # the background tick looks at the token every 15 minutes
-_mirror_renewal = {}
-
-
-def _mirror_renewal_reset():
-    """Back to "never tried": no failures, no backoff, no recent success, tick due now."""
-    _mirror_renewal.clear()
-    _mirror_renewal.update(fails=0, next_try=0.0, failed_exp=None, last_ok_at=None,
-                           last_attempt_at=None, last_reason="", tick_at=None, last_road="")
-
-
-_mirror_renewal_reset()
-
-
-def _mirror_state_path():
-    """Where the rotating mirror session (JWT + cookie jar) lives: a dedicated git-ignored
-    machine file, local/mirror_session.json (moonglade.paths.local_path()). Deliberately NOT
-    config.json -- the JWT
-    rotates on every refresh, and a write there must never risk clobbering the API key (a
-    test once overwrote the real PIXAI_API_KEY; a separate file can't)."""
-    return _paths.local_path(_paths.MIRROR_SESSION_NAME)
-
-
-def load_mirror_state():
-    """The stored mirror session {jwt[, minted_at]} or {} if none. (A legacy `cookies` key from
-    older builds is ignored -- the mirror is JWT-only now.) Never raises, never logs a value."""
-    p = _mirror_state_path()
-    if not p.exists():
-        return {}
-    try:
-        with open(p, encoding="utf-8") as f:
-            d = json.load(f)
-        return d if isinstance(d, dict) else {}
-    except (ValueError, OSError):
-        return {}
-
-
-def save_mirror_state(state):
-    """Atomically persist {jwt[, minted_at]} to the git-ignored mirror file. Best-effort:
-    True/False, never raises, never logs a value. JWT-only: cookies are no longer stored -- the
-    Bearer JWT authenticates both the create and the refresh; the short session cookies died
-    ~1 h after issue (so they never survived to a day-22 refresh anyway), and pairing a
-    Default-profile cookie jar with an any-profile JWT risked a cross-identity submit (review).
-
-    `minted_at` (#71) is a timestamp, not a credential: the moment the APP's own renewal minted
-    this token, set ONLY by a successful renewal. It is what the Control Panel's ring measures
-    the token's life from, because `iat` never moves off the original sign-in. Saving the SAME
-    token without one keeps the stored one (run_mirror_check re-saves an unchanged token on a
-    failed renewal); saving a DIFFERENT token without one -- a browser read -- drops it."""
-    jwt = state.get("jwt", "")
-    minted = state.get("minted_at")
-    if minted is None:
-        prev = load_mirror_state()
-        if jwt and prev.get("jwt") == jwt:
-            minted = prev.get("minted_at")
-    record = {"jwt": jwt}
-    if isinstance(minted, (int, float)) and not isinstance(minted, bool):
-        record["minted_at"] = minted
-    p = _mirror_state_path()
-    # Per-WRITE-unique temp (pid + random), not per-process: the gallery is threaded, so a
-    # per-pid temp name lets two concurrent savers interleave into one file then both
-    # os.replace -> corrupt JSON -> load returns {} -> mirror "lost" (review F5). A unique
-    # temp per write + atomic replace makes concurrent saves last-writer-wins, never corrupt.
-    tmp = p.with_name(p.name + ".tmp-{}-{}".format(os.getpid(), secrets.token_hex(6)))
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(record, f, indent=2)
-        os.replace(tmp, p)
-        return True
-    except OSError:
-        try:
-            if tmp.exists():
-                tmp.unlink()
-        except OSError:
-            pass
-        return False
-
-
-def mirror_enabled():
-    """Is the Control Panel 'Mirror to PixAI website' toggle on? settings.json's
-    mirror_to_pixai (moonglade.settings), read once per change of the file. Default OFF = pure
-    API-key mode. When ON, the create POST rides the browser JWT (see _session_for_create) so
-    the generation lands in the pixai.art web library."""
-    from moonglade import settings as _settings
-    return _settings.mirror_to_pixai()
-
-
-def _jwt_usable(jwt):
-    """True only when the JWT is present, parseable, and not expired (days_left >= 0). This
-    is the gate for 'can the mirror actually submit with this' -- distinct from merely
-    'a JWT string exists', which is what let an expired stored token block a browser re-read."""
-    if not jwt:
-        return False
-    left = jwt_days_left(jwt)
-    return left is not None and left >= 0
-
-
-def _mirror_session_from(jwt):
-    """A requests.Session authed as the browser JWT (Bearer) and presenting the WEB client
-    identity -- used for BOTH the renewal and the mirrored create. Built directly,
-    NOT via _make_session, so it never enforces the API-key/U3T precondition the mirror
-    doesn't need and never resolves USER_ID over the browser token (review). JWT-only, no
-    cookies. The web identity makes PixAI apply the website content policy, not the stricter
-    mobile-app one; x-apollo-operation-name is present for Apollo CSRF (value need only be
-    present, not correct)."""
-    session = requests.Session()
-    if jwt:
-        session.headers["Authorization"] = "Bearer " + jwt
-    session.headers.update({
-        "Accept": "application/json",
-        "apollo-require-preflight": "true",
-        "x-apollo-operation-name": OPERATION_NAME,
-        "User-Agent": MIRROR_WEB_USER_AGENT,
-        "Origin": MIRROR_WEB_ORIGIN,
-        "Referer": MIRROR_WEB_ORIGIN + "/",
-        "Sec-Fetch-Site": "same-site",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Dest": "empty",
-    })
-    return session
-
-
-# PixAI applies its CONTENT POLICY by the client it believes it is talking to, not by the
-# credential. Measured 2026-09-07, owner's walk (a LoRA search for "cum" that fills pages on
-# the site came back "No LoRAs match" in the app): the same API key and the same meilisearch
-# query returned 0 rows presenting as `pixai-personal-backup/1.0`, and 24 rows -- identical to
-# the browser-token session's -- presenting the website's identity. The strict tier is the
-# mobile-app one _mirror_session_from already describes. So a read that browses the market on
-# the owner's behalf presents as the website, which is exactly what his own browser does with
-# the same account. The credential is not in this set: Authorization is left as built.
-WEB_IDENTITY_HEADERS = {
-    "User-Agent": MIRROR_WEB_USER_AGENT,
-    "Origin": MIRROR_WEB_ORIGIN,
-    "Referer": MIRROR_WEB_ORIGIN + "/",
-}
-
-
-def present_as_web(session):
-    """`session`, now presenting the website's client identity (WEB_IDENTITY_HEADERS), so
-    PixAI applies the website content policy to what it returns. Mutates and returns the SAME
-    object -- a PixAIClient delegates `headers` to the Session it holds -- and leaves a stand-in
-    without headers (tests) untouched. Only the identity changes; the credential does not."""
-    headers = getattr(session, "headers", None)
-    if headers is not None:
-        try:
-            headers.update(WEB_IDENTITY_HEADERS)
-        except Exception:
-            pass
-    return session
-
-
-def mirror_token_span(state, now=None):
-    """(seconds left, seconds in the token's life) for the Control Panel's ring, or
-    (None, None) with no parseable token. Offline; neither number reveals the token.
-
-    The life is exp - minted_at for a token the app renewed itself. A token read from the
-    browser on Connect (or stored before #71) has no known start -- `iat` stays at the original
-    sign-in through every renewal (PROBE 2026-10-02), so exp - iat grows without bound -- and
-    is drawn out of max(left, MIRROR_TOKEN_LIFE_S). Never shorter than what is left, so the ring
-    never draws past full."""
-    exp = jwt_expiry((state or {}).get("jwt") or "")
-    if exp is None:
-        return None, None
-    now = time.time() if now is None else now
-    left = exp - now
-    minted = (state or {}).get("minted_at")
-    if isinstance(minted, (int, float)) and not isinstance(minted, bool) and minted < exp:
-        span = exp - minted
-    else:
-        span = max(left, MIRROR_TOKEN_LIFE_S)
-    return left, max(span, left)
-
-
-def _mirror_try_renew(*, user_initiated=False, fallback="", now=None):
-    """THE one renewal (#71): every path that renews -- a create (make_mirror_session), a press
-    of Connect, the background tick -- comes through here. Returns (jwt, outcome); outcome is
-    renewed | failed | not_due | read_only | backoff | floor | no_session.
-
-    Runs entirely inside _mirror_lock and re-reads the stored token there, so two renewals
-    racing (the tick and a Connect, or two creates) make ONE renewal call: the second sees
-    the fresh token and finds nothing due. READ_ONLY is re-checked here, immediately before the
-    POST, because it can flip between a caller's own check and this lock. A failure backs off
-    (see _mirror_renewal) unless this is a press of Connect, which always tries once; and no
-    renewal follows a successful one within MIRROR_RENEW_FLOOR_S.
-
-    The renewal is JWT-only (road "jwt", #92): refresh_jwt on a fresh Bearer session of the
-    stored token, with the stored token's `sub` as the identity the fresh one must carry. A
-    same-session cookie road (road "session"), if it is ever built, would be tried here first,
-    from a browser read made by the caller OUTSIDE this lock, and fall through to this one."""
-    now = time.time() if now is None else now
-    r = _mirror_renewal
-    with _mirror_lock:
-        cur = load_mirror_state().get("jwt") or fallback or ""
-        if not cur:
-            return cur, "no_session"
-        if READ_ONLY or _read_only_now():
-            return cur, "read_only"
-        if not mirror_needs_refresh(cur, now=now):
-            return cur, "not_due"
-        exp = jwt_expiry(cur)
-        if not user_initiated and r["failed_exp"] == exp and now < r["next_try"]:
-            return cur, "backoff"
-        if r["last_ok_at"] is not None and now - r["last_ok_at"] < MIRROR_RENEW_FLOOR_S:
-            return cur, "floor"
-        r["last_attempt_at"] = now
-        road = "jwt"
-        fresh = refresh_jwt(_mirror_session_from(cur), current_jwt=cur,
-                            expected_sub=jwt_claims(cur).get("sub"), now=now)
-        if fresh:
-            save_mirror_state({"jwt": fresh, "minted_at": now})
-            r.update(fails=0, next_try=0.0, failed_exp=None, last_ok_at=now, last_reason="",
-                     last_road=road)
-            return fresh, "renewed"
-        fails = (r["fails"] if r["failed_exp"] == exp else 0) + 1
-        r.update(fails=fails, failed_exp=exp,
-                 next_try=now + min(_MIRROR_REFRESH_COOLDOWN * 2 ** (fails - 1),
-                                    MIRROR_RENEW_BACKOFF_CAP_S),
-                 last_reason=_refresh_last.get("reason") or "failed")
-        return cur, "failed"
-
-
-def make_mirror_session(bootstrap_from_browser=False, user_initiated=False):
-    """The mirror submit/refresh session: a requests.Session authed with the browser JWT
-    (Bearer) presenting the WEB client identity. Returns None -- NEVER raises -- when there is
-    no USABLE (present, parseable, unexpired) JWT even after a browser re-read and a refresh;
-    callers must then refuse and spend nothing, never an API-key fallback (review F5).
-
-    JWT-only, and built via _mirror_session_from (NOT _make_session): the API-key path's
-    precondition/USER_ID-resolution must not run over the browser token (review).
-
-    `user_initiated` is a press of Connect (#71): it re-reads the browser even when the stored
-    token is still usable -- PixAI can revoke a token before its exp -- and keeps whichever of
-    the two expires later; and its renewal tries once even inside a failure backoff.
-
-    Lock scope: the SLOW browser read runs OUTSIDE _mirror_lock; only the keep-the-later choice
-    and the refresh->persist critical section (_mirror_try_renew) take the lock."""
-    jwt = load_mirror_state().get("jwt") or ""
-    # (Re-)bootstrap from the browser whenever the stored JWT is not USABLE -- not merely when
-    # it is absent. Gating on `not jwt` meant an expired stored token could never be replaced,
-    # which left Connect and --mirror-check permanently dead until the file was hand-deleted
-    # (review). The browser read is slow, so it happens before the lock.
-    if bootstrap_from_browser and (user_initiated or not _jwt_usable(jwt)):
-        bj = read_browser_jwt()
-        if bj:
-            with _mirror_lock:
-                cur = load_mirror_state().get("jwt") or ""
-                if not _jwt_usable(cur) or (jwt_expiry(bj) or 0) > (jwt_expiry(cur) or 0):
-                    save_mirror_state({"jwt": bj})        # a browser token: no minted_at
-                    cur = bj
-                jwt = cur
-    # Roll the JWT forward when inside the refresh cushion -- but never under READ_ONLY
-    # (the renewal is account-mutating; _mirror_try_renew checks again inside its lock).
-    if jwt and mirror_needs_refresh(jwt) and not (READ_ONLY or _read_only_now()):
-        jwt, _outcome = _mirror_try_renew(user_initiated=user_initiated, fallback=jwt)
-    if not _jwt_usable(jwt):
-        return None                        # absent/expired -> refuse, never API-key (F5)
-    return _mirror_session_from(jwt)
-
-
-def mirror_renew_tick(now=None):
-    """THE BACKGROUND RENEWAL (#71), asked every minute by the gallery's scheduler heartbeat
-    and deciding every MIRROR_RENEW_TICK_S. Without it the token was renewed only when a
-    generation or a Connect asked, so a week of not generating let it lapse.
-
-    Returns what it did: cadence | mirror_off | read_only | no_session | expired | fresh |
-    backoff | floor | not_due | renewed | failed. Everything before the renewal is offline (two
-    small file reads); the renewal itself is _mirror_try_renew, one renewal POST at most. An
-    expired token is left for Connect -- the tick does not try it. Never raises, never logs or
-    returns the token."""
-    now = time.time() if now is None else now
-    r = _mirror_renewal
-    if r["tick_at"] is not None and now - r["tick_at"] < MIRROR_RENEW_TICK_S:
-        return "cadence"
-    r["tick_at"] = now
-    try:
-        if not mirror_enabled():
-            return "mirror_off"
-        if READ_ONLY or _read_only_now():
-            return "read_only"
-        jwt = load_mirror_state().get("jwt") or ""
-        exp = jwt_expiry(jwt)
-        if exp is None:
-            return "no_session"
-        if exp - now <= 0:
-            return "expired"
-        if not mirror_needs_refresh(jwt, now=now):
-            return "fresh"
-        return _mirror_try_renew(now=now)[1]
-    except Exception:                                  # noqa: BLE001 -- a tick never raises
-        return "failed"
-
-
-def mirror_renewal_status(now=None):
-    """The Control Panel's renewal line (#71): {state, reason, last_ok_at, next_try_at}.
-
-    state: off (the Mirror is disarmed) | none (no parseable token) | expired (no seconds left)
-    | paused (due, but READ_ONLY forbids the renewal) | failed (due, and the last renewal failed
-    against THIS stored token -- a token saved since, by Connect or a renewal, clears it) | ok.
-    Offline, never the token or any of its claims."""
-    now = time.time() if now is None else now
-    r = _mirror_renewal
-    out = {"state": "ok", "reason": "", "last_ok_at": r["last_ok_at"], "next_try_at": None}
-    jwt = load_mirror_state().get("jwt") or ""
-    exp = jwt_expiry(jwt)
-    if not mirror_enabled():
-        out["state"] = "off"
-    elif exp is None:
-        out["state"] = "none"
-    elif exp - now <= 0:
-        out["state"] = "expired"
-    elif mirror_needs_refresh(jwt, now=now):
-        if READ_ONLY or _read_only_now():
-            out["state"] = "paused"
-        elif r["fails"] and r["failed_exp"] == exp:
-            out.update(state="failed", reason=r["last_reason"], next_try_at=r["next_try"])
-    return out
-
-
-def _session_for_create(api_session):
-    """The session the CREATE POST must use: the browser JWT (mirror) when the 'Mirror to
-    PixAI' toggle is on, so the generation lands in the pixai.art web library; else the
-    API-key api_session, exactly as today. The single choke every create site routes
-    through (review F4) -- swap ONLY the create's session, never the poll/collect/media
-    calls (F6), and NEVER fall back to the API key when mirroring: if the mirror session
-    is unavailable, refuse and spend nothing (F5).
-
-    Callers must have already passed _check_read_only, since make_mirror_session may make a
-    renewal network call (review F12). free-card (/v2/kaisuuken/check) still runs on the
-    API-key session at the call site -- only the create rides the JWT."""
-    if not mirror_enabled():
-        return api_session
-    m = make_mirror_session()
-    if m is None:
-        raise PixAIError(
-            "Mirror to PixAI is ON but its browser session is expired or unavailable -- "
-            "run `--mirror-check` (or re-bootstrap from a logged-in browser). Nothing was "
-            "submitted and no credits were spent.")
-    return m
-
-
-def run_mirror_check(args):
-    """--mirror-check: prove the zero-paste mirror loop WITHOUT ever printing the token.
-    Tries the stored session; if none, reads the pixai.art session from a local browser;
-    renews it once (POST /v2/auth/refresh-token, the JWT-only road) to confirm renewal; reports
-    only days-left, the road, ok/fail and the fixed reason word, and persists the fresh session.
-    This is the owner's step-0 verification -- it renews our own token and spends nothing. If it
-    can't read a browser (e.g. run headless/sandboxed), it says so plainly rather than guessing.
-    Refused under READ_ONLY (renewing the session changes your account)."""
-    if READ_ONLY or _read_only_now():
-        print("Mirror: READ_ONLY is set in config.json -- refusing to renew the mirror "
-              "session (renewing the session changes your account). Clear READ_ONLY to run "
-              "this.")
-        return {"ok": False, "source": "read_only"}
-    jwt = load_mirror_state().get("jwt") or ""
-    src = "stored"
-    if not _jwt_usable(jwt):
-        bj = read_browser_jwt()          # localStorage: works on a v20-cookie Chrome
-        if bj:
-            jwt = bj
-            src = "browser"
-    if not jwt:
-        print("Mirror: no session. No usable JWT in mirror_session.json, and none readable "
-              "from a local browser's pixai.art localStorage (is a browser installed and "
-              "logged in to pixai.art?). Open pixai.art logged-in, then retry.")
-        return {"ok": False, "source": "none"}
-    before = jwt_days_left(jwt)
-    road = "jwt"
-    fresh = refresh_jwt(_mirror_session_from(jwt), current_jwt=jwt,
-                        expected_sub=jwt_claims(jwt).get("sub"))
-    reason = _refresh_last.get("reason") or "failed"
-    # A fixed phrase per reason word. no_credential means nothing was sent, so PixAI was not
-    # asked and must not be quoted as answering.
-    why = ("no saved website session to renew (nothing was sent)"
-           if reason == "no_credential" else "PixAI answered: {}".format(reason))
-    if not fresh:
-        # A still-valid JWT whose renewal merely failed (a transient 5xx, a refusal) is
-        # reported distinctly from a truly-dead one, and it is kept.
-        if _jwt_usable(jwt):
-            save_mirror_state({"jwt": jwt})
-            print("Mirror ({}): the stored JWT is still valid ({} days left) but PixAI did NOT "
-                  "renew the session -- renewal may be temporarily unavailable. It keeps "
-                  "working until it nears expiry; re-run then. ({})".format(
-                      src, before, why))
-            return {"ok": True, "source": src, "renewed": False, "days_left": before,
-                    "reason": reason}
-        print("Mirror ({}): the JWT is expired and the session was not renewed. Re-open "
-              "pixai.art logged-in, then retry. ({})".format(src, why))
-        return {"ok": False, "source": src, "renewed": False, "reason": reason}
-    after = jwt_days_left(fresh)
-    # The app's own renewal: stamp when it minted the token (the ring's span, #71) and record
-    # the success and its road, so the background tick's 6 h floor counts it.
-    minted = time.time()
-    saved = save_mirror_state({"jwt": fresh, "minted_at": minted})
-    _mirror_renewal.update(fails=0, next_try=0.0, failed_exp=None, last_ok_at=minted,
-                           last_reason="", last_road=road)
-    print("Mirror OK (source: {}, renewed via {}). PixAI renewed the session -> {} days "
-          "left{}. {}".format(
-              src, road, after, "" if before is None else " (was {})".format(before),
-              "Stored." if saved else "WARNING: could not persist mirror_session.json."))
-    return {"ok": True, "source": src, "renewed": True, "days_left": after, "road": road}
-
-
-# ===========================================================================
-# MIRROR-SUBMIT INVARIANTS (upheld by the code above; from the 2026-08-14 adversarial review
-# and the 2026-08-15 ultrareview). This is a SPEND + CREDENTIAL path -- keep all of these:
-#  1. Single submit: exactly one createGenerationTask per create; the create session is
-#     swapped ONLY at the _session_for_create choke, and every credit-spending create routes
-#     through it (image/edit/video/reference-video via submit_generation, AND the /v2 fixer).
-#  2. No gql_adhoc for spend: createGenerationTask goes through gql_mutate (retries=0).
-#  3. READ_ONLY fires before any mirror network call: the renewal (POST
-#     /v2/auth/refresh-token: make_mirror_session, run_mirror_check, /api/mirror/connect,
-#     mirror_renew_tick -- and again inside _mirror_try_renew's lock) and the create
-#     (submit_generation/submit_fixer).
-#  4. No credential emission: the JWT is never printed/logged/returned; diagnostics report
-#     only days-left + ok/None + a fixed reason word; the credential travels only in a POST
-#     body/Authorization. The renewal's response body carries the fresh token and is read
-#     for that only -- never logged, never put in a message. The renewal never carries the
-#     API key (refresh_jwt refuses one before sending anything).
-#  5. No silent API-key fallback: make_mirror_session decides refuse-vs-allow OFFLINE from a
-#     usable-JWT check and returns None on failure; _session_for_create raises rather than
-#     using the API key when the mirror is ON.
-#  6. Collect stays on the API-key session: only the create POST rides the mirror JWT;
-#     poll / collect_generation / GET /v1/media do NOT.
-#  7. JWT-only: no cookies are stored, sent or paired (they died ~1 h after issue and pairing
-#     them across browser profiles risked a cross-identity submit); the fresh token's `sub`
-#     must match the stored one's, the renewal never follows a redirect (a 3xx's Set-Cookie
-#     would ride the next hop), and any cookie PixAI writes back is cleared off the session
-#     after the renewal. The same-session cookie read the 2026-08-17 ruling allows is not
-#     built: #92's B0 check (2026-10-28) found no installed profile's pixai.art cookies
-#     readable -- the running browser holds the Cookies file locked (Chrome and Edge Default;
-#     Brave not installed), and current Chrome encrypts cookie values with app-bound "v20"
-#     anyway -- so the ruling's own clause applies and the renewal is JWT-only.
-# ===========================================================================
+    return _pixai_client.PixAIClient(session, auth_kind="api-key", user_id=USER_ID)
 
 
 def run_probe(args):
@@ -6809,7 +4377,7 @@ def run_probe(args):
         "on" if _TRUSTSTORE_ACTIVE else "off (requests default)"))
     print("Fetching newest page...\n")
     conn = find_connection(gql(session, page_variables(
-        args.page_size, _client_of(session).user_id)))
+        args.page_size, _pixai_client._client_of(session).user_id)))
     if not conn:
         print("No connection found.")
         return
@@ -6843,7 +4411,7 @@ def run_count(args):
     while True:
         page += 1
         conn = find_connection(gql(session, page_variables(
-            count_size, _client_of(session).user_id, before)))
+            count_size, _pixai_client._client_of(session).user_id, before)))
         if not conn:
             break
         edges = conn.get("edges", [])
@@ -6937,7 +4505,7 @@ def artwork_list_gql(session, before=None, last=50, retries=None):
     number on PixAI's side. `retries` is gql_adhoc's: None keeps the default query retries
     (--sync-artworks, run by hand), and the fifteen-minute sweep passes 0 so a stalled PixAI
     costs it one attempt, not minutes -- the next sweep is the retry."""
-    author = str(_client_of(session).user_id or "")
+    author = str(_pixai_client._client_of(session).user_id or "")
     if not author:
         raise ArtworkListRefused("the app has no PixAI account id to read artworks for")
     variables = {"a": author, "n": last, "lang": "en"}
@@ -6991,7 +4559,7 @@ def artwork_views_bulk(session, page_size=40, delay=0.4, max_pages=60):
     Read-only in the sense that matters for the account: a query, never a mutation, and
     nothing here spends credits."""
     try:
-        author = str(_client_of(session).user_id or "")
+        author = str(_pixai_client._client_of(session).user_id or "")
     except AttributeError:
         return {}, False
     if not author:
@@ -7090,7 +4658,7 @@ def run_sync_artworks(args):
     # isn't pinned in config.json. (Checking before this was the bug: it hard-failed on a config
     # that never lists USER_ID even though the key can resolve it.)
     session = _make_session(getattr(args, "token", None))
-    if not _client_of(session).user_id:
+    if not _pixai_client._client_of(session).user_id:
         raise PixAIError("USER_ID is missing and could not be resolved from your API key. "
                          "Add USER_ID to config.json as a fallback.")
 
@@ -7334,7 +4902,7 @@ def run_sync_videos(args):
     while True:
         conn = find_connection(gql(session, page_variables(
             getattr(args, "page_size", 250) or 250,
-            _client_of(session).user_id, before)))
+            _pixai_client._client_of(session).user_id, before)))
         if not conn:
             break
         edges = conn.get("edges") or []
@@ -7380,7 +4948,7 @@ def run_sync_videos(args):
                             pass
             # Fallback (no poster, e.g. older i2v): first frame of the mp4 via ffmpeg.
             if not thumb_path.exists() and video_path:
-                video_poster_thumb(video_path, thumb_path)
+                _media_tools.video_poster_thumb(video_path, thumb_path)
         except Exception as e:                       # noqa: BLE001 -- poster is cosmetic, never abort the sync
             print("  poster thumbnail failed for {} ({}); video still cataloged".format(video_media_id, e))
 
@@ -7429,7 +4997,7 @@ def run_sync_videos(args):
                     video_duration=str(shared.get("duration") or ""),
                 )
                 _ensure_video_thumb(vmid, o.get("poster_media_id"), path)
-                video_faststart(path)                # iOS needs moov at the front to stream
+                _media_tools.video_faststart(path)                # iOS needs moov at the front to stream
                 rows.append(full)
             else:
                 rows.append(status)
@@ -7466,444 +5034,6 @@ def _under(path, parent):
         return False
 
 
-# ===========================================================================
-# media_tools -- the ONE ffmpeg / ffprobe seam
-# ===========================================================================
-# Every ffmpeg and ffprobe invocation in this app enters the OS through this
-# section. Before it existed there were seven call sites across
-# moonglade_backup.py and moonglade_gallery.py, and each one re-typed the same
-# four things: an availability check, `creationflags=_NO_WINDOW`, a timeout, and
-# a blanket `except`. They disagreed on all four. Two of them asked ffprobe the
-# SAME question -- how long is this clip -- through different `-of` flags and
-# answered differently (one rounded to 2dp, one did not), and were called
-# crosswise from both modules. Two invoked the binary by bare name where the
-# others used a which()-resolved path. One cached its which(), one re-ran it per
-# file. video_poster_thumb's own comment had already banked the diagnosis: "two
-# copies of this wheel WILL drift."
-#
-# What lives here, exactly once:
-#
-#   * availability -- ffmpeg_path() / ffprobe_path(), one cached probe each,
-#     asked separately because they are separately installable.
-#   * the flags -- NO_WINDOW, on every spawn.
-#   * the timeouts -- the *_TIMEOUT constants below ARE the policy; a caller
-#     naming its own number is how the old sites drifted 15 apart from 20.
-#   * the failure rule -- a media tool NEVER raises at its caller and never
-#     blocks the work it serves. run_ffmpeg/run_ffprobe answer with a
-#     ToolResult, and every failure they swallow gets a vlog() line so a
-#     degraded run is on record instead of silent.
-#
-# ToolResult.missing is the load-bearing part. "The binary is not installed" used
-# to reach every caller as a FileNotFoundError caught by a blanket `except` that
-# could not tell it apart from a corrupt file, so the difference between "there
-# is no audio" and "I could not look" was lost at the seam. It is now a field.
-# That is the mechanism under the standing rule that a missing ffprobe DEGRADES
-# the Loom export and never blocks it: the export can ask which kind of nothing
-# it got back.
-#
-# A nonzero returncode is deliberately NOT logged here and NOT a `missing`: it is
-# ffmpeg's ordinary way of refusing a file, its meaning is caller-specific (the
-# faststart remux reads its stderr and names the clip; a thumbnail just retries
-# with different flags), and logging it here would double up on the caller's own,
-# better message.
-#
-# The gallery reaches this section as `core.<name>` through a function-body
-# `from moonglade import backup as core` -- module scope would be an import cycle,
-# since this module imports moonglade.gallery at the top.
-
-NO_WINDOW = _NO_WINDOW   # re-exported: no caller of this section reaches for the raw constant
-
-# The timeout policy, in one place. Sized by what the invocation actually does,
-# not by which module happens to be calling.
-PROBE_TIMEOUT = 20         # ffprobe: a metadata read, no decoding
-FRAME_TIMEOUT = 45         # one frame out of one clip
-THUMB_TIMEOUT = 90         # the thumbnail filter scans a batch of opening frames
-THUMB_RETRY_TIMEOUT = 60   # ...and the literal-first-frame retry behind it
-REMUX_TIMEOUT = 300        # faststart: -c copy over the whole file
-
-
-@dataclass(frozen=True)
-class ToolResult:
-    """What one ffmpeg/ffprobe invocation did. Never an exception.
-
-    `ok`          -- the process ran and exited 0.
-    `returncode`  -- its exit code, or None when no process completed at all
-                     (binary absent, timed out, failed to spawn).
-    `stdout`/`stderr` -- text, always captured. ffmpeg reports WHY it refused
-                     something on stderr and nowhere else.
-    `missing`     -- the binary is not installed. The degrade-never-block road:
-                     a caller answers this differently from a real failure.
-    """
-    ok: bool
-    returncode: object
-    stdout: str
-    stderr: str
-    missing: bool
-
-
-_TOOL_PATHS = {}
-
-
-def _tool_path(name):
-    """Resolved path to a media binary, or '' -- asked of the OS once per process.
-
-    Cached because it is asked on per-file hot paths (every clip in a thumbnail
-    sweep, every shot in an export) and a which() is a directory walk. The price is
-    that installing ffmpeg while the app runs needs a restart to be noticed, which
-    is the deal the old `_ffmpeg_path` already made; the gallery's uncached copies
-    paid a which() per file for a refresh nobody was waiting on."""
-    if name not in _TOOL_PATHS:
-        import shutil
-        _TOOL_PATHS[name] = shutil.which(name) or ""
-    return _TOOL_PATHS[name]
-
-
-def ffmpeg_path():
-    """Path to ffmpeg, or '' when it is not installed (cached -- see _tool_path).
-
-    Public because some callers must gate BEFORE building work: the faststart sweep
-    prints one honest line instead of walking the library, and the Loom export
-    refuses up front rather than assembling a filtergraph nothing can run."""
-    return _tool_path("ffmpeg")
-
-
-def ffprobe_path():
-    """Path to ffprobe, or '' when it is not installed (cached -- see _tool_path).
-
-    Asked SEPARATELY from ffmpeg_path() on purpose. They ship together in a full
-    build but not in every package, and the machine with ffmpeg and no ffprobe is
-    exactly the one the Loom export has to keep serving -- gating the two together
-    would take a working feature away over a binary the wiki never asks for."""
-    return _tool_path("ffprobe")
-
-
-def _reset_tool_cache():
-    """Forget the resolved binary paths. For tests that exercise the caching itself;
-    production has no reason to re-ask."""
-    _TOOL_PATHS.clear()
-
-
-def _as_text(v):
-    """Whatever a completed process handed back, as str. The one decode point."""
-    if v is None:
-        return ""
-    if isinstance(v, bytes):
-        return v.decode("utf-8", "replace")
-    return v
-
-
-def _run_tool(name, path, args, timeout, input=None):
-    """Spawn one media binary and answer with a ToolResult. Never raises.
-
-    The single owner of the missing-binary road, `creationflags=NO_WINDOW`, the
-    timeout, stream capture, decoding, and the vlog() line for every failure that
-    used to disappear into a caller's blanket `except`."""
-    import subprocess
-    if not path:
-        vlog("{} is not installed; skipping: {}".format(
-            name, " ".join(str(a) for a in args[:4])))
-        return ToolResult(ok=False, returncode=None, stdout="",
-                          stderr="{} not found on PATH".format(name), missing=True)
-    argv = [path] + [str(a) for a in args]
-    try:
-        # stdout/stderr are PIPEd explicitly rather than via capture_output=True:
-        # ffmpeg's stderr is the entire diagnostic on a refusal, and with `-v error`
-        # it prints nothing at all on success, so piping costs nothing on the happy
-        # path. Decoding is pinned to utf-8/replace because the alternative -- the
-        # platform locale with strict errors -- can raise out of a call whose whole
-        # contract is that it does not.
-        # stdin is DEVNULL whenever no input is given: a server launched detached on
-        # Windows has no valid stdin handle to inherit, and the child then fails with
-        # WinError 6 -- which this function swallows by contract, so frame_at returned
-        # None and an export silently lost its audio (real-ffmpeg smoke test, 2026-09-29).
-        stdin_kw = {"input": input} if input is not None else {"stdin": subprocess.DEVNULL}
-        r = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                           text=True, encoding="utf-8", errors="replace",
-                           timeout=timeout, creationflags=NO_WINDOW, **stdin_kw)
-    except FileNotFoundError as e:
-        # which() said yes and the exec still failed: the binary moved, or a shim
-        # points at nothing. Same road for the caller as never having had it.
-        vlog("{} vanished between which() and exec: {}".format(name, e))
-        return ToolResult(ok=False, returncode=None, stdout="", stderr=str(e), missing=True)
-    except subprocess.TimeoutExpired:
-        vlog("{} timed out after {}s: {}".format(name, timeout, " ".join(argv[1:5])))
-        return ToolResult(ok=False, returncode=None, stdout="",
-                          stderr="timed out after {}s".format(timeout), missing=False)
-    except Exception as e:                       # noqa: BLE001 -- a media tool never raises at its caller
-        vlog("{} failed to run: {}".format(name, e))
-        return ToolResult(ok=False, returncode=None, stdout="", stderr=str(e), missing=False)
-    return ToolResult(ok=(r.returncode == 0), returncode=r.returncode,
-                      stdout=_as_text(r.stdout), stderr=_as_text(r.stderr), missing=False)
-
-
-def run_ffmpeg(args, *, timeout, input=None):
-    """Run ffmpeg with `args` -- everything AFTER the binary, which this supplies.
-    Never raises; see ToolResult. `input` is stdin text for the rare filter that
-    wants it (the streams are text-mode, so bytes are not accepted)."""
-    return _run_tool("ffmpeg", ffmpeg_path(), args, timeout, input=input)
-
-
-def run_ffprobe(args, *, timeout):
-    """Run ffprobe with `args` -- everything AFTER the binary, which this supplies.
-    Never raises; see ToolResult."""
-    return _run_tool("ffprobe", ffprobe_path(), args, timeout)
-
-
-def duration(path, *, timeout=None):
-    """Real length of a clip in seconds, or None when it cannot be read.
-
-    THE one answer to "how long is this file". There used to be two, asking ffprobe
-    the same question through different flags: this module's `probe_video_duration`
-    (`-of default=noprint_wrappers=1:nokey=1`, 20s, rounded to 2dp) and the
-    gallery's `probe_duration` (`-of csv=p=0`, 15s, full precision), each called
-    from both modules. Full precision wins, because rounding is a display choice and
-    a measurement that has already been rounded cannot be un-rounded -- a caller that
-    wants 2dp rounds at its own call site, where the reason it wants them is visible.
-    """
-    r = run_ffprobe(["-v", "error", "-show_entries", "format=duration",
-                     "-of", "csv=p=0", str(path)],
-                    timeout=PROBE_TIMEOUT if timeout is None else timeout)
-    if not r.ok:
-        return None
-    try:
-        return float(r.stdout.strip())
-    except (TypeError, ValueError):
-        return None
-
-
-def has_audio(path, *, timeout=None):
-    """True/False for "does this file carry at least one audio stream", and None
-    when ffprobe could not answer at all.
-
-    The three-way answer is the whole point. "Definitely silent" and "I could not
-    look" are different facts, and collapsing them is how a machine without ffprobe
-    came to read every clip as silent with nothing able to notice. A caller that
-    only needs the safe reading -- treat unknown as silent -- coerces with bool(),
-    in one place, on purpose."""
-    r = run_ffprobe(["-v", "error", "-select_streams", "a", "-show_entries",
-                     "stream=index", "-of", "csv=p=0", str(path)],
-                    timeout=PROBE_TIMEOUT if timeout is None else timeout)
-    if not r.ok:
-        return None
-    return bool(r.stdout.strip())
-
-
-def frame_seek_point(at_seconds, dur):
-    """Where a trim-aware frame grab lands on a clip `dur` seconds long: `at_seconds` itself
-    when it is inside the clip, else None -- the clip's LAST frame (no time asked, a time
-    at/after the real end, or a length that could not be measured). The one rule, read by
-    extract_last_frame and by /api/loom/handoff, which reports back where the frame it
-    uploaded came from (the Loom's anchor records that time; owner walk 2026-09-30)."""
-    if at_seconds is None:
-        return None
-    if not (dur and at_seconds < dur - 0.05):
-        return None
-    return at_seconds
-
-
-def extract_last_frame(video_path, out_png, at_seconds=None, *, trim_aware=True):
-    """Grab a clip's frame to out_png via ffmpeg. This is the frame-handoff primitive:
-    one shot's last frame becomes the next shot's opening frame, so a sequence reads as
-    one continuous scene.
-
-    `at_seconds` makes the handoff TRIM-AWARE: the previous shot's trimOut is the point
-    the cut actually ends on, so the handed-off frame must be the frame AT that out-point,
-    not the untrimmed clip's real final frame. When it's None (no trim) -- or past the
-    clip's real end -- decode the clip's last half second and keep the final frame decoded
-    (`-update 1` with no frame cap overwrites out_png per frame). A clip shorter than that
-    is decoded whole, so it still yields its LAST frame; the old fixed "-sseof -0.15
-    -frames:v 1" clamped to the start on such a clip and handed back the FIRST.
-    Returns out_png or None.
-
-    It is also GENERAL: `at_seconds=0.0` takes the explicit-seek branch and yields the
-    FIRST frame. Nothing in this app should write a second frame extractor; `frame_at`
-    below is this function under the module's argument order, not another copy of it.
-
-    `trim_aware=False` skips the duration measurement and seeks to `at_seconds` as given
-    -- for a caller that already knows its timestamp is inside the clip."""
-    import os
-    if at_seconds is not None and trim_aware:
-        # a trimOut at/after the real end is just "the last frame" -> use the EOF path
-        at_seconds = frame_seek_point(at_seconds, duration(video_path))
-    try:
-        if at_seconds is None:
-            seek = ["-sseof", "-0.5", "-i", str(video_path)]
-            take = ["-update", "1"]
-        else:
-            # -ss before -i (fast, keyframe-accurate enough for a still); back off a hair
-            # so we land ON the last kept frame, not the first discarded one.
-            seek = ["-ss", "{:.3f}".format(max(0.0, float(at_seconds) - 0.05)), "-i", str(video_path)]
-            take = ["-update", "1", "-frames:v", "1"]
-    except (TypeError, ValueError):
-        return None
-    r = run_ffmpeg(["-y"] + seek + take + ["-q:v", "2", str(out_png)],
-                   timeout=FRAME_TIMEOUT)
-    if not r.ok:
-        return None
-    try:
-        return str(out_png) if os.path.exists(out_png) and os.path.getsize(out_png) > 0 else None
-    except OSError:
-        return None
-
-
-def frame_at(path, t, out, *, trim_aware=True):
-    """Write the frame at `t` seconds of `path` to `out`; `t=None` means the clip's
-    last frame, `t=0.0` its first. Returns `out` or None.
-
-    The module-interface face of extract_last_frame, which stays THE frame primitive
-    and keeps its name because the rest of the app and the decision record both call
-    it that. This is a signature, not a second implementation."""
-    return extract_last_frame(path, out, at_seconds=t, trim_aware=trim_aware)
-
-
-# --- end media_tools -------------------------------------------------------
-
-
-def video_poster_thumb(video_path, thumb_path):
-    """Extract a frame of a video via ffmpeg and write it as the gallery thumbnail.
-    OPTIONAL: returns False (no-op) if ffmpeg isn't on PATH, so videos just fall
-    back to the placeholder + play badge. Used for imported videos and as a
-    fallback for i2v videos with no still-frame poster.
-
-    Thin delegate: the ONE ffmpeg-extract implementation lives in
-    moonglade.gallery.make_video_thumbnail (which build_thumbnails' poster-less
-    fallback also uses) -- two copies of this wheel WILL drift. The availability
-    guard stays here because import-local and sync-videos gate on it."""
-    if not ffmpeg_path():
-        return False
-    from moonglade.gallery import make_video_thumbnail
-    return make_video_thumbnail(video_path, thumb_path)
-
-
-def _mp4_is_faststart(path):
-    """True if an mp4's `moov` atom precedes `mdat` — i.e. iOS/Safari can stream it
-    progressively over HTTP. Best-effort top-level box scan; returns True on any parse
-    trouble so we never remux a file we can't read."""
-    import struct
-    order = []
-    try:
-        with open(path, "rb") as f:
-            while len(order) < 12:
-                hdr = f.read(8)
-                if len(hdr) < 8:
-                    break
-                size = struct.unpack(">I", hdr[:4])[0]
-                order.append(hdr[4:8].decode("latin1", "replace"))
-                if size == 1:                       # 64-bit extended size
-                    size = struct.unpack(">Q", f.read(8))[0]; f.seek(size - 16, 1)
-                elif size == 0:                     # extends to EOF
-                    break
-                else:
-                    f.seek(size - 8, 1)
-                if "moov" in order and "mdat" in order:
-                    break
-    except (OSError, struct.error, ValueError):
-        return True
-    if "moov" not in order:
-        return True
-    di = order.index("mdat") if "mdat" in order else 10 ** 9
-    return order.index("moov") < di
-
-
-# What a faststart attempt actually DID. Three outcomes, because two are not enough: a bool
-# collapses "I tried and ffmpeg refused" into the same False as "there was nothing to do",
-# and a sweep that treats that union as failure reports a healthy file as broken. The
-# concurrency that makes them collide is BLESSED by the docs -- wiki/Backing-Up.md says
-# --faststart-videos is safe to run while the gallery or a live watch is collecting, and the
-# live mirror remuxes the same clips -- so between one caller's "not faststart" check and the
-# next line of code the file can legitimately already be fixed, or gone from Trash entirely
-# (M04 round 2, 2026-07-27).
-FASTSTART_REWROTE = "rewrote"        # the file was not faststart and now is
-FASTSTART_NOT_NEEDED = "not-needed"  # nothing to do: already faststart, vanished, not a video
-FASTSTART_REFUSED = "refused"        # ffmpeg (or the swap) tried and failed -- a REAL failure
-
-
-def _video_faststart_attempt(path):
-    """The remux, reporting WHICH of the three FASTSTART_* outcomes happened.
-
-    `video_faststart` below is the bool face of this, kept because almost every caller only
-    wants "did the file change" -- see its docstring for the mechanism and the unique-temp
-    rationale. Only run_faststart_videos, which has to account for every clip it walked and
-    name the ones still broken, needs the third answer."""
-    p = Path(path)
-    if p.suffix.lower() not in (".mp4", ".mov", ".m4v"):
-        return FASTSTART_NOT_NEEDED
-    ff = ffmpeg_path()
-    if not ff or not p.exists() or _mp4_is_faststart(p):
-        # Deliberately NOT a refusal. This is the branch a concurrent collector's remux (or a
-        # Trash purge) lands in when it wins the race with a sweep that had already decided
-        # this file needed work; calling it a failure prints "still not iOS-playable" about a
-        # file that is now perfectly playable.
-        return FASTSTART_NOT_NEEDED
-    from uuid import uuid4
-    # unique per call; the real ext stays LAST so ffmpeg still picks the muxer by extension
-    tmp = p.with_name(p.stem + ".__fstmp__" + uuid4().hex[:8] + p.suffix)
-    try:
-        # Through media_tools: the binary, the no-window flag, the timeout and the "never
-        # raises" rule all come from there. stderr arrives CAPTURED because run_ffmpeg pipes
-        # it always -- ffmpeg reports why it refused a remux there and nowhere else, and with
-        # -v error it prints nothing at all on success.
-        r = run_ffmpeg(["-y", "-v", "error", "-i", str(p),
-                        "-c", "copy", "-movflags", "+faststart", str(tmp)],
-                       timeout=REMUX_TIMEOUT)
-        if r.ok and tmp.exists() and tmp.stat().st_size > 0:
-            os.replace(str(tmp), str(p))            # atomic swap
-            return FASTSTART_REWROTE
-        # A non-zero returncode raises NOTHING -- it is ffmpeg's ordinary way of refusing a
-        # file (a stream anomaly `-c copy` won't carry, say), which is why media_tools hands
-        # it back rather than logging it: the message worth printing is this one, naming the
-        # clip. This branch used to fall straight through to the cleanup below, so the one
-        # genuinely COMMON failure mode was the one that produced no message even under -v --
-        # flatly contradicting the comment in the except clause below (M04, 2026-07-27).
-        # Report the code and ffmpeg's own reason, since "it didn't work" without either is
-        # not something a user can act on.
-        why = " ".join((r.stderr or "").split())[:400] or (
-            "no stderr; wrote no usable temp file" if r.ok else "no stderr")
-        vlog("faststart remux failed for {}: ffmpeg exit {} -- {}".format(
-            p.name, r.returncode, why))
-    except Exception as e:                          # noqa: BLE001 -- remux must never crash a collect
-        # swallowed by design (a failed remux leaves the original playable), but never
-        # silently: a lost race or an odd ffmpeg failure must at least show under -v.
-        vlog("faststart remux failed for {}: {}".format(p.name, e))
-    try:
-        if tmp.exists():
-            tmp.unlink()   # the temp is unique to THIS call, so this only ever cleans our own leftover
-    except OSError:
-        pass
-    if not p.exists():
-        # The SOURCE went away while ffmpeg was reading it -- a Trash purge from the gallery,
-        # or an --organize move, both of which the docs say may run alongside this. ffmpeg
-        # failing to open a file that no longer exists is not a refusal, and reporting it as
-        # one names a file the user cannot go and look at. Checked here rather than up front
-        # because this is the only window the earlier `p.exists()` cannot cover.
-        return FASTSTART_NOT_NEEDED
-    return FASTSTART_REFUSED
-
-
-def video_faststart(path):
-    """Losslessly move an mp4's `moov` atom to the front (ffmpeg -c copy -movflags
-    +faststart) so iOS/Safari will play it over HTTP -- PixAI serves videos with moov at
-    the END, which desktop tolerates but iOS refuses (MediaError 4). No re-encode, no
-    quality loss. Returns True only when it rewrote the file; no-op (False) if ffmpeg is
-    absent, the file is already faststart, or the remux fails (original left untouched).
-
-    A caller that has to tell a refusal apart from a no-op wants `_video_faststart_attempt`,
-    which this wraps -- False here is deliberately the union of both, and the collect-time
-    callers (which just want the file made streamable if it can be) do not care which.
-
-    The temp name is UNIQUE per invocation (uuid suffix), never derived from the
-    filename alone. Two collectors can legitimately remux the same clip seconds apart
-    (the gallery's live-mirror watcher and a /api/task-status done-poll both collect a
-    finished task, and the CLI's --watch-backup is a whole separate process), and with
-    a deterministic temp name their two concurrent ffmpeg runs interleaved writes into
-    the SAME temp file: the survivor was a full-length mp4 carrying the other run's
-    stale pre-shift bytes exactly one moov-size offset out of place -- it played fine
-    and then stopped mid-way. With unique temps any overlap is safe: each remux is
-    complete and self-contained, and whichever os.replace lands last wins with a
-    COMPLETE file either way."""
-    return _video_faststart_attempt(path) == FASTSTART_REWROTE
-
-
 def run_faststart_videos(args):
     """Rewrite every non-faststart mp4 under videos/ so iOS can stream them (lossless
     -c copy +faststart). Idempotent -- skips files already faststart. Touches only the
@@ -7930,18 +5060,18 @@ def run_faststart_videos(args):
     vdir = out / "videos"
     vids = sorted(p for p in vdir.rglob("*")
                   if p.is_file() and p.suffix.lower() in (".mp4", ".mov", ".m4v")) if vdir.exists() else []
-    if not ffmpeg_path():
+    if not _media_tools.ffmpeg_path():
         print("ffmpeg not found on PATH; cannot faststart.")
         return {"fixed": 0, "skipped": 0, "failed": 0, "total": len(vids)}
     print("Faststart pass over {} video(s) in {}...".format(len(vids), vdir), flush=True)
     fixed = skipped = 0
     failures = []
     for i, p in enumerate(vids, 1):
-        outcome = _video_faststart_attempt(p)
-        if outcome == FASTSTART_REWROTE:
+        outcome = _media_tools._video_faststart_attempt(p)
+        if outcome == _media_tools.FASTSTART_REWROTE:
             fixed += 1
             print("  [{}/{}] faststart -> {}".format(i, len(vids), p.name), flush=True)
-        elif outcome == FASTSTART_REFUSED:
+        elif outcome == _media_tools.FASTSTART_REFUSED:
             failures.append(p)
             print("  [{}/{}] FAILED {} -- still not iOS-playable (re-run with -v for "
                   "ffmpeg's own reason)".format(i, len(vids), p.name), flush=True)
@@ -8086,8 +5216,8 @@ def run_import_local(args):
             prompt_preview=stored.stem[:100],       # no prompt: name the file after itself
             is_video="1" if is_vid else ""))        # no fm: a local file has no task
         if is_vid:
-            video_poster_thumb(stored, thumb_dir / "{}.jpg".format(mid))  # ffmpeg, optional
-            video_faststart(stored)                  # iOS needs moov at the front to stream
+            _media_tools.video_poster_thumb(stored, thumb_dir / "{}.jpg".format(mid))  # ffmpeg, optional
+            _media_tools.video_faststart(stored)                  # iOS needs moov at the front to stream
         else:
             make_thumbnail(stored, thumb_dir / "{}.jpg".format(mid))
         made += 1
@@ -8965,7 +6095,8 @@ def make_video_duration_lookup(out_dir, db_path=None):
     The answer is cached per media id for the life of the returned callable (one per gallery
     app, one per CLI run), so a quote and the spend that follows it read the same number even
     if a file lands in between, and a miss does not re-walk the library per keystroke."""
-    from moonglade.gallery import find_local_video_file, get_row
+    from moonglade.gallery import get_row
+    from moonglade.scan import find_local_video_file
     out = Path(out_dir)
     dbp = Path(db_path) if db_path else out / "catalog.db"
     cache = {}
@@ -8988,7 +6119,7 @@ def make_video_duration_lookup(out_dir, db_path=None):
         try:
             f = find_local_video_file(out, mid, row)
             if f is not None:
-                secs = duration(str(f))
+                secs = _media_tools.duration(str(f))
         except Exception:                            # noqa: BLE001
             secs = None
         if secs is None or not secs > 0:
@@ -10157,7 +7288,7 @@ def run_generate(args):
     # never moved (M16, 2026-07-27).
     if existing_task and (rows or videos):
         try:
-            from moonglade.gallery import telem_bump
+            from moonglade.telemetry import telem_bump
             telem_bump("recover_events", out_dir=out)
         except Exception:
             pass
@@ -10297,10 +7428,10 @@ def _download_video_task(session, result, task_id, out, args, params):
             # gallery never shows a blank tile waiting on a later sync. Matches _do_task /
             # run_import_local; no-op if ffmpeg isn't on PATH.
             if not thumb_path.exists():
-                video_poster_thumb(path, thumb_path)
+                _media_tools.video_poster_thumb(path, thumb_path)
         except Exception as e:                       # noqa: BLE001 -- poster is cosmetic, never abort the catalog
             print("  poster thumbnail failed for {} ({}); video still cataloged".format(vmid, e))
-        video_faststart(path)                        # iOS needs moov at the front to stream
+        _media_tools.video_faststart(path)                        # iOS needs moov at the front to stream
         rows.append(full)
         saved.append(str(path))
     if rows:
@@ -10469,7 +7600,7 @@ def _bump_card_use(params):
     (a card attached to a rejected submit was never spent). Fail-soft no-op."""
     if isinstance(params, dict) and params.get("kaisuukenId"):
         try:
-            from moonglade.gallery import telem_bump
+            from moonglade.telemetry import telem_bump
             telem_bump("free_cards_applied")
         except Exception:
             pass
@@ -11321,7 +8452,7 @@ def is_lane_request(params):
 def _unlimited_identity():
     """The identity that will CREATE: the browser JWT when Mirror to PixAI is on, else the
     API key. The entitlement is read, and cached, under that identity (§8.8)."""
-    return "mirror" if mirror_enabled() else "key"
+    return "mirror" if _mirror.mirror_enabled() else "key"
 
 
 def _unlimited_session(session, identity):
@@ -11330,8 +8461,8 @@ def _unlimited_session(session, identity):
     directly, never through make_mirror_session: a read must not roll the token forward."""
     if identity != "mirror":
         return session
-    jwt = load_mirror_state().get("jwt") or ""
-    return _mirror_session_from(jwt) if _jwt_usable(jwt) else None
+    jwt = _mirror.load_mirror_state().get("jwt") or ""
+    return _mirror._mirror_session_from(jwt) if _mirror._jwt_usable(jwt) else None
 
 
 def _unlimited_raw(session, version_id):
@@ -11551,7 +8682,7 @@ def submit_generation(session, params, *, on_send=None, exact=False):
     # generation is create-only -- it returns the task id and never polls/collects -- so
     # rebinding the whole session here is safe; the CALLER keeps its API-key session for
     # download (F6).
-    session = _session_for_create(session)
+    session = _mirror._session_for_create(session)
     # Gate the field set on the model's architecture (DiT profile vs SDXL steps/cfg) BEFORE
     # the mutation, with the SAME helper price_task uses, so the submitted shape equals the
     # priced shape. Fail-soft: an undetermined profile set returns params unchanged (today's
@@ -11791,7 +8922,7 @@ def submit_fixer(session, media_id, boxes):
     # toggle is on (review F1: the choke belongs at "a create", not only at gql_mutate sites).
     # Create-only -- the caller polls/collects on its own API-key session (F6); pass-through
     # when the mirror is off; refuses before spend if the mirror is on but unavailable (F5).
-    data = _rest_post(_session_for_create(session), "/task/fixer", body) or {}
+    data = _rest_post(_mirror._session_for_create(session), "/task/fixer", body) or {}
     tid = data.get("id")
     if not tid:
         raise PixAIError("fixer: no task id returned: " + json.dumps(data)[:200])
@@ -12918,7 +10049,7 @@ def collect_generation(session, task_id, out_dir, *, name_length=60, name_sep="_
         # Real clip length for the reel. media_tools.duration answers at full precision;
         # the 2dp are this call site's own display choice (the catalog's video_duration
         # column is read back as a label, not re-measured).
-        _dur = duration(saved[0]) if saved else None
+        _dur = _media_tools.duration(saved[0]) if saved else None
         dur = round(_dur, 2) if _dur is not None else None
         return {"media_ids": mids, "saved": len(saved), "is_video": True, "duration": dur}
     fm = extract_full_meta(result)
@@ -13002,7 +10133,7 @@ def run_generate_video(args):
         # (expensive) video and a second charge -- see gql_mutate's docstring.
         # _session_for_create: the CREATE rides the mirror JWT when the toggle is on
         # (else pass-through); download below stays on the API-key `session` (F6).
-        created = gql_mutate(_session_for_create(session), _GEN_MUTATION, {"parameters": params})
+        created = gql_mutate(_mirror._session_for_create(session), _GEN_MUTATION, {"parameters": params})
         task_id = (created.get("createGenerationTask") or {}).get("id")
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
@@ -13086,7 +10217,7 @@ def run_reference_video(args):
 
     def _vid_len(src):
         if _is_local_source(src):
-            return duration(str(src))
+            return _media_tools.duration(str(src))
         if _lookup[0] is None:
             _lookup[0] = make_video_duration_lookup(out)
         return _lookup[0](src)
@@ -13154,7 +10285,7 @@ def run_reference_video(args):
         _apply_kaisuuken(session, params, args)   # free-card check on the API-key session
         # gql_mutate, never gql_adhoc -- a re-POST here is a second charge.
         # _session_for_create: create rides the mirror JWT when on; download stays API-key (F6).
-        created = gql_mutate(_session_for_create(session), _GEN_MUTATION, {"parameters": params})
+        created = gql_mutate(_mirror._session_for_create(session), _GEN_MUTATION, {"parameters": params})
         task_id = (created.get("createGenerationTask") or {}).get("id")
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
@@ -13250,7 +10381,7 @@ def run_edit_image(args):
         _apply_kaisuuken(session, params, args)   # free-card check on the API-key session
         # gql_mutate, never gql_adhoc -- a re-POST here is a second charge.
         # _session_for_create: create rides the mirror JWT when on; download stays API-key (F6).
-        created = gql_mutate(_session_for_create(session), _GEN_MUTATION, {"parameters": params})
+        created = gql_mutate(_mirror._session_for_create(session), _GEN_MUTATION, {"parameters": params})
         task_id = (created.get("createGenerationTask") or {}).get("id")
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
@@ -14167,7 +11298,7 @@ def list_my_trained_loras(session, pages=3, per_page=20):
     authorId + ANY_USER_LORA, the list PixAI's "Import from previous datasets" reads), newest
     first, up to `pages` pages. Each row: {model_id, title, is_private, visibility, created_at,
     cover_media_id, version_id, task} where task is the TrainingTask dict or None. Read-only."""
-    uid = str(_client_of(session).user_id or "")
+    uid = str(_pixai_client._client_of(session).user_id or "")
     out, before = [], None
     for _ in range(max(1, int(pages))):
         v = {"au": uid, "ty": "ANY_USER_LORA", "n": int(per_page)}
@@ -14734,7 +11865,7 @@ def run_account_info(args):
         credits = "{:,}".format(int(me.get("quotaAmount") or 0))
     except (TypeError, ValueError):
         credits = str(me.get("quotaAmount"))
-    print("Account ID       : {}".format(me.get("id") or _client_of(session).user_id))
+    print("Account ID       : {}".format(me.get("id") or _pixai_client._client_of(session).user_id))
     print("Credits (balance): {}".format(credits))
     balance = credit_balance(session)
     if balance["free"] is not None or balance["paid"] is not None:
@@ -15004,7 +12135,7 @@ _CONTEST_PAGE_SIZE = 50
 # board's own `totalPage`; this ceiling only bounds a board that keeps growing -- it was a bare
 # 6, and the 2026-09-26 board already answered totalPage 7 at 50 a page (330 contests), so the
 # oldest page silently fell off. Pages are read 0.35 s apart, the contest sweep's own pace
-# (moonglade.gallery._CONTEST_SYNC_PAUSE): the board is a public read and CLAUDE.md asks for
+# (moonglade.contest_sync._CONTEST_SYNC_PAUSE): the board is a public read and CLAUDE.md asks for
 # paced requests.
 _CONTEST_MAX_PAGES = 20
 _CONTEST_PAGE_PAUSE = 0.35
@@ -15311,7 +12442,7 @@ def _rest_get(session, path, params=None, timeout=30):
     section. Kept under this name because a dozen call sites hand it a `session`
     positionally and the suite patches it here (dev/tests/conftest.py's `_no_live_card_network`
     is what makes the /v2 API offline by default)."""
-    return _client_of(session).rest_get(path, params=params, timeout=timeout)
+    return _pixai_client._client_of(session).rest_get(path, params=params, timeout=timeout)
 
 
 def _rest_post(session, path, body, timeout=60):
@@ -15319,19 +12450,19 @@ def _rest_post(session, path, body, timeout=60):
 
     THIN DELEGATE onto `PixAIClient.rest_post`, which carries the no-retry-loop rule that
     keeps `submit_fixer` and `claim_reward` single-attempt."""
-    return _client_of(session).rest_post(path, body, timeout=timeout)
+    return _pixai_client._client_of(session).rest_post(path, body, timeout=timeout)
 
 
 def _rest_patch(session, path, body, timeout=60):
     """PATCH JSON to a /v2 oRPC REST route. THIN DELEGATE onto `PixAIClient.rest_patch`
     (single attempt). Blocked in tests by conftest."""
-    return _client_of(session).rest_patch(path, body, timeout=timeout)
+    return _pixai_client._client_of(session).rest_patch(path, body, timeout=timeout)
 
 
 def _rest_put(session, path, body, timeout=60):
     """PUT JSON to a /v2 oRPC REST route. THIN DELEGATE onto `PixAIClient.rest_put`
     (single attempt). Blocked in tests by conftest, like _rest_get / _rest_post."""
-    return _client_of(session).rest_put(path, body, timeout=timeout)
+    return _pixai_client._client_of(session).rest_put(path, body, timeout=timeout)
 
 
 def _normalize_kaisuuken(raw):
@@ -16135,7 +13266,7 @@ def run_claims(args):
             print("Failed to claim {}: {}".format(r["id"], str(e)[:150]))
     if claimed:
         try:      # Claimant: the Void pays a small stipend
-            from moonglade.gallery import telem_bump
+            from moonglade.telemetry import telem_bump
             telem_bump("claims", claimed)
         except Exception:
             pass
@@ -16202,7 +13333,7 @@ def _apply_kaisuuken(session, params, args):
     # create, so a generation previewed as FREE could be billed in real credits (review F2/F8).
     # _session_for_create is a pass-through when the mirror is off, and refuses (raises) before
     # any spend when the mirror is on but unavailable (F5).
-    session = _session_for_create(session)
+    session = _mirror._session_for_create(session)
     best = None
     check_err = None
     for attempt in range(2):
@@ -16222,7 +13353,7 @@ def _apply_kaisuuken(session, params, args):
                 time.sleep(1.5)
     if check_err is not None:
         if _is_signin_refusal(check_err):
-            raise PixAIError((_SIGNIN_REFUSED_MIRROR if mirror_enabled()
+            raise PixAIError((_SIGNIN_REFUSED_MIRROR if _mirror.mirror_enabled()
                               else _SIGNIN_REFUSED_API_KEY).format(check_err))
         # On-theme wording: mirrors the "job lost"
         # message PixAI's own site shows on a similar random failure, rather than a raw
@@ -16479,7 +13610,7 @@ def run_reconcile_deleted(args):
     while True:
         conn = find_connection(gql(session, page_variables(
             getattr(args, "page_size", 250) or 250,
-            _client_of(session).user_id, before)))
+            _pixai_client._client_of(session).user_id, before)))
         if not conn:
             break
         edges = conn.get("edges") or []
@@ -17349,7 +14480,7 @@ def _check_time_capsule(created_at, out_dir):
         if not s:
             return
         if (datetime.now() - datetime.fromisoformat(s)).days > 730:
-            from moonglade.gallery import telem_flag
+            from moonglade.telemetry import telem_flag
             telem_flag("old_piece_backed_up", out_dir=out_dir)
     except Exception:
         pass
@@ -17374,7 +14505,7 @@ def walk_end_reached(out_dir):
     """True once some pass over this library has seen pageInfo.hasPreviousPage == False."""
     try:
         from moonglade import gallery as _mg
-        return bool(_mg.load_telemetry(out_dir)["flags"].get(WALK_END_FLAG))
+        return bool(_telemetry.load_telemetry(out_dir)["flags"].get(WALK_END_FLAG))
     except Exception:
         return False
 
@@ -17383,7 +14514,7 @@ def mark_walk_end_reached(out_dir):
     """Record that a pass walked all the way to the oldest page. Idempotent."""
     try:
         from moonglade import gallery as _mg
-        _mg.telem_flag(WALK_END_FLAG, out_dir=out_dir)
+        _telemetry.telem_flag(WALK_END_FLAG, out_dir=out_dir)
     except Exception:
         pass
 
@@ -17572,7 +14703,7 @@ def run_download(args, progress=None):
         while True:
             page += 1
             conn = find_connection(gql(session, page_variables(
-                args.page_size, _client_of(session).user_id, before)))
+                args.page_size, _pixai_client._client_of(session).user_id, before)))
             if not conn:
                 print("No connection; stopping.")
                 break
@@ -18523,7 +15654,7 @@ def main():
     img_dir = out / "images"
     db_path  = out / "catalog.db"
     try:      # achievement telemetry: bare telem_* bumps land in this install's ledger
-        from moonglade.gallery import set_telemetry_out
+        from moonglade.telemetry import set_telemetry_out
         set_telemetry_out(out)
     except Exception:
         pass
@@ -18543,13 +15674,13 @@ def main():
             # above) -- previously this call had NO job logging at all, so a partial
             # failure (mid-pagination break, a failed video download) was invisible
             # everywhere: no Jobs-tray entry, no done_with_errors, nothing.
-            _job = _cli_job_start(out, "Artwork sync")
+            _job = _jobs._cli_job_start(out, "Artwork sync")
             try:
                 res = run_sync_artworks(args)
             except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged
-                _cli_job_finish(out, _job, error=e)
+                _jobs._cli_job_finish(out, _job, error=e)
                 raise
-            _cli_job_finish(out, _job, warn=(res or {}).get("fail", 0),
+            _jobs._cli_job_finish(out, _job, warn=(res or {}).get("fail", 0),
                             warn_detail="issue(s) during artwork sync")
             return
         if args.sync_videos:
@@ -18565,7 +15696,7 @@ def main():
             run_cards(args)
             return
         if getattr(args, "mirror_check", False):
-            run_mirror_check(args)
+            _mirror.run_mirror_check(args)
             return
         if getattr(args, "card_history", False) or getattr(args, "card_history_all", False):
             run_card_history(args)
@@ -18595,22 +15726,22 @@ def main():
             run_list_models(args)
             return
         if args.generate:
-            _job = _cli_job_start(out, "Image generation")
+            _job = _jobs._cli_job_start(out, "Image generation")
             try:
                 run_generate(args)
             except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged
-                _cli_job_finish(out, _job, error=e)
+                _jobs._cli_job_finish(out, _job, error=e)
                 raise
-            _cli_job_finish(out, _job)
+            _jobs._cli_job_finish(out, _job)
             return
         if getattr(args, "generate_video", False):
-            _job = _cli_job_start(out, "Video render")
+            _job = _jobs._cli_job_start(out, "Video render")
             try:
                 run_generate_video(args)
             except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged
-                _cli_job_finish(out, _job, error=e)
+                _jobs._cli_job_finish(out, _job, error=e)
                 raise
-            _cli_job_finish(out, _job)
+            _jobs._cli_job_finish(out, _job)
             return
         if getattr(args, "reference_video", False):
             run_reference_video(args)
@@ -18628,19 +15759,19 @@ def main():
             run_fix_models(args)
             return
         if args.audit:
-            cmd_audit(args, out)
+            _organize.cmd_audit(args, out)
             return
         if getattr(args, "verify_library", False):
             # Read-only (moonglade/integrity.py): no _check_read_only, nothing to gate.
             from moonglade import integrity as moonglade_integrity
-            _job = _cli_job_start(out, "Verify library integrity")
+            _job = _jobs._cli_job_start(out, "Verify library integrity")
             try:
                 moonglade_integrity.run_cli(out, db_path, deep=getattr(args, "verify_deep", False),
                                             progress=args.progress)
             except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged
-                _cli_job_finish(out, _job, error=e)
+                _jobs._cli_job_finish(out, _job, error=e)
                 raise
-            _cli_job_finish(out, _job)
+            _jobs._cli_job_finish(out, _job)
             return
         if getattr(args, "export_curation", None) is not None:
             # Local catalog only (moonglade/curation_io.py); no PixAI call.
@@ -18658,10 +15789,10 @@ def main():
                 sys.exit(1)
             return
         if args.dedup:
-            cmd_dedup(args, out, db_path)
+            _organize.cmd_dedup(args, out, db_path)
             return
         if args.verify_dupes:
-            cmd_verify_dupes(args, out)
+            _organize.cmd_verify_dupes(args, out)
             return
         if getattr(args, "rebuild_thumbs", False):
             run_rebuild_thumbs(args)
@@ -18698,7 +15829,7 @@ def main():
             # a --sync run spawned as a subprocess. Also re-point args.progress at a
             # job-aware callback so the download/thumbnail progress ticks below feed
             # throttled heartbeats into the same job (purely additive -- see _make_progress).
-            _job = _cli_job_start(out, "Library sync")
+            _job = _jobs._cli_job_start(out, "Library sync")
             if _job:
                 args.progress = _make_progress(out, _job)
             try:
@@ -18751,13 +15882,13 @@ def main():
                 try:
                     from moonglade import gallery as _mg
                     if walk_end_reached(out):
-                        _mg.telem_flag("first_sync_done", out_dir=out)
+                        _telemetry.telem_flag("first_sync_done", out_dir=out)
                 except Exception:
                     pass
             except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged
-                _cli_job_finish(out, _job, error=e)
+                _jobs._cli_job_finish(out, _job, error=e)
                 raise
-            _cli_job_finish(out, _job, warn=(dl or {}).get("fail", 0))
+            _jobs._cli_job_finish(out, _job, warn=(dl or {}).get("fail", 0))
             return
         if args.backfill_meta:
             run_backfill_meta(args)
@@ -18775,10 +15906,10 @@ def main():
             cmd_convert_existing(args, out)
             return
         if args.undo_organize:
-            cmd_undo_organize(args, out)
+            _organize.cmd_undo_organize(args, out)
             return
         if args.organize:
-            cmd_organize(args, out, img_dir, db_path)
+            _organize.cmd_organize(args, out, img_dir, db_path)
             return
         if args.probe:
             run_probe(args)
@@ -18792,13 +15923,13 @@ def main():
         # passes no `progress` kwarg today, so run_download's own `sys.stdout.isatty()`
         # fallback draws the \r bar directly -- wiring progress in would change that
         # existing terminal-output behavior (it would print unconditionally, tty or not).
-        _job = _cli_job_start(out, "Incremental update" if getattr(args, "update", False) else "Full backup")
+        _job = _jobs._cli_job_start(out, "Incremental update" if getattr(args, "update", False) else "Full backup")
         try:
             dl = run_download(args)
         except Exception as e:                           # noqa: BLE001 -- re-raised below unchanged
-            _cli_job_finish(out, _job, error=e)
+            _jobs._cli_job_finish(out, _job, error=e)
             raise
-        _cli_job_finish(out, _job, warn=(dl or {}).get("fail", 0))
+        _jobs._cli_job_finish(out, _job, warn=(dl or {}).get("fail", 0))
         # Build any missing preview thumbnails so a plain --update (or full backup) leaves
         # batch tiles renderable immediately. run_download writes image files + catalog rows
         # but NO thumbs, and the /thumbs/<mid>.jpg route serves straight from the cache with

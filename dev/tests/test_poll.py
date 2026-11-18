@@ -4,6 +4,7 @@ sleep; timeout=0 never enters the loop)."""
 import pytest
 
 from moonglade import backup as core
+from moonglade import pixai_client as pixai_client_mod
 
 
 def _one_poll_then_timeout(monkeypatch, task):
@@ -201,7 +202,7 @@ def test_delete_one_image_sends_the_right_mutation(monkeypatch):
     `updateGenerationTask(id: ID!, input: UpdateGenerationTaskInput!)` carrying
     `{deleteBatchMedia: {mediaId}}`."""
     seen = {}
-    monkeypatch.setattr(core.PixAIClient, "_graphql_post",
+    monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post",
                         lambda s, q, v=None, retries=3: seen.update(q=q, v=v or {}) or
                         {"updateGenerationTask": {"id": "T1"}})
     core.delete_batch_media_gql(object(), "T1", "M9")

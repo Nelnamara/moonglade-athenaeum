@@ -15,10 +15,20 @@ package is then importable only once the app's folder (this folder's parent) is 
 it takes this folder's place there: with this folder itself on the path, every module in it
 (paths, logs, assets, ...) would also be importable under its bare name, and would win over any
 other module of that name for the whole process (dev/tests/test_code_package.py).
+
+ONE ENGINE. The engine runs as `__main__` the way runpy.run_module(run_name="__main__",
+alter_sys=True) ran it (the same globals, and sys.modules["__main__"] and sys.argv[0] set for
+the run), and it is ALSO registered as moonglade.backup before its first line runs. The modules
+the 3.21.0 split moved out of it (pixai_client, mirror, media_tools, organize, jobs, ...) reach
+it with a call-time `from moonglade.backup import ...`. With the engine unregistered, the first
+of those loaded a second copy of backup.py, whose PixAIError slipped past every
+`except PixAIError` in the engine and whose _VERBOSE and USER_ID were never the ones main() set
+(dev/tests/test_cli_one_engine.py).
 """
+import importlib.util
 import os
-import runpy
 import sys
+import types
 
 if not __package__:                       # run as a folder: python "<app>\moonglade" ...
     _here = os.path.dirname(os.path.abspath(__file__))
@@ -28,4 +38,21 @@ if not __package__:                       # run as a folder: python "<app>\moong
     else:
         sys.path.insert(0, _app)
 
-runpy.run_module("moonglade.backup", run_name="__main__", alter_sys=True)
+import moonglade                          # noqa: E402 -- the package, once it is importable
+
+_spec = importlib.util.find_spec("moonglade.backup")
+_code = _spec.loader.get_code(_spec.name)
+_engine = types.ModuleType("__main__")
+_engine.__dict__.update(__name__="__main__", __file__=_spec.origin, __cached__=_spec.cached,
+                        __doc__=None, __loader__=_spec.loader, __package__=_spec.parent,
+                        __spec__=_spec)
+_saved_main, _saved_argv0 = sys.modules["__main__"], sys.argv[0]
+sys.modules["__main__"] = _engine
+sys.modules["moonglade.backup"] = _engine
+moonglade.backup = _engine
+sys.argv[0] = _spec.origin
+try:
+    exec(_code, _engine.__dict__)
+finally:
+    sys.modules["__main__"] = _saved_main
+    sys.argv[0] = _saved_argv0

@@ -313,7 +313,7 @@ class _Sess:
 
 def test_rest_errors_carry_status_and_body_and_keep_their_message():
     body = {"code": "RECIPE_INCOMPATIBLE", "data": {"recipeIds": [RID], "reason": "x"}}
-    client = core.PixAIClient(_Sess(_Resp(422, body)))
+    client = pixai_client_mod.PixAIClient(_Sess(_Resp(422, body)))
     with pytest.raises(core.PixAIError) as ei:
         client.rest_get("/task-price")
     assert ei.value.http_status == 422 and ei.value.body == body
@@ -321,7 +321,7 @@ def test_rest_errors_carry_status_and_body_and_keep_their_message():
 
 
 def test_a_non_json_error_body_is_still_a_pixai_error():
-    client = core.PixAIClient(_Sess(_Resp(502, "<html>bad gateway</html>")))
+    client = pixai_client_mod.PixAIClient(_Sess(_Resp(502, "<html>bad gateway</html>")))
     with pytest.raises(core.PixAIError) as ei:
         client.rest_post("/kaisuuken/check", {})
     assert ei.value.body is None and ei.value.http_status == 502
@@ -331,7 +331,7 @@ def test_graphql_errors_ride_whole_on_the_error():
     errs = [{"message": "m" * 700, "extensions": {"exception": {"name": "RECIPE_UNAVAILABLE",
                                                                "recipeIds": [RID],
                                                                "reason": "not_found"}}}]
-    client = core.PixAIClient(_Sess(_Resp(200, {"errors": errs})))
+    client = pixai_client_mod.PixAIClient(_Sess(_Resp(200, {"errors": errs})))
     with pytest.raises(core.PixAIError) as ei:
         client.mutate("mutation { x }")
     assert ei.value.graphql_errors == errs
@@ -697,6 +697,7 @@ def test_generate_answers_a_recipe_refusal_structured(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 from tests.test_tsubaki3_generate import T3, Rest, ctx_payload, road  # noqa: E402
+from moonglade import pixai_client as pixai_client_mod
 
 
 @pytest.fixture

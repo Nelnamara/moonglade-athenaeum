@@ -7,6 +7,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade.gallery import (find_image_file, init_db, save_catalog, load_catalog)
+from moonglade import organize as organize_mod
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +48,7 @@ def _make_class_a_tree(tmp_path):
 
 def test_audit_detects_class_a_and_keeps_organized(tmp_path):
     _make_class_a_tree(tmp_path)
-    rep = core.audit_collection(tmp_path, content=False)
+    rep = organize_mod.audit_collection(tmp_path, content=False)
     assert rep["totals"]["class_a_groups"] == 1
     grp = rep["class_a"][0]
     assert grp["media_id"] == "111"
@@ -61,7 +62,7 @@ def test_audit_detects_class_b_content_dupe(tmp_path):
     # identical bytes, DIFFERENT media_ids -> Class B
     (tmp_path / "images" / "p_t1_333.webp").write_bytes(b"IDENTICAL-BYTES")
     (tmp_path / "images" / "p_t2_444.webp").write_bytes(b"IDENTICAL-BYTES")
-    rep = core.audit_collection(tmp_path, content=True)
+    rep = organize_mod.audit_collection(tmp_path, content=True)
     assert rep["totals"]["class_b_groups"] == 1
 
 
@@ -70,12 +71,12 @@ def test_audit_ignores_deleted_quarantine(tmp_path):
     verify_quarantine) excluded gallery/ and _duplicates/ but never learned about
     _deleted/ -- so a locally-purged image is reported back as a live Class A
     duplicate of its own quarantined self, and counted in the audit's file total."""
-    from moonglade.gallery import DELETED_DIRNAME
+    from moonglade.scan import DELETED_DIRNAME
     (tmp_path / "images").mkdir()
     (tmp_path / DELETED_DIRNAME).mkdir()
     (tmp_path / "images" / "a_111.webp").write_bytes(b"AAAA")
     (tmp_path / DELETED_DIRNAME / "111.webp").write_bytes(b"AAAA")
-    rep = core.audit_collection(tmp_path, content=False)
+    rep = organize_mod.audit_collection(tmp_path, content=False)
     assert rep["totals"]["files"] == 1, "the _deleted/ file was counted in the audit's walk"
     assert rep["totals"]["class_a_groups"] == 0, (
         "a _deleted/ file was paired with the live copy as a phantom duplicate")
@@ -100,7 +101,7 @@ def test_zero_byte_file_would_lose_to_a_real_copy_even_by_bucket_priority_alone(
     (tmp_path / "batches" / "b1").mkdir(parents=True)
     (tmp_path / "images" / "p_t1_111.webp").write_bytes(b"REAL-IMAGE-BYTES")
     (tmp_path / "batches" / "b1" / "111.webp").write_bytes(b"")
-    rep = core.audit_collection(tmp_path, content=False)
+    rep = organize_mod.audit_collection(tmp_path, content=False)
     assert rep["totals"]["class_a_groups"] == 0, (
         "the empty batches/ file paired with the real images/ file as a duplicate group "
         "-- bucket priority alone would have made it the keeper")
@@ -140,7 +141,7 @@ def test_dedup_delete_never_unlinks_the_only_real_copy(tmp_path):
     (tmp_path / "batches" / "b1" / "111.webp").write_bytes(b"")   # interrupted, 0 bytes
     db = tmp_path / "catalog.db"
     init_db(db)
-    core.cmd_dedup(_args(apply=True, dedup_delete=True), tmp_path, db)
+    organize_mod.cmd_dedup(_args(apply=True, dedup_delete=True), tmp_path, db)
     assert (tmp_path / "images" / "p_t1_111.webp").exists(), (
         "the real image was deleted or quarantined -- the zero-byte file was treated "
         "as a duplicate of it")
@@ -164,7 +165,7 @@ def test_dedup_dry_run_changes_nothing(tmp_path):
     _make_class_a_tree(tmp_path)
     db = tmp_path / "catalog.db"
     init_db(db)
-    core.cmd_dedup(_args(apply=False), tmp_path, db)
+    organize_mod.cmd_dedup(_args(apply=False), tmp_path, db)
     # both copies still present
     assert (tmp_path / "images" / "a_prompt_t1_111.webp").exists()
     assert (tmp_path / "2023-10" / "111.webp").exists()
@@ -177,7 +178,7 @@ def test_dedup_apply_quarantines_loser_keeps_keeper(tmp_path):
     init_db(db)
     save_catalog(db, [{"media_id": "111", "filename": "a_prompt_t1_111.webp",
                        "batch": "", "task_id": "t1"}])
-    core.cmd_dedup(_args(apply=True), tmp_path, db)
+    organize_mod.cmd_dedup(_args(apply=True), tmp_path, db)
     # keeper (month) stays, loser (images) moved to _duplicates/
     assert (tmp_path / "2023-10" / "111.webp").exists()
     assert not (tmp_path / "images" / "a_prompt_t1_111.webp").exists()
@@ -196,7 +197,7 @@ def test_verify_safe_when_identical_keeper_exists(tmp_path):
     (tmp_path / "_duplicates" / "images").mkdir(parents=True)
     (tmp_path / "2023-10" / "111.webp").write_bytes(b"SAME")
     (tmp_path / "_duplicates" / "images" / "p_t1_111.webp").write_bytes(b"SAME")
-    res = core.verify_quarantine(tmp_path)
+    res = organize_mod.verify_quarantine(tmp_path)
     assert res["safe"] == 1
     assert res["differs"] == [] and res["orphan"] == []
 
@@ -205,14 +206,14 @@ def test_verify_flags_orphan(tmp_path):
     # quarantined file with NO surviving keeper anywhere
     (tmp_path / "_duplicates" / "images").mkdir(parents=True)
     (tmp_path / "_duplicates" / "images" / "p_t1_222.webp").write_bytes(b"LONELY")
-    res = core.verify_quarantine(tmp_path)
+    res = organize_mod.verify_quarantine(tmp_path)
     assert len(res["orphan"]) == 1
 
 
 def test_verify_restore_orphans_moves_back(tmp_path):
     (tmp_path / "_duplicates" / "images").mkdir(parents=True)
     (tmp_path / "_duplicates" / "images" / "p_t1_333.webp").write_bytes(b"LONELY")
-    res = core.verify_quarantine(tmp_path, restore_orphans=True)
+    res = organize_mod.verify_quarantine(tmp_path, restore_orphans=True)
     assert res["restored"] == 1
     assert (tmp_path / "images" / "p_t1_333.webp").exists()
 
@@ -224,7 +225,7 @@ def test_verify_flags_genuine_pixel_difference(tmp_path):
     (tmp_path / "_duplicates" / "images").mkdir(parents=True)
     (tmp_path / "2023-10" / "444.webp").write_bytes(b"CONTENT-A")
     (tmp_path / "_duplicates" / "images" / "p_t1_444.webp").write_bytes(b"CONTENT-B-DIFFERENT")
-    res = core.verify_quarantine(tmp_path)
+    res = organize_mod.verify_quarantine(tmp_path)
     assert len(res["differs"]) == 1
 
 
@@ -236,7 +237,7 @@ def test_dedup_apply_then_verify_reports_safe(tmp_path):
     init_db(db)
     save_catalog(db, [{"media_id": "111", "filename": "a_prompt_t1_111.webp",
                        "batch": "", "task_id": "t1"}])
-    core.cmd_dedup(_args(apply=True), tmp_path, db)
-    res = core.verify_quarantine(tmp_path)
+    organize_mod.cmd_dedup(_args(apply=True), tmp_path, db)
+    res = organize_mod.verify_quarantine(tmp_path)
     assert res["safe"] + res["meta_only"] == res["total"]
     assert res["differs"] == [] and res["orphan"] == []

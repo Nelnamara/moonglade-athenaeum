@@ -27,6 +27,7 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import clear_sealed_caches, login_test_client, session_csrf
+from moonglade import branding as branding_mod
 
 ROLE_ORDER = ["login_companion", "tracker_mascots", "reward_icons", "power_poses"]
 KEYS = {
@@ -69,7 +70,7 @@ def _img(size=(256, 256), mode="RGBA", fmt="PNG", see_through=True, color=(120, 
 
 def _fit(slot, key, h=256):
     """A size with the shape of that image's pack default (so it clears the shape rule): `h` tall."""
-    d = g.ROLE_SLOTS[slot]["images"][key]["default"]
+    d = branding_mod.ROLE_SLOTS[slot]["images"][key]["default"]
     return (round(h * d["w"] / d["h"]), h)
 
 
@@ -105,12 +106,12 @@ def _post(cli, slot, key, data, name="x.png"):
 
 
 def _override_path(slot, key):
-    return g.branding_root() / g._public_rel_to_coded(PUBLIC[(slot, key)])
+    return branding_mod.branding_root() / branding_mod._public_rel_to_coded(PUBLIC[(slot, key)])
 
 
 def _pack(assets):
     """A container beside branding_root() carrying `assets` ({coded rel: bytes}) -- the pack."""
-    g.moonglade_container.write_container(g._container_path(), assets)
+    g.moonglade_container.write_container(branding_mod._container_path(), assets)
     clear_sealed_caches()
 
 
@@ -122,30 +123,30 @@ def _role(cli, slot):
 # ---- the table ---------------------------------------------------------------------------
 
 def test_branding_slots_are_the_banners_plus_exactly_the_four_roles():
-    assert g.BRANDING_SLOTS == ("banner_main", "banner_login", "banner_loom") + tuple(ROLE_ORDER)
-    assert g.BANNER_SLOTS == ("banner_main", "banner_login", "banner_loom")
-    assert list(g.ROLE_SLOTS) == ROLE_ORDER
+    assert branding_mod.BRANDING_SLOTS == ("banner_main", "banner_login", "banner_loom") + tuple(ROLE_ORDER)
+    assert branding_mod.BANNER_SLOTS == ("banner_main", "banner_login", "banner_loom")
+    assert list(branding_mod.ROLE_SLOTS) == ROLE_ORDER
     for slot in ROLE_ORDER:
-        assert list(g.ROLE_SLOTS[slot]["images"]) == KEYS[slot], slot
+        assert list(branding_mod.ROLE_SLOTS[slot]["images"]) == KEYS[slot], slot
 
 
 def test_each_image_owns_the_public_name_the_app_already_asks_for():
     for (slot, key), public in PUBLIC.items():
-        assert g.ROLE_SLOTS[slot]["images"][key]["public"] == public, (slot, key)
+        assert branding_mod.ROLE_SLOTS[slot]["images"][key]["public"] == public, (slot, key)
 
 
 def test_every_role_image_is_open_chrome_never_sealed_art():
     """A role may only name art the seal serves to anyone: system chrome, the mascots/ poses and the
     two reward icons the claim UI fetches. A name the seal denies or gates cannot be a role."""
     for public in PUBLIC.values():
-        mode, _ = g._seal_rule(g._public_rel_to_coded(public))
+        mode, _ = branding_mod._seal_rule(branding_mod._public_rel_to_coded(public))
         assert mode == "open", public
 
 
 def test_each_roles_base_rules_and_each_images_effective_rule():
     """The drawn minimums and formats are the role's; the SHAPE and (where the pack's own art is
     smaller) the minimum size are each image's, taken from the pack default it replaces."""
-    base = lambda s: g.ROLE_SLOTS[s]["spec"]
+    base = lambda s: branding_mod.ROLE_SLOTS[s]["spec"]
     assert base("login_companion") == {"formats": ["WEBP", "PNG"], "transparent": True,
                                        "animated_formats": ["WEBP"], "min_axis": "height", "min_px": 600}
     assert base("tracker_mascots") == {"formats": ["PNG"], "transparent": True, "animated_formats": [],
@@ -154,7 +155,7 @@ def test_each_roles_base_rules_and_each_images_effective_rule():
                                     "min_axis": "side", "min_px": 64}
     assert base("power_poses") == {"formats": ["PNG"], "transparent": True, "animated_formats": [],
                                    "min_axis": "side", "min_px": 256}
-    eff = g.role_image_spec
+    eff = branding_mod.role_image_spec
     # the login default is 366 x 360 and animated (pack v7 re-encoded every animation 360 px
     # tall): shape within 8 % of it, and the drawn 600 px minimum gives way to the default's own 360
     assert eff("login_companion", "companion") == {
@@ -191,7 +192,7 @@ def test_the_shape_rule_spans_square_to_the_defaults_shape_give_or_take_8_percen
     assert _post(cli, "tracker_mascots", "failed", _img((256, 256))).status_code == 200
     assert _post(cli, "tracker_mascots", "failed", _img(_fit("tracker_mascots", "failed"))).status_code == 200
     # a default that is square to within the tolerance keeps its plain "about square"
-    assert g.role_spec_failures(g.role_image_spec("reward_icons", "gift"),
+    assert branding_mod.role_spec_failures(branding_mod.role_image_spec("reward_icons", "gift"),
                                 {"format": "PNG", "w": 64, "h": 64, "see_through": 0.3, "animated": False}) == []
     r = _post(cli, "reward_icons", "claim", _img((64, 80)))
     assert r.get_json()["failed"][0]["need"] == "about square"
@@ -201,8 +202,8 @@ def test_the_payload_carries_each_images_effective_spec(tmp_path):
     cli = _client(tmp_path)
     for role in cli.get("/api/branding").get_json()["roles"]:
         for img in role["images"]:
-            want = dict(g.role_image_spec(role["slot"], img["key"]),
-                        see_through_min=g.ROLE_SEE_THROUGH_MIN)
+            want = dict(branding_mod.role_image_spec(role["slot"], img["key"]),
+                        see_through_min=branding_mod.ROLE_SEE_THROUGH_MIN)
             assert img["spec"] == want, (role["slot"], img["key"])
 
 
@@ -229,8 +230,8 @@ def test_the_banner_payload_and_routes_are_unchanged(tmp_path):
     for slot in ROLE_ORDER:
         assert cli.post("/api/branding/slot/crop", json={"slot": slot, "id": "x", "zoom": 120}).status_code == 400
         assert cli.post("/api/branding/slot/active", json={"slot": slot, "id": "x"}).status_code == 400
-    assert g.list_slot_assets(tmp_path, "power_poses") == []
-    assert g.set_slot_active(tmp_path, "power_poses", "x") is False
+    assert branding_mod.list_slot_assets(tmp_path, "power_poses") == []
+    assert branding_mod.set_slot_active(tmp_path, "power_poses", "x") is False
     # the banner door takes banners only; the role door takes roles only; mascots and rewards
     # themselves are still not slots at either
     for slot in ROLE_ORDER + ["mascots", "rewards", "marks", "system"]:
@@ -353,7 +354,7 @@ def test_a_file_that_breaks_the_spec_is_refused_naming_the_rule_and_writes_nothi
     assert [f["got"] for f in d["failed"]] == gots
     assert d["error"] == sentence
     assert not _override_path(slot, key).exists(), "a refused file is never written"
-    assert not list((g.branding_root()).rglob("*.tmp")), "no half-written file is left behind"
+    assert not list((branding_mod.branding_root()).rglob("*.tmp")), "no half-written file is left behind"
 
 
 def test_the_boundaries_pass(tmp_path):
@@ -384,7 +385,7 @@ def test_an_oversized_image_is_refused_before_it_is_decoded(tmp_path):
 
 
 def test_an_oversized_file_is_refused(tmp_path, monkeypatch):
-    monkeypatch.setattr(g, "ROLE_MAX_BYTES", 2000)
+    monkeypatch.setattr(branding_mod, "ROLE_MAX_BYTES", 2000)
     cli = _client(tmp_path)
     r = _post(cli, "power_poses", "restart", _img((256, 256), see_through=True) + b"\0" * 5000)
     assert r.status_code == 400 and "too large" in r.get_json()["error"].lower()
@@ -393,7 +394,7 @@ def test_an_oversized_file_is_refused(tmp_path, monkeypatch):
 def test_a_request_body_far_over_the_limit_is_refused_before_it_is_read(tmp_path, monkeypatch):
     """The route caps the whole request, not just the file it reads afterwards: a body this big
     never reaches the form parser (a 413), so a huge upload cannot be spooled to disk first."""
-    monkeypatch.setattr(g, "ROLE_MAX_BYTES", 2000)
+    monkeypatch.setattr(branding_mod, "ROLE_MAX_BYTES", 2000)
     cli = _client(tmp_path)
     r = cli.post("/api/branding/role", content_type="multipart/form-data", data={
         "csrf": session_csrf(cli), "slot": "power_poses", "key": "restart",
@@ -471,7 +472,7 @@ def test_a_check_only_post_measures_a_library_picture_and_writes_nothing(tmp_pat
     assert check("3").status_code == 400                                   # not in the library
     assert check("1", key="nope").get_json()["error"] == "unknown image"
     assert not _override_path("power_poses", "restart").exists()
-    assert {p.name for p in g.branding_root().rglob("*") if p.is_file()} <= {"README.txt"}, "nothing written"
+    assert {p.name for p in branding_mod.branding_root().rglob("*") if p.is_file()} <= {"README.txt"}, "nothing written"
     # the check needs the token like the write does
     r = cli.post("/api/branding/role", data={"slot": "power_poses", "key": "restart", "media_id": "1", "check": "1"})
     assert r.status_code == 400
@@ -481,19 +482,19 @@ def test_an_upload_is_the_apps_own_write_not_a_file_dropped_in_the_tree(tmp_path
     """The tree scan reads a file the install did not put there as a drop; the app's own write is
     folded into the baseline at once (as every other Branding upload is)."""
     cli = _client(tmp_path)
-    assert g._branding_tree_has_new_art(tmp_path) is False         # takes the first snapshot
+    assert branding_mod._branding_tree_has_new_art(tmp_path) is False         # takes the first snapshot
     assert _post(cli, "reward_icons", "claim", _img((128, 128))).status_code == 200
-    assert g._branding_tree_has_new_art(tmp_path) is False
+    assert branding_mod._branding_tree_has_new_art(tmp_path) is False
 
 
 # ---- restore, and the pack ---------------------------------------------------------------
 
 def test_restore_removes_only_the_installs_file_and_the_pack_answers_again(tmp_path):
     cli = _client(tmp_path)
-    rel = g._public_rel_to_coded("mascots/nel_restart.png")
+    rel = branding_mod._public_rel_to_coded("mascots/nel_restart.png")
     pack_bytes = _img((256, 256), color=(1, 2, 3))
     _pack({rel: pack_bytes})
-    pack_file = g._container_path()
+    pack_file = branding_mod._container_path()
     before = pack_file.read_bytes()
     assert cli.get("/branding/mascots/nel_restart.png").data == pack_bytes
     assert _post(cli, "power_poses", "restart", _img((300, 300))).status_code == 200
@@ -509,19 +510,19 @@ def test_restore_removes_only_the_installs_file_and_the_pack_answers_again(tmp_p
 
 def test_restore_when_nothing_is_overridden_is_a_quiet_no_op_and_never_the_pack(tmp_path):
     cli = _client(tmp_path)
-    rel = g._public_rel_to_coded("rewards/claim.png")
+    rel = branding_mod._public_rel_to_coded("rewards/claim.png")
     _pack({rel: _img((128, 128))})
-    before = g._container_path().read_bytes()
+    before = branding_mod._container_path().read_bytes()
     r = cli.post("/api/branding/role/restore", json={"csrf": session_csrf(cli), "slot": "reward_icons", "key": "claim"})
     assert r.status_code == 200 and r.get_json()["removed"] is False
-    assert g._container_path().read_bytes() == before
+    assert branding_mod._container_path().read_bytes() == before
     assert cli.post("/api/branding/role/restore", json={"csrf": session_csrf(cli), "slot": "reward_icons", "key": "nope"}).status_code == 400
     assert cli.post("/api/branding/role/restore", json={"csrf": session_csrf(cli), "slot": "banner_main", "key": "x"}).status_code == 400
 
 
 def test_the_pack_default_is_served_for_the_row_to_show_beside_yours(tmp_path):
     cli = _client(tmp_path)
-    rel = g._public_rel_to_coded("rewards/gift.png")
+    rel = branding_mod._public_rel_to_coded("rewards/gift.png")
     pack_bytes = _img((128, 119), color=(9, 9, 9))
     _pack({rel: pack_bytes})
     assert _post(cli, "reward_icons", "gift", _img((200, 200))).status_code == 200
@@ -541,7 +542,7 @@ def test_the_pack_default_is_served_for_the_row_to_show_beside_yours(tmp_path):
 
 def test_an_override_that_will_not_decode_shows_the_packs_default_silently(tmp_path):
     cli = _client(tmp_path)
-    rel = g._public_rel_to_coded("mascots/trk_fail.png")
+    rel = branding_mod._public_rel_to_coded("mascots/trk_fail.png")
     pack_bytes = _img((256, 256), color=(5, 5, 5))
     _pack({rel: pack_bytes})
     assert _post(cli, "tracker_mascots", "failed", _img(_fit("tracker_mascots", "failed"))).status_code == 200
@@ -571,7 +572,7 @@ def test_an_unreadable_override_with_no_pack_default_is_left_as_it_always_was(tm
 
 def test_a_missing_override_is_just_the_default(tmp_path):
     cli = _client(tmp_path)
-    rel = g._public_rel_to_coded("nel_spinner.png")
+    rel = branding_mod._public_rel_to_coded("nel_spinner.png")
     pack_bytes = _img((256, 256), color=(8, 8, 8))
     _pack({rel: pack_bytes})
     assert _post(cli, "tracker_mascots", "spinner", _img((256, 256))).status_code == 200
@@ -611,7 +612,7 @@ def test_an_animated_webp_that_stops_decoding_part_way_is_refused_and_writes_not
 
 
 def test_an_animation_past_the_budget_is_refused_before_its_frames_are_decoded(tmp_path, monkeypatch):
-    monkeypatch.setattr(g, "ROLE_MAX_ANIM_PIXELS", 500 * 490 * 2)       # room for two frames of this size
+    monkeypatch.setattr(branding_mod, "ROLE_MAX_ANIM_PIXELS", 500 * 490 * 2)       # room for two frames of this size
     cli = _client(tmp_path)
     r = _post(cli, "login_companion", "companion", _anim_webp(frames=3), "long.webp")
     assert r.status_code == 400 and "animation" in r.get_json()["error"].lower()
@@ -628,18 +629,18 @@ def test_an_animation_past_the_budget_is_refused_before_its_frames_are_decoded(t
 
 def test_every_pack_default_passes_its_own_roles_check(pack_art):
     for (slot, key), raw in pack_art.items():
-        facts, _ = g.role_measure(raw)
-        assert g.role_spec_failures(g.role_image_spec(slot, key), facts) == [], (slot, key, facts)
+        facts, _ = branding_mod.role_measure(raw)
+        assert branding_mod.role_spec_failures(branding_mod.role_image_spec(slot, key), facts) == [], (slot, key, facts)
         # ...and the table's idea of the default is the pack's real one, so a repainted default
         # that changes shape fails HERE, by name, until the table is told
-        d = g.ROLE_SLOTS[slot]["images"][key]["default"]
+        d = branding_mod.ROLE_SLOTS[slot]["images"][key]["default"]
         assert (facts["w"], facts["h"], facts["animated"]) == (d["w"], d["h"], d.get("animated", False)), (slot, key)
 
 
 def test_every_pack_default_can_be_uploaded_as_the_override_of_itself(pack_art, tmp_path):
     cli = _client(tmp_path)
     for (slot, key), raw in pack_art.items():
-        r = _post(cli, slot, key, raw, g.ROLE_SLOTS[slot]["images"][key]["public"].rsplit("/", 1)[-1])
+        r = _post(cli, slot, key, raw, branding_mod.ROLE_SLOTS[slot]["images"][key]["public"].rsplit("/", 1)[-1])
         assert r.status_code == 200, (slot, key, r.get_json())
         assert _override_path(slot, key).is_file()
     with Image.open(_override_path("login_companion", "companion")) as im:
@@ -659,8 +660,8 @@ def test_the_shape_rule_is_not_vacuous_on_the_packs_own_art(pack_art):
         for target in (max(1.0, a) * 1.2, min(1.0, a) / 1.2):
             buf = io.BytesIO()
             rgba.resize((round(rgba.height * target), rgba.height)).save(buf, format="PNG")
-            facts, _ = g.role_measure(buf.getvalue())
-            rules = [f["rule"] for f in g.role_spec_failures(g.role_image_spec(slot, key), facts)]
+            facts, _ = branding_mod.role_measure(buf.getvalue())
+            rules = [f["rule"] for f in branding_mod.role_spec_failures(branding_mod.role_image_spec(slot, key), facts)]
             assert rules == ["aspect"], (slot, key, target, rules)
 
 
@@ -704,9 +705,9 @@ def test_the_header_reader_gets_the_same_canvas_as_pillow_for_every_webp_encodin
         Image.new(mode, (321, 123), (9, 8, 7) + ((200,) if mode == "RGBA" else ())).save(buf, "WEBP", **kw)
         raw = buf.getvalue()
         assert raw[12:16] == kind, (mode, raw[12:16])
-        assert g.webp_declared_size(raw[:64]) == (321, 123), kind
-    assert g.webp_declared_size(_anim_webp((50, 40), frames=2)[:64]) == (50, 40)
-    assert g.webp_declared_size(b"\x89PNG\r\n\x1a\n" + bytes(40)) is None, "not a WebP: nothing to say"
+        assert branding_mod.webp_declared_size(raw[:64]) == (321, 123), kind
+    assert branding_mod.webp_declared_size(_anim_webp((50, 40), frames=2)[:64]) == (50, 40)
+    assert branding_mod.webp_declared_size(b"\x89PNG\r\n\x1a\n" + bytes(40)) is None, "not a WebP: nothing to say"
 
 
 @pytest.mark.parametrize("kind", ["VP8X", "VP8 ", "VP8L"])
@@ -729,11 +730,11 @@ def test_a_tiny_webp_declaring_a_huge_canvas_is_refused_before_it_is_opened(tmp_
 
 
 def test_a_webp_canvas_at_the_limit_is_not_refused_by_the_header_reader():
-    g.guard_webp_canvas(_webp_claiming("VP8X", 4096, 4096), 4096)               # exactly the limit: allowed
-    with pytest.raises(g.ImageRefused):
-        g.guard_webp_canvas(_webp_claiming("VP8X", 4097, 10), 4096)
-    with pytest.raises(g.ImageRefused):
-        g.guard_webp_canvas(_webp_claiming("VP8X", 10, 4097), 4096)
+    branding_mod.guard_webp_canvas(_webp_claiming("VP8X", 4096, 4096), 4096)               # exactly the limit: allowed
+    with pytest.raises(branding_mod.ImageRefused):
+        branding_mod.guard_webp_canvas(_webp_claiming("VP8X", 4097, 10), 4096)
+    with pytest.raises(branding_mod.ImageRefused):
+        branding_mod.guard_webp_canvas(_webp_claiming("VP8X", 10, 4097), 4096)
 
 
 @pytest.mark.parametrize("header", [
@@ -758,7 +759,7 @@ def test_the_banner_upload_reads_the_same_header_first(tmp_path, no_open):
                  content_type="multipart/form-data")
     assert r.status_code == 400 and r.get_json()["error"] == "That picture is larger than 8,192 px on a side."
     assert no_open == []
-    assert g.list_slot_assets(tmp_path, "banner_main") == []
+    assert branding_mod.list_slot_assets(tmp_path, "banner_main") == []
 
 
 def test_an_ordinary_banner_webp_still_uploads(tmp_path):
@@ -799,7 +800,7 @@ def test_a_format_outside_the_allowlist_is_refused_before_a_decoder_runs(tmp_pat
 
 
 def test_the_allowlist_is_the_four_everyday_formats_and_no_more():
-    assert tuple(g.ROLE_OPEN_FORMATS) == ("PNG", "WEBP", "JPEG", "GIF")
+    assert tuple(branding_mod.ROLE_OPEN_FORMATS) == ("PNG", "WEBP", "JPEG", "GIF")
 
 
 def test_the_everyday_formats_still_open_and_a_jpeg_is_refused_by_name(tmp_path):
@@ -846,7 +847,7 @@ def test_restore_with_nothing_to_remove_is_still_a_quiet_no_op_whatever_the_pack
 
 def test_restore_still_removes_the_file_when_the_pack_does_hold_the_default(tmp_path):
     cli = _client(tmp_path)
-    _pack({g._public_rel_to_coded("rewards/gift.png"): _img((128, 119), color=(9, 9, 9))})
+    _pack({branding_mod._public_rel_to_coded("rewards/gift.png"): _img((128, 119), color=(9, 9, 9))})
     assert _post(cli, "reward_icons", "gift", _img((128, 119))).status_code == 200
     r = cli.post("/api/branding/role/restore", json={"csrf": session_csrf(cli), "slot": "reward_icons", "key": "gift"})
     assert r.status_code == 200 and r.get_json()["removed"] is True
@@ -867,18 +868,18 @@ def _post_mark(cli, data, name="m.png"):
 @pytest.mark.parametrize("kind", ["VP8X", "VP8 ", "VP8L"])
 def test_a_tiny_webp_declaring_a_huge_canvas_is_refused_by_the_mark_upload_before_it_is_opened(
         tmp_path, monkeypatch, no_open, kind):
-    monkeypatch.setattr(g, "_mark_earned", lambda *a, **k: True)
+    monkeypatch.setattr(branding_mod, "_mark_earned", lambda *a, **k: True)
     cli = _client(tmp_path)
     crafted = _webp_claiming(kind, 16383, 16383, pad=100)
     r = _post_mark(cli, crafted, "evil.webp")
     assert r.status_code == 400
     assert r.get_json()["error"] == "That picture is larger than 4,096 px on a side."
     assert no_open == [], "refused from the header alone"
-    assert not g._role_dir("marks").exists() or not any(g._role_dir("marks").glob("*.webp"))
+    assert not branding_mod._role_dir("marks").exists() or not any(branding_mod._role_dir("marks").glob("*.webp"))
 
 
 def test_the_mark_upload_refuses_a_webp_whose_header_cannot_be_read_without_opening_it(tmp_path, monkeypatch, no_open):
-    monkeypatch.setattr(g, "_mark_earned", lambda *a, **k: True)
+    monkeypatch.setattr(branding_mod, "_mark_earned", lambda *a, **k: True)
     cli = _client(tmp_path)
     r = _post_mark(cli, b"RIFF\x20\x00\x00\x00WEBPJUNK" + bytes(30), "x.webp")
     assert r.status_code == 400 and r.get_json()["error"] == "Couldn't read this image."
@@ -887,7 +888,7 @@ def test_the_mark_upload_refuses_a_webp_whose_header_cannot_be_read_without_open
 
 @pytest.mark.parametrize("fmt", ["TIFF", "BMP", "EPS", "ICO"])
 def test_the_mark_upload_opens_only_the_everyday_formats(tmp_path, monkeypatch, fmt):
-    monkeypatch.setattr(g, "_mark_earned", lambda *a, **k: True)
+    monkeypatch.setattr(branding_mod, "_mark_earned", lambda *a, **k: True)
     real_open, seen = Image.open, []
 
     def spy(*a, **k):
@@ -906,7 +907,7 @@ def test_the_mark_upload_opens_only_the_everyday_formats(tmp_path, monkeypatch, 
 
 
 def test_ordinary_marks_still_upload_png_and_webp(tmp_path, monkeypatch):
-    monkeypatch.setattr(g, "_mark_earned", lambda *a, **k: True)
+    monkeypatch.setattr(branding_mod, "_mark_earned", lambda *a, **k: True)
     cli = _client(tmp_path)
     assert _post_mark(cli, _img((256, 256))).status_code == 200
     buf = io.BytesIO()
@@ -963,7 +964,7 @@ def test_the_apps_own_refusals_keep_their_own_words(tmp_path):
     cli = _client(tmp_path)
     r = _post(cli, "power_poses", "restart", _img((4400, 300)))
     assert r.get_json()["error"] == "That picture is larger than 4,096 px on a side."
-    assert issubclass(g.ImageRefused, Exception) and not issubclass(g.ImageRefused, ValueError), \
+    assert issubclass(branding_mod.ImageRefused, Exception) and not issubclass(branding_mod.ImageRefused, ValueError), \
         "the app's refusal is its own type, so a ValueError from Pillow cannot pass for one"
 
 

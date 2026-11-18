@@ -32,6 +32,8 @@ import pytest
 import requests
 
 from moonglade import backup as core
+from moonglade import pixai_client as pixai_client_mod
+from moonglade import mirror as mirror_mod
 
 
 # Every function that fires a credit-spending or account-mutating GraphQL call. When a new
@@ -87,8 +89,8 @@ def gql_calls(monkeypatch):
     Both real methods still run, so the document-aware default is exercised, not bypassed.
     """
     calls = []
-    real_query = core.PixAIClient.query
-    real_mutate = core.PixAIClient.mutate
+    real_query = pixai_client_mod.PixAIClient.query
+    real_mutate = pixai_client_mod.PixAIClient.mutate
     box = {"verb": None}
 
     def _query(self, document, variables=None, retries=None, timeout=120):
@@ -110,9 +112,9 @@ def gql_calls(monkeypatch):
                                      retries=retries, verb=box["verb"]))
         return _STUB_PAYLOAD
 
-    monkeypatch.setattr(core.PixAIClient, "query", _query)
-    monkeypatch.setattr(core.PixAIClient, "mutate", _mutate)
-    monkeypatch.setattr(core.PixAIClient, "_graphql_post", _recorder)
+    monkeypatch.setattr(pixai_client_mod.PixAIClient, "query", _query)
+    monkeypatch.setattr(pixai_client_mod.PixAIClient, "mutate", _mutate)
+    monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", _recorder)
     return calls
 
 
@@ -192,9 +194,9 @@ class TestGqlMutate:
         knob has to hold at the verb too -- otherwise the rule would live in the delegate
         and a caller reaching the client directly (the gallery, the fake, a future call
         site) could ask for the unsafe value after all."""
-        assert "retries" not in inspect.signature(core.PixAIClient.mutate).parameters
+        assert "retries" not in inspect.signature(pixai_client_mod.PixAIClient.mutate).parameters
         with pytest.raises(TypeError):
-            core.PixAIClient(None).mutate("mutation { x }", None, retries=3)
+            pixai_client_mod.PixAIClient(None).mutate("mutation { x }", None, retries=3)
 
 
 class TestGqlAdhocDefault:
@@ -236,7 +238,7 @@ class TestGqlAdhocDefault:
         (None, False),
     ])
     def test_document_classification(self, document, is_mutation):
-        assert core._is_mutation_document(document) is is_mutation
+        assert pixai_client_mod._is_mutation_document(document) is is_mutation
 
 
 # ---------------------------------------------------------------------------
@@ -398,12 +400,12 @@ class TestRestSpendPathsAreSingleAttempt:
         the real road grew a loop. Both are checked: the delegate must stay a delegate and
         the verb must stay single-attempt."""
         for fn, name in ((core._rest_post, "_rest_post"),
-                         (core.PixAIClient.rest_post, "PixAIClient.rest_post"),
+                         (pixai_client_mod.PixAIClient.rest_post, "PixAIClient.rest_post"),
                          # the training routes' dataset/description PUT and the rebate PATCH
                          (core._rest_put, "_rest_put"),
-                         (core.PixAIClient.rest_put, "PixAIClient.rest_put"),
+                         (pixai_client_mod.PixAIClient.rest_put, "PixAIClient.rest_put"),
                          (core._rest_patch, "_rest_patch"),
-                         (core.PixAIClient.rest_patch, "PixAIClient.rest_patch")):
+                         (pixai_client_mod.PixAIClient.rest_patch, "PixAIClient.rest_patch")):
             src = inspect.getsource(fn)
             assert "for " not in src and "while " not in src, (
                 "{} grew a retry loop -- submit_fixer and claim_reward would "
@@ -473,7 +475,7 @@ class TestWritesNeverFollowRedirects:
     @pytest.mark.parametrize("verb", ["rest_post", "rest_put", "rest_patch"])
     def test_each_rest_write_verb_refuses_to_follow(self, verb):
         s = _Kw(body={"ok": 1})
-        assert getattr(core.PixAIClient(s), verb)("/x", {}) == {"ok": 1}
+        assert getattr(pixai_client_mod.PixAIClient(s), verb)("/x", {}) == {"ok": 1}
         (_v, _u, kw), = s.calls
         assert kw["allow_redirects"] is False, verb
 
@@ -482,14 +484,14 @@ class TestWritesNeverFollowRedirects:
     def test_a_3xx_on_a_rest_write_is_an_error_after_one_call(self, verb, status):
         s = _Kw(status=status, body={"success": True})
         with pytest.raises(core.PixAIRestError) as ei:
-            getattr(core.PixAIClient(s), verb)("/x", {})
+            getattr(pixai_client_mod.PixAIClient(s), verb)("/x", {})
         assert ei.value.status == status and "nothing was re-sent" in str(ei.value)
         assert len(s.calls) == 1
 
     def test_the_mutation_road_refuses_to_follow(self):
         s = _Kw(body={"data": {"x": {"id": "1"}}})
         core.gql_mutate(s, "mutation { x { id } }")
-        core.PixAIClient(s).query("mutation { x { id } }")      # the backstop road too
+        pixai_client_mod.PixAIClient(s).query("mutation { x { id } }")      # the backstop road too
         assert [kw["allow_redirects"] for _v, _u, kw in s.calls] == [False, False]
 
     @pytest.mark.parametrize("status", [302, 307])
@@ -509,13 +511,13 @@ class TestWritesNeverFollowRedirects:
         cur = _b({"alg": "none"}) + "." + _b({"exp": int(_time.time()) + 86400,
                                               "iss": "pixai", "sub": "s"}) + ".x"
         s = _Kw(status=307)
-        assert core.refresh_jwt(s, current_jwt=cur) is None
-        assert core._refresh_last["reason"] == "http_307"
+        assert mirror_mod.refresh_jwt(s, current_jwt=cur) is None
+        assert mirror_mod._refresh_last["reason"] == "http_307"
         (_v, _u, kw), = s.calls
         assert kw["allow_redirects"] is False
 
     def test_reads_are_unchanged(self):
         s = _Kw(body={"data": {"me": {"id": "1"}}})
-        core.PixAIClient(s).query("query { me { id } }")
-        core.PixAIClient(s).rest_get("/claim")
+        pixai_client_mod.PixAIClient(s).query("query { me { id } }")
+        pixai_client_mod.PixAIClient(s).rest_get("/claim")
         assert ["allow_redirects" in kw for _v, _u, kw in s.calls] == [False, False]

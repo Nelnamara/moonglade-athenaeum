@@ -16,6 +16,8 @@ from moonglade import container as mc
 from moonglade import gallery as g
 
 from tests.conftest import login_client
+from moonglade import telemetry as telemetry_mod
+from moonglade import branding as branding_mod
 
 # PNG-SHAPED bytes: a real signature and header, but a broken IDAT CRC, so
 # Pillow refuses to decode it. Fine for every test here, which is about bytes
@@ -42,18 +44,18 @@ def _build(tmp_path, assets=None, payloads=None):
     container key == coded rel, always); only the rendered banner FLAT stays a
     bare top-level name. Never hardcode the hex here -- that recreates the
     scatter the map removed."""
-    box_path = g._container_path()
+    box_path = branding_mod._container_path()
     default_assets = {
-        g._role_rel("marks", "marks.json"): json.dumps(
+        branding_mod._role_rel("marks", "marks.json"): json.dumps(
             {"marks": [{"id": "mark_4", "label": "Crescent", "kind": "tile"},
                        {"id": "mark_7", "label": "Tile Seven", "kind": "tile"}]}).encode(),
-        g._role_rel("marks", "mark_4.png"): PNG_1PX,
-        g._role_rel("marks", "mark_7.png"): PNG_1PX,
+        branding_mod._role_rel("marks", "mark_4.png"): PNG_1PX,
+        branding_mod._role_rel("marks", "mark_7.png"): PNG_1PX,
         "banner.png": PNG_1PX,
-        g._role_rel("badges", "first-light.png"): PNG_1PX,
-        g._role_rel("banner_main", "manifest.json"): json.dumps(
+        branding_mod._role_rel("badges", "first-light.png"): PNG_1PX,
+        branding_mod._role_rel("banner_main", "manifest.json"): json.dumps(
             {"items": [{"id": "deadbeef", "zoom": 100, "cropX": 50, "cropY": 50}]}).encode(),
-        g._role_rel("banner_main", "deadbeef.png"): PNG_1PX,
+        branding_mod._role_rel("banner_main", "deadbeef.png"): PNG_1PX,
     }
     mc.write_container(box_path,
                        assets if assets is not None else default_assets,
@@ -141,22 +143,22 @@ def test_deterministic_build(tmp_path):
 # ---------------------------------------------------------------------------
 def test_container_answers_when_no_loose_file_exists(tmp_path):
     _build(tmp_path)
-    assert not (g._role_dir("marks") / "mark_4.png").exists()
-    assert g._branding_exists(g._role_rel("marks", "mark_4.png"))
-    assert g._branding_bytes(g._role_rel("marks", "mark_4.png")) == PNG_1PX
+    assert not (branding_mod._role_dir("marks") / "mark_4.png").exists()
+    assert branding_mod._branding_exists(branding_mod._role_rel("marks", "mark_4.png"))
+    assert branding_mod._branding_bytes(branding_mod._role_rel("marks", "mark_4.png")) == PNG_1PX
 
 
 def test_loose_file_always_wins(tmp_path):
     _build(tmp_path)
-    loose = g._role_dir("marks") / "mark_4.png"
+    loose = branding_mod._role_dir("marks") / "mark_4.png"
     loose.parent.mkdir(parents=True, exist_ok=True)
     loose.write_bytes(b"LOOSE WINS")
-    assert g._branding_bytes(g._role_rel("marks", "mark_4.png")) == b"LOOSE WINS"
+    assert branding_mod._branding_bytes(branding_mod._role_rel("marks", "mark_4.png")) == b"LOOSE WINS"
 
 
 def test_no_container_no_loose_means_absent(tmp_path):
-    assert g._branding_bytes(g._role_rel("marks", "mark_4.png")) is None
-    assert not g._branding_exists(g._role_rel("marks", "mark_4.png"))
+    assert branding_mod._branding_bytes(branding_mod._role_rel("marks", "mark_4.png")) is None
+    assert not branding_mod._branding_exists(branding_mod._role_rel("marks", "mark_4.png"))
 
 
 def test_container_swap_is_picked_up_without_restart(tmp_path):
@@ -164,22 +166,22 @@ def test_container_swap_is_picked_up_without_restart(tmp_path):
     downloader's atomic swap -- must serve the NEW content on the next call."""
     import os
     path = _build(tmp_path)
-    assert g._branding_bytes("banner.png") == PNG_1PX
+    assert branding_mod._branding_bytes("banner.png") == PNG_1PX
     mc.write_container(path, {"banner.png": b"NEW CONTENT"})
     os.utime(path, (path.stat().st_atime, path.stat().st_mtime + 5))
-    assert g._branding_bytes("banner.png") == b"NEW CONTENT"
+    assert branding_mod._branding_bytes("banner.png") == b"NEW CONTENT"
 
 
 def test_list_marks_reads_from_the_container(tmp_path):
     _build(tmp_path)
-    marks = {m["id"]: m for m in g.list_marks(tmp_path)}
+    marks = {m["id"]: m for m in branding_mod.list_marks(tmp_path)}
     assert set(marks) == {"mark_4", "mark_7"}
     assert marks["mark_4"]["png"] == "/branding/marks/mark_4.png"
 
 
 def test_list_slot_assets_reads_from_the_container(tmp_path):
     _build(tmp_path)
-    items = g.list_slot_assets(tmp_path, "banner_main")
+    items = branding_mod.list_slot_assets(tmp_path, "banner_main")
     assert [i["id"] for i in items] == ["deadbeef"]
 
 
@@ -188,8 +190,8 @@ def test_seed_promotes_shipped_manifest_before_first_write(tmp_path):
     shipped defaults out of the picker: the container manifest is promoted
     loose first, then the upload appends to it."""
     _build(tmp_path)
-    added = g.add_custom_mark(tmp_path, PNG_1PX, "My Mark")
-    ids = {m["id"] for m in g.list_marks(tmp_path)}
+    added = branding_mod.add_custom_mark(tmp_path, PNG_1PX, "My Mark")
+    ids = {m["id"] for m in branding_mod.list_marks(tmp_path)}
     assert added["id"] in ids
     assert {"mark_4", "mark_7"} <= ids, (
         "shipped defaults vanished after a custom upload -- the loose manifest "
@@ -204,19 +206,19 @@ def test_write_banner_flat_renders_a_container_sourced_active_asset(tmp_path):
     buf = io.BytesIO()
     Image.new("RGB", (400, 100), (90, 60, 140)).save(buf, format="PNG")
     _build(tmp_path, assets={
-        g._role_rel("banner_main", "manifest.json"): json.dumps(
+        branding_mod._role_rel("banner_main", "manifest.json"): json.dumps(
             {"items": [{"id": "deadbeef", "zoom": 100, "cropX": 50, "cropY": 50}]}).encode(),
-        g._role_rel("banner_main", "deadbeef.png"): buf.getvalue(),
+        branding_mod._role_rel("banner_main", "deadbeef.png"): buf.getvalue(),
     })
-    assert g._write_banner_flat(tmp_path, "banner_main") is True
+    assert branding_mod._write_banner_flat(tmp_path, "banner_main") is True
     # The render is derived per-install state, so it lives in the app cache
     # outside the coded tree (2026-09-10), never at the coded root.
-    flat = g.banner_cache_dir(tmp_path) / "banner.png"
+    flat = branding_mod.banner_cache_dir(tmp_path) / "banner.png"
     assert flat.is_file(), "a container-sourced active asset must still render"
-    assert not (g.branding_root() / "banner.png").exists()
+    assert not (branding_mod.branding_root() / "banner.png").exists()
     # ...and it is stamped with the pick it came from, so the startup ensure
     # pass can tell "still current" from "the pick moved".
-    rec = g._read_banner_record(tmp_path, "banner.png")
+    rec = branding_mod._read_banner_record(tmp_path, "banner.png")
     assert rec["kind"] == "slot" and rec["asset_id"] == "deadbeef"
 
 
@@ -224,7 +226,7 @@ def test_write_banner_flat_renders_a_container_sourced_active_asset(tmp_path):
 # The discovery mechanic must not false-fire off shipped defaults
 # ---------------------------------------------------------------------------
 def _flag(tmp_path):
-    return (g.load_telemetry(tmp_path).get("flags") or {}).get("branding_custom_file")
+    return (telemetry_mod.load_telemetry(tmp_path).get("flags") or {}).get("branding_custom_file")
 
 
 def test_container_alone_never_earns_the_discovery_flag(tmp_path):
@@ -237,9 +239,9 @@ def test_container_alone_never_earns_the_discovery_flag(tmp_path):
     is the one that could actually fire, and a container-aware check would make
     it fire here with zero user action."""
     _build(tmp_path)
-    g.set_telemetry_out(tmp_path)
-    g.sweep_telemetry(tmp_path)
-    g.sweep_telemetry(tmp_path)
+    telemetry_mod.set_telemetry_out(tmp_path)
+    telemetry_mod.sweep_telemetry(tmp_path)
+    telemetry_mod.sweep_telemetry(tmp_path)
     assert not _flag(tmp_path), (
         "the sealed container alone earned the discovery flag with zero user action")
 
@@ -249,17 +251,17 @@ def test_a_real_loose_mark_still_earns_the_discovery_flag(tmp_path):
     this install's baseline was taken still fires the flag, container or no
     container."""
     _build(tmp_path)
-    g.set_telemetry_out(tmp_path)
-    g.sweep_telemetry(tmp_path)               # baseline: this tree, as shipped
+    telemetry_mod.set_telemetry_out(tmp_path)
+    telemetry_mod.sweep_telemetry(tmp_path)               # baseline: this tree, as shipped
     assert not _flag(tmp_path)
 
-    mdir = g._role_dir("marks")
+    mdir = branding_mod._role_dir("marks")
     mdir.mkdir(parents=True, exist_ok=True)
     (mdir / "marks.json").write_text(json.dumps(
         {"marks": [{"id": "dropped", "label": "dropped", "kind": "tile"}]}))
     (mdir / "dropped.png").write_bytes(_real_png())
 
-    g.sweep_telemetry(tmp_path)
+    telemetry_mod.sweep_telemetry(tmp_path)
     assert _flag(tmp_path), (
         "a genuine drop no longer earns the flag -- the guard overcorrected")
 
@@ -287,7 +289,7 @@ def test_branding_route_loose_still_wins_over_container(tmp_path):
     -- so a flat is the one rel that cannot demonstrate this rule. The flat's own
     order is pinned in dev/tests/test_branding_tree_rules.py."""
     _build(tmp_path)
-    loose = g.branding_root() / g._role_rel("marks", "mark_4.png")
+    loose = branding_mod.branding_root() / branding_mod._role_rel("marks", "mark_4.png")
     loose.parent.mkdir(parents=True, exist_ok=True)
     loose.write_bytes(b"LOOSE MARK")
     client = login_client(tmp_path)

@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 from PIL import Image
+from moonglade import branding as branding_mod
 
 ROOT = Path(__file__).resolve().parents[2]
 _TOOL = ROOT / "dev" / "tools" / "art" / "build_inbox_icon.py"
@@ -134,7 +135,7 @@ def test_a_pack_copy_under_rewards_is_served_and_its_absence_is_a_plain_404(tmp_
                                            "created_at": "2025-01-01T00:00:00"}])
     cli = login_client(tmp_path)
     assert cli.get("/branding/rewards/inbox.png").status_code == 404
-    pack = g._role_dir("rewards")
+    pack = branding_mod._role_dir("rewards")
     pack.mkdir(parents=True, exist_ok=True)
     Image.new("RGBA", (8, 8), (1, 2, 3, 255)).save(pack / "inbox.png")
     r = cli.get("/branding/rewards/inbox.png")

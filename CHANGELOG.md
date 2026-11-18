@@ -16,6 +16,15 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.21.0] - 2026-11-18 — Moving Day
+
+### Changed
+- **The two largest files are split into smaller modules.** The command-line engine (`moonglade/backup.py`) and the gallery server (`moonglade/gallery.py`) each handed whole sections to modules of their own: the library scan, duplicates, organize, series, health, account settings, the job log, the PixAI client, the updater, About, the Mirror, media tools, the living library, telemetry, contest sync, achievements and branding. Each section moved word for word, a test maps every seam between them, and nothing you see or use should behave any differently. (2026-11-18)
+- **Log lines name the module they came from.** Lines written by moved code now carry that module's name in `local/logs/moonglade.log`, such as `moonglade.telemetry`. (2026-11-18)
+
+### Fixed
+- **A generate from the web that used a free card is now counted in your stats,** the same as one from the command line always was. (2026-11-18)
+
 ## [3.20.7] - 2026-11-16 — Fresh Ink
 
 ### Changed

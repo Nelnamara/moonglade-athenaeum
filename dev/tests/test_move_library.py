@@ -37,6 +37,12 @@ from moonglade import setup as msetup
 from tests.move_layouts import (KEY_GONE, KEY_NEL, KEY_NEL_LOWER, db_rows, layout_310,
                                 layout_317, layout_c_copy_first, rig, start, write,
                                 write_config)
+from moonglade import scan as scan_mod
+from moonglade import account_prefs as account_prefs_mod
+from moonglade import jobs as jobs_mod
+from moonglade import telemetry as telemetry_mod
+from moonglade import achievements as achievements_mod
+from moonglade import branding as branding_mod
 
 
 @pytest.fixture
@@ -124,12 +130,12 @@ def test_an_install_on_3_10_to_3_16_moves_whole(r):
 def test_the_readers_find_the_moved_records(r):
     layout_317(r)
     _prepare(r)
-    assert g.load_ach_state(r.lib)["earned_at"] == {"a1": "2026-09-01"}
-    assert g.load_telemetry(r.lib)["counters"] == {"gens": 5}
+    assert achievements_mod.load_ach_state(r.lib)["earned_at"] == {"a1": "2026-09-01"}
+    assert telemetry_mod.load_telemetry(r.lib)["counters"] == {"gens": 5}
     from moonglade import runs
     assert runs.RunsStore(r.lib).path.is_file()
     from moonglade import backup as core
-    assert core._jobs_path(r.lib).read_text().count("\n") == 2
+    assert jobs_mod._jobs_path(r.lib).read_text().count("\n") == 2
 
 
 def test_the_shared_presets_go_to_each_login_with_none_of_its_own(r):
@@ -275,7 +281,7 @@ def test_two_logins_get_two_folders_and_another_install_s_login_moves_too(r):
     with zipfile.ZipFile(zips[0]) as zf:
         assert "account_prefs/%s.json" % KEY_GONE in zf.namelist()
     # and the app reads each login's own folder
-    assert g.account_prefs_path(r.lib, "nel") == acc / KEY_NEL_LOWER / "prefs.json"
+    assert account_prefs_mod.account_prefs_path(r.lib, "nel") == acc / KEY_NEL_LOWER / "prefs.json"
 
 
 def test_with_config_unreadable_no_login_s_files_are_dropped(r):
@@ -406,10 +412,10 @@ def test_the_banners_b6(r):
     assert not (r.local / "banners" / "banner.png").exists(), "an earned render is rebuilt"
     assert not (r.lib / "gallery" / "cache" / "_banners").exists()
     assert not (r.lib / "gallery" / "cache" / "_masks").exists()
-    assert not g.branding_root().exists() or not list(g.branding_root().rglob("*.png"))
+    assert not branding_mod.branding_root().exists() or not list(branding_mod.branding_root().rglob("*.png"))
     # what the app serves for the migrated slot is the kept copy
-    assert g._served_flat_dir(r.lib, "banner_login") == r.local / "banners"
-    assert g._ensure_banner_flat(r.lib, "banner_login") == r.local / "banners" / "login-banner.png"
+    assert branding_mod._served_flat_dir(r.lib, "banner_login") == r.local / "banners"
+    assert branding_mod._ensure_banner_flat(r.lib, "banner_login") == r.local / "banners" / "login-banner.png"
 
 
 def test_a_slot_render_is_simply_rebuilt(r):
@@ -444,7 +450,7 @@ def test_the_walkers_never_see_the_moved_loom(r):
     write(r.lib / "loom" / "exports" / "loom_cut.mp4", b"CUT")
     _prepare(r)
     assert (r.lib / "_moonglade" / "loom" / "_frames" / "last.png").is_file()
-    seen = [e.rel.as_posix() for e in g.scan_library(r.lib)]
+    seen = [e.rel.as_posix() for e in scan_mod.scan_library(r.lib)]
     assert not any("loom" in s or "_moonglade" in s for s in seen), seen
 
 

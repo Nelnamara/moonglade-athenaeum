@@ -174,7 +174,7 @@ def test_import_local_skips_deleted_quarantine(tmp_path):
     scan that doesn't skip _deleted/ finds the orphaned file, sees no existing row/
     media_id for it, and resurrects it as a brand-new source='local' row. A purged
     image must stay purged, not come back to life on the next --import-local."""
-    from moonglade.gallery import DELETED_DIRNAME
+    from moonglade.scan import DELETED_DIRNAME
     qdir = tmp_path / DELETED_DIRNAME
     qdir.mkdir(parents=True)
     (qdir / "old_prompt_task1_999.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
@@ -196,7 +196,7 @@ def test_import_local_external_copies_in(tmp_path):
 
 
 def test_import_local_video_no_crash_without_ffmpeg(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "ffmpeg_path", lambda: "")
+    monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "")
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "v.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
     res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
@@ -217,24 +217,24 @@ def test_mp4_faststart_detection(tmp_path):
     """moov BEFORE mdat = faststart (iOS-streamable); moov after = not."""
     fs = tmp_path / "fs.mp4"; fs.write_bytes(_mp4(b"ftyp", b"moov", b"mdat"))
     nf = tmp_path / "nf.mp4"; nf.write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
-    assert core._mp4_is_faststart(fs) is True
-    assert core._mp4_is_faststart(nf) is False
+    assert media_tools_mod._mp4_is_faststart(fs) is True
+    assert media_tools_mod._mp4_is_faststart(nf) is False
 
 
 def test_video_faststart_noop_without_ffmpeg(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "ffmpeg_path", lambda: "")
+    monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "")
     nf = tmp_path / "nf.mp4"; nf.write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
     before = nf.read_bytes()
-    assert core.video_faststart(nf) is False       # no ffmpeg -> graceful no-op
+    assert media_tools_mod.video_faststart(nf) is False       # no ffmpeg -> graceful no-op
     assert nf.read_bytes() == before               # original untouched
 
 
 def test_video_faststart_skips_already_faststart(tmp_path, monkeypatch):
     # ffmpeg 'present' but the file is already faststart -> short-circuits, no remux attempt
-    monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "ffmpeg")
     fs = tmp_path / "fs.mp4"; fs.write_bytes(_mp4(b"ftyp", b"moov", b"mdat"))
-    assert core.video_faststart(fs) is False
-    assert core.video_faststart(tmp_path / "x.webm") is False   # non-mp4 ignored
+    assert media_tools_mod.video_faststart(fs) is False
+    assert media_tools_mod.video_faststart(tmp_path / "x.webm") is False   # non-mp4 ignored
 
 
 def test_concurrent_faststart_never_mixes_two_remuxes(tmp_path, monkeypatch):
@@ -254,7 +254,7 @@ def test_concurrent_faststart_never_mixes_two_remuxes(tmp_path, monkeypatch):
     import subprocess
     import threading
 
-    monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "ffmpeg")
     clip = tmp_path / "clip.mp4"
     clip.write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))       # NOT faststart -> both remux
 
@@ -293,8 +293,8 @@ def test_concurrent_faststart_never_mixes_two_remuxes(tmp_path, monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", fake_ffmpeg)
 
-    t1 = threading.Thread(target=core.video_faststart, args=(clip,))
-    t2 = threading.Thread(target=core.video_faststart, args=(clip,))
+    t1 = threading.Thread(target=media_tools_mod.video_faststart, args=(clip,))
+    t2 = threading.Thread(target=media_tools_mod.video_faststart, args=(clip,))
     t1.start(); t2.start()
     t1.join(15); t2.join(15)
     assert not t1.is_alive() and not t2.is_alive()
@@ -308,7 +308,7 @@ def test_concurrent_faststart_never_mixes_two_remuxes(tmp_path, monkeypatch):
 
 
 def test_run_faststart_videos_no_ffmpeg(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "ffmpeg_path", lambda: "")
+    monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "")
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "a.mp4").write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
     res = core.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
@@ -327,16 +327,16 @@ def test_import_local_skips_branding_folder(tmp_path, monkeypatch):
     _isolated_branding redirects branding_root() to tmp_path/"branding"."""
     from moonglade import gallery as g
     from moonglade.gallery import load_catalog
-    monkeypatch.setattr(core, "ffmpeg_path", lambda: "")
-    g._role_dir("marks").mkdir(parents=True)
-    (g.branding_root() / "banner.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
-    (g._role_dir("marks") / "m1.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
+    monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "")
+    branding_mod._role_dir("marks").mkdir(parents=True)
+    (branding_mod.branding_root() / "banner.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
+    (branding_mod._role_dir("marks") / "m1.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "v.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
     res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
     assert res["imported"] == 1                       # only the video, not the 2 branding pngs
     files = [r.get("filename", "") for r in load_catalog(tmp_path / "catalog.db")]
-    root_name = g.branding_root().name                 # derived, not retyped
+    root_name = branding_mod.branding_root().name                 # derived, not retyped
     assert not any(root_name in f for f in files)      # branding stayed out of the gallery
     assert any(f.endswith("v.mp4") for f in files)
 
@@ -363,7 +363,7 @@ def test_organize_normalizes_to_month_descriptive_no_batches(tmp_path):
     args = SimpleNamespace(out=str(tmp_path), name_length=60, name_sep="_", convert=None,
                            dry_run=False, embed_metadata=False, jpeg_quality=92,
                            jpeg_bg="white", keep_webp=False, progress=None)
-    core.cmd_organize(args, tmp_path, tmp_path / "images", db)
+    organize_mod.cmd_organize(args, tmp_path, tmp_path / "images", db)
 
     assert (tmp_path / "2024-03" / "alpha_T1_m1.png").exists()            # flat -> month
     assert (tmp_path / "2024-05" / "beta_T2_m2.png").exists()             # bare -> descriptive
@@ -379,7 +379,7 @@ def test_organize_normalizes_to_month_descriptive_no_batches(tmp_path):
     import io, contextlib
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        core.cmd_organize(args2, tmp_path, tmp_path / "images", db)
+        organize_mod.cmd_organize(args2, tmp_path, tmp_path / "images", db)
     assert "already organized" in buf.getvalue()
 
 
@@ -396,7 +396,8 @@ def test_organize_never_touches_deleted_quarantine(tmp_path):
     replaces it into the organized tree in place of the live file. Either way the
     _deleted/ file must never be touched at all -- this asserts exactly that,
     regardless of which of the two on-disk copies the walk happens to visit first."""
-    from moonglade.gallery import save_catalog, CATALOG_FIELDS, DELETED_DIRNAME
+    from moonglade.gallery import save_catalog, CATALOG_FIELDS
+    from moonglade.scan import DELETED_DIRNAME
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m9", "task_id": "T9",
         "prompt_preview": "alpha", "created_at": "2024-03-01T00:00:00", "filename": "alpha_T9_m9.png"}])
@@ -409,7 +410,7 @@ def test_organize_never_touches_deleted_quarantine(tmp_path):
     args = SimpleNamespace(out=str(tmp_path), name_length=60, name_sep="_", convert=None,
                            dry_run=False, embed_metadata=False, jpeg_quality=92,
                            jpeg_bg="white", keep_webp=False, progress=None)
-    core.cmd_organize(args, tmp_path, tmp_path / "images", db)
+    organize_mod.cmd_organize(args, tmp_path, tmp_path / "images", db)
 
     assert (qdir / "old_m9.png").exists(), (
         "a file under _deleted/ was moved or deleted by cmd_organize -- quarantine is not immune")
@@ -427,9 +428,9 @@ def test_undo_organize_reverts_moves(tmp_path):
     args = SimpleNamespace(out=str(tmp_path), name_length=60, name_sep="_", convert=None,
                            dry_run=False, embed_metadata=False, jpeg_quality=92,
                            jpeg_bg="white", keep_webp=False, progress=None)
-    core.cmd_organize(args, tmp_path, tmp_path / "images", db)
+    organize_mod.cmd_organize(args, tmp_path, tmp_path / "images", db)
     assert (tmp_path / "2024-03" / "alpha_T1_m1.png").exists()
-    core.cmd_undo_organize(SimpleNamespace(out=str(tmp_path), dry_run=False), tmp_path)
+    organize_mod.cmd_undo_organize(SimpleNamespace(out=str(tmp_path), dry_run=False), tmp_path)
     assert (tmp_path / "images" / "alpha_T1_m1.png").exists()             # back to original
     assert not (tmp_path / "2024-03" / "alpha_T1_m1.png").exists()
     assert not paths.decisions_path(tmp_path, "organize_manifest.csv").exists()              # manifest cleared
@@ -458,7 +459,7 @@ def test_organize_drops_byte_identical_duplicate(tmp_path):
     loc_a.write_bytes(b"identical-bytes")
     loc_b.write_bytes(b"identical-bytes")
 
-    core.cmd_organize(_organize_args(tmp_path), tmp_path, tmp_path / "images", db)
+    organize_mod.cmd_organize(_organize_args(tmp_path), tmp_path, tmp_path / "images", db)
 
     dst = tmp_path / "2024-07" / "dup_T9_dup1.png"
     assert dst.exists() and dst.read_bytes() == b"identical-bytes"
@@ -482,7 +483,7 @@ def test_organize_keeps_differing_content_side_by_side(tmp_path):
     loc_a.write_bytes(b"content-A")
     loc_b.write_bytes(b"totally-different-content-B")
 
-    core.cmd_organize(_organize_args(tmp_path), tmp_path, tmp_path / "images", db)
+    organize_mod.cmd_organize(_organize_args(tmp_path), tmp_path, tmp_path / "images", db)
 
     dst = tmp_path / "2024-07" / "dup_T8_dup2.png"
     assert dst.exists()
@@ -527,6 +528,9 @@ def test_generate_preview_spends_nothing(tmp_path):
 from moonglade.gallery import (CATALOG_FIELDS, init_db, save_catalog, load_catalog,
                             update_rating, delete_from_catalog,
                             update_prompt_full, bulk_replace_prompt, _db_is_empty)
+from moonglade import organize as organize_mod
+from moonglade import media_tools as media_tools_mod
+from moonglade import branding as branding_mod
 
 
 def _make_row(**kwargs):

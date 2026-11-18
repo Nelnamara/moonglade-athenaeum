@@ -17,6 +17,7 @@ from moonglade.gallery import (CATALOG_FIELDS, load_catalog, save_catalog,
                            purge_media_local)
 
 from tests.conftest import login_client
+from moonglade import scan as scan_mod
 
 LAN = "203.0.113.5"      # TEST-NET-3, matching dev/tests/test_route_tiers.py's stand-in
 
@@ -39,7 +40,7 @@ def _png_bytes():
 def _seed_quarantined(out_dir, media_id, filename="{}.png", mtime=None, content=None):
     """Drop a file DIRECTLY into _deleted/ -- bypassing purge_media_local -- to
     simulate a pre-2026-07-24 quarantined file with no sidecar."""
-    qdir = out_dir / g.DELETED_DIRNAME
+    qdir = out_dir / scan_mod.DELETED_DIRNAME
     qdir.mkdir(parents=True, exist_ok=True)
     name = filename.format(media_id)
     p = qdir / name
@@ -64,7 +65,7 @@ def test_purge_writes_a_trash_sidecar_snapshot(tmp_path):
 
     purge_media_local(tmp_path, thumb, tmp_path / "catalog.db", "55", "55.png")
 
-    meta_path = tmp_path / g.DELETED_DIRNAME / "55.json"
+    meta_path = tmp_path / scan_mod.DELETED_DIRNAME / "55.json"
     assert meta_path.exists()
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     assert meta["rating"] == "4"
@@ -83,7 +84,7 @@ def test_purge_hard_delete_skips_the_sidecar(tmp_path):
     purge_media_local(tmp_path, tmp_path / "t", tmp_path / "catalog.db", "9", "9.png",
                       quarantine=False)
 
-    assert not (tmp_path / g.DELETED_DIRNAME).exists()
+    assert not (tmp_path / scan_mod.DELETED_DIRNAME).exists()
 
 
 def test_purge_missing_row_writes_no_sidecar(tmp_path):
@@ -94,8 +95,8 @@ def test_purge_missing_row_writes_no_sidecar(tmp_path):
     img = tmp_path / "images"; img.mkdir()
     (img / "404.png").write_bytes(_png_bytes())
     purge_media_local(tmp_path, tmp_path / "t", db, "404", "404.png")
-    assert not (tmp_path / g.DELETED_DIRNAME / "404.json").exists()
-    assert (tmp_path / g.DELETED_DIRNAME / "404.png").exists()   # file still quarantined
+    assert not (tmp_path / scan_mod.DELETED_DIRNAME / "404.json").exists()
+    assert (tmp_path / scan_mod.DELETED_DIRNAME / "404.png").exists()   # file still quarantined
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +116,7 @@ def test_list_quarantined_paginates_newest_first(tmp_path):
         _seed_quarantined(tmp_path, str(i), mtime=base - (5 - i))
     items, total, total_bytes = g.list_quarantined(tmp_path, page=1, page_size=2)
     assert total == 5
-    assert total_bytes == sum((tmp_path / g.DELETED_DIRNAME / "{}.png".format(i)).stat().st_size
+    assert total_bytes == sum((tmp_path / scan_mod.DELETED_DIRNAME / "{}.png".format(i)).stat().st_size
                               for i in range(5))
     assert len(items) == 2
     # newest mtime (i=4, base-1) must lead
@@ -130,7 +131,7 @@ def test_list_quarantined_paginates_newest_first(tmp_path):
 def test_list_quarantined_prefers_sidecar_deleted_at_and_prompt(tmp_path):
     _seed_quarantined(tmp_path, "77", mtime=time.time() - 99999)   # old mtime
     real_deleted_at = time.time()
-    (tmp_path / g.DELETED_DIRNAME / "77.json").write_text(
+    (tmp_path / scan_mod.DELETED_DIRNAME / "77.json").write_text(
         json.dumps({"prompt_full": "a stormy harbor", "_deleted_at": real_deleted_at}),
         encoding="utf-8")
 
@@ -156,10 +157,10 @@ def test_list_quarantined_sorts_by_sidecar_deleted_at_not_stale_mtime(tmp_path):
     # test doesn't trip over that unrelated parsing rule.
     now = time.time()
     _seed_quarantined(tmp_path, "9001", mtime=now - 500000)     # ancient mtime...
-    (tmp_path / g.DELETED_DIRNAME / "9001.json").write_text(
+    (tmp_path / scan_mod.DELETED_DIRNAME / "9001.json").write_text(
         json.dumps({"_deleted_at": now}), encoding="utf-8")     # ...deleted just now
     _seed_quarantined(tmp_path, "9002", mtime=now - 10)         # recent mtime...
-    (tmp_path / g.DELETED_DIRNAME / "9002.json").write_text(
+    (tmp_path / scan_mod.DELETED_DIRNAME / "9002.json").write_text(
         json.dumps({"_deleted_at": now - 100}), encoding="utf-8")   # ...deleted earlier
 
     items, total, _ = g.list_quarantined(tmp_path)
@@ -189,7 +190,7 @@ def test_list_quarantined_skips_sidecar_json_as_an_item(tmp_path):
     """A '<media_id>.json' sidecar must never itself be listed as a trash item --
     only the real media file it describes."""
     _seed_quarantined(tmp_path, "3")
-    (tmp_path / g.DELETED_DIRNAME / "3.json").write_text("{}", encoding="utf-8")
+    (tmp_path / scan_mod.DELETED_DIRNAME / "3.json").write_text("{}", encoding="utf-8")
     items, total, _ = g.list_quarantined(tmp_path)
     assert total == 1
     assert items[0]["media_id"] == "3"
@@ -201,7 +202,7 @@ def test_list_quarantined_skips_sidecar_json_as_an_item(tmp_path):
 
 def test_find_quarantined_file_ignores_the_json_sidecar(tmp_path):
     p = _seed_quarantined(tmp_path, "12")
-    (tmp_path / g.DELETED_DIRNAME / "12.json").write_text("{}", encoding="utf-8")
+    (tmp_path / scan_mod.DELETED_DIRNAME / "12.json").write_text("{}", encoding="utf-8")
     found = g._find_quarantined_file(tmp_path, "12")
     assert found == p
 
@@ -228,8 +229,8 @@ def test_restore_recovers_the_full_row_from_its_sidecar(tmp_path):
 
     assert res == {"ok": True, "media_id": "55", "filename": "55.png"}
     assert (tmp_path / "images" / "55.png").exists()
-    assert not (tmp_path / g.DELETED_DIRNAME / "55.png").exists()
-    assert not (tmp_path / g.DELETED_DIRNAME / "55.json").exists()   # sidecar consumed
+    assert not (tmp_path / scan_mod.DELETED_DIRNAME / "55.png").exists()
+    assert not (tmp_path / scan_mod.DELETED_DIRNAME / "55.json").exists()   # sidecar consumed
     rows = load_catalog(db)
     assert len(rows) == 1
     assert rows[0]["rating"] == "5"
@@ -285,7 +286,7 @@ def test_restore_avoids_clobbering_a_same_named_live_file(tmp_path):
 
 def test_delete_quarantined_forever_removes_file_sidecar_and_thumb(tmp_path):
     p = _seed_quarantined(tmp_path, "1")
-    (tmp_path / g.DELETED_DIRNAME / "1.json").write_text("{}", encoding="utf-8")
+    (tmp_path / scan_mod.DELETED_DIRNAME / "1.json").write_text("{}", encoding="utf-8")
     thumb = tmp_path / "gallery" / "thumbs"; thumb.mkdir(parents=True)
     (thumb / "1.jpg").write_bytes(_png_bytes())
 
@@ -293,7 +294,7 @@ def test_delete_quarantined_forever_removes_file_sidecar_and_thumb(tmp_path):
 
     assert removed is True
     assert not p.exists()
-    assert not (tmp_path / g.DELETED_DIRNAME / "1.json").exists()
+    assert not (tmp_path / scan_mod.DELETED_DIRNAME / "1.json").exists()
     assert not (thumb / "1.jpg").exists()
 
 
@@ -304,14 +305,14 @@ def test_delete_quarantined_forever_missing_media_id_is_safe(tmp_path):
 def test_empty_trash_wipes_everything_and_counts_media_only(tmp_path):
     for i in range(4):
         _seed_quarantined(tmp_path, str(i))
-    (tmp_path / g.DELETED_DIRNAME / "0.json").write_text("{}", encoding="utf-8")
+    (tmp_path / scan_mod.DELETED_DIRNAME / "0.json").write_text("{}", encoding="utf-8")
     thumb = tmp_path / "gallery" / "thumbs"; thumb.mkdir(parents=True)
     (thumb / "0.jpg").write_bytes(_png_bytes())
 
     n = g.empty_trash(tmp_path, thumb)
 
     assert n == 4                                       # sidecar doesn't count
-    assert list((tmp_path / g.DELETED_DIRNAME).glob("*")) == []
+    assert list((tmp_path / scan_mod.DELETED_DIRNAME).glob("*")) == []
     assert not (thumb / "0.jpg").exists()
 
 
@@ -413,7 +414,7 @@ def test_api_trash_empty_works_from_localhost_with_confirm(tmp_path):
     cli = login_client(tmp_path)
     r = cli.post("/api/trash/empty", json={"confirm": True})
     assert r.get_json() == {"deleted": 3}
-    assert list((tmp_path / g.DELETED_DIRNAME).glob("*")) == []
+    assert list((tmp_path / scan_mod.DELETED_DIRNAME).glob("*")) == []
 
 
 # ---------------------------------------------------------------------------

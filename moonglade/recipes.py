@@ -29,6 +29,7 @@ import threading
 import time
 
 from moonglade import backup as core
+from moonglade import pixai_client as _pixai_client
 
 MAX_RECIPES = 10                 # recipeIds per task (the site's .slice(0, 10), stepUp qr)
 MAX_SLOTS = 8                    # payload.slots
@@ -831,7 +832,7 @@ def set_items(session, set_id, cursor="", ref_type="recipe", model_types="", lor
 def _rest_delete(session, path, timeout=30):
     """DELETE a /v2 route. Single attempt; raises core.PixAIError on non-2xx with the same
     `http_status` / `body` attributes the transport's GET and POST attach."""
-    client = core._client_of(session)
+    client = _pixai_client._client_of(session)
     r = client.session.delete(core.REST_API_BASE + path, timeout=timeout)
     if not r.ok:
         raise core._rest_error("DELETE", path, r)

@@ -32,11 +32,28 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+from moonglade import about as _about
+from moonglade import account_prefs as _account_prefs
+from moonglade import achievements as _achievements
 from moonglade import assets as moonglade_assets
+from moonglade import branding as _branding
 from moonglade import container as moonglade_container
+from moonglade import contest_sync as _contest_sync
 from moonglade import contest_wins
+from moonglade import dupes as _dupes
+from moonglade import health as _health
+from moonglade import jobs as _jobs
+from moonglade import living as _living
+from moonglade import media_tools as _media_tools
+from moonglade import mirror as _mirror
+from moonglade import organize as _organize
 from moonglade import paths as _paths
+from moonglade import pixai_client as _pixai_client
+from moonglade import scan as _scan
+from moonglade import series as _series
 from moonglade import settings as _settings
+from moonglade import telemetry as _telemetry
+from moonglade import updater as _updater
 
 try:
     from flask import (Flask, jsonify, redirect, render_template_string, request,
@@ -167,10 +184,8 @@ CATALOG_FIELDS = [
     "views_prev_at",   # ISO timestamp of the sweep that wrote `views_prev`
 ]
 
-_IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
 THUMB_SIZE = (768, 768)
 THUMB_QUALITY = 90
-DHASH_SIZE = 8  # compute_dhash()'s hash dimension: 8x8 -> 64-bit hash, 16 hex chars
 
 
 _CREATE_TABLE = """
@@ -2251,7 +2266,7 @@ def _series_member_task_ids(db_path, sid):
     list is exactly the series' own tasks -- so it is naturally capped at the
     series' real size -- each coerced to a non-empty, de-duplicated string, ready
     for safe parameterized IN-clause binding (query_catalog does the binding)."""
-    _, by_sid = series_index(db_path)
+    _, by_sid = _series.series_index(db_path)
     s = by_sid.get(str(sid or "").strip())
     if not s:
         return []
@@ -3143,6174 +3158,6 @@ def history_created_ats(db_path, since_utc, until_utc, media="", source=""):
     return [r[0] for r in rows]
 
 
-# ---------------------------------------------------------------------------
-# The dial-in series engine (issue #34) -- clustering a run of tasks into the
-# session that produced them: same model, gap <= 8h, clause-Jaccard >= 0.5,
-# chained over tasks in id order. The rule is OWNER-VALIDATED on the Series
-# Review Board (10/10 samples accurate, near-misses correctly apart), so this
-# code's job is to REPLICATE the validated JS exactly, not to improve on it.
-# Series are computed, never stored: the catalog stays the single source of
-# truth and a recompute after any edit/delete is honest about what exists.
-# ---------------------------------------------------------------------------
-
-def _series_text(row):
-    """The EXACT text the owner validated the clustering rule on (#34, engine
-    requirement comment): the library API's `prompt` field, which is
-    `(prompt_full or prompt_preview or "")[:1200]` (see /api/library's item
-    builder). Same fallback order, same 1200-char cap -- Mio-era prose runs ~2k
-    chars, and an uncapped read yields DIFFERENT clause sets than the validated
-    board. Pinned by the >1200-char test in dev/tests/test_series_engine.py."""
-    return (row["prompt_full"] or row["prompt_preview"] or "")[:1200]
-
-
-def _series_clause_list(text):
-    """Ordered, de-duplicated clause list for a prompt -- the exact tokenization
-    the owner validated (#34): strip `<...>` tokens (lora/character markup is not
-    prose), turn `.` `;` and newlines into commas, split on commas, trim,
-    lowercase, keep only clauses longer than 3 chars. Order is prompt order --
-    the delta differ uses it so "+ added clause" labels surface the clause the
-    way the owner typed it, not alphabetically."""
-    t = re.sub(r"<[^>]*>", "", str(text or ""))
-    t = t.replace(".", ",").replace(";", ",").replace("\r", ",").replace("\n", ",")
-    out, seen = [], set()
-    for part in t.split(","):
-        c = part.strip().lower()
-        if len(c) > 3 and c not in seen:
-            seen.add(c)
-            out.append(c)
-    return out
-
-
-def _series_ts(created_at):
-    """Epoch seconds for a stored created_at, or None. Same tolerance as the
-    History feed's _history_ts (which lives inside create_app and can't be
-    shared from module level): PixAI's 24-char `...T06:14:10.545Z`, the 20-char
-    no-millis `...Z`, and the 19-char naive legacy rows -- all UTC (#34 review:
-    timestamps are UTC ISO strings, hour math needs no zone care).
-
-    TWO SHAPES ADDED 2026-09-03, because this now also measures CONTEST dates, which do
-    not come from the same place catalog rows do:
-      * DATE-ONLY ("2026-09-20") returned None, so a contest whose end date carried no
-        time component read as having no date at all -- no countdown, and the sweep
-        recency window silently skipped it;
-      * a real UTC OFFSET was TRUNCATED and the time read as UTC, quietly wrong by up to
-        a day either way. A deadline is the one thing on that surface that must not be
-        approximately right."""
-    from datetime import datetime, timedelta, timezone
-    s = str(created_at or "").strip()
-    if not s:
-        return None
-    if s[-1:] in ("Z", "z"):
-        s = s[:-1]
-    # A trailing offset, scanned backwards from the end and never past the "T" -- the
-    # date's own hyphens are not offsets, and an offset only ever follows the time.
-    off = timedelta(0)
-    tpos = s.find("T")
-    if tpos > 0:
-        for i in range(len(s) - 1, tpos, -1):
-            ch = s[i]
-            if ch == "+" or ch == "-":
-                tail = s[i + 1:].replace(":", "")
-                if tail.isdigit() and len(tail) in (2, 4):
-                    hh = int(tail[:2])
-                    mm = int(tail[2:]) if len(tail) == 4 else 0
-                    off = timedelta(hours=hh, minutes=mm)
-                    if ch == "+":
-                        off = -off       # +09:00 is AHEAD of UTC: subtract to reach UTC
-                    s = s[:i]
-                break
-    try:
-        base = datetime.strptime(s[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
-    except ValueError:
-        try:                             # date-only: midnight UTC on that day
-            base = datetime.strptime(s[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        except ValueError:
-            return None
-        return (base + off).timestamp()
-    frac = s[19:]
-    ms = 0.0
-    if frac.startswith(".") and frac[1:].isdigit():
-        ms = float("0" + frac)
-    return (base + off).timestamp() + ms
-
-
-# Ported from gallery/src/gen/headline.js's SCAFFOLD set -- KEEP THE TWO IN SYNC
-# (that file is the origin; a tag added there belongs here too). Used only to
-# skip non-descriptive clauses when a series has no character token to name
-# itself after (#34: "else the head descriptive clause -- the headline excerpt
-# rule already in gen/headline.js").
-_SERIES_SCAFFOLD = frozenset({
-    "masterpiece", "best quality", "amazing quality", "high quality", "highres",
-    "absurdres", "very awa", "newest", "1girl", "1boy", "2girls", "2boys", "solo",
-    "looking at viewer", "detailed background", "ultra detailed", "highly detailed",
-    "8k", "4k", "score_9", "score_8_up", "score_7_up", "rating_safe",
-    "rating_explicit", "rating_questionable",
-})
-
-
-def _series_is_scaffold(clause):
-    """Python twin of headline.js's isScaffold(), over an already-lowercased
-    clause: the SCAFFOLD set, tag namespaces, leftover `<...>` tokens, pony
-    scores/ratings, and weighted quality openers."""
-    c = clause
-    if c in _SERIES_SCAFFOLD:
-        return True
-    if re.match(r"^(artist|character|copyright|lora|source):", c):
-        return True
-    if re.match(r"^<[^>]*>$", c):
-        return True
-    if re.match(r"^score_\d", c) or re.match(r"^rating_", c):
-        return True
-    if re.match(r"^\(?(masterpiece|best quality)", c):
-        return True
-    return False
-
-
-def _series_cap_first(s):
-    """headline.js's capFirst: first character up, rest untouched."""
-    return (s[:1].upper() + s[1:]) if s else s
-
-
-def _series_title(text):
-    """A series' display name, from the FIRST task's prompt (#34: 'character
-    name when a character token resolves, else the head descriptive clause').
-    Character sources, in order:
-      * a clause starting `character:` (booru tag namespace);
-      * a `<token>` in the ORIGINAL text -- captured BEFORE _series_clause_list
-        strips them -- whose text is not a lora-weight form (`lora:...` /
-        trailing `:0.8` weights are model plumbing, not a name).
-    Normalization: drop the `character:` prefix, dashes to spaces, title-case
-    the first word. Fallback: the first non-scaffold clause (the headline
-    excerpt rule -- see _SERIES_SCAFFOLD). Everything trims to 40 chars; ''
-    when the prompt has nothing descriptive to say."""
-    raw = str(text or "")
-    cand = ""
-    for c in _series_clause_list(raw):
-        if c.startswith("character:"):
-            cand = c
-            break
-    if not cand:
-        for tok in re.findall(r"<([^>]*)>", raw):
-            t = tok.strip()
-            if not t:
-                continue
-            if re.match(r"^(lora|lyco|hypernet)\b", t, re.IGNORECASE):
-                continue
-            if re.search(r":\d+(\.\d+)?$", t):
-                continue
-            cand = t
-            break
-    if cand:
-        cand = re.sub(r"^character:\s*", "", cand, flags=re.IGNORECASE)
-        cand = " ".join(cand.replace("-", " ").split())
-        return _series_cap_first(cand)[:40]
-    for c in _series_clause_list(raw):
-        if not _series_is_scaffold(c):
-            return _series_cap_first(c)[:40]
-    return ""
-
-
-def _series_delta_label(prev_task, cur_task):
-    """The short step label for a NON-reroll member vs the previous task in its
-    series (#34): added = clauses in cur not in prev, removed = prev not in cur
-    (sets, so pure reorderings vanish); up to 2 added ('+ ...') then 1 removed
-    ('− ...'), each clause trimmed to 34 chars, joined ' · ', whole
-    label capped at ~80. Clause order is prompt order (see _series_clause_list)
-    so the label reads the way the owner typed the change."""
-    added = [c for c in cur_task["clause_list"] if c not in prev_task["clauses"]]
-    removed = [c for c in prev_task["clause_list"] if c not in cur_task["clauses"]]
-    parts = ["+ " + c[:34] for c in added[:2]]
-    if removed:
-        parts.append("− " + removed[0][:34])
-    label = " · ".join(parts)
-    if len(label) > 80:
-        label = label[:79].rstrip() + "…"
-    return label
-
-
-def compute_series(db_path):
-    """One linear pass applying the owner-validated dial-in rule (#34): over
-    tasks in task_id order, a task JOINS the current series iff
-        same model key  AND  gap <= 8h  AND  clause-Jaccard >= 0.5
-    vs the PREVIOUS task. Returns (by_task, by_sid):
-        by_task -- {task_id: (sid, v)} for every member of a multi-task series;
-        by_sid  -- {sid: series struct} (the /api/series/<sid> payload).
-
-    The decisions this encodes (design review 2026-08-23, folded into #34):
-      * model key = model_id if non-empty else model_name -- display names
-        collide ("Unknown or removed model") and renames drift; ids only ever
-        SPLIT relative to the validated name-keyed clusters, never merge, so
-        the owner's validation stands as the looser bound.
-      * sid = the FIRST task's id -- deterministic, so `?series=<sid>` URLs and
-        B's navigation survive a recompute. Series are computed, not stored.
-      * missing/blank created_at => gap = infinity (starts a new series); a
-        task AFTER one with no timestamp can't measure its gap either, so it
-        starts fresh too. Jaccard of two EMPTY clause sets = 1 -- identical
-        empties chain, matching the validated board.
-      * only series with >= 2 tasks are kept: singletons (85% of tasks) cost
-        nothing and produce no API rows.
-      * member media_ids are ordered the way /api/siblings orders them (#33):
-        by batch_index when EVERY member has one, else media_id -- so
-        first_media_id is the task's true first output when the order is known.
-      * v-numbers are 1-based positions and MAY renumber when a member is
-        deleted -- honest (they describe what exists), explicitly UNLIKE #33's
-        batch index (PixAI's permanent fact, never renumbered).
-    """
-    with catalog(db_path) as con:
-        rows = con.execute(
-            "SELECT task_id, model_id, model_name, created_at, prompt_full,"
-            " prompt_preview, media_id, batch_index FROM catalog"
-            " WHERE task_id != '' ORDER BY task_id, media_id").fetchall()
-
-    # Aggregate rows into tasks (first row's text/model/timestamp; every row a
-    # member). batch_index rides along purely for the #33 member ordering.
-    tasks, by_id = [], {}
-    for r in rows:
-        tid = str(r["task_id"])
-        t = by_id.get(tid)
-        if t is None:
-            text = _series_text(r)
-            clause_list = _series_clause_list(text)
-            t = {
-                "task_id": tid,
-                "text": text,
-                "clause_list": clause_list,
-                "clauses": set(clause_list),
-                "model_key": str(r["model_id"] or "") or str(r["model_name"] or ""),
-                "model_label": str(r["model_name"] or "") or str(r["model_id"] or ""),
-                "created_at": str(r["created_at"] or ""),
-                "ts": _series_ts(r["created_at"]),
-                "members": [],
-            }
-            by_id[tid] = t
-            tasks.append(t)
-        try:
-            bi = int(str(r["batch_index"] or "").strip())
-        except ValueError:
-            bi = None
-        t["members"].append((str(r["media_id"] or ""), bi))
-    for t in tasks:
-        if t["members"] and all(bi is not None for _, bi in t["members"]):
-            t["members"].sort(key=lambda m: m[1])
-
-    # The linear chain. `tasks` is already task_id-ascending (SQL ORDER BY).
-    chains, cur, prev = [], None, None
-    for t in tasks:
-        joins = False
-        if prev is not None and t["model_key"] == prev["model_key"]:
-            if t["ts"] is None or prev["ts"] is None:
-                gap = float("inf")
-            else:
-                gap = abs(t["ts"] - prev["ts"])
-            if gap <= 8 * 3600.0:
-                a, b = t["clauses"], prev["clauses"]
-                union = len(a | b)
-                jaccard = (len(a & b) / union) if union else 1.0
-                joins = jaccard >= 0.5
-        if joins:
-            cur.append(t)
-        else:
-            cur = [t]
-            chains.append(cur)
-        prev = t
-
-    by_task, by_sid = {}, {}
-    for chain in chains:
-        if len(chain) < 2:
-            continue
-        sid = chain[0]["task_id"]
-        steps, count_images, prev_t = [], 0, None
-        for i, t in enumerate(chain):
-            v = i + 1
-            reroll = prev_t is not None and t["clauses"] == prev_t["clauses"]
-            if prev_t is None:
-                label = "series start"
-            elif reroll:
-                label = "seed-only reroll"
-            else:
-                label = _series_delta_label(prev_t, t)
-            n = len(t["members"])
-            count_images += n
-            steps.append({
-                "task_id": t["task_id"], "v": v, "reroll": bool(reroll),
-                "label": label,
-                "first_media_id": t["members"][0][0] if t["members"] else "",
-                "n": n,
-            })
-            by_task[t["task_id"]] = (sid, v)
-            prev_t = t
-        by_sid[sid] = {
-            "sid": sid,
-            "title": _series_title(chain[0]["text"]),
-            "model": chain[0]["model_label"],
-            "count_tasks": len(chain),
-            "count_images": count_images,
-            "span": [chain[0]["created_at"], chain[-1]["created_at"]],
-            "steps": steps,
-        }
-    return by_task, by_sid
-
-
-# The series cache (#34 review item 3). Keyed by db_path so tests' tmp catalogs
-# never collide; each entry stores the cheap invalidation key, the compute time,
-# and both indexes. The cheap key is `(COUNT(*), MAX(media_id))` -- journal_mode
-# is `delete` (no WAL) so file mtime would also work, but the query is robust
-# either way. The 30s floor exists because the live mirror WRITES DURING a sync:
-# every saved page would otherwise trigger a full recompute (a linear pass over
-# ~21k tasks) per gallery request. Staleness is bounded and honest -- the next
-# request after the floor picks the new rows up.
-_SERIES_CACHE = {}
-_SERIES_CACHE_LOCK = threading.Lock()
-_SERIES_RECOMPUTE_FLOOR_S = 30.0
-
-
-def series_index(db_path):
-    """The cached (by_task, by_sid) pair for a catalog. Recomputes only when the
-    cheap key CHANGED and the last compute is at least _SERIES_RECOMPUTE_FLOOR_S
-    old (both conditions -- see the cache note above). The lock covers the whole
-    check-and-compute so concurrent requests during a sync can't stampede into
-    parallel recomputes. Fails soft to empty indexes (no cache write) on a
-    missing/broken catalog, like catalog_counts does."""
-    try:
-        with catalog(db_path) as con:
-            cheap = tuple(con.execute(
-                "SELECT COUNT(*), MAX(media_id) FROM catalog").fetchone())
-        now = time.time()
-        with _SERIES_CACHE_LOCK:
-            ent = _SERIES_CACHE.get(str(db_path))
-            if ent is not None and (
-                    ent["key"] == cheap
-                    or (now - ent["computed_at"]) < _SERIES_RECOMPUTE_FLOOR_S):
-                return ent["by_task"], ent["by_sid"]
-            by_task, by_sid = compute_series(db_path)
-            _SERIES_CACHE[str(db_path)] = {
-                "key": cheap, "computed_at": time.time(),
-                "by_task": by_task, "by_sid": by_sid,
-            }
-            return by_task, by_sid
-    except sqlite3.Error:
-        return {}, {}
-
-
-# --- direction B: the grouped listing (series-as-units) --------------------------------
-# Folding a filtered, sorted row set into dial-in series UNITS for /api/library
-# ?group=series. Kept as module-level pure functions so the fold + cover choice are
-# unit-testable without a request (dev/tests/test_series_grouping.py). The route supplies
-# the rows (list_group_rows) and the series index (series_index); these decide only
-# unit membership, order, and which surviving member is the cover.
-
-def _series_cover_row(member_rows):
-    """The cover among a series unit's SURVIVING members (#34 direction B review
-    item 4): the newest by created_at, PREFERRING an image over a video poster --
-    the newest image when the unit has any image at all, else the newest member
-    overall. Deterministic on ties (created_at, then media_id)."""
-    images = [m for m in member_rows if str(m.get("is_video") or "") != "1"]
-    pool = images or member_rows
-    return max(pool, key=lambda m: (_series_ts(m.get("created_at")) or float("-inf"),
-                                    str(m.get("media_id") or "")))
-
-
-def fold_series_units(rows_min, by_task):
-    """Fold a filtered, sorted row list into grid UNITS for the grouped listing
-    (#34 direction B). `rows_min` is the FULL filtered set in the active sort order
-    (list_group_rows shape: dicts with media_id/task_id/created_at/is_video);
-    `by_task` is series_index()[0] -- task_id -> (sid, v) for members of MULTI-task
-    series only.
-
-    A UNIT is a generation event shown as ONE card, keyed:
-      * ("series", sid)   -- a MULTI-task dial-in series: every image of every task
-                             in it folds into this one unit (up to 801 images);
-      * ("task", task_id) -- any other task: its sibling images (a batch) collapse
-                             to one unit -- one generation, one card, exactly the
-                             count the grouped grid pages over (a lone image is just
-                             a one-member task unit);
-      * ("row", media_id) -- a row with a BLANK task_id: its own per-row unit, since
-                             imports all share task_id '' and must never weld into
-                             one giant unit (the series-engine / siblings rule).
-
-    Returns (unit_order, members):
-      * unit_order -- the unit KEYS in first-appearance order. A unit takes the
-        POSITION of its FIRST matching member (first occurrence in the sorted set);
-        every later member folds in rather than opening a new unit.
-      * members -- {key: [surviving member rows]}, for cover selection and a cheap
-        surviving-member count.
-
-    The whole point is server-side grouping: a series can span many pages, so the
-    fold must see the entire filtered set, not one page. `total` = len(unit_order)."""
-    unit_order, members, seen = [], {}, set()
-    for r in rows_min:
-        # No media_id -> no card, exactly as the ungrouped path skips it. Guards
-        # against blank-media_id rows welding into one ("row","") unit and against a
-        # blank cover that rows_for_media_ids would later drop, leaving total > items.
-        if not str(r.get("media_id") or "").strip():
-            continue
-        tid = str(r.get("task_id") or "")
-        hit = by_task.get(tid) if tid else None
-        if hit:
-            key = ("series", hit[0])
-        elif tid:
-            key = ("task", tid)
-        else:
-            key = ("row", str(r.get("media_id") or ""))
-        members.setdefault(key, []).append(r)
-        if key not in seen:
-            seen.add(key)
-            unit_order.append(key)
-    return unit_order, members
-
-
-# ---------------------------------------------------------------------------
-# Achievements & Skins -- WoW-flavored milestones computed from local catalog
-# stats (read-only, no spend). Earning an epic tier unlocks a cosmetic skin
-# (a CSS-variable palette swap in the browser). State (which unlocks the user
-# has already been *toasted* for, plus the active skin) persists to
-# out_dir/_moonglade/records/achievements.json. See ACHIEVEMENTS/SKINS below for the catalog.
-# ---------------------------------------------------------------------------
-# ACHIEVEMENTS roster: SEALED into the art pack (see _sealed_defs below). Read via _roster().
-
-# ---------------------------------------------------------------------------
-# The achievement roster + its ancillary tables (skins, skin-unlock text, the
-# closed-set criteria labels, ladder-track names) are DEFINITIONS. They used to sit
-# inline here, readable in a public `git clone`; they now live SEALED in
-# the art pack's "achievements" payload (a dict), built from the private donor
-# ../moonglade-internal/achievements_folio_donor.json by dev/tools/build_container.py.
-# Loaded LAZILY + cached (out_dir -- so the container path -- is not known at import).
-# A container-less install degrades to the free-skins-only fallback (empty Folio,
-# like missing art), never a crash. See ACHIEVEMENT_SEALING_SPEC.md; this is what
-# lets the /api/achievements ??? masking finally protect something.
-# The free skins are the app's DEFAULT dress (not rewards), so their non-spoiler
-# names stay public as the no-container fallback.
-_FALLBACK_DEFS = {
-    "roster": [], "skin_unlock": {}, "ach_criteria": {}, "ladder_tracks": [],
-    "skins": [
-        {"id": "moonglade",   "name": "Moonglade",   "free": True,
-         "desc": "The default -- lavender leads, emerald magic."},
-        {"id": "nightfallen", "name": "Nightfallen", "free": True,
-         "desc": "Void-touched violet and star-ash."},
-    ],
-}
-_sealed_cache = {"path": None, "mtime": None, "defs": None}
-_sealed_lock = threading.Lock()
-
-
-def _sealed_defs():
-    """The sealed achievement definitions {roster, skins, skin_unlock, ach_criteria,
-    ladder_tracks} from the art pack's "achievements" payload, plus the derived id /
-    hidden / rung / skin-id sets. Cached per (container path, mtime) and computed UNDER
-    the lock, so a cold-cache race (N workers hitting /api/achievements at once) decodes
-    it once, not once per request. Fallback (free skins only) when there is no valid
-    container OR the sealed roster is malformed -- the Folio degrades, never 500s."""
-    p = _container_path()
-    try:
-        mtime = p.stat().st_mtime
-    except OSError:
-        mtime = None
-    # Open the container OUTSIDE _sealed_lock (it has its own _container_lock). The
-    # decode+derive below runs UNDER _sealed_lock -- it re-enters neither lock, so holding
-    # it here just serializes concurrent cold misses instead of decoding the payload N
-    # times (box.payload does XOR + zlib.decompress; a few ms, not free).
-    box = _get_container()
-    with _sealed_lock:
-        c = _sealed_cache
-        if c["path"] == p and c["mtime"] == mtime and c["defs"] is not None:
-            return c["defs"]
-        defs = None
-        raw = box.payload("achievements") if box is not None else None
-        if raw:
-            try:
-                d = json.loads(raw)
-                if isinstance(d, dict) and "roster" in d:
-                    defs = d
-            except ValueError:
-                defs = None
-        # A checksum-valid but MALFORMED roster (valid JSON, but "roster" not a list of
-        # well-shaped entries) must degrade like a missing one, not 500 the whole Folio:
-        # derive from it, and on any shape error fall back to the free-skins defaults.
-        try:
-            computed = _derive_sealed(defs if defs is not None else _FALLBACK_DEFS)
-        except (KeyError, TypeError, AttributeError):
-            computed = _derive_sealed(_FALLBACK_DEFS)
-        _sealed_cache.update(path=p, mtime=mtime, defs=computed)
-        return computed
-
-
-def _derive_sealed(defs):
-    """Normalize a raw sealed-defs dict and attach the derived id / hidden / rung /
-    skin-id sets. Raises (KeyError/TypeError/AttributeError) on a malformed roster so
-    _sealed_defs can catch it and fall back to the free-skins defaults. _FALLBACK_DEFS is
-    well-formed, so _derive_sealed(_FALLBACK_DEFS) is the guaranteed-safe last resort."""
-    roster = defs.get("roster") or []
-    defs = dict(defs)
-    defs.setdefault("skins", [])
-    defs.setdefault("skin_unlock", {})
-    defs.setdefault("ach_criteria", {})
-    defs.setdefault("ladder_tracks", [])
-    # The narrator's poke lines (moonglade.narrator.clean_pools' shape). Carried whole from
-    # the pack like the roster; a pack that has none leaves the narrator on its neutral line.
-    if not isinstance(defs.get("poke_lines"), dict):
-        defs["poke_lines"] = {}
-    defs["_ach_ids"] = frozenset(a["id"] for a in roster)
-    defs["_ach_hidden"] = frozenset(a["id"] for a in roster if a.get("hidden"))
-    defs["_ach_rung"] = _build_ach_rung(roster)
-    defs["_skin_ids"] = {s["id"] for s in defs["skins"]}
-    # The roster FLAGS the code keys on instead of an id (pack v5): `moment` names the
-    # bespoke moment a feat plays, `unlocks` what it opens. {moment: achievement id},
-    # first roster entry wins -- the seal rule and the API resolve "which feat" here,
-    # so no hidden id is ever a literal in this source. A roster without the flag (an
-    # older pack) yields no entry, and every caller fails closed on a missing one.
-    moment_ach = {}
-    for a in roster:
-        m = a.get("moment")
-        if isinstance(m, str) and m:
-            moment_ach.setdefault(m, a["id"])
-    defs["_moment_ach"] = moment_ach
-    return defs
-
-
-def _roster():        return _sealed_defs()["roster"]          # noqa: E704
-def _skins():         return _sealed_defs()["skins"]           # noqa: E704
-def _skin_unlock():   return _sealed_defs()["skin_unlock"]     # noqa: E704
-def _ach_criteria():  return _sealed_defs()["ach_criteria"]    # noqa: E704
-def _ladder_tracks(): return _sealed_defs()["ladder_tracks"]   # noqa: E704
-def _ach_ids():       return _sealed_defs()["_ach_ids"]        # noqa: E704
-def _ach_hidden():    return _sealed_defs()["_ach_hidden"]     # noqa: E704
-def _ach_rung():      return _sealed_defs()["_ach_rung"]       # noqa: E704
-def _skin_ids():      return _sealed_defs()["_skin_ids"]       # noqa: E704
-def _moment_ach():    return _sealed_defs()["_moment_ach"]     # noqa: E704
-def _poke_lines():    return _sealed_defs()["poke_lines"]      # noqa: E704
-
-# ---------------------------------------------------------------------------
-# Branding: the banner mark (the animated icon beside the title) is one of the
-# owner's own cut marks in the art tree's marks/ (branding_root()), chosen + animated from the
-# Control Panel. settings.json's branding = {"mark": "mark_4", "animation": {"anim": "classic", ...}}.
-# The favicon is a plain file (served at /branding/favicon.png); the double-click launcher
-# icon is a Desktop .lnk whose icon we point at a mark's .ico (a .pyw can't
-# carry its own icon -- the shortcut can).
-
-# The mark animation roster, settled by the two-round marks workshop (2026-08-31).
-# The survivors keep their ORIGINAL ids on purpose -- "classic" is the modernized
-# classic, not a new id -- so an install that already stored a pick keeps wearing the
-# treatment it chose, now rebuilt. moondust is the promoted canvas demo.
-# "sheen" split out of classic 2026-09-04 (owner: "star and glint should be
-# separate. the star was the OG classic") -- classic is the star alone; sheen is
-# the vanilla interface's selectable glass sweep, masked to the mark's silhouette.
-MARK_ANIMS = ["classic", "sheen", "glow", "shine", "aurora", "twinkle", "shoot",
-              "eclipse", "mist", "prism", "moondust", "none"]
-# Retired by the same workshop. A stored pick of one of these is NOT an error: it
-# renders as classic (load_branding's own validation does that), the picker stops
-# offering it, and nothing has to migrate settings.json's branding.
-MARK_ANIMS_RETIRED = ("halo", "breathe", "tilt", "float", "orbit", "ripple")
-
-# The owner-tunable animation settings the workshop asked for ("There should be a
-# speed and size slider setting for animations") plus glow's own colour/direction
-# pair. Numbers are clamped to these ranges server-side; the client's sliders use
-# the same bounds, but the server is the one that decides.
-_BRAND_NUM_RANGES = {"anim_speed": (0.25, 3.0), "anim_scale": (0.5, 2.0),
-                     "glow_angle": (0.0, 360.0)}
-_HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
-_BRAND_DEFAULTS = {"mark": "mark_4", "anim": "classic",
-                   # 1.0 = the treatments' authored tempo. The workshop board
-                   # exported at 0.80x, but that was the owner auditioning the
-                   # slider, not a ruling on the default -- so the shipped default
-                   # stays the authored speed until he says otherwise.
-                   "anim_speed": 1.0, "anim_scale": 1.0,
-                   "glow_color": "#94e2d5", "glow_angle": 0.0}
-
-
-def _brand_num(key, value, fallback):
-    """One branding number, coerced and CLAMPED to its own range. A junk value
-    falls back rather than raising: branding is cosmetic and must never be the
-    reason a page fails to render."""
-    lo, hi = _BRAND_NUM_RANGES[key]
-    try:
-        return max(lo, min(hi, float(value)))
-    except (TypeError, ValueError):
-        return fallback
-
-
-def _brand_color(value, fallback):
-    """A #rrggbb colour, or the fallback. Deliberately strict: this string is
-    interpolated into a CSS custom property, so anything that is not exactly a
-    six-digit hex colour never reaches the stylesheet."""
-    s = str(value or "").strip()
-    return s if _HEX_COLOR_RE.match(s) else fallback
-
-
-def branding_root():
-    """Where branding lives: the APP folder, beside the launcher -- NOT inside the library.
-
-    Moved 2026-07-26 (owner decision) for two reasons, the first of which was a live bug.
-
-    It used to be `Path(out_dir) / "branding"`, and out_dir comes from resolve_library_dir(), so
-    the library-folder setting shipped the day before silently relocated it. Point the app at a
-    different library and every mark, mascot and banner disappeared from its view -- the files
-    still on disk in the old folder, the app just no longer looking there. Nobody hit it because
-    only one library has ever existed.
-
-    And the slot folders are meant to be VISIBLE: they sit beside the launcher, in the same
-    folder the user already opens to start the app, rather than inside a picture library full of
-    month folders and thumbnail caches nobody browses by hand. Deliberately NOT inside the
-    /moonglade package that the naming pass will create either -- that is for code, and user art
-    in a package boundary gets treated as code by something eventually.
-
-    Every caller goes through here. Nine sites used to derive this path independently, which is
-    exactly how the out_dir coupling above went unnoticed.
-
-    Renamed to the coded goods root 2026-08-21 (the bundle-v2 rewire,
-    SCOPE_bundle-v2-contract.md): the on-disk tree is coded end
-    to end -- role names never appear as folder names -- while the browser keeps
-    requesting the friendly /branding/<role>/... URLs and the serve route
-    translates once at the boundary (_public_rel_to_coded below).
-
-    The path itself is moonglade.paths.art_root(), the one place app-root paths are derived.
-    The machine files that used to be this folder's siblings by derivation (the pack, the
-    branding picks, the icons) live in local/ instead (moonglade.paths, moonglade.settings),
-    so the art tree and they can move separately."""
-    return _paths.art_root()
-
-
-# ---------------------------------------------------------------------------
-# The role -> coded-folder map (bundle-v2, 2026-08-21). Codes exist ONLY on
-# disk and inside the art pack; the public URL contract stays /branding/
-# <role>/... and every emitted URL keeps the role vocabulary. This dict is the
-# SINGLE source of truth for the coded tree -- _seal_rule, the resolver
-# callers, the discovery scaffold and the migration all DERIVE their paths
-# from it, never retype them (a retyped prefix is how a seal silently fails
-# open). `_thumbs` is a LEGACY literal: the badge-thumb cache now lives OUTSIDE
-# the tree (badge_cache_dir(): local/cache/badges/); the _thumbs/ seal
-# deny + the builder's exclusion stay as belt-and-braces for a stale cache left
-# behind by an older build -- never coded, never packed, never served.
-# ---------------------------------------------------------------------------
-_GOODS_ROOT_NAME = _paths.GOODS_ROOT_NAME  # hex "goods" -- the on-disk branding root folder name
-_GOODS_MID = "3f/00100100"             # 0x3F "?" / Bender's apartment -- shared middle
-# The pre-2026-08-21 badge-thumb cache folder, as a path SEGMENT at any depth --
-# the same shape dev/tools/build_container.py's EXCLUDED_DIRS uses, and the reason
-# the container can never name one of these files. Read by the seal (deny).
-# An install that upgraded through that move still carries a folder of
-# app-rendered PNGs inside the tree; nothing here has to special-case them any
-# more, because a snapshot taken before anyone looked already holds them
-# (_branding_tree_has_new_art).
-_LEGACY_THUMB_DIR = "_thumbs"
-
-ROLE_CODE = {
-    # role            -> coded folder rel-from-root (POSIX, no trailing slash)
-    "banner_main":    _GOODS_MID + "/001",
-    "banner_login":   _GOODS_MID + "/009",
-    "banner_loom":    _GOODS_MID + "/019",
-    "mystery":        _GOODS_MID + "/01473",
-    "marks":          _GOODS_MID + "/101",
-    "rewards":        _GOODS_MID + "/109",
-    "system":         _GOODS_MID + "/5S5",
-    "bridge":         _GOODS_MID + "/0xB01",
-    "enhance":        _GOODS_MID + "/0xB01/0x534958",
-    "emotion":        _GOODS_MID + "/0xB01/0x656d6f7465",
-    "badges":         _GOODS_MID + "/A01",
-    "mascots":        _GOODS_MID + "/A02",
-    "mascots_ach":    _GOODS_MID + "/A02/ach",
-    "earned_banners": _GOODS_MID + "/B0N",
-    # Basic training's goal pictures (pack v7): /branding/training/goal_<goal>.png, the
-    # address gallery/src/lib/goalTileCore.js asks before the bundle's own copy. Open chrome.
-    "training":       _GOODS_MID + "/0x747261696e",
-    "starfall":       "ABBA/a2c/0x53746172",
-    "breadcrumb":     "ABBA/a2c/0x53746172/GONK",
-    # A sibling of starfall, NOT nested under it: starfall's seal is a prefix
-    # rule gated on a different feat, so a folder inside it would inherit the
-    # wrong gate.
-    "keyturn":        "ABBA/a2c/0x4B6579",
-}
-
-# The bespoke moments' clips: {moment flag: the clip's PUBLIC /branding/ name}.
-# Neutral names on purpose -- the URL is visible in the network tab, so it names
-# the moment, never the feat. The starfall clip rides translation rule 3 into the
-# starfall bucket like the rest of its set; the keyturn clip has its own rule
-# (2b) ahead of that one, into its own bucket.
-_MOMENT_CLIPS = {
-    "starfall": "ee_starfall_clip.mp4",
-    "keyturn":  "ee_keyturn_clip.mp4",
-}
-# Rule 2b: a bare public clip name routed to a bucket OTHER than starfall's.
-_MOMENT_CLIP_ROLES = {"ee_keyturn_clip.mp4": "keyturn"}
-
-
-def _role_rel(role, *tail):
-    """posix rel-from-root for a role file: _role_rel('marks','marks.json') ->
-    '3f/00100100/101/marks.json'. No tail -> the role folder's own rel."""
-    return "/".join((ROLE_CODE[role],) + tail)
-
-
-def _role_dir(role):
-    """Path: branding_root() / coded role folder."""
-    return branding_root() / ROLE_CODE[role]
-
-
-# The top-level system files rule 2 of the translation maps into the system
-# role -- the app's chrome, requested by bare public name since before the
-# coded tree existed.
-_SYSTEM_TOP_FILES = frozenset({"logo.png", "favicon.png", "favicon.ico",
-                               "nel_spinner.png", "login_nel.webp", "login_nel.png"})
-
-
-def _public_rel_to_coded(rel):
-    """Translate ONE incoming public /branding/ rel to its coded on-disk /
-    container rel. Applied exactly once, at the serve boundary (the
-    /branding/<path:fname> route); everything downstream -- seal, loose file,
-    container key -- operates on the CODED rel only, so loose disk path ==
-    container key always. First matching rule wins; the order is the contract
-    (SCOPE_bundle-v2-contract.md section 2):
-
-      1. the three banner flats -- bare names, returned as-is. Translation is a
-         no-op for them BECAUSE they are not coded-tree assets at all: the
-         rendered flat lives in the app cache (banner_cache_dir()) and its
-         shipped-default fallback lives in the slot's coded folder. Both of
-         those are SERVING rules the route applies after translation; the coded
-         root itself is never read for a flat.
-      2. top-level system files -> system/<name>
-     2b. a bare moment clip that is not starfall's (_MOMENT_CLIP_ROLES) ->
-         its own role. MUST precede rule 3: the clip's name is also a bare
-         ee_*, and rule 3 would file it under the starfall bucket's seal
-      3. bare ee_* filenames -> starfall/<name>
-      4. bridge/emotion/<f> -> emotion ; bridge/preset_<f> -> enhance ;
-         bridge/<f> -> bridge (the SIX subfolder holds the presets on disk,
-         but the front-end asks for them flat under bridge/ -- filename rule)
-      5. mascots/ach/<f> -> mascots_ach ; mascots/<f> -> mascots
-      6. the single-segment role prefixes -> their coded folder + remainder
-      7. _thumbs/<f>, sfx/<f> (no shipped sfx role -- absent -> 404 -> the
-         synth-chime fallback) and anything unmatched: returned as-is. A probe
-         that guesses a coded path lands here unchanged, so the seal still
-         judges it."""
-    if rel in _BANNER_FLAT.values():                              # rule 1
-        return rel
-    if rel in _SYSTEM_TOP_FILES:                                  # rule 2
-        return _role_rel("system", rel)
-    if rel in _MOMENT_CLIP_ROLES:                                 # rule 2b
-        return _role_rel(_MOMENT_CLIP_ROLES[rel], rel)
-    if "/" not in rel and rel.startswith("ee_"):                  # rule 3
-        return _role_rel("starfall", rel)
-    if rel.startswith("bridge/"):                                 # rule 4
-        f = rel[len("bridge/"):]
-        if f.startswith("emotion/"):
-            return _role_rel("emotion", f[len("emotion/"):])
-        if f.startswith("preset_"):
-            return _role_rel("enhance", f)
-        return _role_rel("bridge", f)
-    if rel.startswith("mascots/"):                                # rule 5
-        f = rel[len("mascots/"):]
-        if f[:4].lower() == "ach/":   # case-insensitive: the seal is too (Windows FS)
-            return _role_rel("mascots_ach", f[4:])
-        return _role_rel("mascots", f)
-    for role in ("marks", "badges", "rewards", "mystery", "banner_main",
-                 "banner_login", "banner_loom", "earned_banners",
-                 "training"):                                     # rule 6
-        if rel.startswith(role + "/"):
-            return _role_rel(role, rel[len(role) + 1:])
-    return rel                                                    # rule 7
-
-
-# ---------------------------------------------------------------------------
-# The asset container -- loose-then-container resolution (2026-08-10,
-# moonglade-internal/DECISIONS.md "The asset container, re-scoped from scratch").
-#
-# moonglade.mgpack, the art pack (moonglade/container.py's custom format; built by
-# dev/tools/build_container.py, delivered as a GitHub Release asset, never
-# committed) carries the app's DEFAULT branding so a fresh install is fully
-# dressed while branding/ itself stays empty -- that emptiness is a shipped
-# mechanic, not a gap. Resolution order everywhere below: a real loose file
-# under branding/ ALWAYS wins; the container only answers when no loose file
-# exists.
-#
-# The coded tree's read-only scan (_branding_tree_has_new_art, and so both
-# sweep_branding_drops and sweep_telemetry) does NOT consult the container in
-# either direction, and that is a correctness requirement rather than a
-# convention. Asking "does the pack ship this?" as a POSITIVE would make an
-# untouched default install look customized. Asking it as a NEGATIVE, to
-# dismiss a candidate, fails OPEN on an install that has no pack at all (a
-# legacy tree's art left loose then counts for everyone who upgrades) and fails
-# CLOSED on the owner's own loose-wins override (his bytes under a shipped
-# asset's filename are still "shipped"). The scan compares against a BASELINE of
-# what was already on disk instead -- one snapshot per library-and-app-folder
-# pairing, since the snapshot is stored in the library and the tree is not
-# (_baseline_key) -- a question that is answerable identically with a pack and
-# without one. See _branding_tree_has_new_art.
-# ---------------------------------------------------------------------------
-def _container_path():
-    """THE path of the art pack, `moonglade.mgpack` (pack v7; `.mgpack` so Explorer can give it
-    a type of its own): local/moonglade.mgpack (moonglade.paths.local_path()), not the art
-    tree's parent. Every code path that reads, fetches, checks or builds the pack asks this;
-    its `.version` marker is derived from it (moonglade.assets._version_marker_path). The
-    pack's pre-v7 name is read only by the one-time rename the move runs
-    (moonglade.assets.migrate_legacy_name, from moonglade.migrate)."""
-    return _paths.local_path(_paths.PACK_NAME)
-
-
-_container_cache = {"path": None, "mtime": None, "box": None}
-_container_lock = threading.Lock()
-
-
-def _get_container():
-    """The current container read handle, or None if no (valid) art pack
-    exists. Cached per (path, mtime) so the TOC parses once, and re-opened
-    automatically when the file is replaced -- the downloader's atomic swap and
-    a hand-copied update both just work on the next request."""
-    p = _container_path()
-    try:
-        mtime = p.stat().st_mtime
-    except OSError:
-        with _container_lock:
-            _container_cache.update(path=None, mtime=None, box=None)
-        return None
-    with _container_lock:
-        if _container_cache["path"] == p and _container_cache["mtime"] == mtime:
-            return _container_cache["box"]
-        box = moonglade_container.open_container(p)
-        _container_cache.update(path=p, mtime=mtime, box=box)
-        return box
-
-
-def _branding_bytes(rel):
-    """One branding asset's bytes by branding_root()-relative posix path --
-    loose file first, container second, None if neither has it."""
-    loose = branding_root() / rel
-    try:
-        if loose.is_file():
-            return loose.read_bytes()
-    except OSError:
-        pass
-    box = _get_container()
-    return box.get(rel) if box else None
-
-
-def _branding_exists(rel):
-    loose = branding_root() / rel
-    try:
-        if loose.is_file():
-            return True
-    except OSError:
-        pass
-    box = _get_container()
-    return bool(box and box.has(rel))
-
-
-def _branding_mtime(rel):
-    """Freshness stamp for cache-invalidation: the loose file's own mtime when
-    it exists, else the container FILE's mtime (a whole-container rebuild is the
-    only way container-sourced content changes)."""
-    loose = branding_root() / rel
-    try:
-        if loose.is_file():
-            return loose.stat().st_mtime
-    except OSError:
-        pass
-    try:
-        return _container_path().stat().st_mtime
-    except OSError:
-        return None
-
-
-# ---------------------------------------------------------------------------
-# HTTP Range for CONTAINER-sourced branding assets (pack v5). A <video> seeks by
-# asking for byte ranges, and the container used to answer every request with the
-# whole body. Loose files never needed this: send_from_directory already ranges.
-#
-# A range is SLICED from bytes that were read and SHA-verified whole, never
-# decoded mid-blob on the fly: Container.get() is the one place that checks an
-# asset against its TOC digest, so a slice of a verified copy is the only slice
-# that is known good. For the moments' clips -- the assets a browser actually
-# ranges, fifty requests to a seek -- the verified copy is kept in a small
-# in-memory cache keyed on the TOC digest (content, not path: a replaced pack
-# that carries the same clip reuses it, a changed clip is a different key). It
-# holds at most one entry per moment, least-recently-used out first.
-# ---------------------------------------------------------------------------
-_moment_clip_cache = {}            # toc sha256 -> verified bytes (insertion = LRU order)
-_moment_clip_cache_lock = threading.Lock()
-
-
-def _moment_clip_rels():
-    """The CODED rels of the moments' clips -- the only assets the cache admits."""
-    return frozenset(_public_rel_to_coded(n) for n in _MOMENT_CLIPS.values())
-
-
-def _container_clip_bytes(rel):
-    """One moment clip's bytes from the container, read and verified ONCE per
-    content digest and served from memory after that. None when the container is
-    absent or does not carry it, or the blob fails its checksum (never cached)."""
-    box = _get_container()
-    sha = box.sha256(rel) if box is not None else None
-    if not sha:
-        return None
-    with _moment_clip_cache_lock:
-        raw = _moment_clip_cache.pop(sha, None)
-        if raw is not None:
-            _moment_clip_cache[sha] = raw          # re-insert: most recently used
-            return raw
-    raw = box.get(rel)                             # whole blob, sha-verified
-    if raw is None:
-        return None
-    with _moment_clip_cache_lock:
-        _moment_clip_cache.pop(sha, None)
-        _moment_clip_cache[sha] = raw
-        while len(_moment_clip_cache) > max(1, len(_MOMENT_CLIPS)):
-            _moment_clip_cache.pop(next(iter(_moment_clip_cache)))
-    return raw
-
-
-def _ranged_bytes_response(response_class, raw, mime):
-    """A 200 / 206 / 416 for an in-memory body, per the request's Range header.
-
-    One satisfiable byte range -> 206 with Content-Range; `bytes=0-1`, a suffix
-    (`bytes=-500`, clamped to the whole body when longer than it) and an open end
-    (`bytes=100-`) all land here. A range that starts at or past the end -> 416
-    with `Content-Range: bytes */<length>`. A header this does not understand --
-    another unit, a malformed spec, several ranges, or an If-Range (these
-    responses carry no validator it could match) -- is IGNORED and the whole body
-    goes out as 200, which is what RFC 9110 permits a server to do. Accept-Ranges
-    is advertised either way so the client knows it may seek."""
-    from werkzeug.http import parse_range_header
-    n = len(raw)
-    resp = None
-    header = request.headers.get("Range")
-    if header and request.method in ("GET", "HEAD") and "If-Range" not in request.headers:
-        rng = parse_range_header(header)
-        if rng is not None and rng.units == "bytes" and len(rng.ranges) == 1:
-            start, stop = rng.ranges[0]            # stop exclusive, None = to the end
-            if start < 0:                          # suffix: the last -start bytes
-                start, stop = max(n + start, 0), n
-            else:
-                stop = n if stop is None else min(stop, n)
-            if start >= n:
-                resp = response_class(b"", status=416)
-                resp.headers["Content-Range"] = "bytes */%d" % n
-            else:
-                resp = response_class(raw[start:stop], status=206, mimetype=mime)
-                resp.headers["Content-Range"] = "bytes %d-%d/%d" % (start, stop - 1, n)
-    if resp is None:
-        resp = response_class(raw, mimetype=mime)
-    resp.headers["Accept-Ranges"] = "bytes"
-    resp.headers["Cache-Control"] = "no-cache, must-revalidate"
-    return resp
-
-
-# ---------------------------------------------------------------------------
-# The bundle's unlock split, ENFORCED at the serving layer (moonglade-internal/DECISIONS.md
-# "The bundle's unlock split" 2026-07-27 + the "Mascots-in-Branding" correction
-# 2026-08-06): achievement-bound art -- badge masters, the per-achievement
-# mascot poses under mascots/ach/, the rewards/ tree, the easter-egg ee_* assets --
-# is sealed to the achievement that earns it. System chrome (narrator, login
-# companion, wizard poses, tracker spinner/status art, present_* fallbacks)
-# stays open: it is the app's default dress, not a reward. Deny answers are
-# 404, indistinguishable from "no such file", so the route is not an oracle
-# for what art exists.
-# ---------------------------------------------------------------------------
-# Earned-art gate ids come from the SEALED roster via _ach_ids()/_ach_hidden() (below),
-# not a module-level frozenset -- the roster is no longer in this source.
-
-
-def _seal_rule(rel):
-    """(mode, achievement_id) for one branding_root()-relative posix path:
-    'open' (serve normally), 'deny' (never serve), or 'earned' (serve only once
-    the named achievement is earned).
-
-    Operates on the CODED rel (the serve route translates the public form
-    first). Every prefix here is DERIVED from ROLE_CODE, never retyped -- an
-    unmatched rel falls through to open, so a hand-typed prefix that drifts
-    from the map would silently LEAK sealed art, not 404 it."""
-    # The filesystem this guards is case-INSENSITIVE on Windows, so the seal is
-    # too: decide on a lowercased copy of the rel and compare against lowercased
-    # prefixes. Otherwise a case-variant of a sealed path (e.g. mascots/ACH/<id>)
-    # dodges a case-sensitive prefix check, falls through to the fail-open
-    # default, and the case-insensitive FS serves the real sealed file anyway.
-    # Achievement ids are lowercase, so a lowercased stem matches _ach_ids()
-    # directly. (bundle-v2 adversarial-review HIGH finding, 2026-08-21.)
-    low = rel.lower()
-    rew = ROLE_CODE["rewards"].lower()
-    if low in (rew + "/claim.png", rew + "/gift.png", rew + "/inbox.png"):
-        # The D8 exception: the two reward UI icons notify.css fetches for the
-        # claim toast/modal -- chrome, not prizes, so they stay open while the
-        # rest of the bucket seals (an open pair beats a physical move, which
-        # would change the public URLs and force a dist rebuild). inbox.png is
-        # the same kind of chrome: the header's Inbox button, beside the gift
-        # box (owner's art, 2026-10-04; the pack carries it from v7).
-        return ("open", None)
-    if low.startswith(rew + "/") or low == rew:
-        # rewards/ is pure achievement data with no live front-end consumer (the
-        # reward-marker reconciliation is tracked work; gate per-achievement when
-        # it lands).
-        return ("deny", None)
-    if low.startswith(_LEGACY_THUMB_DIR + "/") or low == _LEGACY_THUMB_DIR:
-        # _thumbs/ was the badge-thumb cache before it moved out to
-        # badge_cache_dir(); a stale one may linger in an older install's tree.
-        # /badge-thumb/ is the one sanctioned path so its own hidden-feat gate
-        # can't be walked around -- keep denying it here.
-        return ("deny", None)
-    marks = ROLE_CODE["marks"].lower()
-    if low.startswith(marks + "/"):
-        # Marks are a MIXED bucket: free/shipped tile marks serve open, but a
-        # mark bound to an achievement (its marks.json `unlock`) is reward art --
-        # served only once earned, exactly like a badge or mascot. Without this
-        # branch the lock was CSS-only and /branding/marks/<id>.<ext> handed the
-        # full-res locked art to anyone (red team 2026-09-08). marks.json itself
-        # is the manifest the picker reads, always open; no nesting under marks/.
-        name = low[len(marks) + 1:]
-        if "/" in name:
-            return ("deny", None)
-        if name == "marks.json":
-            return ("open", None)
-        unlock = _mark_unlock_for(name.rsplit(".", 1)[0])
-        if unlock:
-            return ("earned", unlock)     # bound: the serve route 404s it until earned
-        return ("open", None)             # free mark (or an unknown stem) serves normally
-    badges = ROLE_CODE["badges"].lower()
-    if low.startswith(badges + "/"):
-        aid = low[len(badges) + 1:]
-        if aid.endswith(".png"):
-            aid = aid[:-4]
-        if "/" not in aid and aid in _ach_ids():
-            return ("earned", aid)    # full-res master: the celebration fetches it AT earn time
-        return ("deny", None)         # the whole bucket is sauce; unknown files stay sealed
-    mascots_ach = ROLE_CODE["mascots_ach"].lower()
-    if low.startswith(mascots_ach + "/"):
-        aid = low[len(mascots_ach) + 1:].rsplit(".", 1)[0]
-        if "/" not in aid and aid in _ach_ids():
-            return ("earned", aid)
-        return ("deny", None)
-    for moment in ("starfall", "keyturn"):
-        if low.startswith(ROLE_CODE[moment].lower() + "/"):
-            # A moment's whole bucket -- art, audio, the clip, and for starfall
-            # the GONK folder inside it (ROLE_CODE['breadcrumb'] nests under
-            # starfall, so this prefix covers it without its own branch) -- is
-            # gated on the feat the sealed roster flags with that moment. The
-            # feat is looked up, never named here; a roster that carries no
-            # such flag (no pack, an older pack) DENIES, because this is the
-            # one branch where falling through would fail open.
-            aid = _moment_ach().get(moment)
-            return ("earned", aid) if aid else ("deny", None)
-    earned_b = ROLE_CODE["earned_banners"].lower()
-    if low == earned_b + "/great_library.png":
-        return ("earned", "the-great-library")
-    if low.startswith(earned_b + "/") or low == earned_b:
-        # The rest of the bucket (void_banner.png) is an UNWIRED future reward
-        # (achievements #57-60) -- sealed shut until its achievement exists.
-        return ("deny", None)
-    return ("open", None)
-
-
-_earned_ids_cache = {"t": 0.0, "ids": frozenset()}
-_earned_ids_lock = threading.Lock()
-
-
-def _earned_achievement_ids(out_dir, db_path, need=None):
-    """The set of currently-earned achievement ids -- the seal check for
-    achievement-bound art. Cached briefly (one celebration fetches several
-    sealed assets back-to-back); a cache answer that would DENY `need` is
-    recomputed fresh first, so the fetch that lands milliseconds after the
-    earning event never 404s off a stale cache -- staleness can only ever
-    delay a denial's recompute, never a legitimate serve."""
-    now = time.time()
-    with _earned_ids_lock:
-        ids = _earned_ids_cache["ids"]
-        if now - _earned_ids_cache["t"] < 5.0 and (need is None or need in ids):
-            return ids
-    metrics = achievement_metrics(db_path)
-    metrics.update(telemetry_metrics(out_dir))
-    result = compute_achievements(metrics, (),
-                                  sets=load_telemetry(out_dir).get("sets", {}),
-                                  earned_at=load_ach_state(out_dir).get("earned_at"))
-    ids = frozenset(a["id"] for a in result["achievements"] if a["earned"])
-    with _earned_ids_lock:
-        _earned_ids_cache.update(t=now, ids=ids)
-    return ids
-
-
-def _seed_loose_manifest(rel):
-    """Promote a container-shipped manifest to a real loose file before the
-    first read-modify-write against it. Without this, the first custom upload
-    on a container-dressed install would start from an EMPTY loose manifest and
-    silently shadow every shipped default out of the picker (loose wins). A
-    no-op when the loose file already exists or the container lacks it."""
-    loose = branding_root() / rel
-    if loose.exists():
-        return
-    box = _get_container()
-    data = box.get(rel) if box else None
-    if data is None:
-        return
-    try:
-        loose.parent.mkdir(parents=True, exist_ok=True)
-        loose.write_bytes(data)
-    except OSError:
-        pass
-
-
-# Marks the owner has REMOVED from the roster: mark_12 "Gem Tome" (ruled
-# 2026-07-23), and mark_74 (the Winged Crescent, remade as mark_nightfallen for
-# bundle-v2 -- the old id's loose file lingers on every full-tree install the
-# owner ran before the rename). A tombstone rather than a container rebuild alone
-# because the rebuild can't reach everywhere: _seed_loose_manifest promotes the
-# container's marks.json to a loose file on first customization, and loose wins
-# forever after -- so an install that already seeded keeps a removed mark in its
-# picker no matter what a new container ships. Just as important, a tombstoned
-# stem reads as KNOWN to sweep_branding_drops, so a still-on-disk loose file is
-# NOT re-adopted as a fresh hand-drop (which would delete the original, register
-# a custom mark, AND fire the branding feat -- the mark_12 near-miss of
-# 2026-08-13, which mark_74 would have repeated on the owner's own upgrade).
-_MARK_TOMBSTONES = frozenset({"mark_12", "mark_74"})
-
-
-# A mark's art may be a .png or a .webp. The webp lane exists for ANIMATED marks:
-# an animated webp plays natively in an <img>, so the owner can author one himself
-# (his Grok -> key -> webp pipeline) and drop it in. png is tried first because
-# every shipped default is one; the order is the tie-break, not a preference.
-MARK_EXTS = (".png", ".webp")
-
-
-def mark_art_ext(mark_id):
-    """The extension one mark's art actually exists as (loose or container), or ""
-    when it has none. The single place the app decides what a mark's file is
-    called -- every other site asks here rather than assuming .png."""
-    for ext in MARK_EXTS:
-        if _branding_exists(_role_rel("marks", str(mark_id) + ext)):
-            return ext
-    return ""
-
-
-def list_marks(out_dir, earned_ids=None):
-    """Marks available on THIS machine: marks/marks.json entries whose art
-    actually exists, resolved loose-then-container (_branding_bytes) so the
-    shipped defaults show up even though branding/ itself is deliberately empty
-    on a fresh install -- and still empty on a truly bare install with no
-    container at all. Tombstoned ids (_MARK_TOMBSTONES) never list.
-
-    Art is .png OR .webp (see MARK_EXTS). The payload key stays `png` even for a
-    webp mark: it is the shipped contract every client already reads (and
-    brand_context's mark_url comes straight off it), so renaming it would be a
-    breaking change for a field that was only ever a URL.
-
-    `unlock` (2026-09-08): a mark entry may carry `unlock: "<achievement id>"`,
-    the mark's reward binding -- empty/absent means a free pick, the marks-are-
-    pure-data default the 2026-08 rewire plan set. `earned_ids` is the set of
-    currently-earned achievement ids (from _earned_achievement_ids); pass it and each
-    mark reports `earned` (free, or its unlock is in the set) plus `unlock_name`
-    for the "Unlocks with <name>" needle. Pass None -- the many callers that
-    don't gate (the custom-mark upload response, the launcher-icon path) -- and
-    every mark reports earned:True, exactly the pre-gate behaviour. This is the
-    marks half of the same reward gate `/api/skin` already applies to skins."""
-    raw = _branding_bytes(_role_rel("marks", "marks.json"))
-    if raw is None:
-        return []
-    try:
-        data = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
-        return []
-    if not isinstance(data, dict):
-        return []          # corrupt manifest degrades to "no marks", never a 500
-    out = []
-    for m in data.get("marks") or []:
-        if not isinstance(m, dict):
-            continue
-        mid = str(m.get("id") or "")
-        if mid in _MARK_TOMBSTONES:
-            continue
-        # Disk/container lookups are coded; the emitted URL stays the PUBLIC
-        # role form (the /branding/ route translates on the way back in).
-        ext = mark_art_ext(mid) if mid else ""
-        if ext:
-            unlock = str(m.get("unlock") or "")
-            earned = (not unlock) or (earned_ids is None) or (unlock in earned_ids)
-            # A feat the roster marks hidden stays masked until it is earned
-            # (leak class HIGH #2, owner 2026-08-21; /api/achievements masks the
-            # same feat to "???"). So only name the unlock when it is non-hidden,
-            # or GENUINELY earned (a real earned set that carries it --
-            # earned_ids=None means "not gating / earned unknown", which for a
-            # masked feat must stay silent).
-            # Fail CLOSED on the roster, exactly as the badge-thumb route does
-            # (adversarial 2026-08-22): when the container is missing/invalid/stale
-            # _ach_hidden() goes EMPTY, so `unlock not in _ach_hidden()` passes for
-            # every mark -- and _ach_name falls back to returning the id itself, so
-            # a masked feat's id would be published to an unearned user in exactly
-            # the state we cannot verify anything. Name it only when the roster
-            # actually carries it.
-            named = bool(unlock) and unlock in _ach_ids() and (
-                unlock not in _ach_hidden()
-                or (earned_ids is not None and unlock in earned_ids))
-            out.append({"id": mid, "label": m.get("label") or mid,
-                        "kind": m.get("kind") or "tile",
-                        "png": "/branding/marks/%s%s" % (mid, ext),
-                        "animated": ext == ".webp",
-                        # BOTH the raw id and the display name are spoiler-masked on
-                        # the SAME `named` gate: the earlier fix masked only
-                        # unlock_name and left `unlock` carrying the raw hidden-feat
-                        # id to any unearned LOGIN user on
-                        # GET /api/branding and /api/panel/summary (spoiler audit
-                        # 2026-09-08). `earned` is computed off the local `unlock`
-                        # above, and the seal rule reads the binding straight from
-                        # marks.json -- neither depends on this emitted field.
-                        "unlock": unlock if named else "",
-                        "unlock_name": _ach_name(unlock) if named else "",
-                        "earned": earned,
-                        "ico": _branding_exists(_role_rel("marks", mid + ".ico"))})
-    return out
-
-
-def _earned_roster_flags(entry):
-    """The sealed roster flags /api/achievements adds to an achievement ONCE IT IS
-    EARNED (pack v5), from its roster `entry`: `unlocks` (what the earn opens, e.g.
-    a Control Panel tab), and for a feat with a bespoke moment `moment`,
-    `moment_clip` (the clip's neutral public /branding/ URL, "" for a moment this
-    build has no clip for) and `moment_copy` (the moment's sealed strings). The
-    caller applies it to earned entries only -- before the earn none of these keys
-    exists in the payload, the same masking unlock_name gets -- and the client keys
-    on these flags, never on an achievement id. {} for an entry with no flags."""
-    out = {}
-    if not isinstance(entry, dict):
-        return out
-    unlocks = entry.get("unlocks")
-    if isinstance(unlocks, str) and unlocks:
-        out["unlocks"] = unlocks
-    moment = entry.get("moment")
-    if isinstance(moment, str) and moment:
-        clip = _MOMENT_CLIPS.get(moment)
-        copy = entry.get("moment_copy")
-        out["moment"] = moment
-        out["moment_clip"] = "/branding/" + clip if clip else ""
-        out["moment_copy"] = ({k: v for k, v in copy.items()
-                               if isinstance(k, str) and isinstance(v, str)}
-                              if isinstance(copy, dict) else {})
-    return out
-
-
-def earned_relic_marks(out_dir, earned_ids):
-    """The marks an achievement AWARDED and the account has earned -- the Folio's Marks row
-    (Small Calls L2, relics by kind). A free mark (no `unlock` binding) is not a relic, and an
-    unearned one is never listed at all, so nothing here says a locked mark exists: the row is
-    built from earned marks only and the client shows no empty slot. `unlock` is the awarding
-    achievement's id (list_marks blanks it for a hidden feat until that feat is earned, so a
-    listed mark's binding is always one the account already holds); the client dates the mark
-    by that achievement's earned_at. `earned_ids` is the set of currently-earned ids."""
-    out = []
-    for m in list_marks(out_dir, set(earned_ids or ())):
-        if m.get("earned") and m.get("unlock"):
-            out.append({"id": m["id"], "label": m["label"], "png": m["png"],
-                        "animated": bool(m.get("animated")), "unlock": m["unlock"]})
-    return out
-
-
-# ---------------------------------------------------------------------------
-# MASKED FEATS (Session G): the Folio's ONE veil card. The payload carries a riddle and an
-# alpha-only silhouette of the NEXT unfound feat's badge, and nothing else about it -- no
-# id, name, description, count, order, points, earned-by, badge art or file name. The
-# roster fields it reads are the sealed `riddle` (and its unleashed twin `riddle_nsfw`);
-# a feat whose roster entry carries no riddle is never picked, so a pack that has none yet
-# shows no veil at all rather than invented copy.
-# ---------------------------------------------------------------------------
-FEAT_MASK_PX = 256
-
-
-def feat_mask_png(badge_bytes, max_px=FEAT_MASK_PX):
-    """The alpha-only mask of one badge: white on transparent, cut from the badge's OWN
-    alpha channel and never carrying its colours. `badge_bytes` is the badge file's bytes
-    (any format Pillow reads); the result is PNG bytes at most `max_px` on the long edge,
-    or None when the bytes are not an image. A badge with no alpha at all yields a solid
-    silhouette (its honest outline) rather than a leak of its pixels.
-
-    A small PURE helper on purpose: the pack build (pack v6) calls it too, to pre-cut the
-    masks it ships, so the lazy cut below and the pre-cut file can never disagree."""
-    import io
-    try:
-        from PIL import Image
-        with Image.open(io.BytesIO(badge_bytes)) as im:
-            im.load()
-            if "A" in im.getbands() or "transparency" in im.info:
-                alpha = im.convert("RGBA").getchannel("A")
-            else:
-                alpha = Image.new("L", im.size, 255)
-        alpha.thumbnail((int(max_px), int(max_px)))
-        out = Image.new("RGBA", alpha.size, (255, 255, 255, 255))
-        out.putalpha(alpha)
-        buf = io.BytesIO()
-        out.save(buf, format="PNG", optimize=True)
-        return buf.getvalue()
-    except Exception:
-        return None
-
-
-def _feat_riddles(entry):
-    """(riddle, riddle_nsfw) from one sealed roster entry: stripped strings, "" when the
-    field is absent or not text. Never invents a riddle."""
-    if not isinstance(entry, dict):
-        return "", ""
-    out = []
-    for key in ("riddle", "riddle_nsfw"):
-        v = entry.get(key)
-        out.append(v.strip() if isinstance(v, str) else "")
-    return out[0], out[1]
-
-
-def _pick_masked_feat(earned_ids, roster=None, has_art=None):
-    """The roster entry the veil card is drawn for, or None. It is the first hidden feat,
-    in roster order, that is not earned yet, carries a riddle and (when `has_art` is given)
-    has badge art to cut a silhouette from. None until a feat has been earned at all (the
-    Feats section stays cloaked until then), and None once nothing eligible is left.
-
-    The server picks; the client never names which. Roster order is used only to choose --
-    it is never sent."""
-    roster = _roster() if roster is None else roster
-    entries = [a for a in roster if isinstance(a, dict)]
-    if not any(a.get("tier") == "feat" and a.get("id") in earned_ids for a in entries):
-        return None
-    for a in entries:
-        aid = a.get("id")
-        if not a.get("hidden") or not aid or aid in earned_ids:
-            continue
-        if not _feat_riddles(a)[0]:
-            continue
-        if has_art is not None and not has_art(aid):
-            continue
-        return a
-    return None
-
-
-def _feat_mask_token(secret, aid):
-    """The opaque token that names the veil's mask in its URL: an HMAC of the achievement
-    id under this install's own secret, so it reveals nothing about the feat's id, name or
-    file, is stable for one feat on one install (the browser can cache the mask), and
-    cannot be computed by anyone who lacks the secret."""
-    key = ("feat-mask:" + str(secret)).encode("utf-8")
-    return hmac.new(key, str(aid).encode("utf-8"), hashlib.sha256).hexdigest()[:32]
-
-
-def _feats_payload(earned_ids, n_masked, feats_revealed, unleashed, secret):
-    """The `feats` object /api/achievements carries beside the earned feats (which stay in
-    `achievements`, unchanged):
-
-        masked     None, or {"riddle", "mask_url"[, "riddle_nsfw"]} for the ONE feat the
-                   server picks. `riddle_nsfw` is the unleashed twin, present only where
-                   roast_nsfw is (the account has earned Triggered) and the pack has one:
-                   the client's Unleash switch chooses which line to show, exactly as it
-                   does for the roast.
-        all_found  True only when the roster has hidden feats and none is left. It is what
-                   tells the client "Every secret found" apart from "no veil yet" (a pack
-                   with no riddles), and it says nothing a masked veil does not already.
-
-    Both are cloaked (None / False) until a feat has been earned, so devtools before the
-    first earn learns nothing. Nothing else about a masked feat is ever built into this."""
-    out = {"masked": None, "all_found": False}
-    if not feats_revealed:
-        return out
-    hidden_total = len(_ach_hidden())
-    out["all_found"] = bool(hidden_total) and n_masked == 0
-    pick = _pick_masked_feat(
-        earned_ids, has_art=lambda aid: _branding_exists(_role_rel("badges", aid + ".png")))
-    if pick is not None:
-        riddle, riddle_nsfw = _feat_riddles(pick)
-        masked = {"riddle": riddle,
-                  "mask_url": "/feat-mask/" + _feat_mask_token(secret, pick["id"]) + ".png"}
-        if unleashed and riddle_nsfw:
-            masked["riddle_nsfw"] = riddle_nsfw
-        out["masked"] = masked
-    return out
-
-
-def feat_mask_cache_dir(out_dir=None):
-    """Where the lazily cut masks live: local/cache/masks/, a sibling of badge_cache_dir()'s
-    badges/ (outside the coded branding tree, and outside every library: a mask's name is an
-    HMAC under this install's secret, meaningless to any other install). Files are named by
-    the opaque token, never by the achievement id. Rebuildable: anything here is cut again
-    when next asked for. (`out_dir` is accepted and unused.)"""
-    return _paths.cache_dir() / "masks"
-
-
-def _feat_mask_bytes(out_dir, aid, token):
-    """The mask PNG bytes for one feat: the pack's badge cut to its alpha silhouette once
-    and cached under the library folder (re-cut when the badge master changes). None when
-    the badge is missing or unreadable. A cache that cannot be written still answers."""
-    rel = _role_rel("badges", aid + ".png")
-    if not _branding_exists(rel):
-        return None
-    dst = feat_mask_cache_dir(out_dir) / (token + ".png")
-    src_mtime = _branding_mtime(rel)
-    try:
-        if dst.is_file() and src_mtime is not None and dst.stat().st_mtime >= src_mtime:
-            return dst.read_bytes()
-    except OSError:
-        pass
-    raw = _branding_bytes(rel)
-    if raw is None:
-        return None
-    png = feat_mask_png(raw)
-    if png is None:
-        return None
-    try:
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        dst.write_bytes(png)
-    except OSError:
-        pass
-    return png
-
-
-def _ach_name(aid):
-    """The display name of one achievement id, or the id itself if the roster
-    has no entry (a mark bound to an id the current pack does not carry still
-    shows *something* rather than an empty needle)."""
-    if not aid:
-        return ""
-    for a in _roster():
-        if (a.get("id") if isinstance(a, dict) else a) == aid:
-            return (a.get("name") if isinstance(a, dict) else "") or aid
-    return aid
-
-
-def _mark_unlock_for(mid):
-    """The achievement id a mark is bound to (its marks.json `unlock`), or "" for
-    a free mark, an unknown id, or a missing/corrupt manifest. Read fresh from
-    the manifest so the seal check on mark ART (_seal_rule's marks/ branch) can
-    never drift from the `unlock` list_marks() offers the picker off the same
-    file. Fails open ("" -> serve): a bound mark only exists when marks.json
-    parses AND carries its unlock, so a corrupt manifest has no bound mark to
-    leak (list_marks returns [] from it too)."""
-    if not mid:
-        return ""
-    raw = _branding_bytes(_role_rel("marks", "marks.json"))
-    if not raw:
-        return ""
-    try:
-        for m in (json.loads(raw.decode("utf-8")).get("marks") or []):
-            if isinstance(m, dict) and str(m.get("id") or "") == mid:
-                return str(m.get("unlock") or "")
-    except (ValueError, UnicodeDecodeError):
-        pass
-    return ""
-
-
-# The 4 Branding-tab slots Control Panel.dc.html specs beyond Icons & marks
-# (banner-main/banner-login/mascots/rewards) -- none had any backend at all
-# before this. Deliberately ONE shape for all four (manifest.json + <id>.png
-# per slot, same "many stored, one exists-checked" contract list_marks() above
-# already established) rather than a bespoke single-file slot vs. a bespoke
-# multi-file slot: the F1/F2 SQLite-bundle work only has to learn ONE storage
-# shape to take over, not four. Rotating-source selection (Banner-main's own
-# "pick FROM a collection" mechanic) is explicitly deferred until that bundle
-# work lands (owner call, 2026-08-05) -- for now every slot is just "the
-# uploaded assets, one of which is active", identical to how marks/mark
-# already relate, so that later mechanic has real asset ids to pick FROM
-# instead of a schema migration first.
-# banner_loom (12:1 workspace strip) added 2026-08-06 with the Branding-tab rebuild
-# (Control Panel.dc.html SLOTS index 5: "Banner - Loom", 1920x160). It joins the two
-# 4:1 banners as a real, written-through slot.
-#
-# mascots/rewards were REMOVED from this tuple 2026-08-13, enforcing the bundle's
-# unlock split (moonglade-internal/DECISIONS.md 2026-07-27 + the 2026-08-06 mascots correction):
-# the Branding surface reaches banners + marks only. rewards/ is achievement data,
-# and mascots' customization ships later as a named-role checklist over an
-# owner-curated SELECTION of system roles -- not a pick-one-active gallery, and not
-# the full role list. Until then neither is a slot: the payload doesn't list them,
-# the upload/crop/set-active routes refuse them. Their on-disk folders stay
-# (see _BRANDING_DISCOVERY_SLOTS).
-#
-# That checklist is here now (Session X, 2026-10-03): the four named roles below. The
-# banner-shaped slots keep their own tuple, because every banner function (manifest,
-# active pick, crop, render) is about THAT shape and must not see a role.
-BANNER_SLOTS = ("banner_main", "banner_login", "banner_loom")
-
-# The named roles: an owner-curated four of the app's own system art (the keep-fixed roles,
-# the easter-egg set, achievement-bound art, the claim popup, the logo, the favicon and the app
-# icons are NOT here and never will be by accident -- adding one means editing this table).
-# Each role is a set of images keyed by a short name; each image owns ONE public /branding/
-# name, the one the app already asks for. An override is a single file written where that name
-# resolves first (the coded tree, loose before the pack), so every screen that shows the art
-# wears it with no change of its own; the pack's default stays in the container and is never
-# written.
-#
-# WHAT AN UPLOAD MUST BE is checked HERE whatever the client said, and it is derived from the
-# art it replaces (role_image_spec): the role's formats and drawn minimum size, plus, per image,
-# `default` -- the pack default's own size (and whether it moves). The shape must lie between square
-# and that default's shape, ROLE_ASPECT_TOLERANCE beyond either (so a tall mascot's slot takes a
-# square picture as well as one shaped like it), the minimum size is the drawn one unless the default
-# is smaller (then the default's own), and an animation is allowed only where the role says its format
-# may (the login companion's default is an animated WebP). Transparency is always required. The
-# stand-in specs drawn first (3:4, square) would have refused the pack's own login companion, the
-# tracker's done / failed / empty and the gift icon; dev/tests/test_branding_roles.py holds that every
-# pack default passes its own role's check.
-ROLE_SLOTS = {
-    "login_companion": {
-        "name": "Login companion", "where": "the sign-in page",
-        "spec": {"formats": ["WEBP", "PNG"], "transparent": True, "animated_formats": ["WEBP"],
-                 "min_axis": "height", "min_px": 600},
-        # Pack v7 re-encoded every animation 360 px tall: the login companion is 366 x 360.
-        "images": {"companion": {"label": "Companion", "public": "login_nel.webp",
-                                 "default": {"w": 366, "h": 360, "animated": True}}},
-    },
-    "tracker_mascots": {
-        "name": "Job tracker mascots", "where": "the job tracker",
-        "spec": {"formats": ["PNG"], "transparent": True, "animated_formats": [],
-                 "min_axis": "side", "min_px": 128},
-        "images": {"spinner": {"label": "Spinner", "public": "nel_spinner.png",
-                               "default": {"w": 566, "h": 560}},
-                   "done": {"label": "Done", "public": "mascots/trk_done.png",
-                            "default": {"w": 329, "h": 364}},
-                   "failed": {"label": "Failed", "public": "mascots/trk_fail.png",
-                              "default": {"w": 324, "h": 365}},
-                   "empty": {"label": "Empty", "public": "mascots/trk_empty.png",
-                             "default": {"w": 402, "h": 356}}},
-    },
-    "reward_icons": {
-        "name": "Reward icons", "where": "the claim toast and the header",
-        "spec": {"formats": ["PNG"], "transparent": True, "animated_formats": [],
-                 "min_axis": "side", "min_px": 64},
-        "images": {"claim": {"label": "Claim", "public": "rewards/claim.png",
-                             "default": {"w": 128, "h": 128}},
-                   "gift": {"label": "Gift", "public": "rewards/gift.png",
-                            "default": {"w": 128, "h": 119}}},
-    },
-    "power_poses": {
-        "name": "Power poses", "where": "the restart and shutdown screens",
-        "spec": {"formats": ["PNG"], "transparent": True, "animated_formats": [],
-                 "min_axis": "side", "min_px": 256},
-        "images": {"restart": {"label": "Restart", "public": "mascots/nel_restart.png",
-                               "default": {"w": 406, "h": 401}},
-                   "shutdown": {"label": "Shutdown", "public": "mascots/nel_shutdown.png",
-                                "default": {"w": 401, "h": 398}}},
-    },
-}
-BRANDING_SLOTS = BANNER_SLOTS + tuple(ROLE_SLOTS)
-
-# What an upload to a role must clear besides its spec: a hard ceiling on the bytes read and on
-# the pixels' extent (checked from the header, before any pixel is decoded), the shape tolerance
-# (how far beyond square, or beyond the pack default's shape, a picture's may lie, relative), "transparent"
-# meaning at least 1 % of the pixels are more than half see-through, and the budget for an
-# animation the role allows (its frames are decoded one at a time to prove the file is sound, so
-# the count and the total pixels are capped first).
-ROLE_MAX_BYTES = 12 * 1024 * 1024
-ROLE_MAX_SIDE = 4096
-ROLE_ASPECT_TOLERANCE = 0.08
-ROLE_SEE_THROUGH_MIN = 0.01
-ROLE_MAX_FRAMES = 300
-ROLE_MAX_ANIM_PIXELS = 64_000_000
-# The only formats a role upload ever opens. Pillow identifies dozens, some with decoders that shell
-# out or are old and sprawling (EPS via Ghostscript, TIFF, PSD...); those never reach a decoder here.
-# PNG and WebP are what a role takes; JPEG and GIF are opened only so the editor can refuse them BY
-# NAME ("this one is JPEG") rather than "couldn't read this".
-ROLE_OPEN_FORMATS = ("PNG", "WEBP", "JPEG", "GIF")
-# The same question asked of a banner upload (/api/branding/slot decodes the same way): banners are
-# wide, so the ceiling is higher, but a WebP may not declare a canvas past it.
-BANNER_MAX_SIDE = 8192
-
-
-def _slot_dir(slot):
-    # Slot names double as ROLE_CODE keys, so the coded folder falls straight
-    # out of the map -- the LOGICAL slot key ("banner_main") stays the JSON/API
-    # vocabulary everywhere above this line.
-    return _role_dir(slot)
-
-
-def _asset_transform(it):
-    """Normalize one manifest item's crop transform to the design's zoom/cropX/cropY
-    model (Control Panel.dc.html:953 -- object-position cropX% cropY% + scale(zoom/100)).
-    Back-compat: an item written under the OLD left/center/right crop model (pre
-    2026-08-06) maps to the equivalent pan -- left->cropX 0, center->50, right->100 --
-    at zoom 100, cropY 50, so an existing install's banners keep displaying unchanged
-    until re-tuned."""
-    if not isinstance(it, dict):
-        it = {}
-    if "zoom" in it or "cropX" in it or "cropY" in it:
-        z = it.get("zoom", 100); cx = it.get("cropX", 50); cy = it.get("cropY", 50)
-    else:
-        legacy = {"left": 0, "right": 100}.get(it.get("crop") or "center", 50)
-        z, cx, cy = 100, legacy, 50
-    try:
-        z = max(100, min(int(z), 250))
-        cx = max(0, min(int(cx), 100))
-        cy = max(0, min(int(cy), 100))
-    except (TypeError, ValueError):
-        z, cx, cy = 100, 50, 50
-    return {"zoom": z, "cropX": cx, "cropY": cy}
-
-
-def list_slot_assets(out_dir, slot):
-    """Uploaded assets for one Branding slot: branding/<slot>/manifest.json
-    entries whose .png actually exists. Empty on a fresh install / until that
-    slot's first real upload, exactly like list_marks() above. Each asset carries
-    its zoom/cropX/cropY transform (normalized, legacy crop migrated)."""
-    if slot not in BANNER_SLOTS:
-        return []
-    raw = _branding_bytes(_role_rel(slot, "manifest.json"))
-    if raw is None:
-        return []
-    try:
-        data = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
-        return []
-    if not isinstance(data, dict):
-        return []          # corrupt manifest degrades to "no assets", never a 500
-    out = []
-    for it in data.get("items") or []:
-        if not isinstance(it, dict):
-            continue
-        iid = str(it.get("id") or "")
-        if iid and _branding_exists(_role_rel(slot, iid + ".png")):
-            out.append({"id": iid, **_asset_transform(it),
-                        "png": "/branding/%s/%s.png" % (slot, iid)})
-    return out
-
-
-def _recorded_slot_active(out_dir):
-    """The RECORDED pick per slot, exactly as settings.json's branding.slots holds it -- no
-    self-heal, no existence check, no defaulting. Split out so the resolver below can be
-    handed ONE read instead of re-reading it per slot. (settings.json is written through
-    moonglade.settings.update_branding, which changes only the key it is asked to, so the
-    mark's writer can never clobber a slot pick or the other way round.)"""
-    raw = _settings.branding().get("slots")
-    if not isinstance(raw, dict):
-        return {}
-    return {k: str(v) for k, v in raw.items() if k in BANNER_SLOTS and v}
-
-
-def resolve_slot_active(out_dir, slot, recorded=None, assets=None):
-    """Which asset a slot actually wears, by ONE rule for every caller:
-
-      1. the RECORDED pick, when an asset with that id still exists on disk;
-      2. otherwise the manifest's LAST item -- the most recent upload, which is
-         the one add_slot_asset() makes active on the way in, so a pick that
-         went missing heals to the asset the last upload had already chosen;
-      3. otherwise None (the slot is empty).
-
-    One function because the answer has to be the SAME answer in three places:
-    the payload the Branding tab is served, load_slot_active()'s self-heal, and
-    the startup ensure pass that decides whether a render is still current. The
-    self-heal used to be `next(iter({ids}), None)` over a SET, and a set of
-    strings iterates in hash order -- which is randomised per process. With two
-    assets and no recorded pick, two starts of one install could resolve to
-    different assets, so the ensure pass compared the render against one answer
-    and re-rendered it to the other, on every other boot.
-
-    `recorded` / `assets` let a caller that already has them skip the re-read."""
-    if slot not in BANNER_SLOTS:
-        return None
-    ids = [a["id"] for a in (list_slot_assets(out_dir, slot) if assets is None else assets)]
-    if recorded is None:
-        recorded = _recorded_slot_active(out_dir).get(slot)
-    if recorded in ids:
-        return recorded
-    return ids[-1] if ids else None
-
-
-def load_slot_active(out_dir):
-    """Which uploaded asset (by id) is the ACTIVE one per slot -- the same
-    relationship settings.json's branding "mark" already has to list_marks():
-    many stored, one worn. Self-heals exactly like load_branding() does for
-    "mark": a recorded active id that no longer exists on disk (deleted file,
-    corrupt manifest) falls back through resolve_slot_active() above, which is
-    where the healing rule -- and its determinism -- lives."""
-    recorded = _recorded_slot_active(out_dir)
-    return {slot: resolve_slot_active(out_dir, slot, recorded.get(slot))
-            for slot in BANNER_SLOTS}
-
-
-def save_slot_active(out_dir, active):
-    slots = {k: v for k, v in active.items() if v}
-    _settings.update_branding(lambda b: b.__setitem__("slots", slots))
-
-
-def add_slot_asset(out_dir, slot, png_bytes, zoom=100, cropx=50, cropy=50):
-    """Save a new upload into one Branding slot and make it the active one.
-    Returns the new asset dict, or None for an unknown slot. Caller (the
-    /api/branding/slot route) is responsible for making sure png_bytes is a
-    real PNG before this is called -- this function just persists it. New
-    uploads start at the neutral transform (zoom 100, centered) -- the
-    equivalent of the design's own defaults."""
-    if slot not in BANNER_SLOTS:
-        return None
-    sdir = _slot_dir(slot)
-    sdir.mkdir(parents=True, exist_ok=True)
-    # First write against a container-dressed slot: promote the shipped manifest
-    # loose first, or this upload would shadow every default out of the picker.
-    _seed_loose_manifest(_role_rel(slot, "manifest.json"))
-    try:
-        data = json.loads((sdir / "manifest.json").read_text(encoding="utf-8"))
-        items = list(data.get("items") or []) if isinstance(data, dict) else []
-    except (OSError, ValueError):
-        items = []
-    new_id = secrets.token_hex(4)
-    (sdir / (new_id + ".png")).write_bytes(png_bytes)
-    # The app just put a file in the tree: record it as a default in the same
-    # breath, so the read-only scan cannot later read the app's own write as a
-    # file the install did not put there (_baseline_note_app_write).
-    _baseline_note_app_write(out_dir, _role_rel(slot, new_id + ".png"))
-    t = _asset_transform({"zoom": zoom, "cropX": cropx, "cropY": cropy})
-    items.append({"id": new_id, **t})
-    (sdir / "manifest.json").write_text(json.dumps({"items": items}, indent=2), encoding="utf-8")
-    active = load_slot_active(out_dir)
-    active[slot] = new_id
-    save_slot_active(out_dir, active)
-    _write_banner_flat(out_dir, slot)   # the new upload is now active -> display it
-    return {"id": new_id, **t, "png": "/branding/%s/%s.png" % (slot, new_id)}
-
-
-def set_slot_crop(out_dir, slot, item_id, zoom=None, cropx=None, cropy=None):
-    """Update one already-uploaded asset's zoom/cropX/cropY transform (Control
-    Panel.dc.html's three banner sliders -- zoom 100-250, cropX/cropY 0-100).
-    Any field left None keeps its stored value. False for an unknown slot/item,
-    never a 500. Widened 2026-08-06 from the old 3-value left/center/right crop."""
-    if slot not in BANNER_SLOTS:
-        return False
-    sdir = _slot_dir(slot)
-    # Adjusting a shipped default's crop is a WRITE -- promote the manifest
-    # loose first so the edit lands on a real file (P3-review lesson: without
-    # this, retuning a container-shipped banner just failed).
-    _seed_loose_manifest(_role_rel(slot, "manifest.json"))
-    try:
-        data = json.loads((sdir / "manifest.json").read_text(encoding="utf-8"))
-        items = data.get("items") if isinstance(data, dict) else None
-    except (OSError, ValueError):
-        return False
-    if not isinstance(items, list):
-        return False
-    found = False
-    for it in items:
-        if isinstance(it, dict) and str(it.get("id")) == str(item_id):
-            cur = _asset_transform(it)
-            merged = {
-                "zoom": cur["zoom"] if zoom is None else zoom,
-                "cropX": cur["cropX"] if cropx is None else cropx,
-                "cropY": cur["cropY"] if cropy is None else cropy,
-            }
-            norm = _asset_transform(merged)
-            it.pop("crop", None)          # drop the legacy field once re-tuned
-            it.update(norm)
-            found = True
-    if not found:
-        return False
-    (sdir / "manifest.json").write_text(json.dumps({"items": items}, indent=2), encoding="utf-8")
-    if load_slot_active(out_dir).get(slot) == str(item_id):
-        _write_banner_flat(out_dir, slot)   # the transform is baked into the displayed flat
-    return True
-
-
-def set_slot_active(out_dir, slot, item_id):
-    """Mark an already-uploaded asset as the active one for its slot. False for
-    an unknown slot or an item_id that isn't a real asset in it -- there is no
-    "clear to none" here on purpose: the design never models deselecting a slot
-    back to empty, only picking among what's uploaded, and load_slot_active()'s
-    own self-heal (falling back to the first real asset when nothing is
-    recorded) would silently undo a stored None anyway, since the two cases
-    look identical on disk."""
-    if slot not in BANNER_SLOTS:
-        return False
-    if not item_id or item_id not in {a["id"] for a in list_slot_assets(out_dir, slot)}:
-        return False
-    active = load_slot_active(out_dir)
-    active[slot] = item_id
-    save_slot_active(out_dir, active)
-    _write_banner_flat(out_dir, slot)
-    return True
-
-
-def _mark_earned(out_dir, db_path, ach_id):
-    """Whether one specific achievement id is currently earned -- runs the exact
-    same compute_achievements() pipeline /api/achievements itself uses, so a
-    custom-mark upload can never disagree with what the Branding tab already
-    shows unlocked. Pure read (no save_ach_state call), so unlike that route it
-    needs no lock -- nothing here can race a concurrent write."""
-    metrics = achievement_metrics(db_path)
-    metrics.update(telemetry_metrics(out_dir))
-    state = load_ach_state(out_dir)
-    result = compute_achievements(metrics, state.get("seen"),
-                                   sets=load_telemetry(out_dir).get("sets", {}),
-                                   earned_at=state.get("earned_at"))
-    return any(a["id"] == ach_id and a["earned"] for a in result["achievements"])
-
-
-ICO_SIZES = (16, 32, 48, 256)
-
-
-def _cut_mark_ico(mdir, mark_id, art_bytes):
-    """Cut <mark_id>.ico beside an uploaded mark's art. Returns True if the file was
-    written, False if it could not be (and the caller keeps the mark either way).
-
-    WHY: the Desktop launcher shortcut is the app's real icon (make_launcher_shortcut --
-    a .pyw cannot carry one, the .lnk can), and it reads a mark's .ico off disk. The
-    shipped tile marks are delivered with one already cut; an UPLOADED mark never had one,
-    so POST /api/branding/shortcut answered "no .ico cut" for it and a custom mark could
-    never become the launcher's icon. Cutting it at upload time is what closes that.
-
-    The art is padded to a SQUARE on transparency (an icon is square; letterboxing beats
-    stretching), and scaled to 256 when it is smaller, so all four of ICO_SIZES really land
-    in the file rather than Pillow silently dropping the ones larger than the source. An
-    animated webp contributes its FIRST frame -- an .ico has no animation to keep it in.
-
-    FAILS SOFT on everything: no Pillow, unreadable art, a write that cannot happen. The
-    mark itself is already saved by the time this runs, and losing the icon is not a reason
-    to lose the mark."""
-    try:
-        import io
-        from PIL import Image
-        with Image.open(io.BytesIO(art_bytes)) as im:
-            im.load()
-            rgba = im.convert("RGBA")
-        side = max(rgba.width, rgba.height)
-        if side <= 0:
-            return False
-        if rgba.width != rgba.height:
-            square = Image.new("RGBA", (side, side), (0, 0, 0, 0))
-            square.paste(rgba, ((side - rgba.width) // 2, (side - rgba.height) // 2))
-            rgba = square
-        biggest = max(ICO_SIZES)
-        if side < biggest:
-            rgba = rgba.resize((biggest, biggest), Image.LANCZOS)
-        rgba.save(mdir / (str(mark_id) + ".ico"), format="ICO",
-                  sizes=[(s, s) for s in ICO_SIZES])
-        return True
-    except Exception:
-        return False
-
-
-def add_custom_mark(out_dir, png_bytes, label="Custom mark", ext=".png"):
-    """Save The Great Library's custom-mark upload into branding/marks/ and make
-    it the active mark. Same manifest shape list_marks() already reads
-    (marks.json + <id>.png) -- one new kind:'upload' entry, not a new storage
-    concept, matching how add_slot_asset() extends the identical contract for
-    banner slots. Unlike _adopt_mark() (the filesystem-drop path, which derives
-    an id from the dropped filename), this is a real upload with a random id,
-    same convention add_slot_asset() uses for banner uploads.
-
-    There is only ONE custom-mark slot (the design's single 6th tile), so a
-    second upload REPLACES the first -- any existing kind:'upload' entry (and
-    its .png/.webp/.ico) is dropped here first, rather than accumulating
-    orphaned marks the picker would need de-duping logic to hide.
-
-    Also cuts the mark's launcher .ico (2026-09-07, see _cut_mark_ico) -- the
-    returned `ico` is True when that file was written and False when the cut
-    failed, and the mark is saved either way."""
-    mdir = _role_dir("marks")
-    mdir.mkdir(parents=True, exist_ok=True)
-    _seed_loose_manifest(_role_rel("marks", "marks.json"))   # keep shipped defaults in the picker
-    try:
-        data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
-        marks = list(data.get("marks") or []) if isinstance(data, dict) else []
-    except (OSError, ValueError):
-        marks = []
-    for old in [m for m in marks if isinstance(m, dict) and (m.get("kind") or "tile") == "upload"]:
-        # ".ico" joins MARK_EXTS here (2026-09-07): an upload now gets one cut for it, so
-        # the replaced upload's icon has to go with its art -- otherwise a stale .ico
-        # outlives the mark it was cut from and list_marks would keep claiming it.
-        for old_ext in MARK_EXTS + (".ico",):   # the replaced upload may be either format
-            old_art = mdir / (str(old.get("id")) + old_ext)
-            if old_art.exists():
-                old_art.unlink()
-    marks = [m for m in marks if not (isinstance(m, dict) and (m.get("kind") or "tile") == "upload")]
-    new_id = secrets.token_hex(4)
-    (mdir / (new_id + ext)).write_bytes(png_bytes)
-    # Cut the launcher icon too (2026-09-07). Before this an upload always reported
-    # ico:False and POST /api/branding/shortcut refused it, so a custom mark could never
-    # become the app's Desktop icon. Best effort: the mark is already on disk, and a
-    # failed cut costs the icon, never the mark.
-    ico = _cut_mark_ico(mdir, new_id, png_bytes)
-    # Both files the app just wrote into the tree go into the baseline as
-    # defaults (_baseline_note_app_write). The .ico matters as much as the art:
-    # Pillow reads an .ico perfectly well, so an unrecorded one would raise the
-    # flag on the very next scan.
-    _baseline_note_app_write(out_dir, _role_rel("marks", new_id + ext))
-    if ico:
-        _baseline_note_app_write(out_dir, _role_rel("marks", new_id + ".ico"))
-    marks.append({"id": new_id, "label": label, "kind": "upload"})
-    (mdir / "marks.json").write_text(json.dumps({"marks": marks}, indent=2), encoding="utf-8")
-    cfg = load_branding(out_dir)
-    cfg["mark"] = new_id
-    save_branding(out_dir, cfg)
-    return {"id": new_id, "label": label, "kind": "upload",
-            "png": "/branding/marks/%s%s" % (new_id, ext),
-            "animated": ext == ".webp", "ico": ico}
-
-
-def remove_custom_mark(out_dir, mark_id):
-    """Remove one uploaded custom mark. Refuses to touch a non-upload (built-in
-    tile) mark -- the design's Replace/Remove chips only ever appear next to the
-    uploaded one, but this guard makes that true at the data layer too, not just
-    the UI. Reverts the active mark back to the default logo if the removed one
-    was the one currently worn."""
-    mdir = _role_dir("marks")
-    try:
-        data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
-        marks = list(data.get("marks") or []) if isinstance(data, dict) else []
-    except (OSError, ValueError):
-        return False
-    target = next((m for m in marks if isinstance(m, dict) and str(m.get("id")) == str(mark_id)
-                   and (m.get("kind") or "tile") == "upload"), None)
-    if target is None:
-        return False
-    keep = [m for m in marks if m is not target]
-    (mdir / "marks.json").write_text(json.dumps({"marks": keep}, indent=2), encoding="utf-8")
-    # ".ico" joins the sweep (2026-09-07): an upload gets a launcher icon cut for it, and
-    # it must not outlive the mark -- a left-behind .ico is an icon path pointing at a
-    # mark that no longer exists.
-    for ext in MARK_EXTS + (".ico",):    # an uploaded mark may be png or webp
-        art = mdir / (str(mark_id) + ext)
-        if art.exists():
-            art.unlink()
-    cfg = load_branding(out_dir)
-    if cfg.get("mark") == str(mark_id):
-        cfg["mark"] = "logo"
-        save_branding(out_dir, cfg)
-    return True
-
-
-def branding_slots_payload(out_dir):
-    """The Branding tab's full slot state -- assets + which one is active, per
-    slot -- in the one shape both /api/branding and /api/panel/summary hand to
-    the React BrandingTab. A single function so both routes can never disagree
-    about what a slot looks like.
-
-    The active id comes from resolve_slot_active() -- the same function the
-    self-heal and the startup render pass ask -- so what the tab shows as active
-    is what the header is actually wearing. Each slot's manifest is parsed once
-    and handed to both halves."""
-    recorded = _recorded_slot_active(out_dir)
-    out = {}
-    for slot in BANNER_SLOTS:
-        assets = list_slot_assets(out_dir, slot)
-        out[slot] = {"assets": assets,
-                     "active": resolve_slot_active(out_dir, slot, recorded.get(slot), assets)}
-    return out
-
-
-# ---------------------------------------------------------------------------
-# The named roles (Session X): what an upload must be, how it is written, how it is undone,
-# and what the app does when an override cannot be read. ROLE_SLOTS (above) is the table.
-# ---------------------------------------------------------------------------
-def _ratio_label(w, h):
-    """A picture's shape in words for a refusal: "1:1", "3:2", "16:9", or "1.71:1" when no small
-    whole-number ratio matches within half a percent."""
-    if w <= 0 or h <= 0:
-        return "0:0"
-    have = w / h
-    for q in range(1, 17):
-        p = round(have * q)
-        if p >= 1 and abs(have - p / q) / have <= 0.005:
-            g = math.gcd(p, q)
-            return "%d:%d" % (p // g, q // g)
-    return "%.2f:1" % have
-
-
-def role_image_spec(slot, key):
-    """What ONE image's override must be: the role's formats, transparency and drawn minimum, with
-    the SHAPE taken from the pack default it replaces (anything between square and that shape,
-    ROLE_ASPECT_TOLERANCE beyond either: see role_spec_failures) and the minimum size lowered to the
-    default's own where the default is smaller than the drawn minimum (the login companion's pack
-    art is 360 px tall, the drawn minimum 600)."""
-    role = ROLE_SLOTS[slot]
-    base, d = role["spec"], role["images"][key]["default"]
-    own = d["h"] if base["min_axis"] == "height" else min(d["w"], d["h"])
-    return {"formats": list(base["formats"]), "transparent": base["transparent"],
-            "animated_formats": list(base["animated_formats"]),
-            "aspect": [d["w"], d["h"]], "aspect_tolerance": ROLE_ASPECT_TOLERANCE,
-            "min_axis": base["min_axis"], "min_px": min(base["min_px"], own)}
-
-
-def _aspect_words(aw, ah, tol):
-    """The shape an image may take, in words for a rule: "about square" when its pack default is
-    square to within the tolerance, else the span from that default's shape to square, "about 9:10
-    to square" (a tall default) or "about square to 9:8" (a wide one)."""
-    a = aw / ah
-    if abs(a - 1.0) <= tol:
-        return "about square"
-    label = _ratio_label(aw, ah)
-    return "about %s to square" % label if a < 1 else "about square to %s" % label
-
-
-def role_spec_failures(spec, facts):
-    """The rules `facts` breaks against one image's spec (role_image_spec), in the order the editor
-    lists them: format, transparency, animation, shape, size. [] means the file is acceptable.
-
-    `facts` is what was MEASURED (role_measure): {"format": "PNG", "w": 256, "h": 256,
-    "see_through": 0.31, "animated": False} (see_through = the share of pixels more than half
-    clear). Each failure is {"rule", "need", "got"}: the words a refusal and the editor's tick
-    line both use. The client runs the same rules over the same measurements
-    (lib/brandRolesCore.js) to tick them live; THIS is the one that decides."""
-    failed = []
-    fmt = str(facts.get("format") or "").upper()
-    if fmt not in spec["formats"]:
-        failed.append({"rule": "format", "need": " or ".join(spec["formats"]), "got": fmt or "unknown"})
-    if spec["transparent"] and facts["see_through"] < ROLE_SEE_THROUGH_MIN:
-        clear = facts["see_through"]
-        failed.append({"rule": "transparent", "need": "a transparent background",
-                       "got": "opaque" if clear <= 0 else "%.1f%% see-through" % (clear * 100)})
-    if facts.get("animated") and fmt not in spec["animated_formats"]:
-        failed.append({"rule": "animation", "need": "a still picture", "got": "animated"})
-    w, h = facts["w"], facts["h"]
-    aw, ah = spec["aspect"]
-    want, tol = aw / ah, spec["aspect_tolerance"]
-    # anything between square and the default's shape, `tol` beyond either edge
-    lo, hi = min(1.0, want) * (1 - tol), max(1.0, want) * (1 + tol)
-    if h <= 0 or not (lo <= w / h <= hi):
-        failed.append({"rule": "aspect", "need": _aspect_words(aw, ah, tol), "got": _ratio_label(w, h)})
-    tall = spec["min_axis"] == "height"
-    have = h if tall else min(w, h)
-    if have < spec["min_px"]:
-        unit = " px tall" if tall else " px"
-        failed.append({"rule": "size", "need": "at least %d%s" % (spec["min_px"], unit),
-                       "got": "%d%s" % (have, unit)})
-    return failed
-
-
-_ROLE_NEED_VERB = {"format": "be", "transparent": "have", "animation": "be", "aspect": "be", "size": "be"}
-
-
-def role_refusal_text(role_name, failed):
-    """The loud refusal, in plain words: the rule and the measured value, ending on the one
-    thing the user most needs to hear. One broken rule reads "...must be about square. This one
-    is 3:4."; several read as pairs, "...must be about 9:10 (this one is 3:2) and at least 128 px
-    (this one is 64 px)."."""
-    if len(failed) == 1:
-        f = failed[0]
-        what = "%s %s. This one is %s." % (_ROLE_NEED_VERB[f["rule"]], f["need"], f["got"])
-    else:
-        parts, last = [], None
-        for f in failed:
-            verb = _ROLE_NEED_VERB[f["rule"]]
-            parts.append(("" if verb == last else verb + " ") + "%s (this one is %s)" % (f["need"], f["got"]))
-            last = verb
-        what = ", ".join(parts[:-1]) + " and " + parts[-1] + "."
-    return "Refused: the %s must %s Your current art is unchanged." % (role_name, what)
-
-
-class ImageRefused(Exception):
-    """A picture the app turns away in its own plain words (the message IS the sentence to show). It is
-    deliberately NOT a ValueError: Pillow raises ValueErrors of its own ("tile cannot extend outside
-    image"), and one of those must never pass for a sentence meant for the user."""
-
-
-_UNREADABLE = "Couldn't read this image."
-
-
-def webp_declared_size(head):
-    """The canvas a WebP's own header declares, as (width, height), read by hand from its first ~30
-    bytes; None when `head` is not a WebP at all. Raises ImageRefused when it IS a WebP whose header
-    cannot be read: no picture chunk a WebP may start with, or a lossy / lossless header missing its
-    start code / signature, or a header cut short.
-
-    WHY BY HAND: libwebp commits the whole declared canvas when Pillow merely OPENS a WebP, so a
-    138-byte file claiming 16383 x 16383 costs ~2 GB before any size check Pillow offers has run.
-      VP8X (animated, or with alpha / metadata): 24-bit width-1 at offset 24, height-1 at 27.
-      VP8  (lossy): after the frame tag and the 9d 01 2a start code, 14-bit width at 26, height at 28.
-      VP8L (lossless): after the 0x2f signature, 14-bit width-1 and 14-bit height-1 packed at 21."""
-    if len(head) < 12 or head[:4] != b"RIFF" or head[8:12] != b"WEBP":
-        return None
-    kind = head[12:16]
-    if kind == b"VP8X" and len(head) >= 30:
-        return (int.from_bytes(head[24:27], "little") + 1, int.from_bytes(head[27:30], "little") + 1)
-    if kind == b"VP8 " and len(head) >= 30 and head[23:26] == b"\x9d\x01\x2a":
-        return (int.from_bytes(head[26:28], "little") & 0x3FFF, int.from_bytes(head[28:30], "little") & 0x3FFF)
-    if kind == b"VP8L" and len(head) >= 25 and head[20] == 0x2F:
-        bits = int.from_bytes(head[21:25], "little")
-        return ((bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1)
-    raise ImageRefused(_UNREADABLE)
-
-
-def guard_webp_canvas(head, max_side):
-    """Refuse, BEFORE anything opens the file, a WebP whose declared canvas is past `max_side` on a
-    side (or whose header cannot be read). Pass the file's first 64 bytes or more. One helper for every
-    upload that decodes user pictures: the named roles (role_measure) and the banner slots."""
-    size = webp_declared_size(head)
-    if size is not None and max(size) > max_side:
-        raise ImageRefused("That picture is larger than {:,} px on a side.".format(max_side))
-
-
-def role_measure(raw):
-    """Open one picture's bytes and measure it: (facts, rgba) with facts as role_spec_failures reads
-    them. A WebP's declared canvas is read from its header first (guard_webp_canvas); the size of
-    anything else comes from its header too and is refused past ROLE_MAX_SIDE before a pixel is
-    decoded; an animation is refused past its frame and pixel budget before any frame is. Raises
-    ImageRefused with the plain-words message when the picture cannot be used at all; anything
-    Pillow itself raises becomes the one plain sentence about not being able to read it."""
-    import io
-    guard_webp_canvas(raw[:64], ROLE_MAX_SIDE)
-    try:
-        from PIL import Image
-        im = Image.open(io.BytesIO(raw), formats=ROLE_OPEN_FORMATS)
-        fmt, (w, h) = im.format, im.size
-        if max(w, h) > ROLE_MAX_SIDE:
-            raise ImageRefused("That picture is larger than {:,} px on a side.".format(ROLE_MAX_SIDE))
-        frames = getattr(im, "n_frames", 1)
-        if frames > 1 and (frames > ROLE_MAX_FRAMES or frames * w * h > ROLE_MAX_ANIM_PIXELS):
-            raise ImageRefused("That animation is too long or too big.")
-        im.load()
-        rgba = im.convert("RGBA")
-    except ImageRefused:
-        raise
-    except Exception:                      # noqa: BLE001 -- anything Pillow raises, ValueErrors included
-        raise ImageRefused(_UNREADABLE)
-    clear = sum(rgba.getchannel("A").histogram()[:128]) / float(w * h)
-    return {"format": fmt, "w": w, "h": h, "see_through": clear, "animated": frames > 1}, rgba
-
-
-_ROLE_KEEP_CHUNKS = (b"VP8X", b"ICCP", b"ANIM", b"ANMF")
-
-
-def _role_animation_bytes(raw):
-    """An accepted animated WebP, ready to store: rebuilt from only the chunks the picture needs (the
-    VP8X header, a colour profile, the animation's parameters and its frames), so metadata a sender
-    embedded (a camera's EXIF, an editor's XMP) is not served from the sign-in page, with the VP8X
-    header no longer claiming it; cut at the end of its RIFF container so nothing appended after the
-    picture survives; and every frame decoded once to prove the file is sound. Raises ImageRefused for
-    a stream that stops short, has a chunk that overruns, or will not decode."""
-    import io
-    from PIL import Image
-    if raw[:4] != b"RIFF" or raw[8:12] != b"WEBP":
-        raise ImageRefused(_UNREADABLE)
-    end = 8 + int.from_bytes(raw[4:8], "little")
-    if end > len(raw):
-        raise ImageRefused(_UNREADABLE)
-    body, pos, kept = raw[12:end], 0, []
-    while pos + 8 <= len(body):
-        fourcc = body[pos:pos + 4]
-        size = int.from_bytes(body[pos + 4:pos + 8], "little")
-        if pos + 8 + size > len(body):
-            raise ImageRefused(_UNREADABLE)
-        span = min(8 + size + (size & 1), len(body) - pos)          # a chunk is padded to an even length
-        if fourcc in _ROLE_KEEP_CHUNKS:
-            kept.append(body[pos:pos + span])
-        pos += span
-    if not kept or kept[0][:4] != b"VP8X" or len(kept[0]) < 18:
-        raise ImageRefused(_UNREADABLE)
-    head = bytearray(kept[0])
-    head[8] &= ~0x0C & 0xFF                                         # no EXIF (0x08), no XMP (0x04)
-    kept[0] = bytes(head)
-    data = b"RIFF" + (4 + sum(len(c) for c in kept)).to_bytes(4, "little") + b"WEBP" + b"".join(kept)
-    try:
-        with Image.open(io.BytesIO(data), formats=("WEBP",)) as im:
-            for i in range(getattr(im, "n_frames", 1)):
-                im.seek(i)
-                im.load()
-    except Exception:                      # noqa: BLE001
-        raise ImageRefused(_UNREADABLE)
-    return data
-
-
-def _role_coded_rel(slot, key):
-    return _public_rel_to_coded(ROLE_SLOTS[slot]["images"][key]["public"])
-
-
-def _role_override_path(slot, key):
-    return branding_root() / _role_coded_rel(slot, key)
-
-
-def _role_coded_rels():
-    """Every role image's CODED rel, lowercased (the filesystem the tree lives on is
-    case-insensitive on Windows, so the serve route compares the way the seal does)."""
-    return frozenset(_role_coded_rel(slot, key).lower()
-                     for slot, role in ROLE_SLOTS.items() for key in role["images"])
-
-
-_role_decode_memo = {}
-
-
-def _role_file_decodes(path):
-    """Whether an override file on disk still decodes as a picture. Answered once per
-    (file, mtime, size): the public /branding/ route asks on every request for these names, and a
-    decode per request would be work a stranger on the LAN could schedule. A changed file is a
-    new key, so a repaired override is believed at once."""
-    try:
-        st = os.stat(path)
-    except OSError:
-        return False
-    key = (str(path), st.st_mtime_ns, st.st_size)
-    hit = _role_decode_memo.get(key)
-    if hit is not None:
-        return hit
-    try:
-        from PIL import Image
-        with Image.open(path, formats=ROLE_OPEN_FORMATS) as im:
-            im.load()
-        ok = True
-    except Exception:                      # noqa: BLE001 -- anything undecodable is "unreadable"
-        ok = False
-    if len(_role_decode_memo) > 128:
-        _role_decode_memo.clear()
-    _role_decode_memo[key] = ok
-    return ok
-
-
-def branding_roles_payload(out_dir):
-    """The Roles section's state for the Branding tab, in the fixed meeting order (the order of
-    ROLE_SLOTS): per role its name and where it shows, and per image its own spec, the URL the app
-    wears now, whether that is the install's own file, whether that file still decodes (a
-    missing or unreadable override is served as the pack's default -- see the /branding/ route
-    -- and the row says so), and a URL for the pack's own art so the row can show default
-    beside yours. Both /api/branding and /api/panel/summary hand it over, so the two cannot
-    disagree."""
-    box = _get_container()
-    roles = []
-    for slot, role in ROLE_SLOTS.items():
-        images = []
-        for key, img in role["images"].items():
-            coded = _public_rel_to_coded(img["public"])
-            path = branding_root() / coded
-            try:
-                yours = path.is_file()
-                stamp = path.stat().st_mtime_ns // 1_000_000 if yours else 0
-            except OSError:
-                yours, stamp = False, 0
-            images.append({
-                "key": key, "label": img["label"], "url": "/branding/" + img["public"],
-                "yours": yours, "unreadable": bool(yours and not _role_file_decodes(path)),
-                "v": stamp,
-                "default_url": ("/api/branding/role/default/%s/%s" % (slot, key))
-                               if box is not None and box.has(coded) else None,
-                # the rule THIS image's override must meet (role_image_spec), for the editor to tick
-                "spec": dict(role_image_spec(slot, key), see_through_min=ROLE_SEE_THROUGH_MIN),
-            })
-        roles.append({"slot": slot, "name": role["name"], "where": role["where"], "images": images})
-    return roles
-
-
-def _role_payload(out_dir, slot):
-    return next(r for r in branding_roles_payload(out_dir) if r["slot"] == slot)
-
-
-def branding_role_upload(out_dir, slot, key, upload=None, media_id="", check_only=False):
-    """POST /api/branding/slot for a role slot: one picture becomes the install's override of
-    one role image. Returns (body, status). Read it top to bottom -- it is the whole path:
-
-      1. take the bytes, from the uploaded file or from the user's own library by media id,
-         capped at ROLE_MAX_BYTES;
-      2. open the picture and read its size from the HEADER; refuse anything over ROLE_MAX_SIDE a
-         side before a pixel is decoded (role_measure);
-      3. decode it (first frame), measure format, shape, size, whether it moves and how much of it
-         is see-through, and check those against THIS image's spec (role_image_spec) -- a broken
-         rule is a 400 that names the rule and the measured value, and NOTHING has been written;
-      4. only then write it: a still is re-encoded from the decoded pixels (nothing the sender
-         appended survives; the login companion is stored as WebP, every other role as PNG, under
-         the public name the app already asks for); the one animation a role allows (the login
-         companion's WebP) is decoded frame by frame and stored as sent, cut at its container's end
-         (_role_animation_bytes). The override file is replaced whole.
-
-    `check_only` stops after step 3 and answers with the measurements ({"facts": ...}) instead of
-    judging them: that is how a picture already in the library ("From the gallery") gets its rules
-    ticked in the editor before Use this, with the same numbers the client's rules read. It never
-    writes.
-
-    The pack is read-only here: the file lands in the coded tree, where loose beats the pack."""
-    import io
-    role = ROLE_SLOTS[slot]
-    img = role["images"].get(key)
-    if img is None:
-        return {"error": "unknown image"}, 400
-    if upload is not None and getattr(upload, "filename", ""):
-        raw = upload.stream.read(ROLE_MAX_BYTES + 1)
-    elif media_id:
-        hit = next((p for p in find_files_for_media_id(out_dir, media_id)
-                    if p.suffix.lower() in _IMAGE_EXTS), None)
-        if hit is None:
-            return {"error": "no local image for that media id"}, 400
-        try:
-            if hit.stat().st_size > ROLE_MAX_BYTES:
-                return {"error": "That file is too large."}, 400
-            raw = hit.read_bytes()
-        except OSError:
-            return {"error": _UNREADABLE}, 400
-    else:
-        return {"error": "no file"}, 400
-    if len(raw) > ROLE_MAX_BYTES:
-        return {"error": "That file is too large."}, 400
-    try:
-        facts, rgba = role_measure(raw)
-    except ImageRefused as exc:
-        return {"error": str(exc)}, 400
-    if check_only:
-        return {"facts": facts}, 200
-    failed = role_spec_failures(role_image_spec(slot, key), facts)
-    if failed:
-        return {"error": role_refusal_text(role["name"], failed), "failed": failed}, 400
-    buf = io.BytesIO()
-    if facts["animated"]:
-        try:
-            buf.write(_role_animation_bytes(raw))
-        except ImageRefused as exc:
-            return {"error": str(exc)}, 400
-    elif img["public"].lower().endswith(".webp"):
-        rgba.save(buf, "WEBP", lossless=True, quality=100, method=4)
-    else:
-        rgba.save(buf, "PNG", optimize=True)
-    path = _role_override_path(slot, key)
-    tmp = path.with_name("%s.%s.tmp" % (path.name, secrets.token_hex(4)))
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_bytes(buf.getvalue())
-        os.replace(tmp, path)
-    except OSError:
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
-        return {"error": "Couldn't save that file. Your current art is unchanged."}, 500
-    _baseline_note_app_write(out_dir, _role_coded_rel(slot, key))
-    return {"slot": slot, "key": key, "role": _role_payload(out_dir, slot)}, 200
-
-
-def branding_role_restore(out_dir, slot, key):
-    """POST /api/branding/role/restore: remove the install's override of one role image, so the
-    pack's default answers again. Returns (body, status). It unlinks ONE file under the coded
-    tree and nothing else; the pack (the container) is never opened for writing, and removing
-    an override that is not there is a quiet {"removed": false}, never an error.
-
-    It refuses (409) when the pack holds no default for that image: then the file under the coded
-    tree is the only copy of that art (the legacy branding migration moved an old install's loose
-    files into these very paths, and the art pack may be absent), and deleting it would leave the
-    role with nothing at all."""
-    if key not in ROLE_SLOTS[slot]["images"]:
-        return {"error": "unknown image"}, 400
-    path = _role_override_path(slot, key)
-    removed = False
-    try:
-        if path.is_file():
-            box = _get_container()
-            if box is None or not box.has(_role_coded_rel(slot, key)):
-                return {"error": "There's no default to go back to, so your file is kept."}, 409
-            path.unlink()
-            removed = True
-    except OSError:
-        return {"error": "Couldn't remove your file."}, 409
-    return {"slot": slot, "key": key, "removed": removed, "role": _role_payload(out_dir, slot)}, 200
-
-
-# The raw-drop path (moonglade-internal/DECISIONS.md, 2026-07-26, owner-confirmed 2026-08-05):
-# a fresh install ships the branding slot folders EMPTY, and a raw PNG/JPEG
-# placed by hand into one of the four adopt folders is ADOPTED into that slot by
-# the app itself -- no marks.json to hand-author, no upload UI, no authenticated
-# request. That is the point: the Branding tab's own upload API is gated, so a
-# drop has to be picked up by scanning the filesystem rather than by extending
-# the authenticated upload routes above.
-# Fallback README text ONLY (container absent): the real README content is a
-# SEALED asset materialized by ensure_branding_discovery_tree and deliberately
-# kept out of this public source.
-_BRANDING_README = "Maybe something goes in here.\n"
-# The folders the app creates at startup, so an install has somewhere to put
-# art. mascots/rewards are listed EXPLICITLY even though they are no longer
-# BRANDING_SLOTS (the 2026-08-13 unlock-split enforcement): existing installs
-# already have them, so the on-disk tree keeps the same six roles (now coded). A
-# drop in either is DETECTED and nothing else -- the wide read-only scan raises
-# the branding_custom_file flag (2026-09-10), while adoption stays narrow
-# (_SWEEPABLE_SLOTS + marks), so the role-bound files those two folders hold are
-# read but never consumed.
-_BRANDING_DISCOVERY_SLOTS = BANNER_SLOTS + ("mascots", "rewards", "marks")
-
-
-def _migrate_legacy_branding_root():
-    """One-time move of an existing install's OLD role-named `branding/` tree
-    into the coded goods tree (bundle-v2, SCOPE_bundle-v2-contract.md section
-    5). MOVE only, NEVER delete -- renaming the root would otherwise orphan
-    every real upload an existing install has (custom marks, banner slots, the
-    rendered flats). Rules:
-
-      - the six role folders' files -> their coded dirs (recursive, so the old
-        mascots/ach/ nesting lands under the coded ach folder too);
-      - old top-level loose files route through _public_rel_to_coded: the
-        three banner flats land top-level at the coded root, system files /
-        ee_* land in their coded homes (leaving them at the coded top would
-        strand a working override where the resolver no longer looks). The
-        flats do not STAY at the root: _migrate_root_banner_flats(), which a
-        real server start (main()) runs immediately after this, moves them on
-        into the banner cache (2026-09-10 -- renders live outside the tree
-        now). Two separate migrations on purpose: this one is legacy-tree-
-        shaped, additive-or-move-only and safe to run from create_app(); that
-        one is cache-shaped, needs an out_dir, and is destructive to the tree,
-        so it stays out of app construction;
-      - anything unrecognized STAYS PUT (flag-to-owner territory, per the
-        standing stray-copy rule), and a destination that already exists is
-        never overwritten -- the source stays put and is logged;
-      - emptied old folders are removed; the old root goes only if COMPLETELY
-        empty. One log line per move via the standard logger.
-
-    A no-op on fresh installs (no old root at all)."""
-    import logging as _logging
-    import shutil
-    old = branding_root().parent / "branding"
-    if not old.is_dir():
-        return
-    log = _logging.getLogger(__name__)
-
-    def _move(src, dst):
-        if dst.exists():
-            log.warning("branding migration: NOT moving %s (destination %s already exists)",
-                        src, dst)
-            return
-        try:
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(src), str(dst))
-            log.info("branding migration: moved %s -> %s", src, dst)
-        except OSError:
-            log.warning("branding migration: failed to move %s -> %s",
-                        src, dst, exc_info=True)
-
-    for role in ("banner_main", "banner_login", "banner_loom",
-                 "marks", "mascots", "rewards"):
-        src_dir = old / role
-        if not src_dir.is_dir():
-            continue
-        for p in sorted(src_dir.rglob("*")):
-            if p.is_file():
-                _move(p, _role_dir(role) / p.relative_to(src_dir))
-    try:
-        top = sorted(old.iterdir())
-    except OSError:
-        top = []
-    for p in top:
-        if not p.is_file():
-            continue
-        coded = _public_rel_to_coded(p.name)
-        if p.name in _BANNER_FLAT.values() or coded != p.name:
-            _move(p, branding_root() / coded)
-        # else: unrecognized (the old README.txt, stray notes) -- stays put.
-    # Sweep away what emptied, deepest-first; rmdir refuses anything non-empty,
-    # which is exactly the "removed only if left completely empty" contract.
-    for d in sorted((q for q in old.rglob("*") if q.is_dir()), reverse=True):
-        try:
-            d.rmdir()
-        except OSError:
-            pass
-    try:
-        old.rmdir()
-    except OSError:
-        pass
-    # Anything left behind was unrecognized (not a role folder, not a flat/system
-    # /ee_ file) so it stayed put by design -- but surface it rather than let it
-    # 404 silently, so the owner can move a stray by hand. (Re-logs each start
-    # while the leftover remains; that is a persistent, accurate nudge.)
-    if old.is_dir():
-        leftovers = [str(p.relative_to(old)) for p in old.rglob("*") if p.is_file()]
-        if leftovers:
-            log.warning("branding migration: %d file(s) left unmigrated in the old "
-                        "branding/ folder (unrecognized -- move by hand if wanted): %s",
-                        len(leftovers), ", ".join(sorted(leftovers)[:20]))
-
-
-def ensure_branding_discovery_tree():
-    """Create the empty, coded slot folders + the one GONK folder's README, so a
-    fresh install has the tree on disk. Idempotent and additive only -- never
-    touches a folder or file that already exists, so it is safe to call on every
-    server start regardless of what's already on disk (the owner's own real
-    tree, a returning install with real uploads, ...). Runs the one-time legacy
-    migration first so an old install's real files land in the coded dirs before
-    the empties go down. The README's content is materialized from the SEALED
-    asset (it never appears in this public source); a container-less install
-    gets the plain one-liner. The old root-level README is no longer written.
-
-    Called at STARTUP, never per-request, and from TWO places: create_app()
-    runs it, and main() runs it again itself immediately before
-    _migrate_root_banner_flats() -- which is what lets an ancient install's
-    legacy flats land at the coded root and be moved on within the same
-    start."""
-    _migrate_legacy_branding_root()
-    for slot in _BRANDING_DISCOVERY_SLOTS:
-        _role_dir(slot).mkdir(parents=True, exist_ok=True)
-    crumb_dir = _role_dir("breadcrumb")
-    readme = crumb_dir / "README.txt"
-    if not readme.exists():
-        try:
-            crumb_dir.mkdir(parents=True, exist_ok=True)
-            raw = _branding_bytes(_role_rel("breadcrumb", "README.txt"))
-            if raw is not None:
-                readme.write_bytes(raw)
-            else:
-                readme.write_text(_BRANDING_README, encoding="utf-8")
-        except OSError:
-            pass
-
-
-def _migrate_root_banner_flats(out_dir):
-    """One-time MOVE of any rendered banner flat still sitting at the coded
-    root into banner_cache_dir() (2026-09-10 owner ruling: renders leave the
-    tree; afterwards the root holds nothing the app wrote). Idempotent and a
-    no-op once the root holds no flats, so it is safe on every start.
-
-    Called from main() only -- NOT from create_app(). This is the one startup
-    step that writes destructively to the coded tree, and create_app() is built
-    by ~every test in the suite, several of them from module-scoped fixtures
-    that conftest's per-test branding isolation cannot reach; running it there
-    would relocate the owner's own dressed banner into a pytest tmp dir on a
-    plain test run. main() is the one caller that knows this is a real server
-    start with this install's real out_dir, and it runs the (additive,
-    idempotent) ensure_branding_discovery_tree() itself immediately before this
-    call, so an ancient install's legacy flats land at the coded root and are
-    moved on within the SAME start.
-
-    MOVE, never delete: the flat IS the banner an existing install is currently
-    wearing, and re-rendering it needs the active asset, which may only exist
-    inside the container. It is the only copy, so it goes to banner_keep_dir()
-    (local/banners/), never into a cache, and settings.json's worn_banner says the
-    slot wears it ({"kind": "migrated"}) -- which is what makes the move stick: the
-    create_app ensure pass that runs moments later leaves a migrated banner alone.
-    Only an explicit upload, pick, crop or apply-earned replaces it. A slot that
-    already wears something else, or a kept copy already there, is the newer truth
-    and wins -- the stale root leftover is left where it is and logged, exactly
-    the never-overwrite rule _migrate_legacy_branding_root() holds."""
-    import logging as _logging
-    import shutil
-    root = branding_root()
-    dst_dir = banner_keep_dir()
-    log = _logging.getLogger(__name__)
-    for slot, name in _BANNER_FLAT.items():
-        src = root / name
-        try:
-            if not src.is_file():
-                continue
-        except OSError:
-            continue
-        dst = dst_dir / name
-        if dst.exists() or _worn_banner(slot) is not None:
-            log.warning("banner flat migration: NOT moving %s (the slot already wears "
-                        "another banner)", src)
-            continue
-        try:
-            dst_dir.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(src), str(dst))
-            _set_worn_banner(slot, {"kind": "migrated"})
-            log.info("banner flat migration: moved %s -> %s", src, dst)
-        except OSError:
-            log.warning("banner flat migration: failed to move %s -> %s",
-                        src, dst, exc_info=True)
-
-
-def _is_readable_image(path):
-    """True when Pillow can open `path` as an image at all. The validation half of
-    the verbatim-webp path: the bytes are passed through untouched, so this is what
-    stops a renamed .txt (or anything else) from being adopted as a mark."""
-    try:
-        from PIL import Image
-        with Image.open(path) as im:
-            im.verify()
-        return True
-    except Exception:                       # noqa: BLE001 -- any failure means "not an image"
-        return False
-
-
-# How deep the read-only detection walk below descends. The deepest SHIPPED
-# coded folder is four segments from the root (ROLE_CODE's enhance/emotion under
-# bridge, and the GONK folder under starfall), so six leaves two levels of
-# user-made nesting inside the cap and still bounds the cost on a per-request path.
-_BRANDING_WALK_MAX_DEPTH = 6
-
-
-# The baselines[] entry this install's coded-tree snapshot is stored under, and
-# how much of each file goes into a fingerprint. 64 KiB carries a whole image
-# header plus a real slab of pixel data for anything this tree holds, costs one
-# or two reads off the page cache, and is BOUNDED -- a fingerprint whose cost
-# scaled with file size would put a multi-megabyte mascot on a per-request path.
-_BASELINE_GOODS = "goods_tree"
-_BASELINE_HEAD = 64 * 1024
-# How recently a file may have been written and still be trusted to the
-# in-process clean memo below. Windows' file-time clock ticks about every
-# 15.6 ms, so two writes inside one tick can share an mtime to the nanosecond;
-# two seconds is three orders of magnitude clear of that.
-_BASELINE_SETTLE_NS = 2_000_000_000
-# Per-process memo of "this exact file was compared against the baseline and was
-# a default": {(out_dir, baseline key) -> frozenset of (rel, size, mtime_ns)}.
-# Small on purpose -- one entry per library/app-folder pairing a single process
-# ever scans -- and cleared wholesale rather than evicted, because a rebuilt memo
-# costs one scan and a clever eviction costs a bug.
-_BASELINE_CLEAN_MEMO = {}
-_BASELINE_CLEAN_MEMO_MAX = 8
-
-
-def _branding_tree_files():
-    """Yield (coded rel, os.DirEntry) for every FILE in the coded tree -- ONE
-    walk definition, shared by the baseline snapshot and the read-only scan that
-    compares against it, so a file the scan can reach is a file the baseline
-    recorded and vice versa.
-
-    Two boundaries, both of them the tree's own rules rather than tuning knobs:
-
-      - the coded ROOT's own top-level files are skipped. The app writes nothing
-        there (renders live in banner_cache_dir()) and the serve route never
-        reads it, so a file parked at the root is neither counted nor served --
-        the FOLDERS are what this tree is for.
-      - the walk descends to _BRANDING_WALK_MAX_DEPTH and no further. Anything
-        past the cap is outside the tree's vocabulary in BOTH directions:
-        invisible to the baseline and invisible to the scan, which is the only
-        arrangement in which the cap itself cannot manufacture a difference.
-
-    An unreadable directory yields nothing rather than raising -- a permissions
-    oddity in one corner must not take a page render down."""
-    pending = [(branding_root(), "", 0)]
-    while pending:
-        d, prefix, depth = pending.pop()
-        try:
-            with os.scandir(d) as it:
-                entries = sorted(it, key=lambda e: e.name)
-        except OSError:                     # unreadable dir -> nothing to see, not a crash
-            continue
-        for e in entries:
-            try:
-                if e.is_dir():
-                    if depth < _BRANDING_WALK_MAX_DEPTH:
-                        pending.append((Path(e.path), prefix + e.name + "/", depth + 1))
-                    continue
-                if depth == 0 or not e.is_file():
-                    continue                # the root's own files never count
-            except OSError:
-                continue
-            yield prefix + e.name, e
-
-
-def _file_fingerprint(path):
-    """[size, sha256 of the first _BASELINE_HEAD bytes] for one file, or None if
-    it cannot be read. Size ALONE would miss a same-size overwrite, and that is
-    the case this has to catch: the owner dropping his own art under a shipped
-    asset's exact filename is the loose-wins override, not a default."""
-    import hashlib
-    try:
-        size = os.stat(path).st_size
-        with open(path, "rb") as fh:
-            head = fh.read(_BASELINE_HEAD)
-    except OSError:
-        return None
-    return [int(size), hashlib.sha256(head).hexdigest()]
-
-
-def _baseline_key():
-    """The baselines[] key a coded-tree snapshot is stored under: the goods-tree
-    name PLUS the identity of the tree it describes.
-
-    The two halves of this mechanism hang off DIFFERENT folders. The snapshot
-    lives in the LIBRARY's telemetry (out_dir); the tree it describes is the APP
-    folder's (branding_root(), beside the launcher). branding_root() was moved
-    out of out_dir in 2026-07-26 precisely because the two are independent, and
-    _ensure_banner_flat() already handles the same split for renders -- but a
-    single shared snapshot key would ignore it here. Point a second checkout at
-    the same library (the D: run-copy, a worktree, a branch tried out live) and
-    that library's one snapshot would describe a tree this install has never
-    seen: every file in it missing from the record, every file therefore "new",
-    and the flag raised on the first fetch with no user action at all.
-
-    So the pairing is part of the key: a library remembers one snapshot per app
-    folder it has been pointed at, and a tree is only ever compared against a
-    snapshot of ITSELF. A never-seen pairing takes its own first snapshot and
-    reports nothing, exactly like a fresh install.
-
-    Hashed rather than spelled out: the path is normalised for case first so
-    Windows' several spellings of one folder agree, and a telemetry dump has no
-    need to carry a filesystem path in the clear."""
-    import hashlib
-    p = os.path.normcase(str(branding_root()))
-    return "%s@%s" % (_BASELINE_GOODS,
-                      hashlib.sha256(p.encode("utf-8", "replace")).hexdigest()[:16])
-
-
-def _branding_baseline(out_dir, telem=None):
-    """This library's recorded snapshot of THIS app folder's coded tree (see
-    _baseline_key), or None when that pairing has never taken one.
-
-    None and {} are deliberately DIFFERENT answers. An empty dict is the correct
-    record for a tree that held nothing when the snapshot was taken (a fresh
-    install), and it is exactly what makes the first later drop count; None means
-    nobody has looked yet, and the next look records rather than judges."""
-    d = load_telemetry(out_dir) if telem is None else telem
-    base = (d.get("baselines") or {}).get(_baseline_key())
-    return base if isinstance(base, dict) else None
-
-
-def _record_branding_baseline(out_dir):
-    """Take the snapshot: every file the walk can reach, fingerprinted, stored in
-    the library's telemetry beside flags and sets, under this library-and-app-
-    folder pairing's own key. Once per pairing, on that pairing's first scan --
-    which is why that scan reports nothing.
-
-    EVERY file the walk reaches is recorded, including one whose bytes could not
-    be read when the snapshot was taken (locked by another process, a
-    permissions corner). Such a file is stored with its size and a NULL hash
-    rather than dropped, because dropping it is wrong in both directions: an
-    absent rel counts as new forever -- a permanent false positive on a file that
-    was always there -- while pretending it is fine forever would be a permanent
-    blind spot. Size alone is what the snapshot honestly knows, so that is what
-    it stores, and the comparison honours it exactly: a later file at that rel
-    with the same size is the file that was already there (readable or not), and
-    a different size is a real change and counts. A stat that fails too leaves
-    the rel recorded with nothing known, which the comparison reads as changed --
-    and the scan cannot stat such a file either, so it never reaches judgement."""
-    snap = {}
-    for rel, e in _branding_tree_files():
-        fp = _file_fingerprint(e.path)
-        if fp is None:
-            try:
-                fp = [int(e.stat().st_size), None]
-            except (OSError, TypeError, ValueError):
-                fp = [None, None]
-        snap[rel] = fp
-
-    def _store(d):
-        d.setdefault("baselines", {})[_baseline_key()] = snap
-    _telem_mutate(out_dir, _store)
-    return snap
-
-
-def _baseline_note_app_write(out_dir, rel):
-    """Fold ONE file the app itself just wrote INTO the tree into the standing
-    baseline, so it reads as a default from the moment it exists.
-
-    Its callers are exactly the paths that still REGISTER an asset into the
-    tree: add_slot_asset() (`<id>.png` into a banner slot, every Branding-tab
-    upload), _adopt_mark() (`<id>.png|.webp` into marks) and add_custom_mark()
-    (the custom mark plus the launcher .ico cut beside it -- Pillow reads an
-    .ico, so an unrecorded one would raise the flag). Everything else the app
-    writes now lands outside the tree (banner_cache_dir(), badge_cache_dir()),
-    and grep for this function's name is the live list.
-
-    A no-op before the first snapshot exists -- with no baseline yet, the next
-    scan is about to sweep this file up anyway."""
-    if _branding_baseline(out_dir) is None:
-        return
-    fp = _file_fingerprint(branding_root() / rel)
-    if fp is None:
-        return
-
-    def _note(d):
-        cur = d.setdefault("baselines", {}).get(_baseline_key())
-        if isinstance(cur, dict):
-            cur[rel] = fp
-    _telem_mutate(out_dir, _note)
-
-
-def _branding_tree_has_new_art(out_dir):
-    """True when the coded tree holds a readable image the baseline does not
-    account for. ONE detector, two callers: sweep_branding_drops() on every
-    /api/achievements fetch, and sweep_telemetry()'s once-a-day backstop.
-
-    STRICTLY READ-ONLY over the whole tree. It never unlinks, renames,
-    re-encodes, moves or registers anything, at any depth, in any folder --
-    including the four that sweep_branding_drops() does adopt from. That is what
-    keeps the 2026-08-05 near-miss dead: mascots/ and rewards/ hold role-bound
-    files real code reads by exact filename, and being SEEN cannot consume them.
-
-    Why a BASELINE rather than a list of what the app ships. Every regression
-    this check has had was the same one -- something that was always on disk got
-    counted as somebody's drop -- and every attempt to enumerate the app's own
-    art failed at one end or the other. Comparing a candidate against the
-    shipped container fails OPEN on an install that HAS no container (a legacy
-    tree's art left loose then counts on every upgrade) and fails CLOSED on the
-    owner's own override (his bytes under a shipped asset's name are still
-    "shipped"). A snapshot asks a question with no such gap: what was here
-    before anyone looked? Everything else is new.
-
-    So the first call on a pairing RECORDS and reports nothing, and from then on
-    a file counts when its coded rel is absent from the snapshot, or when the
-    bytes at a recorded rel have changed -- the override case, and the reason a
-    candidate can never be dismissed on its path alone.
-
-    WHAT IT COSTS, precisely, because this runs on every /api/achievements fetch
-    until the flag is set. Deciding "same path, same bytes" needs the bytes: an
-    UNCHANGED baseline file is same-size by definition, so a full comparison
-    reads and hashes 64 KiB of every file in the tree -- and an upgraded install
-    can carry a hundred of them in a legacy _thumbs cache. So the answer is
-    memoised per process: a file compared and found to be a default is
-    remembered as (rel, size, mtime_ns), and a later scan that finds the same
-    triple skips straight past it. The first scan of a process pays the reads;
-    every scan after it pays the walk's own stats, plus -- every single call,
-    memo or no memo -- the one read-and-JSON-parse of the telemetry store that
-    fetching the baseline costs (_branding_baseline -> load_telemetry). That
-    parse is why the callers guard this on the flag not already being set.
-
-    The memo trusts an mtime, so it deliberately does NOT trust a fresh one: a
-    file written within _BASELINE_SETTLE_NS of the scan is left out of the memo
-    and re-read next time, which closes the one window where a coarse filesystem
-    clock could hand a changed file its predecessor's timestamp. Nothing here
-    touches the persisted baseline, so a change the memo could ever miss inside
-    one process is still caught by the full comparison the next start runs.
-
-    Cheapest test first within a file, too: the memo lookup, then a dict lookup,
-    then a size compare off the walk's own stat, so only a same-size unmemoised
-    candidate pays a read; the Pillow decode is last. First hit wins and the walk
-    stops there."""
-    import time
-    base = _branding_baseline(out_dir)
-    if base is None:
-        _record_branding_baseline(out_dir)
-        return False
-    memo_key = (str(out_dir), _baseline_key())
-    was_clean = _BASELINE_CLEAN_MEMO.get(memo_key) or frozenset()
-    now = time.time_ns()
-    clean = []
-    for rel, e in _branding_tree_files():
-        try:
-            st = e.stat()
-            stamp = (rel, int(st.st_size), int(st.st_mtime_ns))
-        except (OSError, TypeError, ValueError):
-            continue                        # unreadable now -> nothing to judge
-        if stamp in was_clean:
-            clean.append(stamp)
-            continue                        # already compared, byte for byte, this process
-        known = base.get(rel)
-        if isinstance(known, list) and len(known) == 2:
-            try:
-                same_size = stamp[1] == int(known[0])
-            except (TypeError, ValueError):
-                same_size = False
-            if same_size:
-                # A NULL hash is the snapshot saying it could not read this file
-                # when it looked: size is the whole of what it knows, so a
-                # same-size file at that rel is the file it recorded, and there
-                # is nothing to compare bytes against.
-                fp = None if known[1] is None else _file_fingerprint(e.path)
-                if fp is None or fp[1] == known[1]:
-                    if now - stamp[2] > _BASELINE_SETTLE_NS:
-                        clean.append(stamp)
-                    continue                # same path, same bytes -> a default
-        if _is_readable_image(Path(e.path)):
-            _BASELINE_CLEAN_MEMO.pop(memo_key, None)
-            return True
-        if now - stamp[2] > _BASELINE_SETTLE_NS:
-            clean.append(stamp)             # not art, and not art again next time
-    if memo_key not in _BASELINE_CLEAN_MEMO and len(_BASELINE_CLEAN_MEMO) >= _BASELINE_CLEAN_MEMO_MAX:
-        _BASELINE_CLEAN_MEMO.clear()
-    _BASELINE_CLEAN_MEMO[memo_key] = frozenset(clean)
-    return False
-
-
-def _adopt_dropped_file(path):
-    """Re-encode a raw dropped image (PNG/JPEG/anything Pillow can read) into
-    real PNG bytes, or None if it isn't a readable image at all -- the same
-    defense-in-depth the authenticated upload route above applies, just
-    against a file that arrived by hand instead of by POST."""
-    try:
-        from PIL import Image
-        import io
-        im = Image.open(path)
-        im.load()
-        buf = io.BytesIO()
-        im.convert("RGBA").save(buf, format="PNG")
-        return buf.getvalue()
-    except Exception:
-        return None
-
-
-def _adopt_mark(out_dir, raw_stem, art_bytes, ext=".png"):
-    """Register a raw dropped file into marks.json + write its art, then make it
-    the active mark -- the marks-folder half of sweep_branding_drops()'s
-    auto-adopt (marks predate BRANDING_SLOTS and keep their own established
-    list_marks()/marks.json shape rather than being folded into the newer
-    per-slot manifest convention).
-
-    `ext` is .png for anything re-encoded on the way in, .webp for a dropped webp
-    kept verbatim -- see the sweep, which is where that decision is made."""
-    mdir = _role_dir("marks")
-    mid = re.sub(r"[^a-z0-9_-]+", "-", raw_stem.lower()).strip("-")[:40] or "custom"
-    # Tombstoned ids count as taken: adopting a drop AS a tombstoned id would
-    # register a mark list_marks() then refuses to show.
-    have = {m["id"] for m in list_marks(out_dir)} | set(_MARK_TOMBSTONES)
-    if mid in have:
-        mid = (mid + "-" + secrets.token_hex(3))[:40]
-    _seed_loose_manifest(_role_rel("marks", "marks.json"))   # keep shipped defaults in the picker
-    try:
-        data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
-        marks = list(data.get("marks") or []) if isinstance(data, dict) else []
-    except (OSError, ValueError):
-        marks = []
-    marks.append({"id": mid, "label": mid.replace("-", " "), "kind": "tile"})
-    (mdir / "marks.json").write_text(json.dumps({"marks": marks}, indent=2), encoding="utf-8")
-    (mdir / (mid + ext)).write_bytes(art_bytes)
-    # Same reason as add_slot_asset's own note: the art this just registered is
-    # the app's own write from here on, not a standing flag.
-    _baseline_note_app_write(out_dir, _role_rel("marks", mid + ext))
-    cfg = load_branding(out_dir)
-    cfg["mark"] = mid
-    save_branding(out_dir, cfg)
-
-
-# SAFETY, 2026-08-05: mascots/ and rewards/ are NOT empty user-customizable
-# buckets -- they already hold a family of specifically-named, role-bound
-# files real shipped code reads by exact filename (the narrator/login/power-
-# modal mascots, the claim icon, and a per-achievement ach/<id>.png chain that
-# has no fixed, enumerable list). The original version of this sweep had no
-# awareness of that and would have adopted-then-DELETED every one of those
-# files the first time it ran against an install that actually has them --
-# caught before it ever ran against real assets, but only just. Until
-# mascots/rewards get a real design (named-role overrides, most likely, not
-# a manifest-of-many-pick-one-active gallery like the other two slots), the
-# sweep only ever touches the slots that map cleanly onto a real,
-# already-established single displayed flat: banner_main -> banner.png,
-# banner_login -> login-banner.png, banner_loom -> banner-loom.png (WIRED to
-# write those exact files as of 2026-08-06 -- see _write_banner_flat below;
-# owner call: "Yes, seems obvious"). Those three RENDERS live in
-# banner_cache_dir() since 2026-09-10, not at the coded root -- the flat is
-# derived per-install state, and the tree holds slot folders and nothing else.
-#
-# 2026-09-10 (owner ruling), the one thing that DID change: mascots/ and
-# rewards/ -- and every other folder under the coded root, at any depth -- are
-# now READ by _branding_tree_has_new_art(), which raises the
-# branding_custom_file telemetry flag when it sees an image the install's
-# baseline does not account for. Reading is not adopting. This note's substance
-# is untouched: nothing outside the four adopt folders below (these three slots
-# + marks) is ever unlinked, renamed, re-encoded, moved or registered, so the
-# family of role-bound files above still cannot be eaten.
-_SWEEPABLE_SLOTS = ("banner_main", "banner_login", "banner_loom")
-
-# The flat files the header/login/Loom templates read directly (the header's
-# <img src="/branding/banner.png">, the login page's login-banner.png, and the
-# Loom's workspace strip). The slot system stores MANY assets; these flats are
-# the ONE the app displays -- so every path that changes which asset is active
-# (upload, pick-active, re-crop the active one, a raw drop the sweep adopts)
-# re-renders its slot's flat.
-_BANNER_FLAT = {"banner_main": "banner.png", "banner_login": "login-banner.png",
-                "banner_loom": "banner-loom.png"}
-# The SHIPPED default banner per slot -- a sealed container asset inside the
-# slot's own coded folder, served only when no loose flat exists (bundle-v2:
-# the coded tree ships real default banners; the old repo tree shipped the
-# slots empty, so brand_context's flat-only check left a fresh install bare).
-# Filenames as the tree actually carries them -- banner_loom's is hyphenated.
-_BANNER_FLAT_DEFAULT = {"banner_main": "banner_main.png",
-                        "banner_login": "banner_login.png",
-                        "banner_loom": "banner-loom.png"}
-
-
-def _flat_default_rel(slot):
-    """Coded rel of one slot's shipped default banner (the rule-8 fallback)."""
-    return _role_rel(slot, _BANNER_FLAT_DEFAULT[slot])
-
-
-def banner_cache_dir(out_dir=None):
-    """Where the RENDERED banner flats live: local/cache/banners/. A sibling of
-    badge_cache_dir()'s badges/, for exactly its reasons: these files are rebuildable --
-    a slot render from the slot's pick, an earned render from the pack -- and derived from
-    this install's picks, not from any library, so they live with the install.
-
-    Moved OUT of the coded goods root on 2026-09-10 (owner ruling). The tree now holds slot
-    folders and nothing else: the root is empty and inert, the app writes nothing there and
-    serves nothing from there, and a file dropped at the root is neither served nor
-    overwritten by the next re-render. A render that is the ONLY copy of what the install
-    wears (one migrated from an early version's root) is not a cache and lives in
-    banner_keep_dir() instead (B6). (`out_dir` is accepted and unused.)"""
-    return _paths.cache_dir() / "banners"
-
-
-def banner_keep_dir():
-    """local/banners/: banner renders that are the only copy of what this install wears (moved
-    in from an early version's art-tree root, or a render with no record). Never regenerated,
-    never in a cache; settings.json's branding.worn_banner says a slot wears one (B6)."""
-    return _paths.banners_dir()
-
-
-# The earned banners, by id, and the achievement each one is gated on.
-_EARNED_BANNERS = {"great_library": "the-great-library"}
-
-
-def _served_flat_dir(out_dir, slot):
-    """The folder `slot`'s flat is served from: banner_keep_dir() while the slot wears an only
-    copy (a migrated banner, or a kind this build does not know), else the render cache."""
-    worn = _worn_banner(slot)
-    if worn is not None and worn.get("kind") != "earned":
-        return banner_keep_dir()
-    return banner_cache_dir(out_dir)
-
-
-def _worn_banner(slot):
-    """What `slot` wears beyond its own pick, from settings.json's branding.worn_banner:
-    {"kind": "earned", "banner_id": ...} (applied from the pack), {"kind": "migrated"} (the
-    only copy, in banner_keep_dir()), or None (the slot's own pick)."""
-    worn = _settings.branding().get("worn_banner")
-    v = worn.get(slot) if isinstance(worn, dict) else None
-    return v if isinstance(v, dict) and v.get("kind") else None
-
-
-def _set_worn_banner(slot, value):
-    """Store (or with None clear) what `slot` wears beyond its pick. Fail-soft: a choice that
-    cannot be saved costs the choice, never a request."""
-    def _apply(b):
-        worn = b.get("worn_banner") if isinstance(b.get("worn_banner"), dict) else {}
-        if value is None:
-            worn.pop(slot, None)
-        else:
-            worn[slot] = value
-        if worn:
-            b["worn_banner"] = worn
-        else:
-            b.pop("worn_banner", None)
-    try:
-        _settings.update_branding(_apply)
-        return True
-    except (OSError, _settings.SettingsBusy):
-        return False
-
-
-# The output aspect each banner flat is cropped to (width / height). banner_loom
-# is the 12:1 workspace strip added with the Branding-tab rebuild.
-_BANNER_RATIO = {"banner_main": 4.0, "banner_login": 4.0, "banner_loom": 12.0}
-# Canonical output pixel size per slot (the DC's own spec strings: 1920x480,
-# 1920x160). The saved flat is resized to this so downstream CSS never upsamples
-# an oddly-sized source.
-_BANNER_OUT = {"banner_main": (1920, 480), "banner_login": (1920, 480),
-               "banner_loom": (1920, 160)}
-
-
-def _banner_window(w, h, target_ar, zoom, cropx, cropy):
-    """The source-pixel crop box that reproduces the design's live preview EXACTLY
-    (Control Panel.dc.html:953): an object-fit:cover image with
-    `object-position: cropX% cropY%`, `transform: scale(zoom/100)`,
-    `transform-origin: cropX% cropY%`. WYSIWYG matters here -- the owner tunes the
-    sliders watching that preview, so the flat must match it, not merely approximate.
-
-    Derivation: model a display frame of the target aspect, replicate the CSS
-    (cover-fit, then object-position, then the scale about the crop-origin), and map
-    the frame's four corners back into source-pixel space; their bounding rectangle
-    is the visible window. Returns (left, top, right, bottom) clamped to the source.
-    """
-    z = max(1.0, zoom / 100.0)
-    px, py = cropx / 100.0, cropy / 100.0
-    # A frame of the target aspect, sized in the source's own units (height = h) so
-    # the cover math stays in familiar pixels; only the ratio matters.
-    FH = float(h)
-    FW = target_ar * FH
-    sc = max(FW / w, FH / h)                      # object-fit: cover
-    disp_w, disp_h = w * sc, h * sc
-    over_x, over_y = disp_w - FW, disp_h - FH     # >= 0
-    img_l, img_t = -px * over_x, -py * over_y     # object-position placement
-    ox, oy = px * FW, py * FH                     # transform-origin in frame coords
-
-    def src(fx, fy):
-        # undo scale(z) about (ox,oy), then undo cover placement -> source px
-        qx = ox + (fx - ox) / z
-        qy = oy + (fy - oy) / z
-        return (qx - img_l) / sc, (qy - img_t) / sc
-
-    corners = [src(0, 0), src(FW, 0), src(0, FH), src(FW, FH)]
-    xs = [c[0] for c in corners]; ys = [c[1] for c in corners]
-    l, t, r, b = min(xs), min(ys), max(xs), max(ys)
-    # clamp into the source, then re-fit the exact target aspect inside the clamp so
-    # the saved file's aspect is precise even at an edge-panned extreme.
-    l, t = max(0.0, l), max(0.0, t)
-    r, b = min(float(w), r), min(float(h), b)
-    cw, ch = r - l, b - t
-    if cw <= 0 or ch <= 0:
-        return (0, 0, w, h)
-    if cw / ch > target_ar:                       # too wide -> trim width, keep centre
-        nw = ch * target_ar; l += (cw - nw) / 2; r = l + nw
-    else:                                         # too tall -> trim height
-        nh = cw / target_ar; t += (ch - nh) / 2; b = t + nh
-    # Size-preserving integer rounding: round the origin, derive the far edge from the
-    # SIZE (min 1px). Rounding all four edges independently can collapse a sub-pixel-
-    # tall box to zero height (round(1.5)=2 and round(2.5)=2 under banker's rounding),
-    # which made Pillow produce an empty crop for small sources.
-    li, ti = int(round(l)), int(round(t))
-    wi = max(1, int(round(r - l))); hi = max(1, int(round(b - t)))
-    li = max(0, min(li, w - wi)); ti = max(0, min(ti, h - hi))
-    return (li, ti, li + wi, ti + hi)
-
-
-# ---------------------------------------------------------------------------
-# What the banner cache holds, and why it holds a RECORD beside every render.
-#
-# banner_cache_dir() carries the three rendered flats the header/login/Loom
-# templates display, and beside each one a sidecar `<name>.json` naming where
-# that render CAME FROM. Three kinds, and they are not interchangeable:
-#
-#   {"kind": "slot", "asset_id": ..., "transform": {...}}
-#       rendered from a banner slot's active pick at that pick's stored
-#       zoom/cropX/cropY. The ONLY kind anything is allowed to regenerate, and
-#       only when the pick or the transform no longer matches what is recorded.
-#   {"kind": "earned", "banner_id": ...}
-#       applied from sealed container bytes by the earned-banner route, with no
-#       slot pick behind it at all.
-#   {"kind": "migrated"}
-#       moved in from a pre-2026-09-10 install's coded root. The bytes are the
-#       banner that install is WEARING and there may be nothing left to
-#       re-render them from.
-#
-# The record exists because the cache used to decide staleness by MTIME against
-# the shared branding_slots.json, and that is not a provenance: every slot's
-# flat went stale when any slot's pick changed, and an applied earned banner or
-# a just-migrated flat was silently re-rendered back to the slot's pick on the
-# next request. A render whose record is absent or unreadable is treated as
-# opaque and left alone for the same reason -- the file is what the install is
-# wearing, and nothing here knows better than it does.
-# ---------------------------------------------------------------------------
-def _banner_record_path(out_dir, name):
-    """The sidecar beside one rendered flat. `.json` on the flat's own full
-    name, so banner.png -> banner.png.json -- never a second name to keep in
-    step with _BANNER_FLAT."""
-    return banner_cache_dir(out_dir) / (name + ".json")
-
-
-def _read_banner_record(out_dir, name):
-    """The provenance record for one rendered flat, or None when there is none
-    (or it is unreadable, or it is not an object). None means OPAQUE: a render
-    nothing here may regenerate."""
-    try:
-        rec = json.loads(_banner_record_path(out_dir, name).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return rec if isinstance(rec, dict) else None
-
-
-def _write_banner_record(out_dir, name, record):
-    """Stamp a render's provenance. Best effort: a record that fails to write
-    leaves an opaque render, which is the SAFE failure -- a later pass declines
-    to touch it rather than regenerating something it cannot account for."""
-    try:
-        banner_cache_dir(out_dir).mkdir(parents=True, exist_ok=True)
-        _banner_record_path(out_dir, name).write_text(
-            json.dumps(record, indent=2), encoding="utf-8")
-    except (OSError, TypeError, ValueError):
-        pass
-
-
-def _slot_render_record(out_dir, slot):
-    """The record a render of `slot`'s CURRENT active pick would carry --
-    {"kind": "slot", "asset_id", "transform"} -- or None when the slot has no
-    active asset to render from. The one place the comparison shape is built,
-    so what _ensure_banner_renders compares against and what _write_banner_flat
-    stamps can never disagree.
-
-    "Current active pick" is resolve_slot_active()'s answer, not this function's
-    own: a slot with assets and no recorded pick has to resolve the same way
-    here as it does for the payload and the self-heal, or the ensure pass
-    compares a render against an answer nothing else would give."""
-    assets = list_slot_assets(out_dir, slot)
-    active_id = resolve_slot_active(out_dir, slot, assets=assets)
-    a = next((x for x in assets if x["id"] == active_id), None)
-    if not a:
-        return None
-    return {"kind": "slot", "asset_id": a["id"],
-            "transform": {"zoom": a.get("zoom", 100), "cropX": a.get("cropX", 50),
-                          "cropY": a.get("cropY", 50)}}
-
-
-def _render_banner_flat(out_dir, slot, raw, zoom=100, cropx=50, cropy=50, record=None):
-    """The ratio/size pipeline itself: bake raw image bytes into `slot`'s flat
-    via _banner_window (the design's own preview math) at the slot's canonical
-    output size, and stamp `record` beside it. Shared by _write_banner_flat (the
-    active-asset path) and the earned-banner apply route (sealed bytes straight
-    from the container) so the two writers can never drift.
-
-    The rendered FLAT lives in banner_cache_dir(out_dir) -- derived per-install
-    state, not shipped art, and outside the coded tree since 2026-09-10 (which
-    is why this takes out_dir at all). `record` is what says where it came from;
-    every caller passes one, and the record is written only after the render
-    itself succeeded, so a stale record can never outlive its bytes. Fails soft
-    (False), never a 500."""
-    name = _BANNER_FLAT.get(slot)
-    if not name or raw is None:
-        return False
-    try:
-        import io
-        from PIL import Image
-        im = Image.open(io.BytesIO(raw))
-        im.load()
-        w, hh = im.size
-        ar = _BANNER_RATIO.get(slot, 4.0)
-        box = _banner_window(w, hh, ar, zoom, cropx, cropy)
-        crop = im.crop(box)
-        ow, oh = _BANNER_OUT.get(slot, (1920, int(round(1920 / ar))))
-        crop = crop.resize((ow, oh), Image.LANCZOS)
-        cdir = banner_cache_dir(out_dir)
-        cdir.mkdir(parents=True, exist_ok=True)
-        crop.save(cdir / name, format="PNG")
-    except Exception:
-        return False
-    _write_banner_record(out_dir, name, record if isinstance(record, dict) else {})
-    return True
-
-
-def _write_banner_flat(out_dir, slot, wear=True):
-    """Render a banner slot's ACTIVE asset into its flat, baking the stored
-    zoom/cropX/cropY transform in via _render_banner_flat above, and stamp the
-    pick it came from. That is what makes the banner sliders REAL -- the
-    transform was stored metadata nothing rendered before.
-
-    `wear`: an explicit action (an upload, a pick, a re-crop) also makes the slot wear its
-    own pick again, clearing an earned or migrated banner it wore (settings.json's
-    worn_banner). The startup ensure pass passes False: re-rendering a pick never changes
-    what the owner chose to wear.
-
-    One of the EXPLICIT writers: an upload, a pick, a re-crop, and the startup
-    ensure pass -- each an authenticated action or a server start. Nothing on the
-    GET/serve path calls this: the /branding/ route only serves. Fails soft (False),
-    never a 500: a banner that fails to render leaves the previous flat and its
-    record in place, which still displays -- strictly better than a broken
-    header image."""
-    if slot not in _BANNER_FLAT:
-        return False
-    rec = _slot_render_record(out_dir, slot)
-    if rec is None:
-        return False
-    # The active asset may be a shipped default living only in the container --
-    # read via the resolution layer (coded rel), not a raw path.
-    raw = _branding_bytes(_role_rel(slot, rec["asset_id"] + ".png"))
-    t = rec["transform"]
-    done = _render_banner_flat(out_dir, slot, raw, t["zoom"], t["cropX"], t["cropY"],
-                               record=rec)
-    if done and wear and _worn_banner(slot) is not None:
-        _set_worn_banner(slot, None)
-    return done
-
-
-def _earned_banner_ok(out_dir, banner_id, db_path=None):
-    """Is the earned banner `banner_id` earned in THIS library (S5)? The choice to wear it is
-    the install's (settings.json), the reward is the library's: in a library where it is not
-    earned the slot shows its own pick, and the stored choice is kept for when the library
-    changes back. Fail-closed: anything that cannot be computed answers False."""
-    aid = _EARNED_BANNERS.get(str(banner_id or ""))
-    if not aid:
-        return False
-    try:
-        return _mark_earned(out_dir, db_path or (Path(out_dir) / "catalog.db"), aid)
-    except Exception:                      # noqa: BLE001 -- a banner must never fail a boot
-        return False
-
-
-def _ensure_banner_flat(out_dir, slot, db_path=None):
-    """Bring one slot's flat up to date, and return the Path the slot is served from (None
-    when there is nothing of this install's to serve: the route then falls through to the
-    container copy and the shipped sealed default).
-
-    What the slot wears decides it (settings.json's branding.worn_banner, B6):
-
-      - "migrated" (or a kind this build does not know): the only copy, in
-        banner_keep_dir(). Never rendered, never touched; None when it is gone.
-      - "earned": rendered from the pack into the cache (banner_cache_dir()) when the render
-        there is missing or is not that banner -- but only while the banner is earned in this
-        library (S5). In a library where it is not, the slot's own pick is rendered instead,
-        and the choice stays stored for when the library changes back.
-      - nothing: the slot's own pick, rendered into the cache when the render there is
-        missing, or its record no longer matches the pick or its transform.
-
-    Everything in the cache is this app's own, rebuildable render, stamped with a record
-    (_write_banner_record) saying what it was rendered from; one without a record is stale.
-
-    Called at STARTUP (create_app, via _ensure_banner_renders) and from nowhere on the
-    request path: the /branding/ flat route serves what is here and never decodes,
-    resizes or writes."""
-    name = _BANNER_FLAT.get(slot)
-    if not name:
-        return None
-    worn = _worn_banner(slot)
-    kind = worn.get("kind") if worn else None
-    if kind not in (None, "earned"):
-        keep = banner_keep_dir() / name
-        try:
-            return keep if keep.is_file() else None
-        except OSError:
-            return None
-    dst = banner_cache_dir(out_dir) / name
-    try:
-        have = dst.is_file()
-    except OSError:
-        have = False
-    rec = _read_banner_record(out_dir, name)
-    if kind == "earned" and _earned_banner_ok(out_dir, worn.get("banner_id"), db_path):
-        want = {"kind": "earned", "banner_id": str(worn.get("banner_id"))}
-        if have and isinstance(rec, dict) and rec.get("kind") == "earned" \
-                and rec.get("banner_id") == want["banner_id"]:
-            return dst
-        raw = _branding_bytes(_role_rel("earned_banners", want["banner_id"] + ".png"))
-        if raw is not None and _render_banner_flat(out_dir, slot, raw, record=want):
-            return dst
-        # the pack has no bytes for it right now: fall through to the slot's own pick
-    want = _slot_render_record(out_dir, slot)
-    if want is None:
-        if have and not (isinstance(rec, dict) and rec.get("kind") == "slot"):
-            # an earned render this library has not earned, with no pick to show instead
-            for stale in (dst, _banner_record_path(out_dir, name)):
-                try:
-                    stale.unlink()
-                except OSError:
-                    pass
-            return None
-        return dst if have else None
-    if (have and isinstance(rec, dict) and rec.get("kind") == "slot"
-            and rec.get("asset_id") == want["asset_id"]
-            and rec.get("transform") == want["transform"]):
-        return dst
-    _write_banner_flat(out_dir, slot, wear=False)
-    try:
-        return dst if dst.is_file() else None
-    except OSError:
-        return None
-
-
-def _record_slot_resolution(out_dir):
-    """Write the resolution the startup pass is about to render from back into
-    settings.json's branding slots, so a slot that HAD no recorded pick has one from here
-    on and the answer stops being re-derived at every start.
-
-    Resolution is already deterministic (resolve_slot_active), so this changes
-    no bytes; what it changes is where the answer lives. A slot whose pick was
-    only ever implied -- assets adopted from a hand-drop by an older build, a
-    pick file lost with a copied library -- is one manifest edit away from
-    implying a different asset, and a render then disagrees with a record that
-    was never written down. Recording it makes the render's `asset_id` a claim
-    about a stored pick rather than about a derivation.
-
-    Called from main() only -- NOT from create_app(), and for the same reason
-    _migrate_root_banner_flats() is not: before settings.json held the picks, the pick file
-    was addressed off branding_root(), the REAL coded tree on any test that did not patch it,
-    and ~every test in the suite builds create_app(), several from module-scoped
-    fixtures that conftest's per-test branding isolation cannot reach. Run there,
-    a plain pytest run on a dressed install would rewrite the owner's own pick
-    file. main() is the one caller that knows this is a real start, and it runs
-    immediately before create_app(), so the ensure pass inside it still stamps
-    its renders with picks that are by then written down.
-
-    Writes only when a slot actually resolved to an asset the file does not
-    already name: a library with no assets at all leaves no file behind, and the
-    owner's own recorded picks are never rewritten. Fail-soft -- a pick that
-    cannot be persisted still resolves the same way and still renders."""
-    try:
-        recorded = _recorded_slot_active(out_dir)
-        resolved = {slot: resolve_slot_active(out_dir, slot, recorded.get(slot))
-                    for slot in BANNER_SLOTS}
-        if not any(resolved[slot] and recorded.get(slot) != resolved[slot]
-                   for slot in BANNER_SLOTS):
-            return
-        save_slot_active(out_dir, resolved)
-    except Exception:                      # noqa: BLE001 -- a pick must never fail a boot
-        import logging as _logging
-        _logging.getLogger(__name__).warning(
-            "banner render: the slot resolution could not be recorded", exc_info=True)
-
-
-def _ensure_banner_renders(out_dir, db_path=None):
-    """The startup pass: every banner slot's flat brought up to date once, at
-    app construction, instead of lazily on a request. The public unauthenticated
-    /branding/ route must only ever SERVE -- an anonymous GET that can trigger a
-    Pillow decode-crop-resize-save is work a stranger on the LAN schedules --
-    and doing it here means the page's very first paint already has the right
-    bytes.
-
-    Fails soft per slot, and deliberately BROADLY: this runs inside create_app,
-    so anything that escapes here takes the whole server down at construction.
-    A banner that cannot be rendered costs a banner -- the route still falls
-    through to the container copy and then the shipped sealed default.
-
-    Reads the slot picks, never writes them: on a real start main() has already
-    persisted the resolution (_record_slot_resolution) a moment earlier, so the
-    picks stamped into the renders below are picks this install has written
-    down, and on a test build there is nothing here that can touch the coded
-    tree's own pick file."""
-    for slot in BANNER_SLOTS:
-        try:
-            _ensure_banner_flat(out_dir, slot, db_path=db_path)
-        except Exception:                  # noqa: BLE001 -- a banner must never fail a boot
-            import logging as _logging
-            _logging.getLogger(__name__).warning(
-                "banner render: %s could not be brought up to date", slot, exc_info=True)
-
-
-def sweep_branding_drops(out_dir, telem=None):
-    """Two jobs with deliberately different scopes (owner ruling, 2026-09-10).
-
-    ADOPT -- the only part that WRITES -- covers exactly four folders: the three
-    _SWEEPABLE_SLOTS plus marks. A raw file there that arrived by hand and isn't
-    already a known asset is read, deleted, and re-registered as a real slot
-    asset (re-encoded to PNG) or a real mark (a .webp kept verbatim). Nothing
-    anywhere else is ever adopted, and that list has not changed.
-
-    SCAN -- strictly READ-ONLY -- covers everything under the coded root:
-    mascots, rewards, the bridge/system/starfall folders, a folder the user
-    invented, at any depth to _BRANDING_WALK_MAX_DEPTH, plus the four adopt
-    folders themselves. One readable image in there that this install's BASELINE
-    does not account for raises the branding_custom_file telemetry flag, with
-    the file left exactly as it was -- not unlinked, not renamed, not
-    re-encoded, not moved, not registered. The coded ROOT's own top-level files
-    are outside both jobs: not adopted, not scanned, not served.
-
-    The baseline is the whole of "the app did not put it there", and it is
-    recorded on the FIRST scan this library-and-app-folder pairing ever runs,
-    which therefore reports nothing (_branding_tree_has_new_art). That is what
-    stops an upgrade from counting art an older build left behind. Adoption is
-    unaffected: a drop in one of the four folders is consumed and flagged on the
-    very first sweep, baseline or no baseline, because ADOPTING is itself the
-    signal.
-
-    Runs on every /api/achievements fetch rather than sweep_telemetry()'s
-    once-a-day cadence, so a file that arrived since the last fetch is adopted,
-    or raises the flag, on the next reload rather than up to a day later --
-    the same cadence the four adopt folders have always had for a hand-placed
-    file. The cost of that cadence is the scan's, and it is
-    priced in _branding_tree_has_new_art: the first scan of a process reads and
-    hashes a head of each baseline file, every scan after it is the walk's stats
-    and a memo lookup. The adopt half is a handful of small directory listings,
-    matching list_marks()/list_quarantined()'s own "stays cheap" precedent.
-
-    `telem` is this request's already-loaded telemetry store, when the caller has
-    one (/api/achievements does, and used to make the short-circuit below parse
-    the file a second time). Handed in, it is READ for the flag short-circuit and
-    UPDATED in place with any flag this call raises, so the caller's copy still
-    matches the file it was parsed from -- which matters because that caller goes
-    on reading its copy further down the same request.
-
-    Returns True if anything was ADOPTED this call -- the flag can fire off the
-    scan without that being true."""
-    def _raise_flag():
-        telem_flag("branding_custom_file", out_dir=out_dir)
-        if isinstance(telem, dict) and isinstance(telem.get("flags"), dict):
-            telem["flags"]["branding_custom_file"] = 1
-
-    adopted = False
-    for slot in _SWEEPABLE_SLOTS:
-        sdir = _slot_dir(slot)
-        if not sdir.is_dir():
-            continue
-        known = {a["id"] for a in list_slot_assets(out_dir, slot)}
-        try:
-            entries = sorted(sdir.iterdir())
-        except OSError:
-            continue
-        for p in entries:
-            if not p.is_file() or p.name == "manifest.json" or p.stem in known:
-                continue
-            png_bytes = _adopt_dropped_file(p)
-            if png_bytes is None:
-                continue
-            # Delete the raw drop BEFORE writing the adopted copy, not after: the
-            # adopted asset's own filename can legitimately collide with the raw
-            # drop's path (add_slot_asset uses a random id, but a stem-derived id
-            # elsewhere -- see _adopt_mark below -- routinely does), and deleting
-            # afterward would then remove the file it just wrote instead of the
-            # original. png_bytes is already read into memory, so the source file
-            # is safe to remove first regardless of what gets written next.
-            try:
-                p.unlink()
-            except OSError:
-                pass
-            add_slot_asset(out_dir, slot, png_bytes)   # neutral transform (zoom 100, centered)
-            adopted = True
-    mdir = _role_dir("marks")
-    if mdir.is_dir():
-        known = {m["id"] for m in list_marks(out_dir)}
-        try:
-            entries = sorted(mdir.iterdir())
-        except OSError:
-            entries = []
-        for p in entries:
-            # A tombstoned stem is KNOWN, not a fresh drop. Without this, delisting
-            # a mark makes its still-on-disk loose file invisible to the `known` set
-            # and the sweep ADOPTS it -- delete-and-re-encode of a real asset, the
-            # exact 2026-08-05 near-miss. Caught live 2026-08-13 on the mark_12
-            # tombstone: the owner's own mark_12.png got eaten on first page load.
-            if (not p.is_file() or p.name == "marks.json" or p.suffix.lower() == ".ico"
-                    or p.stem in known or p.stem in _MARK_TOMBSTONES):
-                continue
-            # A dropped WEBP is kept VERBATIM. _adopt_dropped_file re-encodes to
-            # PNG, which is right for a still image and destructive for an animated
-            # one -- Pillow's convert() keeps frame one and throws the animation
-            # away. Since the whole point of the webp lane is an animated mark the
-            # owner authored, the bytes have to survive the trip; the file is still
-            # validated as a readable image first, so this is not an unchecked pass.
-            is_webp = p.suffix.lower() == ".webp"
-            art = p.read_bytes() if (is_webp and _is_readable_image(p)) \
-                else _adopt_dropped_file(p)
-            if art is None:
-                continue
-            try:              # delete first -- see the identical note above
-                p.unlink()
-            except OSError:
-                pass
-            _adopt_mark(out_dir, p.stem, art, ext=".webp" if is_webp else ".png")
-            adopted = True
-    # The scan is WIDER than adoption: a drop the four folders above could not
-    # touch still counts. Guarded on the flag ALREADY being set, because this
-    # whole function runs on every /api/achievements fetch and the flag is
-    # one-shot by contract ("once set they stay set"). Without the guard, every
-    # request on a dressed install would both walk the tree and take
-    # _telem_mutate's process lock + atomic rewrite to store a 1 that is already
-    # there. One cheap read replaces both -- and on the request path it is not
-    # even a read: `telem` is the store that request already parsed, so the
-    # guard costs a dict lookup.
-    if adopted:
-        _raise_flag()
-    else:
-        try:
-            d = load_telemetry(out_dir) if telem is None else telem
-            already = (d["flags"] or {}).get("branding_custom_file")
-        except Exception:                  # noqa: BLE001 -- a broken read must not hide a real drop
-            already = False
-        if not already and _branding_tree_has_new_art(out_dir):
-            _raise_flag()
-    return adopted
-
-
-def load_branding(out_dir):
-    """Current branding choice, validated against what exists on disk. Falls back
-    to the legacy drop-in logo.png ('logo') when no cut marks are present."""
-    cfg = dict(_BRAND_DEFAULTS)
-    stored = _settings.branding()          # settings.json's branding: {mark, animation, ...}
-    raw = dict(stored.get("animation") or {}) if isinstance(stored.get("animation"), dict) \
-        else {}
-    if stored.get("mark"):
-        raw["mark"] = stored["mark"]
-    if raw:                     # a junk value degrades to the default, never a 500
-        cfg.update({k: str(v) for k, v in raw.items() if k in ("mark", "anim")})
-        for k in ("anim_speed", "anim_scale", "glow_angle"):
-            if k in raw:
-                cfg[k] = _brand_num(k, raw[k], _BRAND_DEFAULTS[k])
-        if "glow_color" in raw:
-            cfg["glow_color"] = _brand_color(raw["glow_color"],
-                                             _BRAND_DEFAULTS["glow_color"])
-    # A retired animation (the six the 2026-08-31 workshop killed) is a stored pick
-    # this build no longer has a treatment for -- it wears classic instead. Same
-    # line that has always caught a typo'd id; nothing migrates, nothing errors.
-    if cfg["anim"] not in MARK_ANIMS:
-        cfg["anim"] = "classic"
-    have = {m["id"] for m in list_marks(out_dir)}
-    if cfg["mark"] not in have:
-        cfg["mark"] = _BRAND_DEFAULTS["mark"] if _BRAND_DEFAULTS["mark"] in have else "logo"
-    return cfg
-
-
-def save_branding(out_dir, cfg):
-    """Persist the branding choice into settings.json's branding (mark, animation). Every key
-    is written explicitly (never the caller's whole dict) so a stray field can't land in the
-    file, and the numbers go through the same clamp load_branding applies on the way back in
-    -- the file can only ever hold a value the app would accept. The slot picks and the worn
-    banner beside them are left exactly as they are."""
-    mark = str(cfg["mark"])
-    animation = {
-        "anim": str(cfg["anim"]),
-        "anim_speed": _brand_num("anim_speed", cfg.get("anim_speed"),
-                                 _BRAND_DEFAULTS["anim_speed"]),
-        "anim_scale": _brand_num("anim_scale", cfg.get("anim_scale"),
-                                 _BRAND_DEFAULTS["anim_scale"]),
-        "glow_color": _brand_color(cfg.get("glow_color"), _BRAND_DEFAULTS["glow_color"]),
-        "glow_angle": _brand_num("glow_angle", cfg.get("glow_angle"),
-                                 _BRAND_DEFAULTS["glow_angle"]),
-    }
-
-    def _apply(b):
-        b["mark"] = mark
-        b["animation"] = animation
-    _settings.update_branding(_apply)
-
-
-def _branding_tuning(cfg):
-    """The four owner-tunable animation settings, as the API hands them out. One
-    function so /api/branding's GET, its POST echo and the Control Panel summary
-    can never disagree about the shape."""
-    return {"anim_speed": cfg["anim_speed"], "anim_scale": cfg["anim_scale"],
-            "glow_color": cfg["glow_color"], "glow_angle": cfg["glow_angle"]}
-
-
-def brand_context(out_dir):
-    """Template vars for the header mark on every page (fed by a context
-    processor, so old installs with only logo.png render exactly as before)."""
-    cfg = load_branding(out_dir)
-    marks = {m["id"]: m for m in list_marks(out_dir)}
-    # A banner shows when ANY of the three things /branding/banner.png serves
-    # exists -- and this is the SAME three, in the same order, as the route's
-    # flat branch, because this flag has to agree with what that route answers:
-    #   1. this install's RENDERED flat, in the app cache (not the coded root);
-    #   2. a bare top-level flat inside the container, which a pack cut from a
-    #      pre-2026-09-10 dressed tree carries (dev/tools/build_container.py gathers
-    #      the root recursively);
-    #   3. the slot's shipped sealed default -- the route's rule-8 fallback.
-    # Dropping any one of them here is how the header renders no banner while
-    # the route happily answers 200.
-    #
-    # This runs from a context processor, i.e. on EVERY page render, so it stays
-    # a lookup: one stat for the render, then two cheap existence checks. It
-    # deliberately no longer consults load_slot_active() -- that parses each
-    # slot's manifest (container-resolved) on every page just to ask whether a
-    # pick exists, and it is no longer the right question either. Since the
-    # render pass moved to startup, a recorded pick has already become a real
-    # render by the time any page is served, and if rendering it failed the
-    # route falls through to rule 3, which line 3 below is exactly what checks.
-    flat = _BANNER_FLAT["banner_main"]
-    try:
-        has_flat = (_served_flat_dir(out_dir, "banner_main") / flat).is_file()
-    except OSError:
-        has_flat = False
-    box = _get_container()
-    has_banner = (has_flat
-                  or bool(box and box.has(flat))
-                  or _branding_exists(_flat_default_rel("banner_main")))
-    # The animation settings ride along on every page render, exactly as the mark
-    # and its anim id always have -- the header reads them straight off MG_BOOT and
-    # needs no extra fetch to dress itself correctly on first paint.
-    tune = {"anim_speed": cfg["anim_speed"], "anim_scale": cfg["anim_scale"],
-            "glow_color": cfg["glow_color"], "glow_angle": cfg["glow_angle"]}
-    if cfg["mark"] in marks:
-        m = marks[cfg["mark"]]
-        return dict(tune, mark_url=m["png"], mark_anim=cfg["anim"], mark_kind=m["kind"],
-                    has_banner=has_banner)
-    return dict(tune, mark_url="/branding/logo.png", mark_anim=cfg["anim"],
-                mark_kind="alpha", has_banner=has_banner)
-
-
-def _mark_ico_path(mark_id):
-    """The app icon for `mark_id` as a REAL file in local\\icons\\ (moonglade.paths.icons_dir()),
-    or None when the mark has no .ico cut. Every shortcut the app makes or re-points
-    (make_launcher_shortcut, moonglade.outside) takes its icon from here, because Windows
-    reads an icon only off disk -- and this folder is no cache, so no clean-up ever blanks a
-    shortcut, as deleting 3.19's _container_cache\\ would have. The bytes are the loose cut in
-    the coded tree when there is one, else the pack's; the file is rewritten only when they
-    differ."""
-    raw = _branding_bytes(_role_rel("marks", str(mark_id) + ".ico"))
-    if raw is None:
-        return None
-    ico = _paths.icons_dir() / (str(mark_id) + ".ico")
-    try:
-        if ico.is_file() and ico.read_bytes() == raw:
-            return ico
-        ico.parent.mkdir(parents=True, exist_ok=True)
-        tmp = ico.with_name(ico.name + ".tmp")
-        tmp.write_bytes(raw)
-        os.replace(tmp, ico)                   # whole, never half-written under a shortcut
-    except OSError:
-        return None
-    return ico
-
-
-def make_launcher_shortcut(out_dir, mark_id):
-    """Create/refresh the Desktop 'Moonglade Athenaeum.lnk' whose icon is the
-    chosen mark's .ico, targeting Moonglade Launcher.pyw via pythonw. Returns the
-    .lnk path. Machine-local action -- caller must gate to localhost. The Desktop is the
-    shell's own (one moved into OneDrive included: moonglade.outside.desktop_dir()). The
-    shortcut is written by the same fixed-script writer the outside-references fixer uses
-    (moonglade.outside._save_lnk_with_powershell): every path reaches PowerShell as an
-    environment variable, never quoted into the script, so a quote in one -- a typographic
-    one included, which also ends a PowerShell '...' string -- can't break or steer it."""
-    from moonglade import outside as moonglade_outside
-    # PowerShell's CreateShortcut reads IconLocation straight off disk, so the .ico is
-    # written into local\icons\ first (_mark_ico_path).
-    ico = _mark_ico_path(mark_id)
-    if ico is None:
-        raise RuntimeError("no .ico cut for %s yet (branding/marks/)" % mark_id)
-    repo = _paths.APP_ROOT
-    pyw = _paths.launcher_path()
-    if not pyw.exists():
-        raise RuntimeError("Moonglade Launcher.pyw not found next to the server")
-    pythonw = Path(sys.executable).with_name("pythonw.exe")
-    target = pythonw if pythonw.exists() else Path(sys.executable)
-    lnk = moonglade_outside.desktop_dir() / "Moonglade Athenaeum.lnk"
-    moonglade_outside._save_lnk_with_powershell(
-        lnk, str(target), '"%s"' % pyw, str(repo), str(ico) + ",0",
-        description="Moonglade Athenaeum")
-    return str(lnk)
-
-
-# The art pack's own file type in Explorer (pack v7; the owner approved the per-user registry
-# entry 2026-10-02). The app's first registry write, so it is kept to this one function.
-PACK_PROGID = "MoongladeAthenaeum.ArtPack"
-PACK_TYPE_NAME = "Moonglade art pack"
-
-
-def register_pack_file_type(out_dir, winreg=None, platform=None):
-    """Give the art pack a type of its own in Explorer -- the name "Moonglade art pack" and the
-    app's icon, instead of a blank Type column and a generic icon. A real start runs this
-    (main()) once the pack is present. Current user only, under HKEY_CURRENT_USER\\Software\\
-    Classes: no admin rights, no other account touched, nothing machine-wide:
-
-        .mgpack                                 (default)          MoongladeAthenaeum.ArtPack
-        MoongladeAthenaeum.ArtPack              (default)          Moonglade art pack
-                                                FriendlyTypeName   Moonglade art pack
-        MoongladeAthenaeum.ArtPack\\DefaultIcon  (default)          <_pack_type_icon()>,0
-
-    The icon is a per-user copy of the current mark's .ico, the Desktop shortcut's picture
-    (_pack_type_icon). With no .ico to copy, or a copy that failed, the icon value is left as
-    it is. There is deliberately NO open command: the pack isn't meant to be opened; the
-    app reads it by itself (double-click one and Windows asks which app to open it with).
-
-    Each value is read first and written only when it differs, so a start that finds them in
-    place writes nothing (and only a start that wrote asks Explorer to refresh). A no-op off
-    Windows. Any error logs one warning and returns: a missing file type is cosmetic and must
-    never stop the server. `winreg` and `platform` are seams for the tests, which always pass a
-    fake registry. Returns True when something was written."""
-    if (platform or sys.platform) != "win32" or not _container_path().is_file():
-        return False
-    try:
-        if winreg is None:
-            import winreg
-        hkcu = winreg.HKEY_CURRENT_USER      # first: a registry that is not there fails here,
-        classes = "Software\\Classes\\"     # before any file is written
-        want = [(classes + _container_path().suffix, "", PACK_PROGID),
-                (classes + PACK_PROGID, "", PACK_TYPE_NAME),
-                (classes + PACK_PROGID, "FriendlyTypeName", PACK_TYPE_NAME)]
-        icon, wrote = _pack_type_icon(out_dir)
-        if icon is not None:
-            want.append((classes + PACK_PROGID + "\\DefaultIcon", "", str(icon) + ",0"))
-        for key_path, name, value in want:
-            try:
-                with winreg.OpenKey(hkcu, key_path) as key:
-                    if winreg.QueryValueEx(key, name)[0] == value:
-                        continue                   # already right: leave it alone
-            except OSError:
-                pass                               # not there yet: write it below
-            with winreg.CreateKeyEx(hkcu, key_path, 0, winreg.KEY_WRITE) as key:
-                winreg.SetValueEx(key, name, 0, winreg.REG_SZ, value)
-            wrote = True
-        if wrote:
-            _tell_explorer_file_types_changed()
-        return wrote
-    except Exception as e:                         # noqa: BLE001 -- cosmetic, never fatal
-        import logging as _logging
-        _logging.getLogger(__name__).warning(
-            "art pack: could not register its Explorer file type (%s); carrying on.", e)
-        return False
-
-
-def _pack_type_icon(out_dir):
-    """(path, rewritten) for the pack's Explorer icon: %LOCALAPPDATA%\\Moonglade Athenaeum\\
-    mgpack.ico, a copy of the current mark's .ico (the Desktop shortcut's picture, read the
-    same loose-then-pack way). One fixed per-user place, outside every install, so the D: and
-    C: installs point Explorer at the same path and moving or deleting an install never leaves
-    it pointing at a file that is gone. Rewritten only when its bytes differ. (None, False)
-    when the mark has no .ico, or when the copy fails -- logged once, and the caller then
-    leaves the registry's icon as it was."""
-    raw = _branding_bytes(_role_rel("marks", str(load_branding(out_dir)["mark"]) + ".ico"))
-    if raw is None:
-        return None, False
-    try:
-        dst = Path(os.environ["LOCALAPPDATA"]) / "Moonglade Athenaeum" / "mgpack.ico"
-        if dst.is_file() and dst.read_bytes() == raw:
-            return dst, False
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        tmp = dst.with_name(dst.name + ".tmp")
-        tmp.write_bytes(raw)
-        os.replace(tmp, dst)                   # whole, never half-written under Explorer
-        return dst, True
-    except (KeyError, OSError) as e:
-        import logging as _logging
-        _logging.getLogger(__name__).warning(
-            "art pack: could not copy its Explorer icon (%r); the icon is left as it was.", e)
-        return None, False
-
-
-def _tell_explorer_file_types_changed():
-    """SHChangeNotify(SHCNE_ASSOCCHANGED): Explorer picks up the new type name and icon now
-    instead of at the next sign-in. Best-effort; it changes nothing by itself."""
-    try:
-        import ctypes
-        ctypes.windll.shell32.SHChangeNotify(0x08000000, 0x0000, None, None)
-    except Exception:                              # noqa: BLE001 -- a refresh hint only
-        pass
-
-
-# Prompt word-cloud vocabulary, shared by the /health word cloud and the Watchword
-# achievement so both count the identical set of meaningful prompt words. Hoisted from
-# collection_health()'s own inline block (kept byte-identical) so top_word_uses can never
-# drift from what the dashboard shows.
-_PROMPT_STOPWORDS = frozenset({
-    "the", "and", "a", "an", "of", "with", "in", "on", "at", "to", "for",
-    "is", "by", "as", "or", "from", "best", "quality", "masterpiece",
-    "highres", "detailed", "very", "high", "score", "up", "1girl", "1boy",
-    "solo", "looking", "viewer"})
-
-
-def _prompt_word_counter(rows):
-    """Counter of meaningful prompt words across prompt_preview values. `rows` is an
-    iterable of 1-tuples (the SELECT prompt_preview shape) or bare strings. Pure; drops the
-    shared stopwords. Sealing note: the word itself is only ever surfaced as a COUNT by
-    callers (Watchword takes most_common(1)[0][1]) -- the word never leaves this layer."""
-    from collections import Counter
-    c = Counter()
-    for r in rows:
-        pp = r if isinstance(r, str) else r[0]   # a 1-tuple / sqlite3.Row / list -> its first col
-        for w in re.findall(r"[a-z][a-z']{2,}", (pp or "").lower()):
-            if w not in _PROMPT_STOPWORDS:
-                c[w] += 1
-    return c
-
-
-# The achievement-metrics cache. Keyed by db_path (so a test's tmp catalog never
-# collides) and invalidated on the same cheap `(COUNT(*), MAX(media_id))` key the
-# series cache uses.
-#
-# DELIBERATELY NO TIME FLOOR, unlike that cache. A floor means a catalog change is
-# bounded-stale, and one of this bundle's consumers is the ACHIEVEMENT GATE: earning
-# something unlocks its art, and "your banner appears within thirty seconds" is a bug,
-# not a bounded staleness (caught by dev/tests/test_unlock_split.py, which earns mid-test
-# and asks for the art immediately). The key alone is enough for the case that was
-# actually slow -- repeatedly opening overlays against a catalog nobody is writing to,
-# which is every open outside a sync. During a sync it recomputes per request, exactly
-# as it did before this cache existed, so nothing regressed there either.
-#
-# It exists because this bundle is NOT the "cheap COUNTs" its docstring once claimed
-# on its own: four of its passes read every matching row -- rated, the LoRA CSV
-# split, the palindrome seed scan and the prompt word counter -- and the whole
-# bundle reran on EVERY /api/achievements call. That is the Folio opening, the
-# Control Panel opening, and every achievement re-check, each paying a full-library
-# walk. On a modest machine with a real library that is the overlay-open stall the
-# owner reported (2026-09-03).
-_ACH_METRICS_CACHE = {}
-_ACH_METRICS_LOCK = threading.Lock()
-
-
-def achievement_metrics(db_path, use_cache=True):
-    """The metric bundle every achievement threshold is measured against. Read-only over
-    the local catalog -- no network, no spend. Fails soft.
-
-    NOT the "cheap COUNTs" this docstring used to claim, which is why the memo below
-    exists: most of it is indexed COUNTs, but four passes read every matching ROW and
-    process it in Python -- `rated`, the LoRA CSV split, the palindrome seed scan, and the
-    prompt word counter. On a real library that is the expensive part of opening the Folio
-    or the Control Panel, and it ran on every /api/achievements call before 2026-09-03.
-
-    CACHED (see _ACH_METRICS_CACHE): recomputed whenever the catalog's cheap key
-    changes, and served from the memo when it has not. `use_cache=False` forces a real
-    read -- what a test asserting the computation itself wants."""
-    if use_cache:
-        try:
-            with catalog(db_path) as con:
-                cheap = tuple(con.execute(
-                    "SELECT COUNT(*), MAX(media_id) FROM catalog").fetchone())
-            with _ACH_METRICS_LOCK:
-                ent = _ACH_METRICS_CACHE.get(str(db_path))
-                if ent is not None and ent["key"] == cheap:
-                    return dict(ent["metrics"])          # a COPY: callers .update() it
-            fresh = achievement_metrics(db_path, use_cache=False)
-            with _ACH_METRICS_LOCK:
-                _ACH_METRICS_CACHE[str(db_path)] = {
-                    "key": cheap, "computed_at": time.time(), "metrics": dict(fresh)}
-            return fresh
-        except sqlite3.Error:
-            pass          # a broken/missing catalog falls through to the real read
-    m = catalog_counts(db_path)   # images, videos, collections
-    with catalog(db_path) as con:
-        try:
-            def _scalar(sql):
-                return int(con.execute(sql).fetchone()[0] or 0)
-            m["models"] = _scalar(
-                "SELECT COUNT(DISTINCT COALESCE(NULLIF(model_name,''), NULLIF(model_id,''))) "
-                "FROM catalog WHERE COALESCE(model_name,'') != '' OR COALESCE(model_id,'') != ''")
-            m["published"] = _scalar("SELECT COUNT(*) FROM catalog WHERE is_published = '1'")
-            m["tagged"] = _scalar("SELECT COUNT(*) FROM catalog WHERE COALESCE(art_tags,'') != ''")
-            # The Moonforge: gens made IN the app -- same set as the gallery's
-            # "made locally" filter (source api OR local), NOT just api.
-            m["local_gens"] = _scalar(
-                "SELECT COUNT(*) FROM catalog WHERE source IN ('api','local')")
-            # Marathon: the busiest single calendar day of in-app conjuring.
-            m["gens_in_a_day"] = _scalar(
-                "SELECT COALESCE(MAX(c), 0) FROM (SELECT COUNT(*) AS c FROM catalog "
-                "WHERE source IN ('api','local') AND COALESCE(created_at,'') != '' "
-                "GROUP BY substr(created_at, 1, 10))")
-            # The Lexicon: distinct keywords across every tagged piece (art_tags is
-            # a comma list; the split has to happen Python-side).
-            kw = set()
-            for (tags,) in con.execute(
-                    "SELECT art_tags FROM catalog WHERE COALESCE(art_tags,'') != ''"):
-                for t in (tags or "").split(","):
-                    t = t.strip().lower()
-                    if t:
-                        kw.add(t)
-            m["distinct_keywords"] = len(kw)
-            # --- Folio expansion catalog metrics (all COUNT-only integers; no rating value,
-            # LoRA name, seed value, or prompt word ever leaves this function) ---
-            # The Bench (rated): health-panel-identical -- a non-empty, non-zero rating.
-            m["rated"] = _scalar(
-                "SELECT COUNT(*) FROM catalog "
-                "WHERE COALESCE(NULLIF(rating,''),'0') NOT IN ('0')")
-            # The Atelier (loras_distinct): distinct LoRA NAME-keys across the per-row `loras`
-            # CSV (drop ':weight'), parsed exactly like collection_health's top-LoRAs block,
-            # over the WHOLE library.
-            # The same pass counts the IN-APP rows (source api/local, the Moonforge's set) for
-            # the three LoRA honors that used to be bumped on an accepted submit (owner
-            # 2026-10-02: evidence-based counts): lora_used = distinct in-app generations that
-            # used one, lora_stacked = the most on one generation, lora_distinct = distinct
-            # names across them. A submit that never produced a picture counts nothing now.
-            lk, in_app_names, lora_tasks, stacked = set(), set(), set(), 0
-            for (loras, src, tid, mid) in con.execute(
-                    "SELECT loras, source, task_id, media_id FROM catalog "
-                    "WHERE COALESCE(loras,'') != ''"):
-                names = [part.strip().rsplit(":", 1)[0].strip()   # drop ":weight"
-                         for part in (loras or "").split(",")]
-                names = [n for n in names if n]
-                lk.update(names)
-                if names and src in ("api", "local"):
-                    in_app_names.update(names)
-                    lora_tasks.add(tid or ("media:" + str(mid)))
-                    stacked = max(stacked, len(names))
-            m["loras_distinct"] = len(lk)
-            m["lora_used"] = len(lora_tasks)
-            m["lora_stacked"] = stacked
-            m["lora_distinct"] = len(in_app_names)
-            # The Restoration Wing (edits): in-app generations that ARE edits by their own
-            # lineage (derive_kind, read off the task PixAI stored), one per task -- not a
-            # count of accepted submits (owner 2026-10-02).
-            m["edits"] = _scalar(
-                "SELECT COUNT(DISTINCT task_id) FROM catalog WHERE derive_kind = 'edit' "
-                "AND source IN ('api','local') AND COALESCE(task_id,'') != ''")
-            # Seven Candles (gen_streak): the best run of consecutive LOCAL days with an in-app
-            # generation, from PixAI's own timestamps on the rows rather than a day ledger.
-            m["gen_streak"] = _best_day_streak([
-                d for (d,) in con.execute(
-                    "SELECT DISTINCT date(created_at, 'localtime') FROM catalog "
-                    "WHERE source IN ('api','local') AND COALESCE(created_at,'') != ''")
-                if d])
-            # Mirror Seed (palindrome_seeds): distinct numeric-palindrome seeds of >=5 digits.
-            # COUNT ONLY -- no seed value is ever emitted.
-            pal = set()
-            for (seed,) in con.execute(
-                    "SELECT DISTINCT seed FROM catalog WHERE COALESCE(seed,'') != ''"):
-                s = str(seed or "").lstrip("-")
-                if len(s) >= 5 and s.isdigit() and s == s[::-1]:
-                    pal.add(s)                              # dedupe '12321' vs '-12321'
-            m["palindrome_seeds"] = len(pal)
-            # Watchword (top_word_uses): uses of the single most-common prompt word, via the
-            # shared /health word cloud. COUNT ONLY -- the word itself never leaves.
-            _wc = _prompt_word_counter(con.execute(
-                "SELECT prompt_preview FROM catalog "
-                "WHERE COALESCE(prompt_preview,'') != ''"))
-            m["top_word_uses"] = _wc.most_common(1)[0][1] if _wc else 0
-        except sqlite3.Error:
-            for k in ("models", "published", "tagged", "local_gens",
-                      "gens_in_a_day", "distinct_keywords",
-                      "rated", "loras_distinct", "palindrome_seeds", "top_word_uses",
-                      "lora_used", "lora_stacked", "lora_distinct", "edits", "gen_streak"):
-                m.setdefault(k, 0)
-    return m
-
-
-_TIER_POINTS = {"common": 5, "rare": 10, "epic": 25, "legendary": 50, "feat": 0}
-
-# PLAIN WORDS FOR WHAT A LADDER COUNTS (owner walk 2026-09-29). The Folio's ladder headers read
-# "<track> — measured in <metric>", and the metric is the roster's own key: "images" reads fine,
-# "local_gens" is a code name on screen. Every metric a ladder track uses has its words here,
-# sent on each track as `metric_words`; a metric this list does not know yet (a roster that grows
-# a track before this does) falls back to its key with the underscores spaced out, so no header
-# can ever show one. dev/tests/test_achievements.py holds every live track to an entry here.
-LADDER_METRIC_WORDS = {
-    "images": "images",
-    "videos": "videos",
-    "local_gens": "pictures made in the app",
-    "collections": "collections",
-    "models": "models used",
-    "tagged": "tagged pictures",
-    "published": "published pictures",
-    "edits": "edits",
-    "culled": "pictures deleted",
-    "days_used": "days you opened the app",
-    "rated": "rated pictures",
-    "loras_trained": "LoRAs trained",
-    "contest_entries": "contest entries",
-    "jobs_concurrent": "jobs running at once",
-    "loras_distinct": "different LoRAs used",
-    "distinct_active_days": "days you made or sorted pictures",
-}
-
-
-def metric_words(metric):
-    """What a ladder's metric counts, in words a person reads (never a code name)."""
-    m = str(metric or "")
-    return LADDER_METRIC_WORDS.get(m) or " ".join(m.replace("_", " ").split())
-
-
-def _build_ach_rung(roster):
-    """Rung = the ordinal step within a ladder family. A ladder family = the
-    bucket=='ladder' achievements that share a metric, ordered by threshold;
-    non-ladder (milestone/mastery) achievements are rung 1. Derived (not a
-    hand-kept field) so it reproduces the owner's Archive ladder exactly
-    (5/15/35/65/70). Shared metrics stay safe: milestone/feat entries that reuse
-    a metric are NOT bucket=='ladder', so they never join the family."""
-    fam = {}
-    for a in roster:
-        if a.get("bucket") == "ladder":
-            fam.setdefault(a["metric"], []).append(a)
-    rung = {}
-    for members in fam.values():
-        for i, a in enumerate(sorted(members, key=lambda x: x["threshold"]), 1):
-            rung[a["id"]] = i
-    return rung
-
-
-# The rung map is derived from the sealed roster once per load; read via _ach_rung().
-
-
-def achievement_points(a):
-    """Rung-scaled score for one achievement: tier base + 5*(rung-1). Feats score
-    0 by design (pure bragging-rights flair), so the points total never reveals a
-    masked feat."""
-    if a.get("tier") == "feat":
-        return 0
-    return _TIER_POINTS.get(a.get("tier"), 0) + 5 * (_ach_rung().get(a["id"], 1) - 1)
-
-
-# Closed-universe set achievements -> a per-criterion checklist (WHICH members are done),
-# not just an N/M count. Maps achievement id -> (telemetry set key, ordered
-# [(member, label)] universe). ONLY closed sets belong here; open-ended distinct-counts
-# (loras, enhance_workflows) have no finite universe and stay count-only. `video_modes`
-# tracks only i2v/flf/r2v (V2V is deliberately not counted -- see the loom/generate bump).
-# The closed-set criteria labels are SEALED in the container too; read via _ach_criteria()
-# -> {aid: [set_key, [[member, label], ...]]} (JSON tuples arrive as lists, unpacked below).
-
-
-def achievement_criteria(sets):
-    """For each closed-universe set achievement, which of its criteria are met. `sets` =
-    telemetry.json's 'sets' block (id -> list of members). Returns
-    {achievement_id: [{"key","label","done"}, ...]}. Pure + fail-soft: a missing or
-    non-list set reads as 'nothing done' rather than raising."""
-    out = {}
-    for aid, (set_key, universe) in _ach_criteria().items():
-        have = sets.get(set_key) if isinstance(sets, dict) else None
-        have = set(have) if isinstance(have, list) else set()
-        out[aid] = [{"key": k, "label": lbl, "done": k in have} for k, lbl in universe]
-    return out
-
-
-def compute_achievements(metrics, seen=(), sets=None, earned_at=None):
-    """Pure: given the metric bundle + the set of already-seen achievement ids,
-    return {achievements, skins, newly}. An achievement is *earned* when its metric
-    reaches the threshold; a skin is *earned* if it's free or any earned achievement
-    unlocks it. `newly` = earned-but-not-yet-seen (drives the one-shot unlock toast).
-
-    PIN-ONCE (#37, owner: "a Failure -- Colossal"): `earned_at` is the stamped
-    id->date record from achievements.json, and any id present in it stays earned
-    even when its live metric has since dropped below the threshold. Catalog-count
-    metrics are snapshots, not counters -- the web Duplicate Review's last-copy
-    delete (quarantine_duplicate_file -> delete_from_catalog) and every real bulk
-    delete shrink them, and before this pin an earned badge visibly un-earned in
-    the Folio after a prune. The record is append-only or it isn't a record.
-    Callers that render or GATE on earned-ness must pass it; omitting it (pure
-    metric tests) keeps the old live-threshold behavior.
-
-    Two metrics are self-referential and resolved in post-passes here (they cannot
-    be a metrics.get() lookup): skins_unlocked (Skin Changer) counts the skins this
-    very computation unlocked, and all_non_feat_earned (Completionist) requires
-    every non-feat, non-banner achievement to be earned."""
-    seen = set(seen or [])
-    pinned = set(earned_at or ())
-    metrics = dict(metrics or {})
-    # per-criterion checklists for the closed-universe set achievements (only when the
-    # caller supplies the raw telemetry sets; tests that pass metrics-only skip it)
-    crit = achievement_criteria(sets) if sets is not None else {}
-    earned_skins = set()
-    achs = []
-    for a in _roster():
-        cur = int(metrics.get(a["metric"], 0) or 0)
-        earned = cur >= a["threshold"] or a["id"] in pinned
-        if earned and a.get("skin"):
-            earned_skins.add(a["skin"])
-        entry = {
-            "id": a["id"], "name": a["name"], "icon": a["icon"], "desc": a["desc"],
-            "tier": a["tier"], "metric": a["metric"], "threshold": a["threshold"],
-            "current": cur, "earned": earned, "skin": a.get("skin", ""),
-            "bucket": a.get("bucket", "ladder"), "hidden": bool(a.get("hidden")),
-            "banner_reward": bool(a.get("banner_reward")), "points": achievement_points(a),
-            "roast": a.get("roast", ""), "roast_nsfw": a.get("roast_nsfw", ""),
-        }
-        if a.get("bucket") == "ladder":
-            entry["track"] = a["track"]
-            entry["rung"] = a["rung"]
-            entry["rungs_total"] = a["rungs_total"]
-        if a["id"] in crit:
-            entry["criteria"] = crit[a["id"]]
-        achs.append(entry)
-    by_id = {x["id"]: x for x in achs}
-    # Generic `requires` meta-loop (Glories of the Curator/Forgewright + The Way Is Shut):
-    # an achievement carrying a `requires` prereq list earns when every prereq id is earned
-    # (or it is pin-once). Iterates the SEALED roster -- which carries `requires` -- rather
-    # than the built entries, which deliberately never copy it, so no prereq list ever
-    # reaches the payload/client. `current` reflects how many prereqs are met (for a masked
-    # feat this stays cloaked until earned anyway).
-    #
-    # A FIXED POINT, and ABOVE the two post-passes -- both of those matter:
-    #   * it used to read ONE `earned_ids` snapshot taken before the loop, so a meta whose
-    #     prereq is ITSELF a meta could never earn: the prereq earned during the same pass
-    #     and the snapshot never heard about it. Iterating until nothing new earns is what
-    #     makes a chain of any depth resolve.
-    #   * it used to run AFTER Skin Changer and Completionist, so a skin granted by a meta
-    #     was invisible to Skin Changer count, and a meta earned here never counted toward
-    #     Completionist "everything earned". Resolving first means both post-passes see the
-    #     finished picture.
-    # Bounded by construction: a round can only ADD earns, so it converges in at most one
-    # pass per requires-carrying achievement.
-    _reqs = [a for a in _roster() if a.get("requires")]
-    for _ in range(len(_reqs) + 1):
-        earned_ids = {x["id"] for x in achs if x["earned"]}
-        changed = False
-        for a in _reqs:
-            e = by_id.get(a["id"])
-            if e is None:
-                continue
-            req = a["requires"]
-            met = sum(1 for r in req if r in earned_ids)
-            e["current"] = met
-            was = e["earned"]
-            e["earned"] = (met == len(req)) or e["id"] in pinned
-            if e["earned"] and a.get("skin"):
-                earned_skins.add(a["skin"])
-            if e["earned"] and not was:
-                changed = True
-        if not changed:
-            break
-    # post-pass: Skin Changer counts unlocked skins (free ones + this pass's earns)
-    sc = by_id.get("skin-changer")
-    if sc:
-        n = sum(1 for s in _skins() if s.get("free") or s["id"] in earned_skins)
-        sc["current"] = n
-        sc["earned"] = n >= sc["threshold"] or sc["id"] in pinned
-    # post-pass: Completionist = every non-feat, non-banner achievement earned
-    comp = by_id.get("completionist")
-    if comp:
-        pool = [x for x in achs if x["tier"] != "feat" and not x["banner_reward"]]
-        done = sum(1 for x in pool if x["earned"])
-        comp["current"] = 1 if done == len(pool) else 0
-        comp["earned"] = done == len(pool) or comp["id"] in pinned
-    skins = [{"id": s["id"], "name": s["name"], "desc": s["desc"],
-              "earned": bool(s.get("free")) or s["id"] in earned_skins,
-              "unlock": _skin_unlock().get(s["id"])}
-             for s in _skins()]
-    newly = [a["id"] for a in achs if a["earned"] and a["id"] not in seen]
-    earned_points = sum(x["points"] for x in achs if x["earned"])
-    possible_points = sum(x["points"] for x in achs)
-    # Each track also carries its metric in plain words, for the Folio's "measured in" header
-    # (copies: the sealed defs are cached and shared, never written into).
-    ladders = [dict(t, metric_words=metric_words(t.get("metric"))) if isinstance(t, dict) else t
-               for t in _ladder_tracks()]
-    return {"achievements": achs, "skins": skins, "ladders": ladders, "newly": newly,
-            "earned_points": earned_points, "possible_points": possible_points}
-
-
-# THE METRICS THIS SERVER MEASURES THAT A FRESH INSTALL DOES NOT YET HOLD A KEY FOR. The bundle
-# behind /api/achievements is open-ended: a telemetry counter, maximum or flag exists in it only
-# once something has bumped it, so "the key is absent" cannot tell "measured, and still zero"
-# from "a metric nobody counts". The first is a true 0-of-N; only the second shows no count.
-# Every name below is one code in this app bumps (telem_bump / telem_max), plus the metrics
-# compute_achievements() resolves ITSELF in a post-pass (Skin Changer counts the skins that very
-# computation unlocked). Feat metrics are deliberately NOT listed: achievement_progress refuses
-# a feat before it ever reads this set. dev/tests/test_achievement_progress.py pins that every
-# non-feat metric in the sealed roster is either in the bundle or here, so a new honor added
-# without its metric being declared fails a test instead of silently losing its count.
-_MEASURED_METRICS = frozenset({
-    "claims", "enhances", "free_cards_applied", "jobs_concurrent",
-    "organize_runs", "similar_uses",
-    "skin_changed_runs", "storyboards", "uploads",
-    "skins_unlocked",
-})
-# (edits, culled, the LoRA counts and loras_trained left this list on 2026-10-02: they are
-# counted from evidence now -- the catalog, or a set telemetry_metrics always measures -- so
-# every bundle carries them, a fresh install's as a true 0.)
-
-
-def achievement_progress(entry, metrics):
-    """The "N to go" numbers for ONE unearned achievement entry (Folio for completionists, O1),
-    or None when there is nothing true to say:
-
-        {"current": int, "threshold": int, "left": int, "fraction": float}
-
-    `left` is threshold - current from the server's own metric, never negative; `fraction` is
-    current / threshold clamped to [0, 1] -- the true fraction the moon gauge draws.
-
-    NONE for every case that must show no count, no moon and no pin:
-      * a FEAT of any kind (tier or bucket feat, or a meta): feats leak nothing (Session G), so
-        this function refuses them by construction rather than trusting a caller to skip them;
-      * an entry already earned (there is nothing to go);
-      * a metric this server does not measure (neither in the bundle nor in _MEASURED_METRICS --
-        compute_achievements reads a missing metric as 0, which would draw a false "N to go"
-        from a metric nobody counts);
-      * a threshold that is not a positive whole number.
-    Pure: it reads the entry and the metric bundle it is handed."""
-    if not isinstance(entry, dict) or entry.get("earned"):
-        return None
-    if entry.get("tier") == "feat" or entry.get("bucket") in ("feat", "meta"):
-        return None
-    metric = entry.get("metric")
-    if not isinstance(metrics, dict) or (
-            metric not in metrics and metric not in _MEASURED_METRICS):
-        return None
-    try:
-        threshold = int(entry.get("threshold") or 0)
-        current = int(entry.get("current") or 0)
-    except (TypeError, ValueError):
-        return None
-    if threshold <= 0 or current < 0:
-        return None
-    return {"current": current, "threshold": threshold,
-            "left": max(0, threshold - current),
-            "fraction": min(1.0, current / threshold)}
-
-
-def claim_job_label(claimed, credits):
-    """The activity-tracker line for a successful claim.
-
-    Credits are the headline when there are any -- "+1,200 credits claimed" -- because
-    that is the number the owner came to see, grouped the same way every other figure in
-    the tracker is. A claim can also be worth zero credits (a stamina-only reward is
-    still a real claim), and "+0 credits claimed" would read as a bug rather than a
-    fact, so that case counts the rewards instead."""
-    try:
-        credits = int(credits or 0)
-    except (TypeError, ValueError):
-        credits = 0
-    if credits > 0:
-        return "+{:,} credits claimed".format(credits)
-    n = max(1, int(claimed or 1))
-    return "{} reward{} claimed".format(n, "" if n == 1 else "s")
-
-
-def _ach_state_path(out_dir):
-    return _paths.records_path(out_dir, "achievements.json")
-
-
-def load_ach_state(out_dir):
-    """Persisted cosmetic state: {seen:[ids already toasted], skin:'active id',
-    earned_at:{id: iso-date}}. Fails soft to an empty default so a missing/corrupt
-    file never breaks a page."""
-    try:
-        d = json.loads(_ach_state_path(out_dir).read_text(encoding="utf-8"))
-        seen = [s for s in (d.get("seen") or []) if isinstance(s, str)]
-        # Preserve the stored skin id verbatim -- do NOT coerce it to the default
-        # just because it isn't in the CURRENT _skin_ids(). That set comes from the
-        # sealed container, so during an undressed window (the pack still
-        # downloading, or briefly unreadable) it collapses to the two free skins;
-        # coercing here would rewrite a legitimately-earned skin to "moonglade" and
-        # the next save_ach_state would PERSIST that reset -- permanent loss for a
-        # purely cosmetic value the container has nothing to do with. Every skin's
-        # CSS is hard-coded server-side (html[data-skin=...]) and applied client-
-        # side, so an id we can't validate right now still renders correctly; a
-        # genuinely unknown id just renders the default tokens, harmlessly. The
-        # write gate (/api/skin: earned + known) is what refuses a bogus/locked
-        # skin -- read is trust, write is checked. (Adversarial M1, 2026-08-22.)
-        skin = d.get("skin") if isinstance(d.get("skin"), str) and d.get("skin") else "moonglade"
-        earned_at = {k: v for k, v in (d.get("earned_at") or {}).items()
-                     if isinstance(k, str) and isinstance(v, str)}
-        return {"seen": seen, "skin": skin, "earned_at": earned_at}
-    except (OSError, ValueError):
-        return {"seen": [], "skin": "moonglade", "earned_at": {}}
-
-
-def save_ach_state(out_dir, state):
-    """Persist {seen, skin, earned_at} atomically-ish. Best-effort; swallows write errors."""
-    try:
-        _ach_state_path(out_dir).write_text(
-            json.dumps({"seen": sorted(set(state.get("seen") or [])),
-                        "skin": state.get("skin", "moonglade"),
-                        "earned_at": state.get("earned_at") or {}}, indent=2),
-            encoding="utf-8")
-        return True
-    except OSError:
-        return False
-
-
-def badge_cache_dir(out_dir=None):
-    """Where the regenerable badge-thumb cache lives: local/cache/badges/. OUTSIDE the coded
-    branding tree on purpose (SCOPE_bundle-v2-branding constraint 3: the tree must keep
-    reading as the empty slot scaffold -- a folder of PNGs named by achievement id beside the
-    coded folders published the sealed roster's own contents to anyone who opened it), and
-    outside every library: the thumbs are cut from the art pack, identical for any library,
-    so they live with the install that has the pack. local/cache/ is the general home for
-    rebuildable caches; add siblings beside badges/, not elsewhere. (`out_dir` is accepted
-    and unused.)"""
-    return _paths.cache_dir() / "badges"
-
-
-def _badge_thumb(out_dir, aid, size=256):
-    """Lazily cache a ~size px copy of a badge master and return its Path (or PNG bytes when the cache dir can't be written). The 57
-    badge masters are 2000px (~300 MB total); the Folio of Honors renders these thumbs so
-    a full open doesn't pull the masters. Masters stay the source of truth; the cache
-    self-heals when a master is re-cut (mtime check). Falls back to the master on any
-    trouble, so a tile always resolves to *something*. Cache home: badge_cache_dir().
-
-    NEVER LARGER THAN THE SOURCE: `size` is a ceiling, not a target. Pillow's thumbnail()
-    only ever shrinks, so a master smaller than the size asked (the toast's 384 against a
-    smaller drop-in) is served at its own size, never blown up; keep it that way in both
-    cuts below rather than resizing to `size` (dev/tests/test_badge_anim.py holds it)."""
-    rel = _role_rel("badges", aid + ".png")
-    if not _branding_exists(rel):
-        return None
-    src = _role_dir("badges") / (aid + ".png")
-    dst = badge_cache_dir(out_dir) / ((aid + ".png") if size == 256 else (aid + "." + str(size) + ".png"))
-    src_mtime = _branding_mtime(rel)   # loose master's own mtime, or the container file's
-    try:
-        if dst.is_file() and src_mtime is not None and dst.stat().st_mtime >= src_mtime:
-            return dst
-        raw = _branding_bytes(rel)
-        if raw is None:
-            return None
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        import io
-        from PIL import Image
-        im = Image.open(io.BytesIO(raw))
-        im.thumbnail((size, size))
-        im.save(dst)
-        return dst
-    except Exception:
-        if src.is_file():
-            return src         # loose master exists -- serve it full-size
-        # Container-sourced master AND a cache we couldn't write (unwritable dir,
-        # read-only mount, full disk): don't fall through to a 404 -> emoji. Hand
-        # bytes back for the route to serve from memory -- resized if PIL can, else
-        # the raw master (adversarial-review 2026-08-22).
-        raw = _branding_bytes(rel)
-        if raw is None:
-            return None
-        try:
-            import io
-            from PIL import Image
-            im = Image.open(io.BytesIO(raw))
-            im.thumbnail((size, size))
-            buf = io.BytesIO()
-            im.save(buf, format="PNG")
-            return buf.getvalue()
-        except Exception:
-            return raw
-
-
-# An ANIMATED badge master is a `<id>.webp` dropped beside the stills in the badges
-# role -- the same "drop it in and it moves" move the toast mascot already takes
-# (notify/ach.js's mascot chain). It is served THROUGH, byte-for-byte, never down a
-# PIL path: measured here on Pillow 12.2.0, reading an animated webp hands back every
-# frame but reports each frame's `duration` as None (the masters carry a real 66 ms in
-# their ANMF chunks), so a re-encode silently invents the cadence the art was authored
-# at -- and re-compresses the artist's chroma-keyed alpha on top of it. Pass-through
-# keeps frames, timing, loop count and alpha exactly as made. The still-PNG path below
-# is untouched by any of this: a badge with no .webp beside it serves exactly as before.
-#
-# The cap is the one thing pass-through has to bring of its own, since nothing is being
-# resized: an animated master is whole-file, and the ones banked for future feats run
-# ~3-8 MB each. 12 MB clears those with headroom while still refusing something absurd;
-# over the cap the .webp 404s and the client's chain falls back to the still thumb.
-_BADGE_ANIM_MAX_BYTES = 12 * 1024 * 1024
-
-
-def _badge_anim(aid):
-    """The animated master's bytes for `aid`, or None when there isn't one (no
-    `<id>.webp` in the badges role, unreadable, or over _BADGE_ANIM_MAX_BYTES).
-    None is the fallback signal, not an error: the route 404s and the client's
-    webp-first chain drops to the still `<id>.png` thumb. Reads through
-    _branding_bytes(), so a loose master wins over the container's, same as the
-    stills. NO cache entry: there is no derived artefact to cache -- the bytes
-    served ARE the master."""
-    rel = _role_rel("badges", aid + ".webp")
-    if not _branding_exists(rel):
-        return None
-    raw = _branding_bytes(rel)
-    if raw is None or len(raw) > _BADGE_ANIM_MAX_BYTES:
-        return None
-    return raw
-
-
-# ---------------------------------------------------------------------------
-# Telemetry: the persisted counters behind every achievement metric that is NOT
-# a cheap catalog COUNT (edits run, pieces culled, distinct days, feat events...).
-# One JSON file beside achievements.json; every write is lock-guarded and
-# fail-soft so a telemetry hiccup can NEVER break a backup, a gen, or a page.
-# Call sites bump via telem_*(); out_dir defaults to the process-wide value set
-# once by create_app()/the CLI so deep call sites need no plumbing.
-# ---------------------------------------------------------------------------
-_TELEM_LOCK = threading.Lock()
-_TELEM_OUT = None            # set by set_telemetry_out(); None -> bare bumps no-op
-
-
-def _telemetry_path(out_dir):
-    return _paths.records_path(out_dir, "telemetry.json")
-
-
-def set_telemetry_out(out_dir):
-    """Point the bare telem_* helpers at this install's out_dir (server + CLI)."""
-    global _TELEM_OUT
-    _TELEM_OUT = out_dir
-
-
-_TELEM_EMPTY = {"counters": {}, "maxima": {}, "sets": {}, "flags": {}, "days": [],
-                "day_lists": {}, "baselines": {}, "contest_results": {}}
-# `baselines` is the ONE section telemetry_metrics() deliberately ignores: it is
-# not a metric, it is remembered STATE -- a snapshot of what was already on disk
-# the first time a detector looked, so a later comparison can tell "this was
-# always here" from "this is new". Today the only detector using it is the coded
-# branding tree's, and its keys are _BASELINE_GOODS plus the identity of the app
-# folder whose tree was snapshotted (_baseline_key): this file lives in the
-# LIBRARY, the tree does not, so one library can legitimately hold one snapshot
-# per app folder it has been pointed at. A dict of named snapshots rather than a
-# bare map, so a second detector can never have to rename the first one's key.
-#
-# `contest_results` is the other structured section (L3, moonglade/contest_wins.py): the
-# VERIFIED contest wins ({"wins": {contest_id: {artwork_id: record}}}) and the schedule of the
-# automatic win check ({"checks": {contest_id: row}}). The contest-win metric counts `wins`
-# and nothing else; the flat `contest_win_keys` set an older sweep wrote is left in place,
-# untouched, as the record that a contest was once believed won.
-
-
-def load_telemetry(out_dir):
-    """The persisted counter bundle. Missing/corrupt file -> empty defaults."""
-    try:
-        d = json.loads(_telemetry_path(out_dir).read_text(encoding="utf-8"))
-        if not isinstance(d, dict):
-            raise ValueError("not a dict")
-    except (OSError, ValueError):
-        d = {}
-    out = {}
-    for k, dflt in _TELEM_EMPTY.items():
-        v = d.get(k)
-        if isinstance(v, type(dflt)):
-            out[k] = v
-        else:
-            out[k] = dict(dflt) if isinstance(dflt, dict) else list(dflt)
-    return out
-
-
-def _save_telemetry(out_dir, data):
-    """Atomic write (tmp + os.replace, the same idiom as download's .part) so a
-    reader can never see a half-written file -- a torn read would fail-soft to
-    empty defaults and the next mutate would persist that wipe."""
-    try:
-        p = _telemetry_path(out_dir)
-        tmp = p.with_name(p.name + ".tmp-%d" % os.getpid())
-        tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
-        os.replace(tmp, p)
-    except OSError:
-        pass
-
-
-def _telem_file_lock(out_dir):
-    """Best-effort CROSS-PROCESS lock (the server + a Panel CLI job can both bump
-    the same ledger). O_EXCL lockfile, short spin, stale takeover; on timeout we
-    proceed anyway -- a rarely-lost bump beats a blocked backup. Returns the lock
-    path if acquired (caller unlinks), else None."""
-    return _excl_lockfile(_telemetry_path(out_dir).with_suffix(".lock"))
-
-
-def _excl_lockfile(lock, wait_s=2.0, stale_s=10.0):
-    """The O_EXCL lockfile behind _telem_file_lock, shared with the per-account prefs
-    store: create `lock` exclusively, spinning up to `wait_s`; a lock older than
-    `stale_s` is a crashed writer's and is taken over. Returns the lock path if
-    acquired (the caller unlinks it), else None -- what a None MEANS is the caller's
-    call: telemetry proceeds anyway, the prefs store refuses the write."""
-    import time as _t
-    deadline = _t.monotonic() + wait_s
-    while True:
-        try:
-            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.close(fd)
-            return lock
-        except FileExistsError:
-            try:                       # a crashed writer's lock goes stale fast
-                if _t.time() - lock.stat().st_mtime > stale_s:
-                    lock.unlink()
-                    continue
-            except OSError:
-                pass
-            if _t.monotonic() > deadline:
-                return None
-            _t.sleep(0.02)
-        except OSError:
-            return None
-
-
-def _telem_mutate(out_dir, fn):
-    """Load-mutate-save under both locks (thread + process). fn(data) edits in
-    place. Fail-soft: telemetry must never break a backup, a gen, or a page."""
-    out_dir = out_dir if out_dir is not None else _TELEM_OUT
-    if out_dir is None:
-        return
-    try:
-        with _TELEM_LOCK:
-            lock = _telem_file_lock(out_dir)
-            try:
-                d = load_telemetry(out_dir)
-                fn(d)
-                _save_telemetry(out_dir, d)
-            finally:
-                if lock is not None:
-                    try:
-                        lock.unlink()
-                    except OSError:
-                        pass
-    except Exception:
-        pass
-
-
-def telem_bump(key, n=1, out_dir=None):
-    """counters[key] += n (e.g. 'edits', 'culled', 'uploads', 'narrator_pokes')."""
-    _telem_mutate(out_dir, lambda d: d["counters"].__setitem__(
-        key, int(d["counters"].get(key, 0) or 0) + int(n)))
-
-
-def telem_max(key, value, out_dir=None):
-    """maxima[key] = max(old, value) (e.g. 'lora_stacked')."""
-    _telem_mutate(out_dir, lambda d: d["maxima"].__setitem__(
-        key, max(int(d["maxima"].get(key, 0) or 0), int(value))))
-
-
-def telem_set_discard(key, value, out_dir=None):
-    """sets[key] -= {value}. Returns True when something was actually removed.
-
-    These sets are GROW-ONLY by design -- they are the ladder's memory, and a metric that
-    can fall is a metric that can un-earn an achievement. This exists for the one case
-    that is not a retraction but a CORRECTION: a key written under an identity the app has
-    since learned was wrong, where the true key is being written in the same breath. The
-    count does not fall; a duplicate of something already counted stops being counted
-    twice. Every caller must be able to prove the two keys are the same thing, and the
-    removal is logged."""
-    removed = {"n": 0}
-
-    def _discard(d):
-        cur = d["sets"].get(key)
-        if not isinstance(cur, list):
-            return
-        v = str(value)
-        if v in cur:
-            cur.remove(v)
-            removed["n"] = 1
-        d["sets"][key] = cur
-    _telem_mutate(out_dir, _discard)
-    if removed["n"]:
-        import logging as _logging
-        _logging.getLogger(__name__).info(
-            "telemetry: discarded one superseded %s key", key)
-    return bool(removed["n"])
-
-
-def telem_set_add(key, value, out_dir=None):
-    """sets[key] |= {value} (e.g. 'video_modes', 'tools', 'loras')."""
-    def _add(d):
-        cur = d["sets"].get(key)
-        if not isinstance(cur, list):
-            cur = []
-        v = str(value)
-        if v and v not in cur:
-            cur.append(v)
-        d["sets"][key] = cur
-    _telem_mutate(out_dir, _add)
-
-
-def telem_set_add_many(key, values, out_dir=None):
-    """sets[key] |= set(values), in ONE write. Returns how many were new. A caller with a
-    batch (a Runs read, a bulk delete) must not rewrite the store once per member, and a
-    batch with nothing new does not write at all."""
-    vals = [str(v) for v in (values or []) if str(v)]
-    if not vals:
-        return 0
-    target = out_dir if out_dir is not None else _TELEM_OUT
-    if target is None:
-        return 0
-    have = load_telemetry(target)["sets"].get(key)
-    have = set(have) if isinstance(have, list) else set()
-    if not (set(vals) - have):
-        return 0
-    added = {"n": 0}
-
-    def _add(d):
-        cur = d["sets"].get(key)
-        if not isinstance(cur, list):
-            cur = []
-        seen = set(cur)
-        for v in vals:
-            if v not in seen:
-                cur.append(v)
-                seen.add(v)
-                added["n"] += 1
-        d["sets"][key] = cur
-    _telem_mutate(out_dir, _add)
-    return added["n"]
-
-
-def telem_flag(key, out_dir=None):
-    """flags[key] = 1, once (e.g. 'konami_triggered'). Idempotent."""
-    _telem_mutate(out_dir, lambda d: d["flags"].__setitem__(key, 1))
-
-
-def telem_mark_day(out_dir=None, keys=None):
-    """Record today (idempotent) in the distinct-days ledger. `keys=None` marks the legacy
-    flat `days` list -- byte-identical to before (The Vigil / days_used). Otherwise mark today
-    under each named per-key list in `day_lists` (e.g. gen_days / curation_days / active_days),
-    for the streak + long-watch metrics. A given key records a day at most once."""
-    import datetime as _dt
-    today = _dt.date.today().isoformat()
-
-    def _mark(d):
-        if keys is None:
-            if today not in d["days"]:
-                d["days"].append(today)
-            return
-        dl = d.setdefault("day_lists", {})
-        if not isinstance(dl, dict):
-            dl = {}
-            d["day_lists"] = dl
-        for k in keys:
-            lst = dl.get(k)
-            if not isinstance(lst, list):
-                lst = []
-            if today not in lst:
-                lst.append(today)
-            dl[k] = lst
-    _telem_mutate(out_dir, _mark)
-
-
-def _best_day_streak(days):
-    """Best-ever run of consecutive calendar days in an ISO-date list. A later gap never
-    un-earns an already-reached streak (the metric is a high-water mark, like the maxima).
-    A malformed/empty list -> 0; unparseable dates are skipped."""
-    import datetime as _dt
-    dates = set()
-    for s in (days or []):
-        try:
-            dates.add(_dt.date.fromisoformat(str(s)))
-        except (TypeError, ValueError):
-            continue
-    if not dates:
-        return 0
-    one = _dt.timedelta(days=1)
-    best = 0
-    for d in dates:
-        if (d - one) in dates:
-            continue                       # not a run start
-        run, cur = 1, d
-        while (cur + one) in dates:
-            cur += one
-            run += 1
-        if run > best:
-            best = run
-    return best
-
-
-def vigil_status(days, today=None):
-    """The Vigil chip's numbers (Folio for completionists, O5): {"day": int, "best": int}.
-
-    `days` is the ISO-date list of days that had at least one generation collected (the
-    `gen_days` ledger, marked by the server's LOCAL date, date.today(); Seven Candles read it
-    too until 2026-10-02 and counts the catalog's in-app rows now).
-
-    `day` is the run of consecutive generation days that ends today -- or ends yesterday when
-    today has none YET, because a day that has not finished is not a missed one. A run that
-    ended before yesterday is over: the chip starts again at day 1. It is never 0 and never
-    says a word about a miss; there is no message, no toast and no state to explain, only a
-    smaller number. `best` is the longest run ever recorded, and is never below `day`.
-
-    A malformed list, a date in the future or an unparseable entry is skipped, never raised."""
-    import datetime as _dt
-    if today is None:
-        today = _dt.date.today()
-    elif isinstance(today, str):
-        today = _dt.date.fromisoformat(today)
-    dates = set()
-    for s in (days or []):
-        try:
-            d = _dt.date.fromisoformat(str(s))
-        except (TypeError, ValueError):
-            continue
-        if d <= today:
-            dates.add(d)
-    one = _dt.timedelta(days=1)
-    anchor = today if today in dates else (today - one if (today - one) in dates else None)
-    run = 0
-    if anchor is not None:
-        cur = anchor
-        while cur in dates:
-            run += 1
-            cur -= one
-    day = max(1, run)
-    return {"day": day, "best": max(day, _best_day_streak([d.isoformat() for d in dates]))}
-
-
-def telemetry_metrics(out_dir, telem=None):
-    """Flatten the telemetry store into the achievement metric namespace.
-    Counters/maxima pass through, sets become cardinalities, flags become 0/1.
-
-    `telem` lets a caller that has ALREADY loaded the store hand it in rather than
-    making this parse the file again. /api/achievements needed the store three times
-    over (here, in first_sync_complete, and for compute's `sets`) and was reading and
-    JSON-parsing it three times per request; it now loads once and passes it through.
-    Absent, the behaviour is exactly as before."""
-    d = load_telemetry(out_dir) if telem is None else telem
-    m = {}
-    for src in (d["counters"], d["maxima"]):
-        for k, v in src.items():
-            try:
-                m[k] = int(v or 0)
-            except (TypeError, ValueError):
-                m[k] = 0
-    # Counted from the catalog now (achievement_metrics), and the merge everywhere is
-    # catalog-then-telemetry: an old or hand-edited counter of the same name would win it,
-    # so these names never come out of the store (owner 2026-10-02, evidence-based counts).
-    for k in CATALOG_EVIDENCE_METRICS:
-        m.pop(k, None)
-    sets = d["sets"]
-
-    def _card(key):                 # hostile-but-valid JSON must not len()-crash
-        v = sets.get(key)
-        return len(v) if isinstance(v, list) else 0
-    m["video_modes_used"] = _card("video_modes")
-    m["tools_used"] = _card("tools")
-    m["enhance_workflows_distinct"] = _card("enhance_workflows")
-    # The Academy (loras_trained): training runs PIXAI reports as finished, recorded by id
-    # when Runs is listed (api_train_runs) -- not accepted submits, so a failed run, its
-    # retry and a replayed request add nothing. The old submit counter is not read.
-    m["loras_trained"] = _card("trained_runs")
-    # The Great Sweep (culled): the count kept before 2026-10-02 (no longer written) plus
-    # each picture removed since, ONCE -- keyed by what was removed, so deleting, restoring
-    # and deleting the same picture again is one.
-    m["culled"] = int(m.get("culled", 0) or 0) + _card("culled_keys")
-    # Folio expansion set-cardinalities (count only -- the underlying scene ids / preset
-    # names never leave the store).
-    m["scenes_used"] = _card("scenes")                        # Doorwarden
-    m["bridge_gens"] = _card("bridge_gen_tasks")              # Speak, Friend: distinct bridge tasks (re-poll-safe)
-    # Contests. ONE dedupe set per metric is the whole rule: the publish-time hook, the
-    # explicit entry route and the detection poll all write the SAME keys, so the same
-    # image in the same contest can never count twice no matter which path saw it, an
-    # entry made off-app still lands, and a failed submit writes nothing. Values are
-    # "{contest_id}:{artwork_id}" / "{contest_id}" and never leave the store -- only the
-    # count does. Deliberately NOT also counters: the assignment below would shadow a
-    # same-named counter, and one source of truth is the point.
-    m["contest_entries"] = _card("contest_entry_keys")
-    # VERIFIED wins only (L3). `contest_win_keys` is what the old sweep wrote when a winners
-    # row merely carried this account's authorId: no artwork id, no tier, no receipt. That set
-    # is kept on disk but no longer counted; a win counts once a check has matched the entry's
-    # artwork id to a row with an integer rank (moonglade.contest_wins.verify).
-    _cres = d.get("contest_results")
-    m["contest_wins"] = contest_wins.verified_count(
-        _cres.get("wins") if isinstance(_cres, dict) else None)
-    # Blades of Gondolin (enhance_tools_complete): mastery of all SIX gen-drawer enhance tools.
-    # The five non-emotion presets each count once used; Change Emotion counts only when EVERY
-    # emotion in the universe has been used. The preset keys and the emotion-universe size come
-    # from core -- never hardcoded -- and ONLY the computed count is exposed (the underlying tool
-    # keys and emotion keys never leave the store). Silent-soft: an absent/bad core resolves to 0.
-    try:
-        from moonglade import backup as _core
-        _non_emotion = set()
-        for pp in getattr(_core, "BRIDGE_ENHANCE_PRESETS", ()):
-            _k = str(pp.get("key") or "").strip()
-            if _k and _k != "emotion":
-                _non_emotion.add(_k)
-        _tools = sets.get("enhance_tools")
-        _tools = set(_tools) if isinstance(_tools, list) else set()
-        _universe = len(getattr(_core, "ENHANCE_EMOTION_PROMPTS", ()) or ())
-        _emotion_done = _universe > 0 and _card("enhance_emotions") >= _universe
-        m["enhance_tools_complete"] = len(_tools & _non_emotion) + (1 if _emotion_done else 0)
-    except Exception:
-        m["enhance_tools_complete"] = 0
-    for k, v in d["flags"].items():
-        m[k] = 1 if v else 0
-    m["days_used"] = len(d["days"])
-    # Keyed day-lists -> the streak + long-watch metrics. Each per-key list is validated
-    # here (a hostile file could store a non-list) before it is measured.
-    dl = d.get("day_lists") if isinstance(d.get("day_lists"), dict) else {}
-
-    def _days(key):
-        v = dl.get(key)
-        return v if isinstance(v, list) else []
-    # (gen_streak is the catalog's now -- achievement_metrics; the gen_days ledger still
-    # feeds the Vigil chip.)
-    m["curation_streak"] = _best_day_streak(_days("curation_days"))    # Lamplighter
-    m["distinct_active_days"] = len(set(_days("active_days")))         # Long Vigil / Unbroken Watch
-    return m
-
-
-# Metrics achievement_metrics() counts from the catalog that used to be telemetry counters.
-# telemetry_metrics() drops these names, so an old counter cannot shadow the catalog's count.
-CATALOG_EVIDENCE_METRICS = ("edits", "lora_used", "lora_stacked", "lora_distinct", "gen_streak")
-
-
-# ---- the `session_hour` flag: a NEW generation made in its window ----------------------
-# Owner, 2026-10-02: the honor on this metric is earned by a NEW in-app generation actually
-# MADE in its local hour window -- never by opening a page then (what /api/achievements used
-# to check), and never retroactively by a generation made before this rule. So the flag is
-# stamped at the one moment a generation is new: when this server collects it into the
-# catalog (_collect_single_flight), and only when PixAI's own timestamp on the row
-# (created_at, UTC) is in the window AND recent. "Recent" is what makes it new: collecting or
-# importing an old task that dates from the window is not evidence of anything tonight.
-SESSION_HOUR_WINDOW = (2, 4)              # local hours, [start, end)
-SESSION_HOUR_FRESH_S = 6 * 3600           # older than this when collected is not new
-_SESSION_HOUR_SKEW_S = 300                # PixAI's clock may run a little ahead of ours
-
-
-def _utc_now():
-    """The real clock, aware, in UTC -- one seam so a test can stand at any hour."""
-    import datetime as _dt
-    return _dt.datetime.now(_dt.timezone.utc)
-
-
-def session_hour_generation(created_at, now=None):
-    """True when `created_at` -- a catalog row's PixAI timestamp, ISO UTC -- is a generation
-    made inside SESSION_HOUR_WINDOW local time AND new as of `now` (aware; default the real
-    clock). Unparseable or blank -> False, never raises."""
-    import datetime as _dt
-    raw = str(created_at or "").strip()
-    if not raw:
-        return False
-    try:
-        t = _dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        if t.tzinfo is None:
-            t = t.replace(tzinfo=_dt.timezone.utc)        # the catalog stores UTC
-        age = ((now or _utc_now()) - t).total_seconds()
-        hour = t.astimezone().hour
-    except (ValueError, OverflowError, OSError, TypeError):
-        return False
-    if age < -_SESSION_HOUR_SKEW_S or age > SESSION_HOUR_FRESH_S:
-        return False
-    lo, hi = SESSION_HOUR_WINDOW
-    return lo <= hour < hi
-
-
-def stamp_session_hour(db_path, media_ids, out_dir, now=None):
-    """Set the `session_hour` flag when any of `media_ids` -- just collected -- is an in-app
-    row (source api/local) session_hour_generation() accepts. True when it stamped. Reads the
-    catalog only; fail-soft."""
-    ids = [str(x) for x in (media_ids or []) if str(x).strip()]
-    if not ids:
-        return False
-    try:
-        with catalog(db_path) as con:
-            rows = con.execute(
-                "SELECT created_at FROM catalog WHERE source IN ('api','local') "
-                "AND media_id IN (%s)" % ",".join("?" * len(ids)), ids).fetchall()
-    except sqlite3.Error:
-        return False
-    if any(session_hour_generation(r[0], now) for r in rows):
-        telem_flag("session_hour", out_dir=out_dir)
-        return True
-    return False
-
-
-def first_sync_complete(out_dir, db_path, telem=None):
-    """True once the first FULL library sync has finished -- the gate that stops the
-    achievement unlock toasts from firing mid-first-sync. `first-light` is metric
-    images>=1, so without this gate it pops the instant image #1 lands, seconds into a
-    fresh install's very first sync (and every image rung crosses the same way). While
-    this is False, /api/achievements withholds `newly` and leaves `seen` untouched, so
-    the rungs earned during the first sync fire together AFTER it completes, not during.
-
-    Set by `--sync`'s completion (telem flag 'first_sync_done') -- the CLI path AND the
-    wizard's sync job both run `--sync`, so one setter covers both. Refined 2026-09-07
-    (owner report): --sync used to set it on EVERY exit, so a first backup stopped
-    part-way plus a two-page Sync claimed a finished first sync over a mostly-empty
-    library. It is now set only once that library's walk has reached the end of history
-    (moonglade.backup.WALK_END_FLAG), so this gate says what its name says.
-
-    Backfill for PRE-EXISTING installs so they neither suppress nor spam: keyed on
-    prior achievement recognition (`seen`/`earned_at` present), NOT on images>0. An
-    images-based backfill would re-fire the bug -- during a fresh first sync the image
-    count climbs above zero, so it would flip the flag mid-sync. Any install that has
-    ever surfaced an achievement has a non-empty `seen`/`earned_at`; a fresh mid-first-
-    sync install cannot (the gate keeps `seen` empty until completion). The rare install
-    with a real library but a pristine achievement state simply resolves on its next
-    `--sync`."""
-    try:
-        d = load_telemetry(out_dir) if telem is None else telem
-        if d["flags"].get("first_sync_done"):
-            return True
-        st = load_ach_state(out_dir)
-        if st.get("seen") or st.get("earned_at"):
-            telem_flag("first_sync_done", out_dir=out_dir)
-            return True
-    except Exception:                                    # never let the gate crash the route
-        return True                                      # fail OPEN: a broken gate must not hide trophies forever
-    return False
-
-
-def sweep_telemetry(out_dir):
-    """Set the state-derived flags whose 'event' may predate the telemetry
-    layer: art in the coded branding tree that this install's baseline does not
-    account for, and the eclipse mark animation. Once set they stay set. Cheap;
-    called by the API on a once-a-day cadence.
-
-    A BACKSTOP, and it asks the same question the same way: the coded-tree check
-    here is literally _branding_tree_has_new_art(), the one detector
-    sweep_branding_drops() runs on every /api/achievements fetch. One function,
-    two callers, one answer -- an earlier arrangement had this backstop applying
-    a narrower rule of its own (a loose marks.json entry with loose art), which
-    could contradict the wide scan in both directions: it saw a registered mark
-    the scan had already accepted as a default, and it was blind to a drop
-    anywhere outside the marks folder.
-
-    Nothing is written into the tree and nothing is adopted here -- the scan is
-    read-only, and the only writes are the telemetry flags themselves."""
-    try:
-        if _branding_tree_has_new_art(out_dir):
-            telem_flag("branding_custom_file", out_dir=out_dir)
-        if load_branding(out_dir).get("anim") == "eclipse":
-            telem_flag("eclipse_anim_triggered", out_dir=out_dir)
-    except Exception:
-        pass
-
-
-# --- contest detection sweep ---------------------------------------------------------
-# The two ladder signals this app cannot see for itself: an entry made on pixai.art never
-# touches this process at all, and NOTHING local ever hears "you won" -- there is no local
-# event to hook. So both are read back FROM PixAI, into the very same dedupe sets the entry
-# paths write, which is what makes the sweep safe to run as often as it likes: re-seeing an
-# entry adds nothing, and an entry the app made itself is the same key the poll finds.
-#
-# Bounded on purpose: two pages of the board, every RUNNING contest, and at most
-# _CONTEST_SYNC_MAX ended ones from inside the recent window. The historical board is long
-# and its old rows cannot change, so sweeping all of it would be a request storm for
-# nothing -- but a running contest is where entries actually happen, so the cap must never
-# be what drops one.
-# The contest board, memoized per variant (see api_contests). Module-level so every
-# surface that mounts a contest list shares one answer rather than each paying its own
-# round trip on open.
-CONTESTS_TTL = 90.0
-_contests_cache = {}
-_contests_cache_lock = threading.Lock()
-
-
-def contest_board(core, session, force=False):
-    """The WHOLE contest board, memoized for CONTESTS_TTL -- and the one read every
-    consumer goes through.
-
-    Before this there were four different boards. /api/contests read six pages; the
-    sweep read two; the enter route, the publish-and-enter hook and /api/contest/mine
-    each read ONE. So a contest past row ~50 was visible in the list and then refused by
-    the enter route as "unknown contest", and My entries rendered its rows with blank
-    titles -- the same contest, present or absent depending on which code asked. The
-    publish hook's one-page read was the worst of them: it happens AFTER the publish is
-    already committed, so failing to find the contest there means an artwork published
-    and silently not entered.
-
-    One snapshot, read the full depth (list_contests' own default), filtered by whoever
-    needs less. Costs no more upstream than the single widest read did, and every caller
-    now agrees about what exists."""
-    now = time.time()
-    with _contests_cache_lock:
-        ent = _contests_cache.get("board")
-        if not force and ent and (now - ent["at"]) < CONTESTS_TTL:
-            return ent["rows"]
-    meta = {}
-    rows = core.list_contests(session, active_only=False, meta=meta)
-    with _contests_cache_lock:
-        _contests_cache["board"] = {"at": time.time(), "rows": rows, "meta": meta}
-    return rows
-
-
-def contest_board_meta():
-    """How the memoized board's walk ended (list_contests' `meta`: truncated, limit,
-    total_count ...), or {} when nothing is cached. A copy, so a caller cannot edit the memo."""
-    with _contests_cache_lock:
-        ent = _contests_cache.get("board")
-        return dict((ent or {}).get("meta") or {})
-
-# How long a completed sweep counts as recent enough to skip. The spec asked for this
-# and it never got built: opening the Contests overlay fired a full sweep EVERY time --
-# a paced walk over the board plus a per-contest entries read, on the open of a window
-# whose data changes on the order of days. A forced sweep (the publish kick, which is
-# confirming an entry made seconds ago) ignores this entirely.
-CONTEST_SYNC_RECENT_S = 600.0
-_contest_sync_last_ok = {"at": 0.0}
-_CONTEST_SYNC_MAX = 40
-_CONTEST_SYNC_RECENT_DAYS = 45
-_CONTEST_SYNC_PAUSE = 0.35          # paced: be polite to their servers
-_CONTEST_SYNC_STARTUP_DELAY = 20.0  # let the app finish booting before any network work
-_contest_sync_lock = threading.Lock()
-
-
-def _contest_sync_is_recent(contest, now=None):
-    """True when a contest's result/end date parses AND lands inside the recent window --
-    "finished, but recently enough that its result is still worth one look".
-
-    An absent or unparseable date is deliberately NOT recent: the sweep would rather miss
-    a stale contest than fall back to polling the entire history every startup. A date in
-    the future is not recent either -- that contest is either still running (kept by the
-    `active` flag instead) or its dates disagree with its status, which is not a reason to
-    poll for winners that cannot exist yet."""
-    now = time.time() if now is None else now
-    window = _CONTEST_SYNC_RECENT_DAYS * 86400.0
-    for key in ("result_at", "end_at"):
-        ts = _series_ts(contest.get(key))
-        if ts is not None and 0 <= (now - ts) <= window:
-            return True
-    return False
-
-
-def _contest_detection_sync(out_dir, force=False):
-    """Read this account's contest entries and wins back from PixAI into telemetry.
-    Returns True when the sweep ran, False when it gave up.
-
-    Per kept contest: the owner's own entries (`/contest/{slug}/artwork/{userId}`) become
-    contest_entry_keys. WINS ARE NOT READ HERE ANY MORE (L3): a win is a verified fact, and
-    the automatic check that establishes it (contest_win_pass, below) reads the winners list
-    once per contest at the result time and then daily, matching the entry's artwork id and
-    an integer tier rank. This sweep used to match the author alone, which recorded a win
-    with no artwork, no tier and no receipt, and read the winners list a second time.
-
-    `force` drops the recent-window filter (every row the board returns is kept, ended ones
-    still capped). The publish kick uses it: the app has just been TOLD an entry was made,
-    and the point of that sweep is to confirm it against PixAI rather than take the client's
-    word -- so a contest the window would have skipped must not be what hides it.
-
-    FAIL-SOFT TOP TO BOTTOM, and that is the point rather than an afterthought: this runs on
-    a background thread and from a route, and a poll that can raise is a poll that can break
-    the very thing it exists to observe. A per-contest failure skips that contest and the
-    sweep continues; anything else ends the sweep. Both are LOGGED, not swallowed silently:
-    a detection sweep that quietly stops working looks exactly like an account that stopped
-    entering contests, and nothing else in the app would ever say otherwise.
-
-    Sealing: only counts ever leave the telemetry store, and nothing written to the store is
-    ever logged -- the log lines carry an exception type and a redacted message, no keys."""
-    import logging as _logging
-    log = _logging.getLogger(__name__)
-    # RUN-RECENCY GUARD. A sweep that just ran has nothing new to learn: the board moves
-    # over days and an entry made in the last ten minutes was either made HERE (in which
-    # case the publish kick forced its own sweep) or on the website, where ten more
-    # minutes of latency costs nothing. Without this, every Contests overlay open paid a
-    # paced walk of the board plus a read per contest. `force` bypasses it completely --
-    # that caller is confirming a specific entry it was just told about.
-    if not force:
-        age = time.time() - _contest_sync_last_ok.get("at", 0.0)
-        if age < CONTEST_SYNC_RECENT_S:
-            return True
-    try:
-        from moonglade import backup as core
-        session = core._make_session(None)
-        uid = str(core._client_of(session).user_id or "")
-        if not uid:
-            log.info("contest sweep: no account id resolved -- nothing to poll")
-            return False
-        active, ended = [], []
-        for c in contest_board(core, session) or []:
-            if not isinstance(c, dict):
-                continue
-            # A RUNNING contest is never capped out: it is the only kind an entry can still
-            # be made into, so dropping one to a cap would blind the sweep to live activity.
-            # The cap exists for the ended tail, which is long and cannot change.
-            if c.get("active"):
-                active.append(c)
-            elif (force or _contest_sync_is_recent(c)) and len(ended) < _CONTEST_SYNC_MAX:
-                ended.append(c)
-        for i, c in enumerate(active + ended):
-            if i:
-                time.sleep(_CONTEST_SYNC_PAUSE)
-            try:
-                cid = str(c.get("id") or "")
-                slug = str(c.get("slug") or "")
-                if not cid or not slug:
-                    continue
-                for row in core.contest_my_entries(session, slug, uid) or []:
-                    # MIGRATION, deliberate and narrow. Before 2026-09-03 this keyed by the
-                    # ENTRY id when the artwork id was nested (and therefore stripped), so
-                    # an old store can hold "cid:<entry id>" for a piece now keyed
-                    # "cid:<artwork id>" -- one entry counted twice, forever, in a set that
-                    # otherwise only grows. When upstream hands us BOTH ids we can prove
-                    # they are the same entry, which is the only moment that judgement is
-                    # safe to make, so the stale key is discarded here and nowhere else.
-                    # The by-user row's shape is UNVERIFIED against a real entry (the probe
-                    # that mapped this endpoint found no owner entries to compare), so the
-                    # explicit artwork field is preferred and the row id is only the
-                    # fallback -- they may or may not be the same value.
-                    row = row or {}
-                    art_id = str(row.get("artworkId") or "")
-                    row_id = str(row.get("id") or "")
-                    rid = art_id or row_id
-                    if rid:
-                        telem_set_add("contest_entry_keys", "%s:%s" % (cid, rid),
-                                      out_dir=out_dir)
-                    # Both ids present and different: upstream has just told us they name
-                    # the same entry, so a stored key under the OLD identity is a duplicate
-                    # of the one just written, not a second entry. This is the only place
-                    # that can know, so this is the only place that heals it.
-                    if art_id and row_id and art_id != row_id:
-                        telem_set_discard("contest_entry_keys", "%s:%s" % (cid, row_id),
-                                          out_dir=out_dir)
-            except Exception as e:                           # one bad contest, not the sweep
-                log.warning("contest sweep: one contest failed: %s: %s", type(e).__name__,
-                            _redact_host_paths_cli(out_dir, str(e))[:200])
-                continue
-        # The board this sweep just read also tells the win check when each contest's results
-        # land; a result time that moved is followed here (local, no network).
-        try:
-            contest_win_refresh(out_dir, contest_board(core, session) or [])
-        except Exception:                                     # noqa: BLE001
-            pass
-        # Only a sweep that actually completed counts as recent -- a failed one must not
-        # buy ten minutes of silence.
-        _contest_sync_last_ok["at"] = time.time()
-        return True
-    except Exception as e:
-        log.warning("contest sweep: gave up: %s: %s", type(e).__name__,
-                    _redact_host_paths_cli(out_dir, str(e))[:200])
-        return False
-
-
-def _contest_sync_kick(out_dir, force=False):
-    """Run one sweep under the single-flight lock, or skip if one is already running.
-
-    The lock is the whole contract: the startup sweep, the publish kick and the manual route
-    all reach the same work, and a caller that loses the race has nothing to do -- the sweep
-    already in flight reads the same account from the same board. Returns whether it ran."""
-    if not _contest_sync_lock.acquire(False):
-        return False
-    try:
-        return _contest_detection_sync(out_dir, force=force)
-    finally:
-        _contest_sync_lock.release()
-
-
-# --- verified contest wins (L3) ------------------------------------------------------
-# A contest win is a fact PixAI states, so it is recorded only when PixAI's own winners list
-# says so: the entry's artwork id is in the list, its `entry.rank` is an integer, and the
-# author is this account. The rules live in moonglade/contest_wins.py (pure, tested); this is
-# the part that reads and writes.
-#
-#   * THE AUTOMATIC CHECK (contest_win_pass). For each contest the account entered, per the
-#     app's own entry record: one GET of the winners list at the contest's result time, then
-#     once a day for up to 14 days. An EMPTY list is undecided, never "lost". It stops early
-#     when the contest's rewardStatus is "distributed" and the entries are settled. It rides
-#     the scheduler's existing 60-second tick (see _contest_win_tick in create_app), reads
-#     nothing at import and nothing when a page opens, and is single-flight.
-#   * THE CHECK BUTTON (contest_win_check, POST /api/contest/check). The owner pastes an
-#     entry's link; one GET of that contest's winners; verified only when matched. The link is
-#     kept as the receipt.
-#
-# Both are GETs. Neither can write to PixAI: there is no such call on this road.
-_CW_PAUSE = 1.0                     # between two contests inside one pass
-_CW_BOARD_BACKOFF_S = 900.0         # a failed board read is not asked again for a quarter hour
-_cw_lock = threading.Lock()         # single flight, like the entry sweep's
-_cw_state = {"board_retry_at": 0.0, "manual": {}}
-
-
-def _cw_sections(d):
-    """The two sub-records of telemetry's `contest_results` section, made real dicts in place
-    (a hostile file can hold anything there) -> (wins, checks)."""
-    res = d.get("contest_results")
-    if not isinstance(res, dict):
-        res = d["contest_results"] = {}
-    for k in ("wins", "checks"):
-        if not isinstance(res.get(k), dict):
-            res[k] = {}
-    return res["wins"], res["checks"]
-
-
-def _cw_edit(out_dir, fn):
-    """fn(wins, checks) under the telemetry lock. Fail-soft, like every telemetry write."""
-    _telem_mutate(out_dir, lambda d: fn(*_cw_sections(d)))
-
-
-def _cw_inputs(d):
-    """(entries, legacy_wins, wins, checks) read from a loaded telemetry bundle. Copies:
-    nothing here writes through them."""
-    sets = d.get("sets") if isinstance(d.get("sets"), dict) else {}
-    entries = contest_wins.entries_by_contest(sets.get("contest_entry_keys"))
-    legacy = sets.get("contest_win_keys")
-    legacy = [str(x) for x in legacy] if isinstance(legacy, list) else []
-    res = d.get("contest_results") if isinstance(d.get("contest_results"), dict) else {}
-    wins = res.get("wins") if isinstance(res.get("wins"), dict) else {}
-    checks = res.get("checks") if isinstance(res.get("checks"), dict) else {}
-    checks = {str(k): dict(v) for k, v in checks.items() if isinstance(v, dict)}
-    return entries, legacy, wins, checks
-
-
-def contest_win_due(out_dir, now=None):
-    """Whether anything is worth waking the check for. LOCAL ONLY -- one small file read and
-    some arithmetic, so the 60-second tick can ask it every minute for nothing."""
-    now = time.time() if now is None else now
-    try:
-        entries, legacy, wins, checks = _cw_inputs(load_telemetry(out_dir))
-    except Exception:                                         # noqa: BLE001
-        return False
-    plan = contest_wins.plan_pass(entries, legacy, wins, checks, now)
-    if plan["due"]:
-        return True
-    # A seed needs the contest board; a board that just failed is left alone for a while.
-    return bool(plan["seed"] or plan["legacy"]) and now >= _cw_state["board_retry_at"]
-
-
-def contest_win_refresh(out_dir, board, now=None):
-    """Follow contests whose result time moved (local; no network). `board` is the list of
-    contest rows list_contests returns. Only rows that have not been checked yet move."""
-    now = time.time() if now is None else now
-    by_id = {str(c.get("id")): c for c in (board or []) if isinstance(c, dict) and c.get("id")}
-    if not by_id:
-        return
-
-    def _do(wins, checks):
-        for cid, st in checks.items():
-            c = by_id.get(str(cid))
-            if isinstance(st, dict) and c:
-                contest_wins.refresh_state(st, contest_wins.parse_ts(c.get("result_at")),
-                                           str(c.get("slug") or ""), now)
-    _cw_edit(out_dir, _do)
-
-
-def contest_win_pass(out_dir, now=None, pause=None):
-    """ONE automatic pass. Returns {ran, checked, recorded, errors} (for the log and the tests).
-
-    Decided from the local record first (moonglade.contest_wins.plan_pass): nothing due and
-    nothing to seed means no network at all. Otherwise the contest board is read ONCE (the
-    memoized snapshot every contest surface shares) to give new contests their schedule and
-    to learn each due contest's rewardStatus, and then each due contest's winners list is
-    read ONCE, `_CW_PAUSE` apart. A failed read is logged, pushed an hour out and never
-    retried in a loop; one bad contest does not stop the pass."""
-    import logging as _logging
-    from moonglade import backup as core
-    log = _logging.getLogger(__name__)
-    out = {"ran": False, "checked": [], "recorded": 0, "errors": 0}
-    clock = (lambda: now) if now is not None else time.time
-    pause = _CW_PAUSE if pause is None else pause
-    entries, legacy, wins, checks = _cw_inputs(load_telemetry(out_dir))
-    plan = contest_wins.plan_pass(entries, legacy, wins, checks, clock())
-    if not (plan["seed"] or plan["legacy"] or plan["due"]):
-        return out
-    try:
-        session = core._make_session(None)
-        uid = str(core._client_of(session).user_id or "")
-    except Exception as e:                                    # noqa: BLE001
-        log.warning("contest win check: no session: %s: %s", type(e).__name__,
-                    _redact_host_paths_cli(out_dir, str(e))[:200])
-        return out
-    if not uid:
-        log.info("contest win check: no account id resolved -- nothing to verify")
-        return out
-    out["ran"] = True
-    board = {}
-    if clock() >= _cw_state["board_retry_at"]:
-        try:
-            board = {str(c.get("id")): c for c in (contest_board(core, session) or [])
-                     if isinstance(c, dict) and c.get("id")}
-        except Exception as e:                                # noqa: BLE001
-            _cw_state["board_retry_at"] = clock() + _CW_BOARD_BACKOFF_S
-            log.warning("contest win check: the board read failed: %s: %s", type(e).__name__,
-                        _redact_host_paths_cli(out_dir, str(e))[:200])
-    # -- give every entered contest (and every unverified legacy win) a schedule row
-    fresh = {}
-    if board:
-        for cid in list(plan["seed"]) + [c for c in plan["legacy"] if c not in plan["seed"]]:
-            c = board.get(cid)
-            is_legacy = cid in plan["legacy"]
-            if c is None and cid not in entries:
-                continue                         # a legacy win for a contest we cannot see
-            anchor = None if is_legacy else contest_wins.parse_ts((c or {}).get("result_at"))
-            fresh[cid] = contest_wins.new_state((c or {}).get("slug") or "", anchor, clock(),
-                                                legacy=is_legacy)
-    if fresh:
-        _cw_edit(out_dir, lambda w, ch: [ch.setdefault(k, v) for k, v in fresh.items()])
-        checks.update({k: v for k, v in fresh.items() if k not in checks})
-    now_t = clock()
-    due = [cid for cid, st in checks.items()
-           if (cid in entries or st.get("legacy")) and contest_wins.is_due(st, now_t)]
-    for i, cid in enumerate(due):
-        if i and pause:
-            time.sleep(pause)
-        st = dict(checks[cid])
-        c = board.get(cid) or {}
-        slug = str(st.get("slug") or c.get("slug") or "")
-        t = clock()
-        try:
-            if not slug:
-                raise ValueError("no slug known for this contest")
-            rows = core.contest_winners(session, slug)          # one GET, nothing else
-        except Exception as e:                                # noqa: BLE001
-            out["errors"] += 1
-            log.warning("contest win check: one contest failed: %s: %s", type(e).__name__,
-                        _redact_host_paths_cli(out_dir, str(e))[:200])
-            contest_wins.after_error(st, t)
-
-            def _fail(w, ch, cid=cid, st=st):
-                ch[cid] = st
-            _cw_edit(out_dir, _fail)
-            continue
-        st["slug"] = slug
-        res = contest_wins.verify(rows, uid, entries.get(cid) or None)
-        contest_wins.after_read(st, t, res, c.get("reward_status"))
-        fresh_wins = res["wins"]
-
-        def _ok(w, ch, cid=cid, st=st, fresh_wins=fresh_wins, t=t):
-            ch[cid] = st
-            for win in fresh_wins:
-                contest_wins.record_win(w, cid, win, "auto", t,
-                                        contest_wins.artwork_url(win["artwork_id"]))
-        _cw_edit(out_dir, _ok)
-        out["checked"].append(cid)
-        out["recorded"] += len(fresh_wins)
-    return out
-
-
-def contest_win_kick(out_dir, now=None):
-    """Start one pass OFF-THREAD if anything is due, under a single-flight lock. The tick calls
-    this every minute and it costs a local file read when there is nothing to do. Returns
-    whether a pass was started."""
-    if not contest_win_due(out_dir, now):
-        return False
-    if not _cw_lock.acquire(False):
-        return False
-
-    def _go():
-        try:
-            contest_win_pass(out_dir, now)
-        except Exception as e:                                # noqa: BLE001
-            import logging as _logging
-            _logging.getLogger(__name__).warning(
-                "contest win check: gave up: %s: %s", type(e).__name__,
-                _redact_host_paths_cli(out_dir, str(e))[:200])
-        finally:
-            _cw_lock.release()
-    try:
-        threading.Thread(target=_go, daemon=True).start()
-    except Exception:                                         # noqa: BLE001
-        _cw_lock.release()
-        return False
-    return True
-
-
-def contest_win_check(out_dir, body, now=None):
-    """The Check button. Returns (http status, payload). Verified ONLY when matched.
-
-    `body` carries `url` (a pasted pixai.art link: an entry's, or a contest's), and optionally
-    `contest_id` (a contest from the account's own entries) and `slug` (a contest typed in).
-    The artwork read the app already has does not carry the artwork's contest, so the contest
-    comes from the row's pick, a contest link, a typed slug, or the contest the app recorded
-    the linked artwork in -- in that order (moonglade.contest_wins.plan_manual). Then ONE GET
-    of that contest's winners. A miss says what did not match; nothing is recorded on a miss.
-    """
-    from moonglade import backup as core
-    cw = contest_wins
-    now = time.time() if now is None else now
-    url_text = str((body or {}).get("url") or "").strip()
-    cid_in = str((body or {}).get("contest_id") or "").strip()
-    slug_in = str((body or {}).get("slug") or "").strip()
-
-    def _say(state, entry="", **extra):
-        p = {"verified": False, "state": state, "message": cw.message(state, entry), "wins": []}
-        p.update(extra)
-        return 200, p
-
-    parsed = {"ok": True, "receipt": "", "artwork_id": "", "slug": ""}
-    if url_text:
-        parsed = cw.parse_evidence(url_text)
-        if not parsed["ok"]:
-            return _say(parsed["reason"])
-    elif not (cid_in or slug_in):
-        return _say("no_link")
-    entries, _legacy, _wins, checks = _cw_inputs(load_telemetry(out_dir))
-    lazy = {"board": None}
-
-    def _board():
-        """The contest board by id, read at most once and only if a lookup needs it."""
-        if lazy["board"] is None:
-            try:
-                sess = core._make_session(None)
-                lazy["board"] = {str(c.get("id")): c for c in (contest_board(core, sess) or [])
-                                 if isinstance(c, dict) and c.get("id")}
-            except Exception:                                 # noqa: BLE001
-                lazy["board"] = {}
-        return lazy["board"]
-
-    def _slug_of(cid):
-        st = checks.get(str(cid)) or {}
-        return str(st.get("slug") or (_board().get(str(cid)) or {}).get("slug") or "")
-
-    def _cid_of(slug):
-        for k, st in checks.items():
-            if st.get("slug") == slug:
-                return k
-        for k, c in _board().items():
-            if c.get("slug") == slug:
-                return k
-        return ""
-
-    plan = cw.plan_manual(parsed, cid_in, slug_in, entries, _slug_of, _cid_of)
-    if not plan["ok"]:
-        return _say(plan["reason"])
-    slug, cid = plan["slug"], plan["cid"]
-    last = _cw_state["manual"].get(slug)
-    if last is not None and 0 <= now - last < cw.MANUAL_COOLDOWN_S:
-        return _say("cooldown", cid=cid, slug=slug)
-    _cw_state["manual"][slug] = now
-    ids = plan["entry_ids"]
-    entry = ids[0] if ids and len(ids) == 1 else ""
-    try:
-        session = core._make_session(None)
-        uid = str(core._client_of(session).user_id or "")
-        if not uid:
-            raise ValueError("no account id resolved")
-        rows = core.contest_winners(session, slug)              # one GET, nothing else
-    except Exception as e:                                    # noqa: BLE001
-        return _say("failed", entry, cid=cid, slug=slug,
-                    detail=_redact_host_paths_cli(out_dir, str(e))[:200])
-    res = cw.verify(rows, uid, ids)
-    if not res["wins"]:
-        return _say(res["outcome"], entry, cid=cid, slug=slug, decided=res["decided"])
-    reward = str(((_board().get(cid) if cid else None) or {}).get("reward_status") or "")
-
-    def _do(w, ch):
-        for win in res["wins"]:
-            cw.record_win(w, cid or slug, win, "check", now,
-                          parsed["receipt"] or cw.artwork_url(win["artwork_id"]))
-        st = ch.get(cid)
-        if isinstance(st, dict) and st.get("status") == cw.PENDING:
-            cw.after_read(st, now, res, reward)
-    _cw_edit(out_dir, _do)
-    listed = [{"artwork_id": x["artwork_id"], "tier": x["tier"], "prize_amount": x["prize"],
-               "label": cw.tier_label(x["tier"], x["prize"])} for x in res["wins"]]
-    return 200, {"verified": True, "state": "verified", "message": cw.message("verified"),
-                 "wins": listed, "cid": cid, "slug": slug,
-                 "receipt_url": parsed["receipt"] or cw.artwork_url(res["wins"][0]["artwork_id"])}
-
-
-def _cw_check_view(state, now):
-    """Where the daily check stands for one contest, for the My-entries row: {state, last_at,
-    next_at, until, decided}. `state` is "none" (no schedule yet), "pending", "settled" or
-    "expired"; times are epoch seconds (0 when not applicable)."""
-    if not isinstance(state, dict):
-        return {"state": "none", "last_at": 0, "next_at": 0, "until": 0, "decided": False}
-    status = contest_wins.effective_status(state, now)
-    return {"state": status, "last_at": float(state.get("last_at") or 0.0),
-            "next_at": float(state.get("next_at") or 0.0) if status == contest_wins.PENDING else 0,
-            "until": contest_wins.deadline(state), "decided": bool(state.get("decided"))}
-
-
-# ======================================================================================
-# THE LIVING LIBRARY (2026-09-06)
-# ======================================================================================
-# "It's not just a backup dump. It's a living library that should update itself and its
-# data without my need to clicky click." -- the owner, 2026-09-04. Scoped in
-# ../moonglade-internal/scopes/SCOPE_2026-09-04_living-library.md and answered by him on
-# 2026-09-06; this is that scope's five answers in code.
-#
-# Two halves, and they are deliberately different animals:
-#
-#   * THE ARTWORKS SWEEP (below) is IN-PROCESS, modelled line for line on the contest
-#     sweep above -- one single-flight lock, a "ran recently" guard, a boot kick and a
-#     FORCED publish kick. It is in-process because it must be quiet: it runs every
-#     fifteen minutes, and a subprocess would occupy the Panel's one job slot, spawn a
-#     python, and write a row into the Activity ledger on every one of those ticks.
-#     It announces only when it CHANGED something.
-#
-#   * THE JOB LIST (further down) is the existing scheduler, widened from one
-#     {action, interval_hours} pair to several. Each entry still runs through
-#     _panel_run -- the same whitelisted argv, the same one-job-at-a-time slot, the same
-#     destructive/advanced refusal. A schema change, not a redesign.
-#
-# BOTH obey the standing rule "the library stands still -- nothing moves the owner's view
-# except his own hands" (DECISIONS.md, 2026-09-05, which names living-library jobs as an
-# inheritor by name). Neither half has any path to the gallery's own loaders: a finished
-# job ANNOUNCES through the toast/Activity idiom the jobs ledger already drives, and never
-# rebuilds the page, the search, the address or the selection. dev/tests/test_living_library.py
-# walks these functions' source to keep it that way.
-
-ARTWORKS_SWEEP_S = 900.0        # owner call 3: "15 Works, I was going to say 20. Go with 15"
-ARTWORKS_YOUNG_DAYS = 90        # owner call 4: works this young ride EVERY sweep
-ARTWORKS_DEEP_S = 172800.0      # owner call 4: older works refresh at most once per 48h
-ARTWORKS_GRACE = 2              # consecutive spent pages before stopping -- run_download's
-                                # own `update_grace` default (moonglade/backup.py), mirrored
-ARTWORKS_PAGE = 50              # artwork list page size run_sync_artworks already uses
-ARTWORKS_PAUSE = 0.4            # paced: run_sync_artworks' own inter-page delay
-ARTWORKS_MAX_PAGES = 1000       # a hard stop (50,000 published works at 50 a page), so a
-                                # pageInfo that never says "no more" cannot turn a
-                                # background sweep into an endless walk. Reaching it is
-                                # reported as INCOMPLETE, never as a finish.
-ARTWORKS_STARTUP_DELAY = 25.0   # after the contest sweep's 20s, so the two never race at boot
-_artworks_lock = threading.Lock()
-# `at` is the last sweep that COMPLETED (the recent-guard); `deep_at` is the last one that
-# was allowed to refresh works older than ARTWORKS_YOUNG_DAYS. Both are mirrored into
-# schedule.json by the sweep itself so they survive a restart -- an in-memory-only deep
-# stamp would make every boot a full walk, which is exactly what the tier exists to avoid.
-# `kicks` counts how many times a TRIGGER asked for a sweep -- boot, tick, publish, Run
-# now -- whether or not one actually started. It is the only record that a trigger fired
-# at all: a kick that stands down (a Panel job in the slot, the background gate off, a
-# sweep already in flight) leaves no other trace anywhere, which made "did the publish
-# route really ask?" unanswerable except by reading the source.
-_artworks_state = {"at": 0.0, "deep_at": 0.0, "changed": 0, "pages": 0, "kicks": 0}
-# Whether the sweep has already said, in plain words, why it could not read the published
-# list. A sweep that is refused every fifteen minutes says so ONCE and then stays quiet at
-# debug level; the first sweep that reads the whole list again clears it.
-_artworks_refusal = {"reported": False}
-
-
-def _note_artworks_refusal(log, out_dir, page, err):
-    """Say why the sweep could not read the published list: once, in plain words, with the
-    reason PixAI or the network gave (folder paths hidden), then quietly while it lasts."""
-    reason = _redact_host_paths_cli(out_dir, str(err))[:300]
-    if _artworks_refusal["reported"]:
-        log.debug("artworks sweep: page %d still cannot be read: %s", page, reason)
-        return
-    _artworks_refusal["reported"] = True
-    log.warning(
-        "artworks sweep: the app cannot read your published artworks from PixAI (page %d), "
-        "so their titles, likes and tags are not refreshing. Reason: %s. The sweep tries "
-        "again on its schedule; this is said once until a read works again.", page, reason)
-
-
-def published_index(db_path):
-    """media_id -> (artwork_id, created_epoch_or_None) for every catalog row that already
-    claims an artwork. The sweep's whole idea of "do I already know this work, and is it
-    young?" -- one indexed read, no network, ~36k rows of two small values."""
-    idx = {}
-    try:
-        with catalog(db_path) as con:
-            for r in con.execute(
-                    "SELECT media_id, artwork_id, created_at FROM catalog "
-                    "WHERE COALESCE(artwork_id,'') != ''"):
-                idx[str(r["media_id"])] = (str(r["artwork_id"] or ""),
-                                           _series_ts(r["created_at"]))
-    except sqlite3.Error:
-        return {}
-    return idx
-
-
-def published_local_ids(db_path):
-    """Every media_id the catalog holds -- the sweep's "is there a local row at all?" set.
-
-    The companion to published_index, and the difference between the two is the whole of
-    the short-circuit's convergence. published_index only holds rows that ALREADY claim an
-    artwork, so a work missing from it is either brand new (a downloaded generation just
-    published) or permanently unmatched (published on the website, never downloaded here).
-    The sweep cannot write the second kind at all -- apply_artwork_meta only UPDATEs rows
-    that exist -- so treating it as "might be new" made it hold the walk open forever.
-
-    One indexed column scan, no row bodies, the same shape published_index already is."""
-    ids = set()
-    try:
-        with catalog(db_path) as con:
-            for r in con.execute("SELECT media_id FROM catalog"):
-                ids.add(str(r["media_id"]))
-    except sqlite3.Error:
-        return set()
-    return ids
-
-
-def artworks_page_needed(nodes, index, now, deep, local=None):
-    """Does this page of artwork-list nodes contain anything this sweep needs to write?
-
-    THE SHORT-CIRCUIT AND THE TIER, in one predicate -- and the reason a quiet sweep costs
-    one or two pages instead of the whole walk. `run_download --update` stops after
-    `update_grace` consecutive pages whose every media_id was already on disk
-    (moonglade/backup.py's `page_new`); the artwork list pages newest-first exactly like the
-    generation feed, so the same stop works here. What "already known" means is where the
-    owner's tier (call 4) lives:
-
-      * an artwork with no catalog row claiming its artwork_id, but WITH a local row ->
-        NEEDED. Newly published work is why the sweep exists, and it arrives at the
-        newest end.
-      * an artwork with NO LOCAL ROW AT ALL -> spent, not needed. This one is the
-        difference between a sweep that converges and one that does not. Such a work is
-        published on PixAI and was never downloaded here, so apply_artwork_meta has
-        nothing to update and the sweep can never write it -- no number of pages will
-        change that. Read as "never merged" it was NEEDED on every sweep forever, and a
-        run of them before the stable tail meant every fifteen-minute sweep walked the
-        whole published history rather than the one or two pages the design promises.
-        `local` (published_local_ids) is what tells "brand new" from "confirmed miss";
-        without it the old, non-converging answer stands.
-      * a work younger than ARTWORKS_YOUNG_DAYS -> NEEDED on every sweep. Its like and
-        comment counts are the ones still moving.
-      * an older work -> needed only when `deep`, i.e. when ARTWORKS_DEEP_S has passed
-        since the last deep pass. That is "older than 90 days refresh at most once every
-        48 hours" stated as a walk rather than as ~36k per-row timestamps: the sweep
-        always starts at the newest end, so one global stamp says the same thing and
-        costs one integer instead of a schema migration.
-
-    A node with no mediaId is ignored rather than treated as new -- it can never be
-    matched to a row, so it must not be able to hold the walk open forever."""
-    young_s = ARTWORKS_YOUNG_DAYS * 86400.0
-    for node in nodes or []:
-        mid = str((node or {}).get("mediaId") or "")
-        vmid = str((node or {}).get("videoMediaId") or "")
-        known = index.get(mid) or index.get(vmid)
-        if not known:
-            if local is not None and mid not in local and vmid not in local:
-                continue                     # confirmed miss: no row here to write
-            return True                      # never merged this artwork -> fetch it
-        if deep:
-            return True                      # the 48h pass refreshes every age
-        ts = known[1]
-        if ts is None or (now - ts) <= young_s:
-            # No parseable creation date is treated as YOUNG on purpose: the sweep would
-            # rather pay for a row it could not date than silently stop refreshing it.
-            return True
-    return False
-
-
-def artworks_sweep(out_dir, db_path, force=False, now=None, log_event=None):
-    """One pass of the published-artwork sweep. Returns {changed, pages, artworks, deep,
-    incomplete} -- or None when it refused to run (recent enough, and not forced).
-
-    THE THREE TRIGGERS, exactly the contest sweep's: a boot kick, a periodic kick from the
-    scheduler's own 60-second tick, and a FORCED kick the instant something is published,
-    unpublished or re-tagged from this app. Same lock discipline, same "PixAI is the truth,
-    the client's word is not" stance -- the publish route already wrote what it believes
-    into the catalog; this reads back what PixAI actually says.
-
-    Writes go through apply_artwork_meta: one narrow UPDATE per row it actually saw,
-    eleven PixAI-owned columns, no full-catalog rewrite. Nothing here can create, move or
-    delete a row or a file.
-
-    `log_event` is the announcement seam (the create_app closure's _log_job). It is called
-    ONLY when the sweep changed something -- a fifteen-minute heartbeat that wrote a row
-    into the Activity ledger every time would bury the events that matter under its own
-    noise. It is the ONLY thing this function tells the browser; there is no path from
-    here to the gallery's loaders."""
-    import logging as _logging
-    import uuid as _uuid
-    from moonglade import backup as core
-    log = _logging.getLogger(__name__)
-    now = time.time() if now is None else now
-    if not force and (now - _artworks_state["at"]) < ARTWORKS_SWEEP_S:
-        return None
-    deep = (now - _artworks_state["deep_at"]) >= ARTWORKS_DEEP_S
-    try:
-        session = core._make_session(None)
-        if not core._client_of(session).user_id:
-            log.info("artworks sweep: no account id resolved -- nothing to read")
-            return None
-    except Exception as e:                                   # noqa: BLE001
-        log.warning("artworks sweep: no session: %s: %s", type(e).__name__,
-                    _redact_host_paths_cli(out_dir, str(e))[:200])
-        return None
-
-    index = published_index(db_path)
-    local = published_local_ids(db_path)
-    metas, before, pages, artworks, spent = [], None, 0, 0, 0
-    incomplete = refused = False
-    while True:
-        if pages >= ARTWORKS_MAX_PAGES:
-            # A hard stop, so a pageInfo that never says "no more" cannot turn a background
-            # sweep into an endless walk. Reaching it is INCOMPLETE, not a finish: the tail
-            # of the history was never read, so this run must not stamp the 48-hour tier as
-            # satisfied and must not buy itself fifteen minutes of quiet.
-            log.warning("artworks sweep: hit the %d-page cap -- the walk is incomplete",
-                        ARTWORKS_MAX_PAGES)
-            incomplete = True
-            break
-        try:
-            conn = core.artwork_list_gql(session, before=before, last=ARTWORKS_PAGE, retries=0)
-        except core.ArtworkListRefused as e:
-            # A page that cannot be read. Whatever was collected is real and is written
-            # below; the run is simply incomplete, and an incomplete sweep must NOT buy
-            # fifteen minutes of silence -- see the `at` stamp at the end, which only a
-            # clean finish reaches. The reason is said once, not on every sweep.
-            _note_artworks_refusal(log, out_dir, pages + 1, e)
-            incomplete = refused = True
-            break
-        pages += 1
-        edges = conn.get("edges") or []
-        if not edges:
-            break
-        nodes = [(e.get("node", e) or {}) for e in edges]
-        if artworks_page_needed(nodes, index, now, deep, local=local):
-            spent = 0
-            for node in nodes:
-                # PER NODE, not per page or per run. extract_artwork_meta reads a dict PixAI
-                # sent us -- a shape this app does not control and has already seen change
-                # (isSensitive and the nsfwPredict block both arrived without notice). One
-                # malformed node raising here used to abort the whole walk through
-                # artworks_sweep_kick's catch-all, discarding every meta collected so far
-                # AND leaving the run unstamped. A skip costs one row until the next sweep;
-                # the alternative costs the entire pass, every fifteen minutes, forever.
-                try:
-                    meta = core.extract_artwork_meta(node)
-                    if meta.get("media_id"):
-                        metas.append(meta)
-                        artworks += 1
-                    vmid = str(node.get("videoMediaId") or "")
-                    if vmid:
-                        # The animation's own row is keyed by its mp4's media_id (#20), so
-                        # it wants the same metadata under that key.
-                        vmeta = dict(meta)
-                        vmeta["media_id"] = vmid
-                        metas.append(vmeta)
-                except Exception as e:                       # noqa: BLE001
-                    log.warning("artworks sweep: skipping a malformed artwork node: %s: %s",
-                                type(e).__name__, str(e)[:160])
-        else:
-            spent += 1
-            if spent >= ARTWORKS_GRACE:
-                break
-        pi = conn.get("pageInfo") or {}
-        if not pi.get("hasPreviousPage"):
-            break
-        before = pi.get("startCursor")
-        time.sleep(ARTWORKS_PAUSE)
-
-    if not refused and _artworks_refusal["reported"]:
-        # Every page this sweep asked for was read: the earlier refusal is over, and the
-        # next one is worth saying again.
-        _artworks_refusal["reported"] = False
-        log.info("artworks sweep: your published artworks can be read from PixAI again")
-
-    changed = 0
-    if metas:
-        try:
-            changed = apply_artwork_meta(db_path, metas)
-        except sqlite3.Error as e:
-            log.warning("artworks sweep: catalog write failed: %s", str(e)[:200])
-    # ONLY A CLEAN FINISH STAMPS, exactly as the contest sweep's own last_ok does. A run
-    # that stopped on a failed page or hit the page cap never saw the tail of the history:
-    # buying itself fifteen minutes of quiet would delay the retry, and stamping the
-    # 48-hour tier would tell the next two days' worth of sweeps that old works had been
-    # refreshed when they had not.
-    #
-    # Stamped with `now` -- the moment the sweep DECIDED, not the moment it finished. Two
-    # reasons: a deep pass can take minutes, and measuring the guard from the end would let
-    # every sweep drift later than the cadence the owner set; and `now` is the same clock
-    # the tier and the guard were read from, so the function has exactly one idea of time
-    # (which is what makes a mock clock able to prove any of this).
-    if not incomplete:
-        _artworks_state["at"] = now
-        if deep:
-            _artworks_state["deep_at"] = now
-    _artworks_state["changed"] = changed
-    _artworks_state["pages"] = pages
-    if changed and log_event:
-        # THE ANNOUNCEMENT, and the whole of it. The Activity card already polls /api/jobs;
-        # a finished sweep lands there as a row exactly like a Panel job does. It does not
-        # touch the grid, the page, the address or the selection -- the library stands still.
-        try:
-            log_event("living-artworks-" + _uuid.uuid4().hex[:12], status="done",
-                      type="panel", action="artworks-sweep",
-                      label="Published-artwork sweep — {} row(s) refreshed".format(changed),
-                      rc=0)
-        except Exception:                                    # noqa: BLE001
-            pass
-    return {"changed": changed, "pages": pages, "artworks": artworks, "deep": deep,
-            "incomplete": incomplete}
-
-
-def artworks_sweep_fresh(interval_s, now):
-    """Has a sweep COMPLETED inside this cadence already? The boot kick's answer to the
-    tick, and the reason the tick's kick is not unconditionally forced.
-
-    THE BOOT DOUBLE-SWEEP this closes: the boot kick fires 25 seconds after start
-    (ARTWORKS_STARTUP_DELAY) and the first tick lands 35 seconds after that, with the sweep
-    row's last_run still unset -- so it read as due, and a forced kick re-ran the whole
-    thing. On a fresh install that is the FIRST-BOOT DEEP WALK (every page of the published
-    history, 0.4s apiece) twice inside one minute, over a library that could not have
-    changed in between.
-
-    Measured against _artworks_state["at"], which ONLY A CLEAN FINISH stamps -- so a run of
-    failing sweeps can never read as fresh, and the retry keeps its cadence. Module-level
-    and a plain function of (interval, now) for the same reason living_due and
-    artworks_page_needed are: a timer that cannot be read on a mock clock cannot be
-    proven."""
-    return (now - _artworks_state["at"]) < max(1.0, float(interval_s or ARTWORKS_SWEEP_S))
-
-
-def artworks_sweep_in_flight():
-    """Is a published-artwork sweep running in THIS process right now?
-
-    THE SECOND DIRECTION of the sweep-vs-Panel-job exclusion, and the whole of the shared
-    state it needs. `_artworks_job_busy` (in create_app) already lets the sweep stand down
-    for a catalog-writing Panel job; this is the same question asked the other way round,
-    so a Panel job can stand down for a sweep. One lock answers both -- there is no second
-    flag to keep in step.
-
-    A non-blocking probe: acquire-and-release rather than `locked()`, because a plain
-    `locked()` read is the same information with no memory barrier discipline, and this is
-    read from a different thread than the one that holds it. Never blocks, so a caller
-    holding another lock cannot deadlock on it."""
-    if _artworks_lock.acquire(False):
-        _artworks_lock.release()
-        return False
-    return True
-
-
-def artworks_sweep_kick(out_dir, db_path, force=False, log_event=None, busy=None):
-    """Run one artworks sweep under the single-flight lock, or skip if one is running.
-
-    The lock is the whole contract, the same way it is for the contest sweep: the boot
-    kick, the fifteen-minute tick, the publish kick and the Run now button all reach the
-    same work, and a caller that loses the race has nothing to do. Returns the sweep's
-    result dict, or None when it did not run.
-
-    `busy` is the caller's "a catalog-writing Panel job is in the slot" check
-    (create_app's _artworks_job_busy), and it is asked HERE, after the lock, rather than
-    only before the kick. Before the lock there was a window: the kick read the slot, found
-    it free, and a Panel job claimed it before this sweep actually started. Asked inside the
-    lock it is the same instant _panel_run's own probe finds this lock held, so whichever of
-    the two arrives first, the other one stands down. Passed in rather than imported because
-    the slot is a create_app closure and this function is module-level and testable."""
-    import logging as _logging
-    if not _artworks_lock.acquire(False):
-        return None
-    try:
-        if busy is not None and busy():
-            return None
-        return artworks_sweep(out_dir, db_path, force=force, log_event=log_event)
-    except Exception as e:                                   # noqa: BLE001 -- a sweep must
-        _logging.getLogger(__name__).warning(               # never kill its caller
-            "artworks sweep: gave up: %s: %s", type(e).__name__,
-            _redact_host_paths_cli(out_dir, str(e))[:200])
-        return None
-    finally:
-        _artworks_lock.release()
-
-
-# --- the job list -------------------------------------------------------------------
-# schedule.json used to hold exactly ONE {action, interval_hours} pair: you could schedule
-# one Panel action on one cadence, and that is the whole reason a published piece could
-# vanish from My Art -- nothing on the machine ever re-read PixAI's list of published works
-# unless a button was pressed. It now holds a LIST (owner call 1), each entry with its own
-# cadence and its own last-run. The legacy pair SURVIVES UNTOUCHED as the "standing order"
-# the Panel's ledger already draws; the list is additive, so no existing schedule changes
-# meaning and no existing setting is rewritten under the owner.
-#
-# `interval_s`, not interval_hours: the artworks sweep is a fifteen-MINUTE job, and hours
-# cannot say that. The legacy pair keeps its own hours field and its own clamp.
-STALE_BACKSTOP_S = 60 * 86400.0     # owner call 5: a full-cost job runs by itself ONLY when
-                                    # it has not run in 60 days -- a staleness backstop,
-                                    # not a calendar slot.
-LIVING_JOBS = (
-    # action              interval        on by default   what it is
-    {"action": "artworks-sweep", "interval_s": ARTWORKS_SWEEP_S, "enabled": True,
-     "label": "Published-artwork sweep",
-     "note": "reads back what PixAI says you have published — short-circuits after two "
-             "known pages, so it usually costs one or two"},
-    {"action": "sync", "interval_s": 6 * 3600.0, "enabled": True, "then": "backfill-phash",
-     "label": "Sync now", "note": "pull new + fill metadata, then backfill perceptual hashes"},
-    # THE VIEW READ ON ITS OWN TIMER (owner's call, 2026-09-06). It is the one part of the
-    # published-artwork refresh that COSTS something: asking PixAI how many views a work
-    # has adds one to that number, for every published work, every time. Riding the
-    # metadata refresh's cadence made that a daily +1 across the whole library. On its own
-    # row it is the owner's to set, to turn off, and to see -- and the fifteen-minute
-    # sweep still never reads a view count at all.
-    {"action": "sync-artwork-views", "interval_s": 7 * 86400.0, "enabled": True,
-     "label": "View counts",
-     "note": "weekly — reads how many views each published work has. Asking adds one "
-             "view to each, so this is the only job that touches those numbers"},
-    {"action": "sync-videos", "interval_s": 24 * 3600.0, "enabled": True,
-     "label": "Sync i2v videos", "note": "nightly — downloads mp4s for your animated works"},
-    {"action": "reconcile-deleted", "interval_s": 7 * 86400.0, "enabled": True,
-     "label": "Reconcile deleted", "note": "weekly — flags rows whose task is gone from PixAI"},
-    {"action": "sync-similar", "interval_s": 24 * 3600.0, "enabled": True, "needs": "torch",
-     "label": "Top up Similar",
-     "note": "nightly, when the ML stack is installed. Heavy: don't run it beside GPU- or RAM-heavy programs."},
-)
-# THE STALENESS BACKSTOP (owner call 5). These three are the scope's "safe but wasteful on
-# a timer" row: full re-walk, rebuild Similar, rebuild thumbnails. They have no incremental
-# form, so they are never on a short cadence -- but a library whose Similar index or
-# thumbnails have not been rebuilt in two months is drifting, and the owner asked for a
-# floor under that. Sixty days, measured from the last run of THAT job.
-#
-# A job with no recorded run does NOT fire: the first tick that sees one stamps `now` as
-# its baseline and runs nothing. Otherwise every fresh install would open by re-walking its
-# whole history, rebuilding every thumbnail and re-embedding every image -- the exact
-# opposite of a backstop.
-LIVING_STALE_JOBS = (
-    {"action": "resync-full", "interval_s": STALE_BACKSTOP_S, "enabled": True,
-     "label": "Full re-walk", "note": "only if it has not run in 60 days"},
-    {"action": "rebuild-similar", "interval_s": STALE_BACKSTOP_S, "enabled": True,
-     "needs": "torch", "label": "Rebuild Similar",
-     "note": "only if it has not run in 60 days. Heavy: don't run it beside GPU- or RAM-heavy programs."},
-    {"action": "rebuild-thumbs", "interval_s": STALE_BACKSTOP_S, "enabled": True,
-     "label": "Rebuild ALL thumbnails", "note": "only if it has not run in 60 days"},
-)
-LIVING_ALL = LIVING_JOBS + LIVING_STALE_JOBS
-LIVING_BY_ACTION = {j["action"]: j for j in LIVING_ALL}
-LIVING_STALE_ACTIONS = frozenset(j["action"] for j in LIVING_STALE_JOBS)
-# THE ONE THING AN IN-PROCESS LOCK CANNOT COVER: a SUBPROCESS. Every Panel action runs as
-# its own interpreter (_panel_run -> subprocess.Popen of the CLI) with its own SQLite
-# connection, so _artworks_lock -- a threading.Lock in the server process -- is invisible to
-# it. These are the actions whose subprocess writes the same catalog rows the sweep writes:
-#
-#   sync / resync-full / test-pull -> run_download, which builds rows and save_catalog()s
-#                                     them (carry-protected, but a carry still restores from
-#                                     a snapshot taken when the job STARTED)
-#   sync-videos                    -> run_sync_videos, same shape
-#   sync-artworks                  -> run_sync_artworks, the sweep's own full re-walk
-#
-# The sweep defers to any of them rather than trying to interleave narrow UPDATEs with a
-# job that is rebuilding rows from its own older snapshot. Deferring costs at most one
-# cadence; the alternative costs whichever writer lost the race. Nothing DESTRUCTIVE is in
-# here, because nothing destructive is reachable from the tick in the first place.
-ARTWORKS_TOUCHING_ACTIONS = frozenset({"sync", "resync-full", "test-pull",
-                                       "sync-videos", "sync-artworks"})
-# The sweep is not a PANEL_ACTIONS key -- it is in-process, and the CLI has no
-# short-circuiting equivalent to spawn. Named here so every caller agrees.
-LIVING_SWEEP_ACTION = "artworks-sweep"
-LIVING_MIN_INTERVAL_S = 60.0
-LIVING_MAX_INTERVAL_S = 120 * 86400.0
-
-
-def _torch_present():
-    """Is the ML stack installed? `find_spec`, never `import torch` -- moonglade.similar's
-    own is_available() imports it, which costs seconds and hundreds of MB, and this is
-    asked on a sixty-second tick."""
-    try:
-        import importlib.util
-        return importlib.util.find_spec("torch") is not None
-    except Exception:                                        # noqa: BLE001
-        return False
-
-
-def living_clamp_interval(action, value, default=None):
-    """One job's cadence, clamped to what this build actually allows. The ONE place that
-    rule lives, so the settings route and the schedule-file normalizer cannot disagree.
-
-    THE SIXTY-DAY FLOOR IS SERVER-SIDE, and that is the whole point of this function. The
-    staleness backstop (full re-walk, rebuild Similar, rebuild ALL thumbnails) is a floor
-    under a job with no incremental form -- the price of running one is the whole library,
-    every time -- so it is not a dial. The Panel renders no cadence selector for those rows
-    for exactly that reason. But "the client draws no control" has never been an
-    enforcement: schedule.json is a plain file the owner can open, and /api/panel/schedule
-    takes a jobs patch. Either could ask for a full re-walk every sixty SECONDS, and before
-    this the server would have written it down and the tick would have obeyed. So the floor
-    lives here, where a hand-edited file and a hand-rolled POST both have to pass through
-    it, rather than in the UI that happens not to offer it."""
-    spec = LIVING_BY_ACTION.get(action) or {}
-    if default is None:
-        default = spec.get("interval_s", LIVING_MIN_INTERVAL_S)
-    try:
-        v = float(value)
-    except (TypeError, ValueError):
-        v = float(default)
-    floor = STALE_BACKSTOP_S if action in LIVING_STALE_ACTIONS else LIVING_MIN_INTERVAL_S
-    return max(floor, min(v, LIVING_MAX_INTERVAL_S))
-
-
-def living_merge(saved):
-    """Normalize whatever is in schedule.json against the shipped list.
-
-    Unknown actions are DROPPED (a hand-edited or downgraded file must not be able to name
-    a job this build does not have), missing ones are added at their defaults, intervals
-    are clamped THROUGH living_clamp_interval (so a hand-edited file cannot put a full
-    re-walk on a one-minute timer any more than a POST can), and the shipped order is what
-    comes back so the Panel's rows never reshuffle under the owner. This is the same
-    discipline the legacy pair already had -- the loop re-checks PANEL_ACTIONS rather than
-    trusting the file."""
-    by_action = {}
-    for row in (saved or []):
-        if not isinstance(row, dict):
-            continue
-        action = str(row.get("action") or "")
-        if action in LIVING_BY_ACTION:
-            by_action[action] = row
-    out = []
-    for spec in LIVING_ALL:
-        row = by_action.get(spec["action"]) or {}
-        interval = living_clamp_interval(
-            spec["action"],
-            row.get("interval_s") if row.get("interval_s") is not None else spec["interval_s"],
-            default=spec["interval_s"])
-        try:
-            last = None if row.get("last_run") in (None, "") else float(row["last_run"])
-        except (TypeError, ValueError):
-            last = None
-        out.append({
-            "action": spec["action"],
-            "enabled": bool(row["enabled"]) if "enabled" in row else bool(spec["enabled"]),
-            "interval_s": interval,
-            "last_run": last,
-        })
-    return out
-
-
-def living_due(jobs, now, torch=None, is_runnable=None):
-    """THE CADENCE, as one pure function of (jobs, now) -- which is what makes every timer
-    in this feature testable on a mock clock instead of a real sleep.
-
-    Returns (due, baselined): the actions that should fire on this tick, and the STALENESS
-    jobs whose last_run was unknown and has just been baselined to `now` (they do not fire;
-    the caller persists the stamp so they fire sixty days from now instead of on the first
-    tick of a fresh install).
-
-    One job per tick, at most -- the list returns in shipped order and the caller takes the
-    first it can actually start, because there is exactly one Panel job slot and a tick that
-    tried to start four things would spawn one and silently drop three.
-
-    `is_runnable` is the caller's PANEL_ACTIONS check (non-destructive, non-advanced, real
-    key). It is a parameter and not a lookup so this stays importable and pure."""
-    due, baselined = [], []
-    stale_actions = {j["action"] for j in LIVING_STALE_JOBS}
-    torch = _torch_present() if torch is None else torch
-    for row in jobs or []:
-        action = row.get("action")
-        spec = LIVING_BY_ACTION.get(action)
-        if not spec or not row.get("enabled"):
-            continue
-        if spec.get("needs") == "torch" and not torch:
-            continue
-        if action in stale_actions and row.get("last_run") in (None, ""):
-            baselined.append(action)          # first sight: stamp, do not run
-            continue
-        if is_runnable is not None and not is_runnable(action):
-            continue
-        if (now - (row.get("last_run") or 0)) >= row.get("interval_s", 0):
-            due.append(action)
-    return due, baselined
-
-
-# --- THE BLOW-UP RULE (owner's addition to the community scope, 2026-09-06) -------------
-#
-# The ask, verbatim: "if something BLOWS up can there be a trigger or metric for that?"
-#
-# What makes this answerable honestly rather than decoratively is that a raw view count
-# cannot say it. 40 new views is enormous for a work that has sat at 3/day for a month and
-# unremarkable for one pulling 200/day. So the rule compares a work's RECENT PACE against
-# ITS OWN lifetime pace, and gates that ratio behind an absolute floor so a quiet work
-# going from 1 view to 4 does not get to shout.
-#
-# THE SELF-READ SUBTRACTION is the part that keeps it from lying. PROBE_2026-09-06 measured
-# that selecting `views` increments the counter for every artwork the query returns -- so
-# two consecutive sweeps ALWAYS differ by at least one view that the sweep itself caused.
-# Without SPIKE_SELF_READ every single work in the library shows a permanent +1 trickle,
-# and any threshold low enough to be sensitive would fire on the owner's own looking.
-#
-# Every constant here is a judgement call, deliberately conservative, and meant to be
-# tuned once the owner has watched it against a real week.
-SPIKE_MIN_GAIN = 25            # real new views in the window, below which nothing is a spike
-SPIKE_RATE_MULTIPLE = 3.0      # the window's pace must beat the work's lifetime pace by this
-SPIKE_MIN_WINDOW_H = 1.0       # floor on the window, so a double-sync minutes apart can't divide by ~0
-SPIKE_MIN_LIFETIME_H = 24.0    # floor on the work's age, so a day-old work has no absurd baseline
-SPIKE_SELF_READ = 1            # views the sweep's own read added -- measured, not assumed
-
-
-def views_spike(row):
-    """Is this published work blowing up? -> a dict describing the spike, or None.
-
-    Pure and side-effect free: it reads one catalog row's four view columns plus
-    created_at and answers from those alone, so it unit-tests without a database and
-    without a network. Callers decide what to do about a spike; this only names one.
-
-    Returns None -- deliberately, and these are the cases that matter most:
-      * never swept, or swept only ONCE (no `views_prev`). A first sweep has nothing to
-        compare against and must announce nothing. This is the no-announce baseline case.
-      * the window's real gain (after SPIKE_SELF_READ) is under SPIKE_MIN_GAIN.
-      * the work's own lifetime pace is >= a third of the window's pace -- i.e. it is
-        simply popular, not blowing up.
-      * a counter that went DOWN or sideways (PixAI recount, a work re-published):
-        clamped to zero gain, never a negative "spike".
-      * an unusable window (no timestamps, or one that runs backwards) -- a spike is a
-        claim about a RATE, and the denominator is never invented.
-      * for the ratio test only, a creation date that will not parse: there is no
-        lifetime to measure the window against.
-
-    A PREVIOUS READING OF 0 IS A SPIKE, not a None (owner's call, 2026-09-06). Going from
-    nothing to something is the plainest "a quiet picture suddenly found an audience" there
-    is, and the rule used to decline it outright: a zero baseline gives the ratio nothing
-    to divide by, and the guard read that as a reason for silence rather than as the ratio
-    simply not applying. It now clears on the absolute floor alone -- SPIKE_MIN_GAIN is
-    what keeps it honest at the bottom of the library -- and reports `multiple: None`,
-    because there is no usual pace to be a multiple OF. Callers must not print a number
-    there; spikeStore.js says "up from nothing" instead. A BLANK previous reading is
-    unchanged and still silent: that is "never swept twice", not "swept and saw zero".
-    """
-    def _int(v):
-        try:
-            return int(str(v).strip() or "")
-        except (TypeError, ValueError):
-            return None
-
-    now_v, prev_v = _int(row.get("views")), _int(row.get("views_prev"))
-    if now_v is None or prev_v is None:
-        return None                                  # never swept, or only once: silence
-    gained = max(0, now_v - prev_v - SPIKE_SELF_READ)
-    if gained < SPIKE_MIN_GAIN:
-        return None
-
-    t_now, t_prev = _series_ts(row.get("views_at")), _series_ts(row.get("views_prev_at"))
-    if t_now is None or t_prev is None or t_now <= t_prev:
-        return None                                  # unusable window; never guess one
-    window_h = max(SPIKE_MIN_WINDOW_H, (t_now - t_prev) / 3600.0)
-    rate = gained / window_h                         # real views per hour, this window
-
-    t_made = _series_ts(row.get("created_at"))
-    if prev_v <= 0:
-        # THE BLOW-UP FROM ZERO. The floor above is the whole gate here: there is no pace
-        # to beat, so the ratio test is skipped rather than failed, and `multiple` is None
-        # because there is no usual pace to be a multiple of.
-        baseline, multiple = 0.0, None
-    else:
-        if t_made is None:
-            return None                              # no lifetime: nothing to compare to
-        lifetime_h = max(SPIKE_MIN_LIFETIME_H, (t_prev - t_made) / 3600.0)
-        baseline = prev_v / lifetime_h               # the work's own all-time views/hour
-        if baseline <= 0 or rate < baseline * SPIKE_RATE_MULTIPLE:
-            return None
-        multiple = round(rate / baseline, 1)
-
-    return {
-        "media_id": row.get("media_id") or "",
-        "artwork_id": row.get("artwork_id") or "",
-        "title": (row.get("title") or "").strip(),
-        "views": now_v,
-        "gained": gained,
-        "window_hours": round(window_h, 1),
-        "rate_per_hour": round(rate, 2),
-        "baseline_per_hour": round(baseline, 3),
-        "multiple": multiple,
-    }
-
-
-def top_published_rows(db_path, limit=12, order="likes"):
-    """The owner's top published artworks -> rows with artwork_id + engagement + views.
-
-    `order` is "likes" (the historical default) or "views". Views are now a CATALOG
-    column filled by --sync-artworks, not twelve live calls made while the panel opens;
-    a library that has never been swept simply reads views=0 with views_at blank, which
-    is what lets the panel say "not swept yet" instead of drawing a bar of zeroes."""
-    col = "views" if order == "views" else "likes"
-    with catalog(db_path) as con:
-        try:
-            rows = con.execute(
-                "SELECT media_id, artwork_id, title, prompt_preview, aes_score, created_at, "
-                "CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER) AS likes, "
-                "CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER) AS comments, "
-                "CAST(COALESCE(NULLIF(views,''),'0') AS INTEGER) AS views, "
-                "views AS views_raw, views_prev, views_at, views_prev_at "
-                "FROM catalog WHERE is_published = '1' AND COALESCE(artwork_id,'') != '' "
-                "ORDER BY {} DESC, likes DESC, comments DESC LIMIT ?".format(col),
-                (int(limit),)).fetchall()
-            return [dict(r) for r in rows]
-        except sqlite3.Error:
-            return []
-
-
-def published_totals(db_path):
-    """At-a-glance totals across ALL the owner's published artworks (from --sync-artworks).
-
-    `views` here is the real LIFETIME total across the whole published library -- the
-    thing the panel could not show while views were fetched live for a top twelve. It
-    sums only rows that have actually been swept; `views_rows` says how many that was,
-    so a partially-swept library reports an honest subtotal rather than a total that
-    silently counts blanks as zero.
-
-    ONE ROW PER ARTWORK, and that is not a nicety. An ANIMATED artwork is two catalog
-    rows -- the poster keyed by `mediaId` and the mp4 keyed by `videoMediaId` -- and both
-    the sync and the sweep write the SAME artwork_id, likes, comments and views onto both
-    on purpose (#20: the Animations tab needs the mp4 row tagged). Summing every published
-    row therefore doubled the count, the likes, the comments and the headline lifetime
-    views for every animation in the library. The dedup key is the artwork_id; a published
-    row that has never been merged has none, so it keys on its own media_id and still
-    counts exactly once rather than folding every unmerged row under one blank key.
-
-    Which of an animation's two rows represents it does not matter here -- they carry the
-    same PixAI-owned numbers by construction -- so the lowest rowid is representative
-    enough. published_spikes, which shows a media_id to the owner, is fussier."""
-    with catalog(db_path) as con:
-        try:
-            r = con.execute(
-                "SELECT COUNT(*) AS c, "
-                "COALESCE(SUM(CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER)),0) AS likes, "
-                "COALESCE(SUM(CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER)),0) AS comments, "
-                "COALESCE(SUM(CASE WHEN COALESCE(views,'') != '' "
-                "                  THEN CAST(views AS INTEGER) ELSE 0 END),0) AS views, "
-                "COALESCE(SUM(CASE WHEN COALESCE(views,'') != '' THEN 1 ELSE 0 END),0) AS views_rows, "
-                "MAX(COALESCE(views_at,'')) AS views_at "
-                "FROM catalog WHERE is_published = '1' AND rowid IN ("
-                "  SELECT MIN(rowid) FROM catalog WHERE is_published = '1' "
-                "  GROUP BY CASE WHEN COALESCE(artwork_id,'') = '' "
-                "                THEN 'mid:' || media_id ELSE 'aid:' || artwork_id END)"
-            ).fetchone()
-            return {"count": int(r[0] or 0), "likes": int(r[1] or 0), "comments": int(r[2] or 0),
-                    "views": int(r[3] or 0), "views_rows": int(r[4] or 0),
-                    "views_at": r[5] or ""}
-        except sqlite3.Error:
-            return {"count": 0, "likes": 0, "comments": 0,
-                    "views": 0, "views_rows": 0, "views_at": ""}
-
-
-def published_spikes(db_path, limit=5):
-    """Every published work that views_spike() calls a blow-up, hottest first.
-
-    A pure catalog read over the swept rows -- no network, no live call. Capped because
-    this feeds a corner note, not a feed: the owner asked to be TOLD when something takes
-    off, and a note naming twenty works tells him nothing.
-
-    ONE SLOT PER ARTWORK. An animation is two rows carrying the same numbers (see
-    published_totals), so both spiked identically and ONE work could fill a two-slot note
-    twice while a genuinely different spiking work never appeared at all. The poster row
-    wins the slot over the mp4 -- the note names a picture, and the still is what the
-    owner recognises. A row that has never been merged has no artwork_id and keys on its
-    own media_id, so it is never folded in with any other."""
-    with catalog(db_path) as con:
-        try:
-            rows = con.execute(
-                "SELECT media_id, artwork_id, title, created_at, views, views_prev, "
-                "views_at, views_prev_at, is_video FROM catalog "
-                "WHERE is_published = '1' AND COALESCE(views_prev,'') != '' "
-                "ORDER BY CASE WHEN COALESCE(is_video,'') = '1' THEN 1 ELSE 0 END, "
-                "         rowid").fetchall()
-        except sqlite3.Error:
-            return []
-    seen, hits = set(), []
-    for r in rows:
-        row = dict(r)
-        key = "aid:" + str(row.get("artwork_id") or "") if row.get("artwork_id") \
-            else "mid:" + str(row.get("media_id") or "")
-        if key in seen:
-            continue                                 # the same work's other row
-        seen.add(key)
-        s = views_spike(row)
-        if s:
-            hits.append(s)
-    # A blow-up from ZERO has no multiple to rank by -- and is the most dramatic thing on
-    # the list, so it sorts to the top rather than to the bottom of a None comparison.
-    hits.sort(key=lambda s: (float("inf") if s["multiple"] is None else s["multiple"],
-                             s["gained"]), reverse=True)
-    return hits[:int(limit)]
-
-
 def distinct_task_count(db_path):
     """How many distinct generation TASKS the local catalog holds. This is the apples-to-apples
     counterpart to the server's `me.tasks.totalCount` (also tasks, not images) -> backup coverage
@@ -9424,7 +3271,7 @@ def backfill_batches(out_dir, db_path):
     that inline copy was one of the two INVARIANT-1 re-implementations.
     """
     updates = {}  # media_id -> batch_name
-    for e in scan_library(out_dir, kinds=("image",), include=("batches",), exclude=()):
+    for e in _scan.scan_library(out_dir, kinds=("image",), include=("batches",), exclude=()):
         if len(e.rel.parts) < 3:
             continue          # a loose file sitting directly in batches/ has no batch dir
         updates[e.media_id] = e.rel.parts[1]
@@ -9453,1098 +3300,14 @@ def catalog_years(db_path):
         return [int(r[0]) for r in rows if str(r[0]).isdigit()]
 
 
-def _fmt_size(n):
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if n < 1024 or unit == "TB":
-            return "{:.1f} {}".format(n, unit)
-        n /= 1024
-
-
-def collection_health(out_dir, db_path):
-    """Compute at-a-glance metrics for the health dashboard. One disk walk
-    (sizes + buckets + Class-A duplicate detection) plus a few catalog queries.
-
-    Returns a dict consumed by the /health route. Cheap (no content hashing) so
-    it's safe to render on every page load.
-    """
-    from collections import defaultdict, Counter
-
-    per_bucket = Counter()
-    total_files = 0
-    total_bytes = 0
-    on_disk_ids = set()
-    on_disk_rels = set()      # relative paths of every media file (incl. videos)
-    locs = defaultdict(set)   # media_id -> set of bucket names (Class A dup detection)
-    dup_redundant = 0
-    dup_bytes = 0
-    mid_sizes = defaultdict(list)  # media_id -> [sizes] to estimate reclaimable
-
-    # The walk is the panel's cost at scale (owner report 2026-08-06: "VERY slow" at
-    # 35k images), which is why the shared scan_library PRUNES the excluded subtrees
-    # (gallery/, _duplicates/, _deleted/, legacy branding/) instead of enumerating
-    # their thousands of entries only to drop each one by path-prefix afterward, and
-    # reads is_file/size straight off the DirEntry. branding/ is this walker's own
-    # extra exclusion (named disagreement 5) and videos are its own extra kind
-    # (named disagreement 4) -- both asked for here, neither imposed on the others.
-    # Guarded by dev/tests/test_gallery_filters.py's existing health tests.
-    #
-    # HEALTH_EXCLUDE is a named constant rather than the tuple spelled inline because
-    # _health_dir_key() has to prune the SAME set: the memo's disk-side signal only means
-    # anything if it watches exactly the roots this walk descends into.
-    size_by_rel = {}          # relative path -> bytes, images AND videos (the Storage bars)
-    size_by_mid = {}          # (kind, media_id) -> bytes of its largest copy (the Storage bars)
-    # Empty files, images and videos (the "Zero-byte files" tile). Counted here for free; they
-    # still count in total_files and keep a row out of `missing`, exactly as before -- the
-    # tile says it plainly instead of moving a number the owner already knows (scope 2+3,
-    # owner question 1, option a).
-    zero_byte = 0
-    for e in scan_library(out_dir, kinds=("image", "video"), exclude=HEALTH_EXCLUDE):
-        _rel = str(e.rel).replace("\\", "/")
-        on_disk_rels.add(_rel)
-        if e.size == 0:
-            zero_byte += 1
-        if e.size is not None:
-            size_by_rel[_rel] = e.size
-            _k = (e.kind, e.media_id)
-            if e.size > size_by_mid.get(_k, -1):
-                size_by_mid[_k] = e.size
-        if e.kind != "image":
-            continue          # videos: track the path only; skip image-centric stats
-        if e.size is None:
-            continue          # stat() failed -- same skip the per-file stat() had
-        total_files += 1
-        total_bytes += e.size
-        per_bucket[e.bucket] += 1
-        on_disk_ids.add(e.media_id)
-        locs[e.media_id].add(e.bucket)
-        mid_sizes[e.media_id].append(e.size)
-
-    for mid, buckets in locs.items():
-        if len(buckets) > 1:
-            extra = len(mid_sizes[mid]) - 1
-            dup_redundant += extra
-            sizes = sorted(mid_sizes[mid])
-            dup_bytes += sum(sizes[:-1])  # all but the largest counted as reclaimable
-
-    with catalog(db_path) as con:
-        def _scalar(sql):
-            return con.execute(sql).fetchone()[0]
-        total_rows   = _scalar("SELECT COUNT(*) FROM catalog")
-        with_image   = _scalar("SELECT COUNT(*) FROM catalog WHERE filename != ''")
-        with_full    = _scalar("SELECT COUNT(*) FROM catalog WHERE COALESCE(prompt_full,'') != ''")
-        # prompt_full alone overstates it badly. A row can hold a prompt and a seed while
-        # holding no model, steps, sampler or CFG -- so this panel read 98% on a catalog
-        # where 1% of rows could say which model made them. model_id is the honest second
-        # number: it comes only from a task-detail fetch, and it is what an image-view
-        # upscale needs. Locally imported rows have no PixAI task and so can never carry
-        # one; they are excluded rather than counted as a permanent shortfall.
-        with_model   = _scalar("SELECT COUNT(*) FROM catalog WHERE COALESCE(model_id,'') != ''")
-        model_base   = _scalar("SELECT COUNT(*) FROM catalog "
-                               "WHERE COALESCE(source,'') != 'local'")
-        rated        = _scalar("SELECT COUNT(*) FROM catalog "
-                               "WHERE COALESCE(NULLIF(rating,''),'0') NOT IN ('0')")
-        by_month = con.execute(
-            "SELECT SUBSTR(created_at,1,7) AS m, COUNT(*) FROM catalog "
-            "WHERE created_at != '' GROUP BY m ORDER BY m"
-        ).fetchall()
-        top_models = con.execute(
-            "SELECT COALESCE(NULLIF(model_name,''), NULLIF(model_id,''), 'unknown') AS mdl, "
-            "COUNT(*) AS c FROM catalog WHERE filename != '' GROUP BY mdl ORDER BY c DESC LIMIT 8"
-        ).fetchall()
-        # Published-artwork analytics (populated by --sync-artworks)
-        published = _scalar("SELECT COUNT(*) FROM catalog WHERE is_published = '1'")
-        total_likes = _scalar(
-            "SELECT COALESCE(SUM(CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER)),0) "
-            "FROM catalog WHERE is_published = '1'")
-        tag_rows = con.execute(
-            "SELECT art_tags FROM catalog WHERE COALESCE(art_tags,'') != ''").fetchall()
-        lora_rows = con.execute(
-            "SELECT loras FROM catalog WHERE COALESCE(loras,'') != ''").fetchall()
-        prompt_rows = con.execute(
-            "SELECT prompt_preview FROM catalog WHERE COALESCE(prompt_preview,'') != ''"
-        ).fetchall()
-        # catalog rows that claim a file but whose media_id isn't on disk
-        cat_rows = con.execute(
-            "SELECT media_id, filename FROM catalog WHERE filename != ''").fetchall()
-        # every media_id the catalog knows about at all (regardless of filename) --
-        # the same "already cataloged" definition run_import_local() uses, so the
-        # health count and what --import-local/Import would actually do stay in sync
-        catalog_ids = {mid for (mid,) in con.execute(
-            "SELECT media_id FROM catalog WHERE media_id != ''").fetchall()}
-        # what the Storage bars group by (Session N6): one small row per picture that has a file
-        storage_rows = con.execute(
-            "SELECT media_id, filename, is_video, model_name, collections FROM catalog "
-            "WHERE filename != ''").fetchall()
-
-    tag_counter = Counter()
-    for (tags,) in tag_rows:
-        for t in (tags or "").split(","):
-            t = t.strip()
-            if t:
-                tag_counter[t] += 1
-    top_tags = tag_counter.most_common(10)
-
-    lora_counter = Counter()
-    for (loras,) in lora_rows:
-        for part in (loras or "").split(","):
-            name = part.strip().rsplit(":", 1)[0].strip()  # drop ":weight"
-            if name:
-                lora_counter[name] += 1
-    top_loras = lora_counter.most_common(10)
-
-    # Prompt word-cloud: most common meaningful words across prompt previews. Shared with the
-    # Watchword achievement via _prompt_word_counter() so the two can never drift.
-    word_counter = _prompt_word_counter(prompt_rows)
-    top_words = word_counter.most_common(40)
-
-    # A row is "missing" only if NEITHER its media id is on disk (the PixAI
-    # naming path) NOR its filename resolves to a real file (the imported/local
-    # path, whose media_id is a synthetic local_<hash> that never matches a file).
-    missing = sum(
-        1 for mid, fn in cat_rows
-        if (not mid or mid not in on_disk_ids)
-        and (fn or "").replace("\\", "/") not in on_disk_rels)
-
-    # Integrity job (audit 2026-07-21, Curator #9): on-disk media with NO catalog
-    # row at all -- the mirror image of `missing` above. Scoped exactly like
-    # on_disk_ids is scoped throughout this function (images only; gallery/
-    # _duplicates/_deleted/branding already excluded from the disk walk).
-    uncataloged = on_disk_ids - catalog_ids
-
-    # The last integrity pass (--verify-library / the Panel's "Verify library integrity"):
-    # a read of its integrity_report.json, never a walk of its own. None until one has run.
-    try:
-        from moonglade import integrity as moonglade_integrity
-        _last = moonglade_integrity.read_summary(out_dir)
-    except Exception:                                    # noqa: BLE001 -- Health never fails on it
-        _last = None
-    integrity = ({k: _last.get(k) for k in ("verified_at", "deep", "rows", "counts", "lost")}
-                 if _last else None)
-
-    return {
-        "total_files": total_files,
-        "total_bytes": total_bytes,
-        "total_size_h": _fmt_size(total_bytes),
-        "per_bucket": dict(per_bucket),
-        "dup_redundant": dup_redundant,
-        "dup_bytes": dup_bytes,
-        "dup_bytes_h": _fmt_size(dup_bytes),
-        "catalog_rows": total_rows,
-        "with_image": with_image,
-        "with_full_meta": with_full,
-        "full_meta_pct": round(100 * with_full / with_image) if with_image else 0,
-        "with_model": with_model,
-        "model_pct": round(100 * with_model / model_base) if model_base else 0,
-        "rated": rated,
-        "missing": missing,
-        "uncataloged": len(uncataloged),
-        "zero_byte": zero_byte,
-        "integrity": integrity,
-        "by_month": [(m, c) for (m, c) in by_month],
-        "top_models": [(m, c) for (m, c) in top_models],
-        "published": published,
-        "total_likes": total_likes,
-        "top_tags": top_tags,
-        "top_loras": top_loras,
-        "top_words": top_words,
-        "storage": storage_breakdown(storage_rows, size_by_rel, loom_render_ids(out_dir),
-                                     size_by_mid),
-    }
-
-
-# ---------------------------------------------------------------------------
-# STORAGE BREAKDOWN (Session N6). Collection Health's one "Storage used" number became three
-# stacked bars: by TYPE (images, videos, Loom renders), by MODEL, and by COLLECTION. Sizes are
-# the bytes each catalogued picture's file takes on disk (the health walk already stats every
-# file; it just kept only the images' before). A picture whose file is not on disk is left out
-# -- it takes no space we can measure -- so the bars total what is really there, catalogued
-# pictures only, which can be less than the folder (an uncataloged file counts in the folder
-# and in no bar).
-#
-# FINDING A ROW'S FILE. The catalog's `filename` is a path relative to the library only on
-# newer rows (videos/..., images/..., imported/...); every older row holds the bare file name
-# while the file sits in images/. Matching on `filename` alone therefore measured 263 of a
-# 37,535-picture library (owner walk, 2026-09-29). So a row is found the way the rest of the
-# app finds a file: its relative path first, else its media id through the walk's own
-# media_id_of (INVARIANT 1), in the same kind (a video row never borrows an image's bytes).
-# Both lookups come off the health walk that already ran -- no second walk, no stat per row.
-# A media id on disk twice counts once, at its larger copy (the Duplicates tile's own keeper
-# rule; the other copy is what Reclaimable counts).
-#
-#   type        an exclusive split: a Loom render (a board's shot result or a kept re-roll) is
-#               "loom" whether it is a clip or a still, else "video", else "image". It is the
-#               same partition `type:` searches by, so a segment's click lands on exactly it.
-#   model       the model name on the row; the top four by bytes, the rest (and any picture
-#               with no model recorded) folded into "Other", which is not a filter.
-#   collection  hand-picked collections only (a smart one is a search, it owns no bytes). A
-#               picture in two collections counts in both, so this bar can overlap and says
-#               so; its segments are shares of their own sum, not of the library. Top four by
-#               bytes plus "Other" for the rest.
-STORAGE_TOP = 4
-_STORAGE_TYPES = (("image", "Images"), ("video", "Videos"), ("loom", "Loom renders"))
-
-
-def storage_breakdown(rows, size_by_rel, loom_ids, size_by_mid=None):
-    """Pure: catalog rows (media_id, filename, is_video, model_name, collections), the walk's
-    {relative path: bytes}, the Loom's render ids and the walk's {(kind, media_id): bytes}
-    -> the payload's `storage` block. A row is measured by its relative path, else by its
-    media id in its own kind (see the section comment: most rows hold a bare file name)."""
-    size_by_mid = size_by_mid or {}
-    by_type = {k: [0, 0] for k, _ in _STORAGE_TYPES}          # key -> [bytes, count]
-    by_model, by_coll = {}, {}                                 # name -> [bytes, count]
-    total, files = 0, 0
-    for r in rows:
-        fn = str(r["filename"] or "").replace("\\", "/")
-        mid = str(r["media_id"] or "")
-        is_video = str(r["is_video"] or "") == "1"
-        size = size_by_rel.get(fn)
-        if size is None and mid:
-            size = size_by_mid.get(("video" if is_video else "image", mid))
-        if size is None:
-            continue
-        total += size
-        files += 1
-        kind = "loom" if mid in loom_ids else ("video" if is_video else "image")
-        by_type[kind][0] += size
-        by_type[kind][1] += 1
-        name = str(r["model_name"] or "").strip()
-        m = by_model.setdefault(name, [0, 0])
-        m[0] += size
-        m[1] += 1
-        for c in _split_collections(r["collections"]):
-            cc = by_coll.setdefault(c, [0, 0])
-            cc[0] += size
-            cc[1] += 1
-
-    def seg(name, b, n, **extra):
-        return dict({"name": name, "bytes": b, "h": _fmt_size(b), "count": n}, **extra)
-
-    def top_plus_other(table, skip_blank):
-        named = sorted(((k, v) for k, v in table.items() if not (skip_blank and not k)),
-                       key=lambda kv: (-kv[1][0], kv[0].lower()))
-        segs = [seg(k, v[0], v[1], other=False) for k, v in named[:STORAGE_TOP]]
-        rest = named[STORAGE_TOP:]
-        rb = sum(v[0] for _, v in rest) + (table.get("", [0, 0])[0] if skip_blank else 0)
-        rn = sum(v[1] for _, v in rest) + (table.get("", [0, 0])[1] if skip_blank else 0)
-        if rb:
-            segs.append(seg("Other", rb, rn, other=True))
-        return segs
-
-    coll_segs = top_plus_other(by_coll, False)
-    return {
-        "total_bytes": total, "total_h": _fmt_size(total), "files": files,
-        "by_type": [seg(label, by_type[k][0], by_type[k][1], key=k) for k, label in _STORAGE_TYPES],
-        "by_model": top_plus_other(by_model, True),
-        "by_collection": {"sum_bytes": sum(sg["bytes"] for sg in coll_segs), "segments": coll_segs},
-    }
-
-
-# ---------------------------------------------------------------------------
-# THE HEALTH MEMO -- the same treatment achievement_metrics() got in 49a646b, applied to
-# the other walk every overlay open was paying for.
-#
-# collection_health() walks the ENTIRE library off disk (sizes, buckets, Class-A duplicate
-# detection) plus a handful of catalog queries. At 35k images that is seconds, and the owner
-# reported it as "VERY slow" back on 2026-08-06. The route has had a 120s TTL cache since
-# then, which helped and was wrong in two directions at once: a change made 5s ago was
-# invisible for two minutes, and a first open after two idle minutes paid the full walk with
-# the user watching.
-#
-# KEYED ON THE CATALOG FILE, NO TIME FLOOR -- the same ruling as _ACH_METRICS_CACHE, for the
-# same reason (see its comment: a floor makes a real change bounded-stale, and that is what
-# broke dev/tests/test_unlock_split.py's earn-then-read). Half the key is the catalog's
-# (mtime_ns, size): every write to the library goes through that file, so the instant it
-# changes the memo is invalid, and a catalog nobody is writing to -- which is every open
-# outside a sync -- is served from memory. os.stat is microseconds; the walk is seconds.
-#
-# ...AND ON THE DISK, because half of what is memoized never touches the catalog. What
-# collection_health() returns is not a catalog summary: total_files, total_bytes, per_bucket
-# and dup_redundant/dup_bytes come off the WALK, and `missing`/`uncataloged` are the DIFF
-# between the walk and the catalog. A file deleted or dropped in by hand moves every one of
-# those and writes nothing to catalog.db, so a catalog-only key served a payload that was
-# provably wrong until some unrelated write happened to move the db file. _health_dir_key()
-# is the cheap disk-side half: the mtimes of the walk's own roots.
-#
-# THE PERIODIC BACKSTOP (HEALTH_MAX_AGE). Directory mtimes catch an add or a delete in the
-# directories themselves, not one nested deeper (batches/<name>/x.png), and not an in-place
-# rewrite that leaves a file's name alone. So the memo also carries a CEILING on age -- a
-# ceiling, never a floor: a catalog write still invalidates in the same instant it lands.
-# Past the ceiling the reader is still served immediately, the recompute just happens behind
-# it, which is the same serve-stale path a moved key already takes.
-#
-# SERVE-STALE-WHILE-RECOMPUTING. When the key HAS moved, the request that notices does not
-# pay for the new walk: it gets the previous payload immediately and a single background
-# thread recomputes for whoever asks next. Only two callers ever block -- the first read of a
-# process (nothing to serve yet) and an explicit ?fresh=1 -- and _HEALTH_BUSY makes the
-# refresh single-flight, so a burst of opens cannot start a walk each.
-#
-# BOOT PRIME (_health_prime, called from main()). Even a perfect memo leaves the FIRST open
-# of a session slow, which is the one actually noticed. Priming it off-thread just after the
-# server binds makes that open a memory read too. Prime + mtime key is what makes good on the
-# owner's "loaded periodically and cached" -- with no timer and no staleness window.
-_HEALTH_CACHE = {"key": None, "payload": None, "at": 0.0}
-_HEALTH_LOCK = threading.Lock()
-_HEALTH_BUSY = {"on": False}
-
-# How long a snapshot may be served before a recompute is kicked off behind it, EVEN when
-# neither half of the key moved. Ten minutes: long enough that an idle session never pays
-# the walk twice over, short enough that the drift the key cannot see (a file swapped inside
-# batches/<name>/, an in-place rewrite) is bounded instead of permanent. This is the owner's
-# own "loaded periodically and cached", and it is a ceiling on staleness, not a floor on
-# freshness -- a catalog write still invalidates in the instant it lands.
-HEALTH_MAX_AGE = 600.0
-
-
-def _health_key(db_path):
-    """The cheap invalidation key: what the catalog file looks like right now. None when it
-    does not exist yet -- a library with no catalog is still a valid thing to report on, and
-    None compares equal to None, so it memoizes like any other key."""
-    try:
-        st = os.stat(str(db_path))
-        return (st.st_mtime_ns, st.st_size)
-    except OSError:
-        return None
-
-
-def _health_dir_key(out_dir):
-    """The cheap DISK-side key: the mtimes of the roots collection_health() actually walks.
-
-    A directory's own mtime moves whenever an entry is added to or removed from it, so one
-    scandir of out_dir plus the mtime of each immediate subdirectory the walk descends into
-    (HEALTH_EXCLUDE pruned, the same set scan_library() is handed) notices a file deleted
-    from or dropped into any month folder, images/, imported/ or the root itself -- exactly
-    the buckets bucket_of() names and per_bucket/total_files/missing/uncataloged are built
-    from. Cost is ONE directory listing plus one stat per top-level directory -- dozens of
-    syscalls against a library of tens of thousands of files, and flat in that count, which
-    is the whole point of not re-walking.
-
-    THE STAT HAS TO BE os.stat(e.path), NOT e.stat(). scan_library() reads size straight off
-    the DirEntry for exactly the reason that would tempt someone here -- on Windows a
-    DirEntry is already populated by the directory read, so e.stat() is free. For a
-    SUBDIRECTORY it is also WRONG: what NTFS hands back there is the duplicated timestamp
-    copy held in the parent's index entry, and that copy is not refreshed when a file inside
-    the subdirectory is added or deleted. Measured on this box: after `unlink()` of a file in
-    2026-01/, os.stat("2026-01") moved and the scandir DirEntry did not. The free stat would
-    have made this whole key silently never fire, which is the bug it exists to fix.
-
-    What it does NOT see: a change nested deeper than one level (batches/<name>/x.png) or a
-    same-name in-place rewrite. HEALTH_MAX_AGE is the backstop for those, not this.
-
-    None when out_dir cannot be listed at all (a disconnected drive) -- the same shape
-    _health_key uses for a missing catalog, and it memoizes the same way.
-    """
-    root = str(out_dir)
-    top_names, any_names = _split_exclusions(HEALTH_EXCLUDE)
-    skip = {n.lower() for n in top_names} | set(any_names)
-    try:
-        marks = [os.stat(root).st_mtime_ns]
-    except OSError:
-        return None
-    subs = []
-    try:
-        with os.scandir(root) as it:
-            for e in it:
-                try:
-                    if not e.is_dir(follow_symlinks=False):
-                        continue
-                    if e.name.lower() in skip:
-                        continue
-                    subs.append((e.name, os.stat(e.path).st_mtime_ns))
-                except OSError:
-                    continue          # vanished mid-listing: the next read will see it
-    except OSError:
-        return None
-    # Sorted so the key does not depend on the order the filesystem hands entries back.
-    return (marks[0], tuple(sorted(subs)))
-
-
-def _health_memo_key(out_dir, db_path):
-    """Both halves. The catalog file AND the walk's roots -- either one moving invalidates."""
-    return (_health_key(db_path), _health_dir_key(out_dir))
-
-
-def health_snapshot(out_dir, db_path):
-    """collection_health(), memoized. Reads the key BEFORE the walk and stores the payload
-    under that one: a catalog (or a file) written DURING the walk therefore leaves a key that
-    no longer matches, and the next reader recomputes rather than trusting a half-old
-    answer."""
-    key = _health_memo_key(out_dir, db_path)
-    payload = collection_health(out_dir, db_path)
-    with _HEALTH_LOCK:
-        _HEALTH_CACHE.update(key=key, payload=payload, at=time.time())
-    return payload
-
-
-def _health_refresh_async(out_dir, db_path):
-    """Recompute behind a stale answer, once. Returns the thread (or None when one was
-    already running) so a test can join it instead of sleeping."""
-    with _HEALTH_LOCK:
-        if _HEALTH_BUSY["on"]:
-            return None
-        _HEALTH_BUSY["on"] = True
-
-    def _run():
-        try:
-            health_snapshot(out_dir, db_path)
-        except Exception:
-            pass                      # a background nicety must never take the server down
-        finally:
-            with _HEALTH_LOCK:
-                _HEALTH_BUSY["on"] = False
-    t = threading.Thread(target=_run, daemon=True, name="moonglade-health-refresh")
-    t.start()
-    return t
-
-
-def health_cached(out_dir, db_path, fresh=False):
-    """What /api/health answers with. Five ways out, in order:
-       1. ?fresh=1 -- walk now, block, store. The explicit user refresh.
-       2. nothing cached at all -- the blocking walk. This is the first read of a process,
-          and it is what _health_prime pre-pays off-thread at boot.
-       3. the key matches and the snapshot is younger than HEALTH_MAX_AGE -- the memo, free.
-       4. the key moved (catalog file OR the walk's own directories) -- hand back the STALE
-          payload now and recompute behind it.
-       5. the key matches but the snapshot has aged past HEALTH_MAX_AGE -- same serve-stale
-          path, because drift deeper than the directory mtimes see must still be bounded."""
-    if fresh:
-        return health_snapshot(out_dir, db_path)
-    key = _health_memo_key(out_dir, db_path)
-    with _HEALTH_LOCK:
-        payload = _HEALTH_CACHE["payload"]
-        fresh_enough = (time.time() - _HEALTH_CACHE["at"]) <= HEALTH_MAX_AGE
-        hit = payload is not None and _HEALTH_CACHE["key"] == key and fresh_enough
-    if payload is None:
-        return health_snapshot(out_dir, db_path)
-    if hit:
-        return payload
-    _health_refresh_async(out_dir, db_path)
-    return payload
-
-
-def health_avg_file_bytes():
-    """The library's average image size from the LAST Health measurement, or None before
-    there is one. A memory read, never a walk: the Broken files list sizes its re-download
-    estimate with it ("~9 MB"), and a cut-short file says nothing about how big it should be."""
-    with _HEALTH_LOCK:
-        payload = _HEALTH_CACHE["payload"]
-    if not payload:
-        return None
-    n, total = payload.get("total_files"), payload.get("total_bytes")
-    return int(total / n) if n and total else None
-
-
-def _health_prime(out_dir, db_path):
-    """Warm the memo off-thread at boot so the first Health open of a session is a memory
-    read too. Daemon, so it can never hold up an exit; fail-soft, so a broken library still
-    starts a server. Returns the thread for the test that asserts it really primes."""
-    def _run():
-        try:
-            health_snapshot(out_dir, db_path)
-        except Exception:
-            pass
-    t = threading.Thread(target=_run, daemon=True, name="moonglade-health-prime")
-    t.start()
-    return t
-
-
-def duplicate_groups(out_dir, limit=300):
-    """Class-A duplicates for the gallery review browser: media_ids whose file
-    exists in more than one folder bucket. Cheap (no hashing). Returns a list of
-    {media_id, keeper(rel), copies:[{rel,bucket,size}]} sorted keeper-first.
-
-    Excludes gallery/, _duplicates/, AND _deleted/ (B11, audit 2026-07-21) -- a
-    locally-purged image must not be reported back as a live duplicate of its own
-    quarantined self."""
-    from collections import defaultdict
-    prio = {"batches": 0, "month": 1, "images": 2, "other": 3}
-    locs = defaultdict(list)
-    for e in scan_library(out_dir, kinds=("image",), exclude=QUARANTINE_EXCLUDE):
-        locs[e.media_id].append({"rel": str(e.rel), "bucket": e.bucket,
-                                 "size": e.size or 0})
-
-    groups = []
-    for mid, items in locs.items():
-        if len(items) > 1 and len({it["bucket"] for it in items}) > 1:
-            ordered = sorted(items, key=lambda it: (prio.get(it["bucket"], 9), len(it["rel"])))
-            groups.append({"media_id": mid, "keeper": ordered[0]["rel"], "copies": ordered})
-            if len(groups) >= limit:
-                break
-    return groups
-
-
-def same_seed_groups(db_path, limit=1000):
-    """Class-C duplicates (2026-08-02, moonglade-internal/DECISIONS.md): catalog rows sharing the
-    same non-blank (seed, prompt_full) pair -- almost certainly the same generation
-    re-rolled or resubmitted. A cheap SQL GROUP BY, not a new detection algorithm; no
-    filesystem access, no hashing. Returns [{seed, prompt_hash, media_ids:[...]}],
-    most-duplicated first, capped at `limit` groups. `prompt_hash` is a short digest
-    of the grouped prompt_full (NOT the seed's own identity) so callers get a stable,
-    compact per-group key without echoing the full prompt text into an id string."""
-    import hashlib
-    with catalog(db_path) as con:
-        rows = con.execute(
-            "SELECT seed, prompt_full, GROUP_CONCAT(media_id) AS ids, COUNT(*) AS n "
-            "FROM catalog "
-            "WHERE COALESCE(seed,'') != '' AND COALESCE(prompt_full,'') != '' "
-            "GROUP BY seed, prompt_full "
-            "HAVING COUNT(*) > 1 "
-            "ORDER BY n DESC "
-            "LIMIT ?",
-            (limit,),
-        ).fetchall()
-        out = []
-        for r in rows:
-            phash = hashlib.sha1((r["prompt_full"] or "").encode("utf-8", "ignore")).hexdigest()[:10]
-            out.append({"seed": r["seed"], "prompt_hash": phash,
-                        "media_ids": [m for m in (r["ids"] or "").split(",") if m]})
-        return out
-
-
-# Hamming distance threshold (out of 64 bits) below which two dHashes count as a
-# near-duplicate pair. 10/64 (~84% bit agreement) is the commonly-cited rule of thumb
-# for 64-bit perceptual hashes -- comfortably wide enough to catch recompression/
-# upscaling noise (measured well under 10 in practice: see dev/tests/test_phash.py) while
-# staying far from the ~32/64 (50%) two UNRELATED images land near.
-NEAR_DUP_HAMMING_THRESHOLD = 10
-
-
-def near_duplicate_groups(db_path, threshold=NEAR_DUP_HAMMING_THRESHOLD, hash_size=DHASH_SIZE):
-    """Class-D duplicates (the perceptual-hash follow-up named in the original
-    api_duplicates() docstring/DECISIONS.md): catalog rows whose dHash `phash` column
-    (compute_dhash(), populated by `--backfill-phash`) is within `threshold` Hamming-
-    distance bits of another row's -- catches an upscaled or recompressed copy of the
-    same image, which Class B (identical_file, a byte hash) cannot, because the bytes
-    genuinely differ. Image rows only (is_video='1' rows and blank-phash rows are
-    skipped -- a row with no phash yet is "unknown", never treated as "no match").
-
-    NOT a naive O(n^2) pairwise scan across the whole library (mirrors Class B's
-    same-size-bucket trick in audit_collection()): the 64-bit hash is split into 4
-    non-overlapping 16-bit bands, and rows are grouped by (band_index, band_value).
-    Only rows that land in the SAME band bucket are ever Hamming-compared. This is a
-    standard LSH ("banding") trick -- any pair within `threshold` bits of each other is
-    near-certain to still agree exactly on at least one 16-bit band (a handful of
-    scattered bit flips is very unlikely to touch all 4 bands at once), so real near-
-    duplicates are still found; only far-apart pairs that would fail the threshold check
-    anyway are skipped from ever being compared. Comparisons are deduped (a pair sharing
-    2+ bands is only Hamming-checked once).
-
-    Matching pairs are merged with union-find so a visual chain (A near B, B near C)
-    lands in ONE group even if A and C individually exceed `threshold` -- same "keeper
-    emerges from the group" shape the other three tiers already return, not a flat pair
-    list.
-
-    Returns [{media_ids:[...], closeness_pct}], most-similar-group first. closeness_pct
-    is this tier's one deliberate departure from the other three (which carry no
-    percentage/confidence by design, per DECISIONS.md) -- it is not invented: for each
-    final group it takes the WORST (largest) pairwise Hamming distance among that
-    group's own members (recomputed exactly now that the group is small, not estimated
-    from the banding pass) and reports 100 * (1 - worst_distance / total_bits), i.e. "the
-    two least-alike members in this group still agree on at least this share of the
-    hash" -- a conservative, real number derived from the actual bits, never a fabricated
-    confidence score."""
-    from collections import defaultdict
-    with catalog(db_path) as con:
-        rows = con.execute(
-            "SELECT media_id, phash FROM catalog "
-            "WHERE COALESCE(phash,'') != '' AND COALESCE(is_video,'') != '1'"
-        ).fetchall()
-
-    total_bits = hash_size * hash_size
-    n_bands = 4
-    band_bits = total_bits // n_bands
-    band_mask = (1 << band_bits) - 1
-
-    ints = {}
-    for r in rows:
-        try:
-            ints[str(r["media_id"])] = int(r["phash"], 16)
-        except (TypeError, ValueError):
-            continue          # a corrupt/non-hex phash value -- skip rather than crash
-
-    by_band = [defaultdict(list) for _ in range(n_bands)]
-    for mid, v in ints.items():
-        for b in range(n_bands):
-            by_band[b][(v >> (b * band_bits)) & band_mask].append(mid)
-
-    parent = {mid: mid for mid in ints}
-
-    def _find(x):
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    def _union(a, c):
-        ra, rc = _find(a), _find(c)
-        if ra != rc:
-            parent[ra] = rc
-
-    compared = set()
-    for band in by_band:
-        for mids in band.values():
-            if len(mids) < 2:
-                continue
-            for i in range(len(mids)):
-                for j in range(i + 1, len(mids)):
-                    a, c = mids[i], mids[j]
-                    key = (a, c) if a < c else (c, a)
-                    if key in compared:
-                        continue
-                    compared.add(key)
-                    dist = bin(ints[a] ^ ints[c]).count("1")
-                    if dist <= threshold:
-                        _union(a, c)
-
-    grouped = defaultdict(set)
-    for mid in ints:
-        grouped[_find(mid)].add(mid)
-
-    out = []
-    for mids in grouped.values():
-        if len(mids) < 2:
-            continue
-        mids = sorted(mids)
-        worst = max(bin(ints[mids[i]] ^ ints[mids[j]]).count("1")
-                    for i in range(len(mids)) for j in range(i + 1, len(mids)))
-        out.append({"media_ids": mids,
-                    "closeness_pct": round(100 * (1 - worst / total_bits), 1)})
-    out.sort(key=lambda g: -g["closeness_pct"])
-    return out
-
-
-# ---------------------------------------------------------------------------
-# LIBRARY SCAN -- the one tree-walk (2026-08-23)
-# ---------------------------------------------------------------------------
-# Ten places used to walk the library tree, each carrying a private copy of the
-# exclusion set, the `.part` skip, the extension set and the bucket classifier.
-# They drifted twice: B11 (audit 2026-07-21) had to teach `_deleted/` to five
-# walkers one at a time, and `_count_backup_images` only caught up at M06
-# (2026-07-27) -- its own docstring says so. This section is the one module they
-# all ride now. It lives HERE, in the gallery, beside the SQLite catalog helpers,
-# because the import direction runs one way: `moonglade.backup` imports the
-# gallery at module top (see its `from moonglade.gallery import ...`), the gallery
-# only imports the backup lazily inside functions, and `moonglade.similar` imports
-# the gallery lazily inside `scan_dir`. Putting the scan anywhere else would need
-# a new top-level module or a cycle.
-#
-# WHAT IS SHARED: the exclusion vocabulary, the `.part` skip, the extension /
-# `kinds` taxonomy, `bucket_of`, `media_id_of`, and the traversal itself.
-# WHAT IS NOT: the zero-byte rule and every caller-specific filter stay at the
-# caller (INVARIANT 3) -- `scan_library` reports `size` (None on a stat failure)
-# and lets each caller decide, exactly as each one decided before.
-#
-# THE TEN WALKERS (walker -> what it skipped -> what it asks for now):
-#
-#   moonglade/gallery.py
-#     find_files_for_media_id   gallery/ _duplicates/ _deleted/, .part, zero-byte,
-#                               _IMAGE_EXTS (or caller `exts`), exact-id
-#                            -> files_for(kinds=("image",) or exts,
-#                                         exclude=QUARANTINE_EXCLUDE)
-#     duplicate_groups          gallery/ _duplicates/ _deleted/, .part, _IMAGE_EXTS
-#                            -> scan_library(kinds=("image",),
-#                                            exclude=QUARANTINE_EXCLUDE)
-#     collection_health._walk   gallery/ _duplicates/ _deleted/ branding/, .part,
-#                               _IMAGE_EXTS + its own video set
-#                            -> scan_library(kinds=("image","video"),
-#                                            exclude=QUARANTINE_EXCLUDE+(BRANDING_DIRNAME,))
-#     backfill_batches          nothing (rooted at batches/), _IMAGE_EXTS
-#                            -> scan_library(kinds=("image",), include=("batches",),
-#                                            exclude=())
-#
-#   moonglade/backup.py
-#     _scan_media_files         gallery/ _duplicates/ _deleted/, .part, _IMAGE_EXTS
-#                            -> scan_library(kinds=("image",),
-#                                            exclude=QUARANTINE_EXCLUDE)
-#     cmd_organize              gallery/ _duplicates/ _deleted/ videos/ imported/,
-#                               .part, leading-underscore names, _IMAGE_EXTS
-#                            -> scan_library(kinds=("image",),
-#                                            exclude=QUARANTINE_EXCLUDE+("videos","imported"))
-#                               plus its own name.startswith("_") skip, kept at the caller
-#     run_import_local          gallery/ _duplicates/ _deleted/ branding/ (internal
-#                               scan only -- an EXTERNAL source dir excludes nothing),
-#                               .part, _IMAGE_EXTS | _VIDEO_EXTS
-#                            -> scan_library(kinds=("image","video"),
-#                                            exclude=IMPORT_EXCLUDE or ())
-#     _count_backup_images      counts gallery/ as thumbs and _deleted/ as trashed
-#                               rather than dropping them; skips _duplicates/;
-#                               .part, _IMAGE_EXTS
-#                            -> scan_library(kinds=("image",), exclude=())
-#                               plus a split on rel.parts[0] against the shared dirnames
-#     run_download._iter_...    gallery/ _duplicates/ _deleted/ by dir NAME at any
-#                               depth, .part, zero-byte, _IMAGE_EXTS
-#                            -> scan_library(kinds=("image",),
-#                                            exclude=QUARANTINE_EXCLUDE_ANYWHERE)
-#                               plus its own zero-byte skip, kept at the caller
-#
-#   moonglade/similar.py
-#     scan_dir                  gallery/ _duplicates/ _deleted/ by dir NAME at any
-#                               depth, case-insensitively; a NARROWER ext set
-#                            -> scan_library(kinds=("embeddable",),
-#                                            exclude=QUARANTINE_EXCLUDE_ANYWHERE)
-#
-# NAMED DISAGREEMENTS -- kept as caller choices, NOT silently unified:
-#
-#   1. Extension set. `moonglade.similar.scan_dir` indexes only
-#      {.png,.jpg,.jpeg,.webp} -- it does NOT embed `.gif` or `.avif`, which the
-#      other nine walkers do read. That is the `"embeddable"` kind, deliberately a
-#      subset of `"image"`, not a bug to be widened here.
-#   2. Exclusion DEPTH. Eight walkers exclude the top-level subtrees
-#      `out/gallery`, `out/_duplicates`, `out/_deleted` only; `run_download` and
-#      `scan_dir` prune any DIRECTORY OF THAT NAME at any depth. Both survive: a
-#      plain name in `exclude` is the top-level subtree, a `"**/name"` entry is the
-#      any-depth prune. `QUARANTINE_EXCLUDE` and `QUARANTINE_EXCLUDE_ANYWHERE` are
-#      the two spellings. (The any-depth match is case-insensitive, which is what
-#      scan_dir already did; run_download's own name compare was case-sensitive,
-#      a difference that cannot show up on Windows, where the two names are the
-#      same directory.)
-#   3. Zero-byte. Only `files_for` (so `find_files_for_media_id`, resume, and
-#      `find_image_file`) and `run_download` treat a zero-byte file as not-there
-#      (INVARIANT 3). The audit deliberately does not -- it wants to SEE the
-#      zero-byte file so it can never pick it as a keeper (dev/tests/test_dedup.py pins
-#      both halves). So the rule stays at the caller and `scan_library` reports
-#      `size` instead of deciding.
-#   4. Video. Only `collection_health` and `run_import_local` look at videos at
-#      all; the audit, organize, dedup and resume paths are image-only, and stay so.
-#   5. Legacy `branding/`. Only `collection_health` and `run_import_local` exclude
-#      it. Branding moved to the app root on 2026-07-26, so on a current install
-#      this excludes nothing; it is kept because an older install still has files
-#      there. Adding it to the other eight would be a behaviour change, so it is
-#      not added.
-#   6. `cmd_organize` alone also skips `videos/`, `imported/`, and any file whose
-#      name starts with `_`. The two directories are `exclude` entries; the
-#      leading-underscore rule is one line at the caller, because it is a rule
-#      about FILES, not about the shape of the tree.
-#
-# ONE MODULE, TWO TRAVERSALS. `scan_library` walks the whole tree with
-# `os.scandir` and prunes excluded subtrees before descending (so the gallery's
-# thousands of thumbnails are never enumerated). `files_for` answers the one-id
-# question with a targeted `rglob("*<mid>.*")` instead, because it is called once
-# per media id inside loops -- a full walk per id is what made resume scale
-# quadratically before run_download built its index. Same rules, same helpers,
-# two access paths: the SET each yields is identical, only the cost differs.
-# ---------------------------------------------------------------------------
-from collections import namedtuple
-
-# The quarantine / derived-output directory names. One spelling each, shared by
-# every walker and by the code that WRITES them, so a rename can never again be
-# taught to some walkers and not others.
-GALLERY_DIRNAME = "gallery"           # derived thumbnails + regenerable caches
-DUPLICATES_DIRNAME = "_duplicates"    # matches cmd_dedup()'s own quarantine_root name
-# Accidental bulk deletes should be recoverable: purges MOVE files here instead of
-# destroying them (the catalog row is still removed, so the gallery stays clean).
-DELETED_DIRNAME = "_deleted"
-# App chrome (banner/logo/marks). Branding moved to the APP root on 2026-07-26, so
-# under a current out_dir this names nothing -- kept because an install that predates
-# the move still has files here, and a scan that swept them in would catalogue
-# someone's banner and mascots as gallery images.
-BRANDING_DIRNAME = "branding"
-# The app's own folder in a library (_moonglade/): its records, the owner's decisions, every
-# login's stores and the Loom -- never pictures. Every walker prunes it, so nothing in it is
-# ever catalogued, counted, flagged as a stray, organized or quarantined (the Loom's frames
-# and cuts included).
-RECORDS_DIRNAME = _paths.LIBRARY_APP_DIRNAME
-
-# The two spellings of "skip the derived + quarantined trees, and the app's records"
-# (named disagreement 2).
-QUARANTINE_EXCLUDE = (GALLERY_DIRNAME, DUPLICATES_DIRNAME, DELETED_DIRNAME, RECORDS_DIRNAME)
-QUARANTINE_EXCLUDE_ANYWHERE = tuple("**/" + n for n in QUARANTINE_EXCLUDE)
-# --import-local's internal scan: the three above plus legacy branding/.
-IMPORT_EXCLUDE = QUARANTINE_EXCLUDE + (BRANDING_DIRNAME,)
-# Web Import's per-request ceiling on uploaded parts (/api/import-local). The page sends a big
-# folder in batches well under it (gallery/src/lib/importBatches.js); the route keeps it as a
-# guard and reports whatever it did not take.
-IMPORT_REQUEST_CAP = 1000
-# collection_health()'s walk, and therefore _health_dir_key()'s stat set. Same names as
-# IMPORT_EXCLUDE today; kept separate because the two would not have to move together and
-# the health memo's correctness depends on THIS one matching the health walk exactly.
-HEALTH_EXCLUDE = QUARANTINE_EXCLUDE + (BRANDING_DIRNAME,)
-
-_VIDEO_EXTS = frozenset({".mp4", ".webm", ".mov", ".mkv", ".m4v"})
-# What moonglade.similar's CLIP index will actually embed -- deliberately narrower
-# than _IMAGE_EXTS (named disagreement 1).
-_EMBED_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
-
-# The kind taxonomy. `_IMAGE_EXTS` is defined at the top of this module beside the
-# other catalog constants; the other two live here because nothing outside the scan
-# needs them.
-SCAN_KINDS = {
-    "image": _IMAGE_EXTS,
-    "video": _VIDEO_EXTS,
-    "embeddable": _EMBED_EXTS,
-}
-# ext -> the widest kind that owns it ("image" wins over the "embeddable" subset).
-_KIND_BY_EXT = {}
-for _k in ("image", "video", "embeddable"):
-    for _e in SCAN_KINDS[_k]:
-        _KIND_BY_EXT.setdefault(_e, _k)
-del _k, _e
-
-MediaEntry = namedtuple("MediaEntry", "path rel bucket media_id size kind")
-MediaEntry.__doc__ = """One media file the scan found.
-
-    path      absolute Path
-    rel       Path relative to the scan root (native separators, like the
-              `p.relative_to(out_dir)` every caller used to compute itself)
-    bucket    bucket_of(rel) -- "images" | "batches" | "month" | "other"
-    media_id  media_id_of(path) -- INVARIANT 1
-    size      st_size, or None if the stat() failed. None is NOT zero: resume
-              treats an unreadable stat as "probably fine, already done", and a
-              genuine zero means an interrupted download (INVARIANT 3).
-    kind      which entry of SCAN_KINDS matched ("image" | "video" | ...)
-    """
-
-
-def bucket_of(path_or_rel):
-    """THE bucket classifier (was moonglade_backup._bucket_of, which is now an
-    alias onto this, and which this module used to re-type inline twice more).
-    Classifies a path RELATIVE to out_dir into its top-level bucket name:
-    "images", "batches", "month" (YYYY-MM/ or unknown-date/), or "other". Feeds
-    _BUCKET_PRIORITY, which decides which copy of a duplicated media_id is the
-    keeper."""
-    top = str(path_or_rel).replace("\\", "/").split("/")[0]
-    if top == "images":
-        return "images"
-    if top == "batches":
-        return "batches"
-    if top == "unknown-date":
-        return "month"
-    if len(top) == 7 and top[4] == "-" and top[:4].isdigit():
-        return "month"
-    return "other"
-
-
-def media_id_of(path):
-    """Canonical media_id extraction (INVARIANT 1): the last underscore-delimited
-    chunk of the filename stem. Works for every naming layout the tool produces:
-    flat (`prompt_task_<mid>`), batch (`NN_<mid>`), and bare (`<mid>`).
-
-    The two inline re-implementations (backfill_batches here, scan_dir in
-    moonglade_similar.py) are gone -- both now arrive here through the scan."""
-    return Path(path).stem.split("_")[-1]
-
-
-def _is_under(path, parent):
-    try:
-        path.relative_to(parent)
-        return True
-    except ValueError:
-        return False
-
-
-def _kind_map(kinds):
-    """{ext: kind name} for a `kinds` argument.
-
-    `kinds` is a kind name or an iterable of them (keys of SCAN_KINDS). It also
-    accepts a raw iterable of ".ext" strings -- that is the compat path for
-    find_files_for_media_id(exts=...), whose callers pass an extension set
-    directly (e.g. already_downloaded_video's _VIDEO_EXTS)."""
-    if isinstance(kinds, str):
-        kinds = (kinds,)
-    out = {}
-    for k in kinds:
-        if k.startswith("."):
-            ext = k.lower()
-            out.setdefault(ext, _KIND_BY_EXT.get(ext, "other"))
-        else:
-            for ext in SCAN_KINDS[k]:
-                out[ext] = k
-    return out
-
-
-def _split_exclusions(exclude):
-    """(top-level subtree names, any-depth dir names) -- see named disagreement 2.
-
-    A plain "gallery" prunes out_dir/gallery only. A "**/gallery" prunes any
-    directory of that name at any depth, matched case-insensitively (which is what
-    moonglade.similar.scan_dir has always done, and what run_download's own
-    name-based prune does in practice on Windows)."""
-    tops, anywhere = [], set()
-    for name in exclude:
-        if name.startswith("**/"):
-            anywhere.add(name[3:].lower())
-        else:
-            tops.append(name)
-    return tops, anywhere
-
-
-def scan_library(out_dir, *, kinds=("image",), include=(), exclude=QUARANTINE_EXCLUDE):
-    """Walk the library tree once and yield a MediaEntry per media file.
-
-    out_dir   the scan root. Everything (`rel`, `bucket`, `exclude`) is relative
-              to it -- so --import-local can point this at an EXTERNAL folder and
-              get the same rules with no exclusions.
-    kinds     which extension families count. See SCAN_KINDS / _kind_map.
-    include   restrict the walk to these top-level subtrees ("only look under
-              batches/"). Empty = the whole tree. A named subtree that does not
-              exist simply yields nothing.
-    exclude   directory names to prune. Plain name = the top-level subtree;
-              "**/name" = that name at any depth (named disagreement 2).
-
-    Prunes excluded subtrees BEFORE descending, so their entries are never
-    enumerated at all -- that is what made the health panel usable at 35k images
-    (owner report 2026-08-06) and what keeps run_download's startup index cheap.
-    Reads is_file/size straight off the DirEntry, which on Windows comes from the
-    directory read itself: no per-file syscall.
-
-    Skips `.part` temp files (INVARIANT 3). Does NOT apply the zero-byte rule --
-    that one is the caller's, and `size` is reported so the caller can apply it.
-    """
-    root = Path(out_dir)
-    kind_of = _kind_map(kinds)
-    top_names, any_names = _split_exclusions(exclude)
-    pruned = {os.path.normcase(str(root / n)) for n in top_names}
-    starts = [str(root / n) for n in include] or [str(root)]
-
-    for start in starts:
-        stack = [start]
-        while stack:
-            try:
-                with os.scandir(stack.pop()) as it:
-                    for e in it:
-                        try:
-                            if e.is_dir(follow_symlinks=False):
-                                if (os.path.normcase(e.path) not in pruned
-                                        and e.name.lower() not in any_names):
-                                    stack.append(e.path)
-                                continue
-                            if not e.is_file(follow_symlinks=False):
-                                continue
-                        except OSError:
-                            continue
-                        name = e.name
-                        if name.endswith(".part"):
-                            continue
-                        kind = kind_of.get(os.path.splitext(name)[1].lower())
-                        if kind is None:
-                            continue
-                        try:
-                            size = e.stat(follow_symlinks=False).st_size
-                        except OSError:
-                            size = None
-                        p = Path(e.path)
-                        rel = p.relative_to(root)
-                        yield MediaEntry(p, rel, bucket_of(rel), media_id_of(name),
-                                         size, kind)
-            except OSError:
-                continue
-
-
-def files_for(out_dir, media_id, *, kinds=("image",), exclude=QUARANTINE_EXCLUDE):
-    """Every on-disk file whose media_id is exactly `media_id`. The one-id view.
-
-    BOTH naming layouts in one pass:
-      * prefixed   `prompt_task_<mid>.ext` / `NN_<mid>.ext`
-      * bare       `<mid>.ext`   (single-image --organize month files)
-    The exact `media_id_of(p) == mid` check prevents substring collisions (a
-    longer id ending in these digits).
-
-    Zero-byte files are excluded HERE, not left to the caller, because this is the
-    resume/lookup matcher and "the file exists but is empty" has to read as
-    not-downloaded (INVARIANT 3): treating it as present strands the catalog row
-    pointing at a dead file that no --update ever re-fetches.
-
-    Uses a targeted glob rather than scan_library's full walk -- it is called once
-    per media id inside loops, so a whole-tree walk per id is quadratic (see the
-    section header, "one module, two traversals"). The rules are the same ones.
-    """
-    root = Path(out_dir)
-    mid = str(media_id)
-    kind_of = _kind_map(kinds)
-    top_names, any_names = _split_exclusions(exclude)
-    top_dirs = [root / n for n in top_names]
-    matches = []
-    for p in root.rglob("*{}.*".format(mid)):
-        if p.suffix.lower() not in kind_of:
-            continue
-        if p.name.endswith(".part"):
-            continue
-        if media_id_of(p) != mid:
-            continue
-        if any(_is_under(p, d) for d in top_dirs):
-            continue
-        if any_names and any_names & {q.lower() for q in p.relative_to(root).parts[:-1]}:
-            continue
-        try:
-            if not p.is_file() or p.stat().st_size == 0:
-                continue
-        except OSError:
-            continue
-        matches.append(p)
-    return matches
-
-
-def find_files_for_media_id(out_dir, media_id, include_gallery=False, exts=None):
-    """All on-disk files whose media_id matches, anywhere under out_dir.
-
-    The named entry point onto `files_for` above -- kept under this name because
-    resume (`already_downloaded`), the gallery (`find_image_file`), the loom's
-    video fallback and the duplicate audit all call it by it, several of them with
-    an explicit `exts` set.
-
-    `exts` defaults to `_IMAGE_EXTS` (this matcher's historical, still image-only
-    default -- e.g. dev/tests/test_loom_export_bundle.py pins that video media resolves
-    via a separate catalog-row fallback, NOT this matcher). Pass `exts=_VIDEO_EXTS`
-    (B16, audit 2026-07-21) for a video-aware sibling -- see already_downloaded_video
-    in moonglade/backup.py -- so the SAME exact-match + quarantine-exclusion
-    contract applies to videos, not just images.
-    """
-    exclude = (QUARANTINE_EXCLUDE if not include_gallery
-               else (DUPLICATES_DIRNAME, DELETED_DIRNAME, RECORDS_DIRNAME))
-    return files_for(out_dir, media_id,
-                     kinds=(("image",) if exts is None else exts),
-                     exclude=exclude)
-
-
-def find_local_video_file(out_dir, mid, row=None):
-    """Resolve a catalog media_id to its local video file on disk: try the catalog's
-    stored filename first, then fall back to the shared media-id matcher (SAME exact
-    media_id_of(p) == mid check and _duplicates/_deleted quarantine exclusion as every
-    other matcher in this file -- B17, audit 2026-07-21: a bare glob fallback used to
-    have neither, so a quarantined file was a valid hit and a shorter media_id could
-    match as a substring of a longer, unrelated one's filename). find_files_for_media_id
-    defaults to images, hence the explicit exts=_VIDEO_EXTS. Returns a Path or None.
-
-    Lifted out of create_app on 2026-09-26 (moved, not changed) so the CLI's
-    --reference-video length lookup reads the one answer the app's _find_local_video_file
-    gives its four callers. `row` is the media id's catalog row (or None / {} for "none").
-
-    _VIDEO_EXTS, not a hand-written tuple: the local copy was missing .m4v, which
-    run_import_local DOES copy in and catalog as is_video='1' (its media_exts is
-    _IMAGE_EXTS | _VIDEO_EXTS). Harmless while the only callers were Loom handoff/
-    duration -- a .m4v is never a generated shot -- but the detail page's existence
-    check runs over a whole catalog, so the short list would have reported a perfectly
-    present imported clip as missing from disk."""
-    out_dir = Path(out_dir)
-    vid_exts = _VIDEO_EXTS
-    row = row or {}
-    fn = row.get("filename") or ""
-    if fn:
-        cand = out_dir / fn
-        # The catalog's `filename` is joined onto out_dir, so a row carrying a traversing
-        # path resolves outside the library. /video-file already refuses that (relative_to
-        # + send_from_directory's own safe_join), which is exactly why this branch has to
-        # agree: without the check THIS resolver says "present" for a file the serving
-        # route will 404, and the detail page draws a player over it and says nothing --
-        # M30's own symptom, reached by a different road. `.resolve()` is the load-bearing
-        # part: relative_to alone does not normalise, so `..` walks straight through it.
-        if (_is_under(cand.resolve(), out_dir.resolve())
-                and cand.is_file() and cand.suffix.lower() in vid_exts):
-            return cand
-    fallback = find_files_for_media_id(out_dir, mid, exts=vid_exts)
-    return fallback[0] if fallback else None
-# ---------------------------------------------------------------------------
-# END LIBRARY SCAN
-# ---------------------------------------------------------------------------
-
-
 def find_image_file(out_dir, media_id, filename):
     """Locate an image file: try catalog filename first, then media-id fallback.
 
     Excludes out_dir/gallery/ so thumbnails are never returned as full-res images.
     """
     gallery_dir = out_dir / "gallery"
-    deleted_dir = out_dir / DELETED_DIRNAME
-    records_dir = out_dir / RECORDS_DIRNAME
+    deleted_dir = out_dir / _scan.DELETED_DIRNAME
+    records_dir = out_dir / _scan.RECORDS_DIRNAME
     if filename:
         for candidate in out_dir.rglob(filename):
             # The fallback below (find_files_for_media_id) already skips zero-byte
@@ -10554,13 +3317,13 @@ def find_image_file(out_dir, media_id, filename):
             # as if it were the real image (audit 2026-07-21, invariant 3/6).
             try:
                 if (candidate.is_file() and candidate.stat().st_size > 0
-                        and not _is_under(candidate, gallery_dir)
-                        and not _is_under(candidate, deleted_dir)
-                        and not _is_under(candidate, records_dir)):
+                        and not _scan._is_under(candidate, gallery_dir)
+                        and not _scan._is_under(candidate, deleted_dir)
+                        and not _scan._is_under(candidate, records_dir)):
                     return candidate
             except OSError:
                 continue
-    matches = find_files_for_media_id(out_dir, media_id)
+    matches = _scan.find_files_for_media_id(out_dir, media_id)
     return matches[0] if matches else None
 
 
@@ -10612,7 +3375,7 @@ def _trash_meta_path(out_dir, media_id):
     """Sidecar path for a quarantined item's snapshotted catalog row (see
     _snapshot_before_purge). Lives beside the quarantined file itself, keyed by
     media_id rather than filename so it's a one-line lookup from either direction."""
-    return Path(out_dir) / DELETED_DIRNAME / "{}.json".format(media_id)
+    return Path(out_dir) / _scan.DELETED_DIRNAME / "{}.json".format(media_id)
 
 
 def _read_trash_meta(out_dir, media_id):
@@ -10671,7 +3434,7 @@ def purge_media_local(out_dir, thumb_dir, db_path, media_id, filename, quarantin
     moved = None
     if img and img.exists():
         if quarantine:
-            qdir = out_dir / DELETED_DIRNAME
+            qdir = out_dir / _scan.DELETED_DIRNAME
             qdir.mkdir(parents=True, exist_ok=True)
             dest = qdir / img.name
             if dest.exists():                       # don't clobber an earlier delete
@@ -10698,7 +3461,7 @@ def purge_media_local(out_dir, thumb_dir, db_path, media_id, filename, quarantin
     return moved
 
 
-def compute_dhash(img_path, hash_size=DHASH_SIZE):
+def compute_dhash(img_path, hash_size=_dupes.DHASH_SIZE):
     """Perceptual difference-hash (dHash) of an image, Pillow-only (no numpy/scipy
     dependency -- this codebase already ships Pillow for thumbnails, so no new
     dependency was added for this).
@@ -10804,20 +3567,20 @@ def make_video_thumbnail(video_path, thumb_path):
     and two differently-shaped subprocess.run() calls."""
     from moonglade import backup as core
     import tempfile
-    if Image is None or not core.ffmpeg_path():
+    if Image is None or not _media_tools.ffmpeg_path():
         return False
     tmp = None
     try:
         fd, tmp = tempfile.mkstemp(suffix=".jpg")
         os.close(fd)
-        r = core.run_ffmpeg(["-y", "-loglevel", "error", "-i", str(video_path),
+        r = _media_tools.run_ffmpeg(["-y", "-loglevel", "error", "-i", str(video_path),
                              "-vf", "thumbnail=72", "-frames:v", "1", tmp],
-                            timeout=core.THUMB_TIMEOUT)
+                            timeout=_media_tools.THUMB_TIMEOUT)
         if not r.ok or not os.path.getsize(tmp):
             # clips shorter than the seek point: take the literal first frame
-            r = core.run_ffmpeg(["-y", "-loglevel", "error", "-i", str(video_path),
+            r = _media_tools.run_ffmpeg(["-y", "-loglevel", "error", "-i", str(video_path),
                                  "-frames:v", "1", tmp],
-                                timeout=core.THUMB_RETRY_TIMEOUT)
+                                timeout=_media_tools.THUMB_RETRY_TIMEOUT)
         if not r.ok or not os.path.getsize(tmp):
             return False
         return make_thumbnail(Path(tmp), thumb_path)
@@ -10847,12 +3610,12 @@ def _find_quarantined_file(out_dir, media_id):
     restricts the extension to real media -- a naive media_id_of() match alone would
     pick either file depending on directory order."""
     from moonglade import backup as core
-    qdir = Path(out_dir) / DELETED_DIRNAME
+    qdir = Path(out_dir) / _scan.DELETED_DIRNAME
     if not qdir.exists():
         return None
-    media_exts = _IMAGE_EXTS | core._VIDEO_EXTS
+    media_exts = _scan._IMAGE_EXTS | core._VIDEO_EXTS
     for p in qdir.glob("*"):
-        if p.is_file() and p.suffix.lower() in media_exts and media_id_of(p) == media_id:
+        if p.is_file() and p.suffix.lower() in media_exts and _scan.media_id_of(p) == media_id:
             return p
     return None
 
@@ -10899,11 +3662,11 @@ def _list_quarantined(out_dir, page=1, page_size=60):
     """list_quarantined's body, plus a fourth value: how many media files in the whole trash
     are the only copy (their sidecar snapshot passes is_archive_only). See list_quarantined."""
     from moonglade import backup as core
-    qdir = Path(out_dir) / DELETED_DIRNAME
+    qdir = Path(out_dir) / _scan.DELETED_DIRNAME
     if not qdir.exists():
         return [], 0, 0, 0
 
-    media_exts = _IMAGE_EXTS | core._VIDEO_EXTS
+    media_exts = _scan._IMAGE_EXTS | core._VIDEO_EXTS
     entries = []
     meta_by_id = {}
     with os.scandir(qdir) as it:
@@ -10927,11 +3690,11 @@ def _list_quarantined(out_dir, page=1, page_size=60):
     total = len(entries)
     total_bytes = sum(s for _, s, _ in entries)
     only_total = sum(1 for name, _s, _m in entries
-                     if is_archive_only(meta_by_id.get(media_id_of(name))))
+                     if is_archive_only(meta_by_id.get(_scan.media_id_of(name))))
 
     def _sort_key(entry):
         name, _size, mtime = entry
-        meta = meta_by_id.get(media_id_of(name))
+        meta = meta_by_id.get(_scan.media_id_of(name))
         return (meta or {}).get("_deleted_at") or mtime
 
     entries.sort(key=_sort_key, reverse=True)
@@ -10942,7 +3705,7 @@ def _list_quarantined(out_dir, page=1, page_size=60):
 
     items = []
     for name, size, mtime in page_entries:
-        media_id = media_id_of(name)
+        media_id = _scan.media_id_of(name)
         is_video = Path(name).suffix.lower() in core._VIDEO_EXTS
         meta = meta_by_id.get(media_id)
         deleted_at = (meta or {}).get("_deleted_at") or mtime
@@ -10970,7 +3733,7 @@ def _ensure_trash_thumbs(out_dir, thumb_dir, items, workers=6):
     quarantines the file, so writing back into that SAME slot means the existing,
     unmodified /thumbs/<media_id>.jpg route serves the result -- no new serving
     route needed."""
-    qdir = Path(out_dir) / DELETED_DIRNAME
+    qdir = Path(out_dir) / _scan.DELETED_DIRNAME
     work = []
     for it in items:
         thumb_path = Path(thumb_dir) / "{}.jpg".format(it["media_id"])
@@ -11101,11 +3864,11 @@ def empty_trash(out_dir, thumb_dir):
     (api_trash_empty()). Same per-item cleanup as delete_quarantined_forever(), just
     walked once instead of media_id-by-media_id. Returns the number of MEDIA files
     removed (sidecars don't count toward the number shown to the owner)."""
-    qdir = Path(out_dir) / DELETED_DIRNAME
+    qdir = Path(out_dir) / _scan.DELETED_DIRNAME
     if not qdir.exists():
         return 0
     from moonglade import backup as core
-    media_exts = _IMAGE_EXTS | core._VIDEO_EXTS
+    media_exts = _scan._IMAGE_EXTS | core._VIDEO_EXTS
     removed = 0
     for p in list(qdir.glob("*")):
         if not p.is_file():
@@ -11116,7 +3879,7 @@ def empty_trash(out_dir, thumb_dir):
             except OSError:
                 pass
             continue
-        mid = media_id_of(p)
+        mid = _scan.media_id_of(p)
         tp = Path(thumb_dir) / "{}.jpg".format(mid)
         if tp.exists():
             try:
@@ -11143,7 +3906,7 @@ def empty_trash(out_dir, thumb_dir):
 # The original path is recorded EXPLICITLY and undo restores to that EXACT
 # location -- unlike trash's restore, which only ever remembered a bare filename
 # and always restores into a flat images/ folder -- because cmd_dedup's own
-# quarantine (moonglade/backup.py's cmd_dedup) preserves the source's
+# quarantine (moonglade/organize.py's cmd_dedup) preserves the source's
 # real subfolder structure under _duplicates/, and this feature's undo is
 # specified to put a file back exactly where it came from.
 # ---------------------------------------------------------------------------
@@ -11168,11 +3931,11 @@ def _resolve_under(out_dir, rel_path):
         return None
     out_dir = Path(out_dir).resolve()
     candidate = (out_dir / rel_path).resolve()
-    return candidate if _is_under(candidate, out_dir) else None
+    return candidate if _scan._is_under(candidate, out_dir) else None
 
 
 def _reconcile_one_row_after_move(out_dir, db_path, media_id, row):
-    """Targeted, single-row version of moonglade.backup.reconcile_catalog_with_disk
+    """Targeted, single-row version of moonglade.organize.reconcile_catalog_with_disk
     -- point media_id's catalog row at whatever copy is still actually on disk,
     without rescanning/rewriting the whole catalog (that function's own approach,
     fine for a batch CLI run, is wasteful for a single synchronous HTTP request).
@@ -11182,12 +3945,12 @@ def _reconcile_one_row_after_move(out_dir, db_path, media_id, row):
     a no-op if the media_id has no surviving file at all (that case is the
     caller's row-delete branch instead, not this function's job)."""
     from moonglade import backup as core
-    matches = find_files_for_media_id(out_dir, media_id)
+    matches = _scan.find_files_for_media_id(out_dir, media_id)
     if not matches:
         return
     survivor = matches[0]
     rel_surv = survivor.relative_to(out_dir)
-    bucket = core._bucket_of(rel_surv)
+    bucket = _organize._bucket_of(rel_surv)
     new_batch = (rel_surv.parts[1] if bucket == "batches" and len(rel_surv.parts) > 2
                 else ("" if bucket != "batches" else row.get("batch", "")))
     if row.get("filename") != survivor.name or row.get("batch", "") != new_batch:
@@ -11200,7 +3963,7 @@ def _reconcile_one_row_after_move(out_dir, db_path, media_id, row):
 def quarantine_duplicate_file(out_dir, thumb_dir, db_path, media_id, rel_path, group_id):
     """Move ONE duplicate loser out of the live tree into out_dir/_duplicates/,
     mirroring cmd_dedup()'s DEFAULT (--apply without --dedup-delete) behavior at
-    moonglade/backup.py's cmd_dedup -- quarantine, never hard-delete,
+    moonglade/organize.py's cmd_dedup -- quarantine, never hard-delete,
     same collision-suffix rule (dest already exists -> "_dup" inserted before the
     extension). Called once per file by the /api/duplicates/resolve route, which
     has already re-verified the (group_id, media_id, path) triple names a real
@@ -11245,9 +4008,9 @@ def quarantine_duplicate_file(out_dir, thumb_dir, db_path, media_id, rel_path, g
     src = _resolve_under(out_dir, rel_path)
     if src is None:
         return {"ok": False, "error": "invalid path"}
-    quarantine_root = out_dir / DUPLICATES_DIRNAME
-    deleted_root = out_dir / DELETED_DIRNAME
-    if _is_under(src, quarantine_root) or _is_under(src, deleted_root):
+    quarantine_root = out_dir / _scan.DUPLICATES_DIRNAME
+    deleted_root = out_dir / _scan.DELETED_DIRNAME
+    if _scan._is_under(src, quarantine_root) or _scan._is_under(src, deleted_root):
         return {"ok": False, "error": "already quarantined"}
     if not src.is_file():
         return {"ok": False, "error": "file not found: {}".format(rel_path)}
@@ -11270,7 +4033,7 @@ def quarantine_duplicate_file(out_dir, thumb_dir, db_path, media_id, rel_path, g
 
     row_deleted = False
     if row_before:
-        survivors = find_files_for_media_id(out_dir, media_id)
+        survivors = _scan.find_files_for_media_id(out_dir, media_id)
         if not survivors:
             delete_from_catalog(db_path, media_id)
             row_deleted = True
@@ -11331,9 +4094,9 @@ def restore_quarantined_duplicate(out_dir, thumb_dir, db_path, quarantine_path):
 
     out_dir = Path(out_dir).resolve()   # match _resolve_under()'s own resolution -- see
                                         # quarantine_duplicate_file()'s identical comment
-    quarantine_root = out_dir / DUPLICATES_DIRNAME
+    quarantine_root = out_dir / _scan.DUPLICATES_DIRNAME
     src = _resolve_under(out_dir, quarantine_path)
-    if src is None or not _is_under(src, quarantine_root):
+    if src is None or not _scan._is_under(src, quarantine_root):
         return {"ok": False, "error": "not a quarantined-duplicate path"}
     meta_path = _quarantine_meta_path(src)
     if not src.is_file() or not meta_path.exists():
@@ -11405,7 +4168,7 @@ def _validate_duplicate_pair(out_dir, db_path, match_type, keep, remove):
         path = _resolve_under(out_dir, entry.get("path"))
         if not mid or path is None or not path.is_file():
             return None
-        if media_id_of(path) != mid:
+        if _scan.media_id_of(path) != mid:
             return None
         return mid, path
 
@@ -11459,7 +4222,7 @@ def _validate_duplicate_pair(out_dir, db_path, match_type, keep, remove):
                 dist = bin(keep_bits ^ int(phash, 16)).count("1")
             except ValueError:
                 return False, "{} has no usable phash".format(mid)
-            if dist > NEAR_DUP_HAMMING_THRESHOLD:
+            if dist > _dupes.NEAR_DUP_HAMMING_THRESHOLD:
                 return False, ("{} is no longer within the near-duplicate threshold "
                               "of the keeper").format(mid)
         return True, ""
@@ -11478,7 +4241,7 @@ def probe_has_audio(path, timeout=None):
     this one place rather than at each of the export's own branches. `timeout=None` takes
     media_tools' probe policy; the number does not live here any more."""
     from moonglade import backup as core
-    return bool(core.has_audio(path, timeout=timeout))
+    return bool(_media_tools.has_audio(path, timeout=timeout))
 
 
 def probe_duration(path, timeout=None):
@@ -11489,7 +4252,7 @@ def probe_duration(path, timeout=None):
     there is only one implementation of this question now, and why it answers at full
     precision. `timeout=None` takes media_tools' probe policy."""
     from moonglade import backup as core
-    return core.duration(path, timeout=timeout)
+    return _media_tools.duration(path, timeout=timeout)
 
 
 def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, workers=8):
@@ -11529,7 +4292,7 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
                 # exts=_VIDEO_EXTS, not the matcher's image-only default: this fallback
                 # exists for a video whose stored filename is stale or blank, and an
                 # image-only match can never find one, so the row stayed thumbless.
-                m = find_files_for_media_id(Path(out_dir), mid, exts=core._VIDEO_EXTS)
+                m = _scan.find_files_for_media_id(Path(out_dir), mid, exts=core._VIDEO_EXTS)
                 vp = m[0] if m else None
             return bool(vp and make_video_thumbnail(vp, thumb_path))
         img_path = find_image_file(out_dir, mid, filename)
@@ -11899,366 +4662,6 @@ def _build_stamp():
     return "v{}".format(ver) + (" · {}".format(sha) if sha else "")
 
 
-# ---------------------------------------------------------------------------
-# THE IN-APP GUIDE AND THE ABOUT CARD (Session I, 2026-09-28 -- the committed
-# Design Handoff is ../moonglade-internal/design/handoff-2026-09-04/Help and First
-# Run Handoff.dc.html; its numbered decisions are design/notes/help-first-run/NOTES.md).
-#
-# Help renders the wiki/ folder SHIPPED WITH THIS INSTALL. The app is a git checkout (see
-# the updater's header below), so the pages on disk are the pages for the version that is
-# running -- the online wiki follows the newest release instead, which is exactly why it
-# is only ever offered as "a newer version of this page is online", never read in place.
-#
-# The server's part is small on purpose. It lists the pages in _Sidebar.md's order with
-# their headings (the overlay's search covers titles and headings), hands ONE page's
-# markdown over as text (the client parses it into plain data and React escapes every
-# character -- there is no HTML sink anywhere on this road), reads the Glossary's terms,
-# and cuts this version's CHANGELOG entry for About and what's new.
-#
-# A slug is served only if it is one of the files the listing itself found: it is looked
-# up, never joined onto a path.
-# ---------------------------------------------------------------------------
-WIKI_WEB_URL = "https://github.com/Nelnamara/moonglade-athenaeum/wiki"
-WIKI_RAW_URL = ("https://raw.githubusercontent.com/wiki/Nelnamara/moonglade-athenaeum/"
-                "{slug}.md")
-RELEASES_WEB_URL = "https://github.com/Nelnamara/moonglade-athenaeum/releases"
-ISSUES_WEB_URL = "https://github.com/Nelnamara/moonglade-athenaeum/issues"
-_WIKI_SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
-_WIKI_LINK_RE = re.compile(r"\[([^\]\n]+)\]\(([^)\s]+)\)")
-_MD_HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
-_GLOSSARY_ITEM_RE = re.compile(r"^- \*\*(.+?)\*\*\s*[—–-]+\s*(.*)$")
-_CHANGELOG_HEAD_RE = re.compile(
-    r"^## \[(\d+\.\d+\.\d+)\]\s*-\s*(\d{4}-\d{2}-\d{2})\s*(?:[—–-]+\s*(.*))?$")
-_SURFACE_MARK_RE = re.compile(r"<!--\s*surface:\s*([a-z]+)\s*-->")
-# The surfaces a what's-new highlight's "Show me" can open -- the first-run guide's own
-# surfaces, less Branding, which no public text may point at.
-HELP_SURFACES = ("gallery", "dock", "loom", "folio", "panel")
-# Keyword inference for a highlight's surface when its CHANGELOG line carries no explicit
-# <!-- surface: x --> mark: the bullet's bold lead is read first and its body only if the
-# lead names nothing, and within one of them the EARLIEST keyword wins. No match means no
-# "Show me" on that card rather than a guess.
-_SURFACE_WORDS = (
-    ("loom", ("the loom", "loom's", "storyboard")),
-    ("folio", ("folio", "achievement")),
-    ("panel", ("control panel", "job console", "runs itself")),
-    ("dock", ("generate drawer", "generate dock", "the dock", "create screen",
-              "cost badge", "the drawer", "generate", "generation")),
-    ("gallery", ("the gallery", "gallery's", "the library", "lightbox", "the grid")),
-)
-WIKI_ONLINE_TTL = 1800           # a page compared against the online wiki: 30 min
-WIKI_ONLINE_FAILURE_TTL = 90     # an unreachable GitHub is asked again soon, not hammered
-_wiki_online_cache = {}
-_wiki_online_lock = threading.Lock()
-
-
-def wiki_dir():
-    """The wiki/ folder shipped with this install (moonglade.paths.wiki_dir())."""
-    return _paths.wiki_dir()
-
-
-def changelog_path():
-    """This install's own CHANGELOG.md (moonglade.paths.changelog_path())."""
-    return _paths.changelog_path()
-
-
-def md_plain(text):
-    """Inline markdown -> the words a reader sees: a link keeps its label, the emphasis and
-    code marks go, whitespace collapses. Titles, headings, glossary cards and changelog
-    lines are all shown as plain text, so this is the one place they are flattened."""
-    s = _WIKI_LINK_RE.sub(lambda m: m.group(1), str(text or ""))
-    s = re.sub(r"`([^`]*)`", r"\1", s)
-    s = re.sub(r"\*\*([^*]+)\*\*", r"\1", s)
-    s = re.sub(r"(?<![\w*])\*([^*\n]+)\*(?![\w*])", r"\1", s)
-    return re.sub(r"\s+", " ", s).strip()
-
-
-def display_version(version):
-    """What the guide prints for a version: x.y for a .0 release, x.y.z for a patch --
-    the same string `seen.whatsnew` stores, so 3.14 -> 3.14.1 is a change and 3.14.0
-    -> 3.14 is not."""
-    v = version_tuple(version)
-    if not v:
-        return str(version or "")
-    return "%d.%d" % v[:2] if v[2] == 0 else "%d.%d.%d" % v
-
-
-def release_kind(version):
-    """major | minor | patch. A patch release gets the toast only (it opens About); a
-    minor or major one gets the what's-new sheet too (decision 3)."""
-    v = version_tuple(version)
-    if not v:
-        return "patch"
-    if v[2]:
-        return "patch"
-    return "major" if v[1] == 0 else "minor"
-
-
-def wiki_web_url(slug):
-    """The online copy of one page; the wiki's own address for Home."""
-    return WIKI_WEB_URL if slug == "Home" else WIKI_WEB_URL + "/" + slug
-
-
-def _wiki_pages_on_disk(root):
-    """{slug: path} for every page file in `root` whose name is a valid slug. Files named
-    _Something (the sidebar, a footer) are chrome, not pages."""
-    out = {}
-    try:
-        for p in sorted(Path(root).glob("*.md")):
-            if not p.stem.startswith("_") and _WIKI_SLUG_RE.match(p.stem):
-                out[p.stem] = p
-    except OSError:
-        pass
-    return out
-
-
-def md_headings(md):
-    """[(level, plain text)] for every ATX heading outside a fenced code block."""
-    out, fence = [], False
-    for line in str(md or "").splitlines():
-        if line.lstrip().startswith("```"):
-            fence = not fence
-            continue
-        if fence:
-            continue
-        m = _MD_HEADING_RE.match(line)
-        if m:
-            text = md_plain(m.group(2))
-            if text:
-                out.append((len(m.group(1)), text))
-    return out
-
-
-def wiki_index(root=None):
-    """The guide's page list: [{slug, title, heading, headings:[{level, text}]}].
-
-    ORDER is _Sidebar.md's -- the same order the online wiki's own sidebar shows -- with
-    any page the sidebar does not link appended by name, so a page can never be missing
-    from the guide just because nobody added it to the sidebar. `title` is the sidebar's
-    label (what the reader knows the page as); `heading` is the page's own # line."""
-    root = Path(root) if root else wiki_dir()
-    pages = _wiki_pages_on_disk(root)
-    order, labels = [], {}
-    try:
-        side = (root / "_Sidebar.md").read_text(encoding="utf-8")
-    except OSError:
-        side = ""
-    for label, target in _WIKI_LINK_RE.findall(side):
-        slug = target.split("#", 1)[0]
-        if slug in pages and slug not in labels:
-            order.append(slug)
-            labels[slug] = md_plain(label)
-    order += [s for s in sorted(pages) if s not in labels]
-    out = []
-    for slug in order:
-        try:
-            heads = md_headings(pages[slug].read_text(encoding="utf-8"))
-        except OSError:
-            continue
-        h1 = next((t for lvl, t in heads if lvl == 1), "")
-        out.append({
-            "slug": slug,
-            "title": labels.get(slug) or h1 or slug.replace("-", " "),
-            "heading": h1,
-            "headings": [{"level": lvl, "text": t} for lvl, t in heads if lvl > 1],
-        })
-    return out
-
-
-def wiki_glossary(root=None):
-    """[{term, def}] from Glossary.md's `- **term** -- definition` bullets (a definition may
-    wrap onto indented lines under its bullet). No Glossary.md answers [] -- the guide then
-    underlines nothing; it never invents a term."""
-    root = Path(root) if root else wiki_dir()
-    try:
-        lines = (root / "Glossary.md").read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return []
-    out, cur = [], None
-    for line in lines:
-        m = _GLOSSARY_ITEM_RE.match(line)
-        if m:
-            cur = {"term": md_plain(m.group(1)), "def": m.group(2).strip()}
-            out.append(cur)
-        elif cur is not None and line.startswith("  ") and line.strip():
-            cur["def"] += " " + line.strip()
-        else:
-            cur = None
-    for t in out:
-        t["def"] = md_plain(t["def"])
-    return [t for t in out if t["term"] and t["def"]]
-
-
-def _changelog_surface(*texts):
-    """The surface the first text that names one names, earliest keyword first."""
-    for text in texts:
-        low = str(text or "").lower()
-        best, at = "", None
-        for surface, words in _SURFACE_WORDS:
-            for w in words:
-                i = low.find(w)
-                if i >= 0 and (at is None or i < at):
-                    best, at = surface, i
-        if best:
-            return best
-    return ""
-
-
-def _changelog_item(raw, section):
-    """One CHANGELOG bullet -> {lead, text, surface, section}. The lead is the bullet's
-    bold opening sentence when it has one (the house style), else its first sentence; the
-    trailing "(2026-09-26)" date tag is dropped. An explicit <!-- surface: x --> mark names
-    the surface a what's-new "Show me" opens; without one it is inferred from the words."""
-    raw = str(raw or "").strip()
-    mark = _SURFACE_MARK_RE.search(raw)
-    raw = _SURFACE_MARK_RE.sub("", raw).strip()
-    raw = re.sub(r"\s*\(\d{4}-\d{2}-\d{2}[^)]*\)\s*$", "", raw)
-    m = re.match(r"^\*\*(.+?)\*\*\s*(.*)$", raw, re.S)
-    if m:
-        lead, text = md_plain(m.group(1)), md_plain(m.group(2))
-    else:
-        plain = md_plain(raw)
-        cut = re.search(r"[.!?](?:\s|$)", plain)
-        lead = plain[:cut.end()].strip() if cut else plain
-        text = plain[len(lead):].strip() if cut else ""
-    lead = lead.rstrip(" .:")
-    if mark and mark.group(1) in HELP_SURFACES:
-        surface = mark.group(1)
-    else:
-        surface = _changelog_surface(lead, text)
-    return {"lead": lead[:240], "text": text[:700], "surface": surface, "section": section}
-
-
-def changelog_entries(text=None):
-    """Every RELEASED version block in CHANGELOG.md, in file order (newest first):
-    [{version, date, title, items:[...]}]. [Unreleased] is not a release and is skipped.
-    Items are the top-level `- ` bullets; a `### Heading` inside a block names the
-    section the bullets under it belong to ("" for the block's own list)."""
-    if text is None:
-        try:
-            text = changelog_path().read_text(encoding="utf-8")
-        except OSError:
-            return []
-    entries, cur, item, section = [], None, None, ""
-
-    def _close_item():
-        if cur is not None and item:
-            cur["items"].append(_changelog_item(" ".join(item), section))
-
-    for line in str(text).splitlines():
-        if line.startswith("## "):
-            _close_item()
-            item = None
-            m = _CHANGELOG_HEAD_RE.match(line.strip())
-            cur = None
-            section = ""
-            if m:
-                cur = {"version": m.group(1), "date": m.group(2),
-                       "title": md_plain(m.group(3) or ""), "items": []}
-                entries.append(cur)
-            continue
-        if cur is None:
-            continue
-        if line.startswith("### "):
-            _close_item()
-            item = None
-            section = md_plain(line[4:])
-        elif line.startswith("- "):
-            _close_item()
-            item = [line[2:].strip()]
-        elif line.strip() and item is not None:
-            item.append(line.strip())
-        elif not line.strip():
-            _close_item()
-            item = None
-    _close_item()
-    return entries
-
-
-def art_pack_info(container_path):
-    """{installed, version} for the About card's "art pack vN". The version comes from the
-    installed pack's own marker when the downloader wrote one, else from the manifest when
-    the pack on disk is the one this build expects; a missing pack says so. (About never
-    lists old copies for a person to delete: the app removes its own old files itself.)"""
-    try:
-        present = Path(container_path).exists()
-    except OSError:
-        present = False
-    if not present:
-        return {"installed": False, "version": ""}
-    marker = moonglade_assets._read_marker(Path(container_path)) or {}
-    if marker.get("version"):
-        info = {"installed": True, "version": str(marker["version"])}
-    else:
-        man = moonglade_assets.read_manifest()
-        try:
-            current = bool(man) and not moonglade_assets.needs_download(Path(container_path), man)
-        except Exception:                        # noqa: BLE001 -- a label, never a failure
-            current = False
-        info = {"installed": True, "version": str(man["version"]) if current else ""}
-    return info
-
-
-def about_payload(version, container_path, entries=None):
-    """What the About card, the post-update toast and the what's-new sheet read: this
-    version's CHANGELOG entry (the running version's, not the newest in the file), the
-    release's size (major/minor/patch), the art pack, and the earlier entries for "Earlier
-    versions"."""
-    entries = changelog_entries() if entries is None else entries
-    vt = version_tuple(version)
-    cur = next((e for e in entries if e["version"] == str(version)), None)
-    earlier = [e for e in entries
-               if vt and version_tuple(e["version"]) and version_tuple(e["version"]) < vt][:24]
-    return {
-        "version": str(version),
-        "display_version": display_version(version),
-        "kind": release_kind(version),
-        "date": (cur or {}).get("date", ""),
-        "title": (cur or {}).get("title", ""),
-        "items": (cur or {}).get("items", []),
-        "earlier": earlier,
-        "pack": art_pack_info(container_path),
-        "releases_url": RELEASES_WEB_URL,
-        "issues_url": ISSUES_WEB_URL,
-        "wiki_url": WIKI_WEB_URL,
-    }
-
-
-def _md_same(a, b):
-    def norm(s):
-        return "\n".join(ln.rstrip() for ln in str(s or "").replace("\r\n", "\n").strip().split("\n"))
-    return norm(a) == norm(b)
-
-
-def wiki_online_differs(slug, local_md, behind, opener=None, now=None):
-    """Is a NEWER copy of this page online? Only asked when a newer release is known to be
-    out (`behind`, from the updater's own cached answer): the online wiki is re-published
-    at every release tag, so with no newer release there is no newer page, and GitHub is
-    not asked at all. When it is asked, the answer is cached per page (WIKI_ONLINE_TTL; an
-    unreachable GitHub for WIKI_ONLINE_FAILURE_TTL), and a failure answers False -- a quiet
-    link that is missing is fine, one that is wrong is not. `opener` is the seam the tests
-    substitute; nothing in the suite touches the network."""
-    if not behind:
-        return False
-    now = time.time() if now is None else now
-    with _wiki_online_lock:
-        c = _wiki_online_cache.get(slug)
-        if c and (now - c["at"]) < c["ttl"]:
-            return c["differs"]
-    import urllib.request
-    opener = opener or urllib.request.urlopen
-    try:
-        req = urllib.request.Request(WIKI_RAW_URL.format(slug=slug), headers={
-            "User-Agent": "moonglade-athenaeum-guide"})
-        with opener(req, timeout=6) as resp:
-            online = resp.read(2 * 1024 * 1024).decode("utf-8", "replace")
-        differs, ttl = (not _md_same(online, local_md)), WIKI_ONLINE_TTL
-    except Exception:                            # noqa: BLE001 -- offline is not an error here
-        differs, ttl = False, WIKI_ONLINE_FAILURE_TTL
-    with _wiki_online_lock:
-        _wiki_online_cache[slug] = {"at": now, "ttl": ttl, "differs": differs}
-    return differs
-
-
 DEFAULT_LIBRARY_DIR = _paths.DEFAULT_LIBRARY_DIR    # relative: anchored to the app folder
 DEFAULT_HOST = _settings.DEFAULT_HOST
 DEFAULT_PORT = _settings.DEFAULT_PORT
@@ -12329,7 +4732,7 @@ def _shortcut_icon_bytes(stem):
     the loose cut, else the pack's. Only a plain stem is ever looked up."""
     if not re.match(r"^[A-Za-z0-9_-]+$", stem or ""):
         return None
-    return _branding_bytes(_role_rel("marks", stem + ".ico"))
+    return _branding._branding_bytes(_branding._role_rel("marks", stem + ".ico"))
 
 
 def server_notice(local=False):
@@ -12490,764 +4893,6 @@ def _power_in_progress():
         return "restart" if _SERVER_CONTROL.get("exit_code") == RESTART_EXIT_CODE else "stop"
 
 
-# ---------------------------------------------------------------------------
-# The auto-updater (P4, owner-approved 2026-08-09; scope recovered 2026-09-01).
-# Notify + one-click apply, NEVER silent. Git-based, because that is what this
-# app already is on every machine that runs it: a checkout, with dist committed,
-# so a code update is a pull and a restart -- no build step, no installer.
-#
-# Why the release LIST and not /releases/latest: the asset packs ship as their
-# own full releases (assets-*), and GitHub's "latest" is whichever release is
-# newest, not whichever is a version. Asking for `latest` would have offered an
-# asset pack as an app update. The list is filtered to real vX.Y.Z tags instead.
-#
-# Versions compare as NUMERIC TUPLES, never as strings: "3.10.0" < "3.9.0" is
-# true alphabetically and catastrophic here -- it would tell a 3.9 user they are
-# current forever, and a 3.10 user they are behind forever.
-# ---------------------------------------------------------------------------
-GITHUB_RELEASES_URL = ("https://api.github.com/repos/Nelnamara/moonglade-athenaeum"
-                       "/releases?per_page=15")
-UPDATE_CHECK_TTL = 1800          # 30 min: GitHub's unauthenticated budget is 60/hr and the
-                                 # check is on-demand (Panel open), so this is generous
-# A FAILED check is memoized too, but briefly. Not caching it at all meant a machine with
-# no network paid a full connect timeout on every Panel open; caching it for the long TTL
-# would hide a real update for half an hour after one blip. 90s splits the difference: the
-# next Panel open is instant, and the one after that tries again.
-UPDATE_FAILURE_TTL = 90
-UPDATE_RESTART_DELAY = 2.0       # see run_update: the modal polls at 1.5s and must be able
-                                 # to SEE "restarting" before the server stops answering
-UPDATE_FETCH_TIMEOUT = 60        # the apply route's pre-check fetch: it happens INSIDE a
-                                 # request, so it gets a shorter leash than _git's 180s
-                                 # default -- a stalled network must not hold the browser
-_VERSION_TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
-_update_cache = {"at": 0.0, "payload": None, "ttl": UPDATE_CHECK_TTL}
-_update_state = {"phase": "idle", "error": "", "at": 0.0}
-_update_lock = threading.Lock()
-
-
-def version_tuple(text):
-    """(major, minor, patch) for a `vX.Y.Z` tag or a bare `X.Y.Z` version, else None.
-    The ONE parser both sides of the comparison go through, so a tag and a __version__
-    can never be measured differently."""
-    s = str(text or "").strip()
-    m = _VERSION_TAG_RE.match(s if s.startswith("v") else "v" + s)
-    return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
-
-
-def pick_latest_release(releases):
-    """The HIGHEST-VERSIONED real app release in the list, or None.
-
-    Three filters, each load-bearing:
-      * the tag must be exactly vX.Y.Z -- which is what keeps the asset packs
-        (assets-2026-08-21 and friends) out of the answer. They are full releases and
-        can easily be the newest thing in the repo, so this is the whole correctness of
-        the check, not a tidy-up;
-      * drafts are not pullable by anyone;
-      * prereleases are not what "update me" means.
-
-    And the winner is the MAXIMUM version, not the first one listed. GitHub orders by
-    creation date, so a hotfix cut on an old line AFTER a newer release (v3.5.1 created
-    after v3.6.0) lists first -- and first-listed would then quietly offer a 3.6.0
-    install a "newer" 3.5.1, or tell it it was current when it was not."""
-    best, best_v = None, None
-    for r in releases or []:
-        if not isinstance(r, dict) or r.get("draft") or r.get("prerelease"):
-            continue
-        tag = str(r.get("tag_name") or "")
-        v = version_tuple(tag) if _VERSION_TAG_RE.match(tag) else None
-        if v and (best_v is None or v > best_v):
-            best, best_v = r, v
-    return best
-
-
-def fetch_releases(opener=None, url=GITHUB_RELEASES_URL, timeout=8):
-    """The release list from GitHub, unauthenticated. `opener` is the seam every test
-    substitutes -- nothing in the suite touches the network."""
-    import json as _json
-    import urllib.request
-    opener = opener or urllib.request.urlopen
-    req = urllib.request.Request(url, headers={
-        "Accept": "application/vnd.github+json",
-        "User-Agent": "moonglade-athenaeum-updater",
-    })
-    with opener(req, timeout=timeout) as resp:
-        return _json.loads(resp.read().decode("utf-8"))
-
-
-def check_for_update(current, opener=None, now=None, force=False):
-    """Is a newer release out? Returns the check payload, cached for UPDATE_CHECK_TTL.
-
-    A network failure is NOT an error state here: it answers `behind: False` with the
-    reason attached, because the Control Panel opening while the machine is offline must
-    show a Panel, not a stack trace. The failure is deliberately NOT cached -- a blip
-    would otherwise hide a real update for half an hour."""
-    now = time.time() if now is None else now
-    cached = _update_cache.get("payload")
-    ttl = _update_cache.get("ttl", UPDATE_CHECK_TTL)
-    if (not force and cached and (now - _update_cache.get("at", 0)) < ttl):
-        return cached
-    payload = {"current": current, "latest": "", "behind": False,
-               "title": "", "notes_url": "", "checked_at": now}
-    try:
-        rel = pick_latest_release(fetch_releases(opener=opener))
-    except Exception as e:                       # noqa: BLE001 -- offline is not a failure here
-        payload["error"] = "%s: %s" % (type(e).__name__, str(e)[:160])
-        _update_cache.update(at=now, payload=payload, ttl=UPDATE_FAILURE_TTL)
-        return payload
-    if not rel:
-        payload["error"] = "no versioned release found"
-        _update_cache.update(at=now, payload=payload, ttl=UPDATE_FAILURE_TTL)
-        return payload
-    cur_v, new_v = version_tuple(current), version_tuple(rel.get("tag_name"))
-    payload.update({
-        "latest": str(rel.get("tag_name") or ""),
-        "behind": bool(cur_v and new_v and new_v > cur_v),
-        "title": str(rel.get("name") or "")[:200],
-        "notes_url": str(rel.get("html_url") or ""),
-    })
-    _update_cache.update(at=now, payload=payload, ttl=UPDATE_CHECK_TTL)
-    return payload
-
-
-# ---------------------------------------------------------------------------
-# The background cadence (owner ruling 2026-09-04, REVERSING 2026-09-01's "no
-# background tick anywhere" -- ../moonglade-internal/DECISIONS.md, "The updater
-# checks in the background").
-#
-# CHECK AND ANNOUNCE, NEVER APPLY. The running app asks GitHub roughly hourly
-# whether a newer release is out and SAYS SO wherever the user is; applying one
-# is still and only the person clicking Update in the Control Panel and
-# confirming. The owner read "full background" as the app updating itself and
-# said "I don't want that" -- auto-apply is explicitly rejected and no future
-# scope may add it under this label. Nothing in this section, and nothing the
-# scheduler tick below reaches, may touch run_update or /api/update/apply;
-# dev/tests/test_updater.py pins that by walking the source.
-# ---------------------------------------------------------------------------
-UPDATE_TICK_SECONDS = 3600       # ~1 GitHub request an hour from the tick -- 24 a day,
-                                 # against an unauthenticated budget of 60 an HOUR
-UPDATE_PANEL_FLOOR = 60          # a Panel open gets a FRESH answer (it bypasses the
-                                 # 30-minute TTL every other caller reads) but no oftener
-                                 # than this, so opening and closing the Panel ten times
-                                 # in a minute still costs GitHub one request
-_update_tick = {"at": 0.0}       # when the hourly background check last ran
-_update_floor = {"at": 0.0}      # when a Panel-open check last actually went to GitHub
-# THE ANNOUNCEMENT: the newest version this server has discovered, and a counter that moves
-# only on a TRANSITION -- the first time a given version is seen. Every hourly tick returns
-# the same answer once a release is out; only a CHANGE is an event, which is what keeps the
-# client's one-toast-per-version promise a property of the server rather than of luck.
-_update_notice = {"version": "", "seq": 0, "at": 0.0, "payload": None}
-
-
-def note_update_transition(payload, now=None):
-    """Record a check's answer as the standing announcement. True only if it is NEW.
-
-    An hourly tick that finds the release it already found an hour ago is not an event.
-    An answer that is no longer `behind` (the update was applied, or the release was
-    pulled) CLEARS the announcement, so the stamp stops offering an update that is not
-    there any more.
-
-    A FAILED check says nothing at all. check_for_update answers `behind: False` with a
-    reason attached when GitHub is unreachable (an offline Panel must show a Panel, not a
-    stack trace) -- but that is the absence of an answer, not the answer "you are current".
-    Treating it as one meant a single network blip pulled the standing banner off every
-    open tab and bumped the seq, and the next good tick an hour later re-announced the SAME
-    version as if it were new: a second toast for one release, which is exactly the promise
-    the background cadence was built to keep. A blip now leaves the announcement untouched.
-
-    Announce-only by construction: this records a version string and a payload the client
-    reads. It has no call into run_update or the apply route, and cannot acquire one
-    without failing the guard test."""
-    now = time.time() if now is None else now
-    payload = payload or {}
-    if payload.get("error"):
-        return False
-    latest = str(payload.get("latest") or "")
-    if not payload.get("behind"):
-        if _update_notice["version"]:
-            _update_notice.update(version="", at=now, payload=None)
-            _update_notice["seq"] += 1
-        return False
-    if latest == _update_notice["version"]:
-        _update_notice["at"] = now
-        return False
-    _update_notice.update(version=latest, at=now, payload=dict(payload))
-    _update_notice["seq"] += 1
-    return True
-
-
-def update_notice():
-    """The standing announcement for the live-events payload, or None when nothing is
-    out. READ ONLY -- it reports what the last check already found and never fetches, so
-    riding it on the /api/jobs poll every open tab already runs costs GitHub nothing."""
-    if not _update_notice.get("version"):
-        return None
-    p = dict(_update_notice.get("payload") or {})
-    p["seq"] = _update_notice.get("seq", 0)
-    return p
-
-
-def run_update_tick(current, opener=None, now=None):
-    """The background check. Returns the payload if it RAN, None if an hour has not passed.
-
-    Deliberately NOT forced: check_for_update's own 30-minute TTL still applies, so a Panel
-    open five minutes ago is reused rather than re-fetched. An hourly cadence against a
-    half-hour cache settles at one GitHub request an hour, which is the whole budget this
-    feature is allowed to spend.
-
-    It checks and announces. It does not apply -- see this section's header."""
-    now = time.time() if now is None else now
-    if (now - _update_tick.get("at", 0)) < UPDATE_TICK_SECONDS:
-        return None
-    _update_tick["at"] = now
-    payload = check_for_update(current, opener=opener, now=now)
-    note_update_transition(payload, now=now)
-    return payload
-
-
-def check_for_update_fresh(current, opener=None, now=None):
-    """A Control Panel open: a FRESH answer, floored.
-
-    The Panel is where a person goes to ask, so it is the one caller that bypasses the
-    30-minute cache -- but not oftener than UPDATE_PANEL_FLOOR seconds, so opening and
-    closing it repeatedly cannot become a way to spend the hourly GitHub budget. Inside
-    the floor it falls back to exactly what every other caller reads: the cache."""
-    now = time.time() if now is None else now
-    force = (now - _update_floor.get("at", 0)) >= UPDATE_PANEL_FLOOR
-    if force:
-        _update_floor["at"] = now
-    payload = check_for_update(current, opener=opener, now=now, force=force)
-    note_update_transition(payload, now=now)
-    return payload
-
-
-def _git(args, timeout=180):
-    """Run one git command in THIS checkout (the app's own directory, never a cwd the
-    request could influence). Returns (returncode, combined output). Never raises: a
-    missing git is a refusal with a reason, not a 500."""
-    import subprocess
-    try:
-        p = subprocess.run(["git"] + list(args), cwd=str(_paths.APP_ROOT),
-                           capture_output=True, text=True, timeout=timeout,
-                           encoding="utf-8", errors="replace",
-                           creationflags=_NO_WINDOW)
-        return p.returncode, ((p.stdout or "") + (p.stderr or "")).strip()
-    except Exception as e:                       # noqa: BLE001
-        return 1, "%s: %s" % (type(e).__name__, str(e)[:200])
-
-
-def update_state():
-    """The apply phase, as the modal polls it."""
-    with _update_lock:
-        return dict(_update_state)
-
-
-def _set_update_state(phase, error=""):
-    with _update_lock:
-        _update_state.update(phase=phase, error=error, at=time.time())
-
-
-def _requirements_changed(old_head, new_head):
-    """Did requirements.txt move between these two commits? The pip step is skipped
-    otherwise -- a dependency install is slow, and running one on every code update
-    would make the common case (no dep change at all) the expensive one."""
-    if not old_head or old_head == new_head:
-        return False
-    rc, out = _git(["diff", "--name-only", old_head, new_head])
-    if rc != 0:
-        return True          # can't tell -> install, because guessing "no" can break the app
-    return any(line.strip() == "requirements.txt" for line in out.splitlines())
-
-
-def split_porcelain(dirty):
-    """`git status --porcelain` output -> (tracked, untracked), each a list of paths.
-
-    The split is the whole point. A modified TRACKED file is genuinely endangered by a
-    pull -- the update owns that path and is about to write it. An UNTRACKED file is only
-    in the way if the update actually needs that path, and real installs accumulate stray
-    ones: a scratch folder, a note, a launcher somebody keeps beside the app. Refusing on
-    all of them refuses most real machines forever, which is exactly what happened on the
-    first live apply (a personal `boop/` the release had never heard of).
-
-    Untracked entries keep porcelain's own shape INCLUDING the trailing slash git puts on
-    a directory it is summarising as one line -- that slash is load-bearing below."""
-    tracked, untracked = [], []
-    for ln in (dirty or "").splitlines():
-        if not ln.strip():
-            continue
-        (untracked if ln[:2] == "??" else tracked).append(ln[3:].strip())
-    return tracked, untracked
-
-
-def incoming_paths():
-    """The paths the pending update would write: (set, "") or (None, why-not).
-
-    Measured against the SAME ref `git pull --ff-only` will merge -- the branch's
-    configured upstream, `@{u}` -- and only after FETCHING it, because an un-fetched
-    remote-tracking ref is a picture of whenever this checkout last looked. Reading a
-    stale one would answer "nothing is incoming" and make the untracked check below
-    silently permissive; a pre-check that exists to give a better answer than git's own
-    error has to be right about what is actually in the way.
-
-    The fetch writes nothing but remote-tracking refs -- precisely what the pull is about
-    to do anyway, one round trip earlier -- so it cannot change this install."""
-    rc, out = _git(["fetch", "--quiet"], timeout=UPDATE_FETCH_TIMEOUT)
-    if rc != 0:
-        return None, out
-    rc, out = _git(["diff", "--name-only", "HEAD..@{u}"])
-    if rc != 0:
-        return None, out
-    return {p.strip() for p in out.splitlines() if p.strip()}, ""
-
-
-def untracked_in_the_way(untracked, incoming):
-    """Which of `untracked` sit where the update needs to write.
-
-    Three shapes, and each is git's OWN rule restated rather than a stricter invention:
-    this pre-check exists to say it in better words than `git pull` would, so it must
-    never wave through something git will then refuse.
-      * an untracked FILE at an incoming path -- the checkout would overwrite it;
-      * an untracked DIRECTORY containing one -- porcelain prints `d/` as a single line
-        standing for everything beneath it, so an incoming `d/x.py` lands inside it and
-        git refuses on the directory it never tracked;
-      * an untracked FILE where the update needs a DIRECTORY (`d` here, `d/x.py` coming).
-    Anything else -- the scratch folder, the note, the personal launcher -- is not a path
-    this update touches, and so is none of the update's business."""
-    hits = []
-    for p in untracked:
-        if not p:
-            continue
-        if p.endswith("/"):
-            bare = p.rstrip("/")
-            if any(inc == bare or inc.startswith(p) for inc in incoming):
-                hits.append(p)
-        elif p in incoming or any(inc.startswith(p + "/") for inc in incoming):
-            hits.append(p)
-    return hits
-
-
-def run_update(restart_fn, pip_fn=None, log_fn=None):
-    """Pull, install deps if they moved, then restart. Runs on its own thread, OFF the
-    panel-job slot, so the restart it asks for is not refused by the job it is itself.
-
-    Every failure stops the sequence and records the tool's own words verbatim -- a git
-    or pip failure is the one thing the person watching actually needs to read, and
-    paraphrasing it would cost them the fix.
-
-    A FAILED PULL changes nothing: --ff-only either fast-forwards or refuses. A FAILED
-    PIP is the dangerous one, and it ROLLS BACK: the tree was verified free of TRACKED
-    edits before the pull (the apply route refuses those), and `reset --hard` does not
-    touch untracked files, so `git reset --hard <old head>` loses nothing and returns the
-    install to the code whose dependencies are actually installed -- a stray untracked
-    file the route allowed past is still sitting there afterwards, unread and unharmed.
-    Without the rollback the install sat on new code with old deps -- and worse, a
-    "Try again" would have found the pull already applied, seen no requirements diff
-    against the new HEAD, skipped pip entirely and declared success on a broken install.
-    The rollback is what makes retry mean retry.
-
-    Both outcomes are also written to the activity log (jobs.jsonl), which is the only
-    part of this that survives the restart the success path is about to trigger."""
-    def _record(status, error=""):
-        if not log_fn:
-            return
-        try:
-            log_fn(status, error)
-        except Exception:                        # noqa: BLE001 -- logging never breaks the job
-            pass
-
-    rc, head_out = _git(["rev-parse", "HEAD"])
-    old_head = head_out.strip() if rc == 0 else ""
-    _set_update_state("pulling")
-    rc, out = _git(["pull", "--ff-only"])
-    if rc != 0:
-        msg = "git pull failed:\n" + out[:600]
-        _set_update_state("failed", msg)
-        _record("failed", msg)
-        return False
-    rc, head_out = _git(["rev-parse", "HEAD"])
-    new_head = head_out.strip() if rc == 0 else ""
-    if _requirements_changed(old_head, new_head):
-        _set_update_state("deps")
-        rc, out = (pip_fn or _pip_install)()
-        if rc != 0:
-            msg = "dependency install failed:\n" + out[:600]
-            if old_head:
-                rrc, rout = _git(["reset", "--hard", old_head])
-                msg += ("\n\nRolled back to %s — this install is unchanged."
-                        % old_head[:12]) if rrc == 0 else (
-                        "\n\nTHE ROLLBACK ALSO FAILED: " + rout[:300]
-                        + "\nThis checkout is on the new code with the old dependencies; "
-                          "run `git reset --hard %s` by hand." % old_head[:12])
-            _set_update_state("failed", msg)
-            _record("failed", msg)
-            return False
-    _set_update_state("restarting")
-    _record("done")
-    # The modal polls status at 1.5s and hands over to the ping-watch when it SEES
-    # "restarting". Exiting immediately raced that poll: the server could stop answering
-    # before the phase was ever observed, and the modal sat on "updating..." forever.
-    # (The client also hands over on the transport error that follows -- belt and braces,
-    # because this sleep is a timing assumption and that one is not.)
-    time.sleep(UPDATE_RESTART_DELAY)
-    try:
-        restart_fn()
-    except Exception as e:                       # noqa: BLE001
-        msg = "restart failed: %s" % str(e)[:200]
-        _set_update_state("failed", msg)
-        _record("failed", msg)
-        return False
-    return True
-
-
-def _pip_install():
-    """pip install -r requirements.txt against THIS interpreter (sys.executable -- never a
-    bare `pip`, which on Windows can easily be a different environment's)."""
-    import subprocess
-    root = _paths.APP_ROOT
-    try:
-        p = subprocess.run([sys.executable, "-m", "pip", "install", "-r",
-                            str(_paths.requirements_path())],
-                           cwd=str(root), capture_output=True, text=True, timeout=900,
-                           encoding="utf-8", errors="replace",
-                           creationflags=_NO_WINDOW)
-        return p.returncode, ((p.stdout or "") + (p.stderr or "")).strip()
-    except Exception as e:                       # noqa: BLE001
-        return 1, "%s: %s" % (type(e).__name__, str(e)[:200])
-
-
-def _account_key(username):
-    """Filesystem-safe, case-COLLISION-safe key for `username` -- the ONE shared
-    helper every per-account store (saved views, prompt snippets, Loom storyboards,
-    toolbox presets) keys its own file/directory with (B14 residual). The rule itself is
-    moonglade.paths.account_key, which names each login's folder
-    (<library>/_moonglade/accounts/<key>/).
-
-    Account identity in this app is case-SENSITIVE: moonglade/backup.py's
-    _find_web_user compares the raw username with `==`, and username_problem()
-    rejects only empty/too-long/control-char names -- nothing about case. So "Nel"
-    and "nel" are two distinct AUTH_USERS rows. But every one of these stores
-    originally keyed its per-account file with quote(username, safe=""), which is
-    itself case-PRESERVING: quote("Nel") == "Nel" and quote("nel") == "nel" are two
-    different STRINGS naming the SAME file on NTFS, which is case-insensitive but
-    case-preserving. That silently merged two distinct accounts onto one shared
-    file/directory -- reproduced end to end (a save from one account was visible
-    to, and overwritable by, the other) for saved views originally, then inherited
-    by every store that copied the same quote() keying pattern since.
-
-    A short hex digest of the exact (case-sensitive) username sidesteps NTFS's
-    case-folding entirely: "Nel" and "nel" hash to two different digests, so they
-    always land on two different files -- on every filesystem, not just Windows.
-    Deliberately not reversible from the key alone -- nothing on disk needs a
-    human-readable username back; the account already owns its display name in
-    config.json's AUTH_USERS."""
-    return _paths.account_key(username)
-
-
-# ---------------------------------------------------------------------------
-# Per-account preferences -- one small JSON document per app login account
-# ---------------------------------------------------------------------------
-# The home for state that belongs to ONE signed-in account rather than to the library:
-# which first-run guides it has dismissed, the "what's new" it has seen, per-base-family
-# generate defaults, a pinned goal. Deliberately generic -- a flat {key: JSON value}
-# document validated at the write boundary -- so each later consumer is a key name
-# (`guide.<surface>`, `seen.whatsnew`, `unleash`, ...), never another store.
-#
-# ON DISK: <library>/_moonglade/accounts/<key>/prefs.json, where <key> is
-# _account_key(username) -- the same case-safe digest every per-account store uses, never
-# the raw name -- beside the login's other stores (moonglade.paths.account_dir).
-#
-# WHICH ACCOUNT: the route passes session["user"] and nothing else; the body can never
-# name one. There is no web "no accounts" mode to key: the gallery has no localhost
-# bypass, and with zero accounts nothing past /login is reachable (DECISIONS: "The
-# gallery is default-deny, with no localhost bypass"), so every request that reaches
-# the route carries a real username. ACCOUNT_LOCAL is for a SERVER-SIDE caller that has
-# no web session at all (the CLI, the MCP server): it lands on accounts/_local/prefs.json.
-# It cannot collide with an account: a digest is 16 hex characters and never "_local",
-# and the sentinel is an object, not a string, so no session cookie can carry it. An
-# empty or missing username is refused outright -- it never falls back to _local.
-#
-# CORRUPT FILES: a read of a missing, unparsable or non-object file answers {} (fail
-# soft: a torn preference must never break a page). A WRITE never silently replaces a
-# corrupt file with that empty reading: the bad file is moved aside to
-# <key>.corrupt-<UTC stamp>.json (kept, logged) before the new document lands. A file
-# that exists but cannot be READ (a sharing violation, a permission error) refuses the
-# write instead -- what could not be read is not overwritten.
-#
-# LOCKING: one thread lock around every read-modify-write, plus a per-account O_EXCL
-# lockfile (_excl_lockfile, telemetry's) so a second process writing the same document
-# cannot interleave. A lockfile that cannot be taken in time refuses the write
-# (AccountPrefsBusy) rather than risk a lost update. Writes are atomic: temp file in
-# the same directory + core._atomic_replace.
-ACCOUNT_PREFS_NAME = "prefs.json"
-ACCOUNT_PREF_KEY_MAX = 64
-ACCOUNT_PREF_VALUE_MAX = 64 * 1024        # one value's compact JSON, UTF-8 bytes
-ACCOUNT_PREFS_DOC_MAX = 1024 * 1024       # the whole document as written, UTF-8 bytes
-# Lowercase dotted names: segments of [a-z0-9_-], the first starting with a letter, the
-# rest with a letter or digit (so `seen.feat.12` works), no empty segment.
-ACCOUNT_PREF_KEY_RE = re.compile(r"^[a-z][a-z0-9_-]*(?:\.[a-z0-9][a-z0-9_-]*)*$")
-_ACCOUNT_PREFS_LOCK = threading.Lock()
-
-
-class _AccountLocal(object):
-    """The type of ACCOUNT_LOCAL. A distinct object, not a string, on purpose."""
-    __slots__ = ()
-
-    def __repr__(self):
-        return "ACCOUNT_LOCAL"
-
-
-ACCOUNT_LOCAL = _AccountLocal()
-
-
-class AccountPrefsError(ValueError):
-    """A change the store refuses (bad key, value not JSON, over a size cap, bad
-    shape). str(e) is a plain sentence the route returns verbatim with a 400."""
-
-
-class AccountPrefsBusy(RuntimeError):
-    """Another process held this account's document lock past the wait."""
-
-
-def account_prefs_path(out_dir, account):
-    """The one file `account`'s preferences live in. `account` is a username (the
-    session's own) or ACCOUNT_LOCAL; anything else -- None, "", whitespace, a
-    non-string -- raises ValueError rather than landing on some shared file."""
-    if account is ACCOUNT_LOCAL:
-        return _paths.local_account_dir(out_dir) / ACCOUNT_PREFS_NAME
-    if isinstance(account, str) and account.strip():
-        return _paths.account_dir(out_dir, account) / ACCOUNT_PREFS_NAME
-    raise ValueError("account prefs need a signed-in account (or ACCOUNT_LOCAL)")
-
-
-def _account_prefs_read(p):
-    """(document, state) for one prefs file. state: "ok", "missing", "corrupt" (not
-    UTF-8 JSON, or not an object) or "unreadable" (it exists, the OS would not hand it
-    over). The document is {} for every state but "ok"."""
-    try:
-        raw = p.read_bytes()
-    except FileNotFoundError:
-        return {}, "missing"
-    except OSError:
-        return {}, "unreadable"
-    try:
-        doc = json.loads(raw.decode("utf-8"))
-    except (ValueError, RecursionError):      # UnicodeDecodeError is a ValueError
-        return {}, "corrupt"
-    if not isinstance(doc, dict):
-        return {}, "corrupt"
-    return doc, "ok"
-
-
-def account_pref_key_problem(key):
-    """A plain sentence saying why `key` is not a valid preference key, or None."""
-    if not isinstance(key, str) or not key:
-        return "Preference keys must be non-empty strings."
-    if len(key) > ACCOUNT_PREF_KEY_MAX:
-        return "Preference key '{}...' is longer than {} characters.".format(
-            key[:24], ACCOUNT_PREF_KEY_MAX)
-    if not ACCOUNT_PREF_KEY_RE.match(key):
-        return ("'{}' is not a valid preference key: use lowercase dotted names "
-                "like guide.library or seen.whatsnew.".format(key))
-    return None
-
-
-def _account_pref_normalise(key, value):
-    """`value` round-tripped through JSON exactly as it will be stored, or
-    AccountPrefsError. allow_nan=False: NaN/Infinity are not JSON, and the browser's
-    JSON.parse would choke on the file forever after."""
-    try:
-        enc = json.dumps(value, allow_nan=False, ensure_ascii=False, separators=(",", ":"))
-    except (TypeError, ValueError, RecursionError):
-        raise AccountPrefsError("The value for '{}' is not plain JSON.".format(key))
-    size = len(enc.encode("utf-8"))
-    if size > ACCOUNT_PREF_VALUE_MAX:
-        raise AccountPrefsError(
-            "The value for '{}' is too large ({:,} bytes; the limit is {:,}).".format(
-                key, size, ACCOUNT_PREF_VALUE_MAX))
-    return json.loads(enc)
-
-
-def account_prefs_get(out_dir, account):
-    """`account`'s preferences document ({} when it has none, or its file is
-    corrupt or unreadable). Returns a fresh dict the caller may keep."""
-    p = account_prefs_path(out_dir, account)
-    with _ACCOUNT_PREFS_LOCK:
-        doc, _state = _account_prefs_read(p)
-    return doc
-
-
-def account_prefs_update(out_dir, account, set_=None, unset=None):
-    """Apply {key: value} sets and a list of key removals to `account`'s document, in
-    one locked, atomic read-modify-write. Returns the updated document.
-
-    Every key and value is validated before anything is written; one bad entry
-    refuses the whole change (AccountPrefsError, nothing written). The document cap is
-    checked on the result, except for a change that only REMOVES keys -- that is
-    always accepted, so an over-cap document (a hand-edited file) can still shrink.
-    Unsetting a key that is not there is a no-op, not an error. A change that alters
-    nothing writes nothing -- except over a corrupt file, which any change sets aside
-    and replaces.
-
-    Raises AccountPrefsError (refused change), AccountPrefsBusy (another process held
-    the lock), OSError (the file could not be read, preserved or written)."""
-    set_ = {} if set_ is None else set_
-    unset = [] if unset is None else unset
-    if not isinstance(set_, dict):
-        raise AccountPrefsError("'set' must be an object of {key: value}.")
-    if not isinstance(unset, (list, tuple)):
-        raise AccountPrefsError("'unset' must be a list of keys.")
-    clean = {}
-    for k, v in set_.items():
-        problem = account_pref_key_problem(k)
-        if problem:
-            raise AccountPrefsError(problem)
-        clean[k] = _account_pref_normalise(k, v)
-    drop = []
-    for k in unset:
-        problem = account_pref_key_problem(k)
-        if problem:
-            raise AccountPrefsError(problem)
-        if k in clean:
-            raise AccountPrefsError("'{}' is in both 'set' and 'unset'.".format(k))
-        drop.append(k)
-
-    p = account_prefs_path(out_dir, account)
-    with _ACCOUNT_PREFS_LOCK:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        lock = _excl_lockfile(p.with_suffix(".lock"))
-        if lock is None:
-            raise AccountPrefsBusy("Preferences are being saved elsewhere; try again.")
-        try:
-            doc, state = _account_prefs_read(p)
-            if state == "unreadable":
-                raise OSError("could not read the saved preferences to update them")
-            new = dict(doc)
-            new.update(clean)
-            for k in drop:
-                new.pop(k, None)
-            if new == doc and state != "corrupt":
-                return new      # nothing changed (a missing file stays missing)
-            data = json.dumps(new, indent=1, sort_keys=True, ensure_ascii=False,
-                              allow_nan=False).encode("utf-8")
-            if clean and len(data) > ACCOUNT_PREFS_DOC_MAX:
-                raise AccountPrefsError(
-                    "Saved preferences would be too large ({:,} bytes; the limit "
-                    "is {:,}).".format(len(data), ACCOUNT_PREFS_DOC_MAX))
-            if state == "corrupt":
-                _account_prefs_set_aside(p)
-            from moonglade import backup as core
-            tmp = p.with_name(p.name + ".tmp-%d" % os.getpid())
-            try:
-                tmp.write_bytes(data)
-                core._atomic_replace(tmp, p)
-            except OSError:
-                try:
-                    tmp.unlink()
-                except OSError:
-                    pass
-                raise
-            return new
-        finally:
-            try:
-                lock.unlink()
-            except OSError:
-                pass
-
-
-# ---------------------------------------------------------------------------
-# Per-account narrator state -- SERVER-ONLY, deliberately not the prefs store
-# ---------------------------------------------------------------------------
-# The narrator's ladder (moonglade/narrator.py) is progress an account earns slowly, so it
-# cannot live where the account itself can write: /api/account/prefs takes any key from the
-# browser, which would make "the count" one console line away. This is a sibling store with
-# the same key rule (_account_key), the same locking (a thread lock plus a per-account
-# lockfile) and the same atomic write, and NO route that takes a state from a client: the
-# poke route below is the only writer, and it writes what moonglade.narrator.poke() returned.
-#
-# ON DISK: <library>/_moonglade/accounts/<key>/state.json. A missing, torn or non-object file reads as a
-# fresh state (fail soft: a torn file must not break a click); a write never fails a poke
-# silently -- the route answers what it could not save.
-ACCOUNT_STATE_NAME = "state.json"
-_ACCOUNT_STATE_LOCK = threading.Lock()
-
-
-def account_state_path(out_dir, account):
-    """The file `account`'s server-only state lives in. A username (the session's own);
-    anything else -- None, "", whitespace, a non-string -- raises ValueError rather than
-    landing on some shared file."""
-    if not (isinstance(account, str) and account.strip()):
-        raise ValueError("account state needs a signed-in account")
-    return _paths.account_dir(out_dir, account) / ACCOUNT_STATE_NAME
-
-
-@contextmanager
-def account_state_locked(out_dir, account):
-    """Hold this account's state lock (thread + process) for a read-modify-write.
-    Yields the path. Raises AccountPrefsBusy when another process held the lockfile past the
-    wait -- the caller refuses the request rather than risk a lost update."""
-    p = account_state_path(out_dir, account)
-    with _ACCOUNT_STATE_LOCK:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        lock = _excl_lockfile(p.with_suffix(".lock"))
-        if lock is None:
-            raise AccountPrefsBusy("Busy; try again.")
-        try:
-            yield p
-        finally:
-            try:
-                lock.unlink()
-            except OSError:
-                pass
-
-
-def _narrator_clock():
-    """(epoch seconds, local calendar day) -- the two readings the ladder is given. The day
-    is the SERVER's local date, the same convention the Vigil's day ledger uses
-    (telem_mark_day). One seam so a test can drive a fortnight without sleeping."""
-    import datetime as _dt
-    return time.time(), _dt.date.today().isoformat()
-
-
-def account_state_read(p):
-    """The stored document ({} when missing, unreadable, torn or not an object)."""
-    doc, _state = _account_prefs_read(p)
-    return doc
-
-
-def account_state_write(p, doc):
-    """Atomically replace `p` with `doc`. Raises OSError."""
-    from moonglade import backup as core
-    p.parent.mkdir(parents=True, exist_ok=True)
-    data = json.dumps(doc, sort_keys=True, allow_nan=False,
-                      separators=(",", ":")).encode("utf-8")
-    tmp = p.with_name(p.name + ".tmp-%d" % os.getpid())
-    try:
-        tmp.write_bytes(data)
-        core._atomic_replace(tmp, p)
-    except OSError:
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
-        raise
-
-
-def _account_prefs_set_aside(p):
-    """Move a corrupt prefs file out of the way (kept, never deleted) so the write
-    about to land does not silently destroy it. Raises OSError if it cannot be moved:
-    a file that could not be preserved is not overwritten."""
-    import logging as _logging
-    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    aside = p.with_name("{}.corrupt-{}.json".format(p.stem, stamp))
-    n = 1
-    while aside.exists():
-        n += 1
-        aside = p.with_name("{}.corrupt-{}-{}.json".format(p.stem, stamp, n))
-    os.replace(p, aside)
-    _logging.getLogger(__name__).warning(
-        "account prefs: %s was not a JSON object; kept it as %s and started a fresh "
-        "document", p.name, aside.name)
-
-
 # Any-OS user-home prefixes: X:\Users\<name>, /home/<name>, /Users/<name>.
 # The candidate loop below only knows THIS machine's directories, so an error
 # text carrying a path under any OTHER username (a library echoing a foreign
@@ -13273,7 +4918,7 @@ def _redact_host_paths_cli(out_dir, msg):
     """THE redactor -- the one copy. create_app()'s nested `_redact_host_paths`
     delegates here (it existed as a closure twin and the two were documented as
     a drift risk; collapsed 2026-08-14 while fixing issue #14). Also called
-    directly by moonglade/backup.py's `_cli_job_finish`, which logs a
+    directly by moonglade/jobs.py's `_cli_job_finish`, which logs a
     bare-terminal CLI run's failure straight to jobs.jsonl (served to any
     LOGIN-tier caller via /api/jobs). Design choices (resolve()'d out_dir,
     longest-first, case-insensitive separator-agnostic regex, the length
@@ -13906,7 +5551,7 @@ def create_app(out_dir: Path):
     import logging as _logging
     try:
         from moonglade import backup as _core
-        _swept = _core.resolve_interrupted_local_jobs(out_dir)
+        _swept = _jobs.resolve_interrupted_local_jobs(out_dir)
         if _swept:
             _logging.getLogger(__name__).info(
                 "Marked %d interrupted job(s) from a previous session as failed.", _swept)
@@ -13939,11 +5584,11 @@ def create_app(out_dir: Path):
     migrate(db_path)          # say the schema upgrade out loud at the entry point --
                               # catalog() would do it lazily anyway, and the per-process
                               # memo makes this call free for every later open
-    set_telemetry_out(out_dir)     # bare telem_* bumps land in this install's ledger
+    _telemetry.set_telemetry_out(out_dir)     # bare telem_* bumps land in this install's ledger
     backfill_batches(out_dir, db_path)
     thumb_dir = out_dir / "gallery" / "thumbs"
     thumb_dir.mkdir(parents=True, exist_ok=True)
-    ensure_branding_discovery_tree()   # the empty slot folders, created if absent
+    _branding.ensure_branding_discovery_tree()   # the empty slot folders, created if absent
     # Banner renders are brought up to date ONCE, here, rather than lazily on a
     # request: /branding/<flat> is PUBLIC tier, and an anonymous LAN GET must not
     # be able to schedule a decode-crop-resize-save. Ordered after the scaffold
@@ -13952,7 +5597,7 @@ def create_app(out_dir: Path):
     # so a just-migrated flat is already stamped 'migrated' and is left alone.
     # Regenerates only a MISSING render or one whose record says its slot's pick
     # moved -- see _ensure_banner_flat.
-    _ensure_banner_renders(out_dir, db_path=db_path)
+    _branding._ensure_banner_renders(out_dir, db_path=db_path)
     # NOTE: two startup steps are deliberately NOT here, both because they write
     # somewhere branding_root() addresses rather than somewhere out_dir does, and
     # create_app() is called by ~every test with the tree unpatched: the root-flat
@@ -14001,7 +5646,7 @@ def create_app(out_dir: Path):
     def _inject_branding():
         # mark_url / mark_anim / mark_kind on every page render, so the chosen
         # banner mark + its animation apply to the gallery, panel, health, dupes.
-        return brand_context(out_dir)
+        return _branding.brand_context(out_dir)
 
     # ------------------------------------------------------------------
     # Control Panel: run maintenance CLI ops as background jobs with live
@@ -14060,7 +5705,7 @@ def create_app(out_dir: Path):
     # missing the container. _container_path() is a module-level function
     # (defined above, beside branding_root()) so this binds the real, current
     # app root -- not a value frozen at import time.
-    _asset_job = moonglade_assets.AssetFetchJob(_container_path())
+    _asset_job = moonglade_assets.AssetFetchJob(_branding._container_path())
 
     _panel_lock = threading.Lock()
     _panel_job = {"status": "idle", "action": "", "label": "", "lines": [],
@@ -14357,7 +6002,7 @@ def create_app(out_dir: Path):
             # Without this, run_download's per-page save silently reverted every column the
             # sweep wrote: it rebuilds each row from a snapshot taken when the JOB started,
             # and the upsert writes the whole row back.
-            if action in ARTWORKS_TOUCHING_ACTIONS and artworks_sweep_in_flight():
+            if action in _living.ARTWORKS_TOUCHING_ACTIONS and _living.artworks_sweep_in_flight():
                 return False
             _panel_job.update(status="running", action=action, label=spec["label"],
                               lines=["$ " + " ".join(action_args)], rc=None,
@@ -14409,7 +6054,7 @@ def create_app(out_dir: Path):
         The updater's OWN restart is exempt by construction: it calls
         _schedule_server_exit directly rather than going through the route, because it
         already re-checks the very gates that route applies."""
-        phase = update_state()["phase"]
+        phase = _updater.update_state()["phase"]
         return phase if phase in ("pulling", "deps", "restarting") else ""
 
     def _update_busy_refusal():
@@ -14436,7 +6081,7 @@ def create_app(out_dir: Path):
         activity logging must never break the request that triggered it."""
         try:
             from moonglade import backup as _core
-            _core.append_job_event(out_dir, job_id, **fields)
+            _jobs.append_job_event(out_dir, job_id, **fields)
         except Exception:
             pass
 
@@ -14461,7 +6106,7 @@ def create_app(out_dir: Path):
         if s is None:
             s = {"enabled": False, "action": "sync", "interval_hours": 6,
                  "last_run": None, "workers": 4}
-        s["jobs"] = living_merge(s.get("jobs"))
+        s["jobs"] = _living.living_merge(s.get("jobs"))
         try:
             s["artworks_deep_at"] = float(s.get("artworks_deep_at") or 0.0)
         except (TypeError, ValueError):
@@ -14537,10 +6182,10 @@ def create_app(out_dir: Path):
     #         scope's automation classification differ, and this comment is the whole of
     #         that difference -- the four jobs that can really lose the owner's data are
     #         still unreachable from here by construction.
-    _LIVING_STALE_ACTIONS = LIVING_STALE_ACTIONS      # the module-level literal, verbatim
+    _LIVING_STALE_ACTIONS = _living.LIVING_STALE_ACTIONS      # the module-level literal, verbatim
 
     def _living_runnable(action):
-        if action == LIVING_SWEEP_ACTION:
+        if action == _living.LIVING_SWEEP_ACTION:
             return True
         if action not in PANEL_ACTIONS:
             return False
@@ -14596,7 +6241,7 @@ def create_app(out_dir: Path):
             if _panel_job["status"] != "running":
                 return ""
             action = _panel_job.get("action") or ""
-        return action if action in ARTWORKS_TOUCHING_ACTIONS else ""
+        return action if action in _living.ARTWORKS_TOUCHING_ACTIONS else ""
 
     def _artworks_kick(force=False, scheduled=False):
         """Fire one published-artwork sweep OFF-THREAD -- the one entry point all four
@@ -14630,7 +6275,7 @@ def create_app(out_dir: Path):
         tick sweeps, and a `--sync` or a `--sync-artworks` writes the publish back itself.
 
         Returns whether a sweep was actually started."""
-        _artworks_state["kicks"] += 1        # a trigger asked; see the counter's own note
+        _living._artworks_state["kicks"] += 1        # a trigger asked; see the counter's own note
         if not _bg_release_check:
             return False
         if _artworks_job_busy():
@@ -14643,8 +6288,8 @@ def create_app(out_dir: Path):
                 # a deep walk, and a deep walk that just happened is remembered.
                 with _sched_lock:
                     saved = float(_load_sched().get("artworks_deep_at") or 0.0)
-                if saved > _artworks_state["deep_at"]:
-                    _artworks_state["deep_at"] = saved
+                if saved > _living._artworks_state["deep_at"]:
+                    _living._artworks_state["deep_at"] = saved
                 # The sweep bypasses _panel_run entirely (it is in-process work, not a
                 # subprocess in the job slot), so this wrapper is where its row learns
                 # whether anybody asked for it. Same `or None` as _panel_run's: a Run now
@@ -14652,9 +6297,9 @@ def create_app(out_dir: Path):
                 def _sweep_log(job_id, **fields):
                     _log_job(job_id, scheduled=(scheduled or None), **fields)
 
-                artworks_sweep_kick(out_dir, db_path, force=force, log_event=_sweep_log,
+                _living.artworks_sweep_kick(out_dir, db_path, force=force, log_event=_sweep_log,
                                     busy=_artworks_job_busy)
-                _sched_stamp(artworks_deep_at=_artworks_state["deep_at"])
+                _sched_stamp(artworks_deep_at=_living._artworks_state["deep_at"])
             except Exception:                                # noqa: BLE001
                 pass
         threading.Thread(target=_go, daemon=True).start()
@@ -14663,7 +6308,7 @@ def create_app(out_dir: Path):
     def _living_run(action):
         """Start one living job. Returns whether it actually started -- a False means the
         Panel's single slot was taken, and the tick simply tries again in sixty seconds."""
-        if action == LIVING_SWEEP_ACTION:
+        if action == _living.LIVING_SWEEP_ACTION:
             # ALWAYS "started": the tick's own fifteen-minute cadence is the authority
             # here, so a sweep that declines (one already in flight, no resolvable account)
             # must not make the loop retry every sixty seconds forever. Forced past the
@@ -14675,7 +6320,7 @@ def create_app(out_dir: Path):
             # branch below it.
             _artworks_kick(force=True, scheduled=True)
             return True
-        return _panel_run(action, then=LIVING_BY_ACTION.get(action, {}).get("then"),
+        return _panel_run(action, then=_living.LIVING_BY_ACTION.get(action, {}).get("then"),
                           scheduled=True)
 
     # Read ONCE, here, exactly as the live-mirror gate is read once further down: a daemon
@@ -14703,7 +6348,7 @@ def create_app(out_dir: Path):
             return
         try:
             from moonglade import backup as _core
-            run_update_tick(_core.__version__)
+            _updater.run_update_tick(_core.__version__)
         except Exception:              # noqa: BLE001 -- a check must never kill the loop
             pass
 
@@ -14721,7 +6366,7 @@ def create_app(out_dir: Path):
         if not _bg_release_check:
             return
         try:
-            contest_win_kick(out_dir)
+            _contest_sync.contest_win_kick(out_dir)
         except Exception:              # noqa: BLE001 -- a check must never kill the loop
             pass
 
@@ -14745,16 +6390,16 @@ def create_app(out_dir: Path):
         try:
             import logging as _logging
             from moonglade import backup as _core
-            out = _core.mirror_renew_tick()
+            out = _mirror.mirror_renew_tick()
             _log = _logging.getLogger(__name__)
             if out == "renewed":
-                left = _core.jwt_days_left(_core.load_mirror_state().get("jwt") or "")
+                left = _mirror.jwt_days_left(_mirror.load_mirror_state().get("jwt") or "")
                 _log.info("mirror: renewed the PixAI web session in the background via %s "
-                          "(%s days left)", _core._mirror_renewal.get("last_road") or "jwt",
+                          "(%s days left)", _mirror._mirror_renewal.get("last_road") or "jwt",
                           left)
             elif out == "failed" and _mirror_renew_seen["last"] != "failed":
                 _log.warning("mirror: couldn't renew the PixAI web session (%s); retrying "
-                             "with backoff", _core._mirror_renewal.get("last_reason") or "failed")
+                             "with backoff", _mirror._mirror_renewal.get("last_reason") or "failed")
             if out in ("renewed", "failed"):
                 _mirror_renew_seen["last"] = out
         except Exception:              # noqa: BLE001 -- a renewal must never kill the loop
@@ -14800,10 +6445,10 @@ def create_app(out_dir: Path):
             # The sweep's 48-hour tier stamp survives restarts through schedule.json --
             # re-seed the in-memory state from it on the first tick that reads a newer one,
             # so a boot does not turn every start into a deep walk.
-            if s.get("artworks_deep_at", 0.0) > _artworks_state["deep_at"]:
-                _artworks_state["deep_at"] = float(s["artworks_deep_at"])
+            if s.get("artworks_deep_at", 0.0) > _living._artworks_state["deep_at"]:
+                _living._artworks_state["deep_at"] = float(s["artworks_deep_at"])
             now = _t.time()
-            due, baselined = living_due(s["jobs"], now, is_runnable=_living_runnable)
+            due, baselined = _living.living_due(s["jobs"], now, is_runnable=_living_runnable)
             for action in baselined:
                 # First sight of a staleness job: stamp `now` as its floor and run nothing.
                 # A fresh install must not open by re-walking its whole history.
@@ -14822,7 +6467,7 @@ def create_app(out_dir: Path):
             for action in due:
                 if action == standing:
                     continue
-                if action == LIVING_SWEEP_ACTION:
+                if action == _living.LIVING_SWEEP_ACTION:
                     # Belt and braces around the subprocess the sweep's own lock cannot
                     # see, and around the boot kick it would otherwise repeat. Neither is
                     # stamped: last_run must keep meaning "when this job last ran", so a
@@ -14831,7 +6476,7 @@ def create_app(out_dir: Path):
                     if _artworks_job_busy():
                         continue
                     row = next((r for r in s["jobs"] if r.get("action") == action), None)
-                    if artworks_sweep_fresh((row or {}).get("interval_s"), now):
+                    if _living.artworks_sweep_fresh((row or {}).get("interval_s"), now):
                         continue
                 if _living_run(action):
                     _living_stamp(action, now)
@@ -14889,7 +6534,7 @@ def create_app(out_dir: Path):
                 # "sync" row is permanently deferred to it -- so without this the chain
                 # never fired for him at all.
                 if not _panel_run(action,
-                                  then=LIVING_BY_ACTION.get(action, {}).get("then"),
+                                  then=_living.LIVING_BY_ACTION.get(action, {}).get("then"),
                                   scheduled=True):
                     continue                   # panel busy -- retry on the next tick
                 # Re-read under the lock before stamping: `s` was loaded up to a minute
@@ -15007,14 +6652,14 @@ def create_app(out_dir: Path):
                 # into the archive marks today. Keyed day-lists, idempotent, silent-soft --
                 # telemetry must never break a collect.
                 try:
-                    telem_mark_day(out_dir=out_dir, keys=("gen_days", "active_days"))
+                    _telemetry.telem_mark_day(out_dir=out_dir, keys=("gen_days", "active_days"))
                 except Exception:
                     pass
                 # A NEW generation is collected only here (the early return above answers
                 # for one already in the catalog), so this is where `session_hour` is
                 # earned: by PixAI's own timestamp on what was just made, never a page load.
                 try:
-                    stamp_session_hour(db_path, (got or {}).get("media_ids"), out_dir)
+                    _telemetry.stamp_session_hour(db_path, (got or {}).get("media_ids"), out_dir)
                 except Exception:
                     pass
                 # bridge_gen_tasks is NOT written here: owner ruling 2026-09-03 -- the metric
@@ -15075,7 +6720,7 @@ def create_app(out_dir: Path):
             mids = (got or {}).get("media_ids") or []
             if not mids:
                 return
-            jobs_by_id, _order, _n = _core._reconstruct_jobs(out_dir)
+            jobs_by_id, _order, _n = _jobs._reconstruct_jobs(out_dir)
             j = jobs_by_id.get(str(tid))
             if not j or j.get("dismissed") or (j.get("media_ids") or []):
                 return
@@ -15151,7 +6796,7 @@ def create_app(out_dir: Path):
         from moonglade import backup as core
         try:
             term = "failed" if ws_status in core._GEN_FAIL else "done"
-            j = next((x for x in core.read_jobs(out_dir)
+            j = next((x for x in _jobs.read_jobs(out_dir)
                       if str(x.get("job_id")) == str(tid)), None)
             if j and j.get("status") not in ("done", "failed"):
                 _log_job(str(tid), status=term,
@@ -15251,7 +6896,7 @@ def create_app(out_dir: Path):
             if not tid:
                 return
             started = str(ws_status or "").lower() not in _WEBSITE_QUEUED_STATUSES
-            jobs_by_id, _order, _n = core._reconstruct_jobs(out_dir)
+            jobs_by_id, _order, _n = _jobs._reconstruct_jobs(out_dir)
             j = jobs_by_id.get(tid)
             if j is None:
                 if terminal:
@@ -15269,7 +6914,7 @@ def create_app(out_dir: Path):
             # and only when the phase actually changed -- the terminal writers (_reconcile_job,
             # _log_mirrored_media) own everything from done/failed onward.
             if (j.get("source") != _WEBSITE_JOB_SOURCE or j.get("dismissed")
-                    or j.get("status") in core._JOBS_TERMINAL
+                    or j.get("status") in _jobs._JOBS_TERMINAL
                     or bool(j.get("started")) == started):
                 return
             _log_job(tid, status="running", started=started)
@@ -15315,7 +6960,7 @@ def create_app(out_dir: Path):
             # real endpoint rather than the library function.
             return core.generation_status(box["s"], tid)
         try:
-            core.resolve_orphan_jobs(out_dir, _status, min_age=min_age)
+            _jobs.resolve_orphan_jobs(out_dir, _status, min_age=min_age)
         except Exception:                          # noqa: BLE001
             pass
 
@@ -15373,7 +7018,7 @@ def create_app(out_dir: Path):
             session = core._make_session(None)
             # The feed's one road (core.gql: the full document, #89), as every other reader.
             data = core.gql(session, core.page_variables(
-                WATCH_CATCHUP_TASKS, core._client_of(session).user_id))
+                WATCH_CATCHUP_TASKS, _pixai_client._client_of(session).user_id))
             conn = core.find_connection(data)
             edges = (conn or {}).get("edges") or []
             missed = []
@@ -15749,8 +7394,8 @@ def create_app(out_dir: Path):
         through the same single-flight wrapper every other trigger uses, so a manual sync
         and this one can never overlap. No `force`: at boot there is no specific entry to
         confirm, so the recent window is exactly the right bound."""
-        time.sleep(_CONTEST_SYNC_STARTUP_DELAY)
-        _contest_sync_kick(out_dir)
+        time.sleep(_contest_sync._CONTEST_SYNC_STARTUP_DELAY)
+        _contest_sync._contest_sync_kick(out_dir)
 
     def _artworks_sync_startup():
         """THE BOOT KICK -- one published-artwork sweep shortly after start.
@@ -15768,7 +7413,7 @@ def create_app(out_dir: Path):
         right bound, and a restart loop cannot become a request storm. Scheduled: starting
         the app is not asking for a sweep, so it announces itself in the Activity window
         and nowhere else (owner's walk, 2026-09-07)."""
-        time.sleep(ARTWORKS_STARTUP_DELAY)
+        time.sleep(_living.ARTWORKS_STARTUP_DELAY)
         _artworks_kick(force=False, scheduled=True)
 
     # MOONGLADE_DISABLE_WATCH=1 skips auto-start -- set by the test suite's conftest so
@@ -15844,7 +7489,7 @@ def create_app(out_dir: Path):
         # token the visible page already held ("Your session expired" on every submit,
         # reproduced). Failed POSTs rotate the token in /api/login instead.
         session.setdefault("csrf", secrets.token_hex(16))
-        brand = brand_context(out_dir)
+        brand = _branding.brand_context(out_dir)
         boot = {
             "authenticated": False,
             "csrf": session["csrf"],
@@ -16128,7 +7773,7 @@ def create_app(out_dir: Path):
         collection_health(), as it always has, so every direct caller -- the classic /health
         page, the tests -- gets a pure, uncached computation. ?fresh=1 bypasses; the client
         sends it on an explicit user refresh, never on a plain open."""
-        return jsonify(health_cached(out_dir, db_path,
+        return jsonify(_health.health_cached(out_dir, db_path,
                                      fresh=bool(request.args.get("fresh"))))
 
     # ---- Health's Broken files list (Session W, the Archive Integrity Handoff) ----
@@ -16145,7 +7790,7 @@ def create_app(out_dir: Path):
         from moonglade import backup as core
         from moonglade import integrity as moonglade_integrity
         doc = moonglade_integrity.broken_list(out_dir, db_path,
-                                              avg_bytes=health_avg_file_bytes())
+                                              avg_bytes=_health.health_avg_file_bytes())
         doc["read_only"] = bool(core.READ_ONLY or core._read_only_now())
         doc["run"] = _fix_runner.status()
         return jsonify(doc)
@@ -16242,10 +7887,10 @@ def create_app(out_dir: Path):
         from moonglade import backup as core
         session.setdefault("csrf", secrets.token_hex(16))
         try:
-            sweep_branding_drops(out_dir)   # see api_branding()'s own GET for why
+            _branding.sweep_branding_drops(out_dir)   # see api_branding()'s own GET for why
         except Exception:
             pass
-        branding = load_branding(out_dir)
+        branding = _branding.load_branding(out_dir)
         # Control Panel.dc.html:226's {{ trashCount }} -- the Trash tile's own real
         # count, previously hardcoded to "--" on both platforms (nothing fetched
         # it; the real number only ever resolved once TrashSubOverlay's own
@@ -16263,18 +7908,18 @@ def create_app(out_dir: Path):
             "web_users": core.list_web_users(),
             "current_username": session.get("user"),
             "csrf": session["csrf"],
-            "branding": dict(_branding_tuning(branding),
+            "branding": dict(_branding._branding_tuning(branding),
                              mark=branding["mark"], anim=branding["anim"],
-                             anims=MARK_ANIMS,
+                             anims=_branding.MARK_ANIMS,
                              # The Control Panel reads its marks from HERE, not from
                              # GET /api/branding -- so the earned annotation the two
                              # gated mark grids render off (locked/dimmed) has to be
                              # computed here too, or the lock never shows and a bound
                              # mark only fails on click with a raw 403 toast (red team
                              # 2026-09-08). Same gate as the GET route below.
-                             marks=list_marks(out_dir, _earned_achievement_ids(out_dir, db_path)),
-                             slots=branding_slots_payload(out_dir),
-                             roles=branding_roles_payload(out_dir)),
+                             marks=_branding.list_marks(out_dir, _branding._earned_achievement_ids(out_dir, db_path)),
+                             slots=_branding.branding_slots_payload(out_dir),
+                             roles=_branding.branding_roles_payload(out_dir)),
         })
 
     def _check_csrf(body):
@@ -16618,9 +8263,9 @@ def create_app(out_dir: Path):
         modal's explicit confirm -- nothing here can reach it."""
         from moonglade import backup as core
         if str(request.args.get("fresh") or "").lower() in ("1", "true", "yes"):
-            return jsonify(check_for_update_fresh(core.__version__))
-        payload = check_for_update(core.__version__)
-        note_update_transition(payload)
+            return jsonify(_updater.check_for_update_fresh(core.__version__))
+        payload = _updater.check_for_update(core.__version__)
+        _updater.note_update_transition(payload)
         return jsonify(payload)
 
     @app.route("/api/update/status")
@@ -16632,7 +8277,7 @@ def create_app(out_dir: Path):
         The error is redacted on the way OUT, not on the way in: git and pip name real
         paths, and this payload is readable by any logged-in device on the LAN. The
         unredacted copy stays where it belongs -- the server's own console/log."""
-        st = update_state()
+        st = _updater.update_state()
         if st.get("error"):
             st["error"] = _redact_host_paths(st["error"])
         return jsonify(st)
@@ -16706,7 +8351,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": "\"{}\" is still running — stop that job first "
                                      "(the code can't change while it works).".format(busy),
                             "kind": "busy"}), 409
-        rc, branch = _git(["rev-parse", "--abbrev-ref", "HEAD"])
+        rc, branch = _updater._git(["rev-parse", "--abbrev-ref", "HEAD"])
         branch = (branch or "").strip()
         if rc != 0:
             return jsonify({"error": "couldn't read this checkout's branch: "
@@ -16716,12 +8361,12 @@ def create_app(out_dir: Path):
             return jsonify({"error": "this checkout is on '%s', not master — updating a "
                                      "feature branch is out of scope. Switch to master "
                                      "first." % branch[:60], "kind": "failed"}), 409
-        rc, dirty = _git(["status", "--porcelain"])
+        rc, dirty = _updater._git(["status", "--porcelain"])
         if rc != 0:
             return jsonify({"error": "couldn't read this checkout's state: "
                                      + _redact_host_paths(dirty)[:200],
                             "kind": "failed"}), 409
-        tracked, untracked = split_porcelain(dirty)
+        tracked, untracked = _updater.split_porcelain(dirty)
         if tracked:
             return jsonify({"error": "this checkout has uncommitted changes — the update "
                                      "would overwrite them. In the way: "
@@ -16733,14 +8378,14 @@ def create_app(out_dir: Path):
         # was about to do regardless.
         ignored_untracked = 0
         if untracked:
-            incoming, why = incoming_paths()
+            incoming, why = _updater.incoming_paths()
             if incoming is None:
                 return jsonify({"error": "couldn't work out what the update brings, so "
                                          "whether your untracked files are in its way is "
                                          "unknown — and this won't guess. git said: "
                                          + _redact_host_paths(why)[:300],
                                 "kind": "failed"}), 409
-            clash = untracked_in_the_way(untracked, incoming)
+            clash = _updater.untracked_in_the_way(untracked, incoming)
             if clash:
                 return jsonify({"error": "an untracked file is where the update needs to "
                                          "write: "
@@ -16748,10 +8393,10 @@ def create_app(out_dir: Path):
                                          + " — move or delete it, then try again.",
                                 "kind": "failed"}), 409
             ignored_untracked = len(untracked)
-        with _update_lock:
-            if _update_state["phase"] not in ("idle", "failed"):
+        with _updater._update_lock:
+            if _updater._update_state["phase"] not in ("idle", "failed"):
                 return jsonify({"error": "an update is already running", "kind": "busy"}), 409
-            _update_state.update(phase="pulling", error="", at=time.time())
+            _updater._update_state.update(phase="pulling", error="", at=time.time())
 
         def _restart():
             # The SAME gates the restart route applies, re-checked at the moment it
@@ -16782,7 +8427,7 @@ def create_app(out_dir: Path):
             _log_job(job_id, status=status, type="update", label=label,
                      error=(_redact_host_paths(error)[:600] or None))
 
-        threading.Thread(target=run_update, args=(_restart,),
+        threading.Thread(target=_updater.run_update, args=(_restart,),
                          kwargs={"log_fn": _log_update}, daemon=True).start()
         return jsonify({"ok": True, "phase": "pulling"})
 
@@ -16955,7 +8600,7 @@ def create_app(out_dir: Path):
         # is in flight. The refusal is re-stated here only so the click gets a reason it can
         # read: _panel_run answers False for "the slot is taken" too, and "a job is already
         # running" would be the wrong sentence for a sweep that has no slot.
-        if action in ARTWORKS_TOUCHING_ACTIONS and artworks_sweep_in_flight():
+        if action in _living.ARTWORKS_TOUCHING_ACTIONS and _living.artworks_sweep_in_flight():
             return jsonify({"error": "the published-artwork sweep is reading PixAI into "
                                      "these same rows right now — wait a moment and press "
                                      "Run now again"}), 409
@@ -16971,7 +8616,7 @@ def create_app(out_dir: Path):
             # alone. Looked up from the same table _living_run reads, so there is one
             # answer to "what follows this job".
             if not _panel_run(action, int_arg=body.get("n"),
-                              then=LIVING_BY_ACTION.get(action, {}).get("then")):
+                              then=_living.LIVING_BY_ACTION.get(action, {}).get("then")):
                 return jsonify({"error": "a job is already running"}), 409
             return jsonify({"ok": True, "action": action, "label": spec["label"]})
         except Exception as e:
@@ -17001,9 +8646,9 @@ def create_app(out_dir: Path):
         itself must succeed even if this bookkeeping doesn't."""
         try:
             from moonglade import backup as _core
-            jobs_by_id, _order, _n = _core._reconstruct_jobs(out_dir)
+            jobs_by_id, _order, _n = _jobs._reconstruct_jobs(out_dir)
             orig = jobs_by_id.get(tid)
-            if orig and not orig.get("dismissed") and orig.get("status") not in _core._JOBS_TERMINAL:
+            if orig and not orig.get("dismissed") and orig.get("status") not in _jobs._JOBS_TERMINAL:
                 _log_job(tid, status="done", media_ids=media_ids, is_video=is_video)
         except Exception:                          # noqa: BLE001 -- bookkeeping must not break recovery
             pass
@@ -17187,7 +8832,7 @@ def create_app(out_dir: Path):
                             # place that knows sixty days is a floor rather than a
                             # default. A patch asking for a full re-walk every minute
                             # comes back clamped, saved clamped, and answered clamped.
-                            row["interval_s"] = living_clamp_interval(
+                            row["interval_s"] = _living.living_clamp_interval(
                                 row["action"], patch["interval_s"],
                                 default=row.get("interval_s"))
                 if not _standing_runnable(s.get("action")):
@@ -17225,8 +8870,8 @@ def create_app(out_dir: Path):
                  "needs_torch": j.get("needs") == "torch",
                  "deferred": j["action"] == standing,
                  "available": _living_runnable(j["action"])
-                              and (j.get("needs") != "torch" or _torch_present())}
-                for j in LIVING_ALL]))
+                              and (j.get("needs") != "torch" or _living._torch_present())}
+                for j in _living.LIVING_ALL]))
 
     @app.route("/api/panel/sweep", methods=["POST"])
     @tier(LOCALHOST)
@@ -17253,7 +8898,7 @@ def create_app(out_dir: Path):
         deferred = _artworks_job_busy()
         return jsonify({"ok": bool(_artworks_kick(force=True)),
                         "deferred": deferred,
-                        "action": LIVING_SWEEP_ACTION})
+                        "action": _living.LIVING_SWEEP_ACTION})
 
     def _batch_sibling_count(task_id):
         """How many catalog rows share this task, for the Details view's own display.
@@ -17461,7 +9106,7 @@ def create_app(out_dir: Path):
                 # strand the rest of a whole-task purge.
                 failed.append(_redact_host_paths(str(e))[:160])
         try:                                     # The Great Sweep: each removed picture once
-            telem_set_add_many("culled_keys", ["media:" + m for m in purged], out_dir=out_dir)
+            _telemetry.telem_set_add_many("culled_keys", ["media:" + m for m in purged], out_dir=out_dir)
         except Exception:                        # noqa: BLE001
             pass
         if failed:
@@ -17517,7 +9162,7 @@ def create_app(out_dir: Path):
             except OSError:
                 failed += 1
         try:              # The Great Sweep: each removed picture once (a restore + re-delete is one)
-            telem_set_add_many("culled_keys", ["media:" + m for m in purged], out_dir=out_dir)
+            _telemetry.telem_set_add_many("culled_keys", ["media:" + m for m in purged], out_dir=out_dir)
         except Exception:                                    # noqa: BLE001
             pass
         return jsonify({"ok": failed == 0, "count": len(purged), "failed": failed})
@@ -18083,7 +9728,7 @@ def create_app(out_dir: Path):
             else:
                 errors.append({"media_id": mid, "error": res.get("error", "unknown error")})
         if restored:
-            telem_bump("trash_restored", len(restored), out_dir=out_dir)
+            _telemetry.telem_bump("trash_restored", len(restored), out_dir=out_dir)
         return jsonify({"restored": restored, "errors": errors})
 
     @app.route("/api/trash/delete-forever", methods=["POST"])
@@ -18107,7 +9752,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": "no media_ids given"}), 400
         n = sum(1 for mid in media_ids
                if delete_quarantined_forever(out_dir, thumb_dir, mid))
-        telem_bump("trash_purged_forever", n, out_dir=out_dir)
+        _telemetry.telem_bump("trash_purged_forever", n, out_dir=out_dir)
         return jsonify({"deleted": n})
 
     @app.route("/api/trash/empty", methods=["POST"])
@@ -18121,7 +9766,7 @@ def create_app(out_dir: Path):
         if not body.get("confirm"):
             return jsonify({"error": "confirm required"}), 400
         n = empty_trash(out_dir, thumb_dir)
-        telem_bump("trash_purged_forever", n, out_dir=out_dir)
+        _telemetry.telem_bump("trash_purged_forever", n, out_dir=out_dir)
         return jsonify({"deleted": n})
 
     @app.route("/api/rate/<media_id>", methods=["POST"])
@@ -18136,7 +9781,7 @@ def create_app(out_dir: Path):
         # Lamplighter (curation_streak) + The Long Vigil (active_days): rating a piece --
         # including clearing it to 0 -- is curation. Keyed day-lists, idempotent, silent-soft.
         try:
-            telem_mark_day(out_dir=out_dir, keys=("curation_days", "active_days"))
+            _telemetry.telem_mark_day(out_dir=out_dir, keys=("curation_days", "active_days"))
         except Exception:
             pass
         return json.dumps({"ok": True, "rating": value}), 200, {"Content-Type": "application/json"}
@@ -18164,7 +9809,7 @@ def create_app(out_dir: Path):
         src = out_dir / str(row.get("filename") or "")
         if not (row.get("filename") and src.is_file()):
             from moonglade import backup as core   # lazy, like every other gallery use of it
-            files = find_files_for_media_id(out_dir, media_id, exts=core._VIDEO_EXTS)
+            files = _scan.find_files_for_media_id(out_dir, media_id, exts=core._VIDEO_EXTS)
             if not files:
                 return json.dumps({"ok": False, "error": "video file not found"}), 404, {"Content-Type": "application/json"}
             src = Path(files[0])
@@ -18301,7 +9946,7 @@ def create_app(out_dir: Path):
         if res["changed"] and isinstance(body.get("op"), dict) and "rating" in body["op"]:
             # Rating is curation whichever door it came through (see /api/rate).
             try:
-                telem_mark_day(out_dir=out_dir, keys=("curation_days", "active_days"))
+                _telemetry.telem_mark_day(out_dir=out_dir, keys=("curation_days", "active_days"))
             except Exception:
                 pass
         return jsonify(dict(res, ok=True))
@@ -18966,7 +10611,7 @@ def create_app(out_dir: Path):
                     payload["results"] = core.annotate_lora_compat(payload["results"], base_type)
                 payload["read_only"] = _read_only_flag(core)
                 return jsonify(payload)
-            session = core.present_as_web(session)
+            session = _mirror.present_as_web(session)
             if src == "bookmark":
                 # Its own operation -- the market connection has no bookmark argument, so this
                 # cannot be folded into the call below. Same row shape, so the grid does not care.
@@ -18983,7 +10628,7 @@ def create_app(out_dir: Path):
                         session, keyword=q, category=category, sort=sort, usage=usage,
                         limit=size, after=after,
                         lora_base_type=server_lora_type,
-                        author_id=core._client_of(session).user_id or "")
+                        author_id=_pixai_client._client_of(session).user_id or "")
                 payload = _hunt_by_name(_mine_page, q, size) if q else _mine_page(cursor or None)
             # GraphQL whenever ANY market filter or sort is in play. The owner reported that
             # under Popular the Model Type and Posted-at filters did nothing: base+Popular used
@@ -19041,7 +10686,7 @@ def create_app(out_dir: Path):
         if version_id:
             try:
                 core, session = _gen_session()
-                session = core.present_as_web(session)   # same policy as the search that found it
+                session = _mirror.present_as_web(session)   # same policy as the search that found it
                 return jsonify({"model_id": core.resolve_model_base_id(session, version_id)})
             except Exception as e:
                 return jsonify({"error": _redact_host_paths(str(e))[:200], "model_id": ""}), 200
@@ -19050,7 +10695,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": "model_id required", "version_id": ""}), 400
         try:
             core, session = _gen_session()
-            session = core.present_as_web(session)   # same policy as the search that found it
+            session = _mirror.present_as_web(session)   # same policy as the search that found it
             if (request.args.get("all") or "").strip() in ("1", "true"):
                 return jsonify({"versions": core.list_model_versions(session, mid)})
             # with_profiles: this is a BASE-model resolve whose answer feeds the composer's
@@ -19392,7 +11037,7 @@ def create_app(out_dir: Path):
                                 "error": "The similarity index is empty, so there is nothing to "
                                          "compare against. Rebuild it from the Control Panel "
                                          "(Rebuild similar index)."}), 200
-        telem_bump("similar_uses", out_dir=out_dir)       # Kindred Spirits
+        _telemetry.telem_bump("similar_uses", out_dir=out_dir)       # Kindred Spirits
         out = []
         for mid, score in hits:
             r = get_row(db_path, mid)
@@ -19449,31 +11094,31 @@ def create_app(out_dir: Path):
         pick; see _ensure_banner_flat."""
         from flask import send_from_directory, abort
         import mimetypes
-        bdir = branding_root().resolve()
+        bdir = _branding.branding_root().resolve()
         try:
             target = (bdir / fname).resolve()
             target.relative_to(bdir)          # reject path traversal
         except (ValueError, OSError):
             abort(404)
-        coded = _public_rel_to_coded(target.relative_to(bdir).as_posix())
+        coded = _branding._public_rel_to_coded(target.relative_to(bdir).as_posix())
         # The unlock split, enforced (see _seal_rule, which judges the CODED
         # rel -- a probe that guesses a coded path passes through translation
         # unchanged, so it faces the same verdict): achievement-bound art only
         # serves once its achievement is earned, whether the bytes would come
         # from a loose file or the container.
-        mode, seal_aid = _seal_rule(coded)
+        mode, seal_aid = _branding._seal_rule(coded)
         if mode == "deny":
             abort(404)
-        if mode == "earned" and seal_aid not in _earned_achievement_ids(
+        if mode == "earned" and seal_aid not in _branding._earned_achievement_ids(
                 out_dir, db_path, need=seal_aid):
             abort(404)
-        if coded in _BANNER_FLAT.values():
+        if coded in _branding._BANNER_FLAT.values():
             # The flat branch. bdir is deliberately NOT consulted: the render
             # lives in the cache, and a file parked at the coded root is not a
             # render. Pure lookup -- whatever the startup ensure pass and the
             # explicit write paths left here is what is served.
-            slot = next(s for s, n in _BANNER_FLAT.items() if n == coded)
-            cdir = _served_flat_dir(out_dir, slot)
+            slot = next(s for s, n in _branding._BANNER_FLAT.items() if n == coded)
+            cdir = _branding._served_flat_dir(out_dir, slot)
             try:
                 have_render = (cdir / coded).is_file()
             except OSError:
@@ -19484,41 +11129,41 @@ def create_app(out_dir: Path):
                 return resp
             # Container-ONLY read (not _branding_bytes, which would try the
             # coded root loose first): an older pack may carry a top-level flat.
-            box = _get_container()
+            box = _branding._get_container()
             raw = box.get(coded) if box else None
             if raw is None:
                 # Rule-8 flat fallback: nothing rendered on this install yet and
                 # nothing to render FROM -> the slot's shipped sealed default
                 # (translation itself never rewrites the flat names).
-                raw = _branding_bytes(_flat_default_rel(slot))
+                raw = _branding._branding_bytes(_branding._flat_default_rel(slot))
         elif "/" not in coded:
             # A bare rel translation did not recognize (rule 7) addresses the
             # coded ROOT's own top level, and the root is inert (2026-09-10):
             # the app writes nothing there, the discovery walk does not count
             # what sits there, and this route does not serve it. Container only
             # -- loose root is never read.
-            box = _get_container()
+            box = _branding._get_container()
             raw = box.get(coded) if box else None
-        elif (coded.lower() in _role_coded_rels() and (bdir / coded).is_file()
-              and not _role_file_decodes(bdir / coded)
-              and (_get_container() is not None and _get_container().has(coded))):
+        elif (coded.lower() in _branding._role_coded_rels() and (bdir / coded).is_file()
+              and not _branding._role_file_decodes(bdir / coded)
+              and (_branding._get_container() is not None and _branding._get_container().has(coded))):
             # Fail-soft (Session X): an override of a named role that will not decode is the
             # pack's default, silently. Container-ONLY, like the flat branch above -- the loose
             # bytes are exactly what must not be served. With no pack default to fall back to
             # there is nothing better to say, and the loose file is served as it always was.
-            raw = _get_container().get(coded)
+            raw = _branding._get_container().get(coded)
         elif (bdir / coded).is_file():
             resp = send_from_directory(str(bdir), coded)
             resp.headers["Cache-Control"] = "no-cache, must-revalidate"   # branding art gets re-cut; never serve a stale copy
             return resp
-        elif coded in _moment_clip_rels():
+        elif coded in _branding._moment_clip_rels():
             # A moment's clip, container-sourced (no loose copy): verified once,
             # then sliced from memory for every range the <video> asks for.
-            raw = _container_clip_bytes(coded)
+            raw = _branding._container_clip_bytes(coded)
         else:
             # Container fallback keys on the CODED rel (posix separators -- the
             # container's native addressing; loose path == container key, always).
-            raw = _branding_bytes(coded)
+            raw = _branding._branding_bytes(coded)
         if raw is None:
             abort(404)
         # Every body that reaches here is in memory -- the container's bytes, or a
@@ -19526,7 +11171,7 @@ def create_app(out_dir: Path):
         # send_from_directory streams, so it gets the Range handling that would
         # have given a loose file.
         mime = mimetypes.guess_type(coded)[0] or "application/octet-stream"
-        return _ranged_bytes_response(app.response_class, raw, mime)
+        return _branding._ranged_bytes_response(app.response_class, raw, mime)
 
     @app.route("/badge-thumb/<aid>.png", defaults={"ext": "png"})
     @app.route("/badge-thumb/<aid>.webp", defaults={"ext": "webp"})
@@ -19560,19 +11205,19 @@ def create_app(out_dir: Path):
         # by id (the fail-open _seal_rule was written to avoid; the parallel gate
         # here missed it -- adversarial, 2026-08-22). Visible feats' thumbs still
         # serve unearned (the Folio's locked tiles show art by design).
-        if aid not in _ach_ids():
+        if aid not in _achievements._ach_ids():
             abort(404)
         # Feats the roster marks hidden are masked in /api/achievements, but
         # their ids sit in this public source -- so an unearned masked feat's
         # badge must not be fishable by id here either.
-        if aid in _ach_hidden() and aid not in _earned_achievement_ids(
+        if aid in _achievements._ach_hidden() and aid not in _branding._earned_achievement_ids(
                 out_dir, db_path, need=aid):
             abort(404)
         if ext == "webp":
             # Past the same gate the stills pass, so an unearned masked feat's
             # animation is no more fishable than its still. Served whole -- see
             # _badge_anim on why an animated master is never re-encoded here.
-            raw = _badge_anim(aid)
+            raw = _achievements._badge_anim(aid)
             if raw is None:
                 abort(404)             # no animated master -> the chain falls back to .png
             resp = app.response_class(raw, mimetype="image/webp")
@@ -19584,7 +11229,7 @@ def create_app(out_dir: Path):
         # 256 default. Allowlisted to those two so the cache can't be spammed into
         # unbounded sizes.
         size = 384 if request.args.get("size") == "384" else 256
-        p = _badge_thumb(out_dir, aid, size)
+        p = _achievements._badge_thumb(out_dir, aid, size)
         if isinstance(p, (bytes, bytearray)):
             # cache unwritable -> _badge_thumb handed us the image in memory
             resp = app.response_class(bytes(p), mimetype="image/png")
@@ -19616,17 +11261,17 @@ def create_app(out_dir: Path):
             abort(404)
 
         def has_art(aid):
-            return _branding_exists(_role_rel("badges", aid + ".png"))
+            return _branding._branding_exists(_branding._role_rel("badges", aid + ".png"))
 
         # need="" is in no cached set, so the helper recomputes instead of answering from its
         # 5-second cache -- an earn that landed since the cache was filled is never missed.
-        earned = _earned_achievement_ids(out_dir, db_path, need="")
-        pick = _pick_masked_feat(earned, has_art=has_art)
+        earned = _branding._earned_achievement_ids(out_dir, db_path, need="")
+        pick = _branding._pick_masked_feat(earned, has_art=has_art)
         if pick is None:
             abort(404)
-        if not hmac.compare_digest(_feat_mask_token(app.secret_key, pick["id"]), token):
+        if not hmac.compare_digest(_branding._feat_mask_token(app.secret_key, pick["id"]), token):
             abort(404)
-        png = _feat_mask_bytes(out_dir, pick["id"], token)
+        png = _branding._feat_mask_bytes(out_dir, pick["id"], token)
         if png is None:
             abort(404)
         resp = app.response_class(png, mimetype="image/png")
@@ -19815,7 +11460,7 @@ def create_app(out_dir: Path):
                           page's own engine, reused as-is (its 300-row cap is lifted here;
                           see the call below).
           identical_file Class B: byte-identical files under DIFFERENT media_ids.
-                          moonglade.backup.audit_collection(content=True)'s size-bucketed
+                          moonglade.organize.audit_collection(content=True)'s size-bucketed
                           SHA pass -- reused as-is; not naive O(n^2).
           same_seed       Class C: catalog rows sharing (seed, prompt_full) -- a cheap
                           SQL GROUP BY (same_seed_groups(), this module), not a new
@@ -19868,7 +11513,7 @@ def create_app(out_dir: Path):
         # No arbitrary cap here -- the classic page's limit=300 exists to keep an HTML
         # render short, not because the underlying scan is expensive (one scan_library
         # pass, no hashing); this route reports the real count instead of truncating.
-        class_a = duplicate_groups(out_dir, limit=100000)
+        class_a = _dupes.duplicate_groups(out_dir, limit=100000)
         rows_a = {r["media_id"]: r for r in rows_for_media_ids(db_path, [g["media_id"] for g in class_a])}
         for g in class_a:
             mid = g["media_id"]
@@ -19880,7 +11525,7 @@ def create_app(out_dir: Path):
                            "reclaimable_bytes": reclaim, "members": members})
 
         # ---- identical_file (Class B) ----------------------------------------
-        audit = core.audit_collection(out_dir, content=True)
+        audit = _organize.audit_collection(out_dir, content=True)
         class_b = audit["class_b"]
         mids_b = sorted({str(item[4]) for g in class_b for item in g["files"]})
         rows_b = {r["media_id"]: r for r in rows_for_media_ids(db_path, mids_b)}
@@ -19893,7 +11538,7 @@ def create_app(out_dir: Path):
                            "reclaimable_bytes": reclaim, "members": members})
 
         # ---- same_seed (Class C) ----------------------------------------------
-        seed_groups = same_seed_groups(db_path)
+        seed_groups = _dupes.same_seed_groups(db_path)
         mids_c = sorted({mid for g in seed_groups for mid in g["media_ids"]})
         rows_c = {r["media_id"]: r for r in rows_for_media_ids(db_path, mids_c)}
         for g in seed_groups:
@@ -19928,7 +11573,7 @@ def create_app(out_dir: Path):
         # Same "resolve real rows/files, oldest created_at is the keeper" shape as
         # same_seed above -- the only tier-specific addition is closeness_pct, carried
         # at the group level exactly like same_seed carries `seed`.
-        near_groups = near_duplicate_groups(db_path)
+        near_groups = _dupes.near_duplicate_groups(db_path)
         mids_d = sorted({mid for g in near_groups for mid in g["media_ids"]})
         rows_d = {r["media_id"]: r for r in rows_for_media_ids(db_path, mids_d)}
         for g in near_groups:
@@ -20097,7 +11742,7 @@ def create_app(out_dir: Path):
                                   "error": result.get("error")})
 
         if quarantined:
-            telem_bump("duplicates_resolved", len(quarantined), out_dir=out_dir)
+            _telemetry.telem_bump("duplicates_resolved", len(quarantined), out_dir=out_dir)
         return jsonify({"quarantined": quarantined, "errors": errors,
                         "reclaimed_bytes": sum(q.get("size", 0) for q in quarantined)})
 
@@ -20129,7 +11774,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": "quarantine_path required"}), 400
         result = restore_quarantined_duplicate(out_dir, thumb_dir, db_path, quarantine_path)
         if result.get("ok"):
-            telem_bump("duplicates_undone", out_dir=out_dir)
+            _telemetry.telem_bump("duplicates_undone", out_dir=out_dir)
         return jsonify(result)
 
     @app.route("/api/account")
@@ -20422,7 +12067,7 @@ def create_app(out_dir: Path):
         job = _asset_job.status()
         manifest = moonglade_assets.read_manifest()
         return jsonify({
-            "needs": moonglade_assets.needs_download(_container_path(), manifest),
+            "needs": moonglade_assets.needs_download(_branding._container_path(), manifest),
             "manifest_present": manifest is not None,
             **job,
         })
@@ -20491,13 +12136,13 @@ def create_app(out_dir: Path):
                 except Exception:                        # noqa: BLE001
                     pass
             if claimed:
-                telem_bump("claims", claimed, out_dir=out_dir)   # Claimant
+                _telemetry.telem_bump("claims", claimed, out_dir=out_dir)   # Claimant
                 # Terminal the moment it is written: a claim is instantaneous, so the row
                 # is born "done" rather than passing through running. Its own id keeps it
                 # out of the orphan sweep (which only chases numeric PixAI task ids) and
                 # lets each claim keep its own line instead of overwriting the last one.
                 _log_job("claim-" + secrets.token_hex(6), status="done", type="claim",
-                         label=claim_job_label(claimed, credits))
+                         label=_achievements.claim_job_label(claimed, credits))
             return jsonify({"claimed": claimed, "credits": credits})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
@@ -20580,7 +12225,7 @@ def create_app(out_dir: Path):
         show_all = request.args.get("all") == "1"
         try:
             core, session = _gen_session()
-            rows = contest_board(core, session)
+            rows = _contest_sync.contest_board(core, session)
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "contests": []}), 200
         # Both variants come off the ONE snapshot -- `active` is the server's own
@@ -20588,7 +12233,7 @@ def create_app(out_dir: Path):
         contests = rows if show_all else [c for c in rows if c.get("active")]
         # Whether the board was longer than the ceiling the reader walks to (the screens say
         # so under the list; until now only a log line did).
-        bm = contest_board_meta()
+        bm = _contest_sync.contest_board_meta()
         board = {"truncated": bool(bm.get("truncated"))}
         if board["truncated"]:
             board["limit"] = int(bm.get("limit") or 0)
@@ -20653,7 +12298,7 @@ def create_app(out_dir: Path):
         try:
             core, session = _gen_session()
             rows = core.contest_winners(session, slug)
-            uid = str(core._client_of(session).user_id or "")
+            uid = str(_pixai_client._client_of(session).user_id or "")
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "winners": []}), 200
         winners = []
@@ -20697,12 +12342,12 @@ def create_app(out_dir: Path):
         receipt link), `check` says where the daily check stands for the contest, and
         `unverified_legacy` marks a contest an older sweep once believed won that no check
         has confirmed yet. No metric name and no ladder language appears in this payload."""
-        d = load_telemetry(out_dir)
+        d = _telemetry.load_telemetry(out_dir)
         sets = d.get("sets") if isinstance(d.get("sets"), dict) else {}
         raw_keys = sets.get("contest_entry_keys")
         raw_legacy = sets.get("contest_win_keys")
         legacy_ids = {str(w) for w in raw_legacy} if isinstance(raw_legacy, list) else set()
-        _e, _l, verified, checks = _cw_inputs(d)
+        _e, _l, verified, checks = _contest_sync._cw_inputs(d)
         now_t = time.time()
         by_contest, order = {}, []
         for k in (raw_keys if isinstance(raw_keys, list) else []):
@@ -20717,7 +12362,7 @@ def create_app(out_dir: Path):
         board = {}
         try:
             core, session = _gen_session()
-            for c in contest_board(core, session) or []:
+            for c in _contest_sync.contest_board(core, session) or []:
                 if isinstance(c, dict) and c.get("id"):
                     board[str(c["id"])] = c
         except Exception:                       # soft: key-only rows beat an error page
@@ -20755,14 +12400,14 @@ def create_app(out_dir: Path):
                             for a in shown],
                 "won": bool(contest_wins.wins_for(verified, cid)),
                 "wins": contest_wins.wins_for(verified, cid),
-                "check": _cw_check_view(checks.get(cid), now_t),
+                "check": _contest_sync._cw_check_view(checks.get(cid), now_t),
                 "unverified_legacy": bool(cid in legacy_ids
                                           and not contest_wins.wins_for(verified, cid)),
             })
         return jsonify({"contests": rows,
                         "total_entries": sum(len(shown_by_contest[cid]) for cid in order),
-                        "sync_running": bool(_contest_sync_lock.locked()),
-                        "last_sync_at": _contest_sync_last_ok.get("at", 0.0)})
+                        "sync_running": bool(_contest_sync._contest_sync_lock.locked()),
+                        "last_sync_at": _contest_sync._contest_sync_last_ok.get("at", 0.0)})
 
     @app.route("/api/contest/enter", methods=["POST"])
     @tier(LOGIN)
@@ -20807,7 +12452,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": "PixAI session unavailable: %s"
                                      % _redact_host_paths(str(e))[:160]}), 502
         try:
-            board = contest_board(core, session)
+            board = _contest_sync.contest_board(core, session)
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 502
         contest_id = next((str(c.get("id") or "") for c in board or []
@@ -20828,7 +12473,7 @@ def create_app(out_dir: Path):
         # Same key shape the detection sweep writes -- one dedupe set, so entering the same
         # artwork twice still counts once.
         try:
-            telem_set_add("contest_entry_keys", "%s:%s" % (contest_id, artwork_id),
+            _telemetry.telem_set_add("contest_entry_keys", "%s:%s" % (contest_id, artwork_id),
                           out_dir=out_dir)
         except Exception:
             pass
@@ -20869,20 +12514,20 @@ def create_app(out_dir: Path):
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
-        m = telemetry_metrics(out_dir)
+        m = _telemetry.telemetry_metrics(out_dir)
         entries = int(m.get("contest_entries", 0) or 0)
         # RECENT: nothing to do, and nothing to wait for.
-        if (time.time() - _contest_sync_last_ok.get("at", 0.0)) < CONTEST_SYNC_RECENT_S:
+        if (time.time() - _contest_sync._contest_sync_last_ok.get("at", 0.0)) < _contest_sync.CONTEST_SYNC_RECENT_S:
             return jsonify({"started": False, "skipped": "recent",
                             "contest_entries": entries})
-        if not _contest_sync_lock.acquire(False):
+        if not _contest_sync._contest_sync_lock.acquire(False):
             return jsonify({"started": False, "busy": True, "contest_entries": entries})
 
         def _run():
             try:
-                _contest_detection_sync(out_dir)
+                _contest_sync._contest_detection_sync(out_dir)
             finally:
-                _contest_sync_lock.release()
+                _contest_sync._contest_sync_lock.release()
 
         # OFF-THREAD, and this is the whole point: the sweep is paced (a third of a second
         # between contests, plus a read each) and can run 30-90 seconds against a real
@@ -20897,7 +12542,7 @@ def create_app(out_dir: Path):
             # starts would leave contest sync permanently "busy" for the life of the
             # process -- every later open answering busy:true forever. Release it here and
             # say what happened. (Found by its own test, which stubs Thread.start.)
-            _contest_sync_lock.release()
+            _contest_sync._contest_sync_lock.release()
             return jsonify({"started": False,
                             "error": _redact_host_paths(str(e))[:200],
                             "contest_entries": entries}), 200
@@ -20928,7 +12573,7 @@ def create_app(out_dir: Path):
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
-        status, payload = contest_win_check(out_dir, body)
+        status, payload = _contest_sync.contest_win_check(out_dir, body)
         return jsonify(payload), status
 
     @app.route("/api/artwork-views")
@@ -20977,8 +12622,8 @@ def create_app(out_dir: Path):
             limit = max(1, min(int(request.args.get("limit") or 12), 200))
         except (TypeError, ValueError):
             limit = 12
-        totals = published_totals(db_path)
-        top = top_published_rows(db_path, limit, order=order)
+        totals = _living.published_totals(db_path)
+        top = _living.top_published_rows(db_path, limit, order=order)
         views_synced = totals.get("views_rows", 0) > 0
         for r in top:
             # '' and 0 are different answers (see myart_items): a never-swept row must not
@@ -20991,7 +12636,7 @@ def create_app(out_dir: Path):
                         "views_at": totals.get("views_at", ""),
                         # The blow-up note's payload. A LIST, capped, never a feed --
                         # see published_spikes() and views_spike().
-                        "spikes": published_spikes(db_path)})
+                        "spikes": _living.published_spikes(db_path)})
 
     @app.route("/api/myart/items")
     @tier(LOGIN)
@@ -21172,7 +12817,7 @@ def create_app(out_dir: Path):
                 if challenge and new_art_id:
                     try:
                         slug = next((str(c.get("slug") or "")
-                                     for c in (contest_board(core, session) or [])
+                                     for c in (_contest_sync.contest_board(core, session) or [])
                                      if isinstance(c, dict)
                                      and str(c.get("id") or "") == challenge), "")
                         if not slug:
@@ -21196,7 +12841,7 @@ def create_app(out_dir: Path):
                                 # every other writer uses -- artwork id, so the set dedupes
                                 # against the sweep's own row rather than double-counting.
                                 try:
-                                    telem_set_add("contest_entry_keys",
+                                    _telemetry.telem_set_add("contest_entry_keys",
                                                   "%s:%s" % (challenge, new_art_id),
                                                   out_dir=out_dir)
                                 except Exception:
@@ -21212,7 +12857,7 @@ def create_app(out_dir: Path):
                 # response or turn an irreversible publish into a failure.
                 if challenge:
                     try:
-                        threading.Thread(target=_contest_sync_kick,
+                        threading.Thread(target=_contest_sync._contest_sync_kick,
                                          args=(out_dir,), kwargs={"force": True},
                                          daemon=True).start()
                     except Exception:
@@ -21225,7 +12870,7 @@ def create_app(out_dir: Path):
                 # Lamplighter (curation_streak) + The Long Vigil: tagging is curation.
                 # Keyed day-lists, idempotent, silent-soft.
                 try:
-                    telem_mark_day(out_dir=out_dir, keys=("curation_days", "active_days"))
+                    _telemetry.telem_mark_day(out_dir=out_dir, keys=("curation_days", "active_days"))
                 except Exception:
                     pass
             if title is not None:
@@ -21389,7 +13034,7 @@ def create_app(out_dir: Path):
                 break
         out = {}
         if ids:
-            by_task_idx, by_sid = series_index(db_path)
+            by_task_idx, by_sid = _series.series_index(db_path)
             for tid in ids:
                 hit = by_task_idx.get(tid)
                 if not hit:
@@ -21417,7 +13062,7 @@ def create_app(out_dir: Path):
         is not a current multi-task series (including a sid whose series
         dissolved after deletions -- honest, like the v-numbers). Pure catalog
         read (through the series cache), no network."""
-        _, by_sid = series_index(db_path)
+        _, by_sid = _series.series_index(db_path)
         s = by_sid.get(str(sid or "").strip())
         if not s:
             return jsonify({"error": "unknown series id"}), 404
@@ -21456,7 +13101,7 @@ def create_app(out_dir: Path):
         # The title is derived the way a series' is (_series_title over the same
         # capped prompt text), so the two stack kinds name themselves by one rule;
         # the row's own `title` column is the fallback when the prompt says nothing.
-        title = _series_title(_series_text(first)) or str(first.get("title") or "").strip()
+        title = _series._series_title(_series._series_text(first)) or str(first.get("title") or "").strip()
         stamps = sorted(str(r.get("created_at") or "") for r in rows
                         if str(r.get("created_at") or ""))
         return jsonify({
@@ -22141,7 +13786,7 @@ def create_app(out_dir: Path):
         payload = {"runs": rows if not light else running, "running": running,
                    "errors": errors}
         try:
-            telem_set_add_many("trained_runs", finished, out_dir=out_dir)
+            _telemetry.telem_set_add_many("trained_runs", finished, out_dir=out_dir)
         except Exception:                               # noqa: BLE001
             pass
         _runs_cache[key] = (time.time(), payload)
@@ -22685,8 +14330,8 @@ def create_app(out_dir: Path):
             today = _dt.date.today().isoformat()
             if _telem_day["day"] != today:
                 _telem_day["day"] = today
-                telem_mark_day(out_dir=out_dir)
-                sweep_telemetry(out_dir)
+                _telemetry.telem_mark_day(out_dir=out_dir)
+                _telemetry.sweep_telemetry(out_dir)
         except Exception:
             pass
         # ONE telemetry read for the whole request. This route wanted the store three
@@ -22700,23 +14345,23 @@ def create_app(out_dir: Path):
         # reads from carries that write -- without that, a store loaded before the
         # sweep is one write stale for the remainder of the request. (A baseline the
         # sweep records is read only by the next scan, so it is not mirrored.)
-        telem = load_telemetry(out_dir)
+        telem = _telemetry.load_telemetry(out_dir)
         # Unlike sweep_telemetry above, this runs EVERY call rather than once a day:
         # a file dropped into the tree since the last fetch is picked up on the next
         # reload, not up to a day later. See sweep_branding_drops()'s own docstring.
         try:
-            sweep_branding_drops(out_dir, telem=telem)
+            _branding.sweep_branding_drops(out_dir, telem=telem)
         except Exception:
             pass
-        metrics = achievement_metrics(db_path)
-        metrics.update(telemetry_metrics(out_dir, telem=telem))
+        metrics = _achievements.achievement_metrics(db_path)
+        metrics.update(_telemetry.telemetry_metrics(out_dir, telem=telem))
         # Gate the unlock toasts until the first full sync completes (see first_sync_complete):
         # first-light is images>=1, so without this it pops seconds into a fresh first sync.
-        fsd = first_sync_complete(out_dir, db_path, telem=telem)
+        fsd = _telemetry.first_sync_complete(out_dir, db_path, telem=telem)
         persist_error = None
         with _ach_lock:
-            state = load_ach_state(out_dir)
-            result = compute_achievements(metrics, state.get("seen"),
+            state = _achievements.load_ach_state(out_dir)
+            result = _achievements.compute_achievements(metrics, state.get("seen"),
                                           sets=telem.get("sets", {}),
                                           earned_at=state.get("earned_at"))
             newly = result["newly"]
@@ -22741,7 +14386,7 @@ def create_app(out_dir: Path):
                 # correct either way (computed fresh from the catalog every call, not from the
                 # state file), so this stays a soft error alongside a normal response rather
                 # than failing the whole request.
-                if not save_ach_state(out_dir, state):
+                if not _achievements.save_ach_state(out_dir, state):
                     persist_error = "could not save achievement progress (disk write failed)"
             earned_at = state.get("earned_at") or {}
         feats_revealed = any(
@@ -22754,7 +14399,7 @@ def create_app(out_dir: Path):
         # all, so neither the array's length nor any entry in it says anything about how
         # many secrets remain.
         masked_metrics, n_masked, visible = set(), 0, []
-        sealed_by_id = {r["id"]: r for r in _roster() if isinstance(r, dict)}
+        sealed_by_id = {r["id"]: r for r in _achievements._roster() if isinstance(r, dict)}
         earned_ids = {a["id"] for a in result["achievements"] if a["earned"]}
         for a in result["achievements"]:
             if a["hidden"] and not a["earned"]:
@@ -22767,17 +14412,17 @@ def create_app(out_dir: Path):
             elif not unleashed:               # uncensored lines stay locked until Triggered
                 a["roast_nsfw"] = ""
             if a["earned"]:                   # the roster flags go out only once earned
-                a.update(_earned_roster_flags(sealed_by_id.get(a["id"])))
+                a.update(_branding._earned_roster_flags(sealed_by_id.get(a["id"])))
             else:                             # "N to go": never a feat, never an unmeasured metric
-                prog = achievement_progress(a, metrics)
+                prog = _achievements.achievement_progress(a, metrics)
                 if prog is not None:
                     a["progress"] = prog
             visible.append(a)
-        result["feats"] = _feats_payload(earned_ids, n_masked, feats_revealed, unleashed,
+        result["feats"] = _branding._feats_payload(earned_ids, n_masked, feats_revealed, unleashed,
                                          app.secret_key)
         # The Folio's Marks row (relics by kind): earned, awarded marks only.
         try:
-            result["relics"] = {"marks": earned_relic_marks(out_dir, earned_ids)}
+            result["relics"] = {"marks": _branding.earned_relic_marks(out_dir, earned_ids)}
         except Exception:
             result["relics"] = {"marks": []}
         result["achievements"] = visible
@@ -22789,7 +14434,7 @@ def create_app(out_dir: Path):
         # gen_days ledger; a fresh install with no days answers day 1, best 1.
         try:
             _gd = (telem.get("day_lists") or {}).get("gen_days")
-            result["vigil"] = vigil_status(_gd if isinstance(_gd, list) else [])
+            result["vigil"] = _telemetry.vigil_status(_gd if isinstance(_gd, list) else [])
         except Exception:
             result["vigil"] = {"day": 1, "best": 1}
         result["feats_revealed"] = feats_revealed
@@ -22809,35 +14454,35 @@ def create_app(out_dir: Path):
         out_dir/_moonglade/records/achievements.json. Cosmetic + local-only, no spend."""
         body = request.get_json(silent=True) or {}
         skin = str(body.get("skin") or "").strip()
-        if skin not in _skin_ids():
+        if skin not in _achievements._skin_ids():
             return jsonify({"error": "unknown skin"}), 400
         # #38: this gate used to compute from achievement_metrics() ALONE -- no
         # telemetry merge, no earned_at -- so any telemetry-backed or pinned skin
         # unlock showed earned in the Folio yet 403'd here. It now runs the exact
         # recipe /api/achievements and _mark_earned() use (guarded by
         # dev/tests/test_achievements.py's gate-parity tests).
-        _m = achievement_metrics(db_path)
-        _m.update(telemetry_metrics(out_dir))
-        result = compute_achievements(_m,
-                                      sets=load_telemetry(out_dir).get("sets", {}),
-                                      earned_at=load_ach_state(out_dir).get("earned_at"))
+        _m = _achievements.achievement_metrics(db_path)
+        _m.update(_telemetry.telemetry_metrics(out_dir))
+        result = _achievements.compute_achievements(_m,
+                                      sets=_telemetry.load_telemetry(out_dir).get("sets", {}),
+                                      earned_at=_achievements.load_ach_state(out_dir).get("earned_at"))
         earned = {s["id"] for s in result["skins"] if s["earned"]}
         if skin not in earned:
-            return jsonify({"error": "skin locked", "skin": load_ach_state(out_dir)["skin"]}), 403
+            return jsonify({"error": "skin locked", "skin": _achievements.load_ach_state(out_dir)["skin"]}), 403
         with _ach_lock:
-            state = load_ach_state(out_dir)
+            state = _achievements.load_ach_state(out_dir)
             changed = state.get("skin") != skin
             state["skin"] = skin
-            saved = save_ach_state(out_dir, state)
+            saved = _achievements.save_ach_state(out_dir, state)
         if not saved:
             # save_ach_state() is "best-effort; swallows write errors" by design (its own
             # docstring) -- but that return value used to be dropped on the floor here, so a
             # disk-write failure still answered 200 {"skin": skin} as if it had stuck. Report
             # what's ACTUALLY active (a fresh read, not the requested value) instead of lying.
             return jsonify({"error": "could not save skin (disk write failed)",
-                            "skin": load_ach_state(out_dir)["skin"]}), 200
+                            "skin": _achievements.load_ach_state(out_dir)["skin"]}), 200
         if changed:                       # Interior Decorator: an explicit re-dress
-            telem_bump("skin_changed_runs", out_dir=out_dir)
+            _telemetry.telem_bump("skin_changed_runs", out_dir=out_dir)
         return jsonify({"skin": skin})
 
     def _ach_sid():
@@ -22967,9 +14612,9 @@ def create_app(out_dir: Path):
         if _ach_debounced(sid, ev):
             return jsonify({"ok": True, "debounced": True, "next_nonce": nxt})
         if ev == "starfall":
-            telem_flag("konami_triggered", out_dir=out_dir)
+            _telemetry.telem_flag("konami_triggered", out_dir=out_dir)
             return jsonify({"ok": True, "next_nonce": nxt})
-        telem_bump("docs_opened", out_dir=out_dir)
+        _telemetry.telem_bump("docs_opened", out_dir=out_dir)
         return jsonify({"ok": True, "next_nonce": nxt})
 
     @app.route("/api/narrator/poke", methods=["POST"])
@@ -23006,32 +14651,32 @@ def create_app(out_dir: Path):
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
         from moonglade import narrator as _nar
-        pools = _nar.clean_pools(_poke_lines())
-        now, today = _narrator_clock()
+        pools = _nar.clean_pools(_achievements._poke_lines())
+        now, today = _account_prefs._narrator_clock()
         try:
-            with account_state_locked(out_dir, user) as p:
-                doc = account_state_read(p)
+            with _account_prefs.account_state_locked(out_dir, user) as p:
+                doc = _account_prefs.account_state_read(p)
                 st, res = _nar.poke(doc.get("ladder"), now, today, pools)
-                account_state_write(p, dict(doc, ladder=st))
-        except AccountPrefsBusy as e:
+                _account_prefs.account_state_write(p, dict(doc, ladder=st))
+        except _account_prefs.AccountPrefsBusy as e:
             return jsonify({"error": str(e)}), 503
         except OSError:
             return jsonify({"error": "Could not save that."}), 500
         # The metric follows the count: only ever up, and re-asserted once the ladder is
         # done so a write that was lost once is repaired by the next poke.
         if res["counted"] or res["count"] >= _nar.FINAL:
-            telem_max("narrator_pokes", res["count"], out_dir=out_dir)
+            _telemetry.telem_max("narrator_pokes", res["count"], out_dir=out_dir)
         out = {"ok": True, "line": res["line"]}
         if res["final"]:
             final = {}
             out["line"] = _nar.NEUTRAL
-            feat = next((a for a in _roster() if a.get("metric") == "narrator_pokes"), None)
-            if feat and feat["id"] in _earned_achievement_ids(out_dir, db_path, need=feat["id"]):
+            feat = next((a for a in _achievements._roster() if a.get("metric") == "narrator_pokes"), None)
+            if feat and feat["id"] in _branding._earned_achievement_ids(out_dir, db_path, need=feat["id"]):
                 final = {"id": feat["id"],
                          "clean": feat.get("roast") or feat.get("desc") or "",
                          "unleashed": feat.get("roast_nsfw") or ""}
                 out["line"] = final["clean"] or _nar.NEUTRAL
-                choice = _nar.clean_choice(_poke_lines().get("choice"))
+                choice = _nar.clean_choice(_achievements._poke_lines().get("choice"))
                 if choice:
                     final["choice"] = choice
             out["final"] = final
@@ -23049,14 +14694,14 @@ def create_app(out_dir: Path):
         failed, paused, expired, off), so the tile warns only when a renewal actually failed
         or cannot run, not whenever the token sits in its normal renewal window."""
         from moonglade import backup as core
-        state = core.load_mirror_state()
+        state = _mirror.load_mirror_state()
         jwt = (state.get("jwt") or "")
-        left_s, span_s = core.mirror_token_span(state)
-        return jsonify({"enabled": core.mirror_enabled(), "connected": bool(jwt),
-                        "days_left": core.jwt_days_left(jwt) if jwt else None,
+        left_s, span_s = _mirror.mirror_token_span(state)
+        return jsonify({"enabled": _mirror.mirror_enabled(), "connected": bool(jwt),
+                        "days_left": _mirror.jwt_days_left(jwt) if jwt else None,
                         "left_s": int(left_s) if left_s is not None else None,
                         "span_s": int(span_s) if span_s is not None else None,
-                        "renewal": core.mirror_renewal_status()})
+                        "renewal": _mirror.mirror_renewal_status()})
 
     @app.route("/api/mirror/enable", methods=["POST"])
     @tier(LOCALHOST)
@@ -23072,7 +14717,7 @@ def create_app(out_dir: Path):
         # mirror with no live session lets every Bridge/enhance submit hit the mirror-ON gate,
         # fail make_mirror_session(), and refuse -- an armed toggle that can run nothing. The
         # DISARM (false-write) is always allowed, so the owner can always turn it back off.
-        if want and not core._jwt_usable(core.load_mirror_state().get("jwt") or ""):
+        if want and not _mirror._jwt_usable(_mirror.load_mirror_state().get("jwt") or ""):
             return jsonify({"error": "Connect the mirror first — not armed",
                             "enabled": False}), 200
         try:
@@ -23093,16 +14738,16 @@ def create_app(out_dir: Path):
             core._check_read_only("connect the PixAI mirror")   # the renewal is account-mutating
             # A press (#71): re-read the browser even for a usable stored token, keep the
             # later-expiring of the two, and try a due renewal even inside a failure backoff.
-            s = core.make_mirror_session(bootstrap_from_browser=True, user_initiated=True)
+            s = _mirror.make_mirror_session(bootstrap_from_browser=True, user_initiated=True)
         except Exception as e:
             return jsonify({"ok": False, "error": _redact_host_paths(str(e))[:160]}), 200
         if s is None:
             return jsonify({"ok": False, "error": "Couldn't read a pixai.art session from a "
                             "browser on this machine. Sign in to pixai.art in Chrome/Edge/Brave "
                             "(reload the page once so the token is written), then try again."}), 200
-        jwt = (core.load_mirror_state().get("jwt") or "")
+        jwt = (_mirror.load_mirror_state().get("jwt") or "")
         return jsonify({"ok": bool(jwt),
-                        "days_left": core.jwt_days_left(jwt) if jwt else None})
+                        "days_left": _mirror.jwt_days_left(jwt) if jwt else None})
 
     @app.route("/api/branding", methods=["GET", "POST"])
     @tier(LOGIN)
@@ -23117,20 +14762,20 @@ def create_app(out_dir: Path):
             # one) must never see a stale pre-adoption picture. Cheap; see
             # sweep_branding_drops()'s own docstring.
             try:
-                sweep_branding_drops(out_dir)
+                _branding.sweep_branding_drops(out_dir)
             except Exception:
                 pass
-            cfg = load_branding(out_dir)
-            return jsonify(dict(_branding_tuning(cfg),
+            cfg = _branding.load_branding(out_dir)
+            return jsonify(dict(_branding._branding_tuning(cfg),
                                 mark=cfg["mark"], anim=cfg["anim"],
-                                anims=MARK_ANIMS,
-                                marks=list_marks(out_dir, _earned_achievement_ids(out_dir, db_path)),
-                                slots=branding_slots_payload(out_dir),
-                                roles=branding_roles_payload(out_dir)))
+                                anims=_branding.MARK_ANIMS,
+                                marks=_branding.list_marks(out_dir, _branding._earned_achievement_ids(out_dir, db_path)),
+                                slots=_branding.branding_slots_payload(out_dir),
+                                roles=_branding.branding_roles_payload(out_dir)))
         body = request.get_json(silent=True) or {}
-        cfg = load_branding(out_dir)
+        cfg = _branding.load_branding(out_dir)
         _before = (cfg.get("mark"), cfg.get("anim"))
-        _marks = list_marks(out_dir, _earned_achievement_ids(out_dir, db_path))
+        _marks = _branding.list_marks(out_dir, _branding._earned_achievement_ids(out_dir, db_path))
         have = {m["id"] for m in _marks}
         if "anim" in body:
             anim = str(body["anim"])
@@ -23139,7 +14784,7 @@ def create_app(out_dir: Path):
             # hand-rolled call, and answering 400 is how it finds that out. (An
             # ALREADY-STORED retired pick is a different case -- load_branding wears
             # classic for it, so nobody's install breaks.)
-            if anim not in MARK_ANIMS:
+            if anim not in _branding.MARK_ANIMS:
                 return jsonify({"error": "unknown animation"}), 400
             cfg["anim"] = anim
         if "mark" in body:
@@ -23167,18 +14812,18 @@ def create_app(out_dir: Path):
         # would be a worse answer than the honest ceiling.
         for k in ("anim_speed", "anim_scale", "glow_angle"):
             if k in body:
-                cfg[k] = _brand_num(k, body[k], cfg[k])
+                cfg[k] = _branding._brand_num(k, body[k], cfg[k])
         if "glow_color" in body:
-            colour = _brand_color(body["glow_color"], None)
+            colour = _branding._brand_color(body["glow_color"], None)
             if colour is None:
                 return jsonify({"error": "glow_color must be #rrggbb"}), 400
             cfg["glow_color"] = colour
-        save_branding(out_dir, cfg)
+        _branding.save_branding(out_dir, cfg)
         if (cfg.get("mark"), cfg.get("anim")) != _before:   # Interior Decorator: a real change only
-            telem_bump("skin_changed_runs", out_dir=out_dir)
+            _telemetry.telem_bump("skin_changed_runs", out_dir=out_dir)
         if cfg["anim"] == "eclipse":           # Eclipse: sun and moon in balance
-            telem_flag("eclipse_anim_triggered", out_dir=out_dir)
-        return jsonify(dict(_branding_tuning(cfg),
+            _telemetry.telem_flag("eclipse_anim_triggered", out_dir=out_dir)
+        return jsonify(dict(_branding._branding_tuning(cfg),
                             mark=cfg["mark"], anim=cfg["anim"]))
 
     @app.route("/api/branding/slot", methods=["POST"])
@@ -23194,7 +14839,7 @@ def create_app(out_dir: Path):
         extension, the same defense-in-depth this app already applies to real
         library thumbnails (see _thumb_for, above)."""
         slot = request.form.get("slot") or ""
-        if slot not in BANNER_SLOTS:
+        if slot not in _branding.BANNER_SLOTS:
             return jsonify({"error": "unknown slot"}), 400
         f = request.files.get("file")
         media_id = (request.form.get("media_id") or "").strip()
@@ -23206,29 +14851,29 @@ def create_app(out_dir: Path):
             if f is not None and f.filename:
                 head = f.stream.read(64)
                 f.stream.seek(0)
-                guard_webp_canvas(head, BANNER_MAX_SIDE)       # before libwebp commits a declared canvas
+                _branding.guard_webp_canvas(head, _branding.BANNER_MAX_SIDE)       # before libwebp commits a declared canvas
                 im = Image.open(f.stream)
             else:
                 # "From the gallery..." (Control Panel.dc.html:342) -- source the asset
                 # from the user's own library by media_id, via the same shared resolver
                 # every other media_id->file path uses. Images only; a video id simply
                 # resolves to no usable frame here.
-                hits = find_files_for_media_id(out_dir, media_id)
-                img_hit = next((p for p in hits if p.suffix.lower() in _IMAGE_EXTS), None)
+                hits = _scan.find_files_for_media_id(out_dir, media_id)
+                img_hit = next((p for p in hits if p.suffix.lower() in _scan._IMAGE_EXTS), None)
                 if img_hit is None:
                     return jsonify({"error": "no local image for that media id"}), 400
                 with open(img_hit, "rb") as fh:
-                    guard_webp_canvas(fh.read(64), BANNER_MAX_SIDE)
+                    _branding.guard_webp_canvas(fh.read(64), _branding.BANNER_MAX_SIDE)
                 im = Image.open(img_hit)
             im.load()
             buf = io.BytesIO()
             im.convert("RGBA").save(buf, format="PNG")
-        except ImageRefused as exc:
+        except _branding.ImageRefused as exc:
             return jsonify({"error": str(exc)}), 400
         except Exception:
             return jsonify({"error": "not a readable image"}), 400
-        item = add_slot_asset(out_dir, slot, buf.getvalue())   # neutral transform to start
-        return jsonify({"slot": slot, "item": item, "assets": list_slot_assets(out_dir, slot)})
+        item = _branding.add_slot_asset(out_dir, slot, buf.getvalue())   # neutral transform to start
+        return jsonify({"slot": slot, "item": item, "assets": _branding.list_slot_assets(out_dir, slot)})
 
     @app.route("/api/branding/slot/crop", methods=["POST"])
     @tier(LOGIN)
@@ -23247,9 +14892,9 @@ def create_app(out_dir: Path):
             if crop not in legacy:
                 return jsonify({"error": "unknown crop value"}), 400
             cropx = legacy[crop]
-        if not set_slot_crop(out_dir, slot, item_id, zoom=zoom, cropx=cropx, cropy=cropy):
+        if not _branding.set_slot_crop(out_dir, slot, item_id, zoom=zoom, cropx=cropx, cropy=cropy):
             return jsonify({"error": "unknown slot or asset"}), 400
-        return jsonify({"assets": list_slot_assets(out_dir, slot)})
+        return jsonify({"assets": _branding.list_slot_assets(out_dir, slot)})
 
     @app.route("/api/branding/slot/active", methods=["POST"])
     @tier(LOGIN)
@@ -23259,9 +14904,9 @@ def create_app(out_dir: Path):
         set_slot_active()'s own docstring for why."""
         body = request.get_json(silent=True) or {}
         slot, item_id = body.get("slot"), body.get("id")
-        if not set_slot_active(out_dir, slot, str(item_id) if item_id else None):
+        if not _branding.set_slot_active(out_dir, slot, str(item_id) if item_id else None):
             return jsonify({"error": "unknown slot or asset"}), 400
-        return jsonify({"slots": branding_slots_payload(out_dir)})
+        return jsonify({"slots": _branding.branding_slots_payload(out_dir)})
 
     @app.route("/api/branding/role", methods=["POST"])
     @tier(LOGIN)
@@ -23273,13 +14918,13 @@ def create_app(out_dir: Path):
         The spec is checked and the file written in branding_role_upload() -- read that, it is the
         whole path; this handler only reads the request. The cap on the request is set before the
         form is parsed, so a body far past ROLE_MAX_BYTES is a 413 and is never spooled."""
-        request.max_content_length = ROLE_MAX_BYTES + 64 * 1024     # the file, plus its form fields
+        request.max_content_length = _branding.ROLE_MAX_BYTES + 64 * 1024     # the file, plus its form fields
         if not _check_csrf(request.form):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
         slot = request.form.get("slot") or ""
-        if slot not in ROLE_SLOTS:
+        if slot not in _branding.ROLE_SLOTS:
             return jsonify({"error": "unknown slot"}), 400
-        body, status = branding_role_upload(
+        body, status = _branding.branding_role_upload(
             out_dir, slot, (request.form.get("key") or "").strip(),
             upload=request.files.get("file"), media_id=(request.form.get("media_id") or "").strip(),
             check_only=request.form.get("check") == "1")
@@ -23294,9 +14939,9 @@ def create_app(out_dir: Path):
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
         slot = str(body.get("slot") or "")          # a list or dict is not hashable: coerce before the lookup
-        if slot not in ROLE_SLOTS:
+        if slot not in _branding.ROLE_SLOTS:
             return jsonify({"error": "unknown slot"}), 400
-        out, status = branding_role_restore(out_dir, slot, str(body.get("key") or ""))
+        out, status = _branding.branding_role_restore(out_dir, slot, str(body.get("key") or ""))
         return jsonify(out), status
 
     @app.route("/api/branding/role/default/<slot>/<key>")
@@ -23308,11 +14953,11 @@ def create_app(out_dir: Path):
         pack does not carry is a plain 404."""
         from flask import abort
         import mimetypes
-        img = (ROLE_SLOTS.get(slot) or {}).get("images", {}).get(key)
+        img = (_branding.ROLE_SLOTS.get(slot) or {}).get("images", {}).get(key)
         if img is None:
             abort(404)
-        box = _get_container()
-        raw = box.get(_public_rel_to_coded(img["public"])) if box else None
+        box = _branding._get_container()
+        raw = box.get(_branding._public_rel_to_coded(img["public"])) if box else None
         if raw is None:
             abort(404)
         resp = app.response_class(raw, mimetype=mimetypes.guess_type(img["public"])[0]
@@ -23328,7 +14973,7 @@ def create_app(out_dir: Path):
         the deferred banner-earned-art masking (still local-UI-only pending the
         SQLite asset-bundling project), this route actually performs a write, so
         it gets the same real gate /api/skin already applies to earned skins."""
-        if not _mark_earned(out_dir, db_path, "the-great-library"):
+        if not _branding._mark_earned(out_dir, db_path, "the-great-library"):
             return jsonify({"error": "The Great Library hasn't been earned yet"}), 403
         f = request.files.get("file")
         if f is None or not f.filename:
@@ -23346,8 +14991,8 @@ def create_app(out_dir: Path):
             # The same two questions every user-picture upload asks first: a WebP's declared canvas
             # from its header (libwebp commits it all when Pillow merely opens the file), and only
             # the everyday formats ever opened.
-            guard_webp_canvas(raw[:64], ROLE_MAX_SIDE)
-            im = Image.open(io.BytesIO(raw), formats=ROLE_OPEN_FORMATS)
+            _branding.guard_webp_canvas(raw[:64], _branding.ROLE_MAX_SIDE)
+            im = Image.open(io.BytesIO(raw), formats=_branding.ROLE_OPEN_FORMATS)
             im.load()
             if is_webp:
                 art = raw
@@ -23355,12 +15000,12 @@ def create_app(out_dir: Path):
                 buf = io.BytesIO()
                 im.convert("RGBA").save(buf, format="PNG")
                 art = buf.getvalue()
-        except ImageRefused as exc:
+        except _branding.ImageRefused as exc:
             return jsonify({"error": str(exc)}), 400
         except Exception:
             return jsonify({"error": "not a readable image"}), 400
-        mark = add_custom_mark(out_dir, art, ext=".webp" if is_webp else ".png")
-        return jsonify({"mark": mark["id"], "marks": list_marks(out_dir)})
+        mark = _branding.add_custom_mark(out_dir, art, ext=".webp" if is_webp else ".png")
+        return jsonify({"mark": mark["id"], "marks": _branding.list_marks(out_dir)})
 
     @app.route("/api/branding/mark/custom/remove", methods=["POST"])
     @tier(LOGIN)
@@ -23369,10 +15014,10 @@ def create_app(out_dir: Path):
         LOGIN tier, same as the upload route above."""
         body = request.get_json(silent=True) or {}
         mark_id = str(body.get("id") or "")
-        if not remove_custom_mark(out_dir, mark_id):
+        if not _branding.remove_custom_mark(out_dir, mark_id):
             return jsonify({"error": "unknown custom mark"}), 400
-        cfg = load_branding(out_dir)
-        return jsonify({"mark": cfg["mark"], "marks": list_marks(out_dir)})
+        cfg = _branding.load_branding(out_dir)
+        return jsonify({"mark": cfg["mark"], "marks": _branding.list_marks(out_dir)})
 
     @app.route("/api/branding/banners/earned")
     @tier(LOGIN)
@@ -23387,7 +15032,7 @@ def create_app(out_dir: Path):
         return jsonify({"banners": [{
             "id": "great_library",
             "label": "The Great Library",
-            "earned": _mark_earned(out_dir, db_path, "the-great-library"),
+            "earned": _branding._mark_earned(out_dir, db_path, "the-great-library"),
             "png": "/branding/earned_banners/great_library.png",
         }]})
 
@@ -23409,13 +15054,13 @@ def create_app(out_dir: Path):
         body = body if isinstance(body, dict) else {}   # a JSON array/string/number -> 400, not 500
         if str(body.get("id") or "") != "great_library":
             return jsonify({"error": "unknown banner"}), 400
-        if not _mark_earned(out_dir, db_path, "the-great-library"):
+        if not _branding._mark_earned(out_dir, db_path, "the-great-library"):
             return jsonify({"error": "banner locked"}), 403
-        raw = _branding_bytes(_role_rel("earned_banners", "great_library.png"))
+        raw = _branding._branding_bytes(_branding._role_rel("earned_banners", "great_library.png"))
         record = {"kind": "earned", "banner_id": "great_library"}
-        if raw is None or not _render_banner_flat(out_dir, "banner_main", raw, record=record):
+        if raw is None or not _branding._render_banner_flat(out_dir, "banner_main", raw, record=record):
             return jsonify({"error": "banner art unavailable"}), 400
-        if not _set_worn_banner("banner_main", record):
+        if not _branding._set_worn_banner("banner_main", record):
             return jsonify({"error": "Couldn't save the banner choice; try again."}), 200
         return jsonify({"ok": True})
 
@@ -23438,14 +15083,14 @@ def create_app(out_dir: Path):
         pass (unlike GET/POST /api/branding just above, which only writes
         settings.json's branding picks -- ordinary app data, correctly broadened)."""
         body = request.get_json(silent=True) or {}
-        mark = str(body.get("mark") or load_branding(out_dir)["mark"])
+        mark = str(body.get("mark") or _branding.load_branding(out_dir)["mark"])
         # Whitelist before anything touches the shell: only a known cut mark id
         # may become an icon path (no traversal, no quoting surprises). Gated on
         # EARNED too (red team 2026-09-08): the Desktop .lnk icon IS the app's
         # real icon, so a locked reward mark's art must not become it any more
         # than it may become the active in-app mark -- the same 403 POST
         # /api/branding gives. Free/logo marks and earned bound marks pass.
-        _marks = list_marks(out_dir, _earned_achievement_ids(out_dir, db_path))
+        _marks = _branding.list_marks(out_dir, _branding._earned_achievement_ids(out_dir, db_path))
         if mark not in {m["id"] for m in _marks}:
             return jsonify({"error": "unknown mark (no .ico cut for it)"}), 400
         locked = next((m for m in _marks if m["id"] == mark and not m["earned"]), None)
@@ -23455,7 +15100,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": "mark locked",
                             "unlock": locked.get("unlock_name") or ""}), 403
         try:
-            lnk = make_launcher_shortcut(out_dir, mark)
+            lnk = _branding.make_launcher_shortcut(out_dir, mark)
         except RuntimeError as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 400
         return jsonify({"ok": True, "lnk": lnk})
@@ -23533,7 +15178,7 @@ def create_app(out_dir: Path):
             tmp.close()
             core, session = _gen_session()
             mid = core.upload_media(session, tmp.name)
-            telem_bump("uploads", out_dir=out_dir)        # first-upload milestone
+            _telemetry.telem_bump("uploads", out_dir=out_dir)        # first-upload milestone
             return jsonify({"media_id": str(mid)})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
@@ -23597,8 +15242,8 @@ def create_app(out_dir: Path):
             # (hooks/useImport.js), so this is only reached by a caller that sends more at
             # once. What it does not take it COUNTS, and says so in the answer (#82) -- it
             # used to drop everything past the cap without a word.
-            not_taken = max(0, len(files) - IMPORT_REQUEST_CAP)
-            for i, f in enumerate(files[:IMPORT_REQUEST_CAP]):
+            not_taken = max(0, len(files) - _scan.IMPORT_REQUEST_CAP)
+            for i, f in enumerate(files[:_scan.IMPORT_REQUEST_CAP]):
                 base = _os.path.basename(f.filename or "")
                 if not base:
                     not_taken += 1          # a part with no file name: nothing to import
@@ -23672,8 +15317,8 @@ def create_app(out_dir: Path):
         not in it; PixAI's refusal covers that case, and nothing is spent."""
         try:
             return any(j.get("lane") == core.UNLIMITED_LANE
-                       and j.get("status") not in core._JOBS_TERMINAL
-                       for j in core.read_jobs(out_dir))
+                       and j.get("status") not in _jobs._JOBS_TERMINAL
+                       for j in _jobs.read_jobs(out_dir))
         except Exception:
             return False
 
@@ -23905,9 +15550,9 @@ def create_app(out_dir: Path):
             return jsonify({"error": "authentication required"}), 401
         if request.method == "GET":
             session.setdefault("csrf", secrets.token_hex(16))
-            return jsonify({"prefs": account_prefs_get(out_dir, user),
+            return jsonify({"prefs": _account_prefs.account_prefs_get(out_dir, user),
                             "csrf": session["csrf"]})
-        if (request.content_length or 0) > 2 * ACCOUNT_PREFS_DOC_MAX:
+        if (request.content_length or 0) > 2 * _account_prefs.ACCOUNT_PREFS_DOC_MAX:
             return jsonify({"error": "That change is too large to save."}), 400
         body = request.get_json(silent=True)
         if not isinstance(body, dict):
@@ -23926,11 +15571,11 @@ def create_app(out_dir: Path):
         if "unset" in body and not isinstance(body["unset"], list):
             return jsonify({"error": "'unset' must be a list of keys."}), 400
         try:
-            prefs = account_prefs_update(out_dir, user, set_=body.get("set"),
+            prefs = _account_prefs.account_prefs_update(out_dir, user, set_=body.get("set"),
                                          unset=body.get("unset"))
-        except AccountPrefsError as e:
+        except _account_prefs.AccountPrefsError as e:
             return jsonify({"error": str(e)}), 400
-        except AccountPrefsBusy as e:
+        except _account_prefs.AccountPrefsBusy as e:
             return jsonify({"error": str(e)}), 503
         except OSError as e:
             return jsonify({"error": "Could not save preferences: "
@@ -23949,18 +15594,18 @@ def create_app(out_dir: Path):
         from moonglade import backup as core
         return jsonify({
             "version": core.__version__,
-            "display_version": display_version(core.__version__),
-            "pages": wiki_index(),
-            "glossary": wiki_glossary(),
-            "wiki_url": WIKI_WEB_URL,
+            "display_version": _about.display_version(core.__version__),
+            "pages": _about.wiki_index(),
+            "glossary": _about.wiki_glossary(),
+            "wiki_url": _about.WIKI_WEB_URL,
         })
 
     def _help_page_file(slug):
         """The page file for `slug`, looked up in the listing -- never a path built from
         the request. None for anything the listing did not find."""
-        if not _WIKI_SLUG_RE.match(str(slug or "")):
+        if not _about._WIKI_SLUG_RE.match(str(slug or "")):
             return None
-        return _wiki_pages_on_disk(wiki_dir()).get(slug)
+        return _about._wiki_pages_on_disk(_about.wiki_dir()).get(slug)
 
     @app.route("/api/help/page/<slug>")
     @tier(LOGIN)
@@ -23975,7 +15620,7 @@ def create_app(out_dir: Path):
         except OSError as e:
             return jsonify({"error": "Could not read that page: "
                                      + _redact_host_paths(str(e))[:160]}), 500
-        return jsonify({"slug": slug, "markdown": md, "url": wiki_web_url(slug)})
+        return jsonify({"slug": slug, "markdown": md, "url": _about.wiki_web_url(slug)})
 
     @app.route("/api/help/online/<slug>")
     @tier(LOGIN)
@@ -23990,10 +15635,10 @@ def create_app(out_dir: Path):
         try:
             md = p.read_text(encoding="utf-8")
         except OSError:
-            return jsonify({"differs": False, "url": wiki_web_url(slug)})
-        behind = bool((_update_cache.get("payload") or {}).get("behind"))
-        return jsonify({"differs": wiki_online_differs(slug, md, behind),
-                        "url": wiki_web_url(slug)})
+            return jsonify({"differs": False, "url": _about.wiki_web_url(slug)})
+        behind = bool((_updater._update_cache.get("payload") or {}).get("behind"))
+        return jsonify({"differs": _about.wiki_online_differs(slug, md, behind),
+                        "url": _about.wiki_web_url(slug)})
 
     @app.route("/api/help/about")
     @tier(LOGIN)
@@ -24002,7 +15647,7 @@ def create_app(out_dir: Path):
         between the what's-new sheet and About after an update), the art pack, the earlier
         entries. Whether a newer release is out is /api/update/check's to say, not this."""
         from moonglade import backup as core
-        return jsonify(about_payload(core.__version__, _container_path()))
+        return jsonify(_about.about_payload(core.__version__, _branding._container_path()))
 
     def _log_gen_failure(where, exc, params=None):
         """Record a failed spend attempt in the server log. Returns the redacted message so a
@@ -24293,7 +15938,7 @@ def create_app(out_dir: Path):
         mirror session (whose read may refresh a token) is not reached for a quote."""
         if core.READ_ONLY or core._read_only_now():
             return gsession
-        return core._session_for_create(gsession)
+        return _mirror._session_for_create(gsession)
 
     def _recipe_budget_check(core, gsession, built, plan):
         """Review F7: with recipes, a prompt a cell's value made too long would only be
@@ -24359,7 +16004,7 @@ def create_app(out_dir: Path):
                                   "was sent.")
         else:
             run_seed = client_rs
-        lists = runs.lists_from_prefs(account_prefs_get(out_dir, user))
+        lists = runs.lists_from_prefs(_account_prefs.account_prefs_get(out_dir, user))
         plan = runs.plan_jobs(body.get("prompt") or "", lists, vm, count, run_seed)
         if plan.get("error"):
             raise _RunRefused(plan["error"])
@@ -24863,7 +16508,7 @@ def create_app(out_dir: Path):
                 return jsonify({"error": "describe the edit"}), 400
             task_id = core.submit(gsession, req)["task_id"]
             # (edits is counted from the catalog's edit rows since 2026-10-02.)
-            telem_set_add("tools", "edit", out_dir=out_dir)
+            _telemetry.telem_set_add("tools", "edit", out_dir=out_dir)
             return jsonify({"task_id": task_id})
         except Exception as e:
             return jsonify({"error": _log_gen_failure(
@@ -24933,7 +16578,7 @@ def create_app(out_dir: Path):
         # Stored session (no bootstrap) -- as the gate uses -- and only while the Mirror is ON,
         # like the scene routes: make_mirror_session can renew the token, and nothing may renew
         # it as a side effect while the owner has the Mirror switched off (#71).
-        s = core.make_mirror_session() if core.mirror_enabled() else None
+        s = _mirror.make_mirror_session() if _mirror.mirror_enabled() else None
 
         def _row(pr):
             row = {"key": pr.get("key"), "label": pr.get("label"),
@@ -24988,7 +16633,7 @@ def create_app(out_dir: Path):
         # invariant-#7 cross-identity violation). mirror_enabled() catches OFF; make_mirror_session()
         # is None catches ON-but-no-usable-session. make_mirror_session is READ_ONLY-guarded and
         # never raises, so it is safe to call as a gate.
-        if not core.mirror_enabled() or core.make_mirror_session() is None:
+        if not _mirror.mirror_enabled() or _mirror.make_mirror_session() is None:
             return jsonify({"error": "Mirror to PixAI must be armed to run AI presets — "
                                      "nothing was submitted, no credits spent"}), 409
         try:
@@ -25044,16 +16689,16 @@ def create_app(out_dir: Path):
         front-end knows (the /branding/ route translates them back)."""
         from moonglade import backup as core
         exts = (".webp", ".png", ".jpg", ".jpeg")
-        emo_prefix = (_role_rel("emotion") + "/").lower()
+        emo_prefix = (_branding._role_rel("emotion") + "/").lower()
         found = {}
-        box = _get_container()
+        box = _branding._get_container()
         if box is not None:
             for rel in box.paths():
                 low = rel.lower()
                 if low.startswith(emo_prefix) and low.endswith(exts):
                     found.setdefault(Path(rel).stem,
                                      "/branding/bridge/emotion/" + Path(rel).name)
-        edir = _role_dir("emotion")
+        edir = _branding._role_dir("emotion")
         if edir.is_dir():
             for p in sorted(edir.iterdir()):
                 if p.is_file() and p.suffix.lower() in exts:
@@ -25079,10 +16724,10 @@ def create_app(out_dir: Path):
         Mirror-gated exactly like /api/enhance -- the AI-Tools tier only exists when the
         Bridge is armed. LOGIN tier; read-only, spends nothing."""
         from moonglade import backup as core
-        if not core.mirror_enabled() or core.make_mirror_session() is None:
+        if not _mirror.mirror_enabled() or _mirror.make_mirror_session() is None:
             return jsonify({"error": "Mirror to PixAI must be armed to browse AI Tools"}), 409
         try:
-            raw = scene_catalog(core, core.make_mirror_session())
+            raw = scene_catalog(core, _mirror.make_mirror_session())
         except Exception as e:
             return jsonify({"error": _log_gen_failure("/api/scenes", e, None)[:200]}), 200
         return jsonify({"scenes": [scene_row(sc) for sc in raw if sc.get("sceneId")]})
@@ -25097,7 +16742,7 @@ def create_app(out_dir: Path):
         routes the submit through the JWT. Body: {scene_id, media_ids[], preset, custom?,
         selector_values?}. Login required; returns {task_id}."""
         from moonglade import backup as core
-        if not core.mirror_enabled() or core.make_mirror_session() is None:
+        if not _mirror.mirror_enabled() or _mirror.make_mirror_session() is None:
             return jsonify({"error": "Mirror to PixAI must be armed to run AI Tools — "
                                      "nothing was submitted, no credits spent"}), 409
         try:
@@ -25112,7 +16757,7 @@ def create_app(out_dir: Path):
             if not media:
                 return jsonify({"error": "pick a source image"}), 400
             task_id = core.submit_scene(
-                core.make_mirror_session(), scene_id, media,
+                _mirror.make_mirror_session(), scene_id, media,
                 preset=str(p.get("preset") or "random"), custom=p.get("custom"),
                 selector_values=(p.get("selector_values") or p.get("selectorValues") or []))
             # Doorwarden telemetry is DEFERRED to terminal success (see _fire_scene_telemetry),
@@ -25231,7 +16876,7 @@ def create_app(out_dir: Path):
             # "which boxes did we actually ask about" is half the diagnosis.
             fix_params = {"mediaId": req.media_id, "boxes": req.boxes}
             task_id = core.submit(session, req)["task_id"]
-            telem_set_add("tools", "fix", out_dir=out_dir)   # Full Toolbox
+            _telemetry.telem_set_add("tools", "fix", out_dir=out_dir)   # Full Toolbox
             return jsonify({"task_id": task_id})
         except Exception as e:
             # Fix is the ONE drawer action that always spends -- no free card ever covers a
@@ -25275,7 +16920,7 @@ def create_app(out_dir: Path):
         # of a board's filename (_loom_kv_path below) is a separate concern (per-board
         # name collisions within one account's own dir, not account identity) and still
         # uses quote() unchanged.
-        d = _paths.loom_root(out_dir) / "kv" / _account_key(user)
+        d = _paths.loom_root(out_dir) / "kv" / _account_prefs._account_key(user)
         d.mkdir(parents=True, exist_ok=True)
         return d
 
@@ -25429,12 +17074,12 @@ def create_app(out_dir: Path):
     def _loom_journal_path(user):
         d = _paths.loom_root(out_dir) / "_submits"
         d.mkdir(parents=True, exist_ok=True)
-        return d / (_account_key(user) + ".jsonl")
+        return d / (_account_prefs._account_key(user) + ".jsonl")
 
     def _loom_journal_load(user):
         """The account's index, read once (callers hold _loom_journal_lock). Entries older
         than 14 days are dropped and the file rewritten, on this first read only."""
-        k = _account_key(user)
+        k = _account_prefs._account_key(user)
         if k in _loom_journal:
             return _loom_journal[k]
         idx = {"subs": {}, "tasks": {}}
@@ -25510,7 +17155,7 @@ def create_app(out_dir: Path):
     # has already matched LOOM_BED_FILE_RE and then checks _is_under the CALLER's own folder, so
     # neither a crafted name nor another account's bed can be reached.
     def _loom_beds_dir(user):
-        return _paths.loom_root(out_dir) / "_beds" / _account_key(user)
+        return _paths.loom_root(out_dir) / "_beds" / _account_prefs._account_key(user)
 
     # Spend review N5: an upload or a bundle import killed mid-write leaves its temp file in the
     # account's bed folder, invisible to the unused list and the sweep (they match finished
@@ -25540,7 +17185,7 @@ def create_app(out_dir: Path):
         d = _loom_beds_dir(user)
         p = d / name
         try:
-            if not _is_under(p.resolve(), d.resolve()) or not p.is_file():
+            if not _scan._is_under(p.resolve(), d.resolve()) or not p.is_file():
                 return None
         except OSError:
             return None
@@ -25793,7 +17438,7 @@ __DESIGN_TOKENS__
     @tier(LOGIN)
     def app_page():
         session.setdefault("csrf", secrets.token_hex(16))
-        brand = brand_context(out_dir)
+        brand = _branding.brand_context(out_dir)
         stats = catalog_counts(db_path)
         # First-run wizard gating -- SAME computation as classic's index() (see its own
         # long comment on why this is a fresh config.json read, not the module-cached
@@ -25812,7 +17457,7 @@ __DESIGN_TOKENS__
         # the resulting UI moment (a Setup Wizard phase vs. standalone) is a
         # frontend decision -- this flag is UI-agnostic on purpose, same as
         # needs_key above, so either caller can drive it.
-        needs_assets = moonglade_assets.needs_download(_container_path())
+        needs_assets = moonglade_assets.needs_download(_branding._container_path())
         boot = {
             "stats": stats,
             "needs_key": needs_key,
@@ -25974,10 +17619,10 @@ __DESIGN_TOKENS__
             }
 
         if group == "series":
-            by_task, by_sid = series_index(db_path)
+            by_task, by_sid = _series.series_index(db_path)
             # The whole filtered set, ids + the four grouping columns only, in sort
             # order. Bounded (measured in dev/tests/test_series_grouping.py).
-            unit_order, members = fold_series_units(
+            unit_order, members = _series.fold_series_units(
                 list_group_rows(db_path, **filters), by_task)
             total = len(unit_order)
             start = (page - 1) * page_size
@@ -25985,7 +17630,7 @@ __DESIGN_TOKENS__
             # Resolve this page's units to ONE cover media_id each (the newest
             # surviving image of the unit), then fetch just those full rows -- one
             # query, at most page_size rows.
-            cover_ids = [str(_series_cover_row(members[k]).get("media_id") or "")
+            cover_ids = [str(_series._series_cover_row(members[k]).get("media_id") or "")
                          for k in page_keys]
             full = {str(r.get("media_id")): r
                     for r in rows_for_media_ids(db_path, cover_ids)}
@@ -26269,7 +17914,7 @@ __DESIGN_TOKENS__
         # generate job). Jobs are always the dock's own runs (source 'api'), so a
         # feed narrowed to backed-up or imported rows has no live rows to add.
         try:
-            jobs = core.read_jobs(out_dir)
+            jobs = _jobs.read_jobs(out_dir)
         except Exception:
             jobs = []
         tasks_in_window = {str(r["task_id"] or "") for r in rows if r["task_id"]}
@@ -26524,7 +18169,7 @@ __DESIGN_TOKENS__
         this doesn't repeat a primary-key SELECT they already paid for. It is a cache, not
         an override: pass a DIFFERENT row and you get a different file, which is why only
         the two callers holding this exact mid's row use it."""
-        return find_local_video_file(out_dir, mid,
+        return _scan.find_local_video_file(out_dir, mid,
                                      row if row is not None else get_row(db_path, mid))
 
     @app.route("/api/loom/handoff", methods=["POST"])
@@ -26573,20 +18218,20 @@ __DESIGN_TOKENS__
             fdir = _paths.loom_root(out_dir) / "_frames"
             fdir.mkdir(parents=True, exist_ok=True)
             png = fdir / (mid + "_last.png")
-            if not core.extract_last_frame(str(vid), str(png), at_seconds=trim_out):
+            if not _media_tools.extract_last_frame(str(vid), str(png), at_seconds=trim_out):
                 return jsonify({"error": "could not extract the last frame (ffmpeg)"}), 200
             frame_mid = core.upload_media(session, str(png))
             make_thumbnail(png, thumb_dir / (str(frame_mid) + ".jpg"))
             # media_tools.duration answers at full precision; 2dp is this route's own
             # display choice for the Edit Bay's reel, made where it is visible.
-            _dur = core.duration(str(vid))
+            _dur = _media_tools.duration(str(vid))
             dur = round(_dur, 2) if _dur is not None else None
             # WHERE the frame came from, by the primitive's own rule (frame_seek_point): the
             # trim point it seeked to, or -- the clip's last frame -- the clip's length (None
             # when it could not be measured). The Loom's anchor records this (owner walk
             # 2026-09-30: a frame spliced from E·01's end was recorded "at 0.0 s", because the
             # card did not know its clip's length).
-            seek = core.frame_seek_point(trim_out, _dur)
+            seek = _media_tools.frame_seek_point(trim_out, _dur)
             at_end = seek is None
             at = dur if at_end else round(seek, 2)
             return jsonify({"frame_media_id": str(frame_mid), "duration": dur,
@@ -26628,7 +18273,7 @@ __DESIGN_TOKENS__
             # explicit-seek branch); None keeps the EOF-relative path for the last frame.
             for key, at in (("first", 0.0), ("last", None)):
                 png = fdir / ("{}_{}.png".format(mid, key))
-                if not core.extract_last_frame(str(vid), str(png), at_seconds=at):
+                if not _media_tools.extract_last_frame(str(vid), str(png), at_seconds=at):
                     continue
                 try:
                     fmid = str(core.upload_media(session, str(png)))
@@ -26665,7 +18310,7 @@ __DESIGN_TOKENS__
             if vid is None:
                 return jsonify({"error": "video file not found locally", "duration": None}), 200
             from moonglade import backup as core
-            _dur = core.duration(str(vid))   # 2dp is this route's display choice, not the probe's
+            _dur = _media_tools.duration(str(vid))   # 2dp is this route's display choice, not the probe's
             return jsonify({"duration": round(_dur, 2) if _dur is not None else None})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "duration": None}), 200
@@ -26758,7 +18403,7 @@ __DESIGN_TOKENS__
         raw = fdir / ".raw-{}-{}.png".format(tag, frame)
         small = fdir / ".small-{}-{}.png".format(tag, frame)
         try:
-            if not core.frame_at(str(vid), seek, str(raw)):
+            if not _media_tools.frame_at(str(vid), seek, str(raw)):
                 return jsonify({"error": "no frame could be taken from that clip (is ffmpeg installed?)"}), 404
             src = raw
             if Image is not None:
@@ -26988,7 +18633,7 @@ __DESIGN_TOKENS__
                 board_id, card_id = str(t.get("board_id") or ""), str(t.get("card_id") or "")
                 if not _LOOM_ID_RE.match(board_id) or not _LOOM_ID_RE.match(card_id):
                     return jsonify({"error": "This render names no valid shot, so nothing was sent."}), 400
-        sending_key = (_account_key(user), submit_id) if journalled else None
+        sending_key = (_account_prefs._account_key(user), submit_id) if journalled else None
         try:
             _core._check_read_only(_core._SUBMIT_ACTION_DEFAULT)
         except _core.PixAIError as e:
@@ -27228,9 +18873,9 @@ __DESIGN_TOKENS__
             try:                       # Master of the Loom + Storyweaver telemetry
                 mode = str(p.get("mode") or "R2V").upper()
                 if mode in ("I2V", "FLF", "R2V"):
-                    telem_set_add("video_modes", mode.lower(), out_dir=out_dir)
+                    _telemetry.telem_set_add("video_modes", mode.lower(), out_dir=out_dir)
                 if str(p.get("origin") or "") == "loom-shot":
-                    telem_bump("storyboards", out_dir=out_dir)
+                    _telemetry.telem_bump("storyboards", out_dir=out_dir)
             except Exception:
                 pass
             _journal(state="submitted", task_id=str(task_id))
@@ -27276,7 +18921,7 @@ __DESIGN_TOKENS__
             return jsonify({"state": "unknown"})
         with _loom_journal_lock:
             e = dict(_loom_journal_load(user)["subs"].get(sid) or {})
-            live = (_account_key(user), sid) in _loom_sending_now
+            live = (_account_prefs._account_key(user), sid) in _loom_sending_now
         if not e:
             return jsonify({"state": "unknown"})
         out = {"state": e.get("state") or "unknown"}
@@ -27307,7 +18952,7 @@ __DESIGN_TOKENS__
             # unclear, it is slow. Releasing it would free the shot for a second paid render
             # while this one is still inside core.submit. (A send that died with an earlier
             # process is not in the set, so it can still be released.)
-            if (_account_key(user), sid) in _loom_sending_now:
+            if (_account_prefs._account_key(user), sid) in _loom_sending_now:
                 return jsonify({"error": "This render is still being sent. Wait for PixAI's answer, "
                                          "then check again.", "sending": True}), 409
             if e.get("state") == "submitted" and e.get("task_id"):
@@ -27334,7 +18979,7 @@ __DESIGN_TOKENS__
             proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                     stderr=subprocess.PIPE,
                                     text=True, bufsize=1, encoding="utf-8", errors="replace",
-                                    creationflags=core.NO_WINDOW)
+                                    creationflags=_media_tools.NO_WINDOW)
             with _export_lock:
                 _export_job["proc"] = proc
             # ffmpeg's last few non-progress lines are its whole explanation on a refusal;
@@ -27434,7 +19079,7 @@ __DESIGN_TOKENS__
         dur = None
         try:
             from moonglade import backup as core
-            d = core.duration(str(_loom_beds_dir(user) / name))
+            d = _media_tools.duration(str(_loom_beds_dir(user) / name))
             dur = round(d, 3) if d else None
         except Exception:
             dur = None
@@ -27471,7 +19116,7 @@ __DESIGN_TOKENS__
             return _loom_beds_unreadable_answer(user, e)
         total = sum(b for (_n, b) in rows)
         return jsonify({"files": [{"file": n, "bytes": b} for (n, b) in rows],
-                        "count": len(rows), "bytes": total, "h": _fmt_size(total)})
+                        "count": len(rows), "bytes": total, "h": _health._fmt_size(total)})
 
     @app.route("/api/loom/beds/sweep", methods=["POST"])
     @tier(LOGIN)
@@ -27532,7 +19177,7 @@ __DESIGN_TOKENS__
             return None
         try:
             if (p.name.endswith(".part") or not p.is_file() or p.stat().st_size <= 0
-                    or not _is_under(p.resolve(), out_dir.resolve())):
+                    or not _scan._is_under(p.resolve(), out_dir.resolve())):
                 return None
         except OSError:
             return None
@@ -27658,7 +19303,7 @@ __DESIGN_TOKENS__
         nothing is lost) or refuses and names the shot (when real audio would be thrown out
         of sync by it). See the span pre-pass below. body: {clips:[{mid,in,out}], total_seconds}"""
         from moonglade import backup as core
-        if not core.ffmpeg_path():
+        if not _media_tools.ffmpeg_path():
             return jsonify({"error": "ffmpeg is not on PATH -- install it to export."}), 400
         # ffprobe deliberately is NOT gated here alongside ffmpeg -- media_tools resolves the
         # two separately for exactly this reason. It usually ships in the
@@ -27809,7 +19454,7 @@ __DESIGN_TOKENS__
                 % (len(unmeasurable), ", ".join(unmeasurable[:5]),
                    " ffprobe is not installed -- it ships with the full ffmpeg build, and "
                    "installing it restores measured lengths and audio."
-                   if not core.ffprobe_path() else ""))
+                   if not _media_tools.ffprobe_path() else ""))
             try:
                 import logging as _logging
                 _logging.getLogger(__name__).warning(
@@ -27818,7 +19463,7 @@ __DESIGN_TOKENS__
                     "padding with a guessed length.",
                     len(unmeasurable), ", ".join(unmeasurable[:5]),
                     " (ffprobe is not on PATH; it ships with the full ffmpeg build)"
-                    if not core.ffprobe_path() else "")
+                    if not _media_tools.ffprobe_path() else "")
             except Exception:
                 pass
         need_silence = audio_track and any(not ha for (_p, _ci, _co, ha, _cr, _m) in segs)
@@ -27877,7 +19522,7 @@ __DESIGN_TOKENS__
             audio_track = True           # the bed alone is an audio track when the shots had none
         # The binary comes from media_tools, not a bare name on PATH -- the one
         # resolution, shared with every other ffmpeg call in the app.
-        cmd = [core.ffmpeg_path(), "-y"]
+        cmd = [_media_tools.ffmpeg_path(), "-y"]
         for (path, _ci, _co, _ha, _cr, _m) in segs:
             cmd += ["-i", path]
         if need_silence:
@@ -27942,7 +19587,7 @@ __DESIGN_TOKENS__
     # id already resolvable on the receiving machine is simply skipped (both sides already
     # have it); one that isn't gets copied into imported/ and cataloged fresh. That also
     # makes re-importing the same bundle twice a no-op the second time.
-    _BUNDLE_VIDEO_EXTS = _VIDEO_EXTS   # THE video extension set, not a fourth copy of it.
+    _BUNDLE_VIDEO_EXTS = _scan._VIDEO_EXTS   # THE video extension set, not a fourth copy of it.
     # It used to be a re-typed literal here, because the set lived in backup.py and
     # backup.py imports this file, so a module-level import back the other way is a
     # cycle. The 2026-08-23 library-scan collapse moved the set into THIS module's
@@ -28025,7 +19670,7 @@ __DESIGN_TOKENS__
         images by design. Same fallback /api/loom/export already uses for exactly this
         reason: catalog row -> is_video + filename -> out_dir/filename. Returns a Path
         or None."""
-        paths = find_files_for_media_id(out_dir, mid)
+        paths = _scan.find_files_for_media_id(out_dir, mid)
         if paths:
             return paths[0]
         row = get_row(db_path, mid)
@@ -28224,7 +19869,7 @@ __DESIGN_TOKENS__
                 continue  # already have it -- both sides share this media, nothing to do
             imported_dir.mkdir(parents=True, exist_ok=True)
             dest = imported_dir / "{}{}".format(mid, ext)
-            if not _is_under(dest.resolve(), imported_dir.resolve()):
+            if not _scan._is_under(dest.resolve(), imported_dir.resolve()):
                 continue
             # Streamed under a cap into a temp file, then moved into place: a huge or
             # truncated entry never leaves a partial picture behind (Invariant 3).
@@ -28354,11 +19999,11 @@ __DESIGN_TOKENS__
             # and fifty registered rows plus one real phase used to read as fifty-one.
             with _gen_phase_lock:
                 _confirmed = set(_gen_phase_seen)
-            _live = sum(1 for j in core.read_jobs(out_dir)
-                        if j.get("status") not in core._JOBS_TERMINAL
+            _live = sum(1 for j in _jobs.read_jobs(out_dir)
+                        if j.get("status") not in _jobs._JOBS_TERMINAL
                         and (j.get("type") or "generate") == "generate"
                         and str(j.get("job_id") or "") in _confirmed)
-            telem_max("jobs_concurrent", _live, out_dir=out_dir)
+            _telemetry.telem_max("jobs_concurrent", _live, out_dir=out_dir)
         except Exception:
             pass
 
@@ -28383,15 +20028,15 @@ __DESIGN_TOKENS__
             return
         identity, emotion_key = pend
         try:
-            telem_bump("enhances", out_dir=out_dir)                        # first-enhance milestone
-            telem_set_add("tools", "enhance", out_dir=out_dir)             # Full Toolbox
-            telem_set_add("enhance_workflows", identity, out_dir=out_dir)  # Enhance Adept: distinct rituals
-            telem_set_add("bridge_gen_tasks", str(tid), out_dir=out_dir)   # Speak, Friend: any enhance is a bridge gen (distinct task, re-poll-safe)
+            _telemetry.telem_bump("enhances", out_dir=out_dir)                        # first-enhance milestone
+            _telemetry.telem_set_add("tools", "enhance", out_dir=out_dir)             # Full Toolbox
+            _telemetry.telem_set_add("enhance_workflows", identity, out_dir=out_dir)  # Enhance Adept: distinct rituals
+            _telemetry.telem_set_add("bridge_gen_tasks", str(tid), out_dir=out_dir)   # Speak, Friend: any enhance is a bridge gen (distinct task, re-poll-safe)
             key = _BRIDGE_PRESET_KEY_BY_NAME.get(identity)                 # only the six known presets map; a non-preset enhance -> nothing
             if key:
-                telem_set_add("enhance_tools", key, out_dir=out_dir)       # a gen-drawer enhance tool exercised (Blades of Gondolin)
+                _telemetry.telem_set_add("enhance_tools", key, out_dir=out_dir)       # a gen-drawer enhance tool exercised (Blades of Gondolin)
             if emotion_key:                                                # Change-Emotion carried the picked expression
-                telem_set_add("enhance_emotions", emotion_key, out_dir=out_dir)  # one of the emotion universe used
+                _telemetry.telem_set_add("enhance_emotions", emotion_key, out_dir=out_dir)  # one of the emotion universe used
         except Exception:                                                  # noqa: BLE001
             pass
 
@@ -28414,8 +20059,8 @@ __DESIGN_TOKENS__
         if not scene_id:
             return
         try:
-            telem_set_add("scenes", scene_id, out_dir=out_dir)   # Doorwarden: distinct scenes run
-            telem_set_add("bridge_gen_tasks", str(tid), out_dir=out_dir)   # Speak, Friend: a scene is a bridge gen (distinct task, re-poll-safe)
+            _telemetry.telem_set_add("scenes", scene_id, out_dir=out_dir)   # Doorwarden: distinct scenes run
+            _telemetry.telem_set_add("bridge_gen_tasks", str(tid), out_dir=out_dir)   # Speak, Friend: a scene is a bridge gen (distinct task, re-poll-safe)
         except Exception:                                        # noqa: BLE001
             pass
 
@@ -28438,7 +20083,7 @@ __DESIGN_TOKENS__
                 vid = _loom_complete_clip(str(mid))
                 if vid is None:
                     continue
-                d = core.duration(str(vid))
+                d = _media_tools.duration(str(vid))
                 return round(d, 2) if d is not None and d > 0 else None
         except Exception:                                      # noqa: BLE001
             return None
@@ -28592,9 +20237,9 @@ __DESIGN_TOKENS__
         Update button and its confirm."""
         from moonglade import backup as core
         try:
-            _reconcile_orphan_jobs(min_age=core.JOBS_ORPHAN_SWEEP_AGE)
-            jobs = core.read_jobs(out_dir)
-            core.maybe_compact_jobs(out_dir)   # keep the append-only log bounded
+            _reconcile_orphan_jobs(min_age=_jobs.JOBS_ORPHAN_SWEEP_AGE)
+            jobs = _jobs.read_jobs(out_dir)
+            _jobs.maybe_compact_jobs(out_dir)   # keep the append-only log bounded
         except Exception:
             jobs = []
         # Sessions R + Y: the gift box's live count (R4b) rides this same poll, and a job this
@@ -28616,7 +20261,7 @@ __DESIGN_TOKENS__
         notice = server_notice(local=_is_local_request())
         if notice and notice.get("fix"):
             notice["fix"]["csrf"] = session.setdefault("csrf", secrets.token_hex(16))
-        return jsonify({"jobs": jobs, "update": update_notice(), "inbox": inbox_live,
+        return jsonify({"jobs": jobs, "update": _updater.update_notice(), "inbox": inbox_live,
                         "notice": notice})
 
     @app.route("/api/jobs", methods=["POST"])
@@ -28669,8 +20314,8 @@ __DESIGN_TOKENS__
         body = request.get_json(silent=True) or {}
         if body.get("finished"):
             try:
-                for j in core.read_jobs(out_dir):
-                    if j.get("status") in core._JOBS_TERMINAL:
+                for j in _jobs.read_jobs(out_dir):
+                    if j.get("status") in _jobs._JOBS_TERMINAL:
                         _log_job(j.get("job_id"), dismissed=True)
             except Exception:
                 pass
@@ -28716,7 +20361,7 @@ __DESIGN_TOKENS__
         return jsonify(out), 200
 
     def _recipe_user_id(core, gsession):
-        uid = str(core._client_of(gsession).user_id or "")
+        uid = str(_pixai_client._client_of(gsession).user_id or "")
         if not uid:
             uid = core.resolve_user_id(gsession)
         return uid
@@ -29088,7 +20733,7 @@ __DESIGN_TOKENS__
         try:
             core, gsession = _gen_session()
             return jsonify(_recipes().model_old_bookmarks(
-                gsession, core.present_as_web(gsession), _recipe_user_id(core, gsession),
+                gsession, _mirror.present_as_web(gsession), _recipe_user_id(core, gsession),
                 _saved_kind()))
         except Exception as e:                                   # noqa: BLE001
             return _recipe_fail(e, rows=[])
@@ -29203,7 +20848,7 @@ __DESIGN_TOKENS__
             return
         try:
             from moonglade import backup as core
-            jobs_by_id, _order, _n = core._reconstruct_jobs(out_dir)
+            jobs_by_id, _order, _n = _jobs._reconstruct_jobs(out_dir)
             for add in _inbox().task_activity(tasks, jobs_by_id):
                 _log_job(add["job_id"], status="done", type="generate", label=add["label"],
                          source="pixai", via="inbox")
@@ -29708,17 +21353,17 @@ def main():
     # is additive and idempotent (create_app runs it again, to no effect); it is
     # repeated here so a legacy install's role-tree migration happens BEFORE the
     # flats are looked for, not after.
-    ensure_branding_discovery_tree()
-    _migrate_root_banner_flats(out_dir)
+    _branding.ensure_branding_discovery_tree()
+    _branding._migrate_root_banner_flats(out_dir)
     # Same rule, same reason: this WRITES settings.json's branding slots, which
     # are not out_dir-scoped, so it stays out of create_app().
     # Ordered last of the three -- after the scaffold, so a legacy install's
     # assets are already in the coded dirs to resolve against, and before
     # create_app(), so its ensure pass stamps renders with a recorded pick.
-    _record_slot_resolution(out_dir)
+    _branding._record_slot_resolution(out_dir)
     # The pack's Explorer file type, per-user and fail-soft (register_pack_file_type). After
     # the rename and the scaffold, so the pack and a custom mark's .ico are where it looks.
-    register_pack_file_type(out_dir)
+    _branding.register_pack_file_type(out_dir)
     app = create_app(out_dir)
     url = "{}://{}:{}/".format(
         scheme, "localhost" if args.host == "0.0.0.0" else args.host, args.port)
@@ -29809,7 +21454,7 @@ def main():
     # be served. AFTER startup, never blocking it: this is a daemon thread doing a disk walk,
     # and its only job is to make the FIRST Health open of the session a memory read instead
     # of a full library walk with the user watching. See _health_prime / health_cached.
-    _health_prime(out_dir, db_path)
+    _health._health_prime(out_dir, db_path)
     # Look for things outside the app that still name its old files (a scheduled task, a
     # Claude registration, a shortcut): off-thread, for the notice (server_notice).
     _outside_prime()

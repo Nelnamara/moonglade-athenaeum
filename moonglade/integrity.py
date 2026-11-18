@@ -62,6 +62,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from moonglade import paths as _paths
+from moonglade import scan as _scan
 
 REPORT_CSV = "integrity_report.csv"
 REPORT_JSON = "integrity_report.json"
@@ -268,9 +269,9 @@ def _trash_ids(out, g):
     same folder, so those are not orphans."""
     ids = set()
     try:
-        with os.scandir(out / g.DELETED_DIRNAME) as it:
+        with os.scandir(out / _scan.DELETED_DIRNAME) as it:
             for e in it:
-                ids.add(g.media_id_of(e.name))
+                ids.add(_scan.media_id_of(e.name))
     except OSError:
         pass
     return ids
@@ -282,13 +283,13 @@ def _index(out, g):
     (kind, media_id), and every thumbnail's size by media id."""
     by_rel = {}
     by_mid = defaultdict(list)                         # (kind, media_id) -> [MediaEntry]
-    for e in g.scan_library(out, kinds=("image", "video"), exclude=g.HEALTH_EXCLUDE):
+    for e in _scan.scan_library(out, kinds=("image", "video"), exclude=_scan.HEALTH_EXCLUDE):
         by_rel[str(e.rel).replace("\\", "/")] = e
         by_mid[(e.kind, e.media_id)].append(e)
 
     thumbs = {}                                        # media_id -> bytes
     try:
-        with os.scandir(out / g.GALLERY_DIRNAME / "thumbs") as it:
+        with os.scandir(out / _scan.GALLERY_DIRNAME / "thumbs") as it:
             for e in it:
                 if e.name.lower().endswith(".jpg"):
                     try:
@@ -363,7 +364,7 @@ def verify_library(out_dir, db_path, deep=False, progress=None):
         if r.get("media_id"):
             catalog_ids.add(str(r["media_id"]))
     for done, r in enumerate(with_file, 1):
-        line = _line_for(r, _row_check(r, index, deep, g.GALLERY_DIRNAME), g)
+        line = _line_for(r, _row_check(r, index, deep, _scan.GALLERY_DIRNAME), g)
         if line:
             lost += 1 if line[4] == "no" else 0
             lines.append(line)
@@ -383,7 +384,7 @@ def verify_library(out_dir, db_path, deep=False, progress=None):
 
     trash = _trash_ids(out, g)
     for m in sorted(set(thumbs) - catalog_ids - trash):
-        lines.append((m, P_ORPHAN_THUMB, "{}/thumbs/{}.jpg".format(g.GALLERY_DIRNAME, m),
+        lines.append((m, P_ORPHAN_THUMB, "{}/thumbs/{}.jpg".format(_scan.GALLERY_DIRNAME, m),
                       thumbs[m], "yes"))
 
     lines.sort(key=lambda ln: (_SEVERITY[ln[1]], ln[0], ln[2]))
@@ -642,7 +643,7 @@ def broken_list(out_dir, db_path, avg_bytes=None):
                if ids and Path(db_path).exists() else {})
     marks = read_marks(out)
     rec_at = reconciled_at(out)
-    thumbs_dir = out / g.GALLERY_DIRNAME / "thumbs"
+    thumbs_dir = out / _scan.GALLERY_DIRNAME / "thumbs"
 
     rows = []
     for mid, problem, path, size, _rec in lines:
@@ -823,12 +824,12 @@ def missing_target(out_dir, row):
         return None, "bad_path"                                        # rule 2
     if not rel.parts:
         return None, "bad_path"                                        # rule 2: the root itself
-    pruned = {os.path.normcase(n) for n in g.HEALTH_EXCLUDE}
+    pruned = {os.path.normcase(n) for n in _scan.HEALTH_EXCLUDE}
     if os.path.normcase(rel.parts[0]) in pruned:
         return None, "bad_path"                                        # rule 3
     if target.suffix.lower() not in _FORMAT_OF_EXT:
         return None, "bad_path"                                        # rule 4
-    if g.media_id_of(target) != mid:
+    if _scan.media_id_of(target) != mid:
         return None, "bad_path"                                        # rule 5
     if target.exists() or target.is_symlink():
         return None, "occupied"
@@ -920,7 +921,7 @@ def _still_broken(target, problem):
 
 
 def _live_check(out, row, index, g):
-    return _row_check(row, index or _index(out, g), True, g.GALLERY_DIRNAME)
+    return _row_check(row, index or _index(out, g), True, _scan.GALLERY_DIRNAME)
 
 
 def redownload_one(out_dir, db_path, media_id, session_factory=None, index=None, on_bytes=None):
@@ -953,13 +954,13 @@ def redownload_one(out_dir, db_path, media_id, session_factory=None, index=None,
         return _result(mid, "redownload", note="already sound")
     else:
         target = Path(best.path)                       # the broken file itself...
-        if g.media_id_of(target) != mid:               # ...and never another picture's file
+        if _scan.media_id_of(target) != mid:               # ...and never another picture's file
             return _result(mid, "redownload", ok=False, refused="not_this_picture")
     want = _FORMAT_OF_EXT.get(target.suffix.lower())
     if not want:
         return _result(mid, "redownload", ok=False, refused="unknown_type")
 
-    stage = out / g.GALLERY_DIRNAME / STAGING_DIRNAME
+    stage = out / _scan.GALLERY_DIRNAME / STAGING_DIRNAME
     got = None
     stem = None
     try:
@@ -1012,7 +1013,7 @@ def redownload_one(out_dir, db_path, media_id, session_factory=None, index=None,
 
     # The fresh file deserves its thumbnail. An image's is remade from it; a video keeps a
     # poster it already has (that one came from PixAI and cannot be remade from the file).
-    thumb = out / g.GALLERY_DIRNAME / "thumbs" / (mid + ".jpg")
+    thumb = out / _scan.GALLERY_DIRNAME / "thumbs" / (mid + ".jpg")
     if _safe_id(mid):
         if str(row.get("is_video") or "") == "1":
             if not thumb.exists() or thumb.stat().st_size == 0:
@@ -1036,9 +1037,9 @@ def rebuild_one(out_dir, db_path, media_id, index=None):
         return _result(mid, "rebuild", ok=False, refused="file_broken")
     if problem not in REBUILD_PROBLEMS:
         return _result(mid, "rebuild", note="already sound")
-    if g.media_id_of(best.path) != mid:                # this picture's thumbnail, from its own file
+    if _scan.media_id_of(best.path) != mid:                # this picture's thumbnail, from its own file
         return _result(mid, "rebuild", ok=False, refused="not_this_picture")
-    thumb = out / g.GALLERY_DIRNAME / "thumbs" / (mid + ".jpg")
+    thumb = out / _scan.GALLERY_DIRNAME / "thumbs" / (mid + ".jpg")
     made = (g.make_video_thumbnail(best.path, thumb) if str(row.get("is_video") or "") == "1"
             else g.make_thumbnail(best.path, thumb))
     if not made:
@@ -1102,7 +1103,7 @@ def _reverify_locked(out, db_path, ids, index, g):
     for r in g.rows_for_media_ids(db_path, sorted(ids)):
         if not str(r.get("filename") or "").strip():
             continue
-        line = _line_for(r, _row_check(r, index, deep, g.GALLERY_DIRNAME), g)
+        line = _line_for(r, _row_check(r, index, deep, _scan.GALLERY_DIRNAME), g)
         if line:
             lines.append(line)
     lines.sort(key=lambda ln: (_SEVERITY.get(ln[1], 9), ln[0], ln[2]))

@@ -7,6 +7,7 @@ import json
 import websockets
 
 from moonglade import backup as core
+from moonglade import jobs as jobs_mod
 
 
 class _FakeWS:
@@ -351,7 +352,7 @@ def test_catchup_sweep_is_bounded_rate_limited_and_off_thread():
     # so the catchup threads it explicitly rather than leaning on a module global.
     assert "WATCH_CATCHUP_TASKS = 30" in text
     assert "core.page_variables(" in body
-    assert "WATCH_CATCHUP_TASKS, core._client_of(session).user_id" in body
+    assert "WATCH_CATCHUP_TASKS, _pixai_client._client_of(session).user_id" in body
 
     # Rate-limited: a reconnect storm must not become a request storm. Since #60 the decision
     # is the pure catchup_plan (driven as a table in test_catchup_plan_table), applied by the
@@ -496,7 +497,7 @@ def _frame(tid, status, **extra):
 
 
 def _jobs(tmp_path):
-    return {j["job_id"]: j for j in core.read_jobs(tmp_path)}
+    return {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}
 
 
 def _sync_threads(monkeypatch):
@@ -573,7 +574,7 @@ def test_the_whole_lifecycle_closes_one_website_row_with_its_media(tmp_path, mon
     on_event(_frame("W3", "running"))
     on_event(_frame("W3", "completed", mediaId="MA"))
 
-    rows = core.read_jobs(tmp_path)
+    rows = jobs_mod.read_jobs(tmp_path)
     assert [r["job_id"] for r in rows] == ["W3"], (
         "one run must be one row -- the job id IS the task id on every writer for exactly this")
     job = rows[0]
@@ -626,7 +627,7 @@ def test_the_catchup_writes_a_done_row_for_a_website_task_it_had_to_collect(tmp_
 
     catchup("startup")
 
-    rows = core.read_jobs(tmp_path)
+    rows = jobs_mod.read_jobs(tmp_path)
     assert [r["job_id"] for r in rows] == ["W5"], "the catch-up wrote more than one row"
     job = rows[0]
     assert job["status"] == "done" and job["media_ids"] == ["M5"]
@@ -665,7 +666,7 @@ def test_the_event_path_and_the_catchup_converge_on_one_row(tmp_path, monkeypatc
     app.extensions["mg_watch_catchup"]("startup")
 
     assert collected == ["W6"], "the catch-up never reached the task, so only one writer ran"
-    rows = core.read_jobs(tmp_path)
+    rows = jobs_mod.read_jobs(tmp_path)
     assert [r["job_id"] for r in rows] == ["W6"], "one generation produced two Activity rows"
     assert rows[0]["source"] == "pixai"
 
@@ -682,7 +683,7 @@ def test_an_app_run_is_untouched_by_any_of_this(tmp_path, monkeypatch):
                         lambda s, tid, out, **k: {"media_ids": ["MX"], "saved": 1,
                                                   "is_video": False})
     # exactly what api_jobs_register writes for a dock submit
-    core.append_job_event(tmp_path, "A1", status="running", type="generate",
+    jobs_mod.append_job_event(tmp_path, "A1", status="running", type="generate",
                           label="Generated", source="web", count=2)
 
     on_event = app.extensions["mg_watch_on_event"]
@@ -690,7 +691,7 @@ def test_an_app_run_is_untouched_by_any_of_this(tmp_path, monkeypatch):
     on_event(_frame("A1", "running"))
     on_event(_frame("A1", "completed", mediaId="MX"))
 
-    rows = core.read_jobs(tmp_path)
+    rows = jobs_mod.read_jobs(tmp_path)
     assert [r["job_id"] for r in rows] == ["A1"]
     job = rows[0]
     assert job["source"] == "web", "an app run was re-branded as a website run"
@@ -710,12 +711,12 @@ def test_a_dismissed_website_row_is_not_resurrected_by_a_later_frame(tmp_path):
     app = _watch_app(tmp_path)
     on_event = app.extensions["mg_watch_on_event"]
     on_event(_frame("W7", "waiting"))
-    core.append_job_event(tmp_path, "W7", dismissed=True)
+    jobs_mod.append_job_event(tmp_path, "W7", dismissed=True)
 
     on_event(_frame("W7", "running"))
     on_event(_frame("W7", "waiting"))
 
-    assert core.read_jobs(tmp_path) == [], "a dismissed website row came back"
+    assert jobs_mod.read_jobs(tmp_path) == [], "a dismissed website row came back"
 
 
 def test_a_frame_that_carries_a_prompt_labels_the_row_with_its_first_words(tmp_path):
@@ -749,7 +750,7 @@ def test_the_row_writer_cannot_kill_the_socket(tmp_path, monkeypatch):
 
     def _boom(*a, **k):
         raise RuntimeError("job log read exploded")
-    monkeypatch.setattr(core, "_reconstruct_jobs", _boom)
+    monkeypatch.setattr(jobs_mod, "_reconstruct_jobs", _boom)
 
     app.extensions["mg_watch_on_event"](_frame("W9", "waiting"))   # must not raise
 

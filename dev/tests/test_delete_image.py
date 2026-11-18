@@ -18,6 +18,7 @@ from moonglade import backup as core  # noqa: E402
 from moonglade.gallery import CATALOG_FIELDS, save_catalog  # noqa: E402
 
 from tests.conftest import login_client  # noqa: E402
+from moonglade import jobs as jobs_mod
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -309,7 +310,7 @@ def test_every_image_pixai_already_deleted_is_kept_back_not_just_one(tmp_path, m
 
 def _delete_jobs(tmp_path):
     """Every `delete` row in the job log, newest first."""
-    return [j for j in core.read_jobs(tmp_path) if j.get("type") == "delete"]
+    return [j for j in jobs_mod.read_jobs(tmp_path) if j.get("type") == "delete"]
 
 
 def test_a_confirmed_delete_writes_one_activity_row(tmp_path, monkeypatch):

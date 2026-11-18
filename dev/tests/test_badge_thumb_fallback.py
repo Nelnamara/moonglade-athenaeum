@@ -10,6 +10,8 @@ from pathlib import Path
 from PIL import Image
 
 from moonglade import gallery as G
+from moonglade import achievements as achievements_mod
+from moonglade import branding as branding_mod
 
 
 def test_badge_thumb_returns_bytes_when_cache_unwritable(monkeypatch, tmp_path):
@@ -18,17 +20,17 @@ def test_badge_thumb_returns_bytes_when_cache_unwritable(monkeypatch, tmp_path):
     png = buf.getvalue()
 
     # A container-only master (no loose file) with a cache we can't write to.
-    monkeypatch.setattr(G, "_branding_exists", lambda rel: True)
-    monkeypatch.setattr(G, "_branding_bytes", lambda rel: png)
-    monkeypatch.setattr(G, "_branding_mtime", lambda rel: 1.0)
-    monkeypatch.setattr(G, "_role_dir", lambda role: tmp_path / "no-loose-master")
+    monkeypatch.setattr(branding_mod, "_branding_exists", lambda rel: True)
+    monkeypatch.setattr(branding_mod, "_branding_bytes", lambda rel: png)
+    monkeypatch.setattr(branding_mod, "_branding_mtime", lambda rel: 1.0)
+    monkeypatch.setattr(branding_mod, "_role_dir", lambda role: tmp_path / "no-loose-master")
 
     def boom_mkdir(self, *a, **k):
         raise OSError("read-only file system")
 
     monkeypatch.setattr(Path, "mkdir", boom_mkdir)
 
-    out = G._badge_thumb(str(tmp_path), "first-light")
+    out = achievements_mod._badge_thumb(str(tmp_path), "first-light")
 
     assert isinstance(out, (bytes, bytearray)), f"expected in-memory bytes, got {type(out)!r}"
     im = Image.open(io.BytesIO(bytes(out)))
@@ -37,5 +39,5 @@ def test_badge_thumb_returns_bytes_when_cache_unwritable(monkeypatch, tmp_path):
 
 def test_badge_thumb_returns_none_when_master_absent(monkeypatch, tmp_path):
     # No master at all -> still None (route 404 is correct here; there is nothing to serve).
-    monkeypatch.setattr(G, "_branding_exists", lambda rel: False)
-    assert G._badge_thumb(str(tmp_path), "does-not-exist") is None
+    monkeypatch.setattr(branding_mod, "_branding_exists", lambda rel: False)
+    assert achievements_mod._badge_thumb(str(tmp_path), "does-not-exist") is None

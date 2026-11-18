@@ -16,6 +16,9 @@ import pytest
 from moonglade import backup as core
 from moonglade import gallery as g
 from tests.conftest import login_client
+from moonglade import updater as updater_mod
+from moonglade import about as about_mod
+from moonglade import branding as branding_mod
 
 
 def _wiki(tmp_path, files):
@@ -51,7 +54,7 @@ def test_the_index_follows_the_sidebar_and_appends_what_it_does_not_link(tmp_pat
         "FAQ.md": "# FAQ\n",
         "_Footer.md": "chrome, not a page",
     })
-    idx = g.wiki_index(root)
+    idx = about_mod.wiki_index(root)
     assert [p["slug"] for p in idx] == ["Home", "Gallery", "The-Loom", "Glossary", "FAQ"]
     gal = idx[1]
     assert gal["title"] == "The Gallery" and gal["heading"] == "The Gallery"
@@ -63,15 +66,15 @@ def test_the_index_follows_the_sidebar_and_appends_what_it_does_not_link(tmp_pat
 
 
 def test_headings_are_flattened_to_the_words_a_reader_sees():
-    heads = g.md_headings("# The **Loom**\n## Free cards and `videos`\n## [Setup](Setup) steps\n")
+    heads = about_mod.md_headings("# The **Loom**\n## Free cards and `videos`\n## [Setup](Setup) steps\n")
     assert heads == [(1, "The Loom"), (2, "Free cards and videos"), (2, "Setup steps")]
 
 
 def test_the_shipped_wiki_indexes_every_page_it_carries():
-    idx = g.wiki_index()
+    idx = about_mod.wiki_index()
     slugs = [p["slug"] for p in idx]
     assert slugs[0] == "Home"
-    on_disk = sorted(p.stem for p in g.wiki_dir().glob("*.md") if not p.stem.startswith("_"))
+    on_disk = sorted(p.stem for p in about_mod.wiki_dir().glob("*.md") if not p.stem.startswith("_"))
     assert sorted(slugs) == on_disk
     # the four pages the guide opens from a surface header must be here
     for slug in ("Gallery", "Generating", "The-Loom", "Folio-of-Honors", "Control-Panel", "Glossary"):
@@ -89,7 +92,7 @@ def test_glossary_terms_come_from_the_bullets_and_their_wrapped_lines(tmp_path):
         "  with **✦ Generate**. See [Generating](Generating).\n"
         "- **toast** — a notice in the corner.\n"
         "\n## Reporting something\n\n- not a term line\n")})
-    assert g.wiki_glossary(root) == [
+    assert about_mod.wiki_glossary(root) == [
         {"term": "the dock", "def": "the generate panel docked at the bottom of the screen, "
                                     "opened with ✦ Generate. See Generating."},
         {"term": "toast", "def": "a notice in the corner."},
@@ -97,11 +100,11 @@ def test_glossary_terms_come_from_the_bullets_and_their_wrapped_lines(tmp_path):
 
 
 def test_no_glossary_page_means_no_terms_rather_than_invented_ones(tmp_path):
-    assert g.wiki_glossary(_wiki(tmp_path, {"Home.md": "# Home\n"})) == []
+    assert about_mod.wiki_glossary(_wiki(tmp_path, {"Home.md": "# Home\n"})) == []
 
 
 def test_the_shipped_glossary_has_terms():
-    terms = g.wiki_glossary()
+    terms = about_mod.wiki_glossary()
     assert terms, "wiki/Glossary.md carries the underlined terms; an empty read is a parse break"
     assert all(t["term"] and t["def"] for t in terms)
 
@@ -138,7 +141,7 @@ CHANGELOG = """# Changelog
 
 
 def test_changelog_entries_cut_each_release_and_skip_unreleased():
-    es = g.changelog_entries(CHANGELOG)
+    es = about_mod.changelog_entries(CHANGELOG)
     assert [e["version"] for e in es] == ["3.15.0", "3.14.1", "3.14.0"]
     e = es[0]
     assert (e["date"], e["title"]) == ("2026-10-01", "Open Book")
@@ -155,7 +158,7 @@ def test_changelog_entries_cut_each_release_and_skip_unreleased():
 
 
 def test_a_highlight_names_its_surface_by_mark_or_by_its_words():
-    items = g.changelog_entries(CHANGELOG)[0]["items"]
+    items = about_mod.changelog_entries(CHANGELOG)[0]["items"]
     assert items[1]["surface"] == "loom"          # "The Loom's" in the lead
     assert items[3]["surface"] == "folio"         # the explicit mark wins
     assert items[2]["surface"] == ""              # nothing named: no "Show me", no guess
@@ -163,8 +166,8 @@ def test_a_highlight_names_its_surface_by_mark_or_by_its_words():
 
 
 def test_about_reads_the_running_versions_entry_not_the_newest(tmp_path):
-    es = g.changelog_entries(CHANGELOG)
-    a = g.about_payload("3.14.1", tmp_path / "nopack" / "moonglade.mgpack", entries=es)
+    es = about_mod.changelog_entries(CHANGELOG)
+    a = about_mod.about_payload("3.14.1", tmp_path / "nopack" / "moonglade.mgpack", entries=es)
     assert (a["version"], a["display_version"], a["kind"]) == ("3.14.1", "3.14.1", "patch")
     assert (a["date"], a["title"]) == ("2026-09-27", "Small Mend")
     assert [i["lead"] for i in a["items"]] == ["A fix"]
@@ -174,9 +177,9 @@ def test_about_reads_the_running_versions_entry_not_the_newest(tmp_path):
 
 
 def test_release_size_and_display_version():
-    assert (g.display_version("3.15.0"), g.release_kind("3.15.0")) == ("3.15", "minor")
-    assert (g.display_version("3.15.2"), g.release_kind("3.15.2")) == ("3.15.2", "patch")
-    assert (g.display_version("4.0.0"), g.release_kind("4.0.0")) == ("4.0", "major")
+    assert (about_mod.display_version("3.15.0"), about_mod.release_kind("3.15.0")) == ("3.15", "minor")
+    assert (about_mod.display_version("3.15.2"), about_mod.release_kind("3.15.2")) == ("3.15.2", "patch")
+    assert (about_mod.display_version("4.0.0"), about_mod.release_kind("4.0.0")) == ("4.0", "major")
 
 
 def test_the_pack_version_reads_the_installed_marker(tmp_path):
@@ -184,7 +187,7 @@ def test_the_pack_version_reads_the_installed_marker(tmp_path):
     dat = tmp_path / "pack" / "moonglade.mgpack"
     dat.write_bytes(b"x")
     (tmp_path / "pack" / "moonglade.mgpack.version").write_text('{"version": "7", "sha256": "ab"}')
-    assert g.art_pack_info(dat) == {"installed": True, "version": "7"}
+    assert about_mod.art_pack_info(dat) == {"installed": True, "version": "7"}
 
 
 def test_about_never_lists_old_copies_to_delete(tmp_path):
@@ -197,10 +200,10 @@ def test_about_never_lists_old_copies_to_delete(tmp_path):
     new = tmp_path / "pack" / "moonglade.mgpack"
     new.write_bytes(b"x")
     (tmp_path / "pack" / ma.LEGACY_NAME).write_bytes(b"an older pack")
-    assert "note" not in g.art_pack_info(new)
-    assert "note" not in g.about_payload("3.14.1", new)["pack"]
+    assert "note" not in about_mod.art_pack_info(new)
+    assert "note" not in about_mod.about_payload("3.14.1", new)["pack"]
     new.unlink()
-    assert g.art_pack_info(new) == {"installed": False, "version": ""}
+    assert about_mod.art_pack_info(new) == {"installed": False, "version": ""}
 
 
 def test_the_about_card_has_no_line_for_old_copies():
@@ -234,7 +237,7 @@ def test_a_real_start_never_asks_the_owner_to_delete_an_old_pack(tmp_path, monke
 def test_the_running_version_has_a_changelog_entry():
     """About and what's new read the running version's block; a release cut without one
     would show an empty card on every install that runs it."""
-    a = g.about_payload(core.__version__, g._container_path())
+    a = about_mod.about_payload(core.__version__, branding_mod._container_path())
     assert a["title"] and a["items"], "CHANGELOG.md has no [%s] block" % core.__version__
 
 
@@ -252,13 +255,13 @@ class _Resp(io.BytesIO):
 
 @pytest.fixture(autouse=True)
 def _fresh_online_cache(monkeypatch):
-    monkeypatch.setattr(g, "_wiki_online_cache", {})
+    monkeypatch.setattr(about_mod, "_wiki_online_cache", {})
 
 
 def test_the_online_check_never_asks_while_no_newer_release_is_out():
     def opener(*a, **k):
         raise AssertionError("GitHub must not be asked when no newer release is out")
-    assert g.wiki_online_differs("Home", "# Home\n", behind=False, opener=opener) is False
+    assert about_mod.wiki_online_differs("Home", "# Home\n", behind=False, opener=opener) is False
 
 
 def test_the_online_check_compares_and_caches_per_page():
@@ -267,11 +270,11 @@ def test_the_online_check_compares_and_caches_per_page():
     def opener(req, timeout=None):
         calls.append(req.full_url)
         return _Resp(b"# Home\n\nNew line online.\n")
-    assert g.wiki_online_differs("Home", "# Home\n", True, opener=opener, now=1000) is True
-    assert g.wiki_online_differs("Home", "# Home\n", True, opener=opener, now=1500) is True
+    assert about_mod.wiki_online_differs("Home", "# Home\n", True, opener=opener, now=1000) is True
+    assert about_mod.wiki_online_differs("Home", "# Home\n", True, opener=opener, now=1500) is True
     assert calls == ["https://raw.githubusercontent.com/wiki/Nelnamara/moonglade-athenaeum/Home.md"]
     # the same text with other line endings is the same page
-    assert g.wiki_online_differs("Setup", "# Setup\r\nA\r\n", True,
+    assert about_mod.wiki_online_differs("Setup", "# Setup\r\nA\r\n", True,
                                  opener=lambda r, timeout=None: _Resp(b"# Setup\nA\n"),
                                  now=1000) is False
 
@@ -279,9 +282,9 @@ def test_the_online_check_compares_and_caches_per_page():
 def test_an_unreachable_github_is_a_quiet_no_and_is_asked_again_soon():
     def down(req, timeout=None):
         raise OSError("offline")
-    assert g.wiki_online_differs("FAQ", "x", True, opener=down, now=1000) is False
+    assert about_mod.wiki_online_differs("FAQ", "x", True, opener=down, now=1000) is False
     hit = []
-    assert g.wiki_online_differs("FAQ", "x", True, now=1000 + g.WIKI_ONLINE_FAILURE_TTL + 1,
+    assert about_mod.wiki_online_differs("FAQ", "x", True, now=1000 + about_mod.WIKI_ONLINE_FAILURE_TTL + 1,
                                  opener=lambda r, timeout=None: hit.append(1) or _Resp(b"y")) is True
     assert hit == [1]
 
@@ -293,7 +296,7 @@ def test_an_unreachable_github_is_a_quiet_no_and_is_asked_again_soon():
 def test_index_route_carries_pages_glossary_and_the_version(tmp_path):
     d = login_client(tmp_path).get("/api/help/index").get_json()
     assert d["version"] == core.__version__
-    assert d["display_version"] == g.display_version(core.__version__)
+    assert d["display_version"] == about_mod.display_version(core.__version__)
     assert d["pages"][0]["slug"] == "Home" and d["glossary"]
 
 
@@ -303,20 +306,20 @@ def test_page_route_serves_a_listed_page_and_refuses_anything_else(tmp_path):
     assert r.status_code == 200
     d = r.get_json()
     assert d["markdown"].startswith("# The Loom")
-    assert d["url"] == g.WIKI_WEB_URL + "/The-Loom"
+    assert d["url"] == about_mod.WIKI_WEB_URL + "/The-Loom"
     for bad in ("_Sidebar", "..%2FCHANGELOG", "Nope", "The-Loom.md"):
         assert cli.get("/api/help/page/" + bad).status_code == 404, bad
 
 
 def test_online_route_answers_without_asking_while_up_to_date(tmp_path, monkeypatch):
-    monkeypatch.setattr(g, "_update_cache", {"at": 0, "payload": {"behind": False}, "ttl": 1})
+    monkeypatch.setattr(updater_mod, "_update_cache", {"at": 0, "payload": {"behind": False}, "ttl": 1})
 
     def boom(*a, **k):
         raise AssertionError("no network while up to date")
-    monkeypatch.setattr(g, "wiki_online_differs",
+    monkeypatch.setattr(about_mod, "wiki_online_differs",
                         lambda slug, md, behind, **k: boom() if behind else False)
     d = login_client(tmp_path).get("/api/help/online/Home").get_json()
-    assert d == {"differs": False, "url": g.WIKI_WEB_URL}
+    assert d == {"differs": False, "url": about_mod.WIKI_WEB_URL}
 
 
 def test_about_route_is_the_running_version(tmp_path):

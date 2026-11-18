@@ -9,6 +9,8 @@ from moonglade import backup as core
 from moonglade import gallery as moonglade_gallery
 
 from tests.conftest import login_client
+from moonglade import mirror as mirror_mod
+from moonglade import telemetry as telemetry_mod
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -31,8 +33,8 @@ def _arm_mirror(monkeypatch):
         return "T-ENH-1"
 
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "mirror_enabled", lambda: True)
-    monkeypatch.setattr(core, "make_mirror_session", lambda *a, **k: object())
+    monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
+    monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "submit_generation", _submit)
     return calls
@@ -57,7 +59,10 @@ def test_no_art_filter_submit_path_survives():
     Asserted against the SOURCE as well as the module namespace: a builder that survives under
     another name, or a stray `pixai-image-filter` model literal, is the same defect back."""
     assert not hasattr(core, "build_filter_parameters")
-    for mod in ("moonglade/gallery.py", "moonglade/backup.py"):
+    # every module of the package, so a section split out of backup or gallery stays covered
+    modules = sorted(p.relative_to(ROOT).as_posix() for p in (ROOT / "moonglade").glob("*.py"))
+    assert "moonglade/backup.py" in modules and "moonglade/gallery.py" in modules
+    for mod in modules:
         src = (ROOT / mod).read_text(encoding="utf-8")
         assert "pixai-image-filter" not in src, mod + " still names the paid filter model"
         assert "filterId" not in src, mod + " still builds a filter task's inputs"
@@ -108,12 +113,12 @@ def test_enhance_refuses_when_mirror_off(tmp_path, monkeypatch, pixai):
     a panelplugin submit would otherwise fall through submit_generation's mirror-off branch to
     the API-key session -- the paid-then-reaped-at-60-min bug the whole surface was deleted for.
     So a mirror-off request must 409 and submit NOTHING (no createGenerationTask, no charge)."""
-    monkeypatch.setattr(core, "mirror_enabled", lambda: False)          # mirror OFF
+    monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: False)          # mirror OFF
     submitted = {"n": 0}
     monkeypatch.setattr(core, "submit_generation",
                         lambda *a, **k: submitted.__setitem__("n", submitted["n"] + 1) or "X")
     # make_mirror_session must never even be consulted for a spend here, but stub it defensively.
-    monkeypatch.setattr(core, "make_mirror_session", lambda *a, **k: None)
+    monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: None)
 
     cli = _enhance_client(tmp_path)
     r = cli.post("/api/enhance", json={"source": "srcABC",
@@ -122,7 +127,7 @@ def test_enhance_refuses_when_mirror_off(tmp_path, monkeypatch, pixai):
     assert "Mirror to PixAI must be armed" in (r.get_json() or {}).get("error", "")
     assert submitted["n"] == 0, "a mirror-off enhance reached the submit choke"
     # And no telemetry moved on a refused run.
-    telem = moonglade_gallery.load_telemetry(tmp_path)
+    telem = telemetry_mod.load_telemetry(tmp_path)
     assert not telem["counters"].get("enhances")
     assert "enhance" not in telem["sets"].get("tools", [])
     assert not telem["sets"].get("enhance_workflows")
@@ -140,7 +145,7 @@ def test_enhance_telemetry_fires_only_on_terminal_success(tmp_path, monkeypatch)
                                        "workflow_id": "1793447160259872021"})
     assert r.status_code == 200 and r.get_json().get("task_id") == "T-ENH-1"
     assert calls["submit"] == 1
-    telem = moonglade_gallery.load_telemetry(tmp_path)
+    telem = telemetry_mod.load_telemetry(tmp_path)
     assert not telem["counters"].get("enhances"), "telemetry fired at submit-acceptance"
     assert "enhance" not in telem["sets"].get("tools", [])
     assert not telem["sets"].get("enhance_workflows")
@@ -153,7 +158,7 @@ def test_enhance_telemetry_fires_only_on_terminal_success(tmp_path, monkeypatch)
                                                   "is_video": False})
     d = cli.get("/api/task-status", query_string={"task_id": "T-ENH-1"}).get_json()
     assert d["phase"] == "done"
-    telem = moonglade_gallery.load_telemetry(tmp_path)
+    telem = telemetry_mod.load_telemetry(tmp_path)
     assert telem["counters"].get("enhances") == 1
     assert "enhance" in telem["sets"].get("tools", [])
     # The identity ACTUALLY submitted (here the numeric id) is what counts toward Enhance Adept.
@@ -161,7 +166,7 @@ def test_enhance_telemetry_fires_only_on_terminal_success(tmp_path, monkeypatch)
 
     # A second poll of the same finished task must NOT double-count (pending entry consumed).
     cli.get("/api/task-status", query_string={"task_id": "T-ENH-1"})
-    assert moonglade_gallery.load_telemetry(tmp_path)["counters"].get("enhances") == 1
+    assert telemetry_mod.load_telemetry(tmp_path)["counters"].get("enhances") == 1
 
 
 def test_enhance_telemetry_does_not_fire_on_dispatched_then_failed(tmp_path, monkeypatch):
@@ -179,7 +184,7 @@ def test_enhance_telemetry_does_not_fire_on_dispatched_then_failed(tmp_path, mon
                                               "reason": "waiting timeout", "started": False})
     d = cli.get("/api/task-status", query_string={"task_id": "T-ENH-1"}).get_json()
     assert d["phase"] == "failed"
-    telem = moonglade_gallery.load_telemetry(tmp_path)
+    telem = telemetry_mod.load_telemetry(tmp_path)
     assert not telem["counters"].get("enhances"), "a reaped/failed enhance counted"
     assert "enhance" not in telem["sets"].get("tools", [])
     assert not telem["sets"].get("enhance_workflows")
@@ -199,7 +204,7 @@ def test_enhance_workflow_name_preset_counts_toward_adept(tmp_path, monkeypatch)
                         lambda s, tid, out, **k: {"media_ids": ["OUT1"], "saved": 1,
                                                   "is_video": False})
     cli.get("/api/task-status", query_string={"task_id": "T-ENH-1"})
-    ews = moonglade_gallery.load_telemetry(tmp_path)["sets"].get("enhance_workflows", [])
+    ews = telemetry_mod.load_telemetry(tmp_path)["sets"].get("enhance_workflows", [])
     assert "mymusise/39a2c67c:unet-0.1.3.2" in ews
 
 

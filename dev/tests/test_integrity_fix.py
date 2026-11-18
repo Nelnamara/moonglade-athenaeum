@@ -28,6 +28,7 @@ from moonglade.gallery import create_app
 from tests.conftest import login_test_client, with_csrf
 from tests.test_integrity import _mp4, _png, _webp
 from tests.test_integrity_broken import _broken_library
+from moonglade import jobs as jobs_mod
 
 
 class _Resp:
@@ -754,9 +755,9 @@ def test_the_fix_route_answers_busy(tmp_path, monkeypatch):
 
 
 def test_an_interrupted_run_is_closed_at_the_next_start(tmp_path):
-    core.append_job_event(tmp_path, "integrity-abc", status="running", type="integrity",
+    jobs_mod.append_job_event(tmp_path, "integrity-abc", status="running", type="integrity",
                           label="Fixing 3 files", done=1, total=3)
-    assert core.resolve_interrupted_local_jobs(tmp_path) == 1
+    assert jobs_mod.resolve_interrupted_local_jobs(tmp_path) == 1
 
 
 def test_the_report_lock_retries_when_windows_answers_permission_denied(tmp_path, monkeypatch):

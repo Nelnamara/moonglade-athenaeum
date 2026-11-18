@@ -24,13 +24,15 @@ from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests import synthetic_feats as sf
 from tests.conftest import login_client
+from moonglade import achievements as achievements_mod
+from moonglade import branding as branding_mod
 
 
 @pytest.fixture(autouse=True)
 def _fresh_seal_cache():
-    g._earned_ids_cache.update(t=0.0, ids=frozenset())
+    branding_mod._earned_ids_cache.update(t=0.0, ids=frozenset())
     yield
-    g._earned_ids_cache.update(t=0.0, ids=frozenset())
+    branding_mod._earned_ids_cache.update(t=0.0, ids=frozenset())
 
 
 def _client(tmp_path, **seed_kw):
@@ -39,7 +41,7 @@ def _client(tmp_path, **seed_kw):
     rows = [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "1", "filename": "a_1.png", "created_at": "2025-01-01T00:00:00"}]
     save_catalog(tmp_path / "catalog.db", rows)
-    sf.seed(g._container_path(), **seed_kw)
+    sf.seed(branding_mod._container_path(), **seed_kw)
     cli = login_client(tmp_path)
     sf.all_badges()                       # after the app exists: create_app sweeps the tree
     return cli
@@ -147,7 +149,7 @@ def test_a_feat_without_a_riddle_or_without_art_is_never_picked(tmp_path):
     cli = _client(tmp_path, bare_first=True)                # the riddle-less feat is first
     sf.earn(tmp_path, sf.FEAT_IDS[1])
     assert _feats(cli)["feats"]["masked"]["riddle"] == "test riddle one"
-    (g._role_dir("badges") / (sf.FEAT_IDS[0] + ".png")).unlink()    # no art to cut a mask from
+    (branding_mod._role_dir("badges") / (sf.FEAT_IDS[0] + ".png")).unlink()    # no art to cut a mask from
     assert _feats(cli)["feats"]["masked"]["riddle"] == "test riddle three"
 
 
@@ -164,7 +166,7 @@ def test_no_container_means_no_veil_and_no_crash(tmp_path):
     rows = [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "1", "filename": "a_1.png", "created_at": "2025-01-01T00:00:00"}]
     save_catalog(tmp_path / "catalog.db", rows)
-    g._container_path().unlink(missing_ok=True)
+    branding_mod._container_path().unlink(missing_ok=True)
     from tests.conftest import clear_sealed_caches
     clear_sealed_caches()
     d = login_client(tmp_path).get("/api/achievements").get_json()
@@ -180,7 +182,7 @@ def test_the_mask_is_an_alpha_only_silhouette_never_the_badge_art(tmp_path):
     r = cli.get(m["mask_url"])
     assert r.status_code == 200 and r.mimetype == "image/png"
     im = Image.open(io.BytesIO(r.data))
-    assert im.mode == "RGBA" and max(im.size) <= g.FEAT_MASK_PX
+    assert im.mode == "RGBA" and max(im.size) <= branding_mod.FEAT_MASK_PX
     px = [im.getpixel((x, y)) for x in range(im.width) for y in range(im.height)]
     assert any(a > 0 for *_c, a in px) and any(a == 0 for *_c, a in px)    # a real silhouette
     assert all((r_, g_, b) == (255, 255, 255) for r_, g_, b, _a in px)     # white, never the art
@@ -204,7 +206,7 @@ def test_the_route_serves_only_the_current_picks_mask(tmp_path):
     # token of a hidden feat with no riddle) answers exactly as an unknown token does
     secret = cli.application.secret_key
     for aid in (sf.FEAT_IDS[1], sf.FEAT_IDS[2], sf.BARE_ID, sf.TRIGGER_ID):
-        r = cli.get("/feat-mask/%s.png" % g._feat_mask_token(secret, aid))
+        r = cli.get("/feat-mask/%s.png" % branding_mod._feat_mask_token(secret, aid))
         assert r.status_code == 404 and r.get_data() == unknown.get_data(), aid
     assert unknown.status_code == 404
     # malformed tokens: the same bare 404
@@ -230,20 +232,20 @@ def test_the_mask_is_served_the_moment_the_earn_lands_not_after_the_cache_expire
     cache (5 s) must not answer that request with the state from before the earn."""
     cli = _client(tmp_path)
     assert cli.get("/feat-mask/" + "1" * 32 + ".png").status_code == 404   # warms the cache: nothing earned
-    st = g.load_ach_state(tmp_path)
+    st = achievements_mod.load_ach_state(tmp_path)
     st["earned_at"] = {sf.FEAT_IDS[1]: "2026-09-01"}
-    g.save_ach_state(tmp_path, st)                          # NOT clearing the cache, on purpose
+    achievements_mod.save_ach_state(tmp_path, st)                          # NOT clearing the cache, on purpose
     m = _feats(cli)["feats"]["masked"]
     assert cli.get(m["mask_url"]).status_code == 200
 
 
 def test_the_token_is_opaque_and_install_specific():
-    t1 = g._feat_mask_token("secret-a", "some-id")
-    t2 = g._feat_mask_token("secret-b", "some-id")
+    t1 = branding_mod._feat_mask_token("secret-a", "some-id")
+    t2 = branding_mod._feat_mask_token("secret-b", "some-id")
     assert len(t1) == 32 and all(c in "0123456789abcdef" for c in t1)
     assert t1 != t2                                         # not computable without the secret
-    assert "some-id" not in t1 and t1 == g._feat_mask_token("secret-a", "some-id")   # stable
-    assert g._feat_mask_token("secret-a", "other-id") != t1
+    assert "some-id" not in t1 and t1 == branding_mod._feat_mask_token("secret-a", "some-id")   # stable
+    assert branding_mod._feat_mask_token("secret-a", "other-id") != t1
 
 
 def test_the_cut_is_cached_by_token_never_by_id(tmp_path):
@@ -252,12 +254,12 @@ def test_the_cut_is_cached_by_token_never_by_id(tmp_path):
     m = _feats(cli)["feats"]["masked"]
     token = _mask_token({"feats": {"masked": m}})
     assert cli.get(m["mask_url"]).status_code == 200
-    d = g.feat_mask_cache_dir(tmp_path)
+    d = branding_mod.feat_mask_cache_dir(tmp_path)
     assert d == tmp_path / "cache" / "masks"      # local/cache/masks (conftest's local_dir)
     names = [p.name for p in d.iterdir()]
     assert names == [token + ".png"]
     assert not any(sf.FEAT_IDS[0] in n for n in names)
-    assert g.branding_root() not in d.parents               # outside the coded tree
+    assert branding_mod.branding_root() not in d.parents               # outside the coded tree
     # a re-cut badge master heals the cache
     before = (d / names[0]).read_bytes()
     src = sf.badge_png(sf.FEAT_IDS[0], size=120)
@@ -280,7 +282,7 @@ def test_feat_mask_png_keeps_the_alpha_and_drops_the_colour():
     for x in range(10, 30):
         for y in range(10, 30):
             src.putpixel((x, y), (10, 200, 30, 180))        # semi-opaque square
-    out = Image.open(io.BytesIO(g.feat_mask_png(_png(src))))
+    out = Image.open(io.BytesIO(branding_mod.feat_mask_png(_png(src))))
     assert out.mode == "RGBA" and out.size == (40, 40)
     assert out.getpixel((20, 20)) == (255, 255, 255, 180)
     assert out.getpixel((2, 2)) == (255, 255, 255, 0)
@@ -288,13 +290,13 @@ def test_feat_mask_png_keeps_the_alpha_and_drops_the_colour():
 
 def test_feat_mask_png_caps_the_size_and_handles_odd_inputs():
     big = Image.new("RGBA", (1000, 600), (0, 0, 0, 255))
-    out = Image.open(io.BytesIO(g.feat_mask_png(_png(big), max_px=128)))
+    out = Image.open(io.BytesIO(branding_mod.feat_mask_png(_png(big), max_px=128)))
     assert max(out.size) == 128 and out.size[0] > out.size[1]
     opaque = Image.new("RGB", (30, 30), (5, 6, 7))          # no alpha: a solid silhouette
-    solid = Image.open(io.BytesIO(g.feat_mask_png(_png(opaque))))
+    solid = Image.open(io.BytesIO(branding_mod.feat_mask_png(_png(opaque))))
     assert solid.getpixel((15, 15)) == (255, 255, 255, 255)
     pal = Image.new("P", (20, 20), 0)
     pal.info["transparency"] = 0                            # palette + transparent index
-    assert Image.open(io.BytesIO(g.feat_mask_png(_png(pal)))).getpixel((5, 5))[3] == 0
-    assert g.feat_mask_png(b"not an image") is None
-    assert g.feat_mask_png(b"") is None
+    assert Image.open(io.BytesIO(branding_mod.feat_mask_png(_png(pal)))).getpixel((5, 5))[3] == 0
+    assert branding_mod.feat_mask_png(b"not an image") is None
+    assert branding_mod.feat_mask_png(b"") is None

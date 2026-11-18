@@ -497,7 +497,7 @@ def _board(name, cards, **more):
 
 def _loom(r):
     """A logged-in client on the library, and the login's kv folders: new home, old home."""
-    from moonglade.gallery import _account_key
+    from moonglade.account_prefs import _account_key
     from tests.conftest import _TEST_USERNAME, login_client
     cli = login_client(r.lib)
     key = _account_key(_TEST_USERNAME)

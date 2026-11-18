@@ -21,10 +21,12 @@ from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import (STARFALL_EVENT, _SEALED_DONOR, MOMENT_FIXTURE_CLIP, ach_event, clear_sealed_caches,
                             first_party_sources, login_client, moment_clip_keys)
+from moonglade import achievements as achievements_mod
+from moonglade import branding as branding_mod
 
 _REPO = Path(__file__).resolve().parents[2]
-_KEYTURN_URL = "/branding/" + g._MOMENT_CLIPS["keyturn"]
-_STARFALL_URL = "/branding/" + g._MOMENT_CLIPS["starfall"]
+_KEYTURN_URL = "/branding/" + branding_mod._MOMENT_CLIPS["keyturn"]
+_STARFALL_URL = "/branding/" + branding_mod._MOMENT_CLIPS["starfall"]
 _COPY_KEYS = {"starfall": {"line"},
               "keyturn": {"title1", "line1", "title2", "line2", "button", "caption"}}
 
@@ -53,14 +55,14 @@ def _donor_roster():
 def _write_box(tmp_path, assets):
     """Replace this test's container with one carrying only `assets` (no roster), then
     drop every cache that remembers the old one."""
-    mc.write_container(g._container_path(), assets, {})
+    mc.write_container(branding_mod._container_path(), assets, {})
     clear_sealed_caches()
 
 
 def _earn_keyturn(cli):
     """The REAL road to the keyturn feat: a file dropped into a banner slot, adopted by
     the sweep the next /api/achievements read runs."""
-    (g._role_dir("banner_login") / "my_art.png").write_bytes(_png_bytes())
+    (branding_mod._role_dir("banner_login") / "my_art.png").write_bytes(_png_bytes())
     cli.get("/api/achievements")
 
 
@@ -69,20 +71,20 @@ def _earn_keyturn(cli):
 def test_each_moment_clip_routes_to_its_own_bucket():
     """The keyturn clip has a rule of its own AHEAD of the bare ee_* rule, so it lands in
     its own bucket; the starfall clip rides the bare rule into starfall's."""
-    assert (g._public_rel_to_coded(g._MOMENT_CLIPS["keyturn"])
-            == g._role_rel("keyturn", g._MOMENT_CLIPS["keyturn"]))
-    assert (g._public_rel_to_coded(g._MOMENT_CLIPS["starfall"])
-            == g._role_rel("starfall", g._MOMENT_CLIPS["starfall"]))
+    assert (branding_mod._public_rel_to_coded(branding_mod._MOMENT_CLIPS["keyturn"])
+            == branding_mod._role_rel("keyturn", branding_mod._MOMENT_CLIPS["keyturn"]))
+    assert (branding_mod._public_rel_to_coded(branding_mod._MOMENT_CLIPS["starfall"])
+            == branding_mod._role_rel("starfall", branding_mod._MOMENT_CLIPS["starfall"]))
     # every other bare ee_* still goes to starfall, as before
-    assert g._public_rel_to_coded("ee_nelstarfall.png") == g._role_rel("starfall", "ee_nelstarfall.png")
+    assert branding_mod._public_rel_to_coded("ee_nelstarfall.png") == branding_mod._role_rel("starfall", "ee_nelstarfall.png")
 
 
 def test_keyturn_bucket_does_not_nest_under_any_other_role():
     """A prefix-judged seal means a folder nested in another role's folder inherits that
     role's gate. The keyturn bucket must sit beside starfall's, never inside it (or any
     other), and nothing may sit inside it."""
-    code = g.ROLE_CODE["keyturn"].lower()
-    for role, other in g.ROLE_CODE.items():
+    code = branding_mod.ROLE_CODE["keyturn"].lower()
+    for role, other in branding_mod.ROLE_CODE.items():
         if role == "keyturn":
             continue
         other = other.lower()
@@ -92,7 +94,7 @@ def test_keyturn_bucket_does_not_nest_under_any_other_role():
 
 def test_clip_urls_are_neutral():
     """The URL shows in the network tab: it may name the moment, never the feat."""
-    for name in g._MOMENT_CLIPS.values():
+    for name in branding_mod._MOMENT_CLIPS.values():
         low = name.lower()
         assert "uth" not in low and "hood" not in low and "konami" not in low, name
 
@@ -103,7 +105,7 @@ def test_clip_urls_name_no_roster_feat(sealed_donor_present):
     for a in _donor_roster():
         forms = {a["id"], a["id"].replace("-", "_"), a["id"].replace("-", ""),
                  a["name"].lower().replace(" ", "_"), a["name"].lower().replace(" ", "")}
-        for name in g._MOMENT_CLIPS.values():
+        for name in branding_mod._MOMENT_CLIPS.values():
             for f in forms:
                 if len(f) >= 4:
                     assert f.lower() not in name.lower(), "a clip URL names a feat"
@@ -112,44 +114,44 @@ def test_clip_urls_name_no_roster_feat(sealed_donor_present):
 # ---- the seal resolves by the `moment` flag, and fails closed without it -------
 
 def test_moment_buckets_are_gated_on_the_flagged_feat(monkeypatch):
-    monkeypatch.setattr(g, "_moment_ach", lambda: {"starfall": "feat-a", "keyturn": "feat-b"})
-    rr = g._role_rel
-    assert g._seal_rule(rr("starfall", "ee_nelstarfall.png")) == ("earned", "feat-a")
-    assert g._seal_rule(rr("starfall", g._MOMENT_CLIPS["starfall"])) == ("earned", "feat-a")
-    assert g._seal_rule(rr("breadcrumb", "README.txt")) == ("earned", "feat-a")
-    assert g._seal_rule(rr("keyturn", g._MOMENT_CLIPS["keyturn"])) == ("earned", "feat-b")
+    monkeypatch.setattr(achievements_mod, "_moment_ach", lambda: {"starfall": "feat-a", "keyturn": "feat-b"})
+    rr = branding_mod._role_rel
+    assert branding_mod._seal_rule(rr("starfall", "ee_nelstarfall.png")) == ("earned", "feat-a")
+    assert branding_mod._seal_rule(rr("starfall", branding_mod._MOMENT_CLIPS["starfall"])) == ("earned", "feat-a")
+    assert branding_mod._seal_rule(rr("breadcrumb", "README.txt")) == ("earned", "feat-a")
+    assert branding_mod._seal_rule(rr("keyturn", branding_mod._MOMENT_CLIPS["keyturn"])) == ("earned", "feat-b")
     # case-variants of a coded path face the same verdict (the FS is case-insensitive)
     for rel, want in ((rr("keyturn", "x.mp4"), ("earned", "feat-b")),
                       (rr("starfall", "x.mp4"), ("earned", "feat-a"))):
         head, _, tail = rel.rpartition("/")
-        assert g._seal_rule(head.upper() + "/" + tail) == want, rel
-        assert g._seal_rule(rel.upper()) == want, rel
+        assert branding_mod._seal_rule(head.upper() + "/" + tail) == want, rel
+        assert branding_mod._seal_rule(rel.upper()) == want, rel
 
 
 def test_moment_buckets_deny_when_no_feat_carries_the_flag(monkeypatch):
     """An older pack (no `moment` flags) or no pack at all: both buckets DENY. Falling
     through would be the seal's fail-open default -- sealed art served to anyone."""
-    monkeypatch.setattr(g, "_moment_ach", lambda: {})
-    for rel in (g._role_rel("starfall", "ee_nelstarfall.png"),
-                g._role_rel("breadcrumb", "README.txt"),
-                g._role_rel("keyturn", g._MOMENT_CLIPS["keyturn"])):
-        assert g._seal_rule(rel) == ("deny", None), rel
+    monkeypatch.setattr(achievements_mod, "_moment_ach", lambda: {})
+    for rel in (branding_mod._role_rel("starfall", "ee_nelstarfall.png"),
+                branding_mod._role_rel("breadcrumb", "README.txt"),
+                branding_mod._role_rel("keyturn", branding_mod._MOMENT_CLIPS["keyturn"])):
+        assert branding_mod._seal_rule(rel) == ("deny", None), rel
 
 
 def test_a_roster_without_flags_derives_no_moments():
-    defs = g._derive_sealed({"roster": [{"id": "x", "hidden": True}]})
+    defs = achievements_mod._derive_sealed({"roster": [{"id": "x", "hidden": True}]})
     assert defs["_moment_ach"] == {}
-    defs = g._derive_sealed({"roster": [{"id": "a", "moment": "starfall"},
+    defs = achievements_mod._derive_sealed({"roster": [{"id": "a", "moment": "starfall"},
                                         {"id": "b", "moment": "starfall"},
                                         {"id": "c", "moment": ""}]})
     assert defs["_moment_ach"] == {"starfall": "a"}          # first entry wins; "" is no flag
 
 
 def test_the_sealed_roster_flags_both_moments_on_hidden_feats(sealed_donor_present):
-    moments = g._moment_ach()
+    moments = achievements_mod._moment_ach()
     assert set(moments) >= {"starfall", "keyturn"}
     for m in ("starfall", "keyturn"):
-        assert moments[m] in g._ach_hidden(), m
+        assert moments[m] in achievements_mod._ach_hidden(), m
     assert moments["starfall"] != moments["keyturn"]
 
 
@@ -158,7 +160,7 @@ def test_the_sealed_roster_flags_both_moments_on_hidden_feats(sealed_donor_prese
 def _open_asset_client(tmp_path, body):
     """A client whose container carries one OPEN (unsealed) asset, so the Range mechanics
     are exercised with no roster at all -- they run on public CI too."""
-    rel = g._role_rel("mystery", "range_probe.png")
+    rel = branding_mod._role_rel("mystery", "range_probe.png")
     cli = _client(tmp_path)
     _write_box(tmp_path, {rel: body})
     return cli, "/branding/mystery/range_probe.png"
@@ -224,7 +226,7 @@ def test_a_loose_file_still_ranges_through_send_from_directory(tmp_path):
     """The loose-file path is unchanged: a real file wins over the container and ranges
     the way send_from_directory always has."""
     cli, url = _open_asset_client(tmp_path, _BODY)
-    loose = g.branding_root() / g._role_rel("mystery", "range_probe.png")
+    loose = branding_mod.branding_root() / branding_mod._role_rel("mystery", "range_probe.png")
     loose.parent.mkdir(parents=True, exist_ok=True)
     loose.write_bytes(b"LOOSE" * 10)
     r = cli.get(url)
@@ -240,14 +242,14 @@ def _clip_client(tmp_path, monkeypatch, assets):
     stub feat that is earned -- the clip mechanics without a roster."""
     cli = _client(tmp_path)
     _write_box(tmp_path, assets)
-    monkeypatch.setattr(g, "_moment_ach", lambda: {"keyturn": "feat-k"})
-    monkeypatch.setattr(g, "_earned_achievement_ids", lambda *a, **k: frozenset({"feat-k"}))
+    monkeypatch.setattr(achievements_mod, "_moment_ach", lambda: {"keyturn": "feat-k"})
+    monkeypatch.setattr(branding_mod, "_earned_achievement_ids", lambda *a, **k: frozenset({"feat-k"}))
     return cli
 
 
 def test_a_clip_is_read_and_verified_once_then_sliced(tmp_path, monkeypatch):
     clip = MOMENT_FIXTURE_CLIP.read_bytes()
-    key = g._public_rel_to_coded(g._MOMENT_CLIPS["keyturn"])
+    key = branding_mod._public_rel_to_coded(branding_mod._MOMENT_CLIPS["keyturn"])
     cli = _clip_client(tmp_path, monkeypatch, {key: clip})
     reads = []
     real_get = mc.Container.get
@@ -271,9 +273,9 @@ def test_a_corrupt_clip_is_404_and_never_cached(tmp_path, monkeypatch):
     """The whole blob is checked against its TOC digest before any slice goes out; a blob
     that fails it is absent, not served in pieces."""
     clip = MOMENT_FIXTURE_CLIP.read_bytes()
-    key = g._public_rel_to_coded(g._MOMENT_CLIPS["keyturn"])
+    key = branding_mod._public_rel_to_coded(branding_mod._MOMENT_CLIPS["keyturn"])
     cli = _clip_client(tmp_path, monkeypatch, {key: clip})
-    dat = g._container_path()
+    dat = branding_mod._container_path()
     off = mc.open_container(dat)._toc["assets"][key][0]
     raw = bytearray(dat.read_bytes())
     raw[off + len(clip) // 2] ^= 0xFF
@@ -281,7 +283,7 @@ def test_a_corrupt_clip_is_404_and_never_cached(tmp_path, monkeypatch):
     clear_sealed_caches()
     assert cli.get(_KEYTURN_URL, headers={"Range": "bytes=0-1"}).status_code == 404
     assert cli.get(_KEYTURN_URL).status_code == 404
-    assert not g._moment_clip_cache
+    assert not branding_mod._moment_clip_cache
 
 
 # ---- the real roster: 404 before the earn, served after ----------------------
@@ -310,7 +312,7 @@ def test_the_starfall_clip_404s_until_its_feat_is_earned(tmp_path, sealed_donor_
 
 
 def test_the_seeded_test_container_carries_the_fixture_under_each_clip_key(sealed_donor_present):
-    box = g._get_container()
+    box = branding_mod._get_container()
     assert box is not None
     for key in moment_clip_keys():
         assert box.get(key) == MOMENT_FIXTURE_CLIP.read_bytes(), key
@@ -337,7 +339,7 @@ def test_moment_flags_are_absent_before_the_earn(tmp_path, sealed_donor_present)
     for moment, copy in _donor_copy().items():
         for v in copy.values():
             assert v not in body, "sealed %s copy served before the earn" % moment
-        assert g._MOMENT_CLIPS[moment] not in body
+        assert branding_mod._MOMENT_CLIPS[moment] not in body
 
 
 def test_moment_flags_arrive_with_the_earn(tmp_path, sealed_donor_present):
@@ -350,8 +352,8 @@ def test_moment_flags_arrive_with_the_earn(tmp_path, sealed_donor_present):
     donor = _donor_copy()
     for moment, a in by_moment.items():
         assert a["earned"] is True
-        assert a["id"] == g._moment_ach()[moment]
-        assert a["moment_clip"] == "/branding/" + g._MOMENT_CLIPS[moment]
+        assert a["id"] == achievements_mod._moment_ach()[moment]
+        assert a["moment_clip"] == "/branding/" + branding_mod._MOMENT_CLIPS[moment]
         assert set(a["moment_copy"]) == _COPY_KEYS[moment], moment
         assert a["moment_copy"] == donor[moment]
         assert all(isinstance(v, str) and v for v in a["moment_copy"].values())
@@ -375,15 +377,15 @@ def test_one_earn_reveals_only_its_own_moment(tmp_path, sealed_donor_present):
 
 
 def test_earned_roster_flags_shape():
-    assert g._earned_roster_flags(None) == {}
-    assert g._earned_roster_flags({"id": "x"}) == {}
-    out = g._earned_roster_flags({"id": "x", "moment": "keyturn", "unlocks": "branding_tab",
+    assert branding_mod._earned_roster_flags(None) == {}
+    assert branding_mod._earned_roster_flags({"id": "x"}) == {}
+    out = branding_mod._earned_roster_flags({"id": "x", "moment": "keyturn", "unlocks": "branding_tab",
                                   "moment_copy": {"title1": "t", "n": 3}})
     assert out == {"unlocks": "branding_tab", "moment": "keyturn",
-                   "moment_clip": "/branding/" + g._MOMENT_CLIPS["keyturn"],
+                   "moment_clip": "/branding/" + branding_mod._MOMENT_CLIPS["keyturn"],
                    "moment_copy": {"title1": "t"}}
     # a moment this build has no clip for still names itself, with an empty clip URL
-    assert g._earned_roster_flags({"id": "x", "moment": "later"})["moment_clip"] == ""
+    assert branding_mod._earned_roster_flags({"id": "x", "moment": "later"})["moment_clip"] == ""
 
 
 # ---- the sealed copy never reaches a public file -----------------------------

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from moonglade import backup as core
+from moonglade import mirror as mirror_mod
 
 
 # ---- _normalize_kaisuuken: the real summary template-row shape ----
@@ -214,8 +215,8 @@ def test_apply_kaisuuken_401_on_mirror_says_refresh_the_session_and_asks_once(mo
     """A 401 can never be fixed by waiting, so it is not retried and does not say 'wait and try
     again'. With Mirror to PixAI on, the sign-in that was refused is the website session: the
     words point at the Mirror tile's Refresh session button. Nothing is submitted."""
-    monkeypatch.setattr(core, "mirror_enabled", lambda: True)
-    monkeypatch.setattr(core, "make_mirror_session", lambda *a, **k: pixai)
+    monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
+    monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: pixai)
     slept = _no_sleep(monkeypatch)
     pixai.fail("/kaisuuken/check", _refused_401())
     params = {"modelId": "m"}
@@ -234,7 +235,7 @@ def test_apply_kaisuuken_401_on_mirror_says_refresh_the_session_and_asks_once(mo
 def test_apply_kaisuuken_401_with_mirror_off_blames_the_api_key(monkeypatch, pixai):
     """Same 401 with the Mirror off: the sign-in that was refused is the API key, so the words
     say that and point at config.json -- not at a Mirror button the user may never have used."""
-    monkeypatch.setattr(core, "mirror_enabled", lambda: False)
+    monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: False)
     slept = _no_sleep(monkeypatch)
     pixai.fail("/kaisuuken/check", _refused_401())
     params = {"modelId": "m"}

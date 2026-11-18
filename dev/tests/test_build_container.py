@@ -31,6 +31,7 @@ from moonglade import assets as ma
 from moonglade import backup as core
 from moonglade import container as mc
 from moonglade import gallery as g
+from moonglade import branding as branding_mod
 
 # tools/ is not a package; load the script by path (its own module-level code only
 # does imports + a sys.path insert, so importing it at collection time is safe --
@@ -47,7 +48,7 @@ PNG_1PX = bytes.fromhex(
 
 def _seed_branding(files):
     """Write {relposix: bytes} under the isolated branding_root(); returns it."""
-    root = g.branding_root()
+    root = branding_mod.branding_root()
     for rel, data in files.items():
         p = root / rel
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -70,7 +71,7 @@ def _run(monkeypatch, *argv):
     donor (so the build never reaches for the private repo) unless argv sets one."""
     argv = list(argv)
     if "--donor" not in argv:
-        donor_file = g.branding_root().parent / "_test_donor.json"
+        donor_file = branding_mod.branding_root().parent / "_test_donor.json"
         donor_file.write_text(json.dumps(_TEST_DONOR), encoding="utf-8")
         argv += ["--donor", str(donor_file)]
     monkeypatch.setattr(bc.sys, "argv", ["build_container.py", *argv])
@@ -78,7 +79,7 @@ def _run(monkeypatch, *argv):
 
 
 def _out_path():
-    return g._container_path()          # the builder's default IS where the app reads
+    return branding_mod._container_path()          # the builder's default IS where the app reads
 
 
 # ---------------------------------------------------------------------------
@@ -89,19 +90,19 @@ def test_gather_excludes_thumbs_at_any_depth():
     # packs is coded end to end); _thumbs stays a LITERAL name at any depth.
     root = _seed_branding({
         "banner.png": PNG_1PX,
-        g._role_rel("marks", "marks.json"): b'{"marks":[]}',
-        g._role_rel("marks", "mark_4.png"): PNG_1PX,
-        g._role_rel("badges", "first-light.png"): PNG_1PX,
+        branding_mod._role_rel("marks", "marks.json"): b'{"marks":[]}',
+        branding_mod._role_rel("marks", "mark_4.png"): PNG_1PX,
+        branding_mod._role_rel("badges", "first-light.png"): PNG_1PX,
         "_thumbs/cache.png": b"REGENERABLE",                          # top-level cache dir
-        g._role_rel("marks", "_thumbs", "mark_4.png"): b"REGENERABLE",  # nested cache dir
+        branding_mod._role_rel("marks", "_thumbs", "mark_4.png"): b"REGENERABLE",  # nested cache dir
     })
     got = bc.gather(root)
     assert set(got) == {"banner.png",
-                        g._role_rel("marks", "marks.json"),
-                        g._role_rel("marks", "mark_4.png"),
-                        g._role_rel("badges", "first-light.png")}
+                        branding_mod._role_rel("marks", "marks.json"),
+                        branding_mod._role_rel("marks", "mark_4.png"),
+                        branding_mod._role_rel("badges", "first-light.png")}
     assert all("_thumbs" not in rel for rel in got)
-    assert got[g._role_rel("marks", "mark_4.png")] == PNG_1PX  # real bytes, posix keys
+    assert got[branding_mod._role_rel("marks", "mark_4.png")] == PNG_1PX  # real bytes, posix keys
 
 
 # ---------------------------------------------------------------------------
@@ -109,8 +110,8 @@ def test_gather_excludes_thumbs_at_any_depth():
 # ---------------------------------------------------------------------------
 def test_build_writes_a_verified_container_and_manifest(monkeypatch):
     _seed_branding({"banner.png": PNG_1PX,
-                    g._role_rel("marks", "marks.json"): b'{"marks":[]}',
-                    g._role_rel("marks", "mark_4.png"): PNG_1PX})
+                    branding_mod._role_rel("marks", "marks.json"): b'{"marks":[]}',
+                    branding_mod._role_rel("marks", "mark_4.png"): PNG_1PX})
     _run(monkeypatch)                                 # no args -> defaults
 
     out = _out_path()
@@ -118,7 +119,7 @@ def test_build_writes_a_verified_container_and_manifest(monkeypatch):
     box = mc.open_container(out)
     assert box is not None
     assert box.get("banner.png") == PNG_1PX
-    assert box.get(g._role_rel("marks", "marks.json")) == b'{"marks":[]}'
+    assert box.get(branding_mod._role_rel("marks", "marks.json")) == b'{"marks":[]}'
     # The tool packs the SEALED achievement definitions (from the donor) as a reserved
     # payload -- the roster no longer lives in source, so this is the donor, byte-for-byte.
     assert box.payload("achievements") == json.dumps(_TEST_DONOR, separators=(",", ":")).encode("utf-8")
@@ -196,7 +197,7 @@ def test_the_default_donor_is_the_folio_donor():
 def test_a_donor_missing_a_v6_key_is_refused_and_nothing_is_written(monkeypatch, missing):
     _seed_branding({"banner.png": PNG_1PX})
     donor = {k: v for k, v in _TEST_DONOR.items() if k != missing}
-    donor_file = g.branding_root().parent / "_short_donor.json"
+    donor_file = branding_mod.branding_root().parent / "_short_donor.json"
     donor_file.write_text(json.dumps(donor), encoding="utf-8")
     before = _out_path().read_bytes() if _out_path().exists() else None   # the seeded pack
     with pytest.raises(SystemExit) as e:
@@ -208,7 +209,7 @@ def test_a_donor_missing_a_v6_key_is_refused_and_nothing_is_written(monkeypatch,
 
 def test_a_donor_key_of_the_wrong_shape_is_refused(monkeypatch):
     _seed_branding({"banner.png": PNG_1PX})
-    donor_file = g.branding_root().parent / "_bad_donor.json"
+    donor_file = branding_mod.branding_root().parent / "_bad_donor.json"
     donor_file.write_text(json.dumps(dict(_TEST_DONOR, poke_lines=[])), encoding="utf-8")
     before = _out_path().read_bytes() if _out_path().exists() else None
     with pytest.raises(SystemExit) as e:
@@ -219,13 +220,13 @@ def test_a_donor_key_of_the_wrong_shape_is_refused(monkeypatch):
 
 
 def test_refuses_missing_branding(monkeypatch):
-    assert not g.branding_root().exists()
+    assert not branding_mod.branding_root().exists()
     with pytest.raises(SystemExit):
         _run(monkeypatch)
 
 
 def test_refuses_empty_branding(monkeypatch):
-    g.branding_root().mkdir(parents=True, exist_ok=True)          # exists but empty
+    branding_mod.branding_root().mkdir(parents=True, exist_ok=True)          # exists but empty
     _out_path().unlink(missing_ok=True)   # drop the conftest fixture's seed container first
     with pytest.raises(SystemExit):
         _run(monkeypatch)
@@ -334,8 +335,8 @@ def _exports(js):
 
 def test_the_build_writes_the_carried_login_set_beside_the_container(monkeypatch, tmp_path):
     _seed_branding({"banner.png": PNG_1PX,
-                    g._role_rel("system", "login_nel.png"): _png_bytes((488, 480)),
-                    g._flat_default_rel("banner_login"): _png_bytes((1920, 480))})
+                    branding_mod._role_rel("system", "login_nel.png"): _png_bytes((488, 480)),
+                    branding_mod._flat_default_rel("banner_login"): _png_bytes((1920, 480))})
     out_js = tmp_path / "carried" / "loginArt.js"
     _run(monkeypatch, "--carry-to", str(out_js))
     ex = _exports(out_js.read_text(encoding="utf-8"))
@@ -349,7 +350,7 @@ def test_a_tree_without_login_art_leaves_the_carried_set_alone(monkeypatch, tmp_
     out_js = tmp_path / "loginArt.js"
     _run(monkeypatch, "--carry-to", str(out_js))
     assert not out_js.exists()
-    assert bc.write_carried_login_art(g.branding_root(), out_js) is None
+    assert bc.write_carried_login_art(branding_mod.branding_root(), out_js) is None
 
 
 def test_the_committed_carried_set_is_small_and_decodes():

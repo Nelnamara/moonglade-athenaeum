@@ -21,6 +21,7 @@ from moonglade import backup as core
 from moonglade import paths
 from moonglade import settings as msettings
 from tests.conftest import first_party_sources, login_client
+from moonglade import mirror as mirror_mod
 
 _REPO = Path(__file__).resolve().parents[2]
 _REAL_CORE_CONFIG_PATH = core._config_path
@@ -65,12 +66,12 @@ def test_the_mirror_toggle_writes_settings_json_never_config_json(routed, tmp_pa
                                                                    monkeypatch):
     """The switch is app-written, so it is settings.json's mirror_to_pixai; config.json (the
     hand-edited file with the auth block) is never rewritten by it."""
-    monkeypatch.setattr(core, "_jwt_usable", lambda jwt: True)
+    monkeypatch.setattr(mirror_mod, "_jwt_usable", lambda jwt: True)
     cli = login_client(tmp_path)
     before = routed.read_text(encoding="utf-8")
     d = cli.post("/api/mirror/enable", json={"enabled": True}).get_json()
     assert d == {"enabled": True}
-    assert msettings.read()["mirror_to_pixai"] is True and core.mirror_enabled() is True
+    assert msettings.read()["mirror_to_pixai"] is True and mirror_mod.mirror_enabled() is True
     assert routed.read_text(encoding="utf-8") == before
     assert "MIRROR_TO_PIXAI" not in json.loads(routed.read_text(encoding="utf-8"))
     _decoy_untouched(routed)
@@ -97,7 +98,7 @@ def test_core_config_path_is_the_paths_rule(monkeypatch, tmp_path):
 def test_mirror_session_is_a_machine_file(routed, tmp_path, monkeypatch):
     """It goes through local_path() like the other machine files, not config.json's folder."""
     monkeypatch.setattr(paths, "local_path", lambda name: tmp_path / "local" / name)
-    assert core._mirror_state_path() == tmp_path / "local" / "mirror_session.json"
+    assert mirror_mod._mirror_state_path() == tmp_path / "local" / "mirror_session.json"
 
 
 def test_the_move_brings_the_mirror_session_from_beside_config_json(tmp_path, monkeypatch):

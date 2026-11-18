@@ -9,10 +9,16 @@ from pathlib import Path
 
 from moonglade import backup as core
 from moonglade import paths
-from moonglade.gallery import CATALOG_FIELDS, _account_key, create_app, save_catalog
+from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.account_prefs import _account_key
 
 from tests.conftest import login_client, login_existing_client, with_csrf
 from tests.csshelp import css_rules, element, winning
+from moonglade import scan as scan_mod
+from moonglade import jobs as jobs_mod
+from moonglade import pixai_client as pixai_client_mod
+from moonglade import media_tools as media_tools_mod
+from moonglade import living as living_mod
 
 
 def _row(**kw):
@@ -784,9 +790,9 @@ def test_loom_handoff_extracts_and_uploads(tmp_path, monkeypatch, pixai):
         with open(out, "wb") as fh:      # simulate a produced frame
             fh.write(b"png")
         return out
-    monkeypatch.setattr(core, "extract_last_frame", fake_extract)
+    monkeypatch.setattr(media_tools_mod, "extract_last_frame", fake_extract)
     monkeypatch.setattr(core, "upload_media", lambda s, p: "FRAME123")
-    monkeypatch.setattr(core, "duration", lambda p: 5.0)
+    monkeypatch.setattr(media_tools_mod, "duration", lambda p: 5.0)
 
     cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
                                   is_video="1", created_at="2025-01-01T00:00:00")])
@@ -814,9 +820,9 @@ def test_loom_handoff_is_trim_aware(tmp_path, monkeypatch, pixai):
         with open(out, "wb") as fh:
             fh.write(b"png")
         return out
-    monkeypatch.setattr(core, "extract_last_frame", fake_extract)
+    monkeypatch.setattr(media_tools_mod, "extract_last_frame", fake_extract)
     monkeypatch.setattr(core, "upload_media", lambda s, p: "FRAME123")
-    monkeypatch.setattr(core, "duration", lambda p: 5.0)
+    monkeypatch.setattr(media_tools_mod, "duration", lambda p: 5.0)
 
     cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
                                   is_video="1", created_at="2025-01-01T00:00:00")])
@@ -839,9 +845,9 @@ def test_loom_handoff_reports_no_time_for_an_unmeasured_clip(tmp_path, monkeypat
         with open(out, "wb") as fh:
             fh.write(b"png")
         return out
-    monkeypatch.setattr(core, "extract_last_frame", fake_extract)
+    monkeypatch.setattr(media_tools_mod, "extract_last_frame", fake_extract)
     monkeypatch.setattr(core, "upload_media", lambda s, p: "FRAME123")
-    monkeypatch.setattr(core, "duration", lambda p: None)
+    monkeypatch.setattr(media_tools_mod, "duration", lambda p: None)
     cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
                                   is_video="1", created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/loom/handoff", json={"video_media_id": "V9", "trim_out": 3.2}).get_json()
@@ -852,12 +858,12 @@ def test_frame_seek_point_is_the_primitives_rule():
     """The handoff route reports where its frame came from through the same rule
     extract_last_frame seeks by: inside the clip -> that time; no time, at/after the end
     (within 0.05 s), or an unmeasured length -> None (the last frame)."""
-    assert core.frame_seek_point(3.2, 5.0) == 3.2
-    assert core.frame_seek_point(None, 5.0) is None
-    assert core.frame_seek_point(4.96, 5.0) is None
-    assert core.frame_seek_point(7, 5.0) is None
-    assert core.frame_seek_point(2.0, None) is None
-    assert core.frame_seek_point(0.0, 5.0) == 0.0
+    assert media_tools_mod.frame_seek_point(3.2, 5.0) == 3.2
+    assert media_tools_mod.frame_seek_point(None, 5.0) is None
+    assert media_tools_mod.frame_seek_point(4.96, 5.0) is None
+    assert media_tools_mod.frame_seek_point(7, 5.0) is None
+    assert media_tools_mod.frame_seek_point(2.0, None) is None
+    assert media_tools_mod.frame_seek_point(0.0, 5.0) == 0.0
 
 
 def test_loom_handoff_thumbnails_the_frame_it_uploads(tmp_path, monkeypatch, pixai):
@@ -878,9 +884,9 @@ def test_loom_handoff_thumbnails_the_frame_it_uploads(tmp_path, monkeypatch, pix
     def fake_upload(s, p):
         uploaded["path"] = p
         return "771867920444519035"
-    monkeypatch.setattr(core, "extract_last_frame", fake_extract)
+    monkeypatch.setattr(media_tools_mod, "extract_last_frame", fake_extract)
     monkeypatch.setattr(core, "upload_media", fake_upload)
-    monkeypatch.setattr(core, "duration", lambda p: 5.0)
+    monkeypatch.setattr(media_tools_mod, "duration", lambda p: 5.0)
     cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
                                   is_video="1", created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/loom/handoff", json={"video_media_id": "V9"}).get_json()
@@ -907,12 +913,12 @@ def test_loom_handoff_ignores_deleted_quarantine(tmp_path, monkeypatch, pixai):
     No catalog row for this media_id, so the fast path can't shortcut past the
     fallback -- this exercises exactly the buggy branch."""
     from moonglade import gallery as g
-    qdir = tmp_path / g.DELETED_DIRNAME
+    qdir = tmp_path / scan_mod.DELETED_DIRNAME
     qdir.mkdir()
     (qdir / "shot_V9.mp4").write_bytes(b"fake")
 
     calls = []
-    monkeypatch.setattr(core, "extract_last_frame", lambda *a, **k: calls.append(a) or None)
+    monkeypatch.setattr(media_tools_mod, "extract_last_frame", lambda *a, **k: calls.append(a) or None)
 
     cli = _authed_client(tmp_path, [])
     d = cli.post("/api/loom/handoff", json={"video_media_id": "V9"}).get_json()
@@ -930,7 +936,7 @@ def test_loom_handoff_requires_exact_media_id_match(tmp_path, monkeypatch, pixai
     (tmp_path / "videos" / "other_9V9.mp4").write_bytes(b"fake")   # real media_id is "9V9"
 
     calls = []
-    monkeypatch.setattr(core, "extract_last_frame", lambda *a, **k: calls.append(a) or None)
+    monkeypatch.setattr(media_tools_mod, "extract_last_frame", lambda *a, **k: calls.append(a) or None)
 
     cli = _authed_client(tmp_path, [])
     d = cli.post("/api/loom/handoff", json={"video_media_id": "V9"}).get_json()
@@ -945,7 +951,7 @@ def test_loom_video_duration_probes_local_file(tmp_path, monkeypatch):
     the real local file via ffprobe instead of leaving an imported clip's length wrong."""
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "shot_V9.mp4").write_bytes(b"fake")
-    monkeypatch.setattr(core, "duration", lambda p: 7.25)
+    monkeypatch.setattr(media_tools_mod, "duration", lambda p: 7.25)
 
     cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
                                   is_video="1", created_at="2025-01-01T00:00:00")])
@@ -977,11 +983,11 @@ def test_loom_video_duration_ignores_deleted_quarantine(tmp_path, monkeypatch):
     _find_local_video_file): a file sitting under _deleted/ must not be probed as if
     it were a live survivor."""
     from moonglade import gallery as g
-    qdir = tmp_path / g.DELETED_DIRNAME
+    qdir = tmp_path / scan_mod.DELETED_DIRNAME
     qdir.mkdir()
     (qdir / "shot_V9.mp4").write_bytes(b"fake")
     calls = []
-    monkeypatch.setattr(core, "duration", lambda p: calls.append(p) or 9.0)
+    monkeypatch.setattr(media_tools_mod, "duration", lambda p: calls.append(p) or 9.0)
 
     cli = _authed_client(tmp_path, [])
     d = cli.get("/api/loom/video-duration?media_id=V9").get_json()
@@ -1417,9 +1423,9 @@ def test_your_art_ranks_published_and_reads_swept_views(tmp_path, pixai):
     ])
     db = tmp_path / "catalog.db"
     # pure helpers
-    assert [r["media_id"] for r in g.top_published_rows(db)] == ["2", "1"]           # by likes
-    assert [r["media_id"] for r in g.top_published_rows(db, order="views")] == ["1", "2"]
-    t = g.published_totals(db)
+    assert [r["media_id"] for r in living_mod.top_published_rows(db)] == ["2", "1"]           # by likes
+    assert [r["media_id"] for r in living_mod.top_published_rows(db, order="views")] == ["1", "2"]
+    t = living_mod.published_totals(db)
     assert t["count"] == 2 and t["likes"] == 44 and t["comments"] == 2
     assert t["views"] == 590 and t["views_rows"] == 2     # 9999 excluded: not published
     # route, no mock of any kind: the swept column is the whole answer
@@ -1778,12 +1784,12 @@ def test_import_task_closes_the_original_orphaned_job_entry(tmp_path, monkeypatc
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli = login_existing_client(cli)
     tid = "2037215124834251576"
-    core.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
+    jobs_mod.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
 
     d = cli.post("/api/import-task", json={"task_id": tid}).get_json()
     assert d["ok"] and d["saved"] == 1
 
-    by_id = {j["job_id"]: j for j in core.read_jobs(tmp_path)}
+    by_id = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}
     assert by_id[tid]["status"] == "done", "the original orphaned entry was never closed"
     assert by_id[tid]["media_ids"] == ["m1"]
     # the recovery's own new job_id still exists too -- this closes the orphan
@@ -1798,7 +1804,7 @@ def test_import_task_closes_orphan_on_the_already_cataloged_path_too(tmp_path):
     entry must still get closed. Without this, a recovery landing on the
     already-cataloged branch does nothing for the stuck Activity card at all."""
     tid = "999"
-    core.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
+    jobs_mod.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
     save_catalog(tmp_path / "catalog.db", [_row(media_id="ex1", filename="e.png", task_id=tid,
                                                 created_at="2025-01-02T00:00:00")])
     cli = login_client(tmp_path)
@@ -1806,7 +1812,7 @@ def test_import_task_closes_orphan_on_the_already_cataloged_path_too(tmp_path):
     d = cli.post("/api/import-task", json={"task_id": tid}).get_json()
     assert d.get("already") is True
 
-    by_id = {j["job_id"]: j for j in core.read_jobs(tmp_path)}
+    by_id = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}
     assert by_id[tid]["status"] == "done", "the already-cataloged path left the orphan spinning"
 
 
@@ -1819,12 +1825,12 @@ def test_import_task_leaves_a_dismissed_orphan_alone(tmp_path, monkeypatch, pixa
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli = login_existing_client(cli)
     tid = "2222"
-    core.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
-    core.append_job_event(tmp_path, tid, dismissed=True)
+    jobs_mod.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
+    jobs_mod.append_job_event(tmp_path, tid, dismissed=True)
 
     cli.post("/api/import-task", json={"task_id": tid})
 
-    from moonglade.backup import _reconstruct_jobs
+    from moonglade.jobs import _reconstruct_jobs
     jobs_by_id, _order, _n = _reconstruct_jobs(tmp_path)
     assert jobs_by_id[tid]["status"] == "running"       # untouched
     assert jobs_by_id[tid]["dismissed"] is True
@@ -2063,7 +2069,7 @@ def test_mine_tab_search_walks_the_authors_own_list_and_matches_every_word(tmp_p
 
     class _C:
         user_id = "u1"
-    monkeypatch.setattr(core, "_client_of", lambda s: _C())
+    monkeypatch.setattr(pixai_client_mod, "_client_of", lambda s: _C())
     cli = login_client(tmp_path)
     d = cli.get("/api/model-search?kind=lora&size=24&q=beautiful%20eyes&src=mine").get_json()
     assert [r["model_id"] for r in d["results"]] == ["4"], d

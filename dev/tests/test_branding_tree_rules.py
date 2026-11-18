@@ -43,6 +43,8 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_client
+from moonglade import telemetry as telemetry_mod
+from moonglade import branding as branding_mod
 
 
 def _row(**kw):
@@ -81,12 +83,12 @@ def _build_box(tmp_path, assets):
     """(Re)build this install's art pack and drop the read cache so the new
     content is seen immediately (the cache keys on mtime, which can collide with
     conftest's own seed within the filesystem's resolution)."""
-    mc.write_container(g._container_path(), assets, {})
-    g._container_cache.update(path=None, mtime=None, box=None)
+    mc.write_container(branding_mod._container_path(), assets, {})
+    branding_mod._container_cache.update(path=None, mtime=None, box=None)
 
 
 def _flag(tmp_path):
-    return (g.load_telemetry(tmp_path).get("flags") or {}).get("branding_custom_file")
+    return (telemetry_mod.load_telemetry(tmp_path).get("flags") or {}).get("branding_custom_file")
 
 
 def _mkdir(p):
@@ -99,11 +101,11 @@ def _no_container(tmp_path):
     runs against an install that genuinely has no pack. Behaviour must be
     identical either way -- that is the point of the baseline."""
     try:
-        g._container_path().unlink()
+        branding_mod._container_path().unlink()
     except OSError:
         pass
-    g._container_cache.update(path=None, mtime=None, box=None)
-    assert g._get_container() is None
+    branding_mod._container_cache.update(path=None, mtime=None, box=None)
+    assert branding_mod._get_container() is None
 
 
 def _age(root, seconds=60):
@@ -130,7 +132,7 @@ def _settle(tmp_path):
     baseline, so an install that upgrades into this build can never self-earn
     off what an older build left behind. Art that arrives afterwards is a
     genuine difference and counts."""
-    assert g.sweep_branding_drops(tmp_path) is False
+    assert branding_mod.sweep_branding_drops(tmp_path) is False
     assert not _flag(tmp_path), "the baseline pass must earn nothing"
 
 
@@ -143,11 +145,11 @@ def test_a_drop_in_the_mascots_folder_raises_the_flag_and_is_untouched(tmp_path)
     role-bound files real code reads by exact filename, so the sweep must never
     consume one. It is now READ, and reading is not adopting."""
     _settle(tmp_path)
-    d = _mkdir(g._role_dir("mascots"))
+    d = _mkdir(branding_mod._role_dir("mascots"))
     raw = _png_bytes()
     (d / "my_nel.png").write_bytes(raw)
 
-    assert g.sweep_branding_drops(tmp_path) is False, "nothing outside the four folders adopts"
+    assert branding_mod.sweep_branding_drops(tmp_path) is False, "nothing outside the four folders adopts"
     assert _flag(tmp_path) == 1
     # byte-for-byte, same name, and no manifest conjured alongside it
     assert (d / "my_nel.png").read_bytes() == raw
@@ -159,11 +161,11 @@ def test_a_drop_in_the_rewards_folder_raises_the_flag_and_is_untouched(tmp_path)
     rather than a customization bucket -- so it gets its own pin rather than
     riding on mascots'."""
     _settle(tmp_path)
-    d = _mkdir(g._role_dir("rewards"))
+    d = _mkdir(branding_mod._role_dir("rewards"))
     raw = _png_bytes((20, 20, 200))
     (d / "my_prize.png").write_bytes(raw)
 
-    assert g.sweep_branding_drops(tmp_path) is False
+    assert branding_mod.sweep_branding_drops(tmp_path) is False
     assert _flag(tmp_path) == 1
     assert (d / "my_prize.png").read_bytes() == raw
     assert sorted(p.name for p in d.iterdir()) == ["my_prize.png"]
@@ -173,11 +175,11 @@ def test_a_drop_in_a_user_made_nested_folder_raises_the_flag_and_is_untouched(tm
     """The walk is general, not a list of known folders: a user who invents their
     own nesting is covered the same as one who uses the folders the app made."""
     _settle(tmp_path)
-    d = _mkdir(g.branding_root() / "my stuff" / "deeper")
+    d = _mkdir(branding_mod.branding_root() / "my stuff" / "deeper")
     raw = _png_bytes((10, 200, 10))
     (d / "art.png").write_bytes(raw)
 
-    assert g.sweep_branding_drops(tmp_path) is False
+    assert branding_mod.sweep_branding_drops(tmp_path) is False
     assert _flag(tmp_path) == 1
     assert (d / "art.png").read_bytes() == raw
 
@@ -195,20 +197,20 @@ def test_the_walk_cap_bounds_the_scan_in_both_directions(tmp_path):
     and "does not count" for a reason that has nothing to do with depth -- the
     assertion then holds with the cap removed entirely, which is how this passed
     against a walk that had none."""
-    cap = g._BRANDING_WALK_MAX_DEPTH
-    at_cap = _mkdir(g.branding_root().joinpath(*["d%d" % i for i in range(cap)]))
+    cap = branding_mod._BRANDING_WALK_MAX_DEPTH
+    at_cap = _mkdir(branding_mod.branding_root().joinpath(*["d%d" % i for i in range(cap)]))
     beyond = _mkdir(at_cap / "toodeep")
 
     _settle(tmp_path)                        # baseline: both folders empty
 
     (at_cap / "found.png").write_bytes(_png_bytes((250, 5, 5)))
-    assert g._branding_tree_has_new_art(tmp_path) is True, \
+    assert branding_mod._branding_tree_has_new_art(tmp_path) is True, \
         "a file AT the cap is inside it"
     (at_cap / "found.png").unlink()
-    assert g._branding_tree_has_new_art(tmp_path) is False, "back to the baseline"
+    assert branding_mod._branding_tree_has_new_art(tmp_path) is False, "back to the baseline"
 
     (beyond / "deeper.png").write_bytes(_png_bytes((5, 5, 5)))
-    assert g._branding_tree_has_new_art(tmp_path) is False, \
+    assert branding_mod._branding_tree_has_new_art(tmp_path) is False, \
         "a file one level PAST the cap is outside the tree's vocabulary, not a find"
 
 
@@ -221,24 +223,24 @@ def test_a_text_file_anywhere_does_not_raise_the_flag(tmp_path):
     real: notes.txt is on disk BEFORE the baseline (so the change to it later is
     genuinely a change at a RECORDED rel -- the override case), while the other
     two arrive after it (new rels)."""
-    _mkdir(g._role_dir("rewards"))
-    (g._role_dir("rewards") / "notes.txt").write_text("todo: draw something", encoding="utf-8")
+    _mkdir(branding_mod._role_dir("rewards"))
+    (branding_mod._role_dir("rewards") / "notes.txt").write_text("todo: draw something", encoding="utf-8")
     _settle(tmp_path)                        # the baseline records notes.txt
-    assert g._branding_baseline(tmp_path).get(g._role_rel("rewards", "notes.txt")), \
+    assert branding_mod._branding_baseline(tmp_path).get(branding_mod._role_rel("rewards", "notes.txt")), \
         "the baseline did not record the .txt this test is about"
 
-    _mkdir(g.branding_root() / "scratch")
-    (g.branding_root() / "scratch" / "plan.txt").write_text("later", encoding="utf-8")
-    _mkdir(g._role_dir("breadcrumb"))
-    (g._role_dir("breadcrumb") / "README.txt").write_text("hint", encoding="utf-8")
+    _mkdir(branding_mod.branding_root() / "scratch")
+    (branding_mod.branding_root() / "scratch" / "plan.txt").write_text("later", encoding="utf-8")
+    _mkdir(branding_mod._role_dir("breadcrumb"))
+    (branding_mod._role_dir("breadcrumb") / "README.txt").write_text("hint", encoding="utf-8")
 
-    assert g.sweep_branding_drops(tmp_path) is False
+    assert branding_mod.sweep_branding_drops(tmp_path) is False
     assert not _flag(tmp_path)
     # ...and a .txt whose bytes change at a path the baseline DOES hold is still
     # not an image, so the override rule cannot smuggle one in either.
-    (g._role_dir("rewards") / "notes.txt").write_text("todo: draw two things",
+    (branding_mod._role_dir("rewards") / "notes.txt").write_text("todo: draw two things",
                                                      encoding="utf-8")
-    assert g._branding_tree_has_new_art(tmp_path) is False
+    assert branding_mod._branding_tree_has_new_art(tmp_path) is False
 
 
 def test_a_file_at_the_coded_root_is_neither_counted_nor_served(tmp_path):
@@ -246,11 +248,11 @@ def test_a_file_at_the_coded_root_is_neither_counted_nor_served(tmp_path):
     file parked at its top level is not counted and not an asset."""
     cli = _public_client(tmp_path)
     _settle(tmp_path)
-    root = _mkdir(g.branding_root())
+    root = _mkdir(branding_mod.branding_root())
     raw = _png_bytes()
     (root / "parked.png").write_bytes(raw)
 
-    assert g.sweep_branding_drops(tmp_path) is False
+    assert branding_mod.sweep_branding_drops(tmp_path) is False
     assert not _flag(tmp_path)
     assert cli.get("/branding/parked.png").status_code == 404
     assert (root / "parked.png").read_bytes() == raw, "and it is left exactly where it was"
@@ -261,26 +263,26 @@ def test_the_four_adopt_folders_still_adopt(tmp_path):
     All four -- the three banner slots and marks -- consume a hand-drop exactly
     as before."""
     _seed_catalog(tmp_path)
-    for slot in g._SWEEPABLE_SLOTS:
-        _mkdir(g._role_dir(slot))
-        (g._role_dir(slot) / ("drop_" + slot + ".png")).write_bytes(_png_bytes())
-    mdir = _mkdir(g._role_dir("marks"))
+    for slot in branding_mod._SWEEPABLE_SLOTS:
+        _mkdir(branding_mod._role_dir(slot))
+        (branding_mod._role_dir(slot) / ("drop_" + slot + ".png")).write_bytes(_png_bytes())
+    mdir = _mkdir(branding_mod._role_dir("marks"))
     (mdir / "hand_drop.png").write_bytes(_png_bytes())
 
-    assert g.sweep_branding_drops(tmp_path) is True
+    assert branding_mod.sweep_branding_drops(tmp_path) is True
     assert _flag(tmp_path) == 1
-    for slot in g._SWEEPABLE_SLOTS:
-        assert not (g._role_dir(slot) / ("drop_" + slot + ".png")).exists(), \
+    for slot in branding_mod._SWEEPABLE_SLOTS:
+        assert not (branding_mod._role_dir(slot) / ("drop_" + slot + ".png")).exists(), \
             "the raw drop is consumed, not left beside the adopted copy"
-        assets = g.list_slot_assets(tmp_path, slot)
+        assets = branding_mod.list_slot_assets(tmp_path, slot)
         assert len(assets) == 1
-        assert (g._role_dir(slot) / (assets[0]["id"] + ".png")).is_file()
+        assert (branding_mod._role_dir(slot) / (assets[0]["id"] + ".png")).is_file()
     # marks adopt under a stem-derived id, so the adopted art legitimately lands
     # back on the raw drop's own filename -- the registration is what says it was
     # adopted rather than merely left alone.
-    assert "hand_drop" in {m["id"] for m in g.list_marks(tmp_path)}
+    assert "hand_drop" in {m["id"] for m in branding_mod.list_marks(tmp_path)}
     assert (mdir / "hand_drop.png").is_file()
-    assert g.load_branding(tmp_path)["mark"] == "hand_drop"
+    assert branding_mod.load_branding(tmp_path)["mark"] == "hand_drop"
 
 
 # ---------------------------------------------------------------------------
@@ -300,14 +302,14 @@ def test_a_tombstoned_shipped_mark_left_loose_is_not_a_find(tmp_path):
     adopt path has treated a tombstoned stem as KNOWN since the 2026-08-13 live
     incident on the owner's own machine; the scan has to hold the same line, or
     delisting a default silently earns for everyone who upgrades."""
-    mdir = _mkdir(g._role_dir("marks"))
-    for stem in sorted(g._MARK_TOMBSTONES):
+    mdir = _mkdir(branding_mod._role_dir("marks"))
+    for stem in sorted(branding_mod._MARK_TOMBSTONES):
         (mdir / (stem + ".png")).write_bytes(_png_bytes())
 
-    assert g.sweep_branding_drops(tmp_path) is False
-    assert g.sweep_branding_drops(tmp_path) is False   # past the baseline pass
+    assert branding_mod.sweep_branding_drops(tmp_path) is False
+    assert branding_mod.sweep_branding_drops(tmp_path) is False   # past the baseline pass
     assert not _flag(tmp_path), "a delisted shipped default earned the flag"
-    for stem in sorted(g._MARK_TOMBSTONES):
+    for stem in sorted(branding_mod._MARK_TOMBSTONES):
         assert (mdir / (stem + ".png")).is_file()
 
 
@@ -330,28 +332,28 @@ def test_shipped_art_the_legacy_migration_left_loose_is_not_a_find(tmp_path, wit
         # role folder, so a mark the old tree listed is still listed after it.
         # (Without it mark_4.png is an unknown stem in an ADOPT folder and the
         # sweep consumes it -- a different rule, pinned by its own tests.)
-        g._role_rel("marks", "marks.json"): manifest,
-        g._role_rel("marks", "mark_4.png"): _png_bytes(),
-        g._role_rel("mascots", "nel_narrator.png"): _png_bytes((9, 9, 9)),
-        g._role_rel("rewards", "reward_1.png"): _png_bytes((8, 8, 8)),
-        g._role_rel("badges", "first-light.png"): _png_bytes((7, 7, 7)),
+        branding_mod._role_rel("marks", "marks.json"): manifest,
+        branding_mod._role_rel("marks", "mark_4.png"): _png_bytes(),
+        branding_mod._role_rel("mascots", "nel_narrator.png"): _png_bytes((9, 9, 9)),
+        branding_mod._role_rel("rewards", "reward_1.png"): _png_bytes((8, 8, 8)),
+        branding_mod._role_rel("badges", "first-light.png"): _png_bytes((7, 7, 7)),
     }
     if with_container:
         _build_box(tmp_path, dict(loose))
     else:
         _no_container(tmp_path)
     for rel, raw in loose.items():
-        p = g.branding_root() / rel
+        p = branding_mod.branding_root() / rel
         _mkdir(p.parent)
         p.write_bytes(raw)
 
-    assert g.sweep_branding_drops(tmp_path) is False
-    assert g.sweep_branding_drops(tmp_path) is False   # past the baseline pass
+    assert branding_mod.sweep_branding_drops(tmp_path) is False
+    assert branding_mod.sweep_branding_drops(tmp_path) is False   # past the baseline pass
     assert not _flag(tmp_path), "the app's own shipped art earned the flag"
 
     # ...and the owner's actual drop, right beside it, still does.
-    (g._role_dir("mascots") / "my_own_nel.png").write_bytes(_png_bytes((1, 250, 1)))
-    assert g.sweep_branding_drops(tmp_path) is False
+    (branding_mod._role_dir("mascots") / "my_own_nel.png").write_bytes(_png_bytes((1, 250, 1)))
+    assert branding_mod.sweep_branding_drops(tmp_path) is False
     assert _flag(tmp_path) == 1
 
 
@@ -363,13 +365,13 @@ def test_the_owners_override_of_a_shipped_asset_counts(tmp_path, with_container)
     "does the pack ship this name?" test got backwards, since the name is still
     the pack's. Only the BYTES can tell the two apart, which is why the baseline
     fingerprints them."""
-    rel = g._role_rel("mascots", "nel_narrator.png")
+    rel = branding_mod._role_rel("mascots", "nel_narrator.png")
     shipped = _png_bytes((9, 9, 9))
     if with_container:
         _build_box(tmp_path, {rel: shipped})
     else:
         _no_container(tmp_path)
-    p = g.branding_root() / rel
+    p = branding_mod.branding_root() / rel
     _mkdir(p.parent)
     p.write_bytes(shipped)
 
@@ -378,7 +380,7 @@ def test_the_owners_override_of_a_shipped_asset_counts(tmp_path, with_container)
     mine = _png_bytes((250, 250, 1), w=81, h=21)     # his own art, same filename
     assert mine != shipped
     p.write_bytes(mine)
-    assert g.sweep_branding_drops(tmp_path) is False
+    assert branding_mod.sweep_branding_drops(tmp_path) is False
     assert _flag(tmp_path) == 1, "the owner's own override read as a shipped default"
     assert p.read_bytes() == mine, "and it is left exactly as he wrote it"
 
@@ -401,16 +403,16 @@ def test_a_same_size_override_still_counts(tmp_path):
     """...including when the replacement happens to be the same length. A size
     compare alone would call this unchanged, which is why the fingerprint hashes
     the head of the file as well."""
-    rel = g._role_rel("rewards", "reward_1.png")
+    rel = branding_mod._role_rel("rewards", "reward_1.png")
     a, b = _same_size_pngs()
     assert len(a) == len(b) and a != b, "fixture no longer exercises the same-size case"
-    p = g.branding_root() / rel
+    p = branding_mod.branding_root() / rel
     _mkdir(p.parent)
     p.write_bytes(a)
 
     _settle(tmp_path)
     p.write_bytes(b)
-    assert g._branding_tree_has_new_art(tmp_path) is True
+    assert branding_mod._branding_tree_has_new_art(tmp_path) is True
 
 
 def test_a_second_app_folder_against_the_same_library_is_not_a_find(tmp_path, monkeypatch):
@@ -428,24 +430,24 @@ def test_a_second_app_folder_against_the_same_library_is_not_a_find(tmp_path, mo
     itself."""
     _seed_catalog(tmp_path)
     shipped = _png_bytes((9, 9, 9))
-    first = _mkdir(g._role_dir("mascots"))
+    first = _mkdir(branding_mod._role_dir("mascots"))
     (first / "nel_narrator.png").write_bytes(shipped)
     _settle(tmp_path)                               # app folder A takes its snapshot
 
     second = tmp_path / "second_checkout"
-    monkeypatch.setattr(g, "branding_root", lambda: second / "branding")
-    other = _mkdir(g._role_dir("mascots"))
+    monkeypatch.setattr(branding_mod, "branding_root", lambda: second / "branding")
+    other = _mkdir(branding_mod._role_dir("mascots"))
     (other / "nel_narrator.png").write_bytes(shipped)
     (other / "nel_dressed.png").write_bytes(_png_bytes((8, 8, 8)))
 
-    assert g.sweep_branding_drops(tmp_path) is False
+    assert branding_mod.sweep_branding_drops(tmp_path) is False
     assert not _flag(tmp_path), \
         "a second app folder's own shipped art self-earned the feat off the first's snapshot"
 
     # ...and the second folder has a real baseline of its OWN, so a real drop
     # into it still counts.
     (other / "mine.png").write_bytes(_png_bytes((1, 250, 1)))
-    assert g.sweep_branding_drops(tmp_path) is False
+    assert branding_mod.sweep_branding_drops(tmp_path) is False
     assert _flag(tmp_path) == 1, "the second app folder's baseline swallowed a genuine drop"
 
 
@@ -461,23 +463,23 @@ def test_a_settled_tree_is_not_rehashed_on_every_fetch(tmp_path, monkeypatch):
     (rel, size, mtime) skips it: the first scan of a process pays the reads, the
     rest pay the walk's own stats."""
     _seed_catalog(tmp_path)
-    mdir = _mkdir(g._role_dir("mascots"))
+    mdir = _mkdir(branding_mod._role_dir("mascots"))
     for n in range(3):
         (mdir / ("shipped_%d.png" % n)).write_bytes(_png_bytes((10, 200, 10), w=80 + n))
-    _age(g.branding_root())
+    _age(branding_mod.branding_root())
     _settle(tmp_path)                               # the snapshot pass
-    assert g.sweep_branding_drops(tmp_path) is False  # the first real comparison: reads
+    assert branding_mod.sweep_branding_drops(tmp_path) is False  # the first real comparison: reads
 
     reads = []
-    real = g._file_fingerprint
-    monkeypatch.setattr(g, "_file_fingerprint",
+    real = branding_mod._file_fingerprint
+    monkeypatch.setattr(branding_mod, "_file_fingerprint",
                         lambda p: (reads.append(str(p)), real(p))[1])
-    assert g.sweep_branding_drops(tmp_path) is False
+    assert branding_mod.sweep_branding_drops(tmp_path) is False
     assert reads == [], "a settled tree was read and hashed again on a later fetch"
 
     # ...and the memo is not a blindfold: a drop still counts on the next fetch.
     (mdir / "mine.png").write_bytes(_png_bytes((1, 250, 1)))
-    assert g.sweep_branding_drops(tmp_path) is False
+    assert branding_mod.sweep_branding_drops(tmp_path) is False
     assert _flag(tmp_path) == 1, "the memo hid a genuine drop"
 
 
@@ -492,22 +494,22 @@ def test_a_freshly_written_file_is_compared_again_rather_than_memoised(tmp_path,
     length, different bytes) counting no matter how fast it follows the scan."""
     a, b = _same_size_pngs()
     assert len(a) == len(b) and a != b, "fixture no longer exercises the same-size case"
-    p = g.branding_root() / g._role_rel("rewards", "reward_1.png")
+    p = branding_mod.branding_root() / branding_mod._role_rel("rewards", "reward_1.png")
     _mkdir(p.parent)
     p.write_bytes(a)
 
     _settle(tmp_path)
-    assert g._branding_tree_has_new_art(tmp_path) is False   # the first real comparison
+    assert branding_mod._branding_tree_has_new_art(tmp_path) is False   # the first real comparison
 
     reads = []
-    real = g._file_fingerprint
-    monkeypatch.setattr(g, "_file_fingerprint",
+    real = branding_mod._file_fingerprint
+    monkeypatch.setattr(branding_mod, "_file_fingerprint",
                         lambda q: (reads.append(str(q)), real(q))[1])
-    assert g._branding_tree_has_new_art(tmp_path) is False
+    assert branding_mod._branding_tree_has_new_art(tmp_path) is False
     assert reads, "a file written moments ago was memoised on its mtime"
 
     p.write_bytes(b)                                # same name, same length, his bytes
-    assert g._branding_tree_has_new_art(tmp_path) is True
+    assert branding_mod._branding_tree_has_new_art(tmp_path) is True
 
 
 def test_a_stale_legacy_badge_thumb_cache_is_not_a_find(tmp_path):
@@ -518,21 +520,21 @@ def test_a_stale_legacy_badge_thumb_cache_is_not_a_find(tmp_path):
     name them (dev/tools/build_container.py excludes `_thumbs` at ANY depth), so it
     was no help; the baseline needs no special case for them at all, dressed or
     bare."""
-    top = _mkdir(g.branding_root() / g._LEGACY_THUMB_DIR)
+    top = _mkdir(branding_mod.branding_root() / branding_mod._LEGACY_THUMB_DIR)
     (top / "first-light.png").write_bytes(_png_bytes())
-    nested = _mkdir(g._role_dir("marks") / g._LEGACY_THUMB_DIR)
+    nested = _mkdir(branding_mod._role_dir("marks") / branding_mod._LEGACY_THUMB_DIR)
     (nested / "mark_4.png").write_bytes(_png_bytes((3, 3, 3)))
 
     _settle(tmp_path)
-    assert g._branding_tree_has_new_art(tmp_path) is False
+    assert branding_mod._branding_tree_has_new_art(tmp_path) is False
     assert not _flag(tmp_path), "the app's own regenerable badge cache earned the flag"
     # ...still so with no pack at all to ask.
     _no_container(tmp_path)
-    assert g._branding_tree_has_new_art(tmp_path) is False
+    assert branding_mod._branding_tree_has_new_art(tmp_path) is False
     # ...and a later drop in a folder of the owner's own still counts.
-    d = _mkdir(g.branding_root() / "_thumbsketches")
+    d = _mkdir(branding_mod.branding_root() / "_thumbsketches")
     (d / "mine.png").write_bytes(_png_bytes((250, 1, 1)))
-    assert g._branding_tree_has_new_art(tmp_path) is True
+    assert branding_mod._branding_tree_has_new_art(tmp_path) is True
 
 
 def test_system_chrome_is_not_a_find_even_with_no_container(tmp_path):
@@ -542,16 +544,16 @@ def test_system_chrome_is_not_a_find_even_with_no_container(tmp_path):
     ran against. It was on disk before anyone looked, so it is a default."""
     _no_container(tmp_path)
 
-    sysd = _mkdir(g._role_dir("system"))
-    for name in sorted(g._SYSTEM_TOP_FILES):
+    sysd = _mkdir(branding_mod._role_dir("system"))
+    for name in sorted(branding_mod._SYSTEM_TOP_FILES):
         if name.endswith(".ico"):
             continue                     # not an image Pillow reads; nothing to pin
         (sysd / name).write_bytes(_png_bytes())
-    (_mkdir(g._role_dir("starfall")) / "ee_nelstarfall.png").write_bytes(_png_bytes())
+    (_mkdir(branding_mod._role_dir("starfall")) / "ee_nelstarfall.png").write_bytes(_png_bytes())
 
-    assert g._get_container() is None, "this install genuinely has no pack"
-    assert g.sweep_branding_drops(tmp_path) is False
-    assert g.sweep_branding_drops(tmp_path) is False   # past the baseline pass
+    assert branding_mod._get_container() is None, "this install genuinely has no pack"
+    assert branding_mod.sweep_branding_drops(tmp_path) is False
+    assert branding_mod.sweep_branding_drops(tmp_path) is False   # past the baseline pass
     assert not _flag(tmp_path)
 
 
@@ -564,12 +566,12 @@ def test_an_upload_through_the_branding_tab_is_not_a_find(tmp_path):
     _seed_catalog(tmp_path)
     _settle(tmp_path)
 
-    asset = g.add_slot_asset(tmp_path, "banner_main", _png_bytes())
-    assert asset and (g._role_dir("banner_main") / (asset["id"] + ".png")).is_file()
+    asset = branding_mod.add_slot_asset(tmp_path, "banner_main", _png_bytes())
+    assert asset and (branding_mod._role_dir("banner_main") / (asset["id"] + ".png")).is_file()
 
-    assert g._branding_tree_has_new_art(tmp_path) is False, \
+    assert branding_mod._branding_tree_has_new_art(tmp_path) is False, \
         "the app's own registered upload read back as somebody's find"
-    assert g.sweep_branding_drops(tmp_path) is False, "a registered id is not a fresh drop"
+    assert branding_mod.sweep_branding_drops(tmp_path) is False, "a registered id is not a fresh drop"
     assert not _flag(tmp_path)
 
 
@@ -580,10 +582,10 @@ def test_a_custom_mark_upload_is_not_a_find(tmp_path):
     _seed_catalog(tmp_path)
     _settle(tmp_path)
 
-    mark = g.add_custom_mark(tmp_path, _png_bytes(), label="My mark")
-    assert (g._role_dir("marks") / (mark["id"] + ".png")).is_file()
+    mark = branding_mod.add_custom_mark(tmp_path, _png_bytes(), label="My mark")
+    assert (branding_mod._role_dir("marks") / (mark["id"] + ".png")).is_file()
 
-    assert g._branding_tree_has_new_art(tmp_path) is False
+    assert branding_mod._branding_tree_has_new_art(tmp_path) is False
     assert not _flag(tmp_path)
 
 
@@ -599,16 +601,16 @@ def test_the_render_lands_in_the_cache_and_the_root_stays_empty(tmp_path):
     assert r.status_code == 200
 
     from PIL import Image
-    flat = g.banner_cache_dir(tmp_path) / "banner.png"
+    flat = branding_mod.banner_cache_dir(tmp_path) / "banner.png"
     assert flat.is_file(), "the render belongs in the app cache, beside the badge thumbs"
     with Image.open(flat) as im:
         assert im.size == (1920, 480)
-    assert [p.name for p in g.branding_root().iterdir() if p.is_file()] == [], \
+    assert [p.name for p in branding_mod.branding_root().iterdir() if p.is_file()] == [], \
         "the coded root must hold nothing the app wrote"
     # ...and it names the pick it came from, which is what everything in the
     # provenance section below hangs off.
     slot = cli.get("/api/branding").get_json()["slots"]["banner_main"]
-    assert g._read_banner_record(tmp_path, "banner.png") == {
+    assert branding_mod._read_banner_record(tmp_path, "banner.png") == {
         "kind": "slot", "asset_id": slot["active"],
         "transform": {"zoom": 100, "cropX": 50, "cropY": 50}}
 
@@ -627,7 +629,7 @@ def test_building_the_app_never_moves_a_render_out_of_the_tree(tmp_path):
     is the one known exception, it predates this rule, and it stays because an
     install carrying the old tree is unusable until it runs."""
     _seed_catalog(tmp_path)
-    root = _mkdir(g.branding_root())
+    root = _mkdir(branding_mod.branding_root())
     raw = _png_bytes((7, 8, 9))
     (root / "banner.png").write_bytes(raw)
 
@@ -635,7 +637,7 @@ def test_building_the_app_never_moves_a_render_out_of_the_tree(tmp_path):
 
     assert (root / "banner.png").read_bytes() == raw, \
         "app construction moved a file out of the coded tree"
-    assert not (g.banner_cache_dir(tmp_path) / "banner.png").exists()
+    assert not (branding_mod.banner_cache_dir(tmp_path) / "banner.png").exists()
 
 
 def test_startup_migration_moves_a_pre_existing_root_flat_into_the_kept_banners(tmp_path):
@@ -645,25 +647,25 @@ def test_startup_migration_moves_a_pre_existing_root_flat_into_the_kept_banners(
     cache, never the art tree -- B6), and settings.json's worn_banner says the
     slot wears it."""
     _seed_catalog(tmp_path)
-    root = _mkdir(g.branding_root())
+    root = _mkdir(branding_mod.branding_root())
     raw = _png_bytes((7, 8, 9))
     (root / "banner.png").write_bytes(raw)
 
-    g._migrate_root_banner_flats(tmp_path)     # what a real start (main()) runs
+    branding_mod._migrate_root_banner_flats(tmp_path)     # what a real start (main()) runs
 
-    dst = g.banner_keep_dir() / "banner.png"
+    dst = branding_mod.banner_keep_dir() / "banner.png"
     assert not (root / "banner.png").exists()
     assert dst.read_bytes() == raw, "moved, not re-rendered and not dropped"
-    assert g._worn_banner("banner_main") == {"kind": "migrated"}
-    assert not (g.banner_cache_dir(tmp_path) / "banner.png").exists(), "never into a cache"
+    assert branding_mod._worn_banner("banner_main") == {"kind": "migrated"}
+    assert not (branding_mod.banner_cache_dir(tmp_path) / "banner.png").exists(), "never into a cache"
 
-    g._migrate_root_banner_flats(tmp_path)     # idempotent: a no-op second time
+    branding_mod._migrate_root_banner_flats(tmp_path)     # idempotent: a no-op second time
     assert dst.read_bytes() == raw
 
     # A kept banner already in place is the newer truth. A stale root leftover
     # never overwrites it, and is left where it is rather than deleted.
     (root / "banner.png").write_bytes(_png_bytes((1, 2, 3)))
-    g._migrate_root_banner_flats(tmp_path)
+    branding_mod._migrate_root_banner_flats(tmp_path)
     assert dst.read_bytes() == raw
     assert (root / "banner.png").is_file()
 
@@ -676,18 +678,18 @@ def test_a_migrated_flat_survives_the_startup_ensure_pass(tmp_path):
     the ensure pass never touches it."""
     _seed_catalog(tmp_path)
     # A real recorded pick, so there IS something the ensure pass could render.
-    g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
+    branding_mod.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
 
-    root = _mkdir(g.branding_root())
+    root = _mkdir(branding_mod.branding_root())
     worn = _png_bytes((7, 8, 9))
     (root / "banner.png").write_bytes(worn)
-    g._migrate_root_banner_flats(tmp_path)     # what main() runs, before create_app
+    branding_mod._migrate_root_banner_flats(tmp_path)     # what main() runs, before create_app
 
     create_app(tmp_path)
-    kept = g.banner_keep_dir() / "banner.png"
+    kept = branding_mod.banner_keep_dir() / "banner.png"
     assert kept.read_bytes() == worn, \
         "app startup re-rendered the slot's pick over the migrated banner"
-    assert g._served_flat_dir(tmp_path, "banner_main") == g.banner_keep_dir()
+    assert branding_mod._served_flat_dir(tmp_path, "banner_main") == branding_mod.banner_keep_dir()
     cli = _public_client(tmp_path)
     assert cli.get("/branding/banner.png").data == worn
 
@@ -706,8 +708,9 @@ def test_a_real_start_runs_the_root_flat_migration(tmp_path):
     import inspect
 
     body = ast.parse(inspect.getsource(g.main))
-    calls = [n.func.id for n in ast.walk(body)
-             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)]
+    # a bare call, or (since 3.21.0's branding move) one through _branding
+    calls = [n.func.id if isinstance(n.func, ast.Name) else n.func.attr for n in ast.walk(body)
+             if isinstance(n, ast.Call) and isinstance(n.func, (ast.Name, ast.Attribute))]
     assert "_migrate_root_banner_flats" in calls, \
         "main() no longer moves a root render into the cache -- the feature is dead"
     assert "ensure_branding_discovery_tree" in calls
@@ -736,12 +739,12 @@ def test_an_absent_cache_render_is_rebuilt_at_startup_not_defaulted(tmp_path):
                  data={"slot": "banner_main", "file": (io.BytesIO(_png_bytes()), "b.png")},
                  content_type="multipart/form-data")
     assert r.status_code == 200
-    flat = g.banner_cache_dir(tmp_path) / "banner.png"
+    flat = branding_mod.banner_cache_dir(tmp_path) / "banner.png"
     mine = flat.read_bytes()
 
-    _build_box(tmp_path, {g._role_rel("banner_main", "banner_main.png"): b"SHIPPED MAIN"})
+    _build_box(tmp_path, {branding_mod._role_rel("banner_main", "banner_main.png"): b"SHIPPED MAIN"})
     flat.unlink()                                   # a cleared cache
-    g._banner_record_path(tmp_path, "banner.png").unlink()
+    branding_mod._banner_record_path(tmp_path, "banner.png").unlink()
 
     create_app(tmp_path)                            # the next start
     assert flat.is_file(), "startup did not rebuild an absent render from the pick"
@@ -753,13 +756,13 @@ def test_the_public_flat_route_only_serves(tmp_path):
     """The route is a lookup, in both directions: it must not render an absent
     flat, and it must not write anything into the cache."""
     cli = _public_client(tmp_path)
-    _build_box(tmp_path, {g._role_rel("banner_main", "banner_main.png"): b"SHIPPED MAIN"})
+    _build_box(tmp_path, {branding_mod._role_rel("banner_main", "banner_main.png"): b"SHIPPED MAIN"})
     # A real recorded pick with NO render in the cache: the only thing that
     # could produce one here is the request itself.
-    g.add_slot_asset(tmp_path, "banner_main", _png_bytes())
-    cdir = g.banner_cache_dir(tmp_path)
+    branding_mod.add_slot_asset(tmp_path, "banner_main", _png_bytes())
+    cdir = branding_mod.banner_cache_dir(tmp_path)
     (cdir / "banner.png").unlink()
-    g._banner_record_path(tmp_path, "banner.png").unlink()
+    branding_mod._banner_record_path(tmp_path, "banner.png").unlink()
 
     r = cli.get("/branding/banner.png")
     assert r.status_code == 200 and r.data == b"SHIPPED MAIN", \
@@ -769,19 +772,19 @@ def test_the_public_flat_route_only_serves(tmp_path):
 
 def test_serving_prefers_the_cache_render_then_the_sealed_default(tmp_path):
     cli = _public_client(tmp_path)
-    _build_box(tmp_path, {g._role_rel("banner_main", "banner_main.png"): b"SHIPPED MAIN"})
+    _build_box(tmp_path, {branding_mod._role_rel("banner_main", "banner_main.png"): b"SHIPPED MAIN"})
 
     r = cli.get("/branding/banner.png")
     assert r.status_code == 200 and r.data == b"SHIPPED MAIN", \
         "nothing rendered yet -> the slot's shipped sealed default (rule 8)"
 
-    cdir = _mkdir(g.banner_cache_dir(tmp_path))
+    cdir = _mkdir(branding_mod.banner_cache_dir(tmp_path))
     (cdir / "banner.png").write_bytes(b"MY RENDER")
     assert cli.get("/branding/banner.png").data == b"MY RENDER"
 
     # ...and the coded root is never consulted for a flat, in either state.
-    _mkdir(g.branding_root())
-    (g.branding_root() / "banner.png").write_bytes(b"PARKED AT ROOT")
+    _mkdir(branding_mod.branding_root())
+    (branding_mod.branding_root() / "banner.png").write_bytes(b"PARKED AT ROOT")
     assert cli.get("/branding/banner.png").data == b"MY RENDER"
     (cdir / "banner.png").unlink()
     assert cli.get("/branding/banner.png").data == b"SHIPPED MAIN"
@@ -803,14 +806,14 @@ def test_one_slots_change_does_not_regenerate_another_slots_render(tmp_path):
     WHICH slot moved. The record does: only the slot whose own pick or
     transform changed is re-rendered."""
     _seed_catalog(tmp_path)
-    g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
-    g.add_slot_asset(tmp_path, "banner_login", _png_bytes((200, 10, 10)))
-    login_flat = g.banner_cache_dir(tmp_path) / "login-banner.png"
+    branding_mod.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
+    branding_mod.add_slot_asset(tmp_path, "banner_login", _png_bytes((200, 10, 10)))
+    login_flat = branding_mod.banner_cache_dir(tmp_path) / "login-banner.png"
     before = login_flat.read_bytes()
     before_mtime = login_flat.stat().st_mtime_ns
 
     # A second banner_main upload rewrites the shared pick file...
-    g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 10, 200)))
+    branding_mod.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 10, 200)))
     create_app(tmp_path)                            # ...and a start after it
 
     assert login_flat.read_bytes() == before
@@ -827,20 +830,20 @@ def test_an_applied_earned_banner_is_never_reverted_by_the_ensure_pass(tmp_path,
     leave it alone however many slot picks are recorded, or applying one is
     undone by the next restart."""
     _seed_catalog(tmp_path)
-    monkeypatch.setattr(g, "_earned_banner_ok", lambda *a, **k: True)
-    g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
-    flat = g.banner_cache_dir(tmp_path) / "banner.png"
+    monkeypatch.setattr(branding_mod, "_earned_banner_ok", lambda *a, **k: True)
+    branding_mod.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
+    flat = branding_mod.banner_cache_dir(tmp_path) / "banner.png"
 
-    assert g._render_banner_flat(tmp_path, "banner_main", _png_bytes((1, 1, 250)),
+    assert branding_mod._render_banner_flat(tmp_path, "banner_main", _png_bytes((1, 1, 250)),
                                  record=dict(_EARNED)) is True
-    g._set_worn_banner("banner_main", dict(_EARNED))
+    branding_mod._set_worn_banner("banner_main", dict(_EARNED))
     applied = flat.read_bytes()
 
     create_app(tmp_path)
-    g._ensure_banner_renders(tmp_path)              # and again, directly
+    branding_mod._ensure_banner_renders(tmp_path)              # and again, directly
     assert flat.read_bytes() == applied, "the ensure pass reverted an applied earned banner"
-    assert g._read_banner_record(tmp_path, "banner.png")["kind"] == "earned"
-    assert g._worn_banner("banner_main") == _EARNED
+    assert branding_mod._read_banner_record(tmp_path, "banner.png")["kind"] == "earned"
+    assert branding_mod._worn_banner("banner_main") == _EARNED
 
 
 def test_an_earned_banner_not_earned_in_this_library_shows_the_pick_and_is_kept(tmp_path):
@@ -849,16 +852,16 @@ def test_an_earned_banner_not_earned_in_this_library_shows_the_pick_and_is_kept(
     shows its own pick -- and the choice stays stored for when the library
     changes back."""
     _seed_catalog(tmp_path)
-    pick = g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
-    assert g._render_banner_flat(tmp_path, "banner_main", _png_bytes((1, 1, 250)),
+    pick = branding_mod.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
+    assert branding_mod._render_banner_flat(tmp_path, "banner_main", _png_bytes((1, 1, 250)),
                                  record=dict(_EARNED)) is True
-    g._set_worn_banner("banner_main", dict(_EARNED))
-    assert g._earned_banner_ok(tmp_path, "great_library") is False   # nothing earned here
+    branding_mod._set_worn_banner("banner_main", dict(_EARNED))
+    assert branding_mod._earned_banner_ok(tmp_path, "great_library") is False   # nothing earned here
 
     create_app(tmp_path)
-    rec = g._read_banner_record(tmp_path, "banner.png")
+    rec = branding_mod._read_banner_record(tmp_path, "banner.png")
     assert rec["kind"] == "slot" and rec["asset_id"] == pick["id"]
-    assert g._worn_banner("banner_main") == _EARNED, "the choice is kept"
+    assert branding_mod._worn_banner("banner_main") == _EARNED, "the choice is kept"
 
 
 def test_an_earned_render_that_goes_missing_is_rebuilt_from_the_pack(tmp_path, monkeypatch):
@@ -866,21 +869,21 @@ def test_an_earned_render_that_goes_missing_is_rebuilt_from_the_pack(tmp_path, m
     again from the pack's own bytes, and the choice in settings.json is never
     overwritten by the slot renderer on the way past."""
     _seed_catalog(tmp_path)
-    monkeypatch.setattr(g, "_earned_banner_ok", lambda *a, **k: True)
-    g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
-    _build_box(tmp_path, {g._role_rel("earned_banners", "great_library.png"):
+    monkeypatch.setattr(branding_mod, "_earned_banner_ok", lambda *a, **k: True)
+    branding_mod.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
+    _build_box(tmp_path, {branding_mod._role_rel("earned_banners", "great_library.png"):
                           _png_bytes((1, 1, 250))})
-    g._set_worn_banner("banner_main", dict(_EARNED))
-    flat = g.banner_cache_dir(tmp_path) / "banner.png"
+    branding_mod._set_worn_banner("banner_main", dict(_EARNED))
+    flat = branding_mod.banner_cache_dir(tmp_path) / "banner.png"
     if flat.exists():
         flat.unlink()
 
-    assert g._ensure_banner_flat(tmp_path, "banner_main") == flat
-    assert g._read_banner_record(tmp_path, "banner.png") == _EARNED
+    assert branding_mod._ensure_banner_flat(tmp_path, "banner_main") == flat
+    assert branding_mod._read_banner_record(tmp_path, "banner.png") == _EARNED
     from PIL import Image
     with Image.open(flat) as im:
         assert im.convert("RGB").getpixel((0, 0)) == (1, 1, 250)
-    assert g._worn_banner("banner_main") == _EARNED
+    assert branding_mod._worn_banner("banner_main") == _EARNED
 
 
 def test_a_kept_banner_that_goes_missing_is_never_replaced_by_the_pick(tmp_path):
@@ -889,25 +892,25 @@ def test_a_kept_banner_that_goes_missing_is_never_replaced_by_the_pick(tmp_path)
     sealed default, which the owner can undo -- and nothing is rendered in its
     place, nor its choice overwritten."""
     _seed_catalog(tmp_path)
-    g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
-    g._set_worn_banner("banner_main", {"kind": "migrated"})
-    assert not (g.banner_keep_dir() / "banner.png").exists()
+    branding_mod.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
+    branding_mod._set_worn_banner("banner_main", {"kind": "migrated"})
+    assert not (branding_mod.banner_keep_dir() / "banner.png").exists()
 
-    assert g._ensure_banner_flat(tmp_path, "banner_main") is None
+    assert branding_mod._ensure_banner_flat(tmp_path, "banner_main") is None
     create_app(tmp_path)
-    assert g._worn_banner("banner_main") == {"kind": "migrated"}
-    assert not (g.banner_keep_dir() / "banner.png").exists()
+    assert branding_mod._worn_banner("banner_main") == {"kind": "migrated"}
+    assert not (branding_mod.banner_keep_dir() / "banner.png").exists()
 
 
 def test_an_explicit_pick_wears_the_slot_again(tmp_path, monkeypatch):
     """Only an explicit action -- an upload, a pick, a crop -- replaces what a slot
     wears; it clears worn_banner for that slot."""
     _seed_catalog(tmp_path)
-    g._set_worn_banner("banner_main", {"kind": "migrated"})
-    g._set_worn_banner("banner_login", {"kind": "migrated"})
-    g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
-    assert g._worn_banner("banner_main") is None
-    assert g._worn_banner("banner_login") == {"kind": "migrated"}, "only that slot"
+    branding_mod._set_worn_banner("banner_main", {"kind": "migrated"})
+    branding_mod._set_worn_banner("banner_login", {"kind": "migrated"})
+    branding_mod.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
+    assert branding_mod._worn_banner("banner_main") is None
+    assert branding_mod._worn_banner("banner_login") == {"kind": "migrated"}, "only that slot"
 
 
 def test_a_slot_render_regenerates_when_its_own_pick_moves(tmp_path):
@@ -915,19 +918,19 @@ def test_a_slot_render_regenerates_when_its_own_pick_moves(tmp_path):
     redo, so a pick recorded while the render could not be written still catches
     up on the next start."""
     _seed_catalog(tmp_path)
-    first = g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
-    second = g.add_slot_asset(tmp_path, "banner_main", _png_bytes((200, 10, 10)))
-    flat = g.banner_cache_dir(tmp_path) / "banner.png"
+    first = branding_mod.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
+    second = branding_mod.add_slot_asset(tmp_path, "banner_main", _png_bytes((200, 10, 10)))
+    flat = branding_mod.banner_cache_dir(tmp_path) / "banner.png"
 
     # Rewind the cache to the FIRST pick while the recorded pick is the second:
     # exactly the state a failed render leaves behind.
-    assert g._render_banner_flat(
+    assert branding_mod._render_banner_flat(
         tmp_path, "banner_main", _png_bytes((10, 200, 10)),
         record={"kind": "slot", "asset_id": first["id"],
                 "transform": {"zoom": 100, "cropX": 50, "cropY": 50}}) is True
 
     create_app(tmp_path)
-    rec = g._read_banner_record(tmp_path, "banner.png")
+    rec = branding_mod._read_banner_record(tmp_path, "banner.png")
     assert rec["asset_id"] == second["id"], "a stale slot render was not brought up to date"
     from PIL import Image
     with Image.open(flat) as im:
@@ -941,14 +944,14 @@ def test_a_cache_render_with_no_record_is_the_caches_own_and_is_rebuilt(tmp_path
     in an older layout's cache -- is moved to local/banners/ by the move, B6, and never
     lives in the cache.)"""
     _seed_catalog(tmp_path)
-    g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
-    flat = g.banner_cache_dir(tmp_path) / "banner.png"
-    g._banner_record_path(tmp_path, "banner.png").unlink()
+    branding_mod.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
+    flat = branding_mod.banner_cache_dir(tmp_path) / "banner.png"
+    branding_mod._banner_record_path(tmp_path, "banner.png").unlink()
     flat.write_bytes(b"SOMETHING OLDER")
 
     create_app(tmp_path)
     assert flat.read_bytes() != b"SOMETHING OLDER"
-    assert g._read_banner_record(tmp_path, "banner.png")["kind"] == "slot"
+    assert branding_mod._read_banner_record(tmp_path, "banner.png")["kind"] == "slot"
 
 
 # ---------------------------------------------------------------------------
@@ -975,17 +978,17 @@ def test_an_unrecorded_pick_resolves_to_the_last_manifest_item(tmp_path, order):
     the last upload already pointed. Both orders run deliberately: an answer
     taken from a set or a sort passes one of them and fails the other; only
     manifest order passes both."""
-    sdir = _mkdir(g._role_dir("banner_main"))
+    sdir = _mkdir(branding_mod._role_dir("banner_main"))
     for iid in order:
         (sdir / (iid + ".png")).write_bytes(_png_bytes())
     (sdir / "manifest.json").write_text(
         json.dumps({"items": [{"id": i} for i in order]}), encoding="utf-8")
     assert "slots" not in _settings.branding(), "no recorded pick is the state under test"
 
-    assert g.resolve_slot_active(tmp_path, "banner_main") == order[-1]
-    assert g.load_slot_active(tmp_path)["banner_main"] == order[-1]
-    assert g.branding_slots_payload(tmp_path)["banner_main"]["active"] == order[-1]
-    assert g._slot_render_record(tmp_path, "banner_main")["asset_id"] == order[-1]
+    assert branding_mod.resolve_slot_active(tmp_path, "banner_main") == order[-1]
+    assert branding_mod.load_slot_active(tmp_path)["banner_main"] == order[-1]
+    assert branding_mod.branding_slots_payload(tmp_path)["banner_main"]["active"] == order[-1]
+    assert branding_mod._slot_render_record(tmp_path, "banner_main")["asset_id"] == order[-1]
 
 
 def test_two_starts_over_an_unrecorded_pick_render_the_same_asset(tmp_path):
@@ -995,21 +998,21 @@ def test_two_starts_over_an_unrecorded_pick_render_the_same_asset(tmp_path):
     (record, then build the app), because create_app() must not write the
     recorded picks."""
     _seed_catalog(tmp_path)
-    first = g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
-    second = g.add_slot_asset(tmp_path, "banner_main", _png_bytes((200, 10, 10)))
-    flat = g.banner_cache_dir(tmp_path) / "banner.png"
+    first = branding_mod.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
+    second = branding_mod.add_slot_asset(tmp_path, "banner_main", _png_bytes((200, 10, 10)))
+    flat = branding_mod.banner_cache_dir(tmp_path) / "banner.png"
     # the recorded pick goes missing -- a settings.json restored from elsewhere
     _drop_recorded_picks()
     flat.unlink()
-    g._banner_record_path(tmp_path, "banner.png").unlink()
+    branding_mod._banner_record_path(tmp_path, "banner.png").unlink()
 
-    g._record_slot_resolution(tmp_path)             # what main() runs, before create_app
-    assert g._recorded_slot_active(tmp_path)["banner_main"] == second["id"], \
+    branding_mod._record_slot_resolution(tmp_path)             # what main() runs, before create_app
+    assert branding_mod._recorded_slot_active(tmp_path)["banner_main"] == second["id"], \
         "the start did not record the resolution it was about to render from"
 
     create_app(tmp_path)
     once = flat.read_bytes()
-    assert g._read_banner_record(tmp_path, "banner.png")["asset_id"] == second["id"], \
+    assert branding_mod._read_banner_record(tmp_path, "banner.png")["asset_id"] == second["id"], \
         "an unrecorded pick did not resolve to the most recent upload"
 
     create_app(tmp_path)                            # the next start
@@ -1024,18 +1027,18 @@ def test_the_render_is_the_same_asset_even_with_nobody_recording_it(tmp_path):
     resolve_slot_active()'s manifest-order rule could hide behind the record the
     test above writes."""
     _seed_catalog(tmp_path)
-    g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
-    second = g.add_slot_asset(tmp_path, "banner_main", _png_bytes((200, 10, 10)))
-    flat = g.banner_cache_dir(tmp_path) / "banner.png"
+    branding_mod.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
+    second = branding_mod.add_slot_asset(tmp_path, "banner_main", _png_bytes((200, 10, 10)))
+    flat = branding_mod.banner_cache_dir(tmp_path) / "banner.png"
     _drop_recorded_picks()                          # never recorded, ever
 
     for _ in range(2):
         flat.unlink()
-        g._banner_record_path(tmp_path, "banner.png").unlink()
+        branding_mod._banner_record_path(tmp_path, "banner.png").unlink()
         create_app(tmp_path)
         assert "slots" not in _settings.branding(), \
             "app construction wrote the recorded picks"
-        assert g._read_banner_record(tmp_path, "banner.png")["asset_id"] == second["id"]
+        assert branding_mod._read_banner_record(tmp_path, "banner.png")["asset_id"] == second["id"]
 
 
 def test_a_real_start_records_the_slot_resolution(tmp_path):
@@ -1047,8 +1050,9 @@ def test_a_real_start_records_the_slot_resolution(tmp_path):
     import inspect
 
     body = ast.parse(inspect.getsource(g.main))
-    calls = [n.func.id for n in ast.walk(body)
-             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)]
+    # a bare call, or (since 3.21.0's branding move) one through _branding
+    calls = [n.func.id if isinstance(n.func, ast.Name) else n.func.attr for n in ast.walk(body)
+             if isinstance(n, ast.Call) and isinstance(n.func, (ast.Name, ast.Attribute))]
     assert "_record_slot_resolution" in calls, \
         "main() no longer records the slot resolution -- the step is dead"
     assert calls.index("ensure_branding_discovery_tree") < \
@@ -1073,27 +1077,27 @@ def test_the_daily_backstop_uses_the_same_baseline_scan(tmp_path):
 
     Also pins the .webp lane end to end: a mark the owner authors as an animated
     .webp is art like any other, and the backstop sees it."""
-    mdir = _mkdir(g._role_dir("marks"))
+    mdir = _mkdir(branding_mod._role_dir("marks"))
     (mdir / "marks.json").write_text(json.dumps(
         {"marks": [{"id": "animated", "label": "animated", "kind": "tile"}]}),
         encoding="utf-8")
-    g.sweep_telemetry(tmp_path)                     # the baseline pass
+    telemetry_mod.sweep_telemetry(tmp_path)                     # the baseline pass
     assert not _flag(tmp_path), "a manifest entry with no art is not art"
 
     from PIL import Image
     buf = io.BytesIO()
     Image.new("RGB", (40, 40), (200, 30, 30)).save(buf, format="WEBP")
     (mdir / "animated.webp").write_bytes(buf.getvalue())
-    g.sweep_telemetry(tmp_path)
+    telemetry_mod.sweep_telemetry(tmp_path)
     assert _flag(tmp_path) == 1, "the backstop missed a .webp mark"
 
 
 def test_the_daily_backstop_sees_a_drop_outside_the_marks_folder(tmp_path):
     """The half the old narrow rule could not see at all."""
-    _mkdir(g._role_dir("mascots"))
-    g.sweep_telemetry(tmp_path)                     # the baseline pass
+    _mkdir(branding_mod._role_dir("mascots"))
+    telemetry_mod.sweep_telemetry(tmp_path)                     # the baseline pass
     assert not _flag(tmp_path)
 
-    (g._role_dir("mascots") / "mine.png").write_bytes(_png_bytes((1, 250, 1)))
-    g.sweep_telemetry(tmp_path)
+    (branding_mod._role_dir("mascots") / "mine.png").write_bytes(_png_bytes((1, 250, 1)))
+    telemetry_mod.sweep_telemetry(tmp_path)
     assert _flag(tmp_path) == 1

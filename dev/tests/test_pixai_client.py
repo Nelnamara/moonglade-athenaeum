@@ -27,6 +27,8 @@ import requests
 
 from moonglade import backup as core
 from tests.fake_pixai import FakePixAI, UnregisteredOperation, operation_name
+from moonglade import pixai_client as pixai_client_mod
+from moonglade import mirror as mirror_mod
 
 
 class FakeResponse:
@@ -105,7 +107,7 @@ def real_rest(monkeypatch):
 class TestVerbsMakeTheRightCall:
     def test_query_posts_the_document_to_graphql(self):
         s = RecordingSession(FakeResponse({"data": {"me": {"id": "7"}}}))
-        c = core.PixAIClient(s)
+        c = pixai_client_mod.PixAIClient(s)
         assert c.query("query{ me{ id } }") == {"me": {"id": "7"}}
         (verb, url, kwargs), = s.calls
         assert verb == "POST" and url == core.API_URL
@@ -113,7 +115,7 @@ class TestVerbsMakeTheRightCall:
 
     def test_mutate_posts_the_document_to_graphql(self):
         s = RecordingSession(FakeResponse({"data": {"doThing": {"id": "1"}}}))
-        c = core.PixAIClient(s)
+        c = pixai_client_mod.PixAIClient(s)
         assert c.mutate("mutation{ doThing{ id } }", {"a": 1}) == {"doThing": {"id": "1"}}
         (verb, url, kwargs), = s.calls
         assert verb == "POST" and url == core.API_URL
@@ -122,16 +124,16 @@ class TestVerbsMakeTheRightCall:
     def test_graphql_errors_become_pixaierror(self):
         s = RecordingSession(FakeResponse({"errors": [{"message": "nope"}]}))
         with pytest.raises(core.PixAIError, match="GraphQL error"):
-            core.PixAIClient(s).query("query{ bad }")
+            pixai_client_mod.PixAIClient(s).query("query{ bad }")
 
     def test_a_401_says_so_plainly(self):
         s = RecordingSession(FakeResponse(status_code=401, text=""))
         with pytest.raises(core.PixAIError, match="401 Unauthorized"):
-            core.PixAIClient(s).query("query{ me{ id } }")
+            pixai_client_mod.PixAIClient(s).query("query{ me{ id } }")
 
     def test_rest_get_hits_the_v2_base(self):
         s = RecordingSession(FakeResponse({"kaisuukens": []}))
-        c = core.PixAIClient(s)
+        c = pixai_client_mod.PixAIClient(s)
         assert c.rest_get("/kaisuuken/summary", params={"a": 1}) == {"kaisuukens": []}
         (verb, url, kwargs), = s.calls
         assert verb == "GET" and url == core.REST_API_BASE + "/kaisuuken/summary"
@@ -139,14 +141,14 @@ class TestVerbsMakeTheRightCall:
 
     def test_rest_post_hits_the_v2_base(self):
         s = RecordingSession(FakeResponse({"id": "T1"}))
-        c = core.PixAIClient(s)
+        c = pixai_client_mod.PixAIClient(s)
         assert c.rest_post("/task/fixer", {"mediaId": "M1"}) == {"id": "T1"}
         (verb, url, kwargs), = s.calls
         assert verb == "POST" and url == core.REST_API_BASE + "/task/fixer"
         assert kwargs["json"] == {"mediaId": "M1"}
 
     def test_rest_raises_pixaierror_on_non_2xx(self):
-        c = core.PixAIClient(RecordingSession(FakeResponse(status_code=500, text="nope")))
+        c = pixai_client_mod.PixAIClient(RecordingSession(FakeResponse(status_code=500, text="nope")))
         with pytest.raises(core.PixAIError, match="REST GET"):
             c.rest_get("/claim")
 
@@ -179,16 +181,16 @@ class TestThePrimitivesAreThinDelegates:
 
     def test_gql_adhoc_takes_a_client(self):
         s = RecordingSession(FakeResponse({"data": {"me": {"id": "1"}}}))
-        assert core.gql_adhoc(core.PixAIClient(s), "query{ me{ id } }") == {"me": {"id": "1"}}
+        assert core.gql_adhoc(pixai_client_mod.PixAIClient(s), "query{ me{ id } }") == {"me": {"id": "1"}}
 
     def test_rest_helpers_take_either_shape(self, real_rest):
         s = RecordingSession(FakeResponse({"ok": 1}))
         assert core._rest_get(s, "/claim") == {"ok": 1}
-        assert core._rest_post(core.PixAIClient(s), "/claim/1", {}) == {"ok": 1}
+        assert core._rest_post(pixai_client_mod.PixAIClient(s), "/claim/1", {}) == {"ok": 1}
 
     def test_client_of_is_identity_for_a_client(self):
-        c = core.PixAIClient(RecordingSession())
-        assert core._client_of(c) is c
+        c = pixai_client_mod.PixAIClient(RecordingSession())
+        assert pixai_client_mod._client_of(c) is c
 
     def test_wrapping_reads_no_config_and_resolves_no_credential(self, monkeypatch):
         """The pasted-API-key route hand-builds a Session with the submitted key as its
@@ -200,7 +202,7 @@ class TestThePrimitivesAreThinDelegates:
         monkeypatch.setattr(core, "resolve_user_id",
                             lambda *a, **k: pytest.fail("wrapping resolved a user id"))
         s = RecordingSession(FakeResponse({"data": {"me": {"id": "1"}}}))
-        assert core._client_of(s).session is s
+        assert pixai_client_mod._client_of(s).session is s
         assert core.account_info(s) == {"id": "1"}
 
     def test_make_session_hands_back_a_client(self, monkeypatch, tmp_path):
@@ -211,7 +213,7 @@ class TestThePrimitivesAreThinDelegates:
         monkeypatch.setattr(core, "load_token", lambda v: "k")
         monkeypatch.setattr(core, "USER_ID", "u-1")
         c = core._make_session(None)
-        assert isinstance(c, core.PixAIClient)
+        assert isinstance(c, pixai_client_mod.PixAIClient)
         assert c.auth_kind == "api-key" and c.user_id == "u-1"
         assert c.headers["Authorization"] == "Bearer k"
 
@@ -225,7 +227,7 @@ class TestTheTransitionSurface:
     def test_get_post_headers_cookies_delegate_to_the_session(self):
         s = RecordingSession(FakeResponse({"ok": 1}))
         s.headers["Authorization"] = "Bearer k"
-        c = core.PixAIClient(s)
+        c = pixai_client_mod.PixAIClient(s)
         assert c.headers["Authorization"] == "Bearer k"     # run_watch reads this
         assert c.cookies is s.cookies
         assert c.session is s
@@ -256,7 +258,7 @@ class TestTheDetailReadsRideTheClient:
         """Drive `driver(client)` against a RecordingSession answering `{"data": data}`,
         and return the kwargs of the single POST it made (it made no GET)."""
         s = RecordingSession(FakeResponse({"data": data}))
-        driver(core.PixAIClient(s))
+        driver(pixai_client_mod.PixAIClient(s))
         assert [(v, u) for v, u, _k in s.calls] == [("POST", core.API_URL)]
         return s.calls[0][2]
 
@@ -302,9 +304,9 @@ class TestTheDetailReadsRideTheClient:
 
 class TestRetryPolicy:
     def test_mutate_has_no_retries_parameter_at_all(self):
-        assert "retries" not in inspect.signature(core.PixAIClient.mutate).parameters
+        assert "retries" not in inspect.signature(pixai_client_mod.PixAIClient.mutate).parameters
         with pytest.raises(TypeError):
-            core.PixAIClient(RecordingSession()).mutate("mutation{ x }", None, retries=1)
+            pixai_client_mod.PixAIClient(RecordingSession()).mutate("mutation{ x }", None, retries=1)
 
     def test_mutate_posts_exactly_once_on_a_retryable_failure(self):
         """A lost RESPONSE is indistinguishable from a lost REQUEST: re-POSTing
@@ -312,14 +314,14 @@ class TestRetryPolicy:
         twice. One attempt, always."""
         s = RecordingSession(requests.ConnectionError("connection dropped"))
         with pytest.raises(requests.RequestException):
-            core.PixAIClient(s).mutate("mutation{ doThing{ id } }")
+            pixai_client_mod.PixAIClient(s).mutate("mutation{ doThing{ id } }")
         assert len(s.calls) == 1
 
     def test_mutate_posts_exactly_once_on_a_5xx(self):
         """The ambiguous one: a proxy's 502 can arrive after the backend already ran."""
         s = RecordingSession(FakeResponse(status_code=502, text="bad gateway"))
         with pytest.raises(requests.HTTPError):
-            core.PixAIClient(s).mutate("mutation{ doThing{ id } }")
+            pixai_client_mod.PixAIClient(s).mutate("mutation{ doThing{ id } }")
         assert len(s.calls) == 1
 
     def test_query_retries_three_times_on_a_retryable_failure(self):
@@ -327,26 +329,26 @@ class TestRetryPolicy:
         a flaky network must not fail them on the first blip."""
         s = RecordingSession(requests.ConnectionError("connection dropped"))
         with pytest.raises(requests.RequestException):
-            core.PixAIClient(s).query("query{ me{ id } }")
+            pixai_client_mod.PixAIClient(s).query("query{ me{ id } }")
         assert len(s.calls) == 4                      # the original + 3 retries
 
     def test_query_retries_three_times_on_a_429(self):
         s = RecordingSession(FakeResponse(status_code=429, text="slow down"))
         with pytest.raises(requests.HTTPError):
-            core.PixAIClient(s).query("query{ me{ id } }")
+            pixai_client_mod.PixAIClient(s).query("query{ me{ id } }")
         assert len(s.calls) == 4
 
     def test_query_of_a_mutation_document_still_does_not_retry(self):
         """The backstop for a call site that reaches past `mutate()`."""
         s = RecordingSession(requests.ConnectionError("connection dropped"))
         with pytest.raises(requests.RequestException):
-            core.PixAIClient(s).query("mutation{ doThing{ id } }")
+            pixai_client_mod.PixAIClient(s).query("mutation{ doThing{ id } }")
         assert len(s.calls) == 1
 
     def test_an_explicit_count_still_wins_on_query(self):
         s = RecordingSession(requests.ConnectionError("connection dropped"))
         with pytest.raises(requests.RequestException):
-            core.PixAIClient(s).query("query{ me{ id } }", retries=0)
+            pixai_client_mod.PixAIClient(s).query("query{ me{ id } }", retries=0)
         assert len(s.calls) == 1
 
     def test_the_history_feed_keeps_its_four_retries(self):
@@ -361,7 +363,7 @@ class TestRetryPolicy:
         """submit_fixer and claim_reward ride this. No loop, by construction."""
         s = RecordingSession(FakeResponse(status_code=502, text="bad gateway"))
         with pytest.raises(core.PixAIError):
-            core.PixAIClient(s).rest_post("/task/fixer", {})
+            pixai_client_mod.PixAIClient(s).rest_post("/task/fixer", {})
         assert len(s.calls) == 1
 
 
@@ -371,16 +373,16 @@ class TestRetryPolicy:
 
 class TestForCreate:
     def test_mirror_off_is_the_same_client(self, monkeypatch):
-        monkeypatch.setattr(core, "mirror_enabled", lambda: False)
-        c = core.PixAIClient(RecordingSession())
+        monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: False)
+        c = pixai_client_mod.PixAIClient(RecordingSession())
         assert c.for_create() is c
         assert c.for_create().auth_kind == "api-key"
 
     def test_mirror_on_returns_a_web_jwt_client_over_the_mirror_session(self, monkeypatch):
         mirror = RecordingSession()
-        monkeypatch.setattr(core, "mirror_enabled", lambda: True)
-        monkeypatch.setattr(core, "make_mirror_session", lambda: mirror)
-        c = core.PixAIClient(RecordingSession())
+        monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
+        monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda: mirror)
+        c = pixai_client_mod.PixAIClient(RecordingSession())
         made = c.for_create()
         assert made is not c
         assert made.session is mirror
@@ -389,19 +391,19 @@ class TestForCreate:
     def test_mirror_on_but_unavailable_refuses_and_never_falls_back(self, monkeypatch):
         """F5: if the mirror session is unavailable, refuse and spend nothing -- never
         quietly file the generation under the API key instead."""
-        monkeypatch.setattr(core, "mirror_enabled", lambda: True)
-        monkeypatch.setattr(core, "make_mirror_session", lambda: None)
-        c = core.PixAIClient(RecordingSession())
+        monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
+        monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda: None)
+        c = pixai_client_mod.PixAIClient(RecordingSession())
         with pytest.raises(core.PixAIError, match="Mirror to PixAI is ON"):
             c.for_create()
 
     def test_it_is_the_same_rule_the_module_choke_uses(self, monkeypatch):
         """`_session_for_create` stays the one place the rule is written; `for_create()`
         is its face on the client, not a second copy of the decision."""
-        monkeypatch.setattr(core, "mirror_enabled", lambda: False)
-        c = core.PixAIClient(RecordingSession())
-        assert core._session_for_create(c) is c
-        assert c.for_create() is core._session_for_create(c)
+        monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: False)
+        c = pixai_client_mod.PixAIClient(RecordingSession())
+        assert mirror_mod._session_for_create(c) is c
+        assert c.for_create() is mirror_mod._session_for_create(c)
 
 
 # ---------------------------------------------------------------------------
@@ -415,7 +417,7 @@ class TestFakePixAISatisfiesTheSameInterface:
     def test_the_fake_offers_the_same_verb_with_the_same_signature(self, verb):
         """Same interface, verb for verb -- otherwise a test could pass against the fake
         and fail against the real client, or the reverse."""
-        real = inspect.signature(getattr(core.PixAIClient, verb)).parameters
+        real = inspect.signature(getattr(pixai_client_mod.PixAIClient, verb)).parameters
         fake = inspect.signature(getattr(FakePixAI, verb)).parameters
         assert list(fake) == list(real), \
             "FakePixAI.{} has a different shape from PixAIClient.{}".format(verb, verb)
@@ -427,13 +429,13 @@ class TestFakePixAISatisfiesTheSameInterface:
 
     def test_the_fake_is_recognised_as_a_client_and_never_wrapped(self):
         fake = FakePixAI()
-        assert core._client_of(fake) is fake
+        assert pixai_client_mod._client_of(fake) is fake
 
     def test_a_magicmock_is_still_wrapped_not_mistaken_for_a_client(self, mock_session):
         """The marker is checked with `is True` precisely because a MagicMock answers every
         attribute truthily. A mock standing in for a Session must keep receiving `.post`."""
-        assert core._client_of(mock_session) is not mock_session
-        assert core._client_of(mock_session).session is mock_session
+        assert pixai_client_mod._client_of(mock_session) is not mock_session
+        assert pixai_client_mod._client_of(mock_session).session is mock_session
 
     @pytest.mark.parametrize("document, expected", [
         ("mutation createGenerationTask($parameters: JSONObject!) { x }",

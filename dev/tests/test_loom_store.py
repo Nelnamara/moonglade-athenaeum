@@ -5,7 +5,7 @@ tests the server backend underneath it."""
 import json
 
 from moonglade import paths as _paths
-from moonglade.gallery import _account_key
+from moonglade.account_prefs import _account_key
 from tests.conftest import login_client
 
 

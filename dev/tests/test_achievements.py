@@ -10,6 +10,9 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_client, _SEALED_DONOR
+from moonglade import telemetry as telemetry_mod
+from moonglade import achievements as achievements_mod
+from moonglade import branding as branding_mod
 
 # The roster is sealed in the container (built from the private donor), not in source.
 # Gate ONLY the tests that assert sealed roster/skin CONTENT -- NOT the whole module: the
@@ -29,7 +32,7 @@ def _row(**kw):
 def test_compute_earns_by_threshold_and_flags_newly():
     m = {"images": 1200, "videos": 0, "collections": 0,
          "models": 0, "published": 0, "tagged": 0}
-    out = g.compute_achievements(m, seen=[])
+    out = achievements_mod.compute_achievements(m, seen=[])
     by = {a["id"]: a for a in out["achievements"]}
     assert by["first-light"]["earned"] is True         # >= 1
     assert by["archivist"]["earned"] is True           # >= 1000
@@ -38,7 +41,7 @@ def test_compute_earns_by_threshold_and_flags_newly():
     # both earned feats are newly-unlocked (nothing seen yet)
     assert set(out["newly"]) == {"first-light", "archivist"}
     # seen suppresses the toast flag but not the earned state
-    out2 = g.compute_achievements(m, seen=["first-light", "archivist"])
+    out2 = achievements_mod.compute_achievements(m, seen=["first-light", "archivist"])
     assert out2["newly"] == [] and by["archivist"]["earned"] is True
 
 
@@ -49,7 +52,7 @@ def test_ladder_achievements_carry_track_rung_and_rungs_total():
     achievements (milestone/mastery/feat) must NOT carry these fields at all,
     not just leave them empty, so the frontend can use their presence as the
     'this is a ladder tier' signal."""
-    out = g.compute_achievements({}, [])
+    out = achievements_mod.compute_achievements({}, [])
     by = {a["id"]: a for a in out["achievements"]}
     fl = by["first-light"]
     assert fl["bucket"] == "ladder"
@@ -65,15 +68,15 @@ def test_ladders_list_matches_every_ladder_achievements_track():
     them, and every track must have at least one achievement (an orphaned
     track, or a track id typo on an achievement, would silently break the
     carousel for that ladder)."""
-    out = g.compute_achievements({}, [])
+    out = achievements_mod.compute_achievements({}, [])
     ladder_ids = {t["id"] for t in out["ladders"]}
     # The payload's ladder list used to be compared to _ladder_tracks() -- which is the
     # thing it is copied FROM, so it could never fail and asserted nothing. What actually
     # matters is that the two SIDES agree: every track names achievements that exist, and
     # every ladder achievement names a track that exists. Either half breaking is a
     # silently empty carousel.
-    for t in g._ladder_tracks():
-        tiers = [a for a in g._roster()
+    for t in achievements_mod._ladder_tracks():
+        tiers = [a for a in achievements_mod._roster()
                  if a.get("bucket") == "ladder" and a.get("track") == t["id"]]
         assert tiers, "ladder track %r has no achievements" % t["id"]
     achievement_tracks = {a["track"] for a in out["achievements"] if a["bucket"] == "ladder"}
@@ -86,7 +89,7 @@ def test_ladder_rungs_are_contiguous_within_each_track():
     """Each track's rungs must run 1..rungs_total with no gaps or duplicates --
     the carousel's tier-pip navigation assumes a dense, correctly-ordered
     sequence, not sparse/scrambled rung numbers."""
-    out = g.compute_achievements({}, [])
+    out = achievements_mod.compute_achievements({}, [])
     by_track = {}
     for a in out["achievements"]:
         if a["bucket"] == "ladder":
@@ -102,29 +105,29 @@ def test_every_ladder_header_says_what_it_counts_in_plain_words():
     """Owner walk 2026-09-29: a Folio ladder header read "measured in local_gens". Every live
     track's metric has its own words in LADDER_METRIC_WORDS (not just the fallback), and what
     the payload sends for the header has no underscore in it."""
-    out = g.compute_achievements({}, [])
+    out = achievements_mod.compute_achievements({}, [])
     assert out["ladders"]
     for t in out["ladders"]:
-        assert t["metric"] in g.LADDER_METRIC_WORDS, "no plain words for " + repr(t["metric"])
-        assert t["metric_words"] == g.LADDER_METRIC_WORDS[t["metric"]]
+        assert t["metric"] in achievements_mod.LADDER_METRIC_WORDS, "no plain words for " + repr(t["metric"])
+        assert t["metric_words"] == achievements_mod.LADDER_METRIC_WORDS[t["metric"]]
         assert "_" not in t["metric_words"] and t["metric_words"].strip()
-    assert "_" not in g.LADDER_METRIC_WORDS["local_gens"]
+    assert "_" not in achievements_mod.LADDER_METRIC_WORDS["local_gens"]
 
 
 def test_ladder_metric_words_never_carry_a_code_name(monkeypatch):
     """Donor-free half: the table itself, the fallback for a metric it does not know yet, and
     the payload copying (never writing into) the cached track defs."""
-    for key, words in g.LADDER_METRIC_WORDS.items():
+    for key, words in achievements_mod.LADDER_METRIC_WORDS.items():
         assert words.strip() and "_" not in words, key
-    assert g.metric_words("local_gens") == "pictures made in the app"
-    assert g.metric_words("brand_new__metric") == "brand new metric"      # fallback: no underscore
-    assert g.metric_words(None) == ""
+    assert achievements_mod.metric_words("local_gens") == "pictures made in the app"
+    assert achievements_mod.metric_words("brand_new__metric") == "brand new metric"      # fallback: no underscore
+    assert achievements_mod.metric_words(None) == ""
     tracks = [{"id": "t1", "name": "Track", "metric": "local_gens"},
               {"id": "t2", "name": "Other", "metric": "not_listed_yet"}]
-    monkeypatch.setattr(g, "_ladder_tracks", lambda: tracks)
-    monkeypatch.setattr(g, "_roster", lambda: [])
-    monkeypatch.setattr(g, "_skins", lambda: [])
-    out = g.compute_achievements({}, [])
+    monkeypatch.setattr(achievements_mod, "_ladder_tracks", lambda: tracks)
+    monkeypatch.setattr(achievements_mod, "_roster", lambda: [])
+    monkeypatch.setattr(achievements_mod, "_skins", lambda: [])
+    out = achievements_mod.compute_achievements({}, [])
     assert [t["metric_words"] for t in out["ladders"]] == ["pictures made in the app",
                                                            "not listed yet"]
     assert "metric_words" not in tracks[0]                                 # the defs are untouched
@@ -132,15 +135,15 @@ def test_ladder_metric_words_never_carry_a_code_name(monkeypatch):
 
 @needs_donor
 def test_epic_feats_unlock_skins():
-    free = {s["id"] for s in g.compute_achievements({}, [])["skins"] if s["earned"]}
-    assert free == {s["id"] for s in g._skins() if s.get("free")}   # the free skins, self-computed
+    free = {s["id"] for s in achievements_mod.compute_achievements({}, [])["skins"] if s["earned"]}
+    assert free == {s["id"] for s in achievements_mod._skins() if s.get("free")}   # the free skins, self-computed
     # Derive each earnable skin's grant (the roster achievement whose `skin` == that skin,
     # with its metric + threshold) -- no hardcoded threshold. Meet ember + verdant's grants
     # while leaving moonlit's own metric at 0.
-    grant = {a["skin"]: (a["metric"], a["threshold"]) for a in g._roster() if a.get("skin")}
+    grant = {a["skin"]: (a["metric"], a["threshold"]) for a in achievements_mod._roster() if a.get("skin")}
     m = {grant["ember"][0]: grant["ember"][1], grant["verdant"][0]: grant["verdant"][1]}
     m.setdefault(grant["moonlit"][0], 0)                 # explicitly below moonlit's threshold
-    skins = {s["id"]: s["earned"] for s in g.compute_achievements(m, [])["skins"]}
+    skins = {s["id"]: s["earned"] for s in achievements_mod.compute_achievements(m, [])["skins"]}
     assert skins["ember"] is True and skins["verdant"] is True
     assert skins["moonlit"] is False                     # moonlit's own metric left at 0
 
@@ -158,7 +161,7 @@ def test_achievement_metrics_counts(tmp_path):
         _row(media_id="9", filename="v_9.mp4", is_video="1",
              created_at="2025-02-01T00:00:00"),
     ])
-    m = g.achievement_metrics(tmp_path / "catalog.db")
+    m = achievements_mod.achievement_metrics(tmp_path / "catalog.db")
     assert m["images"] == 3 and m["videos"] == 1
     assert m["models"] == 2                    # Tsubaki + Haruka (distinct)
     assert m["published"] == 1 and m["tagged"] == 2
@@ -168,10 +171,10 @@ def test_achievement_metrics_counts(tmp_path):
 
 @needs_donor
 def test_state_roundtrip_and_soft_fail(tmp_path):
-    assert g.load_ach_state(tmp_path) == {"seen": [], "skin": "moonglade", "earned_at": {}}
-    g.save_ach_state(tmp_path, {"seen": ["a", "a", "b"], "skin": "ember",
+    assert achievements_mod.load_ach_state(tmp_path) == {"seen": [], "skin": "moonglade", "earned_at": {}}
+    achievements_mod.save_ach_state(tmp_path, {"seen": ["a", "a", "b"], "skin": "ember",
                                 "earned_at": {"a": "2026-07-13"}})
-    st = g.load_ach_state(tmp_path)
+    st = achievements_mod.load_ach_state(tmp_path)
     assert st["seen"] == ["a", "b"] and st["skin"] == "ember"      # deduped + sorted
     assert st["earned_at"] == {"a": "2026-07-13"}                  # earn-dates round-trip
     # a stored skin id is PRESERVED on read, even if it isn't in the current
@@ -179,14 +182,14 @@ def test_state_roundtrip_and_soft_fail(tmp_path):
     # bogus/locked skin. (Coercing here would wipe an earned skin during an
     # undressed window and persist the reset -- adversarial M1, 2026-08-22.) An
     # id with no CSS rule just renders the default tokens, harmlessly.
-    g.save_ach_state(tmp_path, {"seen": [], "skin": "not-a-skin"})
-    assert g.load_ach_state(tmp_path)["skin"] == "not-a-skin"
+    achievements_mod.save_ach_state(tmp_path, {"seen": [], "skin": "not-a-skin"})
+    assert achievements_mod.load_ach_state(tmp_path)["skin"] == "not-a-skin"
     # missing / non-string / empty -> default
-    g.save_ach_state(tmp_path, {"seen": [], "skin": ""})
-    assert g.load_ach_state(tmp_path)["skin"] == "moonglade"
+    achievements_mod.save_ach_state(tmp_path, {"seen": [], "skin": ""})
+    assert achievements_mod.load_ach_state(tmp_path)["skin"] == "moonglade"
     # corrupt file -> default, never raises
-    g._ach_state_path(tmp_path).write_text("{not json", encoding="utf-8")
-    assert g.load_ach_state(tmp_path)["skin"] == "moonglade"
+    achievements_mod._ach_state_path(tmp_path).write_text("{not json", encoding="utf-8")
+    assert achievements_mod.load_ach_state(tmp_path)["skin"] == "moonglade"
 
 
 def test_earned_skin_survives_an_undressed_window(tmp_path, monkeypatch):
@@ -195,13 +198,13 @@ def test_earned_skin_survives_an_undressed_window(tmp_path, monkeypatch):
     picked must NOT be coerced to the default and persisted -- that was permanent
     loss of a cosmetic choice the art container has nothing to do with."""
     from moonglade import gallery as g
-    monkeypatch.setattr(g, "_skin_ids", lambda: {"moonglade", "nightfallen"})  # undressed
-    g.save_ach_state(tmp_path, {"seen": [], "skin": "ember"})   # an earned skin, now unvalidatable
-    assert g.load_ach_state(tmp_path)["skin"] == "ember"        # preserved, not reset
+    monkeypatch.setattr(achievements_mod, "_skin_ids", lambda: {"moonglade", "nightfallen"})  # undressed
+    achievements_mod.save_ach_state(tmp_path, {"seen": [], "skin": "ember"})   # an earned skin, now unvalidatable
+    assert achievements_mod.load_ach_state(tmp_path)["skin"] == "ember"        # preserved, not reset
     # and a save triggered while undressed (e.g. the mark path) must not rewrite it
-    st = g.load_ach_state(tmp_path)
-    g.save_ach_state(tmp_path, st)
-    assert g.load_ach_state(tmp_path)["skin"] == "ember"        # still ember after the pack returns
+    st = achievements_mod.load_ach_state(tmp_path)
+    achievements_mod.save_ach_state(tmp_path, st)
+    assert achievements_mod.load_ach_state(tmp_path)["skin"] == "ember"        # still ember after the pack returns
 
 
 # ---- routes -----------------------------------------------------------------
@@ -236,7 +239,7 @@ def test_the_hall_was_renamed_the_folio_of_honors():
 def test_api_achievements_marks_seen_once(tmp_path):
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
-    g.telem_flag("first_sync_done", out_dir=out)   # a normal install past its first sync;
+    telemetry_mod.telem_flag("first_sync_done", out_dir=out)   # a normal install past its first sync;
     # the first-sync gate (celebrations withheld until the first --sync finishes) has its
     # own coverage in test_first_sync_gate_* below.
     d1 = cli.get("/api/achievements").get_json()
@@ -248,7 +251,7 @@ def test_api_achievements_marks_seen_once(tmp_path):
     assert "first-light" in d2["newly"]
     d3 = cli.get("/api/achievements").get_json()
     assert d3["newly"] == []
-    assert "first-light" in g.load_ach_state(out)["seen"]
+    assert "first-light" in achievements_mod.load_ach_state(out)["seen"]
 
 
 @needs_donor
@@ -263,8 +266,8 @@ def test_first_sync_gate_withholds_celebrations_until_complete(tmp_path):
     d1 = cli.get("/api/achievements?mark=1").get_json()
     assert any(a["id"] == "first-light" and a["earned"] for a in d1["achievements"])  # earned still computes
     assert d1["newly"] == []                                    # but no celebration mid-first-sync
-    assert not g.load_ach_state(out).get("seen")                # and nothing marked seen (not lost)
-    g.telem_flag("first_sync_done", out_dir=out)                # the first --sync completes
+    assert not achievements_mod.load_ach_state(out).get("seen")                # and nothing marked seen (not lost)
+    telemetry_mod.telem_flag("first_sync_done", out_dir=out)                # the first --sync completes
     d2 = cli.get("/api/achievements").get_json()
     assert "first-light" in d2["newly"]                         # now the earned rung fires
 
@@ -277,12 +280,12 @@ def test_first_sync_gate_backfills_for_preexisting_install(tmp_path):
     flag mid-first-sync and reintroduce the bug."""
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
-    st = g.load_ach_state(out)
+    st = achievements_mod.load_ach_state(out)
     st["seen"] = ["first-light"]
-    g.save_ach_state(out, st)
+    achievements_mod.save_ach_state(out, st)
     d = cli.get("/api/achievements").get_json()
     assert d["newly"] == []                                      # already seen -> nothing new
-    assert g.load_telemetry(out)["flags"].get("first_sync_done")  # gate backfilled to done
+    assert telemetry_mod.load_telemetry(out)["flags"].get("first_sync_done")  # gate backfilled to done
 
 
 @needs_donor
@@ -291,11 +294,11 @@ def test_api_skin_rejects_locked_accepts_earned(tmp_path):
                                        created_at="2025-01-01T00:00:00")])
     # ember is locked (no videos) -> 403, active skin unchanged
     r = cli.post("/api/skin", json={"skin": "ember"})
-    assert r.status_code == 403 and g.load_ach_state(out)["skin"] == "moonglade"
+    assert r.status_code == 403 and achievements_mod.load_ach_state(out)["skin"] == "moonglade"
     # nightfallen is free -> accepted + persisted
     r2 = cli.post("/api/skin", json={"skin": "nightfallen"})
     assert r2.status_code == 200 and r2.get_json()["skin"] == "nightfallen"
-    assert g.load_ach_state(out)["skin"] == "nightfallen"
+    assert achievements_mod.load_ach_state(out)["skin"] == "nightfallen"
     # unknown skin id -> 400
     assert cli.post("/api/skin", json={"skin": "bogus"}).status_code == 400
 
@@ -311,14 +314,14 @@ def test_malformed_sealed_roster_degrades_not_500(tmp_path):
     container that opens fine but derives badly, and _sealed_defs only wrapped json.loads.)"""
     import json as _json
     from moonglade import container as mc
-    cpath = g._container_path()          # tmp_path/moonglade.mgpack via _isolated_branding
+    cpath = branding_mod._container_path()          # tmp_path/moonglade.mgpack via _isolated_branding
     # "roster" is a string -> `a["id"] for a in roster` iterates characters -> TypeError.
     for bad in (_json.dumps({"roster": "not-a-list"}).encode(),
                 _json.dumps({"roster": [{"name": "x"}]}).encode()):     # entry lacks "id"
         mc.write_container(cpath, {"seed.txt": b"x"}, {"achievements": bad})
-        g._sealed_cache.update(path=None, mtime=None, defs=None)
-        g._container_cache.update(path=None, mtime=None, box=None)
-        defs = g._sealed_defs()                     # must fall back, not raise
+        achievements_mod._sealed_cache.update(path=None, mtime=None, defs=None)
+        branding_mod._container_cache.update(path=None, mtime=None, box=None)
+        defs = achievements_mod._sealed_defs()                     # must fall back, not raise
         assert defs["roster"] == [] and defs["_ach_ids"] == frozenset()
     # and the live route serves 200 on the degraded roster, never a 500
     save_catalog(tmp_path / "catalog.db",
@@ -335,11 +338,11 @@ def test_pinned_achievement_stays_earned_when_the_metric_drops():
     the web Duplicate Review's last-copy delete (or any real bulk delete) could drop
     `images` back below an already-celebrated threshold and visibly UN-earn the badge.
     An id stamped in earned_at now stays earned regardless of the live metric."""
-    out = g.compute_achievements({"images": 0}, earned_at={"first-light": "2026-01-01"})
+    out = achievements_mod.compute_achievements({"images": 0}, earned_at={"first-light": "2026-01-01"})
     fl = next(a for a in out["achievements"] if a["id"] == "first-light")
     assert fl["earned"], "a stamped achievement un-earned when its metric dropped"
     # and the same input WITHOUT the stamp keeps the live-threshold behavior
-    out2 = g.compute_achievements({"images": 0})
+    out2 = achievements_mod.compute_achievements({"images": 0})
     assert not next(a for a in out2["achievements"] if a["id"] == "first-light")["earned"]
 
 
@@ -347,7 +350,7 @@ def test_pinned_achievement_stays_earned_when_the_metric_drops():
 def test_pinned_achievements_keep_their_skin_unlocked():
     """The pin flows through to skins: a stamped skin-granting achievement keeps its
     palette unlocked even after the backing count shrinks (menagerie -> verdant)."""
-    out = g.compute_achievements({"models": 0}, earned_at={"menagerie": "2026-01-01"})
+    out = achievements_mod.compute_achievements({"models": 0}, earned_at={"menagerie": "2026-01-01"})
     skins = {s["id"]: s["earned"] for s in out["skins"]}
     assert skins.get("verdant") is True
 
@@ -359,11 +362,11 @@ def test_skin_gate_honors_a_pinned_unlock(tmp_path):
     With an empty catalog and menagerie stamped in earned_at, the Folio shows the
     verdant palette unlocked; equipping it must succeed too (403 before the fix)."""
     client = login_client(tmp_path)
-    g.save_ach_state(tmp_path, {"seen": ["menagerie"], "skin": "moonglade",
+    achievements_mod.save_ach_state(tmp_path, {"seen": ["menagerie"], "skin": "moonglade",
                                 "earned_at": {"menagerie": "2026-01-01"}})
     r = client.post("/api/skin", json={"skin": "verdant"})
     assert r.status_code == 200, r.get_json()
-    assert g.load_ach_state(tmp_path)["skin"] == "verdant"
+    assert achievements_mod.load_ach_state(tmp_path)["skin"] == "verdant"
 
 
 @needs_donor
@@ -375,12 +378,12 @@ def test_skin_gate_reads_telemetry_metrics_like_every_other_gate(tmp_path):
     sealed skin-achievement is telemetry-backed -- which is precisely why the
     latent bug survived every review -- so the roster is patched for the test."""
     client = login_client(tmp_path)
-    fake = [dict(a) for a in g._roster()]
+    fake = [dict(a) for a in achievements_mod._roster()]
     for a in fake:
         if a["id"] == "menagerie":
             a["metric"], a["threshold"] = "uploads", 1   # telemetry counter, not catalog
-    g.telem_bump("uploads", out_dir=tmp_path)
-    with mock.patch.object(g, "_roster", return_value=fake):
+    telemetry_mod.telem_bump("uploads", out_dir=tmp_path)
+    with mock.patch.object(achievements_mod, "_roster", return_value=fake):
         r = client.post("/api/skin", json={"skin": "verdant"})
     assert r.status_code == 200, r.get_json()
 

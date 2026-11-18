@@ -24,7 +24,9 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gallery
-from moonglade.gallery import DELETED_DIRNAME, load_catalog
+from moonglade.gallery import load_catalog
+from moonglade.scan import DELETED_DIRNAME
+from moonglade import media_tools as media_tools_mod
 
 
 # ---------------------------------------------------------------------------
@@ -309,8 +311,8 @@ def video_task_network(monkeypatch):
         return "ok", path
 
     monkeypatch.setattr(core, "download", fake_download)
-    monkeypatch.setattr(core, "video_faststart", lambda p: True)
-    monkeypatch.setattr(core, "video_poster_thumb", lambda *a, **k: None)
+    monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: True)
+    monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
     monkeypatch.setattr(gallery, "make_thumbnail", lambda *a, **k: None)
 
 

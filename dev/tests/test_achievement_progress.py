@@ -21,6 +21,9 @@ from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests import synthetic_feats as sf
 from tests.conftest import clear_sealed_caches, login_client
+from moonglade import telemetry as telemetry_mod
+from moonglade import achievements as achievements_mod
+from moonglade import branding as branding_mod
 
 HIDDEN_ID = "synth-hidden-feat"
 HIDDEN_NAME = "Synthetic Hidden Feat"
@@ -63,7 +66,7 @@ def _roster():
 def _seed(tmp_path):
     defs = {"roster": _roster(), "skins": [], "skin_unlock": {}, "ach_criteria": {},
             "ladder_tracks": [{"id": "syn-images", "name": "Synthetic Images", "metric": "images"}]}
-    _mc.write_container(g._container_path(), {"_seed.txt": b"x"},
+    _mc.write_container(branding_mod._container_path(), {"_seed.txt": b"x"},
                         {"achievements": json.dumps(defs).encode("utf-8")})
     clear_sealed_caches()
 
@@ -71,7 +74,7 @@ def _seed(tmp_path):
 def _marks(bindings):
     """marks.json + art for {mark_id: awarding achievement id or ''}. Written BEFORE the app
     is built (create_app sweeps the tree), the way dev/tests/test_branding.py does."""
-    mdir = g._role_dir("marks")
+    mdir = branding_mod._role_dir("marks")
     mdir.mkdir(parents=True, exist_ok=True)
     entries = []
     for mid, unlock in bindings.items():
@@ -112,12 +115,12 @@ def _entry(**kw):
 
 
 def test_progress_is_threshold_minus_current_and_the_true_fraction():
-    p = g.achievement_progress(_entry(), {"images": 4})
+    p = achievements_mod.achievement_progress(_entry(), {"images": 4})
     assert p == {"current": 4, "threshold": 10, "left": 6, "fraction": 0.4}
 
 
 def test_progress_never_goes_negative_or_past_a_full_moon():
-    p = g.achievement_progress(_entry(current=12), {"images": 12})
+    p = achievements_mod.achievement_progress(_entry(current=12), {"images": 12})
     assert p["left"] == 0 and p["fraction"] == 1.0
 
 
@@ -129,27 +132,27 @@ def test_progress_never_goes_negative_or_past_a_full_moon():
     _entry(bucket="meta"),
 ])
 def test_a_feat_of_any_kind_has_no_progress_even_on_a_measured_metric(entry):
-    assert g.achievement_progress(entry, {"images": 4}) is None
+    assert achievements_mod.achievement_progress(entry, {"images": 4}) is None
 
 
 def test_an_earned_entry_has_no_progress():
-    assert g.achievement_progress(_entry(earned=True), {"images": 400}) is None
+    assert achievements_mod.achievement_progress(_entry(earned=True), {"images": 400}) is None
 
 
 def test_an_unmeasured_metric_has_no_progress():
-    assert g.achievement_progress(_entry(metric="nobody_counts_this"), {"images": 4}) is None
-    assert g.achievement_progress(_entry(metric="images"), {}) is None
-    assert g.achievement_progress(_entry(), None) is None
+    assert achievements_mod.achievement_progress(_entry(metric="nobody_counts_this"), {"images": 4}) is None
+    assert achievements_mod.achievement_progress(_entry(metric="images"), {}) is None
+    assert achievements_mod.achievement_progress(_entry(), None) is None
 
 
 def test_a_measured_counter_nothing_has_bumped_yet_is_a_true_zero():
-    p = g.achievement_progress(_entry(metric="claims", threshold=4, current=0), {"images": 4})
+    p = achievements_mod.achievement_progress(_entry(metric="claims", threshold=4, current=0), {"images": 4})
     assert p == {"current": 0, "threshold": 4, "left": 4, "fraction": 0.0}
 
 
 @pytest.mark.parametrize("bad", [0, -3, None, "many", ""])
 def test_a_threshold_that_is_not_a_positive_number_has_no_progress(bad):
-    assert g.achievement_progress(_entry(threshold=bad), {"images": 4}) is None
+    assert achievements_mod.achievement_progress(_entry(threshold=bad), {"images": 4}) is None
 
 
 def test_the_measured_set_names_no_feat_metric(sealed_donor_present):
@@ -158,15 +161,15 @@ def test_the_measured_set_names_no_feat_metric(sealed_donor_present):
     # only in the sealed roster. "Feat-only", because a feat may share its metric with a
     # visible ladder, and that metric is public already. The failure gives a count, never a
     # name.
-    for k in g._MEASURED_METRICS:
+    for k in achievements_mod._MEASURED_METRICS:
         assert isinstance(k, str) and k
 
     def is_feat(a):
         return a.get("tier") == "feat" or a.get("bucket") in ("feat", "meta")
-    feat_metrics = {a.get("metric") for a in g._roster() if is_feat(a)}
-    nonfeat_metrics = {a.get("metric") for a in g._roster() if not is_feat(a)}
+    feat_metrics = {a.get("metric") for a in achievements_mod._roster() if is_feat(a)}
+    nonfeat_metrics = {a.get("metric") for a in achievements_mod._roster() if not is_feat(a)}
     feat_only = feat_metrics - nonfeat_metrics
-    leaked = len(feat_only & set(g._MEASURED_METRICS))
+    leaked = len(feat_only & set(achievements_mod._MEASURED_METRICS))
     assert leaked == 0, "%d feat-only metric(s) named in _MEASURED_METRICS" % leaked
 
 
@@ -214,9 +217,9 @@ def test_opening_the_route_writes_no_progress_anywhere(tmp_path):
     """Nothing writes on open: the achievement state file gains nothing from a plain read
     (no ?mark=1), so the count is computed, never stored."""
     cli = _client(tmp_path)
-    before = g.load_ach_state(tmp_path)
+    before = achievements_mod.load_ach_state(tmp_path)
     _get(cli)
-    assert g.load_ach_state(tmp_path) == before
+    assert achievements_mod.load_ach_state(tmp_path) == before
 
 
 # ---- L2: the Marks row ---------------------------------------------------------------------
@@ -261,13 +264,13 @@ def test_every_non_feat_metric_in_the_sealed_roster_is_measured(tmp_path, sealed
     # The real recipe on an empty library: the catalog's metrics, then telemetry's -- the
     # merge every gate uses -- rather than a hand list that drifts when a metric moves.
     g.save_catalog(tmp_path / "catalog.db", [])
-    fresh = g.achievement_metrics(tmp_path / "catalog.db", use_cache=False)
-    fresh.update(g.telemetry_metrics(tmp_path))
+    fresh = achievements_mod.achievement_metrics(tmp_path / "catalog.db", use_cache=False)
+    fresh.update(telemetry_mod.telemetry_metrics(tmp_path))
     unmeasured = sorted({
-        a["metric"] for a in g._roster()
+        a["metric"] for a in achievements_mod._roster()
         if a.get("tier") != "feat" and a.get("bucket") not in ("feat", "meta")
         and a["metric"] != "all_non_feat_earned"
-        and g.achievement_progress(
+        and achievements_mod.achievement_progress(
             {"tier": a["tier"], "bucket": a.get("bucket", "ladder"), "metric": a["metric"],
              "threshold": a["threshold"], "current": 0, "earned": False}, fresh) is None})
     assert unmeasured == [], "non-feat metrics with no count: %r" % (unmeasured,)

@@ -14,6 +14,10 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_test_client
+from moonglade import health as health_mod
+from moonglade import telemetry as telemetry_mod
+from moonglade import contest_sync as contest_sync_mod
+from moonglade import achievements as achievements_mod
 
 
 def _row(**kw):
@@ -31,7 +35,7 @@ def _client(tmp_path, rows=()):
 
 
 def _fresh_metrics_cache(monkeypatch):
-    monkeypatch.setattr(g, "_ACH_METRICS_CACHE", {})
+    monkeypatch.setattr(achievements_mod, "_ACH_METRICS_CACHE", {})
 
 
 # ---- the achievement-metrics memo -------------------------------------------
@@ -42,7 +46,7 @@ def test_metrics_are_memoized_between_calls(tmp_path, monkeypatch):
     _fresh_metrics_cache(monkeypatch)
     db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png", rating="5",
                                created_at="2026-01-01T00:00:00")])
-    first = g.achievement_metrics(db)
+    first = achievements_mod.achievement_metrics(db)
     calls = {"n": 0}
     real = g.catalog_counts
 
@@ -50,7 +54,7 @@ def test_metrics_are_memoized_between_calls(tmp_path, monkeypatch):
         calls["n"] += 1
         return real(p)
     monkeypatch.setattr(g, "catalog_counts", _counted)
-    again = g.achievement_metrics(db)
+    again = achievements_mod.achievement_metrics(db)
     assert calls["n"] == 0, "a second call inside the window must not recompute"
     assert again == first
 
@@ -61,10 +65,10 @@ def test_the_memo_hands_out_copies_not_its_own_dict(tmp_path, monkeypatch):
     _fresh_metrics_cache(monkeypatch)
     db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png",
                                created_at="2026-01-01T00:00:00")])
-    a = g.achievement_metrics(db)
+    a = achievements_mod.achievement_metrics(db)
     a["images"] = 999999
     a["injected"] = True
-    b = g.achievement_metrics(db)
+    b = achievements_mod.achievement_metrics(db)
     assert b.get("injected") is None and b["images"] != 999999
 
 
@@ -76,10 +80,10 @@ def test_a_changed_catalog_invalidates_the_memo(tmp_path, monkeypatch):
     _fresh_metrics_cache(monkeypatch)
     db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png",
                                created_at="2026-01-01T00:00:00")])
-    before = g.achievement_metrics(db)["images"]
+    before = achievements_mod.achievement_metrics(db)["images"]
     save_catalog(db, [_row(media_id="1", filename="a_1.png", created_at="2026-01-01T00:00:00"),
                       _row(media_id="2", filename="b_2.png", created_at="2026-01-02T00:00:00")])
-    assert g.achievement_metrics(db)["images"] == before + 1
+    assert achievements_mod.achievement_metrics(db)["images"] == before + 1
 
 
 def test_a_gate_reads_a_catalog_that_changed_one_line_ago(tmp_path, monkeypatch):
@@ -88,20 +92,20 @@ def test_a_gate_reads_a_catalog_that_changed_one_line_ago(tmp_path, monkeypatch)
     _fresh_metrics_cache(monkeypatch)
     db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png",
                                created_at="2026-01-01T00:00:00")])
-    g.achievement_metrics(db)                                  # warm the memo
+    achievements_mod.achievement_metrics(db)                                  # warm the memo
     save_catalog(db, [_row(media_id=str(i), filename="a_%d.png" % i,
                            created_at="2026-01-0%dT00:00:00" % ((i % 9) + 1))
                       for i in range(1, 6)])
-    assert g.achievement_metrics(db)["images"] == 5
+    assert achievements_mod.achievement_metrics(db)["images"] == 5
 
 
 def test_use_cache_false_always_reads_for_real(tmp_path, monkeypatch):
     _fresh_metrics_cache(monkeypatch)
     db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png",
                                created_at="2026-01-01T00:00:00")])
-    g.achievement_metrics(db)
-    g._ACH_METRICS_CACHE[str(db)]["metrics"]["images"] = 4242
-    assert g.achievement_metrics(db, use_cache=False)["images"] != 4242
+    achievements_mod.achievement_metrics(db)
+    achievements_mod._ACH_METRICS_CACHE[str(db)]["metrics"]["images"] = 4242
+    assert achievements_mod.achievement_metrics(db, use_cache=False)["images"] != 4242
 
 
 def test_the_achievements_route_still_answers_correctly(tmp_path, monkeypatch):
@@ -119,16 +123,16 @@ def test_the_achievements_route_still_answers_correctly(tmp_path, monkeypatch):
 def test_telemetry_metrics_accepts_a_preloaded_store(tmp_path):
     """The parameter that collapsed three parses into one. Passing the store in must give
     the identical answer to letting it load its own."""
-    g.telem_bump("uploads", 3, out_dir=tmp_path)
-    loaded = g.load_telemetry(tmp_path)
-    assert g.telemetry_metrics(tmp_path, telem=loaded) == g.telemetry_metrics(tmp_path)
-    assert g.telemetry_metrics(tmp_path, telem=loaded)["uploads"] == 3
+    telemetry_mod.telem_bump("uploads", 3, out_dir=tmp_path)
+    loaded = telemetry_mod.load_telemetry(tmp_path)
+    assert telemetry_mod.telemetry_metrics(tmp_path, telem=loaded) == telemetry_mod.telemetry_metrics(tmp_path)
+    assert telemetry_mod.telemetry_metrics(tmp_path, telem=loaded)["uploads"] == 3
 
 
 def test_first_sync_complete_accepts_a_preloaded_store(tmp_path):
-    g.telem_flag("first_sync_done", out_dir=tmp_path)
-    loaded = g.load_telemetry(tmp_path)
-    assert g.first_sync_complete(tmp_path, tmp_path / "catalog.db", telem=loaded) is True
+    telemetry_mod.telem_flag("first_sync_done", out_dir=tmp_path)
+    loaded = telemetry_mod.load_telemetry(tmp_path)
+    assert telemetry_mod.first_sync_complete(tmp_path, tmp_path / "catalog.db", telem=loaded) is True
 
 
 # ---- the contest-board memo -------------------------------------------------
@@ -145,7 +149,7 @@ def _board_stub(monkeypatch, calls):
 
 def test_the_contest_board_is_memoized(tmp_path, monkeypatch):
     """Four surfaces mount this on open. They must share one pull, not take one each."""
-    monkeypatch.setattr(g, "_contests_cache", {})
+    monkeypatch.setattr(contest_sync_mod, "_contests_cache", {})
     calls = []
     _board_stub(monkeypatch, calls)
     cli = _client(tmp_path)
@@ -158,7 +162,7 @@ def test_the_contest_board_is_memoized(tmp_path, monkeypatch):
 def test_the_boards_ceiling_rides_the_memo_to_the_route(tmp_path, monkeypatch):
     """list_contests reports a cut board through `meta`; the memo keeps it beside the rows,
     so /api/contests says so on every read inside the TTL without a second pull (#94)."""
-    monkeypatch.setattr(g, "_contests_cache", {})
+    monkeypatch.setattr(contest_sync_mod, "_contests_cache", {})
     calls = []
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
 
@@ -178,7 +182,7 @@ def test_the_boards_ceiling_rides_the_memo_to_the_route(tmp_path, monkeypatch):
 
 
 def test_a_reader_that_ignores_meta_means_an_untruncated_board(tmp_path, monkeypatch):
-    monkeypatch.setattr(g, "_contests_cache", {})
+    monkeypatch.setattr(contest_sync_mod, "_contests_cache", {})
     _board_stub(monkeypatch, [])
     d = _client(tmp_path).get("/api/contests").get_json()
     assert d["board"] == {"truncated": False}
@@ -188,7 +192,7 @@ def test_both_board_variants_come_off_the_one_snapshot(tmp_path, monkeypatch):
     """?all=1 used to be a SECOND cached read at a different depth. Since the ultrareview
     there is one board -- read at full depth, filtered per variant -- so the running-only
     view and the everything view can never disagree about what exists."""
-    monkeypatch.setattr(g, "_contests_cache", {})
+    monkeypatch.setattr(contest_sync_mod, "_contests_cache", {})
     calls = []
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "list_contests", lambda s, **k: calls.append(1) or [
@@ -204,19 +208,19 @@ def test_both_board_variants_come_off_the_one_snapshot(tmp_path, monkeypatch):
 
 
 def test_the_board_memo_expires(tmp_path, monkeypatch):
-    monkeypatch.setattr(g, "_contests_cache", {})
+    monkeypatch.setattr(contest_sync_mod, "_contests_cache", {})
     calls = []
     _board_stub(monkeypatch, calls)
     cli = _client(tmp_path)
     cli.get("/api/contests")
-    g._contests_cache["board"]["at"] -= (g.CONTESTS_TTL + 1)
+    contest_sync_mod._contests_cache["board"]["at"] -= (contest_sync_mod.CONTESTS_TTL + 1)
     cli.get("/api/contests")
     assert len(calls) == 2
 
 
 def test_a_board_failure_is_not_cached(tmp_path, monkeypatch):
     """An offline blip must not pin an empty board for the whole TTL."""
-    monkeypatch.setattr(g, "_contests_cache", {})
+    monkeypatch.setattr(contest_sync_mod, "_contests_cache", {})
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "list_contests",
                         lambda s, **k: (_ for _ in ()).throw(core.PixAIError("board down")))
@@ -234,40 +238,40 @@ def test_a_board_failure_is_not_cached(tmp_path, monkeypatch):
 def test_a_recent_sweep_short_circuits(tmp_path, monkeypatch, pixai):
     """The guard the spec asked for and never got: opening the overlay fired a full paced
     sweep every time."""
-    monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": 0.0})
-    monkeypatch.setattr(g, "_CONTEST_SYNC_PAUSE", 0)
+    monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": 0.0})
+    monkeypatch.setattr(contest_sync_mod, "_CONTEST_SYNC_PAUSE", 0)
     calls = []
     monkeypatch.setattr(core, "list_contests", lambda s, **k: calls.append(1) or [])
-    assert g._contest_detection_sync(tmp_path) is True     # the real one
+    assert contest_sync_mod._contest_detection_sync(tmp_path) is True     # the real one
     assert len(calls) == 1
-    assert g._contest_detection_sync(tmp_path) is True     # ...and the skip
+    assert contest_sync_mod._contest_detection_sync(tmp_path) is True     # ...and the skip
     assert len(calls) == 1, "a sweep inside the window must not walk the board again"
 
 
 def test_force_bypasses_the_recency_guard(tmp_path, monkeypatch, pixai):
     """The publish kick is confirming an entry it was just told about -- it can never be
     answered with 'we looked recently'."""
-    monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": time.time()})
-    monkeypatch.setattr(g, "_CONTEST_SYNC_PAUSE", 0)
+    monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": time.time()})
+    monkeypatch.setattr(contest_sync_mod, "_CONTEST_SYNC_PAUSE", 0)
     calls = []
     monkeypatch.setattr(core, "list_contests", lambda s, **k: calls.append(1) or [])
-    assert g._contest_detection_sync(tmp_path, force=True) is True
+    assert contest_sync_mod._contest_detection_sync(tmp_path, force=True) is True
     assert len(calls) == 1
 
 
 def test_a_failed_sweep_does_not_count_as_recent(tmp_path, monkeypatch, pixai):
     """Only a completed sweep buys the quiet window; a failure must be retried."""
-    monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": 0.0})
-    monkeypatch.setattr(g, "_CONTEST_SYNC_PAUSE", 0)
+    monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": 0.0})
+    monkeypatch.setattr(contest_sync_mod, "_CONTEST_SYNC_PAUSE", 0)
 
     def _boom(*a, **k):
         raise core.PixAIError("the board is unreachable")
     monkeypatch.setattr(core, "list_contests", _boom)
-    assert g._contest_detection_sync(tmp_path) is False
-    assert g._contest_sync_last_ok["at"] == 0.0
+    assert contest_sync_mod._contest_detection_sync(tmp_path) is False
+    assert contest_sync_mod._contest_sync_last_ok["at"] == 0.0
     calls = []
     monkeypatch.setattr(core, "list_contests", lambda s, **k: calls.append(1) or [])
-    assert g._contest_detection_sync(tmp_path) is True
+    assert contest_sync_mod._contest_detection_sync(tmp_path) is True
     assert len(calls) == 1
 
 
@@ -275,8 +279,8 @@ def test_the_sync_route_tells_the_client_it_skipped(tmp_path, monkeypatch, pixai
     """The client's re-pull is pointless after a skip, and it should be told rather than
     left to infer it from an unchanged number. (The route answers immediately now, so the
     first call is run inline to make the sweep actually happen.)"""
-    monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": 0.0})
-    monkeypatch.setattr(g, "_CONTEST_SYNC_PAUSE", 0)
+    monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": 0.0})
+    monkeypatch.setattr(contest_sync_mod, "_CONTEST_SYNC_PAUSE", 0)
     monkeypatch.setattr(core, "list_contests", lambda s, **k: [])
     cli = _client(tmp_path)
     token = cli.get("/api/myart/items").get_json()["csrf"]
@@ -311,7 +315,7 @@ def _walk_stub(monkeypatch, calls, gate=None):
         if gate is not None and len(calls) > 1:
             assert gate.wait(10), "the gated walk was never released"
         return {"total_files": len(calls), "catalog_rows": len(calls)}
-    monkeypatch.setattr(g, "collection_health", _fake)
+    monkeypatch.setattr(health_mod, "collection_health", _fake)
 
 
 def _settle(pred, timeout=10.0):
@@ -331,9 +335,9 @@ def test_the_health_walk_is_memoized_between_opens(tmp_path, monkeypatch):
     db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png")])
     calls = []
     _walk_stub(monkeypatch, calls)
-    first = g.health_cached(tmp_path, db)
-    assert g.health_cached(tmp_path, db) == first
-    assert g.health_cached(tmp_path, db) == first
+    first = health_mod.health_cached(tmp_path, db)
+    assert health_mod.health_cached(tmp_path, db) == first
+    assert health_mod.health_cached(tmp_path, db) == first
     assert len(calls) == 1, "an unchanged catalog must be served from memory"
 
 
@@ -343,12 +347,12 @@ def test_a_changed_catalog_invalidates_the_health_memo(tmp_path, monkeypatch):
     db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png")])
     calls = []
     _walk_stub(monkeypatch, calls)
-    g.health_cached(tmp_path, db)
+    health_mod.health_cached(tmp_path, db)
     save_catalog(db, [_row(media_id="1", filename="a_1.png"),
                       _row(media_id="2", filename="b_2.png")])
-    g.health_cached(tmp_path, db)                      # notices, kicks the refresh
+    health_mod.health_cached(tmp_path, db)                      # notices, kicks the refresh
     assert _settle(lambda: len(calls) == 2), "a changed catalog must re-walk"
-    assert _settle(lambda: g.health_cached(tmp_path, db)["catalog_rows"] == 2)
+    assert _settle(lambda: health_mod.health_cached(tmp_path, db)["catalog_rows"] == 2)
 
 
 def test_the_stale_answer_is_served_WHILE_it_recomputes(tmp_path, monkeypatch):
@@ -358,16 +362,16 @@ def test_the_stale_answer_is_served_WHILE_it_recomputes(tmp_path, monkeypatch):
     calls, gate = [], threading.Event()
     _walk_stub(monkeypatch, calls, gate)
     try:
-        first = g.health_cached(tmp_path, db)          # nothing cached: this one blocks
+        first = health_mod.health_cached(tmp_path, db)          # nothing cached: this one blocks
         save_catalog(db, [_row(media_id="1", filename="a_1.png"),
                           _row(media_id="2", filename="b_2.png")])
-        served = g.health_cached(tmp_path, db)         # the walk behind this is still stuck
+        served = health_mod.health_cached(tmp_path, db)         # the walk behind this is still stuck
         assert served is first, "the previous payload must come back, not a fresh walk"
         assert _settle(lambda: len(calls) == 2), "the refresh must actually have started"
     finally:
         gate.set()
-    assert _settle(lambda: g._HEALTH_CACHE["payload"] is not first)
-    assert g.health_cached(tmp_path, db)["catalog_rows"] == 2
+    assert _settle(lambda: health_mod._HEALTH_CACHE["payload"] is not first)
+    assert health_mod.health_cached(tmp_path, db)["catalog_rows"] == 2
 
 
 def test_a_burst_of_opens_starts_ONE_recompute(tmp_path, monkeypatch):
@@ -377,17 +381,17 @@ def test_a_burst_of_opens_starts_ONE_recompute(tmp_path, monkeypatch):
     calls, gate = [], threading.Event()
     _walk_stub(monkeypatch, calls, gate)
     try:
-        g.health_cached(tmp_path, db)
+        health_mod.health_cached(tmp_path, db)
         save_catalog(db, [_row(media_id="1", filename="a_1.png"),
                           _row(media_id="2", filename="b_2.png")])
         for _ in range(6):
-            g.health_cached(tmp_path, db)
+            health_mod.health_cached(tmp_path, db)
         assert _settle(lambda: len(calls) == 2)
         time.sleep(0.05)
         assert len(calls) == 2, "one recompute, however many readers noticed"
     finally:
         gate.set()
-    assert _settle(lambda: not g._HEALTH_BUSY["on"])
+    assert _settle(lambda: not health_mod._HEALTH_BUSY["on"])
 
 
 def test_fresh_forces_a_real_walk(tmp_path, monkeypatch):
@@ -395,10 +399,10 @@ def test_fresh_forces_a_real_walk(tmp_path, monkeypatch):
     db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png")])
     calls = []
     _walk_stub(monkeypatch, calls)
-    g.health_cached(tmp_path, db)
-    g.health_cached(tmp_path, db, fresh=True)
+    health_mod.health_cached(tmp_path, db)
+    health_mod.health_cached(tmp_path, db, fresh=True)
     assert len(calls) == 2
-    assert g.health_cached(tmp_path, db)["total_files"] == 2, "and it re-seeds the memo"
+    assert health_mod.health_cached(tmp_path, db)["total_files"] == 2, "and it re-seeds the memo"
 
 
 def test_the_boot_prime_warms_the_memo(tmp_path, monkeypatch):
@@ -407,9 +411,9 @@ def test_the_boot_prime_warms_the_memo(tmp_path, monkeypatch):
     db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png")])
     calls = []
     _walk_stub(monkeypatch, calls)
-    g._health_prime(tmp_path, db).join(10)
+    health_mod._health_prime(tmp_path, db).join(10)
     assert len(calls) == 1, "the prime does the walk"
-    assert g.health_cached(tmp_path, db)["total_files"] == 1
+    assert health_mod.health_cached(tmp_path, db)["total_files"] == 1
     assert len(calls) == 1, "so the first real open walks nothing at all"
 
 
@@ -417,9 +421,9 @@ def test_the_prime_survives_a_library_it_cannot_walk(tmp_path, monkeypatch):
     """A boot nicety must never be able to stop the server from starting."""
     def _boom(out_dir, db_path):
         raise OSError("the library is on a disconnected drive")
-    monkeypatch.setattr(g, "collection_health", _boom)
-    g._health_prime(tmp_path, tmp_path / "catalog.db").join(10)
-    assert g._HEALTH_CACHE["payload"] is None
+    monkeypatch.setattr(health_mod, "collection_health", _boom)
+    health_mod._health_prime(tmp_path, tmp_path / "catalog.db").join(10)
+    assert health_mod._HEALTH_CACHE["payload"] is None
 
 
 def test_a_missing_catalog_still_memoizes(tmp_path, monkeypatch):
@@ -427,9 +431,9 @@ def test_a_missing_catalog_still_memoizes(tmp_path, monkeypatch):
     raises there. It must answer, and answer from the memo the second time."""
     calls = []
     _walk_stub(monkeypatch, calls)
-    assert g._health_key(tmp_path / "catalog.db") is None
-    g.health_cached(tmp_path, tmp_path / "catalog.db")
-    g.health_cached(tmp_path, tmp_path / "catalog.db")
+    assert health_mod._health_key(tmp_path / "catalog.db") is None
+    health_mod.health_cached(tmp_path, tmp_path / "catalog.db")
+    health_mod.health_cached(tmp_path, tmp_path / "catalog.db")
     assert len(calls) == 1
 
 
@@ -437,8 +441,8 @@ def _fresh_health_cache(monkeypatch):
     """Start from an empty memo. The cache is process-wide, so without this a test inherits
     whatever the previous one left in it and reads the serve-stale path where it meant to
     read the first-call one."""
-    assert _settle(lambda: not g._HEALTH_BUSY["on"]), "a previous refresh never finished"
-    monkeypatch.setattr(g, "_HEALTH_CACHE", {"key": None, "payload": None, "at": 0.0})
+    assert _settle(lambda: not health_mod._HEALTH_BUSY["on"]), "a previous refresh never finished"
+    monkeypatch.setattr(health_mod, "_HEALTH_CACHE", {"key": None, "payload": None, "at": 0.0})
 
 
 def test_a_file_deleted_off_disk_invalidates_the_health_memo(tmp_path, monkeypatch):
@@ -456,18 +460,18 @@ def test_a_file_deleted_off_disk_invalidates_the_health_memo(tmp_path, monkeypat
                           _row(media_id="2", filename="b_2.png")])
     calls = []
     _walk_stub(monkeypatch, calls)
-    first = g.health_cached(tmp_path, db)
-    assert g.health_cached(tmp_path, db) is first and len(calls) == 1, "memoized to start"
+    first = health_mod.health_cached(tmp_path, db)
+    assert health_mod.health_cached(tmp_path, db) is first and len(calls) == 1, "memoized to start"
 
-    catalog_key = g._health_key(db)
+    catalog_key = health_mod._health_key(db)
     (month / "b_2.png").unlink()
-    assert g._health_key(db) == catalog_key, \
+    assert health_mod._health_key(db) == catalog_key, \
         "nothing wrote the catalog -- if this moves, the test proves the wrong thing"
 
-    served = g.health_cached(tmp_path, db)
+    served = health_mod.health_cached(tmp_path, db)
     assert served is first, "the stale answer still comes back at once"
     assert _settle(lambda: len(calls) == 2), "a file removed off disk must re-walk"
-    assert _settle(lambda: g.health_cached(tmp_path, db)["total_files"] == 2), \
+    assert _settle(lambda: health_mod.health_cached(tmp_path, db)["total_files"] == 2), \
         "and the next read gets the answer that reflects the disk"
 
 
@@ -477,19 +481,19 @@ def test_a_snapshot_past_HEALTH_MAX_AGE_is_served_stale_and_refreshed(tmp_path, 
     that leaves the name alone. Past the ceiling the reader is still answered immediately --
     the recompute runs behind it, exactly as a moved key already does."""
     _fresh_health_cache(monkeypatch)
-    assert 60 <= g.HEALTH_MAX_AGE <= 3600, "a ceiling, in seconds, not a sentinel"
+    assert 60 <= health_mod.HEALTH_MAX_AGE <= 3600, "a ceiling, in seconds, not a sentinel"
     db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png")])
     calls = []
     _walk_stub(monkeypatch, calls)
-    first = g.health_cached(tmp_path, db)
-    assert g.health_cached(tmp_path, db) is first and len(calls) == 1, "young: pure memo"
+    first = health_mod.health_cached(tmp_path, db)
+    assert health_mod.health_cached(tmp_path, db) is first and len(calls) == 1, "young: pure memo"
 
-    with g._HEALTH_LOCK:                       # age it, rather than sleep ten real minutes
-        g._HEALTH_CACHE["at"] = time.time() - g.HEALTH_MAX_AGE - 1
-    served = g.health_cached(tmp_path, db)
+    with health_mod._HEALTH_LOCK:                       # age it, rather than sleep ten real minutes
+        health_mod._HEALTH_CACHE["at"] = time.time() - health_mod.HEALTH_MAX_AGE - 1
+    served = health_mod.health_cached(tmp_path, db)
     assert served is first, "an aged answer is SERVED, never waited on"
     assert _settle(lambda: len(calls) == 2), "and it kicks the refresh behind itself"
-    assert _settle(lambda: g.health_cached(tmp_path, db)["total_files"] == 2)
+    assert _settle(lambda: health_mod.health_cached(tmp_path, db)["total_files"] == 2)
 
 
 def test_the_disk_side_key_is_a_handful_of_stats_not_a_walk(tmp_path):
@@ -515,7 +519,7 @@ def test_the_disk_side_key_is_a_handful_of_stats_not_a_walk(tmp_path):
         os.scandir = lambda *a, **k: (seen.__setitem__("scandir", seen["scandir"] + 1),
                                       real_scandir(*a, **k))[1]
         try:
-            key = g._health_dir_key(root)
+            key = health_mod._health_dir_key(root)
         finally:
             os.stat, os.scandir = real_stat, real_scandir
         return seen, key
@@ -571,7 +575,7 @@ def test_collection_health_itself_stays_uncached(tmp_path):
     """The cache lives outside the computation, as it always has: the classic /health page
     and every test calling collection_health() directly get a real read every time."""
     db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png")])
-    g.health_cached(tmp_path, db)                                  # warm the memo
+    health_mod.health_cached(tmp_path, db)                                  # warm the memo
     save_catalog(db, [_row(media_id="1", filename="a_1.png"),
                       _row(media_id="2", filename="b_2.png")])
-    assert g.collection_health(tmp_path, db)["catalog_rows"] == 2
+    assert health_mod.collection_health(tmp_path, db)["catalog_rows"] == 2

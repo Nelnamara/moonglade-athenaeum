@@ -26,6 +26,8 @@ from moonglade import backup as core
 from moonglade import paths
 from moonglade.gallery import CATALOG_FIELDS, TrainGuard, create_app, save_catalog
 from tests.conftest import login_test_client
+from moonglade import pixai_client as pixai_client_mod
+from moonglade import telemetry as telemetry_mod
 
 T3 = "2024383379556065549"          # Tsubaki.3 (MMDIT26B), Recommended
 T2 = "1983308862240288769"          # Tsubaki.2 (MMDIT26A)
@@ -176,7 +178,7 @@ def test_the_one_rest_error_serves_the_training_refusals_and_the_recipe_code():
     assert len(re.findall(r"^def _rest_error\(", inspect.getsource(moonglade_backup), re.M)) == 1
     body = {"code": "INSUFFICIENT_BALANCE", "data": {"mediaIds": ["5"]}}
     for verb in ("rest_get", "rest_post", "rest_put", "rest_patch"):
-        client = core.PixAIClient(_Sess(_Resp(403, body)))
+        client = pixai_client_mod.PixAIClient(_Sess(_Resp(403, body)))
         call = getattr(client, verb)
         with pytest.raises(core.PixAIRestError) as ei:
             call("/training-task/1") if verb == "rest_get" else call("/training-task/1", {})
@@ -185,7 +187,7 @@ def test_the_one_rest_error_serves_the_training_refusals_and_the_recipe_code():
         assert e.code == "INSUFFICIENT_BALANCE" and e.data == {"mediaIds": ["5"]}
         assert core.definite_refusal(e)
         assert core.training_error_words(e).startswith("there aren't enough credits")
-    client = core.PixAIClient(_Sess(_Resp(502, "<html>bad gateway</html>")))
+    client = pixai_client_mod.PixAIClient(_Sess(_Resp(502, "<html>bad gateway</html>")))
     with pytest.raises(core.PixAIRestError) as ei:
         client.rest_put("/training-task/1/media", {})
     assert ei.value.body is None and ei.value.code == "" and ei.value.data == {}
@@ -566,12 +568,12 @@ def test_finished_runs_are_what_the_academy_counts(tmp_path, pixai):
                    _basic_node("m2", "502", "running"),
                    _basic_node("m3", "503", "failed")])
     pixai.on("trainingTask", lambda call: _task(tid=call.variables["id"], status="failed"))
-    assert g.telemetry_metrics(tmp_path).get("loras_trained", 0) == 0
+    assert telemetry_mod.telemetry_metrics(tmp_path).get("loras_trained", 0) == 0
     cli.get("/api/train/runs")
-    assert g.telemetry_metrics(tmp_path)["loras_trained"] == 2          # 501 and 900
-    assert sorted(g.load_telemetry(tmp_path)["sets"]["trained_runs"]) == ["501", "900"]
+    assert telemetry_mod.telemetry_metrics(tmp_path)["loras_trained"] == 2          # 501 and 900
+    assert sorted(telemetry_mod.load_telemetry(tmp_path)["sets"]["trained_runs"]) == ["501", "900"]
     cli.get("/api/train/runs?running=1")
-    assert g.telemetry_metrics(tmp_path)["loras_trained"] == 2          # nothing twice
+    assert telemetry_mod.telemetry_metrics(tmp_path)["loras_trained"] == 2          # nothing twice
     assert pixai.mutations() == 0
 
 
@@ -786,7 +788,7 @@ def test_the_paid_guard_lapses_after_its_window_and_only_on_the_same_status(tmp_
 
 def _graphql_error(body):
     """The error the REAL transport raises for `body` (PixAIClient._graphql_post)."""
-    client = core.PixAIClient(_Sess(_Resp(200, body)))
+    client = pixai_client_mod.PixAIClient(_Sess(_Resp(200, body)))
     with pytest.raises(core.PixAIError) as ei:
         client.mutate("mutation { createTrainingTask(input: {}) { id } }", {})
     return ei.value

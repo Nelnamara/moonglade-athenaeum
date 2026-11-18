@@ -9,6 +9,7 @@ import sys
 import pytest
 
 from moonglade import backup as core
+from moonglade import telemetry as telemetry_mod
 
 
 def _patch_chain(monkeypatch, calls, *, reconcile_exc=None):
@@ -124,7 +125,7 @@ def test_sync_that_reached_the_end_says_so_and_marks_the_first_sync(
     out = capsys.readouterr().out
     assert "Sync complete — walked to the end of your history (5 pages)." in out
     assert "caught up" not in out
-    assert g.load_telemetry(tmp_path)["flags"].get("first_sync_done")
+    assert telemetry_mod.load_telemetry(tmp_path)["flags"].get("first_sync_done")
 
 
 def test_sync_that_only_caught_up_says_so_and_withholds_the_first_sync_flag(
@@ -142,7 +143,7 @@ def test_sync_that_only_caught_up_says_so_and_withholds_the_first_sync_flag(
     out = capsys.readouterr().out
     assert "Sync complete — caught up (nothing new in the last 2 pages)." in out
     assert "walked to the end" not in out
-    assert not g.load_telemetry(tmp_path)["flags"].get("first_sync_done")
+    assert not telemetry_mod.load_telemetry(tmp_path)["flags"].get("first_sync_done")
 
 
 def test_update_builds_missing_thumbnails(monkeypatch, tmp_path):

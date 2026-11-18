@@ -32,6 +32,7 @@ from moonglade import backup as core
 from tests.test_tsubaki3_image_gate import (
     FLASH, MODELS, SDXL, SIZE_CONFIG, T3, T3_PROFILES, FakeRest, features, T3_STATUS,
 )
+from moonglade import mirror as mirror_mod
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -284,7 +285,7 @@ def test_a_listed_profile_pixai_refuses_is_never_resubmitted_on_the_default(rest
         sent.append(dict(v["parameters"]))
         raise core.PixAIError('GraphQL error: [{"message": "inferenceProfile ultra requires membership"}]')
     monkeypatch.setattr(core, "gql_mutate", fake)
-    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     params = {"prompts": "p", "modelId": T3, "width": 1024, "height": 1024, "batchSize": 1,
               "inferenceProfile": "ultra", "priority": core.PRIORITY_TURBO}
     with pytest.raises(core.PixAIError, match="refused the ultra profile"):
@@ -299,7 +300,7 @@ def test_a_members_only_profile_stands_the_turbo_fallback_down(rest, monkeypatch
         sent.append(dict(v["parameters"]))
         raise core.PixAIError('GraphQL error: [{"message": "REQUIRE_MEMBERSHIP"}]')
     monkeypatch.setattr(core, "gql_mutate", fake)
-    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     params = {"prompts": "p", "modelId": T3, "width": 1024, "height": 1024, "batchSize": 1,
               "inferenceProfile": "ultra", "priority": core.PRIORITY_TURBO}
     with pytest.raises(core.PixAIError):
@@ -337,7 +338,7 @@ def test_a_partial_success_is_never_resubmitted(rest, monkeypatch, message, prof
         e.graphql_data = {"createGenerationTask": {"id": "T-made"}}
         raise e
     monkeypatch.setattr(core, "gql_mutate", fake)
-    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     monkeypatch.setattr(core, "_turbo_refused", {"seen": False})
     # Reach the two resubmit branches: the profile is not one the version lists (so the
     # inferenceProfile drop is the road taken) and not members-only (so Turbo may step down).

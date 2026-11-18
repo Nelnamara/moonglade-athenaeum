@@ -2,8 +2,10 @@
 year dropdowns, and per-page (via query_catalog)."""
 import pytest
 
-from moonglade.gallery import (CATALOG_FIELDS, init_db, save_catalog, query_catalog,
-                           catalog_years, _like_pattern, collection_health, _role_dir)
+from moonglade.gallery import (CATALOG_FIELDS, init_db, save_catalog, query_catalog, catalog_years,
+                               _like_pattern)
+from moonglade.branding import _role_dir
+from moonglade.health import collection_health
 
 
 def _row(**kw):
@@ -499,7 +501,7 @@ def test_collection_health_detects_duplicate(tmp_path):
 
 
 def test_duplicate_groups_finds_cross_folder_copies(tmp_path):
-    from moonglade.gallery import duplicate_groups
+    from moonglade.dupes import duplicate_groups
     (tmp_path / "images").mkdir()
     (tmp_path / "2024-03").mkdir()
     # 111 lives in two buckets -> a group; 222 lives only in images -> not a group
@@ -516,7 +518,7 @@ def test_duplicate_groups_finds_cross_folder_copies(tmp_path):
 
 
 def test_duplicate_groups_ignores_gallery_and_quarantine(tmp_path):
-    from moonglade.gallery import duplicate_groups
+    from moonglade.dupes import duplicate_groups
     (tmp_path / "images").mkdir()
     (tmp_path / "gallery" / "thumbs").mkdir(parents=True)
     (tmp_path / "_duplicates").mkdir()
@@ -532,7 +534,8 @@ def test_duplicate_groups_ignores_deleted(tmp_path):
     view) excluded gallery/ and _duplicates/ but never _deleted/ -- so a locally
     purged image is reported as a live cross-bucket duplicate of its own quarantined
     self."""
-    from moonglade.gallery import duplicate_groups, DELETED_DIRNAME
+    from moonglade.dupes import duplicate_groups
+    from moonglade.scan import DELETED_DIRNAME
     (tmp_path / "images").mkdir()
     (tmp_path / DELETED_DIRNAME).mkdir()
     (tmp_path / "images" / "a_111.webp").write_bytes(b"d")

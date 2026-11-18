@@ -31,6 +31,8 @@ import pytest
 import requests
 
 from moonglade import backup as core
+from moonglade import media_tools as media_tools_mod
+from moonglade import telemetry as telemetry_mod
 
 
 @pytest.fixture()
@@ -191,11 +193,11 @@ class TestM04Faststart:
         clip = tmp_path / "nf.mp4"
         clip.write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
         before = clip.read_bytes()
-        monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
+        monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "ffmpeg")
         seen = _ffmpeg_refuses(
             monkeypatch, b"[mp4 @ 0x55] track 1: could not find sample table\n")
 
-        assert core.video_faststart(clip) is False
+        assert media_tools_mod.video_faststart(clip) is False
         out = capsys.readouterr().out
         assert "ffmpeg exit 1" in out
         assert "could not find sample table" in out          # ffmpeg's own reason survives
@@ -208,7 +210,7 @@ class TestM04Faststart:
         both "ffmpeg refused" and "there was nothing to do", which is fine for the collect-time
         callers that only want the file made streamable -- but a sweep that has to name the
         clips still broken cannot tell them apart, and so named the wrong ones."""
-        monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
+        monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "ffmpeg")
         already = tmp_path / "already.mp4"
         already.write_bytes(_mp4(b"ftyp", b"moov", b"mdat"))
         gone = tmp_path / "gone.mp4"
@@ -216,10 +218,10 @@ class TestM04Faststart:
         broken.write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
         _ffmpeg_refuses(monkeypatch)
 
-        assert core._video_faststart_attempt(already) == core.FASTSTART_NOT_NEEDED
-        assert core._video_faststart_attempt(gone) == core.FASTSTART_NOT_NEEDED
-        assert core._video_faststart_attempt(broken) == core.FASTSTART_REFUSED
-        assert core.video_faststart(broken) is False      # the bool face is unchanged
+        assert media_tools_mod._video_faststart_attempt(already) == media_tools_mod.FASTSTART_NOT_NEEDED
+        assert media_tools_mod._video_faststart_attempt(gone) == media_tools_mod.FASTSTART_NOT_NEEDED
+        assert media_tools_mod._video_faststart_attempt(broken) == media_tools_mod.FASTSTART_REFUSED
+        assert media_tools_mod.video_faststart(broken) is False      # the bool face is unchanged
 
     def test_run_faststart_accounts_for_every_video(self, tmp_path, monkeypatch, capsys):
         """fixed + skipped used to be less than total when a clip was refused, with nothing
@@ -229,7 +231,7 @@ class TestM04Faststart:
         vdir.mkdir()
         (vdir / "ok.mp4").write_bytes(_mp4(b"ftyp", b"moov", b"mdat"))    # already faststart
         (vdir / "broken.mp4").write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
-        monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
+        monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "ffmpeg")
         _ffmpeg_refuses(monkeypatch)                                      # ffmpeg refuses it
 
         res = core.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
@@ -255,14 +257,14 @@ class TestM04Faststart:
         vdir = tmp_path / "videos"
         vdir.mkdir()
         (vdir / "raced.mp4").write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
-        monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
+        monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "ffmpeg")
         _ffmpeg_succeeds(monkeypatch)
         asked = {"n": 0}
 
         def racing(p):
             asked["n"] += 1
             return asked["n"] > 1          # the mirror won the race after the first check
-        monkeypatch.setattr(core, "_mp4_is_faststart", racing)
+        monkeypatch.setattr(media_tools_mod, "_mp4_is_faststart", racing)
 
         res = core.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
 
@@ -285,13 +287,13 @@ class TestM04Faststart:
         vdir.mkdir()
         clip = vdir / "purged.mp4"
         clip.write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
-        monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
+        monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "ffmpeg")
         _ffmpeg_refuses(monkeypatch, b"purged.mp4: No such file or directory\n")
 
         def purge_then_answer(p):
             core.Path(p).unlink(missing_ok=True)     # Trash purge lands right here
             return False
-        monkeypatch.setattr(core, "_mp4_is_faststart", purge_then_answer)
+        monkeypatch.setattr(media_tools_mod, "_mp4_is_faststart", purge_then_answer)
 
         res = core.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
 
@@ -545,7 +547,7 @@ def recovery_network(monkeypatch):
 
     Returns (install, bumps): `install(task, video_download)` wires the task getTaskById
     returns and how download() behaves for the .mp4, and `bumps` collects the names passed to
-    moonglade_gallery.telem_bump (imported inside run_generate, so patching the module
+    moonglade.telemetry.telem_bump (imported inside run_generate, so patching the module
     attribute is what the call actually sees).
     """
     from moonglade import gallery
@@ -559,10 +561,10 @@ def recovery_network(monkeypatch):
         monkeypatch.setattr(core, "resolve_media",
                             lambda s, mid: ("https://cdn/{}.png".format(mid),
                                             {"width": 8, "height": 8}))
-        monkeypatch.setattr(core, "video_faststart", lambda p: True)
-        monkeypatch.setattr(core, "video_poster_thumb", lambda *a, **k: None)
+        monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: True)
+        monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
         monkeypatch.setattr(gallery, "make_thumbnail", lambda *a, **k: None)
-        monkeypatch.setattr(gallery, "telem_bump",
+        monkeypatch.setattr(telemetry_mod, "telem_bump",
                             lambda name, out_dir=None: bumps.append(name))
 
         def fake_download(session, url, stem, **kw):

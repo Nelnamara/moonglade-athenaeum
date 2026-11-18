@@ -14,6 +14,7 @@ from moonglade import backup as core
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_client, login_test_client
+from moonglade import jobs as jobs_mod
 
 
 def _row(**kw):
@@ -30,8 +31,8 @@ def _authed_client(tmp_path):
 # --------------------------------------------------------------------------- core
 
 def test_append_and_read_basic(tmp_path):
-    core.append_job_event(tmp_path, "j1", status="running", type="generate", label="Sunset")
-    jobs = core.read_jobs(tmp_path)
+    jobs_mod.append_job_event(tmp_path, "j1", status="running", type="generate", label="Sunset")
+    jobs = jobs_mod.read_jobs(tmp_path)
     assert len(jobs) == 1
     j = jobs[0]
     assert j["job_id"] == "j1" and j["status"] == "running"
@@ -40,7 +41,7 @@ def test_append_and_read_basic(tmp_path):
 
 
 def test_missing_file_is_empty(tmp_path):
-    assert core.read_jobs(tmp_path) == []
+    assert jobs_mod.read_jobs(tmp_path) == []
 
 
 def test_string_fields_are_capped_at_the_write_choke_point(tmp_path):
@@ -54,8 +55,8 @@ def test_string_fields_are_capped_at_the_write_choke_point(tmp_path):
 
     Bite: remove the cap and this fails with a 5000-char error stored verbatim.
     """
-    core.append_job_event(tmp_path, "j1", status="failed", error="x" * 5000)
-    stored = core.read_jobs(tmp_path)[0]["error"]
+    jobs_mod.append_job_event(tmp_path, "j1", status="failed", error="x" * 5000)
+    stored = jobs_mod.read_jobs(tmp_path)[0]["error"]
     assert len(stored) == 200, "error field was not capped to 200 chars"
     assert stored == "x" * 200
 
@@ -64,9 +65,9 @@ def test_capping_does_not_touch_non_string_fields(tmp_path):
     """The cap must be type-aware -- media_ids is a list, done/total are ints. A cap that
     tried to slice everything would crash on the very first non-string job event, or
     silently corrupt done/total into something unusable."""
-    core.append_job_event(tmp_path, "j1", status="done",
+    jobs_mod.append_job_event(tmp_path, "j1", status="done",
                           media_ids=["m1", "m2"], done=5, total=10)
-    j = core.read_jobs(tmp_path)[0]
+    j = jobs_mod.read_jobs(tmp_path)[0]
     assert j["media_ids"] == ["m1", "m2"]
     assert j["done"] == 5 and j["total"] == 10
 
@@ -74,16 +75,16 @@ def test_capping_does_not_touch_non_string_fields(tmp_path):
 def test_a_short_string_field_is_unaffected(tmp_path):
     """The cap must not change the common case -- most labels/errors are far under 200
     chars and must round-trip byte-for-byte."""
-    core.append_job_event(tmp_path, "j1", status="running", label="Sunset over the ruins")
-    assert core.read_jobs(tmp_path)[0]["label"] == "Sunset over the ruins"
+    jobs_mod.append_job_event(tmp_path, "j1", status="running", label="Sunset over the ruins")
+    assert jobs_mod.read_jobs(tmp_path)[0]["label"] == "Sunset over the ruins"
 
 
 def test_collapse_last_event_wins_and_merges(tmp_path):
     # queued/running carries the label; the later done carries media_ids -- read_jobs
     # must MERGE them into one job that has both.
-    core.append_job_event(tmp_path, "j1", status="running", type="generate", label="Moon elf")
-    core.append_job_event(tmp_path, "j1", status="done", media_ids=["m9"])
-    jobs = core.read_jobs(tmp_path)
+    jobs_mod.append_job_event(tmp_path, "j1", status="running", type="generate", label="Moon elf")
+    jobs_mod.append_job_event(tmp_path, "j1", status="done", media_ids=["m9"])
+    jobs = jobs_mod.read_jobs(tmp_path)
     assert len(jobs) == 1
     j = jobs[0]
     assert j["status"] == "done"
@@ -100,10 +101,10 @@ def test_started_at_survives_the_collapse(tmp_path):
     the time a job went 'done' the true start time was gone -- unreconstructable. The first
     event's ts must survive under a distinct `started_at` key, even once later events move
     `ts` on to the terminal event's own time."""
-    core.append_job_event(tmp_path, "j1", status="running", type="generate", label="Elf",
+    jobs_mod.append_job_event(tmp_path, "j1", status="running", type="generate", label="Elf",
                           ts=1000.0)
-    core.append_job_event(tmp_path, "j1", status="done", media_ids=["m1"], ts=1042.5)
-    j = core.read_jobs(tmp_path, now=1042.5)[0]
+    jobs_mod.append_job_event(tmp_path, "j1", status="done", media_ids=["m1"], ts=1042.5)
+    j = jobs_mod.read_jobs(tmp_path, now=1042.5)[0]
     assert j["ts"] == 1042.5                  # latest event's ts -- unchanged behavior
     assert j["started_at"] == 1000.0, "registration ts was discarded by the collapse"
 
@@ -112,10 +113,10 @@ def test_started_at_is_the_first_event_not_the_latest_running_heartbeat(tmp_path
     """A job that gets several 'running' heartbeats before finishing must keep the FIRST
     one's ts as started_at, not the most recent heartbeat's -- otherwise "time spent" would
     shrink every time the card polls a long-running job instead of growing."""
-    core.append_job_event(tmp_path, "j1", status="running", type="generate", ts=1000.0)
-    core.append_job_event(tmp_path, "j1", status="running", done=1, total=10, ts=1010.0)
-    core.append_job_event(tmp_path, "j1", status="running", done=5, total=10, ts=1020.0)
-    j = core.read_jobs(tmp_path, now=1020.0)[0]
+    jobs_mod.append_job_event(tmp_path, "j1", status="running", type="generate", ts=1000.0)
+    jobs_mod.append_job_event(tmp_path, "j1", status="running", done=1, total=10, ts=1010.0)
+    jobs_mod.append_job_event(tmp_path, "j1", status="running", done=5, total=10, ts=1020.0)
+    j = jobs_mod.read_jobs(tmp_path, now=1020.0)[0]
     assert j["started_at"] == 1000.0
     assert j["ts"] == 1020.0
 
@@ -124,21 +125,21 @@ def test_started_at_survives_compaction(tmp_path):
     """The compacted log's single surviving line per job must itself carry the real
     started_at (not the compaction-time ts) so a job's elapsed-time reconstruction doesn't
     silently reset the moment the raw log crosses the line cap."""
-    core.append_job_event(tmp_path, "j1", status="running", type="generate", ts=1000.0)
-    for i in range(core._JOBS_COMPACT_AT + 5):
-        core.append_job_event(tmp_path, "j1", status="running", done=i, total=99999)
-    core.append_job_event(tmp_path, "j1", status="done", media_ids=["m"])
-    core.maybe_compact_jobs(tmp_path)
-    j = core.read_jobs(tmp_path)[0]
+    jobs_mod.append_job_event(tmp_path, "j1", status="running", type="generate", ts=1000.0)
+    for i in range(jobs_mod._JOBS_COMPACT_AT + 5):
+        jobs_mod.append_job_event(tmp_path, "j1", status="running", done=i, total=99999)
+    jobs_mod.append_job_event(tmp_path, "j1", status="done", media_ids=["m"])
+    jobs_mod.maybe_compact_jobs(tmp_path)
+    j = jobs_mod.read_jobs(tmp_path)[0]
     assert j["started_at"] == 1000.0
 
 
 def test_terminal_state_is_sticky(tmp_path):
     """A late/interleaved running heartbeat must not drag a finished job back to running,
     nor inject its progress/heartbeat fields onto the finished record."""
-    core.append_job_event(tmp_path, "j1", status="done", media_ids=["m1"])
-    core.append_job_event(tmp_path, "j1", status="running", done=5, total=10, note="stale")
-    j = core.read_jobs(tmp_path)[0]
+    jobs_mod.append_job_event(tmp_path, "j1", status="done", media_ids=["m1"])
+    jobs_mod.append_job_event(tmp_path, "j1", status="running", done=5, total=10, note="stale")
+    j = jobs_mod.read_jobs(tmp_path)[0]
     assert j["status"] == "done"             # sticky status
     assert j["media_ids"] == ["m1"]
     # the stale heartbeat's fields are ignored -- no zombie progress meter on a done job
@@ -148,26 +149,26 @@ def test_terminal_state_is_sticky(tmp_path):
 def test_done_with_errors_is_sticky_too(tmp_path):
     """D-4's new terminal status must be sticky the same way done/failed already are --
     a late running heartbeat must not drag it back to 'running'."""
-    core.append_job_event(tmp_path, "j1", status="done_with_errors",
+    jobs_mod.append_job_event(tmp_path, "j1", status="done_with_errors",
                           error="3 file(s) failed to download")
-    core.append_job_event(tmp_path, "j1", status="running", done=5, total=10)
-    j = core.read_jobs(tmp_path)[0]
+    jobs_mod.append_job_event(tmp_path, "j1", status="running", done=5, total=10)
+    j = jobs_mod.read_jobs(tmp_path)[0]
     assert j["status"] == "done_with_errors"
     assert "done" not in j and "total" not in j
 
 
 def test_dismissed_is_filtered_out(tmp_path):
-    core.append_job_event(tmp_path, "j1", status="done", media_ids=["m1"])
-    core.append_job_event(tmp_path, "j2", status="failed", error="boom")
-    core.append_job_event(tmp_path, "j1", dismissed=True)
-    ids = [j["job_id"] for j in core.read_jobs(tmp_path)]
+    jobs_mod.append_job_event(tmp_path, "j1", status="done", media_ids=["m1"])
+    jobs_mod.append_job_event(tmp_path, "j2", status="failed", error="boom")
+    jobs_mod.append_job_event(tmp_path, "j1", dismissed=True)
+    ids = [j["job_id"] for j in jobs_mod.read_jobs(tmp_path)]
     assert ids == ["j2"]                      # j1 dismissed; dismiss keeps status intact
 
 
 def test_dismiss_does_not_revive_or_flip_status(tmp_path):
-    core.append_job_event(tmp_path, "j1", status="failed", error="boom")
-    core.append_job_event(tmp_path, "j1", dismissed=True)
-    jobs, order, _ = core._reconstruct_jobs(tmp_path)
+    jobs_mod.append_job_event(tmp_path, "j1", status="failed", error="boom")
+    jobs_mod.append_job_event(tmp_path, "j1", dismissed=True)
+    jobs, order, _ = jobs_mod._reconstruct_jobs(tmp_path)
     assert jobs["j1"]["status"] == "failed" and jobs["j1"]["dismissed"] is True
 
 
@@ -175,21 +176,21 @@ def test_stale_jobs_age_out_regardless_of_status(tmp_path):
     """Anything with no activity for max_age ages out -- running included. A day-old
     'running' entry is a zombie (tab closed / blip before the done poll), so it must not
     linger forever; fresh jobs (recent ts) always survive."""
-    core.append_job_event(tmp_path, "old_done", status="done", media_ids=["m1"])
-    core.append_job_event(tmp_path, "old_run", status="running", label="zombie")
+    jobs_mod.append_job_event(tmp_path, "old_done", status="done", media_ids=["m1"])
+    jobs_mod.append_job_event(tmp_path, "old_run", status="running", label="zombie")
     future = time.time() + 25 * 3600         # 25h later, no further activity
-    assert core.read_jobs(tmp_path, now=future) == []   # both aged out -- no zombies
+    assert jobs_mod.read_jobs(tmp_path, now=future) == []   # both aged out -- no zombies
 
 
 def test_running_kept_within_window_even_past_keep_cap(tmp_path):
     """The keep cap trims FINISHED history only; an in-window running job is never capped
     away by a flood of newer completions (mirrored in compaction)."""
-    core.append_job_event(tmp_path, "run", status="running", label="live")
+    jobs_mod.append_job_event(tmp_path, "run", status="running", label="live")
     time.sleep(0.002)
     for i in range(60):
-        core.append_job_event(tmp_path, "d%d" % i, status="done", media_ids=["m"])
+        jobs_mod.append_job_event(tmp_path, "d%d" % i, status="done", media_ids=["m"])
         time.sleep(0.001)                    # distinct ts -> deterministic newest-50
-    jobs = core.read_jobs(tmp_path, keep=50)
+    jobs = jobs_mod.read_jobs(tmp_path, keep=50)
     ids = [j["job_id"] for j in jobs]
     assert "run" in ids                      # running survives despite 60 newer finished
     assert sum(1 for j in jobs if j["status"] == "done") == 50   # finished capped to 50
@@ -197,9 +198,9 @@ def test_running_kept_within_window_even_past_keep_cap(tmp_path):
 
 def test_keep_cap_returns_newest_n(tmp_path):
     for i in range(60):
-        core.append_job_event(tmp_path, "j%d" % i, status="done", media_ids=["m%d" % i])
+        jobs_mod.append_job_event(tmp_path, "j%d" % i, status="done", media_ids=["m%d" % i])
         time.sleep(0.001)                    # keep timestamps distinct for ordering
-    jobs = core.read_jobs(tmp_path, keep=50)
+    jobs = jobs_mod.read_jobs(tmp_path, keep=50)
     assert len(jobs) == 50
     assert jobs[0]["job_id"] == "j59"        # newest first
     kept = {j["job_id"] for j in jobs}
@@ -207,38 +208,38 @@ def test_keep_cap_returns_newest_n(tmp_path):
 
 
 def test_corrupt_lines_are_skipped(tmp_path):
-    p = core._jobs_path(tmp_path)
-    core.append_job_event(tmp_path, "j1", status="done", media_ids=["m1"])
+    p = jobs_mod._jobs_path(tmp_path)
+    jobs_mod.append_job_event(tmp_path, "j1", status="done", media_ids=["m1"])
     with p.open("a", encoding="utf-8") as fh:
         fh.write("not json at all\n\n")      # garbage + blank line
-    core.append_job_event(tmp_path, "j2", status="running")
-    ids = sorted(j["job_id"] for j in core.read_jobs(tmp_path))
+    jobs_mod.append_job_event(tmp_path, "j2", status="running")
+    ids = sorted(j["job_id"] for j in jobs_mod.read_jobs(tmp_path))
     assert ids == ["j1", "j2"]               # garbage skipped, real rows survive
 
 
 def test_compaction_bounds_the_log(tmp_path):
     """The append-only log can't grow forever: past _JOBS_COMPACT_AT lines the reader
     rewrites it down to the reconstructed kept records without losing any job."""
-    p = core._jobs_path(tmp_path)
-    for i in range(core._JOBS_COMPACT_AT + 30):
-        core.append_job_event(tmp_path, "j%d" % (i % 3), status="running", done=i, total=9999)
+    p = jobs_mod._jobs_path(tmp_path)
+    for i in range(jobs_mod._JOBS_COMPACT_AT + 30):
+        jobs_mod.append_job_event(tmp_path, "j%d" % (i % 3), status="running", done=i, total=9999)
     for jid in ("j0", "j1", "j2"):
-        core.append_job_event(tmp_path, jid, status="done", media_ids=["m"])
+        jobs_mod.append_job_event(tmp_path, jid, status="done", media_ids=["m"])
     raw_before = len(p.read_text(encoding="utf-8").splitlines())
-    assert raw_before > core._JOBS_COMPACT_AT
-    core.maybe_compact_jobs(tmp_path)
+    assert raw_before > jobs_mod._JOBS_COMPACT_AT
+    jobs_mod.maybe_compact_jobs(tmp_path)
     raw_after = len(p.read_text(encoding="utf-8").splitlines())
     assert raw_after == 3                     # one line per surviving job
-    jobs = {j["job_id"]: j for j in core.read_jobs(tmp_path)}
+    jobs = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}
     assert set(jobs) == {"j0", "j1", "j2"} and all(j["status"] == "done" for j in jobs.values())
 
 
 def test_compaction_noop_under_threshold(tmp_path):
-    p = core._jobs_path(tmp_path)
-    core.append_job_event(tmp_path, "j1", status="running")
-    core.append_job_event(tmp_path, "j1", status="done", media_ids=["m1"])
+    p = jobs_mod._jobs_path(tmp_path)
+    jobs_mod.append_job_event(tmp_path, "j1", status="running")
+    jobs_mod.append_job_event(tmp_path, "j1", status="done", media_ids=["m1"])
     before = p.read_text(encoding="utf-8")
-    core.maybe_compact_jobs(tmp_path)
+    jobs_mod.maybe_compact_jobs(tmp_path)
     assert p.read_text(encoding="utf-8") == before   # untouched below the line cap
 
 
@@ -246,17 +247,17 @@ def test_compaction_agrees_with_read_and_preserves_running(tmp_path):
     """read_jobs and maybe_compact_jobs share one selection, so compaction can never delete
     a job the card is showing -- and an in-flight running job survives compaction even when
     50+ newer finished jobs exist and the raw log crossed the line cap."""
-    core.append_job_event(tmp_path, "run", status="running", label="live")
+    jobs_mod.append_job_event(tmp_path, "run", status="running", label="live")
     time.sleep(0.002)
     for i in range(60):
-        core.append_job_event(tmp_path, "d%d" % i, status="done", media_ids=["m"])
+        jobs_mod.append_job_event(tmp_path, "d%d" % i, status="done", media_ids=["m"])
         time.sleep(0.001)
     # push the raw log past the compaction threshold with heartbeats on the running job
-    for _ in range(core._JOBS_COMPACT_AT):
-        core.append_job_event(tmp_path, "run", status="running", label="live")
-    before = {j["job_id"] for j in core.read_jobs(tmp_path)}
-    core.maybe_compact_jobs(tmp_path)
-    after = {j["job_id"] for j in core.read_jobs(tmp_path)}
+    for _ in range(jobs_mod._JOBS_COMPACT_AT):
+        jobs_mod.append_job_event(tmp_path, "run", status="running", label="live")
+    before = {j["job_id"] for j in jobs_mod.read_jobs(tmp_path)}
+    jobs_mod.maybe_compact_jobs(tmp_path)
+    after = {j["job_id"] for j in jobs_mod.read_jobs(tmp_path)}
     assert before == after                   # compaction dropped nothing the card showed
     assert "run" in after                    # the running job survived the rewrite
 
@@ -286,7 +287,7 @@ def test_running_then_done_merges_through_the_endpoint(tmp_path):
     done, with the label from register AND the media_ids from completion."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "t7", "type": "generate", "label": "Nightsong"})
-    core.append_job_event(tmp_path, "t7", status="done", media_ids=["mid42"])  # what task-status does
+    jobs_mod.append_job_event(tmp_path, "t7", status="done", media_ids=["mid42"])  # what task-status does
     jobs = cli.get("/api/jobs").get_json()["jobs"]
     assert len(jobs) == 1
     assert jobs[0]["status"] == "done" and jobs[0]["label"] == "Nightsong"
@@ -295,9 +296,9 @@ def test_running_then_done_merges_through_the_endpoint(tmp_path):
 
 def test_dismiss_finished_clears_done_and_failed_only(tmp_path):
     cli = _authed_client(tmp_path)
-    core.append_job_event(tmp_path, "d", status="done", media_ids=["m"])
-    core.append_job_event(tmp_path, "f", status="failed", error="x")
-    core.append_job_event(tmp_path, "r", status="running", label="live")
+    jobs_mod.append_job_event(tmp_path, "d", status="done", media_ids=["m"])
+    jobs_mod.append_job_event(tmp_path, "f", status="failed", error="x")
+    jobs_mod.append_job_event(tmp_path, "r", status="running", label="live")
     cli.post("/api/jobs/dismiss", json={"finished": True})
     ids = [j["job_id"] for j in cli.get("/api/jobs").get_json()["jobs"]]
     assert ids == ["r"]                        # running survives; finished cleared
@@ -308,8 +309,8 @@ def test_dismiss_finished_also_clears_done_with_errors(tmp_path):
     already uses, a done_with_errors job could never be cleared by 'clear finished' --
     it would just sit there forever even though the run it represents is over."""
     cli = _authed_client(tmp_path)
-    core.append_job_event(tmp_path, "w", status="done_with_errors", error="2 failed")
-    core.append_job_event(tmp_path, "r", status="running", label="live")
+    jobs_mod.append_job_event(tmp_path, "w", status="done_with_errors", error="2 failed")
+    jobs_mod.append_job_event(tmp_path, "r", status="running", label="live")
     cli.post("/api/jobs/dismiss", json={"finished": True})
     ids = [j["job_id"] for j in cli.get("/api/jobs").get_json()["jobs"]]
     assert ids == ["r"]
@@ -320,22 +321,22 @@ def test_resolve_orphan_jobs_resolves_stuck_running(tmp_path):
     task finished) gets resolved to its true terminal state by asking PixAI once. Only
     numeric-task-id generate jobs are checked; panel/delete jobs are left alone. This is
     the fix for the 'failed on PixAI but our Activity still says in progress' bug."""
-    core.append_job_event(tmp_path, "2030945851997330461", status="running",
+    jobs_mod.append_job_event(tmp_path, "2030945851997330461", status="running",
                           type="generate", label="Edited")     # the orphaned edit
-    core.append_job_event(tmp_path, "999", status="running", type="generate", label="live gen")
-    core.append_job_event(tmp_path, "panel-abc", status="running", type="panel", label="Sync")
-    core.append_job_event(tmp_path, "5", status="done", type="generate")  # already terminal
+    jobs_mod.append_job_event(tmp_path, "999", status="running", type="generate", label="live gen")
+    jobs_mod.append_job_event(tmp_path, "panel-abc", status="running", type="panel", label="Sync")
+    jobs_mod.append_job_event(tmp_path, "5", status="done", type="generate")  # already terminal
 
     asked = []
     def _status(tid):
         asked.append(tid)
         return {"2030945851997330461": "failed", "999": "running"}.get(tid, "running")
 
-    n = core.resolve_orphan_jobs(tmp_path, _status)
+    n = jobs_mod.resolve_orphan_jobs(tmp_path, _status)
 
     assert n == 1                                   # only the failed one resolved
     assert set(asked) == {"2030945851997330461", "999"}   # panel + already-done skipped
-    by_id = {j["job_id"]: j for j in core.read_jobs(tmp_path)}
+    by_id = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}
     assert by_id["2030945851997330461"]["status"] == "failed"
     assert by_id["999"]["status"] == "running"      # genuinely still running -> untouched
     assert by_id["panel-abc"]["status"] == "running"
@@ -343,15 +344,15 @@ def test_resolve_orphan_jobs_resolves_stuck_running(tmp_path):
 
 def test_resolve_orphan_jobs_survives_lookup_errors(tmp_path):
     """One task whose status lookup raises must not stop the others from resolving."""
-    core.append_job_event(tmp_path, "111", status="running", type="generate")
-    core.append_job_event(tmp_path, "222", status="running", type="generate")
+    jobs_mod.append_job_event(tmp_path, "111", status="running", type="generate")
+    jobs_mod.append_job_event(tmp_path, "222", status="running", type="generate")
     def _status(tid):
         if tid == "111":
             raise RuntimeError("network blip")
         return "done"
-    n = core.resolve_orphan_jobs(tmp_path, _status)
+    n = jobs_mod.resolve_orphan_jobs(tmp_path, _status)
     assert n == 1
-    by_id = {j["job_id"]: j for j in core.read_jobs(tmp_path)}
+    by_id = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}
     assert by_id["111"]["status"] == "running" and by_id["222"]["status"] == "done"
 
 
@@ -364,26 +365,26 @@ def test_reaper_accepts_what_generation_status_actually_returns(tmp_path):
     healthy. Nothing caught it: the unit tests honoured a contract the only real caller
     broke, and the failure mode was "quietly does nothing", which no assertion was
     watching for. Feed it the REAL shape and require the job to actually resolve."""
-    core.append_job_event(tmp_path, "2035858031750209359", status="running",
+    jobs_mod.append_job_event(tmp_path, "2035858031750209359", status="running",
                           type="generate", label="Enhanced")
 
     def _status(tid):                       # exactly generation_status()'s return shape
         return {"status": "completed", "phase": "done", "paid_credit": 0}
 
-    n = core.resolve_orphan_jobs(tmp_path, _status)
+    n = jobs_mod.resolve_orphan_jobs(tmp_path, _status)
     assert n == 1, "reaper ignored generation_status()'s real dict return"
-    by_id = {j["job_id"]: j for j in core.read_jobs(tmp_path)}
+    by_id = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}
     assert by_id["2035858031750209359"]["status"] == "done"
 
 
 def test_reaper_still_leaves_running_jobs_alone_in_dict_form(tmp_path):
     """The dict tolerance must not turn every lookup terminal -- a genuinely running
     task stays running."""
-    core.append_job_event(tmp_path, "777", status="running", type="generate")
-    n = core.resolve_orphan_jobs(
+    jobs_mod.append_job_event(tmp_path, "777", status="running", type="generate")
+    n = jobs_mod.resolve_orphan_jobs(
         tmp_path, lambda tid: {"status": "processing", "phase": "running"})
     assert n == 0
-    assert {j["job_id"]: j for j in core.read_jobs(tmp_path)}["777"]["status"] == "running"
+    assert {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["777"]["status"] == "running"
 
 
 # ------------------------------------------------------- fix 2: age-gated reconciliation
@@ -393,11 +394,11 @@ def test_resolve_orphan_jobs_min_age_skips_jobs_that_are_not_old_enough_yet(tmp_
     submitted (its own Generate card is very likely still actively polling it) is never
     even asked about -- asking would be pointless PixAI traffic on every poll for every
     normal, healthy generation."""
-    core.append_job_event(tmp_path, "1", status="running", type="generate")   # ts ~ now
+    jobs_mod.append_job_event(tmp_path, "1", status="running", type="generate")   # ts ~ now
     asked = []
-    n = core.resolve_orphan_jobs(tmp_path, lambda tid: asked.append(tid) or "done", min_age=1800)
+    n = jobs_mod.resolve_orphan_jobs(tmp_path, lambda tid: asked.append(tid) or "done", min_age=1800)
     assert n == 0 and asked == []
-    assert {j["job_id"]: j for j in core.read_jobs(tmp_path)}["1"]["status"] == "running"
+    assert {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["1"]["status"] == "running"
 
 
 def test_stale_job_reconciliation_marks_stale_when_pixai_cannot_be_reached(tmp_path):
@@ -410,18 +411,18 @@ def test_stale_job_reconciliation_marks_stale_when_pixai_cannot_be_reached(tmp_p
     with the failure reason recorded, so the owner can see a job got stuck AND that we
     tried and couldn't confirm why -- never a silent, untraceable disappearance."""
     old_ts = time.time() - 3700           # well past the 1800s threshold used below
-    core.append_job_event(tmp_path, "2037215124834251576", status="running",
+    jobs_mod.append_job_event(tmp_path, "2037215124834251576", status="running",
                           type="generate", label="Generated", ts=old_ts)
 
     def _network_error(tid):
         raise RuntimeError("connection reset")
 
-    n = core.resolve_orphan_jobs(tmp_path, _network_error, min_age=1800)
+    n = jobs_mod.resolve_orphan_jobs(tmp_path, _network_error, min_age=1800)
 
     assert n == 0                                    # NOT resolved to done/failed
-    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["2037215124834251576"]
+    job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["2037215124834251576"]
     assert job["status"] == "stale", "a failed status check silently vanished instead of being marked"
-    assert job["status"] not in core._JOBS_TERMINAL   # never guessed into a false done/failed
+    assert job["status"] not in jobs_mod._JOBS_TERMINAL   # never guessed into a false done/failed
     assert job.get("error")                           # the owner can see WHY it's stuck
 
 
@@ -430,10 +431,10 @@ def test_stale_job_reconciliation_resolves_a_real_orphan_when_pixai_confirms_it(
     finished (or failed), the sweep resolves it for real -- 'stale' is only for when the
     check itself is impossible, not a substitute for actually asking."""
     old_ts = time.time() - 3700
-    core.append_job_event(tmp_path, "5551", status="running", type="generate", ts=old_ts)
-    n = core.resolve_orphan_jobs(tmp_path, lambda tid: "done", min_age=1800)
+    jobs_mod.append_job_event(tmp_path, "5551", status="running", type="generate", ts=old_ts)
+    n = jobs_mod.resolve_orphan_jobs(tmp_path, lambda tid: "done", min_age=1800)
     assert n == 1
-    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["5551"]
+    job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["5551"]
     assert job["status"] == "done"
 
 
@@ -444,9 +445,9 @@ def test_stale_job_reconciliation_refreshes_ts_for_a_confirmed_still_running_age
     The sweep refreshes its ts on a confirmed-alive check, resetting the min_age clock,
     so the next ask waits another full min_age instead of firing again immediately."""
     old_ts = time.time() - 3700
-    core.append_job_event(tmp_path, "9001", status="running", type="generate", ts=old_ts)
-    core.resolve_orphan_jobs(tmp_path, lambda tid: "running", min_age=1800)
-    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["9001"]
+    jobs_mod.append_job_event(tmp_path, "9001", status="running", type="generate", ts=old_ts)
+    jobs_mod.resolve_orphan_jobs(tmp_path, lambda tid: "running", min_age=1800)
+    job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["9001"]
     assert job["status"] == "running"
     assert job["ts"] > old_ts + 3000, "ts was not refreshed -- the job will be re-asked every poll"
 
@@ -457,8 +458,8 @@ def test_api_jobs_endpoint_reconciles_a_stale_orphan_on_poll(tmp_path, monkeypat
     beside it. A generate job old enough to cross JOBS_ORPHAN_SWEEP_AGE, whose PixAI
     status check fails, comes back from a plain GET /api/jobs already marked 'stale'."""
     cli = _authed_client(tmp_path)
-    old_ts = time.time() - core.JOBS_ORPHAN_SWEEP_AGE - 100
-    core.append_job_event(tmp_path, "2037215124834251576", status="running",
+    old_ts = time.time() - jobs_mod.JOBS_ORPHAN_SWEEP_AGE - 100
+    jobs_mod.append_job_event(tmp_path, "2037215124834251576", status="running",
                           type="generate", label="Generated", ts=old_ts)
 
     def _boom(session, tid):
@@ -491,7 +492,7 @@ def test_empty_output_task_is_logged_failed_not_left_running(tmp_path, monkeypat
 
     r = cli.get("/api/task-status?task_id=555")
     assert r.get_json()["phase"] == "failed"
-    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["555"]
+    job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["555"]
     assert job["status"] == "failed", "empty-output task left spinning at 'running'"
 
 
@@ -513,7 +514,7 @@ def test_a_transient_blip_still_does_not_write_a_false_failure(tmp_path, monkeyp
     monkeypatch.setattr(core, "collect_generation", _blip)
 
     cli.get("/api/task-status?task_id=556")
-    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["556"]
+    job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["556"]
     assert job["status"] == "running", "a transient blip wrote a sticky false failure"
 
 
@@ -622,14 +623,14 @@ def test_watcher_mirror_records_the_media_it_collected_after_a_bare_done(tmp_pat
     Bite: throw away _collect_single_flight's return value again and media_ids is absent."""
     tid = "2037566630884963619"
     app = _mirror_app(tmp_path)
-    core.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
-    core.append_job_event(tmp_path, tid, status="done")   # exactly what _reconcile_job writes
+    jobs_mod.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
+    jobs_mod.append_job_event(tmp_path, tid, status="done")   # exactly what _reconcile_job writes
     _stub_collect(monkeypatch, {"media_ids": ["A", "B", "C", "D"], "saved": 4,
                                "is_video": False})
 
     app.extensions["mg_watch_mirror"](tid)
 
-    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}[tid]
+    job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}[tid]
     assert job["status"] == "done"
     assert job.get("media_ids") == ["A", "B", "C", "D"], (
         "the watcher collected the media but never recorded it -- permanently blank card")
@@ -647,13 +648,13 @@ def test_a_later_bare_done_cannot_clobber_the_mirrors_media_ids(tmp_path, monkey
     the other direction."""
     tid = "2037566243599720339"
     app = _mirror_app(tmp_path)
-    core.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
+    jobs_mod.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
     _stub_collect(monkeypatch, {"media_ids": ["A", "B"], "saved": 2, "is_video": False})
 
     app.extensions["mg_watch_mirror"](tid)
-    core.append_job_event(tmp_path, tid, status="done")   # _reconcile_job's write, arriving late
+    jobs_mod.append_job_event(tmp_path, tid, status="done")   # _reconcile_job's write, arriving late
 
-    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}[tid]
+    job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}[tid]
     assert job["status"] == "done"
     assert job.get("media_ids") == ["A", "B"], "a bare terminal event blanked a good entry"
 
@@ -665,14 +666,14 @@ def test_mirror_matches_task_status_event_shape_for_a_video(tmp_path, monkeypatc
     must stay indistinguishable in jobs.jsonl."""
     tid = "4242"
     app = _mirror_app(tmp_path)
-    core.append_job_event(tmp_path, tid, status="running", type="generate", label="Rendered")
-    core.append_job_event(tmp_path, tid, status="done")
+    jobs_mod.append_job_event(tmp_path, tid, status="running", type="generate", label="Rendered")
+    jobs_mod.append_job_event(tmp_path, tid, status="done")
     _stub_collect(monkeypatch, {"media_ids": ["V1"], "saved": 1, "is_video": True,
                                "duration": 3.0})
 
     app.extensions["mg_watch_mirror"](tid)
 
-    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}[tid]
+    job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}[tid]
     assert job.get("media_ids") == ["V1"] and job.get("is_video") is True
     assert "duration" not in job, "logged a field /api/task-status's done branch never logs"
 
@@ -683,12 +684,12 @@ def test_mirror_writes_no_event_when_the_collect_produced_nothing(tmp_path, monk
     entry that another writer had already filled in correctly. Prefer writing nothing."""
     tid = "7777"
     app = _mirror_app(tmp_path)
-    core.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
+    jobs_mod.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
     _stub_collect(monkeypatch, {"media_ids": [], "saved": 0, "is_video": False})
 
     app.extensions["mg_watch_mirror"](tid)
 
-    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}[tid]
+    job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}[tid]
     assert job["status"] == "running", "wrote a terminal event for a collect that made nothing"
     assert not job.get("media_ids")
 
@@ -703,7 +704,7 @@ def test_mirror_never_invents_a_job_for_a_task_we_do_not_track(tmp_path, monkeyp
 
     app.extensions["mg_watch_mirror"]("8888")
 
-    assert core.read_jobs(tmp_path) == [], "invented an Activity row for a website generation"
+    assert jobs_mod.read_jobs(tmp_path) == [], "invented an Activity row for a website generation"
 
 
 def test_mirror_logging_failure_cannot_break_mirroring(tmp_path, monkeypatch):
@@ -713,13 +714,13 @@ def test_mirror_logging_failure_cannot_break_mirroring(tmp_path, monkeypatch):
     line."""
     app = _mirror_app(tmp_path)
     cli = login_test_client(app)
-    core.append_job_event(tmp_path, "99", status="running", type="generate", label="Generated")
+    jobs_mod.append_job_event(tmp_path, "99", status="running", type="generate", label="Generated")
     calls = []
     _stub_collect(monkeypatch, {"media_ids": ["Z"], "saved": 1, "is_video": False}, calls)
 
     def _boom(*a, **k):
         raise RuntimeError("job log read exploded")
-    monkeypatch.setattr(core, "_reconstruct_jobs", _boom)
+    monkeypatch.setattr(jobs_mod, "_reconstruct_jobs", _boom)
 
     app.extensions["mg_watch_mirror"]("99")      # must not raise
 
@@ -786,7 +787,7 @@ def test_reaped_task_logs_pixai_reason_not_a_bare_cancelled(tmp_path, monkeypatc
     assert body["phase"] == "failed"
     assert "waiting timeout" in str(body), \
         "reason absent from the response: {!r}".format(body)
-    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["2037594262049550370"]
+    job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["2037594262049550370"]
     assert "waiting timeout" in str(job.get("error") or ""), \
         "reason absent from the job log: {!r}".format(job)
 
@@ -811,15 +812,15 @@ def test_reaper_marks_a_never_started_job_stale_with_an_explanation(tmp_path):
     enhances died unnoticed. `stale` is reused deliberately: it already renders a warning
     glyph + message in the tracker, and it is NOT in _JOBS_TERMINAL, so if PixAI does
     eventually start the task a later done/failed still wins."""
-    core.append_job_event(tmp_path, "2037594262049550370", status="running",
+    jobs_mod.append_job_event(tmp_path, "2037594262049550370", status="running",
                           type="generate", label="Enhanced")
 
     def _status(tid):
         return {"status": "waiting", "phase": "running", "paid_credit": 1200,
                 "started": False, "reason": ""}
 
-    core.resolve_orphan_jobs(tmp_path, _status, min_age=0, now=time.time() + 9999)
-    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["2037594262049550370"]
+    jobs_mod.resolve_orphan_jobs(tmp_path, _status, min_age=0, now=time.time() + 9999)
+    job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["2037594262049550370"]
     assert job["status"] == "stale", "never-started job left spinning: {!r}".format(job)
     assert "not started" in str(job.get("error") or "").lower(), \
         "stale marker must explain why: {!r}".format(job)
@@ -828,22 +829,22 @@ def test_reaper_marks_a_never_started_job_stale_with_an_explanation(tmp_path):
 def test_reaper_leaves_a_genuinely_started_job_running(tmp_path):
     """A long video generation legitimately runs for many minutes. `started` True must keep
     it on the running heartbeat, not brand it stale."""
-    core.append_job_event(tmp_path, "888", status="running", type="generate")
-    core.resolve_orphan_jobs(
+    jobs_mod.append_job_event(tmp_path, "888", status="running", type="generate")
+    jobs_mod.resolve_orphan_jobs(
         tmp_path, lambda tid: {"status": "processing", "phase": "running", "started": True},
         min_age=0, now=time.time() + 9999)
-    assert {j["job_id"]: j for j in core.read_jobs(tmp_path)}["888"]["status"] == "running"
+    assert {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["888"]["status"] == "running"
 
 
 def test_reaper_ignores_a_status_fn_that_never_reports_started(tmp_path):
     """Back-compat, and the reason the check is `started is False` and not `not started`:
     a caller (or an older job log) that omits the field must NOT have every in-flight job
     branded stale. Absent means unknown, and unknown is not a failure."""
-    core.append_job_event(tmp_path, "889", status="running", type="generate")
-    core.resolve_orphan_jobs(
+    jobs_mod.append_job_event(tmp_path, "889", status="running", type="generate")
+    jobs_mod.resolve_orphan_jobs(
         tmp_path, lambda tid: {"status": "processing", "phase": "running"},
         min_age=0, now=time.time() + 9999)
-    assert {j["job_id"]: j for j in core.read_jobs(tmp_path)}["889"]["status"] == "running"
+    assert {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["889"]["status"] == "running"
 
 
 def test_api_jobs_endpoint_marks_a_never_started_orphan_stale(tmp_path, monkeypatch, pixai):
@@ -858,8 +859,8 @@ def test_api_jobs_endpoint_marks_a_never_started_orphan_stale(tmp_path, monkeypa
 
     Drives the real GET /api/jobs against a task PixAI accepted and never dispatched."""
     cli = _authed_client(tmp_path)
-    old_ts = time.time() - core.JOBS_ORPHAN_SWEEP_AGE - 100
-    core.append_job_event(tmp_path, "2037625229523385030", status="running",
+    old_ts = time.time() - jobs_mod.JOBS_ORPHAN_SWEEP_AGE - 100
+    jobs_mod.append_job_event(tmp_path, "2037625229523385030", status="running",
                           type="generate", label="Enhanced", ts=old_ts)
     monkeypatch.setattr(core, "generation_status",
                         lambda s, tid: {"status": "waiting", "phase": "running",
@@ -887,7 +888,7 @@ def test_done_event_records_what_the_generation_actually_cost(tmp_path, monkeypa
                         lambda *a, **k: {"media_ids": ["m1"], "saved": 1, "is_video": False})
 
     assert cli.get("/api/task-status?task_id=4242").get_json()["phase"] == "done"
-    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["4242"]
+    job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["4242"]
     assert job.get("paid_credit") == 3700, \
         "the job log did not record the actual cost: {!r}".format(job)
 
@@ -905,7 +906,7 @@ def test_a_free_card_generation_records_zero_not_missing(tmp_path, monkeypatch, 
                         lambda *a, **k: {"media_ids": ["m1"], "saved": 1, "is_video": False})
 
     cli.get("/api/task-status?task_id=4243")
-    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["4243"]
+    job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["4243"]
     assert job.get("paid_credit") == 0, "free generation lost its explicit 0: {!r}".format(job)
 
 
@@ -925,7 +926,7 @@ def test_failed_with_no_reason_explains_itself_instead_of_saying_failed(tmp_path
                                         "paid_credit": 8000, "started": True, "reason": ""})
 
     body = cli.get("/api/task-status?task_id=9101").get_json()
-    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["9101"]
+    job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["9101"]
     msg = str(job.get("error") or "")
     assert msg.strip().lower() != "failed", "still just the bare word: {!r}".format(msg)
     assert "refund" in msg.lower(), "must say the credits come back: {!r}".format(msg)
@@ -944,7 +945,7 @@ def test_failed_before_it_ever_started_says_so_rather_than_blaming_the_render(tm
                                         "reason": "waiting timeout"})
 
     cli.get("/api/task-status?task_id=9102")
-    msg = str({j["job_id"]: j for j in core.read_jobs(tmp_path)}["9102"].get("error") or "")
+    msg = str({j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["9102"].get("error") or "")
     assert "waiting timeout" in msg, "PixAI's own reason must still lead: {!r}".format(msg)
     assert "never started" in msg.lower(), "must distinguish never-dispatched: {!r}".format(msg)
 
@@ -959,7 +960,7 @@ def test_a_reason_from_pixai_is_never_buried_under_our_own_words(tmp_path, monke
                                         "paid_credit": 0, "started": True,
                                         "reason": "content policy"})
     cli.get("/api/task-status?task_id=9103")
-    msg = str({j["job_id"]: j for j in core.read_jobs(tmp_path)}["9103"].get("error") or "")
+    msg = str({j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["9103"].get("error") or "")
     assert "content policy" in msg
 
 
@@ -982,7 +983,7 @@ def _no_estimate(monkeypatch):
 
 
 def _raw_lines(tmp_path):
-    return core._reconstruct_jobs(tmp_path)[2]
+    return jobs_mod._reconstruct_jobs(tmp_path)[2]
 
 
 def test_a_queued_job_is_recorded_as_not_yet_started(tmp_path, monkeypatch, pixai):
@@ -996,7 +997,7 @@ def test_a_queued_job_is_recorded_as_not_yet_started(tmp_path, monkeypatch, pixa
     _no_estimate(monkeypatch)
 
     cli.get("/api/task-status?task_id=7001")
-    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["7001"]
+    job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["7001"]
     assert job.get("started") is False, \
         "the job log has no queued/rendering distinction: {!r}".format(job)
     assert job["status"] == "running", "queued is a phase of running, not a new status"
@@ -1034,7 +1035,7 @@ def test_a_worker_picking_the_job_up_flips_the_recorded_phase(tmp_path, monkeypa
     cli.get("/api/task-status?task_id=7003")
     cli.get("/api/task-status?task_id=7003")
     assert _raw_lines(tmp_path) - before == 1
-    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["7003"]
+    job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["7003"]
     assert job.get("started") is True, "still reads as queued while a worker renders it"
 
 
@@ -1065,7 +1066,7 @@ def test_a_terminal_poll_writes_no_running_phase_and_forgets_the_task(tmp_path, 
     assert _raw_lines(tmp_path) - before == 1, \
         "the finished task was never dropped from the de-dupe map -- it leaks one entry " \
         "per generation for the life of the process"
-    assert {j["job_id"]: j for j in core.read_jobs(tmp_path)}["7004"]["status"] == "done", \
+    assert {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["7004"]["status"] == "done", \
         "a late running event must not revert a finished job (terminal stickiness)"
 
 
@@ -1086,7 +1087,7 @@ def test_pixais_own_queue_estimate_is_recorded_when_a_job_is_seen_queued(tmp_pat
 
     for _ in range(3):
         cli.get("/api/task-status?task_id=7005")
-    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["7005"]
+    job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["7005"]
     assert job.get("eta_seconds") == 27, "no queue estimate recorded: {!r}".format(job)
     assert asked == [(1000, "1983308862240288769")], \
         "the estimate must be fetched ONCE, with the task's own priority + model: " \
@@ -1107,7 +1108,7 @@ def test_a_job_that_starts_before_its_first_poll_costs_no_extra_calls(tmp_path, 
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not ask")))
 
     cli.get("/api/task-status?task_id=7006")
-    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["7006"]
+    job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["7006"]
     assert job.get("started") is True and "eta_seconds" not in job
 
 
@@ -1122,7 +1123,7 @@ def test_an_unavailable_estimate_still_ships_the_phase(tmp_path, monkeypatch, pi
                         lambda *a, **k: (_ for _ in ()).throw(core.PixAIError("boom")))
 
     cli.get("/api/task-status?task_id=7007")
-    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["7007"]
+    job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["7007"]
     assert job.get("started") is False, \
         "a failed estimate lookup swallowed the phase signal too: {!r}".format(job)
     assert "eta_seconds" not in job
@@ -1176,7 +1177,7 @@ def test_a_slow_eta_fetch_cannot_overwrite_a_newer_rendering_phase(tmp_path, mon
     held.wait(timeout=6)
     assert not a_err, a_err
 
-    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["race1"]
+    job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["race1"]
     assert job.get("started") is True, (
         "a rendering job was left showing queued by the slow poll's stale write: {!r}".format(job))
 
@@ -1190,14 +1191,14 @@ def test_sweep_resolves_a_server_owned_job_left_running(tmp_path):
     resolve_orphan_jobs() cannot fix it -- that works by asking PixAI about a task id, and a
     panel job has none. Nothing else ever writes the terminal event, because the process that
     would have written it is gone."""
-    core.append_job_event(tmp_path, "panel-3d49d9bffea2", status="running",
+    jobs_mod.append_job_event(tmp_path, "panel-3d49d9bffea2", status="running",
                           type="panel", label="Rebuild the Similar index")
 
-    assert core.resolve_interrupted_local_jobs(tmp_path) == 1
+    assert jobs_mod.resolve_interrupted_local_jobs(tmp_path) == 1
 
-    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["panel-3d49d9bffea2"]
+    job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["panel-3d49d9bffea2"]
     assert job["status"] == "failed"
-    assert job["status"] in core._JOBS_TERMINAL      # so it leaves the live list
+    assert job["status"] in jobs_mod._JOBS_TERMINAL      # so it leaves the live list
     assert "Interrupted" in job["error"]
     assert "corrupted" in job["error"]               # tells the user it is safe to re-run
 
@@ -1208,33 +1209,33 @@ def test_sweep_leaves_cli_jobs_alone(tmp_path):
     This is the one that would do real damage: the server knows nothing about a command running
     in a terminal, so sweeping it would brand a genuinely-running job dead and, worse, do it
     while the job is still writing its own events."""
-    core.append_job_event(tmp_path, "cli-abc123", status="running", type="cli", label="--sync")
+    jobs_mod.append_job_event(tmp_path, "cli-abc123", status="running", type="cli", label="--sync")
 
-    assert core.resolve_interrupted_local_jobs(tmp_path) == 0
-    assert core.read_jobs(tmp_path)[0]["status"] == "running"
+    assert jobs_mod.resolve_interrupted_local_jobs(tmp_path) == 0
+    assert jobs_mod.read_jobs(tmp_path)[0]["status"] == "running"
 
 
 def test_sweep_leaves_pixai_generate_jobs_alone(tmp_path):
     """Numeric ids are PixAI tasks and belong to resolve_orphan_jobs(), which can actually ASK
     whether they finished. Reaping them here would destroy a real running generation's record
     and lose the reward/claim that follows it."""
-    core.append_job_event(tmp_path, "1672848509142493791", status="running", type="generate")
+    jobs_mod.append_job_event(tmp_path, "1672848509142493791", status="running", type="generate")
 
-    assert core.resolve_interrupted_local_jobs(tmp_path) == 0
-    assert core.read_jobs(tmp_path)[0]["status"] == "running"
+    assert jobs_mod.resolve_interrupted_local_jobs(tmp_path) == 0
+    assert jobs_mod.read_jobs(tmp_path)[0]["status"] == "running"
 
 
 def test_sweep_is_idempotent_and_skips_finished_jobs(tmp_path):
     """Runs on every boot, so a second pass must be a no-op -- otherwise each restart appends
     another failure event to a job that was already resolved."""
-    core.append_job_event(tmp_path, "panel-aaa", status="running", type="panel")
-    core.append_job_event(tmp_path, "panel-bbb", status="done", type="panel")
-    core.append_job_event(tmp_path, "bulkdel-ccc", status="done_with_errors", type="panel")
+    jobs_mod.append_job_event(tmp_path, "panel-aaa", status="running", type="panel")
+    jobs_mod.append_job_event(tmp_path, "panel-bbb", status="done", type="panel")
+    jobs_mod.append_job_event(tmp_path, "bulkdel-ccc", status="done_with_errors", type="panel")
 
-    assert core.resolve_interrupted_local_jobs(tmp_path) == 1     # only panel-aaa
-    assert core.resolve_interrupted_local_jobs(tmp_path) == 0     # nothing left to do
+    assert jobs_mod.resolve_interrupted_local_jobs(tmp_path) == 1     # only panel-aaa
+    assert jobs_mod.resolve_interrupted_local_jobs(tmp_path) == 0     # nothing left to do
 
-    by_id = {j["job_id"]: j for j in core.read_jobs(tmp_path)}
+    by_id = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}
     assert by_id["panel-bbb"]["status"] == "done"                 # untouched
     assert by_id["bulkdel-ccc"]["status"] == "done_with_errors"   # untouched
 
@@ -1244,12 +1245,12 @@ def test_sweep_covers_every_server_owned_prefix(tmp_path):
     must be swept (integrity- is the Broken files list's fix run). Pinned as a set so adding a
     new server-spawned prefix without adding it here fails loudly rather than leaving a whole
     job class stuck at 'running'."""
-    assert set(core._JOBS_SERVER_OWNED_PREFIXES) == {"panel-", "import-", "bulkdel-",
+    assert set(jobs_mod._JOBS_SERVER_OWNED_PREFIXES) == {"panel-", "import-", "bulkdel-",
                                                      "integrity-"}
     for jid in ("panel-1", "import-2", "bulkdel-3", "integrity-4"):
-        core.append_job_event(tmp_path, jid, status="running", type="panel")
+        jobs_mod.append_job_event(tmp_path, jid, status="running", type="panel")
 
-    assert core.resolve_interrupted_local_jobs(tmp_path) == 4
+    assert jobs_mod.resolve_interrupted_local_jobs(tmp_path) == 4
 
 
 def test_a_surviving_subprocess_can_still_correct_a_premature_failure(tmp_path):
@@ -1259,12 +1260,12 @@ def test_a_surviving_subprocess_can_still_correct_a_premature_failure(tmp_path):
     early. That self-corrects only because _reconstruct_jobs() blocks a NON-terminal record from
     overwriting a terminal one but permits terminal -> terminal. If that ever changed, this sweep
     would start permanently mislabelling live work."""
-    core.append_job_event(tmp_path, "panel-live", status="running", type="panel")
-    core.resolve_interrupted_local_jobs(tmp_path)
-    assert core.read_jobs(tmp_path)[0]["status"] == "failed"
+    jobs_mod.append_job_event(tmp_path, "panel-live", status="running", type="panel")
+    jobs_mod.resolve_interrupted_local_jobs(tmp_path)
+    assert jobs_mod.read_jobs(tmp_path)[0]["status"] == "failed"
 
-    core.append_job_event(tmp_path, "panel-live", status="done")   # the subprocess survived
-    assert core.read_jobs(tmp_path)[0]["status"] == "done"
+    jobs_mod.append_job_event(tmp_path, "panel-live", status="done")   # the subprocess survived
+    assert jobs_mod.read_jobs(tmp_path)[0]["status"] == "done"
 
 
 def _status_client(tmp_path):
@@ -1373,7 +1374,7 @@ def test_claim_line_grammar(tmp_path):
     """The wording, in one place. Credits lead when there are any -- grouped, like every
     other figure in the tray -- and a stamina-only claim counts rewards instead of
     announcing "+0 credits", which would read as a bug rather than a fact."""
-    from moonglade.gallery import claim_job_label
+    from moonglade.achievements import claim_job_label
     assert claim_job_label(1, 30000) == "+30,000 credits claimed"
     assert claim_job_label(2, 500) == "+500 credits claimed"
     assert claim_job_label(1, 0) == "1 reward claimed"

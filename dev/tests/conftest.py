@@ -9,12 +9,18 @@ from pathlib import Path
 
 import pytest
 
+from moonglade import achievements as achievements_mod
 from moonglade import assets as moonglade_assets
 from moonglade import backup as core
+from moonglade import branding as branding_mod
 from moonglade import container as _mc
+from moonglade import contest_sync as contest_sync_mod
 from moonglade import gallery
+from moonglade import health as health_mod
 from moonglade import migrate as moonglade_migrate
+from moonglade import mirror as mirror_mod
 from moonglade import paths as moonglade_paths
+from moonglade import telemetry as telemetry_mod
 
 # The sealed achievement-definitions donor (private companion repo). The roster no longer
 # lives in source, so roster tests need a container built from this.
@@ -261,7 +267,7 @@ def pack_art():
     if not folder:
         pytest.skip("MOONGLADE_PACK_ART is unset (the folder holding the pack's role art)")
     root, out, missing = Path(folder), {}, []
-    for slot, role in gallery.ROLE_SLOTS.items():
+    for slot, role in branding_mod.ROLE_SLOTS.items():
         for key, img in role["images"].items():
             public = img["public"]
             # The private design mirror (tools/mirror_pack_to_design.py) writes each role under its
@@ -286,14 +292,14 @@ def clear_sealed_caches():
     are process globals, so they outlive whichever tmp_path wrote them. Every place that
     re-points `_container_path()` at a different file has to clear all three on both sides
     of the swap, and this is that one place."""
-    gallery._sealed_cache.update(path=None, mtime=None, defs=None)
-    gallery._container_cache.update(path=None, mtime=None, box=None)
-    gallery._earned_ids_cache.update(t=0.0, ids=frozenset())
+    achievements_mod._sealed_cache.update(path=None, mtime=None, defs=None)
+    branding_mod._container_cache.update(path=None, mtime=None, box=None)
+    branding_mod._earned_ids_cache.update(t=0.0, ids=frozenset())
     # The moments' verified-clip cache is keyed on content, not on an install, so it
     # cannot answer with the wrong bytes -- but a test that corrupts a pack must see
     # the pack, not a clip an earlier test left verified in memory.
-    with gallery._moment_clip_cache_lock:
-        gallery._moment_clip_cache.clear()
+    with branding_mod._moment_clip_cache_lock:
+        branding_mod._moment_clip_cache.clear()
 
 
 def seed_sealed_container(container_path):
@@ -343,7 +349,7 @@ def donor_feat(**flags):
 def moment_clip_keys():
     """The container keys (CODED rels) every moment's clip is seeded under -- derived from
     the app's own map and translation, never retyped, so a moved bucket moves the seed too."""
-    return sorted(gallery._public_rel_to_coded(name) for name in gallery._MOMENT_CLIPS.values())
+    return sorted(branding_mod._public_rel_to_coded(name) for name in branding_mod._MOMENT_CLIPS.values())
 
 
 def _seed_assets():
@@ -360,7 +366,7 @@ def _seed_assets():
 # The instant every server fixture's install is pinned to: 13:00 on a Wednesday. Any
 # daytime weekday reading would do -- what matters is that it never moves, and that it is
 # outside the narrow window in which a collected generation stamps `session_hour`
-# (moonglade_gallery.stamp_session_hour, 2 <= hour < 4). Documentation only: nothing constructs a datetime from it, because
+# (moonglade.telemetry.stamp_session_hour, 2 <= hour < 4). Documentation only: nothing constructs a datetime from it, because
 # the value a pinned clock produces is what the pin below reproduces, not the clock object.
 PINNED_INSTANT = "13:00, Wednesday 2025-06-11, local"
 
@@ -413,8 +419,8 @@ def pin_daytime_clock(mp):
     Effects are asserted, not assumed: dev/tests/test_fixture_hermeticity.py drives the real
     route at 03:00 with and without this pin.
     """
-    real_flag = gallery.telem_flag
-    real_mark_day = gallery.telem_mark_day
+    real_flag = telemetry_mod.telem_flag
+    real_mark_day = telemetry_mod.telem_mark_day
     marked = set()
 
     def _flag_at_the_pinned_instant(key, out_dir=None):
@@ -434,15 +440,15 @@ def pin_daytime_clock(mp):
         marked.update((str(out_dir), k) for k in fresh)
         return real_mark_day(out_dir=out_dir, keys=None if keys is None else fresh)
 
-    mp.setattr(gallery, "telem_flag", _flag_at_the_pinned_instant)
-    mp.setattr(gallery, "telem_mark_day", _mark_day_at_the_pinned_instant)
+    mp.setattr(telemetry_mod, "telem_flag", _flag_at_the_pinned_instant)
+    mp.setattr(telemetry_mod, "telem_mark_day", _mark_day_at_the_pinned_instant)
 
 
 # The REAL coded goods tree, resolved at conftest IMPORT time -- earlier than any fixture
 # can run, so no monkeypatch of branding_root() has had a chance to redirect it yet. The
 # guard below compares against this Path object instead of re-calling the resolver, so a
 # test that leaves the resolver patched cannot point the guard at a decoy.
-_REAL_CODED_ROOT = gallery.branding_root()
+_REAL_CODED_ROOT = branding_mod.branding_root()
 # The real machine files' folder and the real pack, resolved the same way and for the same
 # reason: the pack and settings.json are local/ files (moonglade.paths), NOT the coded tree's
 # siblings, so pinning branding_root() alone no longer keeps a test away from them.
@@ -519,7 +525,7 @@ def _real_coded_tree_pinned_away(tmp_path_factory):
     still caught."""
     mp = pytest.MonkeyPatch()
     root = tmp_path_factory.mktemp("session-branding")
-    mp.setattr(gallery, "branding_root", lambda: root / "branding")
+    mp.setattr(branding_mod, "branding_root", lambda: root / "branding")
     # ...and the machine files (the pack among them), which no longer derive from the tree --
     # their folder, and the old app folder the move brings them across from
     # (moonglade.migrate.old_app_root), so a fixture that runs a real start moves nothing of
@@ -530,7 +536,7 @@ def _real_coded_tree_pinned_away(tmp_path_factory):
     # ...and the folder a relative library (the default one among them) is anchored to, so a
     # start with no --out opens a library of the session's own, never the checkout's.
     mp.setattr(moonglade_paths, "library_anchor", lambda: root)
-    seed_sealed_container(gallery._container_path())
+    seed_sealed_container(branding_mod._container_path())
     try:
         yield root
     finally:
@@ -809,7 +815,7 @@ class _NoRealRegistry(types.ModuleType):
 @pytest.fixture(autouse=True)
 def _no_real_registry(monkeypatch):
     """No test may read or write the real Windows registry. The app's one registry write
-    (moonglade_gallery.register_pack_file_type) does a plain `import winreg`, so the module
+    (moonglade.branding.register_pack_file_type) does a plain `import winreg`, so the module
     that import hands back is swapped for a stub that refuses every use; tests that pass a
     fake registry never import it and are untouched. Off Windows there is no real winreg to
     protect, and the stub stands in all the same."""
@@ -851,7 +857,7 @@ def _isolated_branding(tmp_path, monkeypatch):
     already written against (branding under the per-test directory), so every existing branding
     test keeps working unchanged and this is a no-op for them. (The branding picks live in
     settings.json, under local_dir() -- pinned to this same tmp_path by _isolated_local_files.)"""
-    monkeypatch.setattr(gallery, "branding_root", lambda: tmp_path / "branding")
+    monkeypatch.setattr(branding_mod, "branding_root", lambda: tmp_path / "branding")
 
 
 @pytest.fixture(autouse=True)
@@ -915,7 +921,7 @@ def _sealed_roster_container(request, tmp_path):
     if "test_assets" in request.node.nodeid:
         yield
         return
-    seed_sealed_container(tmp_path / gallery._container_path().name)
+    seed_sealed_container(tmp_path / branding_mod._container_path().name)
     yield
     clear_sealed_caches()
 
@@ -937,11 +943,11 @@ def _fresh_perf_memos():
     tmp_path's library walk) answers the next one's request. Same isolation the sealed-defs
     and earned-ids caches above already get, and for the same reason."""
     def _clear():
-        gallery._ACH_METRICS_CACHE.clear()
-        gallery._contests_cache.clear()
-        gallery._contest_sync_last_ok.update(at=0.0)
-        gallery._HEALTH_CACHE.update(key=None, payload=None, at=0.0)
-        gallery._HEALTH_BUSY["on"] = False
+        achievements_mod._ACH_METRICS_CACHE.clear()
+        contest_sync_mod._contests_cache.clear()
+        contest_sync_mod._contest_sync_last_ok.update(at=0.0)
+        health_mod._HEALTH_CACHE.update(key=None, payload=None, at=0.0)
+        health_mod._HEALTH_BUSY["on"] = False
     _clear()
     yield
     _clear()
@@ -953,9 +959,9 @@ def _fresh_mirror_renewal():
     6 h success floor, the 15-minute tick, the failed token's exp) is module state that outlives
     a test. Without this, one test's successful renewal would hold the next test's renewal
     behind the 6 h floor, and a failure would leave the next one in backoff."""
-    core._mirror_renewal_reset()
+    mirror_mod._mirror_renewal_reset()
     yield
-    core._mirror_renewal_reset()
+    mirror_mod._mirror_renewal_reset()
 
 
 @pytest.fixture(autouse=True)

@@ -24,6 +24,8 @@ from moonglade import gallery as g
 from moonglade import paths
 from moonglade import settings
 from tests.conftest import login_client
+from moonglade import mirror as mirror_mod
+from moonglade import branding as branding_mod
 
 
 def test_a_missing_file_reads_as_nothing_stored(tmp_path):
@@ -203,29 +205,30 @@ def test_the_bonjour_chip_writes_settings(tmp_path, cli):
 
 
 def test_the_mirror_switch_writes_settings(tmp_path, cli, monkeypatch):
-    monkeypatch.setattr(core, "_jwt_usable", lambda jwt: True)
+    monkeypatch.setattr(mirror_mod, "_jwt_usable", lambda jwt: True)
     assert cli.post("/api/mirror/enable", json={"enabled": True}).get_json() == {"enabled": True}
-    assert core.mirror_enabled() is True
+    assert mirror_mod.mirror_enabled() is True
     assert cli.post("/api/mirror/enable", json={"enabled": False}).get_json() == \
         {"enabled": False}
-    assert core.mirror_enabled() is False
+    assert mirror_mod.mirror_enabled() is False
     _config_untouched(tmp_path, cli)
 
 
 def test_the_branding_picks_write_settings_and_leave_each_other_alone(tmp_path):
-    g.save_slot_active(tmp_path, {"banner_main": "a1"})
-    g.save_branding(tmp_path, dict(g._BRAND_DEFAULTS, anim="glow", anim_speed=9))
+    branding_mod.save_slot_active(tmp_path, {"banner_main": "a1"})
+    branding_mod.save_branding(tmp_path, dict(branding_mod._BRAND_DEFAULTS, anim="glow", anim_speed=9))
     b = settings.branding()
     assert b["slots"] == {"banner_main": "a1"}, "the mark's writer kept the slot pick"
     assert b["animation"]["anim"] == "glow"
     assert b["animation"]["anim_speed"] == 3.0, "clamped on the way in"
-    g.save_slot_active(tmp_path, {"banner_main": "a2"})
+    branding_mod.save_slot_active(tmp_path, {"banner_main": "a2"})
     assert settings.branding()["animation"]["anim"] == "glow", "the slot's writer kept the mark"
 
 
 def test_config_json_keeps_only_hand_edited_values():
     """The keys the app used to write into config.json are gone from every writer."""
     import inspect
-    src = inspect.getsource(g) + inspect.getsource(core)
+    src = (inspect.getsource(g) + inspect.getsource(core) + inspect.getsource(mirror_mod)
+           + inspect.getsource(branding_mod))
     for key in ('"LIBRARY_DIR"', '"BONJOUR_ENABLED"', '"BONJOUR_NAME"', '"MIRROR_TO_PIXAI"'):
         assert key not in src, key

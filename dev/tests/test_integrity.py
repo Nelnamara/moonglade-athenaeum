@@ -28,6 +28,8 @@ from moonglade import gallery as g
 from moonglade import integrity as integ
 from moonglade import paths
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade import health as health_mod
+from moonglade import jobs as jobs_mod
 
 
 def _row(**kw):
@@ -256,11 +258,11 @@ def test_hostile_file_names_cannot_forge_a_report_line(tmp_path):
 
 def test_health_counts_zero_byte_files_and_reads_the_last_run(tmp_path):
     out = _library(tmp_path)
-    before = g.collection_health(out, out / "catalog.db")
+    before = health_mod.collection_health(out, out / "catalog.db")
     assert before["zero_byte"] == 1
     assert before["integrity"] is None                   # never verified
     integ.verify_library(out, out / "catalog.db")
-    after = g.collection_health(out, out / "catalog.db")
+    after = health_mod.collection_health(out, out / "catalog.db")
     assert after["integrity"]["verified_at"].endswith("Z")
     assert after["integrity"]["counts"]["missing_thumb"] == 2
     # Owner question 1, option (a): the numbers he already knows keep their meaning.
@@ -281,6 +283,6 @@ def test_the_cli_flag_runs_the_pass_and_logs_a_job(tmp_path, monkeypatch, capsys
     assert "suspect" in printed and "missing" in printed
     doc = json.loads((paths.records_path(out, "integrity_report.json")).read_text(encoding="utf-8"))
     assert doc["deep"] is True and doc["counts"]["suspect"] == 3
-    jobs = [j for j in core.read_jobs(out) if j.get("type") == "cli"]
+    jobs = [j for j in jobs_mod.read_jobs(out) if j.get("type") == "cli"]
     assert [j["label"] for j in jobs] == ["Verify library integrity"]
     assert jobs[0]["status"] == "done"

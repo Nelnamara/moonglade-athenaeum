@@ -17,6 +17,7 @@ from moonglade import backup as core
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client
+from moonglade import jobs as jobs_mod
 
 
 def _row(**kw):
@@ -189,7 +190,7 @@ def _now_row(**kw):
 
 def test_running_job_becomes_one_synthetic_row_with_count(tmp_path):
     _seed(tmp_path, [])
-    core.append_job_event(tmp_path, "9001", status="running", type="generate",
+    jobs_mod.append_job_event(tmp_path, "9001", status="running", type="generate",
                           label="Generated", count=2)
     d = _get(login_client(tmp_path), tz=0)
     rows = _flat(d)
@@ -204,8 +205,8 @@ def test_running_job_becomes_one_synthetic_row_with_count(tmp_path):
 
 def test_failed_and_stale_jobs_are_synthetic_rows_too(tmp_path):
     _seed(tmp_path, [])
-    core.append_job_event(tmp_path, "9003", status="failed", type="generate", error="boom")
-    core.append_job_event(tmp_path, "9004", status="stale", type="generate", is_video=True)
+    jobs_mod.append_job_event(tmp_path, "9003", status="failed", type="generate", error="boom")
+    jobs_mod.append_job_event(tmp_path, "9004", status="stale", type="generate", is_video=True)
     by_id = {r["job_id"]: r for r in _flat(_get(login_client(tmp_path), tz=0))}
     assert by_id["9003"]["state"] == "failed" and by_id["9003"]["error"] == "boom"
     assert by_id["9004"]["state"] == "stale" and by_id["9004"]["kind"] == "video"
@@ -213,8 +214,8 @@ def test_failed_and_stale_jobs_are_synthetic_rows_too(tmp_path):
 
 def test_done_job_is_not_duplicated(tmp_path):
     _seed(tmp_path, [_now_row(media_id="mid42", filename="a.png", task_id="t7")])
-    core.append_job_event(tmp_path, "t7", status="running", type="generate", label="Nightsong")
-    core.append_job_event(tmp_path, "t7", status="done", media_ids=["mid42"])
+    jobs_mod.append_job_event(tmp_path, "t7", status="running", type="generate", label="Nightsong")
+    jobs_mod.append_job_event(tmp_path, "t7", status="done", media_ids=["mid42"])
     rows = _flat(_get(login_client(tmp_path), tz=0))
     assert [(r["task_id"], r["state"]) for r in rows] == [("t7", "done")]
     assert rows[0]["media_id"] == "mid42"
@@ -222,16 +223,16 @@ def test_done_job_is_not_duplicated(tmp_path):
 
 def test_running_job_whose_task_already_has_rows_is_dropped(tmp_path):
     _seed(tmp_path, [_now_row(media_id="m1", filename="a.png", task_id="9002")])
-    core.append_job_event(tmp_path, "9002", status="running", type="generate", count=4)
+    jobs_mod.append_job_event(tmp_path, "9002", status="running", type="generate", count=4)
     rows = _flat(_get(login_client(tmp_path), tz=0))
     assert len(rows) == 1 and rows[0]["state"] == "done" and rows[0]["media_id"] == "m1"
 
 
 def test_non_generate_jobs_are_ignored(tmp_path):
     _seed(tmp_path, [])
-    core.append_job_event(tmp_path, "panel-abc", status="running", type="panel", label="Sync")
-    core.append_job_event(tmp_path, "cli-abc", status="running", type="cli", label="Update")
-    core.append_job_event(tmp_path, "untyped", status="running", label="???")
+    jobs_mod.append_job_event(tmp_path, "panel-abc", status="running", type="panel", label="Sync")
+    jobs_mod.append_job_event(tmp_path, "cli-abc", status="running", type="cli", label="Update")
+    jobs_mod.append_job_event(tmp_path, "untyped", status="running", label="???")
     assert _flat(_get(login_client(tmp_path), tz=0)) == []
 
 
@@ -240,7 +241,7 @@ def test_running_job_sorts_by_time_among_catalog_rows(tmp_path):
     old = time.time() - 3600
     _seed(tmp_path, [_row(media_id="m1", filename="a.png", task_id="t1",
                           created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(old)))])
-    core.append_job_event(tmp_path, "9005", status="running", type="generate")
+    jobs_mod.append_job_event(tmp_path, "9005", status="running", type="generate")
     ids = [r.get("media_id") or r.get("job_id") for r in _flat(_get(login_client(tmp_path), tz=0))]
     # the catalog row may fall on yesterday's bucket right after midnight UTC; either
     # way the running job is first in feed order

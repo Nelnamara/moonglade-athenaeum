@@ -40,6 +40,7 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.fake_pixai import operation_name
+from moonglade import pixai_client as pixai_client_mod
 
 REPO = Path(__file__).resolve().parents[2]
 FEED = operation_name(core._HISTORY_PAGE_DOC)       # what the fake keys the document by
@@ -124,7 +125,7 @@ def _catalog(tmp_path, rows):
 
 def test_the_document_is_a_query_paged_backward():
     doc = " ".join(core._HISTORY_PAGE_DOC.split())
-    assert core._is_mutation_document(doc) is False
+    assert pixai_client_mod._is_mutation_document(doc) is False
     assert "taskSummaries(last: $last, before: $before)" in doc
     for name in ("$userId", "$last", "$before"):
         assert name in doc
@@ -148,7 +149,7 @@ def test_a_page_is_one_post_of_the_full_document():
 
     s = Session()
     variables = core.page_variables(250, "u-wire", before="c9")
-    data = core.gql(core.PixAIClient(s), variables)
+    data = core.gql(pixai_client_mod.PixAIClient(s), variables)
     [(verb, url, kw)] = s.calls
     assert (verb, url) == ("POST", core.API_URL)
     assert kw["json"] == {"query": core._HISTORY_PAGE_DOC,
@@ -192,7 +193,7 @@ def test_an_internal_server_error_waits_five_seconds_and_asks_again(waits):
     failed = {"errors": [{"message": "Internal server error", "path": ["user", "taskSummaries"],
                           "extensions": {"code": "INTERNAL_SERVER_ERROR"}}], "data": None}
     s = Session([failed, {"data": _answer([_node("T1")])}])
-    data = core.gql(core.PixAIClient(s), {"last": 5000, "userId": "u1"})
+    data = core.gql(pixai_client_mod.PixAIClient(s), {"last": 5000, "userId": "u1"})
     assert waits == [5.0] == [core.HISTORY_RETRY_WAIT_S]
     assert s.sent == [{"last": 5000, "userId": "u1"}] * 2       # the same request, twice
     assert core.find_connection(data)["edges"][0]["node"]["id"] == "T1"
@@ -284,7 +285,7 @@ def test_an_answer_that_is_not_graphql_is_a_refusal_not_an_empty_history(status,
 
     s = Session()
     with pytest.raises(core.HistoryPageRefused) as ei:
-        core.gql(core.PixAIClient(s), {"last": 250, "userId": "u1"})
+        core.gql(pixai_client_mod.PixAIClient(s), {"last": 250, "userId": "u1"})
     assert str(ei.value) == core.HISTORY_REFUSED
     assert "no history page" in str(ei.value.__cause__)
     assert s.posts == 1 and waits == []
@@ -515,12 +516,12 @@ def test_a_count_that_meets_an_answer_with_no_page_exits_with_the_sentence(
 def test_the_retired_saved_request_leaves_nothing_behind():
     assert not hasattr(core, "PERSISTED_QUERY_HASH")
     assert not hasattr(core, "history_page")
-    assert not hasattr(core.PixAIClient, "persisted")   # the whole saved-request road (#92)
+    assert not hasattr(pixai_client_mod.PixAIClient, "persisted")   # the whole saved-request road (#92)
     assert "PERSISTED_QUERY_HASH" not in (REPO / "config.example.json").read_text(
         encoding="utf-8")
     live_docs = [REPO / "README.md", REPO / "CLAUDE.md", REPO / "CONTRIBUTING.md",
                  *sorted((REPO / "wiki").glob("*.md"))]
     for doc in live_docs:
         assert "PERSISTED_QUERY_HASH" not in doc.read_text(encoding="utf-8"), doc.name
-    for module in (core, g):
+    for module in (core, g, pixai_client_mod):     # the transport moved out of core
         assert "PERSISTED_QUERY_HASH" not in inspect.getsource(module)

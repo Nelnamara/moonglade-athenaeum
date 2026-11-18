@@ -23,6 +23,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gallery as g
+from moonglade import media_tools as media_tools_mod
 
 
 # ---------------------------------------------------------------------------
@@ -77,14 +78,14 @@ def verbose():
 def have_tools(monkeypatch):
     """Both binaries 'installed', at paths distinctive enough to prove argv[0] came from
     the seam and not from a bare name typed at the call site."""
-    monkeypatch.setattr(core, "ffmpeg_path", lambda: "/opt/bin/ffmpeg")
-    monkeypatch.setattr(core, "ffprobe_path", lambda: "/opt/bin/ffprobe")
+    monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "/opt/bin/ffmpeg")
+    monkeypatch.setattr(media_tools_mod, "ffprobe_path", lambda: "/opt/bin/ffprobe")
 
 
 @pytest.fixture
 def no_tools(monkeypatch):
-    monkeypatch.setattr(core, "ffmpeg_path", lambda: "")
-    monkeypatch.setattr(core, "ffprobe_path", lambda: "")
+    monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "")
+    monkeypatch.setattr(media_tools_mod, "ffprobe_path", lambda: "")
 
 
 # ---------------------------------------------------------------------------
@@ -99,15 +100,15 @@ def test_the_binaries_are_resolved_once_each_and_separately(monkeypatch):
     asked = []
     monkeypatch.setattr(shutil, "which",
                         lambda n: asked.append(n) or ("/opt/bin/" + n if n == "ffmpeg" else None))
-    core._reset_tool_cache()
+    media_tools_mod._reset_tool_cache()
     try:
-        assert core.ffmpeg_path() == "/opt/bin/ffmpeg"
-        assert core.ffmpeg_path() == "/opt/bin/ffmpeg"      # cached: no second which()
-        assert core.ffprobe_path() == ""                    # absent, and its own answer
-        assert core.ffprobe_path() == ""
+        assert media_tools_mod.ffmpeg_path() == "/opt/bin/ffmpeg"
+        assert media_tools_mod.ffmpeg_path() == "/opt/bin/ffmpeg"      # cached: no second which()
+        assert media_tools_mod.ffprobe_path() == ""                    # absent, and its own answer
+        assert media_tools_mod.ffprobe_path() == ""
         assert asked == ["ffmpeg", "ffprobe"]
     finally:
-        core._reset_tool_cache()
+        media_tools_mod._reset_tool_cache()
 
 
 # ---------------------------------------------------------------------------
@@ -116,12 +117,12 @@ def test_the_binaries_are_resolved_once_each_and_separately(monkeypatch):
 
 def test_run_ffmpeg_supplies_the_binary_the_flags_and_the_timeout(have_tools, monkeypatch):
     rec = _Rec(monkeypatch, stdout="out", stderr="err")
-    r = core.run_ffmpeg(["-i", "a.mp4", "b.png"], timeout=12)
+    r = media_tools_mod.run_ffmpeg(["-i", "a.mp4", "b.png"], timeout=12)
 
     assert rec.argv == ["/opt/bin/ffmpeg", "-i", "a.mp4", "b.png"], "the caller passes args only"
     kw = rec.kwargs
     assert kw["timeout"] == 12
-    assert kw["creationflags"] == core.NO_WINDOW     # no console window flashes on Windows
+    assert kw["creationflags"] == media_tools_mod.NO_WINDOW     # no console window flashes on Windows
     assert kw["stderr"] is subprocess.PIPE           # ffmpeg says WHY only here
     assert kw["stdout"] is subprocess.PIPE
     assert kw["text"] is True and kw["encoding"] == "utf-8" and kw["errors"] == "replace"
@@ -130,17 +131,17 @@ def test_run_ffmpeg_supplies_the_binary_the_flags_and_the_timeout(have_tools, mo
 
 def test_run_ffprobe_supplies_the_binary_the_flags_and_the_timeout(have_tools, monkeypatch):
     rec = _Rec(monkeypatch, stdout="7.5\n")
-    r = core.run_ffprobe(["-show_entries", "format=duration", "clip.mp4"], timeout=9)
+    r = media_tools_mod.run_ffprobe(["-show_entries", "format=duration", "clip.mp4"], timeout=9)
 
     assert rec.argv == ["/opt/bin/ffprobe", "-show_entries", "format=duration", "clip.mp4"]
     assert rec.kwargs["timeout"] == 9
-    assert rec.kwargs["creationflags"] == core.NO_WINDOW
+    assert rec.kwargs["creationflags"] == media_tools_mod.NO_WINDOW
     assert r.ok is True and r.missing is False and r.stdout == "7.5\n"
 
 
 def test_run_ffmpeg_passes_stdin_through(have_tools, monkeypatch):
     rec = _Rec(monkeypatch)
-    core.run_ffmpeg(["-f", "concat", "-i", "-", "out.mp4"], timeout=5, input="file 'a.mp4'\n")
+    media_tools_mod.run_ffmpeg(["-f", "concat", "-i", "-", "out.mp4"], timeout=5, input="file 'a.mp4'\n")
     assert rec.kwargs["input"] == "file 'a.mp4'\n"
     assert "stdin" not in rec.kwargs, "input= and stdin= together make subprocess.run raise"
 
@@ -150,11 +151,11 @@ def test_with_no_input_the_child_never_inherits_our_stdin(have_tools, monkeypatc
     inherits it fails with WinError 6, which _run_tool swallows by contract -- so a
     frame grab answered None and an export lost its audio with no word said."""
     rec = _Rec(monkeypatch)
-    core.run_ffmpeg(["-i", "a.mp4", "b.png"], timeout=5)
+    media_tools_mod.run_ffmpeg(["-i", "a.mp4", "b.png"], timeout=5)
     assert rec.kwargs["stdin"] is subprocess.DEVNULL
     assert "input" not in rec.kwargs
     rec2 = _Rec(monkeypatch)
-    core.run_ffprobe(["clip.mp4"], timeout=5)
+    media_tools_mod.run_ffprobe(["clip.mp4"], timeout=5)
     assert rec2.kwargs["stdin"] is subprocess.DEVNULL
 
 
@@ -164,14 +165,14 @@ def test_a_nonzero_exit_is_an_answer_not_an_exception(have_tools, monkeypatch):
     here: what it MEANS is the caller's to say (the remux names the clip; the thumbnail
     retries with different flags)."""
     _Rec(monkeypatch, returncode=1, stderr="could not find sample table")
-    r = core.run_ffmpeg(["-i", "bad.mp4", "out.mp4"], timeout=5)
+    r = media_tools_mod.run_ffmpeg(["-i", "bad.mp4", "out.mp4"], timeout=5)
     assert r.ok is False and r.returncode == 1 and r.missing is False
     assert "sample table" in r.stderr
 
 
 def test_a_timeout_is_swallowed_named_and_logged(have_tools, monkeypatch, verbose, capsys):
     _Rec(monkeypatch, raises=subprocess.TimeoutExpired(cmd="ffmpeg", timeout=5))
-    r = core.run_ffmpeg(["-i", "slow.mp4", "out.mp4"], timeout=5)
+    r = media_tools_mod.run_ffmpeg(["-i", "slow.mp4", "out.mp4"], timeout=5)
     assert r.ok is False and r.missing is False and r.returncode is None
     assert "timed out" in r.stderr
     assert "timed out after 5s" in capsys.readouterr().out
@@ -183,15 +184,15 @@ def test_a_binary_that_vanished_after_which_takes_the_missing_road(have_tools, m
     nothing. Indistinguishable to the caller from never having had it, so it answers the
     same way rather than escaping as the FileNotFoundError a blanket except used to eat."""
     _Rec(monkeypatch, raises=FileNotFoundError("no such file: ffmpeg"))
-    r = core.run_ffmpeg(["-i", "a.mp4", "b.png"], timeout=5)
+    r = media_tools_mod.run_ffmpeg(["-i", "a.mp4", "b.png"], timeout=5)
     assert r.missing is True and r.ok is False and r.returncode is None
     assert "vanished" in capsys.readouterr().out
 
 
 def test_an_absent_binary_never_spawns_and_says_so(no_tools, monkeypatch, verbose, capsys):
     rec = _Rec(monkeypatch)
-    for r in (core.run_ffmpeg(["-i", "a.mp4"], timeout=5),
-              core.run_ffprobe(["clip.mp4"], timeout=5)):
+    for r in (media_tools_mod.run_ffmpeg(["-i", "a.mp4"], timeout=5),
+              media_tools_mod.run_ffprobe(["clip.mp4"], timeout=5)):
         assert r.missing is True and r.ok is False and r.returncode is None
     assert rec.calls == [], "asked the OS to run a binary it had already been told is absent"
     out = capsys.readouterr().out
@@ -204,23 +205,23 @@ def test_an_absent_binary_never_spawns_and_says_so(no_tools, monkeypatch, verbos
 
 def test_duration_argv_and_full_precision(have_tools, monkeypatch):
     rec = _Rec(monkeypatch, stdout="12.345678\n")
-    assert core.duration("clip.mp4") == 12.345678, "the one answer does not round for anyone"
+    assert media_tools_mod.duration("clip.mp4") == 12.345678, "the one answer does not round for anyone"
     assert rec.argv == ["/opt/bin/ffprobe", "-v", "error", "-show_entries",
                         "format=duration", "-of", "csv=p=0", "clip.mp4"]
-    assert rec.kwargs["timeout"] == core.PROBE_TIMEOUT
+    assert rec.kwargs["timeout"] == media_tools_mod.PROBE_TIMEOUT
 
 
 def test_duration_without_ffprobe_is_none_never_a_raise(no_tools, monkeypatch, verbose, capsys):
     _Rec(monkeypatch)
-    assert core.duration("clip.mp4") is None
+    assert media_tools_mod.duration("clip.mp4") is None
     assert "ffprobe is not installed" in capsys.readouterr().out
 
 
 def test_duration_survives_garbage_and_a_refusal(have_tools, monkeypatch):
     _Rec(monkeypatch, stdout="N/A\n")
-    assert core.duration("clip.mp4") is None
+    assert media_tools_mod.duration("clip.mp4") is None
     _Rec(monkeypatch, returncode=1, stdout="")
-    assert core.duration("clip.mp4") is None
+    assert media_tools_mod.duration("clip.mp4") is None
 
 
 # ---------------------------------------------------------------------------
@@ -229,13 +230,13 @@ def test_duration_survives_garbage_and_a_refusal(have_tools, monkeypatch):
 
 def test_has_audio_argv_and_three_way_answer(have_tools, monkeypatch):
     rec = _Rec(monkeypatch, stdout="0\n")
-    assert core.has_audio("clip.mp4") is True
+    assert media_tools_mod.has_audio("clip.mp4") is True
     assert rec.argv == ["/opt/bin/ffprobe", "-v", "error", "-select_streams", "a",
                         "-show_entries", "stream=index", "-of", "csv=p=0", "clip.mp4"]
-    assert rec.kwargs["timeout"] == core.PROBE_TIMEOUT
+    assert rec.kwargs["timeout"] == media_tools_mod.PROBE_TIMEOUT
 
     _Rec(monkeypatch, stdout="")
-    assert core.has_audio("silent.mp4") is False, "ffprobe looked and found no stream"
+    assert media_tools_mod.has_audio("silent.mp4") is False, "ffprobe looked and found no stream"
 
 
 def test_has_audio_without_ffprobe_is_none_not_false(no_tools, monkeypatch, verbose, capsys):
@@ -244,7 +245,7 @@ def test_has_audio_without_ffprobe_is_none_not_false(no_tools, monkeypatch, verb
     read every clip as silent with nothing able to notice. The gallery's own face still
     coerces to False -- deliberately, in one place (see probe_has_audio)."""
     _Rec(monkeypatch)
-    assert core.has_audio("clip.mp4") is None
+    assert media_tools_mod.has_audio("clip.mp4") is None
     assert g.probe_has_audio("clip.mp4") is False
     assert "ffprobe is not installed" in capsys.readouterr().out
 
@@ -256,29 +257,29 @@ def test_has_audio_without_ffprobe_is_none_not_false(no_tools, monkeypatch, verb
 def test_frame_at_eof_argv(have_tools, monkeypatch, tmp_path):
     out = tmp_path / "f.png"
     rec = _Rec(monkeypatch, writes=b"PNG")
-    assert core.frame_at("clip.mp4", None, out) == str(out)
+    assert media_tools_mod.frame_at("clip.mp4", None, out) == str(out)
     # No -frames:v cap on the EOF path: -update 1 overwrites the png per decoded frame, so
     # the file left behind is the LAST frame even when the clip is shorter than the seek.
     assert rec.argv == ["/opt/bin/ffmpeg", "-y", "-sseof", "-0.5", "-i", "clip.mp4",
                         "-update", "1", "-q:v", "2", str(out)]
-    assert rec.kwargs["timeout"] == core.FRAME_TIMEOUT
+    assert rec.kwargs["timeout"] == media_tools_mod.FRAME_TIMEOUT
 
 
 def test_frame_at_seeks_a_hair_before_the_out_point(have_tools, monkeypatch, tmp_path):
     """Trim-aware handoff: the measured clip is longer than the asked-for point, so the
     explicit seek is used -- backed off 0.05s so we land ON the last kept frame."""
     out = tmp_path / "f.png"
-    monkeypatch.setattr(core, "duration", lambda p, **k: 10.0)
+    monkeypatch.setattr(media_tools_mod, "duration", lambda p, **k: 10.0)
     rec = _Rec(monkeypatch, writes=b"PNG")
-    assert core.frame_at("clip.mp4", 3.2, out) == str(out)
+    assert media_tools_mod.frame_at("clip.mp4", 3.2, out) == str(out)
     assert rec.argv[1:6] == ["-y", "-ss", "3.150", "-i", "clip.mp4"]
 
 
 def test_a_trim_at_or_past_the_real_end_falls_back_to_eof(have_tools, monkeypatch, tmp_path):
     out = tmp_path / "f.png"
-    monkeypatch.setattr(core, "duration", lambda p, **k: 5.0)
+    monkeypatch.setattr(media_tools_mod, "duration", lambda p, **k: 5.0)
     rec = _Rec(monkeypatch, writes=b"PNG")
-    core.frame_at("clip.mp4", 5.0, out)
+    media_tools_mod.frame_at("clip.mp4", 5.0, out)
     assert "-sseof" in rec.argv and "-ss" not in rec.argv
 
 
@@ -287,9 +288,9 @@ def test_trim_aware_false_skips_the_measurement(have_tools, monkeypatch, tmp_pat
 
     def _never(*a, **k):
         raise AssertionError("trim_aware=False must not measure the clip")
-    monkeypatch.setattr(core, "duration", _never)
+    monkeypatch.setattr(media_tools_mod, "duration", _never)
     rec = _Rec(monkeypatch, writes=b"PNG")
-    core.frame_at("clip.mp4", 3.2, out, trim_aware=False)
+    media_tools_mod.frame_at("clip.mp4", 3.2, out, trim_aware=False)
     assert rec.argv[1:4] == ["-y", "-ss", "3.150"]
 
 
@@ -299,19 +300,19 @@ def test_frame_zero_is_the_first_frame_through_the_same_primitive(have_tools, mo
     the explicit-seek branch and yields the FIRST frame, and nothing may duplicate it.
     frame_at is that primitive under the module's argument order, not a second copy."""
     out = tmp_path / "f.png"
-    monkeypatch.setattr(core, "duration", lambda p, **k: 8.0)
+    monkeypatch.setattr(media_tools_mod, "duration", lambda p, **k: 8.0)
     rec = _Rec(monkeypatch, writes=b"PNG")
-    core.frame_at("clip.mp4", 0.0, out)
+    media_tools_mod.frame_at("clip.mp4", 0.0, out)
     assert rec.argv[1:4] == ["-y", "-ss", "0.000"], "0.0 must not become the EOF path"
-    assert core.extract_last_frame("clip.mp4", out, at_seconds=0.0) == str(out)
+    assert media_tools_mod.extract_last_frame("clip.mp4", out, at_seconds=0.0) == str(out)
 
 
 def test_frame_extraction_without_ffmpeg_is_none_never_a_raise(no_tools, monkeypatch,
                                                                tmp_path, verbose, capsys):
     rec = _Rec(monkeypatch)
     out = tmp_path / "f.png"
-    assert core.frame_at("clip.mp4", None, out) is None
-    assert core.extract_last_frame("clip.mp4", out) is None
+    assert media_tools_mod.frame_at("clip.mp4", None, out) is None
+    assert media_tools_mod.extract_last_frame("clip.mp4", out) is None
     assert rec.calls == []
     assert not out.exists()
     assert "ffmpeg is not installed" in capsys.readouterr().out
@@ -320,7 +321,7 @@ def test_frame_extraction_without_ffmpeg_is_none_never_a_raise(no_tools, monkeyp
 def test_an_empty_output_file_is_not_a_frame(have_tools, monkeypatch, tmp_path):
     out = tmp_path / "f.png"
     _Rec(monkeypatch, writes=b"")          # ffmpeg exits 0 but writes nothing usable
-    assert core.frame_at("clip.mp4", None, out) is None
+    assert media_tools_mod.frame_at("clip.mp4", None, out) is None
 
 
 # ---------------------------------------------------------------------------
@@ -337,13 +338,13 @@ def test_the_faststart_remux_takes_its_binary_flags_and_timeout_from_the_seam(
     clip.write_bytes(b"".join(struct.pack(">I", 16) + t + b"\x00" * 8
                               for t in (b"ftyp", b"mdat", b"moov")))
     rec = _Rec(monkeypatch, writes=b"REMUXED")
-    assert core.video_faststart(clip) is True
+    assert media_tools_mod.video_faststart(clip) is True
     argv, kw = rec.calls[0]
     assert argv[0] == "/opt/bin/ffmpeg"
     assert argv[1:8] == ["-y", "-v", "error", "-i", str(clip), "-c", "copy"]
     assert argv[8:10] == ["-movflags", "+faststart"]
     assert "__fstmp__" in argv[-1] and argv[-1].endswith(".mp4")
-    assert kw["timeout"] == core.REMUX_TIMEOUT and kw["creationflags"] == core.NO_WINDOW
+    assert kw["timeout"] == media_tools_mod.REMUX_TIMEOUT and kw["creationflags"] == media_tools_mod.NO_WINDOW
     assert clip.read_bytes() == b"REMUXED"
 
 
@@ -370,16 +371,16 @@ def test_the_video_thumbnail_takes_its_binary_and_timeouts_from_the_seam(
     assert (tmp_path / "t.jpg").exists()
     assert [a[0][0] for a in calls] == ["/opt/bin/ffmpeg", "/opt/bin/ffmpeg"]
     assert "thumbnail=72" in calls[0][0] and "-vf" not in calls[1][0]
-    assert calls[0][1]["timeout"] == core.THUMB_TIMEOUT
-    assert calls[1][1]["timeout"] == core.THUMB_RETRY_TIMEOUT
-    assert all(c[1]["creationflags"] == core.NO_WINDOW for c in calls)
+    assert calls[0][1]["timeout"] == media_tools_mod.THUMB_TIMEOUT
+    assert calls[1][1]["timeout"] == media_tools_mod.THUMB_RETRY_TIMEOUT
+    assert all(c[1]["creationflags"] == media_tools_mod.NO_WINDOW for c in calls)
 
 
 def test_the_video_thumbnail_without_ffmpeg_is_false_and_spawns_nothing(
         no_tools, monkeypatch, tmp_path):
     rec = _Rec(monkeypatch)
     assert g.make_video_thumbnail(tmp_path / "clip.mp4", tmp_path / "t.jpg") is False
-    assert core.video_poster_thumb(tmp_path / "clip.mp4", tmp_path / "t.jpg") is False
+    assert media_tools_mod.video_poster_thumb(tmp_path / "clip.mp4", tmp_path / "t.jpg") is False
     assert rec.calls == [] and not (tmp_path / "t.jpg").exists()
 
 
@@ -396,7 +397,7 @@ def test_the_two_old_duration_probes_agree_on_one_fixture(have_tools, monkeypatc
     unrounded measurement, since rounding is a thing a caller does where it can be seen.
     """
     _Rec(monkeypatch, stdout="6.283185\n")
-    ours = core.duration("clip.mp4")
+    ours = media_tools_mod.duration("clip.mp4")
     theirs = g.probe_duration("clip.mp4")
     assert ours == theirs == 6.283185
     assert round(ours, 2) == 6.28, "a caller that wants 2dp still gets them, at its own site"
@@ -416,7 +417,10 @@ def test_every_media_spawn_in_the_app_goes_through_the_seam():
     # literal is a call site that skipped the seam.
     pat = re.compile(r"""\[\s*["'](ffmpeg|ffprobe)["']""")
     offenders = []
-    for name in ("moonglade/backup.py", "moonglade/gallery.py"):
+    # every module of the package, so a section split out of backup or gallery stays covered
+    modules = sorted(p.relative_to(repo).as_posix() for p in (repo / "moonglade").glob("*.py"))
+    assert "moonglade/backup.py" in modules and "moonglade/gallery.py" in modules
+    for name in modules:
         src = io.open(repo / name, encoding="utf-8").read()
         for m in pat.finditer(src):
             offenders.append("{}:{}".format(name, src[:m.start()].count("\n") + 1))
@@ -438,8 +442,8 @@ def test_the_eof_frame_is_the_last_frame_even_on_a_clip_shorter_than_the_seek(
     white. The old "-sseof -0.15 -frames:v 1" clamped to the start of a 0.1 s clip and
     handed back the FIRST (black) frame."""
     from PIL import Image
-    monkeypatch.setattr(core, "ffmpeg_path", lambda: shutil.which("ffmpeg"))
-    monkeypatch.setattr(core, "ffprobe_path", lambda: shutil.which("ffprobe"))
+    monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: shutil.which("ffmpeg"))
+    monkeypatch.setattr(media_tools_mod, "ffprobe_path", lambda: shutil.which("ffprobe"))
     clip = tmp_path / "clip.mp4"
     dark = max(0.0, seconds - 0.04)
     made = subprocess.run(
@@ -450,6 +454,6 @@ def test_the_eof_frame_is_the_last_frame_even_on_a_clip_shorter_than_the_seek(
         stdin=subprocess.DEVNULL, capture_output=True, timeout=60)
     assert made.returncode == 0, made.stderr
     out = tmp_path / "last.png"
-    assert core.frame_at(str(clip), None, out) == str(out)
+    assert media_tools_mod.frame_at(str(clip), None, out) == str(out)
     px = Image.open(out).convert("L").getpixel((32, 32))
     assert px > 200, "the EOF frame is the clip's last (white) frame, got luma {}".format(px)

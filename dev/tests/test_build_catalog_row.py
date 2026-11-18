@@ -31,6 +31,8 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.conftest import login_test_client
+from moonglade import pixai_client as pixai_client_mod
+from moonglade import media_tools as media_tools_mod
 
 
 # --------------------------------------------------------------------------------------
@@ -310,8 +312,8 @@ def _stub_video_task(monkeypatch, out):
     monkeypatch.setattr(core, "media_file_gql", lambda s, m: {"fileUrl": "https://x/v.mp4"})
     monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(FM))
     monkeypatch.setattr(core, "resolve_media", lambda s, m: ("", {}))
-    monkeypatch.setattr(core, "video_poster_thumb", lambda *a, **k: None)
-    monkeypatch.setattr(core, "video_faststart", lambda p: None)
+    monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
+    monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
     monkeypatch.setattr(g, "make_thumbnail", lambda *a, **k: None)
     return path, result
 
@@ -492,7 +494,7 @@ def _stub_sync_videos(monkeypatch, out):
         return {"edges": [{"node": dict(SV_NODE)}], "pageInfo": {"hasPreviousPage": False}}
 
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "_client_of",
+    monkeypatch.setattr(pixai_client_mod, "_client_of",
                         lambda s: types.SimpleNamespace(user_id="u1"))
     monkeypatch.setattr(core, "gql", lambda s, v: {})
     monkeypatch.setattr(core, "find_connection", _find_connection)
@@ -502,8 +504,8 @@ def _stub_sync_videos(monkeypatch, out):
     monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(FM))
     monkeypatch.setattr(core, "download", lambda s, url, stem: ("ok", path))
     monkeypatch.setattr(core, "resolve_media", lambda s, m: ("", {}))
-    monkeypatch.setattr(core, "video_poster_thumb", lambda *a, **k: None)
-    monkeypatch.setattr(core, "video_faststart", lambda p: None)
+    monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
+    monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
     monkeypatch.setattr(g, "make_thumbnail", lambda *a, **k: None)
     return path, task
 

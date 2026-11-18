@@ -26,6 +26,10 @@ from moonglade import migrate as mmig
 from moonglade import paths
 from moonglade import settings as msettings
 from tests.conftest import first_party_sources
+from moonglade import about as about_mod
+from moonglade import mirror as mirror_mod
+from moonglade import achievements as achievements_mod
+from moonglade import branding as branding_mod
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -36,7 +40,7 @@ _REAL_LOCAL_DIR = paths.local_dir
 _REAL_OLD_APP_ROOT = mmig.old_app_root
 _REAL_LIBRARY_ANCHOR = paths.library_anchor
 _REAL_CORE_CONFIG_PATH = core._config_path
-_REAL_BRANDING_ROOT = g.branding_root
+_REAL_BRANDING_ROOT = branding_mod.branding_root
 _REAL_MANIFEST_PATH = ma.manifest_path
 
 
@@ -50,7 +54,7 @@ def real_paths(monkeypatch):
     monkeypatch.setattr(mmig, "old_app_root", _REAL_OLD_APP_ROOT)
     monkeypatch.setattr(paths, "library_anchor", _REAL_LIBRARY_ANCHOR)
     monkeypatch.setattr(core, "_config_path", _REAL_CORE_CONFIG_PATH)
-    monkeypatch.setattr(g, "branding_root", _REAL_BRANDING_ROOT)
+    monkeypatch.setattr(branding_mod, "branding_root", _REAL_BRANDING_ROOT)
     monkeypatch.setattr(ma, "manifest_path", _REAL_MANIFEST_PATH)
     monkeypatch.chdir(_REPO)        # every entry point runs from the app's folder
 
@@ -72,18 +76,18 @@ _TABLE = [
      lambda: (_REPO / "token.txt", Path("token.txt"))),
     ("this PC's folder", lambda: paths.local_dir(), lambda: _LOCAL),
     ("settings.json", lambda: paths.settings_path(), lambda: _LOCAL / "settings.json"),
-    ("the pack", lambda: g._container_path(), lambda: _LOCAL / "moonglade.mgpack"),
-    ("the pack's marker", lambda: ma._version_marker_path(g._container_path()),
+    ("the pack", lambda: branding_mod._container_path(), lambda: _LOCAL / "moonglade.mgpack"),
+    ("the pack's marker", lambda: ma._version_marker_path(branding_mod._container_path()),
      lambda: _LOCAL / "moonglade.mgpack.version"),
-    ("mirror_session.json", lambda: core._mirror_state_path(),
+    ("mirror_session.json", lambda: mirror_mod._mirror_state_path(),
      lambda: _LOCAL / "mirror_session.json"),
     ("the shortcut icons", lambda: paths.icons_dir(), lambda: _LOCAL / "icons"),
     ("the only-copy banners", lambda: paths.banners_dir(), lambda: _LOCAL / "banners"),
-    ("the only-copy banners, gallery", lambda: g.banner_keep_dir(), lambda: _LOCAL / "banners"),
+    ("the only-copy banners, gallery", lambda: branding_mod.banner_keep_dir(), lambda: _LOCAL / "banners"),
     ("the caches", lambda: paths.cache_dir(), lambda: _LOCAL / "cache"),
-    ("the badge thumbs", lambda: g.badge_cache_dir(_LIB), lambda: _LOCAL / "cache" / "badges"),
-    ("the feat masks", lambda: g.feat_mask_cache_dir(_LIB), lambda: _LOCAL / "cache" / "masks"),
-    ("the banner renders", lambda: g.banner_cache_dir(_LIB),
+    ("the badge thumbs", lambda: achievements_mod.badge_cache_dir(_LIB), lambda: _LOCAL / "cache" / "badges"),
+    ("the feat masks", lambda: branding_mod.feat_mask_cache_dir(_LIB), lambda: _LOCAL / "cache" / "masks"),
+    ("the banner renders", lambda: branding_mod.banner_cache_dir(_LIB),
      lambda: _LOCAL / "cache" / "banners"),
     ("the logs", lambda: paths.logs_dir(), lambda: _LOCAL / "logs"),
     ("the app's log", lambda: mlog.log_path(), lambda: _LOCAL / "logs" / "moonglade.log"),
@@ -106,15 +110,15 @@ _TABLE = [
      lambda: _LIB / "_moonglade" / ".journal.json"),
     # where an install before this layout kept its machine files: what the move brings across
     ("the app folder before the move", lambda: mmig.old_app_root(), lambda: _REPO),
-    ("the art tree", lambda: g.branding_root(), lambda: _REPO / "0x676F6F6473"),
-    ("the art tree, helper", lambda: paths.art_root(), lambda: _REPO / g._GOODS_ROOT_NAME),
-    ("the legacy art folder", lambda: g.branding_root().parent / "branding",
+    ("the art tree", lambda: branding_mod.branding_root(), lambda: _REPO / "0x676F6F6473"),
+    ("the art tree, helper", lambda: paths.art_root(), lambda: _REPO / branding_mod._GOODS_ROOT_NAME),
+    ("the legacy art folder", lambda: branding_mod.branding_root().parent / "branding",
      lambda: _REPO / "branding"),
     # The one location that moved in 3.20: the manifest is committed with the code.
     ("the pack manifest", lambda: ma.manifest_path(),
      lambda: _REPO / "moonglade" / "manifest.json"),
-    ("wiki/", lambda: g.wiki_dir(), lambda: _REPO / "wiki"),
-    ("CHANGELOG.md", lambda: g.changelog_path(), lambda: _REPO / "CHANGELOG.md"),
+    ("wiki/", lambda: about_mod.wiki_dir(), lambda: _REPO / "wiki"),
+    ("CHANGELOG.md", lambda: about_mod.changelog_path(), lambda: _REPO / "CHANGELOG.md"),
     ("gallery/dist", lambda: paths.gallery_dist(), lambda: _REPO / "gallery" / "dist"),
     ("loom/", lambda: paths.loom_dir(), lambda: _REPO / "loom"),
     ("loom/dist", lambda: paths.loom_dist(), lambda: _REPO / "loom" / "dist"),
@@ -138,7 +142,7 @@ def test_every_path_resolves_where_it_did_before(real_paths, what, ask, before):
 def test_the_shipped_files_are_really_there(real_paths):
     """The table's tracked entries name files a checkout has, so a typo in a helper cannot
     hide behind a path that merely looks right."""
-    for p in (ma.manifest_path(), g.wiki_dir(), g.changelog_path(), paths.loom_dir(),
+    for p in (ma.manifest_path(), about_mod.wiki_dir(), about_mod.changelog_path(), paths.loom_dir(),
               paths.static_dir(), paths.requirements_path(), paths.launcher_path()):
         assert p.exists(), p
 
@@ -180,24 +184,24 @@ def test_machine_files_follow_local_dir_not_the_art_tree(monkeypatch, tmp_path):
     """The art tree and the machine files are separate concepts: the art tree sits at the app
     root and the machine files in local/, and either can move without the other."""
     art, local = tmp_path / "elsewhere" / "art", tmp_path / "local"
-    monkeypatch.setattr(g, "branding_root", lambda: art)
+    monkeypatch.setattr(branding_mod, "branding_root", lambda: art)
     monkeypatch.setattr(paths, "local_dir", lambda: local)
     monkeypatch.setattr(paths, "local_path", lambda name: local / name)
-    assert g._container_path() == local / "moonglade.mgpack"
+    assert branding_mod._container_path() == local / "moonglade.mgpack"
     assert paths.settings_path() == local / "settings.json"
     assert paths.icons_dir() == local / "icons"
-    assert g.badge_cache_dir() == local / "cache" / "badges"
+    assert achievements_mod.badge_cache_dir() == local / "cache" / "badges"
     # ...and the art tree itself still follows branding_root().
-    assert g._role_dir("marks").is_relative_to(art)
+    assert branding_mod._role_dir("marks").is_relative_to(art)
 
 
 def test_the_branding_picks_live_in_settings_json(tmp_path):
     """The mark, its animation and the slot picks are settings.json's branding (conftest
     pins local_dir() to tmp_path), never a file beside the art tree."""
-    g.save_branding(tmp_path, dict(g._BRAND_DEFAULTS, anim="glow"))
-    g.save_slot_active(tmp_path, {"banner_main": "abc", "banner_login": None})
+    branding_mod.save_branding(tmp_path, dict(branding_mod._BRAND_DEFAULTS, anim="glow"))
+    branding_mod.save_slot_active(tmp_path, {"banner_main": "abc", "banner_login": None})
     b = msettings.branding()
-    assert b["mark"] == g._BRAND_DEFAULTS["mark"] and b["animation"]["anim"] == "glow"
+    assert b["mark"] == branding_mod._BRAND_DEFAULTS["mark"] and b["animation"]["anim"] == "glow"
     assert b["slots"] == {"banner_main": "abc"}
     assert not (tmp_path / "branding.json").exists()
     assert not (tmp_path / "branding_slots.json").exists()
@@ -210,20 +214,20 @@ def test_shortcut_icons_are_written_into_local_icons(monkeypatch, tmp_path):
     from moonglade import container as mc
     art, local = tmp_path / "elsewhere" / "art", tmp_path / "local"
     local.mkdir()
-    monkeypatch.setattr(g, "branding_root", lambda: art)
+    monkeypatch.setattr(branding_mod, "branding_root", lambda: art)
     monkeypatch.setattr(paths, "local_dir", lambda: local)
     monkeypatch.setattr(paths, "local_path", lambda name: local / name)
-    mc.write_container(g._container_path(), {
-        g._role_rel("marks", "mark_4.ico"): b"\x00\x00\x01\x00ico"}, {})
-    g._container_cache.update(path=None, mtime=None, box=None)
+    mc.write_container(branding_mod._container_path(), {
+        branding_mod._role_rel("marks", "mark_4.ico"): b"\x00\x00\x01\x00ico"}, {})
+    branding_mod._container_cache.update(path=None, mtime=None, box=None)
     try:
-        ico = g._mark_ico_path("mark_4")
-        loose = art / g._role_rel("marks", "mark_5.ico")
+        ico = branding_mod._mark_ico_path("mark_4")
+        loose = art / branding_mod._role_rel("marks", "mark_5.ico")
         loose.parent.mkdir(parents=True)
         loose.write_bytes(b"loose cut")
-        ico5 = g._mark_ico_path("mark_5")
+        ico5 = branding_mod._mark_ico_path("mark_5")
     finally:
-        g._container_cache.update(path=None, mtime=None, box=None)
+        branding_mod._container_cache.update(path=None, mtime=None, box=None)
     assert ico == local / "icons" / "mark_4.ico" == paths.icons_dir() / "mark_4.ico"
     assert ico.read_bytes() == b"\x00\x00\x01\x00ico"
     assert ico5 == local / "icons" / "mark_5.ico" and ico5.read_bytes() == b"loose cut"

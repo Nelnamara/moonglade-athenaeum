@@ -12,7 +12,7 @@ Tier enforcement (login-required) is asserted by dev/tests/test_route_tiers.py.
 import json
 
 from moonglade import paths
-from moonglade.gallery import _account_key
+from moonglade.account_prefs import _account_key
 from tests.conftest import login_client, with_csrf
 
 

@@ -23,6 +23,8 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client, login_test_client
+from moonglade import achievements as achievements_mod
+from moonglade import branding as branding_mod
 
 # A real (tiny) PNG so PIL-facing paths get decodable bytes.
 PNG_1PX = bytes.fromhex(
@@ -39,9 +41,9 @@ def _fresh_seal_cache():
     """The earned-ids seal cache is module-global (one install per real process);
     the suite runs MANY installs per process, and a previous test's earns must
     not leak an allow into this one's fresh tmp_path."""
-    g._earned_ids_cache.update(t=0.0, ids=frozenset())
+    branding_mod._earned_ids_cache.update(t=0.0, ids=frozenset())
     yield
-    g._earned_ids_cache.update(t=0.0, ids=frozenset())
+    branding_mod._earned_ids_cache.update(t=0.0, ids=frozenset())
 
 
 def _client(tmp_path):
@@ -53,7 +55,7 @@ def _client(tmp_path):
 def _seed(rel, data=b"\x89PNG fake"):
     """A loose file at a branding_root()-relative rel (coded or not -- the
     caller decides; that decision is the thing under test here)."""
-    p = g.branding_root() / rel
+    p = branding_mod.branding_root() / rel
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(data)
     return p
@@ -63,8 +65,8 @@ def _build_box(assets):
     """(Re)build the isolated install's art pack and drop the read cache
     so the new content is seen immediately (the cache keys on mtime, which can
     collide with the conftest seed's within the filesystem's resolution)."""
-    mc.write_container(g._container_path(), assets, {})
-    g._container_cache.update(path=None, mtime=None, box=None)
+    mc.write_container(branding_mod._container_path(), assets, {})
+    branding_mod._container_cache.update(path=None, mtime=None, box=None)
 
 
 def _banner_png(w=400, h=100):
@@ -81,41 +83,41 @@ def _banner_png(w=400, h=100):
 def test_translation_flats_pass_through():
     """Rule 1: the three banner flats stay top-level at the coded root."""
     for flat in ("banner.png", "login-banner.png", "banner-loom.png"):
-        assert g._public_rel_to_coded(flat) == flat, flat
+        assert branding_mod._public_rel_to_coded(flat) == flat, flat
 
 
 def test_translation_system_files():
     """Rule 2: the bare top-level chrome names land in the system role."""
     for name in ("logo.png", "favicon.png", "favicon.ico", "nel_spinner.png",
                  "login_nel.webp", "login_nel.png"):
-        assert g._public_rel_to_coded(name) == g._role_rel("system", name), name
+        assert branding_mod._public_rel_to_coded(name) == branding_mod._role_rel("system", name), name
 
 
 def test_translation_ee_prefix_is_top_level_only():
     """Rule 3: bare ee_* -> starfall; a NESTED ee_* is not this rule's business
     (an unknown-dir one falls through unmatched)."""
-    assert (g._public_rel_to_coded("ee_nelstarfall.png")
-            == g._role_rel("starfall", "ee_nelstarfall.png"))
-    assert g._public_rel_to_coded("not_a_dir/ee_x.png") == "not_a_dir/ee_x.png"
+    assert (branding_mod._public_rel_to_coded("ee_nelstarfall.png")
+            == branding_mod._role_rel("starfall", "ee_nelstarfall.png"))
+    assert branding_mod._public_rel_to_coded("not_a_dir/ee_x.png") == "not_a_dir/ee_x.png"
 
 
 def test_translation_bridge_family():
     """Rule 4: emotion/ peels off, preset_* files land in enhance, the rest is
     plain bridge -- the front-end asks for presets FLAT under bridge/."""
-    assert (g._public_rel_to_coded("bridge/emotion/happy.png")
-            == g._role_rel("emotion", "happy.png"))
-    assert (g._public_rel_to_coded("bridge/preset_soft.png")
-            == g._role_rel("enhance", "preset_soft.png"))
-    assert (g._public_rel_to_coded("bridge/six.png")
-            == g._role_rel("bridge", "six.png"))
+    assert (branding_mod._public_rel_to_coded("bridge/emotion/happy.png")
+            == branding_mod._role_rel("emotion", "happy.png"))
+    assert (branding_mod._public_rel_to_coded("bridge/preset_soft.png")
+            == branding_mod._role_rel("enhance", "preset_soft.png"))
+    assert (branding_mod._public_rel_to_coded("bridge/six.png")
+            == branding_mod._role_rel("bridge", "six.png"))
 
 
 def test_translation_mascots_split():
     """Rule 5: mascots/ach/ is its own role; the rest of mascots/ is plain."""
-    assert (g._public_rel_to_coded("mascots/ach/first-light.png")
-            == g._role_rel("mascots_ach", "first-light.png"))
-    assert (g._public_rel_to_coded("mascots/nel_narrator.png")
-            == g._role_rel("mascots", "nel_narrator.png"))
+    assert (branding_mod._public_rel_to_coded("mascots/ach/first-light.png")
+            == branding_mod._role_rel("mascots_ach", "first-light.png"))
+    assert (branding_mod._public_rel_to_coded("mascots/nel_narrator.png")
+            == branding_mod._role_rel("mascots", "nel_narrator.png"))
 
 
 def test_translation_single_segment_roles():
@@ -123,9 +125,9 @@ def test_translation_single_segment_roles():
     the remainder (nested or not) carried through verbatim."""
     for role in ("marks", "badges", "rewards", "mystery", "banner_main",
                  "banner_login", "banner_loom", "earned_banners", "training"):
-        assert (g._public_rel_to_coded(role + "/f.png")
-                == g._role_rel(role, "f.png")), role
-    assert g._public_rel_to_coded("marks/sub/f.png") == g._role_rel("marks", "sub/f.png")
+        assert (branding_mod._public_rel_to_coded(role + "/f.png")
+                == branding_mod._role_rel(role, "f.png")), role
+    assert branding_mod._public_rel_to_coded("marks/sub/f.png") == branding_mod._role_rel("marks", "sub/f.png")
 
 
 def test_training_is_a_coded_folder_of_its_own():
@@ -133,9 +135,9 @@ def test_training_is_a_coded_folder_of_its_own():
     under the shared middle like every chrome role, nested in no other role's folder and
     holding none (a prefix-judged seal would hand a nested folder its parent's gate), and
     named apart from every other code even case-blind (the tree lives on Windows)."""
-    code = g.ROLE_CODE["training"]
-    assert code.startswith(g._GOODS_MID + "/") and code.count("/") == g._GOODS_MID.count("/") + 1
-    for role, other in g.ROLE_CODE.items():
+    code = branding_mod.ROLE_CODE["training"]
+    assert code.startswith(branding_mod._GOODS_MID + "/") and code.count("/") == branding_mod._GOODS_MID.count("/") + 1
+    for role, other in branding_mod.ROLE_CODE.items():
         if role == "training":
             continue
         assert code.lower() != other.lower(), role
@@ -149,7 +151,7 @@ def test_the_packs_goal_pictures_serve_from_training(tmp_path):
     tile falls through to the app's own picture."""
     cli = _client(tmp_path)
     assert cli.get("/branding/training/goal_character.png").status_code == 404
-    _build_box({g._role_rel("training", "goal_character.png"): PNG_1PX})
+    _build_box({branding_mod._role_rel("training", "goal_character.png"): PNG_1PX})
     r = cli.get("/branding/training/goal_character.png")
     assert r.status_code == 200 and r.data == PNG_1PX
 
@@ -159,7 +161,7 @@ def test_translation_unmatched_pass_through():
     back untouched."""
     for rel in ("_thumbs/x.png", "sfx/chime.mp3", "whatever.png",
                 "unknown_dir/f.png"):
-        assert g._public_rel_to_coded(rel) == rel, rel
+        assert branding_mod._public_rel_to_coded(rel) == rel, rel
 
 
 def test_translation_raw_coded_paths_pass_through_and_stay_judged(monkeypatch):
@@ -167,15 +169,15 @@ def test_translation_raw_coded_paths_pass_through_and_stay_judged(monkeypatch):
     and therefore faces the exact same seal verdict the public form would.
     Translation must never be the thing standing between a guesser and sealed
     art."""
-    monkeypatch.setattr(g, "_ach_ids", lambda: frozenset({"first-light"}))
-    monkeypatch.setattr(g, "_moment_ach", lambda: {"starfall": "starfall-feat"})
+    monkeypatch.setattr(achievements_mod, "_ach_ids", lambda: frozenset({"first-light"}))
+    monkeypatch.setattr(achievements_mod, "_moment_ach", lambda: {"starfall": "starfall-feat"})
     for coded, verdict in (
-            (g._role_rel("badges", "first-light.png"), ("earned", "first-light")),
-            (g._role_rel("rewards", "secret.png"), ("deny", None)),
-            (g._role_rel("starfall", "ee_nelstarfall.png"),
+            (branding_mod._role_rel("badges", "first-light.png"), ("earned", "first-light")),
+            (branding_mod._role_rel("rewards", "secret.png"), ("deny", None)),
+            (branding_mod._role_rel("starfall", "ee_nelstarfall.png"),
              ("earned", "starfall-feat"))):
-        assert g._public_rel_to_coded(coded) == coded, coded
-        assert g._seal_rule(g._public_rel_to_coded(coded)) == verdict, coded
+        assert branding_mod._public_rel_to_coded(coded) == coded, coded
+        assert branding_mod._seal_rule(branding_mod._public_rel_to_coded(coded)) == verdict, coded
 
 
 def test_route_judges_direct_coded_probes(tmp_path, monkeypatch):
@@ -184,18 +186,18 @@ def test_route_judges_direct_coded_probes(tmp_path, monkeypatch):
     serves once (and only once) its achievement is earned -- the load-bearing
     half of the seal."""
     cli = _client(tmp_path)
-    _seed(g._role_rel("rewards", "secret.png"))
-    assert cli.get("/branding/" + g._role_rel("rewards", "secret.png")).status_code == 404
-    _seed(g._role_rel("rewards", "claim.png"), b"CLAIM ICON")
-    r = cli.get("/branding/" + g._role_rel("rewards", "claim.png"))
+    _seed(branding_mod._role_rel("rewards", "secret.png"))
+    assert cli.get("/branding/" + branding_mod._role_rel("rewards", "secret.png")).status_code == 404
+    _seed(branding_mod._role_rel("rewards", "claim.png"), b"CLAIM ICON")
+    r = cli.get("/branding/" + branding_mod._role_rel("rewards", "claim.png"))
     assert r.status_code == 200 and r.data == b"CLAIM ICON"
-    _seed(g._role_rel("starfall", "ee_nelstarfall.png"), b"STARFALL BYTES")
-    monkeypatch.setattr(g, "_moment_ach", lambda: {"starfall": "starfall-feat"})
-    monkeypatch.setattr(g, "_earned_achievement_ids", lambda *a, **k: frozenset())
-    assert cli.get("/branding/" + g._role_rel("starfall", "ee_nelstarfall.png")).status_code == 404
-    monkeypatch.setattr(g, "_earned_achievement_ids",
+    _seed(branding_mod._role_rel("starfall", "ee_nelstarfall.png"), b"STARFALL BYTES")
+    monkeypatch.setattr(achievements_mod, "_moment_ach", lambda: {"starfall": "starfall-feat"})
+    monkeypatch.setattr(branding_mod, "_earned_achievement_ids", lambda *a, **k: frozenset())
+    assert cli.get("/branding/" + branding_mod._role_rel("starfall", "ee_nelstarfall.png")).status_code == 404
+    monkeypatch.setattr(branding_mod, "_earned_achievement_ids",
                         lambda *a, **k: frozenset({"starfall-feat"}))
-    r = cli.get("/branding/" + g._role_rel("starfall", "ee_nelstarfall.png"))
+    r = cli.get("/branding/" + branding_mod._role_rel("starfall", "ee_nelstarfall.png"))
     assert r.status_code == 200 and r.data == b"STARFALL BYTES"
 
 
@@ -206,10 +208,10 @@ def test_seal_table_round_trip(monkeypatch):
     ROLE_CODE -- a retyped prefix is how a seal silently fails open. The moment
     buckets resolve their feat through the roster's `moment` flag (stubbed here --
     the real roster's flags are proved in dev/tests/test_moment_serve.py)."""
-    monkeypatch.setattr(g, "_ach_ids", lambda: frozenset({"first-light"}))
-    monkeypatch.setattr(g, "_moment_ach",
+    monkeypatch.setattr(achievements_mod, "_ach_ids", lambda: frozenset({"first-light"}))
+    monkeypatch.setattr(achievements_mod, "_moment_ach",
                         lambda: {"starfall": "starfall-feat", "keyturn": "keyturn-feat"})
-    rr = g._role_rel
+    rr = branding_mod._role_rel
     cases = [
         # the D8 exception: the reward UI icons stay open (the header's inbox icon too)
         (rr("rewards", "claim.png"), ("open", None)),
@@ -217,7 +219,7 @@ def test_seal_table_round_trip(monkeypatch):
         (rr("rewards", "inbox.png"), ("open", None)),
         # ...while the rest of rewards/ (and the folder itself) denies
         (rr("rewards", "anything-else.png"), ("deny", None)),
-        (g.ROLE_CODE["rewards"], ("deny", None)),
+        (branding_mod.ROLE_CODE["rewards"], ("deny", None)),
         # _thumbs is the badge-thumb cache: never served here
         ("_thumbs/x.png", ("deny", None)),
         ("_thumbs", ("deny", None)),
@@ -237,7 +239,7 @@ def test_seal_table_round_trip(monkeypatch):
         # earned banners: great_library gated, the rest (void_banner) sealed shut
         (rr("earned_banners", "great_library.png"), ("earned", "the-great-library")),
         (rr("earned_banners", "void_banner.png"), ("deny", None)),
-        (g.ROLE_CODE["earned_banners"], ("deny", None)),
+        (branding_mod.ROLE_CODE["earned_banners"], ("deny", None)),
         # everything else is the app's default dress: open
         (rr("mystery", "mask.png"), ("open", None)),
         (rr("system", "logo.png"), ("open", None)),
@@ -251,7 +253,7 @@ def test_seal_table_round_trip(monkeypatch):
         ("banner.png", ("open", None)),
     ]
     for rel, want in cases:
-        assert g._seal_rule(rel) == want, rel
+        assert branding_mod._seal_rule(rel) == want, rel
 
 
 def test_seal_is_case_insensitive_no_leak(monkeypatch):
@@ -260,15 +262,15 @@ def test_seal_is_case_insensitive_no_leak(monkeypatch):
     sealed path must NEVER fall through to the fail-open ('open', None). The
     reported hole: GET /branding/mascots/ACH/<id> translated to A02/ACH/... and
     dodged a case-sensitive A02/ach/ prefix check, and the FS served it anyway."""
-    monkeypatch.setattr(g, "_ach_ids", lambda: frozenset({"first-light"}))
-    monkeypatch.setattr(g, "_moment_ach",
+    monkeypatch.setattr(achievements_mod, "_ach_ids", lambda: frozenset({"first-light"}))
+    monkeypatch.setattr(achievements_mod, "_moment_ach",
                         lambda: {"starfall": "starfall-feat", "keyturn": "keyturn-feat"})
-    rr = g._role_rel
+    rr = branding_mod._role_rel
 
     # (a) the exact reported vector, end to end: public mascots/<case>/id -> seal
     for pub in ("mascots/ach/first-light.webp", "mascots/ACH/first-light.webp",
                 "mascots/Ach/first-light.webp"):
-        assert g._seal_rule(g._public_rel_to_coded(pub)) == ("earned", "first-light"), pub
+        assert branding_mod._seal_rule(branding_mod._public_rel_to_coded(pub)) == ("earned", "first-light"), pub
 
     # (b) case-variants applied straight to the coded rel, for every sealed bucket:
     # upper-case the folder segments (mimicking a request the FS would still
@@ -287,9 +289,9 @@ def test_seal_is_case_insensitive_no_leak(monkeypatch):
         (rr("keyturn", "ee_keyturn_clip.mp4"), ("earned", "keyturn-feat")),
     ]
     for rel, want in sealed:
-        assert g._seal_rule(rel) == want, rel                     # canonical
-        assert g._seal_rule(upper_head(rel)) == want, rel         # mixed-case folders
-        assert g._seal_rule(rel.upper()) != ("open", None), rel   # never leaks fully-cased
+        assert branding_mod._seal_rule(rel) == want, rel                     # canonical
+        assert branding_mod._seal_rule(upper_head(rel)) == want, rel         # mixed-case folders
+        assert branding_mod._seal_rule(rel.upper()) != ("open", None), rel   # never leaks fully-cased
 
 
 # ---- the flat-default fallback (translation rule 8, a SERVING rule) ---------
@@ -300,9 +302,9 @@ def test_flats_fall_back_to_the_shipped_slot_defaults(tmp_path):
     filename is HYPHENATED -- the one the contract calls out by name)."""
     cli = _client(tmp_path)
     _build_box({
-        g._role_rel("banner_main", "banner_main.png"): b"SHIPPED MAIN",
-        g._role_rel("banner_login", "banner_login.png"): b"SHIPPED LOGIN",
-        g._role_rel("banner_loom", "banner-loom.png"): b"SHIPPED LOOM",
+        branding_mod._role_rel("banner_main", "banner_main.png"): b"SHIPPED MAIN",
+        branding_mod._role_rel("banner_login", "banner_login.png"): b"SHIPPED LOGIN",
+        branding_mod._role_rel("banner_loom", "banner-loom.png"): b"SHIPPED LOOM",
     })
     for url, want in (("banner.png", b"SHIPPED MAIN"),
                       ("login-banner.png", b"SHIPPED LOGIN"),
@@ -318,8 +320,8 @@ def test_this_installs_render_wins_over_the_shipped_default(tmp_path):
     there; a file parked at the coded root is not a render and is covered by
     dev/tests/test_branding_tree_rules.py."""
     cli = _client(tmp_path)
-    _build_box({g._role_rel("banner_main", "banner_main.png"): b"SHIPPED MAIN"})
-    cdir = g.banner_cache_dir(tmp_path)
+    _build_box({branding_mod._role_rel("banner_main", "banner_main.png"): b"SHIPPED MAIN"})
+    cdir = branding_mod.banner_cache_dir(tmp_path)
     cdir.mkdir(parents=True, exist_ok=True)
     (cdir / "banner.png").write_bytes(b"MY RENDER")
     r = cli.get("/branding/banner.png")
@@ -340,7 +342,7 @@ def test_flat_404s_when_neither_loose_nor_default_exists(tmp_path):
 # migrate FROM.
 
 def test_migration_moves_role_dirs_and_top_level_files(tmp_path, monkeypatch):
-    monkeypatch.setattr(g, "branding_root", lambda: tmp_path / "goodsroot")
+    monkeypatch.setattr(branding_mod, "branding_root", lambda: tmp_path / "goodsroot")
     old = tmp_path / "branding"
     seeds = {
         "banner_main/upload.png": b"MAIN UPLOAD",
@@ -359,24 +361,24 @@ def test_migration_moves_role_dirs_and_top_level_files(tmp_path, monkeypatch):
         p = old / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(data)
-    g._migrate_legacy_branding_root()
+    branding_mod._migrate_legacy_branding_root()
     # every recognized file landed in its coded home, bytes intact
-    assert (g._role_dir("banner_main") / "upload.png").read_bytes() == b"MAIN UPLOAD"
-    assert (g._role_dir("banner_login") / "login.png").read_bytes() == b"LOGIN UPLOAD"
-    assert (g._role_dir("marks") / "marks.json").read_bytes() == b'{"marks": []}'
-    assert (g._role_dir("marks") / "custom-x.png").read_bytes() == b"CUSTOM MARK"
-    assert (g._role_dir("mascots") / "nel_narrator.png").read_bytes() == b"NARRATOR"
+    assert (branding_mod._role_dir("banner_main") / "upload.png").read_bytes() == b"MAIN UPLOAD"
+    assert (branding_mod._role_dir("banner_login") / "login.png").read_bytes() == b"LOGIN UPLOAD"
+    assert (branding_mod._role_dir("marks") / "marks.json").read_bytes() == b'{"marks": []}'
+    assert (branding_mod._role_dir("marks") / "custom-x.png").read_bytes() == b"CUSTOM MARK"
+    assert (branding_mod._role_dir("mascots") / "nel_narrator.png").read_bytes() == b"NARRATOR"
     # the recursive mascots move lands the old ach/ nesting under the coded
     # ach folder (mascots_ach nests inside mascots in the map itself)
-    assert (g._role_dir("mascots_ach") / "first-light.png").read_bytes() == b"POSE"
-    assert (g._role_dir("rewards") / "claim.png").read_bytes() == b"CLAIM"
-    assert (g.branding_root() / "banner.png").read_bytes() == b"FLAT"
-    assert (g._role_dir("system") / "logo.png").read_bytes() == b"LOGO"
-    assert (g._role_dir("starfall") / "ee_star.png").read_bytes() == b"STAR"
+    assert (branding_mod._role_dir("mascots_ach") / "first-light.png").read_bytes() == b"POSE"
+    assert (branding_mod._role_dir("rewards") / "claim.png").read_bytes() == b"CLAIM"
+    assert (branding_mod.branding_root() / "banner.png").read_bytes() == b"FLAT"
+    assert (branding_mod._role_dir("system") / "logo.png").read_bytes() == b"LOGO"
+    assert (branding_mod._role_dir("starfall") / "ee_star.png").read_bytes() == b"STAR"
     # unrecognized stays exactly where it was; nothing was deleted anywhere
     assert (old / "README.txt").read_bytes() == b"old breadcrumb"
     all_files = [p for p in tmp_path.rglob("*") if p.is_file()
-                 and p != g._container_path()]     # the conftest roster seed
+                 and p != branding_mod._container_path()]     # the conftest roster seed
     assert sorted(p.read_bytes() for p in all_files) == sorted(seeds.values())
     # emptied role dirs are swept; the old root survives (README kept it)
     assert not (old / "banner_main").exists()
@@ -385,28 +387,28 @@ def test_migration_moves_role_dirs_and_top_level_files(tmp_path, monkeypatch):
 
 
 def test_migration_collision_skips_source_intact_and_second_run_noop(tmp_path, monkeypatch):
-    monkeypatch.setattr(g, "branding_root", lambda: tmp_path / "goodsroot")
+    monkeypatch.setattr(branding_mod, "branding_root", lambda: tmp_path / "goodsroot")
     old = tmp_path / "branding"
     (old / "marks").mkdir(parents=True)
     (old / "marks" / "custom-x.png").write_bytes(b"SOURCE")
-    dst = g._role_dir("marks") / "custom-x.png"
+    dst = branding_mod._role_dir("marks") / "custom-x.png"
     dst.parent.mkdir(parents=True)
     dst.write_bytes(b"ALREADY THERE")
-    g._migrate_legacy_branding_root()
+    branding_mod._migrate_legacy_branding_root()
     # destination never overwritten; the source stays put (nothing deleted)
     assert dst.read_bytes() == b"ALREADY THERE"
     assert (old / "marks" / "custom-x.png").read_bytes() == b"SOURCE"
     # a second run changes NOTHING -- same skip, same tree
     snapshot = sorted((p.relative_to(tmp_path).as_posix(), p.read_bytes())
                       for p in tmp_path.rglob("*") if p.is_file())
-    g._migrate_legacy_branding_root()
+    branding_mod._migrate_legacy_branding_root()
     assert sorted((p.relative_to(tmp_path).as_posix(), p.read_bytes())
                   for p in tmp_path.rglob("*") if p.is_file()) == snapshot
 
 
 def test_migration_is_a_noop_on_fresh_installs(tmp_path, monkeypatch):
-    monkeypatch.setattr(g, "branding_root", lambda: tmp_path / "goodsroot")
-    g._migrate_legacy_branding_root()      # no old root at all: must not raise
+    monkeypatch.setattr(branding_mod, "branding_root", lambda: tmp_path / "goodsroot")
+    branding_mod._migrate_legacy_branding_root()      # no old root at all: must not raise
     assert not (tmp_path / "branding").exists()
     assert not (tmp_path / "goodsroot").exists()   # doesn't invent the coded root either
 
@@ -415,8 +417,8 @@ def test_migration_is_a_noop_on_fresh_installs(tmp_path, monkeypatch):
 
 def test_earned_banner_pick_is_server_gated(tmp_path, monkeypatch):
     cli = _client(tmp_path)
-    _build_box({g._role_rel("earned_banners", "great_library.png"): _banner_png()})
-    monkeypatch.setattr(g, "_mark_earned", lambda *a, **k: False)
+    _build_box({branding_mod._role_rel("earned_banners", "great_library.png"): _banner_png()})
+    monkeypatch.setattr(branding_mod, "_mark_earned", lambda *a, **k: False)
     # the list: one entry (void_banner deliberately absent), public role URL
     d = cli.get("/api/branding/banners/earned").get_json()
     assert d == {"banners": [{"id": "great_library",
@@ -426,24 +428,24 @@ def test_earned_banner_pick_is_server_gated(tmp_path, monkeypatch):
     # locked -> 403, and no render gets written
     r = cli.post("/api/branding/banner/earned", json={"id": "great_library"})
     assert r.status_code == 403
-    assert not (g.banner_cache_dir(tmp_path) / "banner.png").exists()
+    assert not (branding_mod.banner_cache_dir(tmp_path) / "banner.png").exists()
     # unknown ids (void_banner included -- it is NOT wired) -> 400
     assert cli.post("/api/branding/banner/earned",
                     json={"id": "void_banner"}).status_code == 400
     assert cli.post("/api/branding/banner/earned", json={}).status_code == 400
     # earned -> the sealed bytes go through the real banner pipeline
-    monkeypatch.setattr(g, "_mark_earned", lambda *a, **k: True)
+    monkeypatch.setattr(branding_mod, "_mark_earned", lambda *a, **k: True)
     d = cli.get("/api/branding/banners/earned").get_json()
     assert d["banners"][0]["earned"] is True
     r = cli.post("/api/branding/banner/earned", json={"id": "great_library"})
     assert r.status_code == 200 and r.get_json() == {"ok": True}
-    flat = g.banner_cache_dir(tmp_path) / "banner.png"
+    flat = branding_mod.banner_cache_dir(tmp_path) / "banner.png"
     assert flat.is_file()
     from PIL import Image
     assert Image.open(flat).size == (1920, 480)    # banner_main's canonical cut
     # ...and the render says where it came from, which is what stops any later
     # pass re-rendering banner_main's slot pick over the applied banner.
-    assert g._read_banner_record(tmp_path, "banner.png") == {
+    assert branding_mod._read_banner_record(tmp_path, "banner.png") == {
         "kind": "earned", "banner_id": "great_library"}
 
 
@@ -451,12 +453,12 @@ def test_earned_banner_public_url_is_seal_gated(tmp_path, monkeypatch):
     """The png URL the list hands out is itself sealed: 404 until earned, the
     real bytes after -- and void_banner never serves either way."""
     cli = _client(tmp_path)
-    _build_box({g._role_rel("earned_banners", "great_library.png"): b"GL ART",
-                g._role_rel("earned_banners", "void_banner.png"): b"VOID ART"})
-    monkeypatch.setattr(g, "_earned_achievement_ids", lambda *a, **k: frozenset())
+    _build_box({branding_mod._role_rel("earned_banners", "great_library.png"): b"GL ART",
+                branding_mod._role_rel("earned_banners", "void_banner.png"): b"VOID ART"})
+    monkeypatch.setattr(branding_mod, "_earned_achievement_ids", lambda *a, **k: frozenset())
     assert cli.get("/branding/earned_banners/great_library.png").status_code == 404
     assert cli.get("/branding/earned_banners/void_banner.png").status_code == 404
-    monkeypatch.setattr(g, "_earned_achievement_ids",
+    monkeypatch.setattr(branding_mod, "_earned_achievement_ids",
                         lambda *a, **k: frozenset({"the-great-library"}))
     r = cli.get("/branding/earned_banners/great_library.png")
     assert r.status_code == 200 and r.data == b"GL ART"
@@ -471,21 +473,21 @@ def test_breadcrumb_materialized_from_the_sealed_asset(tmp_path):
     exact content -- and the coded empties for all six discovery roles exist,
     while the old root-level README is no longer written."""
     crumb = b"cryptic nel ascii art\nMaybe something goes in here.\n"
-    _build_box({g._role_rel("breadcrumb", "README.txt"): crumb})
-    g.ensure_branding_discovery_tree()
-    assert (g._role_dir("breadcrumb") / "README.txt").read_bytes() == crumb
+    _build_box({branding_mod._role_rel("breadcrumb", "README.txt"): crumb})
+    branding_mod.ensure_branding_discovery_tree()
+    assert (branding_mod._role_dir("breadcrumb") / "README.txt").read_bytes() == crumb
     for slot in ("banner_main", "banner_login", "banner_loom",
                  "mascots", "rewards", "marks"):
-        assert g._role_dir(slot).is_dir(), slot
-    assert not (g.branding_root() / "README.txt").exists()
+        assert branding_mod._role_dir(slot).is_dir(), slot
+    assert not (branding_mod.branding_root() / "README.txt").exists()
 
 
 def test_breadcrumb_falls_back_to_plain_text_without_the_asset(tmp_path):
     """A container-less (or crumb-less) install still gets a breadcrumb -- the
     unspoilery one-liner."""
-    g.ensure_branding_discovery_tree()
-    readme = g._role_dir("breadcrumb") / "README.txt"
-    assert readme.read_text(encoding="utf-8") == g._BRANDING_README
+    branding_mod.ensure_branding_discovery_tree()
+    readme = branding_mod._role_dir("breadcrumb") / "README.txt"
+    assert readme.read_text(encoding="utf-8") == branding_mod._BRANDING_README
 
 
 # ---- the served-shell tab icon: /branding/favicon.png (fix-favicon) ---------
@@ -505,7 +507,7 @@ def test_favicon_png_link_target_serves_200_image_public(tmp_path):
         _row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     # favicon ships as favicon.png; seed it loose at its coded system rel -- loose
     # path == container key, so this is exactly what the shipped container answers.
-    _seed(g._role_rel("system", "favicon.png"), PNG_1PX)
+    _seed(branding_mod._role_rel("system", "favicon.png"), PNG_1PX)
 
     anon = g.create_app(tmp_path).test_client()          # no login -- pre-auth
     r = anon.get("/branding/favicon.png")

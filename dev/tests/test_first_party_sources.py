@@ -14,13 +14,16 @@ from tests.conftest import CODE_PACKAGE, REPO_ROOT, first_party_sources
 # instead of every guard that trusts it passing over nothing.
 _TODAY = (
     "Moonglade Launcher.pyw",
-    "moonglade/__init__.py", "moonglade/__main__.py",
-    "moonglade/assets.py", "moonglade/backup.py", "moonglade/bonjour.py",
-    "moonglade/container.py", "moonglade/contest_wins.py", "moonglade/curation_io.py",
-    "moonglade/gallery.py", "moonglade/inbox.py", "moonglade/integrity.py",
-    "moonglade/logs.py", "moonglade/mcp_server.py", "moonglade/migrate.py",
-    "moonglade/narrator.py", "moonglade/outside.py", "moonglade/paths.py", "moonglade/recipes.py", "moonglade/runs.py",
-    "moonglade/similar.py",
+    "moonglade/__init__.py", "moonglade/__main__.py", "moonglade/about.py", "moonglade/account_prefs.py",
+    "moonglade/achievements.py",
+    "moonglade/assets.py", "moonglade/backup.py", "moonglade/bonjour.py", "moonglade/branding.py",
+    "moonglade/container.py", "moonglade/contest_sync.py", "moonglade/contest_wins.py", "moonglade/curation_io.py", "moonglade/dupes.py",
+    "moonglade/gallery.py", "moonglade/health.py", "moonglade/inbox.py", "moonglade/integrity.py", "moonglade/jobs.py",
+    "moonglade/living.py",
+    "moonglade/logs.py", "moonglade/mcp_server.py", "moonglade/media_tools.py", "moonglade/migrate.py",
+    "moonglade/mirror.py",
+    "moonglade/narrator.py", "moonglade/organize.py", "moonglade/outside.py", "moonglade/paths.py", "moonglade/pixai_client.py", "moonglade/recipes.py", "moonglade/runs.py", "moonglade/scan.py", "moonglade/series.py",
+    "moonglade/similar.py", "moonglade/telemetry.py", "moonglade/updater.py",
 )
 
 

@@ -39,6 +39,7 @@ from moonglade import runs
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_client, login_test_client
+from moonglade import jobs as jobs_mod
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 VECTORS = json.load(open(os.path.join(HERE, "fixtures", "template_vectors.json"), encoding="utf-8"))
@@ -341,7 +342,7 @@ def test_plan_needs_the_csrf_token_and_touches_nothing_without_it(cli, rig):
 def test_plan_writes_nothing(cli, rig, tmp_path):
     _lists(cli, {"poses": ["kneeling", "seated"]})
     prefs_before = cli.get("/api/account/prefs").get_json()["prefs"]
-    jobs = tmp_path / core.JOBS_LOG_NAME
+    jobs = tmp_path / jobs_mod.JOBS_LOG_NAME
     jobs_before = jobs.read_text(encoding="utf-8") if jobs.exists() else ""
     d = plan(cli, prompt="{silver|cobalt} hair, __poses__", count=4).get_json()
     assert d["count"] == 4 and d["jobs"] == 4
@@ -853,7 +854,7 @@ def test_a_failed_task_id_write_still_answers_with_the_task_and_never_reads_not_
     assert d["jobs"][0]["state"] == "sent" and d["jobs"][0]["task_id"] == "9001"
     back = cli.get("/api/generate/runs/" + d["run_id"]).get_json()
     assert back["jobs"][0]["state"] == "may_have_started"
-    logged = [j for j in core.read_jobs(tmp_path) if j["job_id"] == "9001"]
+    logged = [j for j in jobs_mod.read_jobs(tmp_path) if j["job_id"] == "9001"]
     assert logged and logged[0]["run"] == d["run_id"] and logged[0]["cell"] == 0
 
 
@@ -937,7 +938,7 @@ def test_unlimited_mode_takes_one_task_at_a_time(cli, rig, monkeypatch, tmp_path
         lambda params, vid: dict(params, lane=core.UNLIMITED_LANE)))
     d = plan(cli, prompt="{a|b} x", count=2, unlimited=True).get_json()
     assert "one picture at a time" in d["error"]
-    core.append_job_event(tmp_path, "5555", status="running", type="generate",
+    jobs_mod.append_job_event(tmp_path, "5555", status="running", type="generate",
                           lane=core.UNLIMITED_LANE)
     d = run(cli, prompt="{a|b} x", count=1, unlimited=True).get_json()
     assert d["error"] == core.UNLIMITED_BUSY
@@ -949,7 +950,7 @@ def test_a_lane_single_is_logged_with_its_lane(cli, rig, monkeypatch, tmp_path):
         lambda params, vid: dict(params, lane=core.UNLIMITED_LANE)))
     d = run(cli, prompt="{a|b} x", count=1, unlimited=True).get_json()
     assert d["status"] == "sent"
-    job = [j for j in core.read_jobs(tmp_path) if j["job_id"] == d["jobs"][0]["task_id"]][0]
+    job = [j for j in jobs_mod.read_jobs(tmp_path) if j["job_id"] == d["jobs"][0]["task_id"]][0]
     assert job["lane"] == core.UNLIMITED_LANE
 
 
