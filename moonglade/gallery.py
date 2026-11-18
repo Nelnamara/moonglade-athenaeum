@@ -14749,6 +14749,56 @@ def create_app(out_dir: Path):
         return jsonify({"ok": bool(jwt),
                         "days_left": _mirror.jwt_days_left(jwt) if jwt else None})
 
+    @app.route("/mirror/connect")
+    @tier(LOGIN)
+    def mirror_connect_page():
+        """The window the Control Panel's "Connect from PixAI" bookmark opens from a pixai.art
+        tab. It tells its opener it is ready (to https://pixai.art only), takes the sign-in
+        back only from that exact origin and that window, and hands it to
+        /api/mirror/connect-token with this session's CSRF token. Login-gated like every page:
+        a signed-out visitor goes through /login and lands back here, still the opener's
+        window. Dressed in the login card's own classes -- no new design. Holds no credential
+        itself; the page is marked no-store all the same."""
+        session.setdefault("csrf", secrets.token_hex(16))
+        resp = app.response_class(render_template_string(
+            MIRROR_CONNECT_PAGE.replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS),
+            boot={"csrf": session["csrf"]}), mimetype="text/html")
+        resp.headers["Cache-Control"] = "no-store"
+        resp.headers["Referrer-Policy"] = "no-referrer"
+        return resp
+
+    @app.route("/api/mirror/connect-token", methods=["POST"])
+    @tier(LOGIN)
+    def api_mirror_connect_token():
+        """Connect from PixAI: store the sign-in the user's own pixai.art tab handed over
+        (body {csrf, token}). LOGIN tier, the session's CSRF token, and a same-origin
+        request only (an Origin header naming another site is refused). READ_ONLY refuses,
+        as Connect always has. Then mirror.accept_site_token checks the token -- a PixAI JWT,
+        unexpired, and for the SAME PixAI account the API key resolves to -- before storing
+        it. Answers only ok + days left, or a plain sentence; never the token, a claim or the
+        account id, and nothing here logs."""
+        origin = request.headers.get("Origin")
+        if origin and origin.rstrip("/") != request.host_url.rstrip("/"):
+            return jsonify({"ok": False, "error": "That request didn't come from this "
+                            "Moonglade page, so nothing was saved."}), 403
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict) or not _check_csrf(body):
+            return jsonify({"ok": False, "error": "Your session expired. Reload the page and "
+                            "try again."}), 400
+        from moonglade import backup as core
+        try:
+            core._check_read_only("connect the PixAI mirror")
+        except Exception as e:                          # noqa: BLE001
+            return jsonify({"ok": False, "error": _redact_host_paths(str(e))[:160]}), 200
+
+        def _api_key_account():
+            s = core._make_session(None)
+            return str(getattr(s, "user_id", "") or core.USER_ID or "")
+        out = _mirror.accept_site_token(body.get("token"), _api_key_account)
+        if out.get("ok"):
+            return jsonify({"ok": True, "days_left": out.get("days_left")})
+        return jsonify({"ok": False, "error": out.get("error") or "Not connected."}), 200
+
     @app.route("/api/branding", methods=["GET", "POST"])
     @tier(LOGIN)
     def api_branding():
@@ -17426,6 +17476,91 @@ __DESIGN_TOKENS__
    redirected `next` path can never break out of this inline script. #}
 <script>window.MG_BOOT = {{ boot|tojson }};</script>
 <script type="module" src="/next/assets/app.js"></script>
+</body></html>"""
+
+    # /mirror/connect's page (Connect from PixAI, 2026-11-18): the login card's own markup and
+    # classes (gallery/src/styles/login.css, already in app.css), no bundle -- a few lines of
+    # inline script do the whole job. PIXAI is the one origin a sign-in is taken from (www.
+    # redirects to it), and the ready ping names it as its target, never "*". The token lives
+    # in one closure variable for the length of one POST and is never written to the page.
+    MIRROR_CONNECT_PAGE = """<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Connect from PixAI · Moonglade Athenaeum</title>
+<link rel="icon" type="image/png" href="/branding/favicon.png">
+""" + _PREPAINT_BOOT_JS + _AUTH_401_GUARD_JS + """
+<link rel="stylesheet" href="/next/assets/app.css">
+<style>
+__DESIGN_TOKENS__
+</style>
+</head><body>
+<div class="lgn-stage">
+  <div class="lgn-wash lgn-wash-a"></div>
+  <div class="lgn-wash lgn-wash-b"></div>
+  <div class="lgn-frame">
+    <div class="lgn-card">
+      <div class="lgn-titlewrap">
+        <div class="lgn-title">Connect from PixAI</div>
+        <div class="lgn-framing" id="mc-status" role="status">Waiting for your pixai.art tab…</div>
+      </div>
+      <div class="lgn-error" id="mc-error" role="alert" hidden></div>
+      <button type="button" class="lgn-signbtn" id="mc-close">Close</button>
+    </div>
+  </div>
+</div>
+<script>window.MG_MIRROR_CONNECT = {{ boot|tojson }};</script>
+<script>
+(function () {
+  var PIXAI = "https://pixai.art";
+  var boot = window.MG_MIRROR_CONNECT || {};
+  var status = document.getElementById("mc-status");
+  var error = document.getElementById("mc-error");
+  function say(t) { status.textContent = t; }
+  function fail(t) { error.textContent = t; error.hidden = false; }
+  document.getElementById("mc-close").addEventListener("click", function () { window.close(); });
+  var opener = window.opener;
+  if (!opener) {
+    say("Not connected.");
+    fail("Open this from the Connect from PixAI bookmark, clicked on a pixai.art tab.");
+    return;
+  }
+  var got = false, tries = 0;
+  function ping() {
+    if (got) return;
+    try { opener.postMessage({ type: "moonglade-mirror-ready" }, PIXAI); } catch (e) {}
+    if (++tries < 360) { setTimeout(ping, 500); return; }
+    say("Not connected.");
+    fail("Nothing came from pixai.art. Click the bookmark again on a pixai.art tab.");
+  }
+  function days(n) {
+    return n >= 1 ? n + (n === 1 ? " day" : " days") + " left" : "less than a day left";
+  }
+  window.addEventListener("message", function (e) {
+    if (got || e.origin !== PIXAI || e.source !== opener) return;
+    var d = e.data;
+    if (!d || d.type !== "moonglade-mirror-token" || typeof d.token !== "string") return;
+    got = true;
+    say("Checking your PixAI sign-in…");
+    var token = d.token;
+    fetch("/api/mirror/connect-token", {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ csrf: boot.csrf || "", token: token })
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; });
+    }).then(function (j) {
+      if (j && j.ok) { say("Connected · " + days(j.days_left)); return; }
+      say("Not connected.");
+      fail((j && j.error) || "Moonglade couldn't save that sign-in.");
+    }).catch(function () {
+      say("Not connected.");
+      fail("Couldn't reach Moonglade. Check that it is still running, then try again.");
+    });
+    token = null;
+  });
+  ping();
+})();
+</script>
 </body></html>"""
 
     # "/" is the FRONT DOOR (the flip, 2026-08-01) and, since issue #51, the

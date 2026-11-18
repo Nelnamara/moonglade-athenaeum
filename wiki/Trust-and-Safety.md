@@ -65,10 +65,14 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   behind a flag, not commented out, not planned. `--account` only ever *reads* your
   credits/membership status.
 - **Touch anyone's account but yours.** Every request rides your own API key — or, if you
-  turn on **Mirror to PixAI** (Control Panel ▸ Maintenance), your own logged-in
-  browser session, read from a browser signed in to PixAI on the server machine. That
-  session is read locally and never leaves that machine; the tile shows how many days it has
-  left, never the credential itself. And it's a hard switch, not a preference: when
+  turn on **Mirror to PixAI** (Control Panel ▸ Maintenance), your own PixAI website
+  sign-in. You hand it over yourself, by clicking the **Connect from PixAI** bookmark on a
+  pixai.art tab you are signed in on: the sign-in goes from that tab to your own Moonglade
+  (the address the bookmark was made from) and nowhere else, and Moonglade keeps it only if
+  it belongs to the same PixAI account as your API key. It is stored on the server machine;
+  the tile shows how many days it has left, never the credential itself. If you reach
+  Moonglade from another device over your home network, the hand-over crosses that network
+  the same way the rest of the gallery does. And it's a hard switch, not a preference: when
   mirroring is on and the session isn't usable, the submit **refuses and spends nothing** —
   it never quietly falls back to your API key and files the piece somewhere you didn't
   ask. `python -m moonglade --mirror-check` verifies the session without spending.

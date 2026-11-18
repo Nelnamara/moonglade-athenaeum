@@ -13279,8 +13279,8 @@ def run_claims(args):
 # error in parentheses, like the "Lost to the Void" message beside them.
 _SIGNIN_REFUSED_MIRROR = (
     "PixAI no longer accepts this app's website sign-in, so nothing was submitted and "
-    "nothing was spent. If pixai.art has signed you out, sign in there first, then press "
-    "↻ Refresh session on the Mirror to PixAI tile in the Control Panel and try again. "
+    "nothing was spent. Sign in to pixai.art, click your Connect from PixAI bookmark on "
+    "that tab (it is on the Mirror to PixAI tile in the Control Panel), and try again. "
     "({})")
 _SIGNIN_REFUSED_API_KEY = (
     "PixAI no longer accepts this app's API key, so nothing was submitted and nothing was "

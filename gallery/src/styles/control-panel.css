@@ -646,7 +646,8 @@ button.mgcp-pwr-ghost { display: inline-block; white-space: nowrap; margin-top: 
 
 .mgbr-connectrow { display: flex; gap: 8px; margin-top: auto; }
 .mgbr-connect { flex: none; padding: 8px 14px; border-radius: var(--radius-control); font-size: 11.5px; font-weight: 600; cursor: pointer;
-  font-family: inherit; color: #14102a; background: var(--lavender); border: 1px solid transparent; }
+  font-family: inherit; color: #14102a; background: var(--lavender); border: 1px solid transparent;
+  text-decoration: none; }  /* the chip is a link now (the Connect from PixAI bookmark) */
 .mgbr-connect.armed { color: var(--emerald); background: transparent; border-color: color-mix(in oklab, var(--emerald) 40%, transparent); }
 .mgbr-connect:disabled { opacity: .6; cursor: default; }
 .mgbr-jwtnote { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; font-size: 11px;
