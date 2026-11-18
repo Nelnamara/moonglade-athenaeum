@@ -28,6 +28,7 @@ from moonglade import gallery as g
 from moonglade import integrity as integ
 from moonglade import paths
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade import health as health_mod
 
 
 def _row(**kw):
@@ -256,11 +257,11 @@ def test_hostile_file_names_cannot_forge_a_report_line(tmp_path):
 
 def test_health_counts_zero_byte_files_and_reads_the_last_run(tmp_path):
     out = _library(tmp_path)
-    before = g.collection_health(out, out / "catalog.db")
+    before = health_mod.collection_health(out, out / "catalog.db")
     assert before["zero_byte"] == 1
     assert before["integrity"] is None                   # never verified
     integ.verify_library(out, out / "catalog.db")
-    after = g.collection_health(out, out / "catalog.db")
+    after = health_mod.collection_health(out, out / "catalog.db")
     assert after["integrity"]["verified_at"].endswith("Z")
     assert after["integrity"]["counts"]["missing_thumb"] == 2
     # Owner question 1, option (a): the numbers he already knows keep their meaning.

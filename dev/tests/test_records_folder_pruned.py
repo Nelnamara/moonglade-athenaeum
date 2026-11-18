@@ -21,6 +21,7 @@ from moonglade import paths
 from moonglade import scan as scan_mod
 from moonglade import dupes as dupes_mod
 from moonglade import organize as organize_mod
+from moonglade import health as health_mod
 
 # moonglade.similar imports numpy and pixeltable at module level, and CI installs a curated list
 # without them (it ignores dev/tests/test_similar.py for the same reason), so only the test that
@@ -89,7 +90,7 @@ def test_the_disk_count_never_counts_it(library):
 
 
 def test_health_never_counts_it_or_calls_it_a_stray(library):
-    h = g.collection_health(library, library / "catalog.db")
+    h = health_mod.collection_health(library, library / "catalog.db")
     assert h["total_files"] == 1
     assert h["uncataloged"] == 0
 

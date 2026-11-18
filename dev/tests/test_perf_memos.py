@@ -14,6 +14,7 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_test_client
+from moonglade import health as health_mod
 
 
 def _row(**kw):
@@ -311,7 +312,7 @@ def _walk_stub(monkeypatch, calls, gate=None):
         if gate is not None and len(calls) > 1:
             assert gate.wait(10), "the gated walk was never released"
         return {"total_files": len(calls), "catalog_rows": len(calls)}
-    monkeypatch.setattr(g, "collection_health", _fake)
+    monkeypatch.setattr(health_mod, "collection_health", _fake)
 
 
 def _settle(pred, timeout=10.0):
@@ -331,9 +332,9 @@ def test_the_health_walk_is_memoized_between_opens(tmp_path, monkeypatch):
     db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png")])
     calls = []
     _walk_stub(monkeypatch, calls)
-    first = g.health_cached(tmp_path, db)
-    assert g.health_cached(tmp_path, db) == first
-    assert g.health_cached(tmp_path, db) == first
+    first = health_mod.health_cached(tmp_path, db)
+    assert health_mod.health_cached(tmp_path, db) == first
+    assert health_mod.health_cached(tmp_path, db) == first
     assert len(calls) == 1, "an unchanged catalog must be served from memory"
 
 
@@ -343,12 +344,12 @@ def test_a_changed_catalog_invalidates_the_health_memo(tmp_path, monkeypatch):
     db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png")])
     calls = []
     _walk_stub(monkeypatch, calls)
-    g.health_cached(tmp_path, db)
+    health_mod.health_cached(tmp_path, db)
     save_catalog(db, [_row(media_id="1", filename="a_1.png"),
                       _row(media_id="2", filename="b_2.png")])
-    g.health_cached(tmp_path, db)                      # notices, kicks the refresh
+    health_mod.health_cached(tmp_path, db)                      # notices, kicks the refresh
     assert _settle(lambda: len(calls) == 2), "a changed catalog must re-walk"
-    assert _settle(lambda: g.health_cached(tmp_path, db)["catalog_rows"] == 2)
+    assert _settle(lambda: health_mod.health_cached(tmp_path, db)["catalog_rows"] == 2)
 
 
 def test_the_stale_answer_is_served_WHILE_it_recomputes(tmp_path, monkeypatch):
@@ -358,16 +359,16 @@ def test_the_stale_answer_is_served_WHILE_it_recomputes(tmp_path, monkeypatch):
     calls, gate = [], threading.Event()
     _walk_stub(monkeypatch, calls, gate)
     try:
-        first = g.health_cached(tmp_path, db)          # nothing cached: this one blocks
+        first = health_mod.health_cached(tmp_path, db)          # nothing cached: this one blocks
         save_catalog(db, [_row(media_id="1", filename="a_1.png"),
                           _row(media_id="2", filename="b_2.png")])
-        served = g.health_cached(tmp_path, db)         # the walk behind this is still stuck
+        served = health_mod.health_cached(tmp_path, db)         # the walk behind this is still stuck
         assert served is first, "the previous payload must come back, not a fresh walk"
         assert _settle(lambda: len(calls) == 2), "the refresh must actually have started"
     finally:
         gate.set()
-    assert _settle(lambda: g._HEALTH_CACHE["payload"] is not first)
-    assert g.health_cached(tmp_path, db)["catalog_rows"] == 2
+    assert _settle(lambda: health_mod._HEALTH_CACHE["payload"] is not first)
+    assert health_mod.health_cached(tmp_path, db)["catalog_rows"] == 2
 
 
 def test_a_burst_of_opens_starts_ONE_recompute(tmp_path, monkeypatch):
@@ -377,17 +378,17 @@ def test_a_burst_of_opens_starts_ONE_recompute(tmp_path, monkeypatch):
     calls, gate = [], threading.Event()
     _walk_stub(monkeypatch, calls, gate)
     try:
-        g.health_cached(tmp_path, db)
+        health_mod.health_cached(tmp_path, db)
         save_catalog(db, [_row(media_id="1", filename="a_1.png"),
                           _row(media_id="2", filename="b_2.png")])
         for _ in range(6):
-            g.health_cached(tmp_path, db)
+            health_mod.health_cached(tmp_path, db)
         assert _settle(lambda: len(calls) == 2)
         time.sleep(0.05)
         assert len(calls) == 2, "one recompute, however many readers noticed"
     finally:
         gate.set()
-    assert _settle(lambda: not g._HEALTH_BUSY["on"])
+    assert _settle(lambda: not health_mod._HEALTH_BUSY["on"])
 
 
 def test_fresh_forces_a_real_walk(tmp_path, monkeypatch):
@@ -395,10 +396,10 @@ def test_fresh_forces_a_real_walk(tmp_path, monkeypatch):
     db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png")])
     calls = []
     _walk_stub(monkeypatch, calls)
-    g.health_cached(tmp_path, db)
-    g.health_cached(tmp_path, db, fresh=True)
+    health_mod.health_cached(tmp_path, db)
+    health_mod.health_cached(tmp_path, db, fresh=True)
     assert len(calls) == 2
-    assert g.health_cached(tmp_path, db)["total_files"] == 2, "and it re-seeds the memo"
+    assert health_mod.health_cached(tmp_path, db)["total_files"] == 2, "and it re-seeds the memo"
 
 
 def test_the_boot_prime_warms_the_memo(tmp_path, monkeypatch):
@@ -407,9 +408,9 @@ def test_the_boot_prime_warms_the_memo(tmp_path, monkeypatch):
     db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png")])
     calls = []
     _walk_stub(monkeypatch, calls)
-    g._health_prime(tmp_path, db).join(10)
+    health_mod._health_prime(tmp_path, db).join(10)
     assert len(calls) == 1, "the prime does the walk"
-    assert g.health_cached(tmp_path, db)["total_files"] == 1
+    assert health_mod.health_cached(tmp_path, db)["total_files"] == 1
     assert len(calls) == 1, "so the first real open walks nothing at all"
 
 
@@ -417,9 +418,9 @@ def test_the_prime_survives_a_library_it_cannot_walk(tmp_path, monkeypatch):
     """A boot nicety must never be able to stop the server from starting."""
     def _boom(out_dir, db_path):
         raise OSError("the library is on a disconnected drive")
-    monkeypatch.setattr(g, "collection_health", _boom)
-    g._health_prime(tmp_path, tmp_path / "catalog.db").join(10)
-    assert g._HEALTH_CACHE["payload"] is None
+    monkeypatch.setattr(health_mod, "collection_health", _boom)
+    health_mod._health_prime(tmp_path, tmp_path / "catalog.db").join(10)
+    assert health_mod._HEALTH_CACHE["payload"] is None
 
 
 def test_a_missing_catalog_still_memoizes(tmp_path, monkeypatch):
@@ -427,9 +428,9 @@ def test_a_missing_catalog_still_memoizes(tmp_path, monkeypatch):
     raises there. It must answer, and answer from the memo the second time."""
     calls = []
     _walk_stub(monkeypatch, calls)
-    assert g._health_key(tmp_path / "catalog.db") is None
-    g.health_cached(tmp_path, tmp_path / "catalog.db")
-    g.health_cached(tmp_path, tmp_path / "catalog.db")
+    assert health_mod._health_key(tmp_path / "catalog.db") is None
+    health_mod.health_cached(tmp_path, tmp_path / "catalog.db")
+    health_mod.health_cached(tmp_path, tmp_path / "catalog.db")
     assert len(calls) == 1
 
 
@@ -437,8 +438,8 @@ def _fresh_health_cache(monkeypatch):
     """Start from an empty memo. The cache is process-wide, so without this a test inherits
     whatever the previous one left in it and reads the serve-stale path where it meant to
     read the first-call one."""
-    assert _settle(lambda: not g._HEALTH_BUSY["on"]), "a previous refresh never finished"
-    monkeypatch.setattr(g, "_HEALTH_CACHE", {"key": None, "payload": None, "at": 0.0})
+    assert _settle(lambda: not health_mod._HEALTH_BUSY["on"]), "a previous refresh never finished"
+    monkeypatch.setattr(health_mod, "_HEALTH_CACHE", {"key": None, "payload": None, "at": 0.0})
 
 
 def test_a_file_deleted_off_disk_invalidates_the_health_memo(tmp_path, monkeypatch):
@@ -456,18 +457,18 @@ def test_a_file_deleted_off_disk_invalidates_the_health_memo(tmp_path, monkeypat
                           _row(media_id="2", filename="b_2.png")])
     calls = []
     _walk_stub(monkeypatch, calls)
-    first = g.health_cached(tmp_path, db)
-    assert g.health_cached(tmp_path, db) is first and len(calls) == 1, "memoized to start"
+    first = health_mod.health_cached(tmp_path, db)
+    assert health_mod.health_cached(tmp_path, db) is first and len(calls) == 1, "memoized to start"
 
-    catalog_key = g._health_key(db)
+    catalog_key = health_mod._health_key(db)
     (month / "b_2.png").unlink()
-    assert g._health_key(db) == catalog_key, \
+    assert health_mod._health_key(db) == catalog_key, \
         "nothing wrote the catalog -- if this moves, the test proves the wrong thing"
 
-    served = g.health_cached(tmp_path, db)
+    served = health_mod.health_cached(tmp_path, db)
     assert served is first, "the stale answer still comes back at once"
     assert _settle(lambda: len(calls) == 2), "a file removed off disk must re-walk"
-    assert _settle(lambda: g.health_cached(tmp_path, db)["total_files"] == 2), \
+    assert _settle(lambda: health_mod.health_cached(tmp_path, db)["total_files"] == 2), \
         "and the next read gets the answer that reflects the disk"
 
 
@@ -477,19 +478,19 @@ def test_a_snapshot_past_HEALTH_MAX_AGE_is_served_stale_and_refreshed(tmp_path, 
     that leaves the name alone. Past the ceiling the reader is still answered immediately --
     the recompute runs behind it, exactly as a moved key already does."""
     _fresh_health_cache(monkeypatch)
-    assert 60 <= g.HEALTH_MAX_AGE <= 3600, "a ceiling, in seconds, not a sentinel"
+    assert 60 <= health_mod.HEALTH_MAX_AGE <= 3600, "a ceiling, in seconds, not a sentinel"
     db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png")])
     calls = []
     _walk_stub(monkeypatch, calls)
-    first = g.health_cached(tmp_path, db)
-    assert g.health_cached(tmp_path, db) is first and len(calls) == 1, "young: pure memo"
+    first = health_mod.health_cached(tmp_path, db)
+    assert health_mod.health_cached(tmp_path, db) is first and len(calls) == 1, "young: pure memo"
 
-    with g._HEALTH_LOCK:                       # age it, rather than sleep ten real minutes
-        g._HEALTH_CACHE["at"] = time.time() - g.HEALTH_MAX_AGE - 1
-    served = g.health_cached(tmp_path, db)
+    with health_mod._HEALTH_LOCK:                       # age it, rather than sleep ten real minutes
+        health_mod._HEALTH_CACHE["at"] = time.time() - health_mod.HEALTH_MAX_AGE - 1
+    served = health_mod.health_cached(tmp_path, db)
     assert served is first, "an aged answer is SERVED, never waited on"
     assert _settle(lambda: len(calls) == 2), "and it kicks the refresh behind itself"
-    assert _settle(lambda: g.health_cached(tmp_path, db)["total_files"] == 2)
+    assert _settle(lambda: health_mod.health_cached(tmp_path, db)["total_files"] == 2)
 
 
 def test_the_disk_side_key_is_a_handful_of_stats_not_a_walk(tmp_path):
@@ -515,7 +516,7 @@ def test_the_disk_side_key_is_a_handful_of_stats_not_a_walk(tmp_path):
         os.scandir = lambda *a, **k: (seen.__setitem__("scandir", seen["scandir"] + 1),
                                       real_scandir(*a, **k))[1]
         try:
-            key = g._health_dir_key(root)
+            key = health_mod._health_dir_key(root)
         finally:
             os.stat, os.scandir = real_stat, real_scandir
         return seen, key
@@ -571,7 +572,7 @@ def test_collection_health_itself_stays_uncached(tmp_path):
     """The cache lives outside the computation, as it always has: the classic /health page
     and every test calling collection_health() directly get a real read every time."""
     db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png")])
-    g.health_cached(tmp_path, db)                                  # warm the memo
+    health_mod.health_cached(tmp_path, db)                                  # warm the memo
     save_catalog(db, [_row(media_id="1", filename="a_1.png"),
                       _row(media_id="2", filename="b_2.png")])
-    assert g.collection_health(tmp_path, db)["catalog_rows"] == 2
+    assert health_mod.collection_health(tmp_path, db)["catalog_rows"] == 2

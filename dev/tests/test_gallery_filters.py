@@ -2,8 +2,9 @@
 year dropdowns, and per-page (via query_catalog)."""
 import pytest
 
-from moonglade.gallery import (CATALOG_FIELDS, init_db, save_catalog, query_catalog,
-                           catalog_years, _like_pattern, collection_health, _role_dir)
+from moonglade.gallery import (CATALOG_FIELDS, init_db, save_catalog, query_catalog, catalog_years,
+                               _like_pattern, _role_dir)
+from moonglade.health import collection_health
 
 
 def _row(**kw):

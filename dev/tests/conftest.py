@@ -13,6 +13,7 @@ from moonglade import assets as moonglade_assets
 from moonglade import backup as core
 from moonglade import container as _mc
 from moonglade import gallery
+from moonglade import health as health_mod
 from moonglade import migrate as moonglade_migrate
 from moonglade import paths as moonglade_paths
 
@@ -940,8 +941,8 @@ def _fresh_perf_memos():
         gallery._ACH_METRICS_CACHE.clear()
         gallery._contests_cache.clear()
         gallery._contest_sync_last_ok.update(at=0.0)
-        gallery._HEALTH_CACHE.update(key=None, payload=None, at=0.0)
-        gallery._HEALTH_BUSY["on"] = False
+        health_mod._HEALTH_CACHE.update(key=None, payload=None, at=0.0)
+        health_mod._HEALTH_BUSY["on"] = False
     _clear()
     yield
     _clear()

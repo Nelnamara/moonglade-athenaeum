@@ -22,10 +22,8 @@ import pytest
 from moonglade import paths as _paths
 from moonglade import backup as core
 from moonglade import gallery as g
-from moonglade.gallery import (
-    CATALOG_FIELDS, collection_health, loom_render_ids, query_catalog, save_catalog,
-    storage_breakdown,
-)
+from moonglade.gallery import CATALOG_FIELDS, loom_render_ids, query_catalog, save_catalog
+from moonglade.health import collection_health, storage_breakdown
 from tests.conftest import login_client
 
 
