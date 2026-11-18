@@ -774,6 +774,127 @@ def iter_test_files(tests_dir=DEFAULT_TESTS):
     return sorted(p for p in Path(tests_dir).rglob("*.py") if "__pycache__" not in p.parts)
 
 
+# ---------------------------------------------------------------------------------------------
+# JavaScript tests that read the Python source (loom/test/import-batches.test.js read
+# IMPORT_REQUEST_CAP out of moonglade/gallery.py until phase 1 moved it to moonglade/scan.py)
+# ---------------------------------------------------------------------------------------------
+
+JS_SUFFIXES = (".js", ".mjs", ".cjs", ".jsx")
+JS_TEST_ROOTS = ("loom/test", "loom/test-support", "gallery")
+_JS_SKIP_DIRS = {"node_modules", "dist"}
+_JS_PY_PATH_RE = re.compile(r"^(?:.*[/\\])?moonglade[/\\](\w+)\.py$")
+_JS_REGEX_AFTER = set("(,=:[!&|?{};+-*%<>~^") | {""}
+_JS_REGEX_KEYWORDS = {"return", "typeof", "case", "do", "else", "in", "of", "void", "yield",
+                      "await", "delete", "throw", "new", "instanceof"}
+
+
+def iter_js_test_files(repo=REPO):
+    """The JS files under loom/test, loom/test-support and gallery/ (minus node_modules and
+    the built dist/), the places a node test lives."""
+    out = []
+    for root in JS_TEST_ROOTS:
+        base = Path(repo, root)
+        if not base.is_dir():
+            continue
+        for p in base.rglob("*"):
+            if (p.suffix in JS_SUFFIXES and p.is_file()
+                    and not _JS_SKIP_DIRS & set(p.relative_to(repo).parts)):
+                out.append(p)
+    return sorted(set(out))
+
+
+def js_string_literals(text):
+    """[(line, value)] for every quoted or template string in JS source, comments skipped. A
+    small scanner, not a parser: it knows strings, template literals (a `${...}` inside one is
+    kept as text), line and block comments and regex literals, which is all a path needs."""
+    out = []
+    i, n, line = 0, len(text), 1
+    prev = ""            # the last significant character (or word) before here
+    while i < n:
+        c = text[i]
+        if c == "\n":
+            line += 1
+            i += 1
+            continue
+        if c.isspace():
+            i += 1
+            continue
+        if text.startswith("//", i):
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        if text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            line += text.count("\n", i, j)
+            i = j
+            continue
+        if c in "\"'`":
+            start_line, j, buf = line, i + 1, []
+            while j < n and text[j] != c:
+                if text[j] == "\\" and j + 1 < n:
+                    buf.append(text[j:j + 2])
+                    j += 2
+                    continue
+                if text[j] == "\n":
+                    line += 1
+                buf.append(text[j])
+                j += 1
+            out.append((start_line, "".join(buf)))
+            i = j + 1
+            prev = c
+            continue
+        if c == "/" and (prev in _JS_REGEX_AFTER or prev in _JS_REGEX_KEYWORDS):
+            j, in_class = i + 1, False
+            while j < n and text[j] != "\n":
+                if text[j] == "\\":
+                    j += 2
+                    continue
+                if text[j] == "[":
+                    in_class = True
+                elif text[j] == "]":
+                    in_class = False
+                elif text[j] == "/" and not in_class:
+                    break
+                j += 1
+            i = j + 1
+            prev = "/"
+            continue
+        if c.isalnum() or c in "_$":
+            j = i
+            while j < n and (text[j].isalnum() or text[j] in "_$"):
+                j += 1
+            prev = text[i:j]
+            i = j
+            continue
+        prev = c
+        i += 1
+    return out
+
+
+def scan_js_text(path, text):
+    """A JS file's reads of the Python source: every string naming a `moonglade/<x>.py` path
+    (or a bare "backup.py"/"gallery.py") outside comments counts as reading that module WHOLE
+    -- a node test reads the file's text, never a function by name."""
+    out = FileScan(path=str(path))
+    for _, value in js_string_literals(text):
+        m = _JS_PY_PATH_RE.match(value)
+        if m:
+            _mark(out.reads_source, "moonglade." + m.group(1), "whole")
+            continue
+        m = _MODULE_PATH_RE.match(value)
+        if m and "/" not in value and "\\" not in value:
+            _mark(out.reads_source, "moonglade." + m.group(1), "whole")
+    return out
+
+
+def scan_any(path, text):
+    """scan_js_text for a JS file, scan_text for Python."""
+    if str(path).endswith(JS_SUFFIXES):
+        return scan_js_text(path, text)
+    return scan_text(path, text)
+
+
 def scan_tree(tests_dir=DEFAULT_TESTS):
     scans = []
     for p in iter_test_files(tests_dir):

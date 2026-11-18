@@ -74,8 +74,9 @@ SEAMS = {
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
-# old module(s). Kept exact: a new reader, or one that stops reading, fails
-# test_source_readers_are_the_known_set.
+# old module(s); and every node test (loom/test, loom/test-support, gallery/; keyed from the repo
+# root) that reads a moonglade/*.py file, and which. Kept exact: a new reader, or one that stops
+# reading, fails test_source_readers_are_the_known_set.
 SOURCE_READERS = {
     "tests/test_app_paths.py": ("moonglade.gallery",),
     "tests/test_artworks_adhoc.py": ("moonglade.backup", "moonglade.gallery"),
@@ -129,6 +130,14 @@ SOURCE_READERS = {
     "tests/test_watch.py": ("moonglade.gallery",),
     "tests/test_web_auth.py": ("moonglade.backup",),
     "tools/export_design_kit.py": ("moonglade.gallery",),     # reads DESIGN_TOKENS_CSS by path
+    "loom/test/import-batches.test.js": ("moonglade.scan",),
+    "loom/test/ledger-known-reasons.test.js": ("moonglade.backup",),
+    "loom/test/med-loom-bundle-missing-report.test.js": ("moonglade.gallery",),
+    "loom/test/mg-art-filters.test.js": ("moonglade.gallery",),
+    "loom/test/mg-notify-queue-phase.test.js": ("moonglade.gallery",),
+    "loom/test/mg-notify-website-source.test.js": ("moonglade.gallery",),
+    "loom/test/phone-back-layers.test.js": ("moonglade.gallery",),
+    "loom/test/video-roster-parity.test.js": ("moonglade.backup",),
 }
 
 # (reader file, new module) pairs someone has checked after a move touched what the reader
@@ -244,6 +253,24 @@ SOURCE_READERS_REVIEWED = {
     ("tests/test_training_parity.py", "moonglade.organize"),
     ("tests/test_tsubaki3_image_gate.py", "moonglade.organize"),
     ("tests/test_web_auth.py", "moonglade.organize"),
+    # the node tests, reviewed for the phase-1 moves when they joined the set (phase 2)
+    ("loom/test/med-loom-bundle-missing-report.test.js", "moonglade.scan"),
+    ("loom/test/med-loom-bundle-missing-report.test.js", "moonglade.dupes"),
+    ("loom/test/med-loom-bundle-missing-report.test.js", "moonglade.series"),
+    ("loom/test/mg-art-filters.test.js", "moonglade.scan"),
+    ("loom/test/mg-art-filters.test.js", "moonglade.dupes"),
+    ("loom/test/mg-art-filters.test.js", "moonglade.series"),
+    ("loom/test/mg-notify-queue-phase.test.js", "moonglade.scan"),
+    ("loom/test/mg-notify-queue-phase.test.js", "moonglade.dupes"),
+    ("loom/test/mg-notify-queue-phase.test.js", "moonglade.series"),
+    ("loom/test/mg-notify-website-source.test.js", "moonglade.scan"),
+    ("loom/test/mg-notify-website-source.test.js", "moonglade.dupes"),
+    ("loom/test/mg-notify-website-source.test.js", "moonglade.series"),
+    ("loom/test/phone-back-layers.test.js", "moonglade.scan"),
+    ("loom/test/phone-back-layers.test.js", "moonglade.dupes"),
+    ("loom/test/phone-back-layers.test.js", "moonglade.series"),
+    ("loom/test/ledger-known-reasons.test.js", "moonglade.organize"),
+    ("loom/test/video-roster-parity.test.js", "moonglade.organize"),
 }
 
 
@@ -397,7 +424,7 @@ def detect_source_readers(files):
     """{path: text} -> {path: (old modules whose source it reads)}."""
     out = {}
     for path, text in files.items():
-        scan = rp.scan_text(path, text)
+        scan = rp.scan_any(path, text)
         if scan.reads_source:
             out[path] = tuple(sorted(scan.reads_source))
     return out
@@ -412,7 +439,7 @@ def check_source_readers_reviewed(seams, files, readers, reviewed):
         for path, mods in sorted(readers.items()):
             if entry["from"] not in mods or (path, new_mod) in reviewed:
                 continue
-            kind = rp.scan_text(path, files[path]).reads_source.get(entry["from"])
+            kind = rp.scan_any(path, files[path]).reads_source.get(entry["from"])
             if kind in ("whole", "indirect") or words.search(files[path]):
                 problems.append("%s reads %s's source and the move to %s touches it: check what "
                                 "it reads, then add (%r, %r) to SOURCE_READERS_REVIEWED"
@@ -432,6 +459,15 @@ def _test_files(folder="tests"):
     root = DEV / folder if folder else DEV
     return {p.relative_to(DEV).as_posix(): p.read_text(encoding="utf-8")
             for p in rp.iter_test_files(root)}
+
+
+def _reader_files():
+    """Every file that may read the Python source: dev/ (keyed from dev/) and the node tests
+    (keyed from the repo root)."""
+    files = _test_files(folder=None)
+    files.update({p.relative_to(REPO).as_posix(): p.read_text(encoding="utf-8")
+                  for p in rp.iter_js_test_files(REPO)})
+    return files
 
 
 def _production_refs():
@@ -492,11 +528,21 @@ def test_the_scanner_sees_the_suites_patches():
 
 
 def test_source_readers_are_the_known_set():
-    assert detect_source_readers(_test_files(folder=None)) == SOURCE_READERS
+    assert detect_source_readers(_reader_files()) == SOURCE_READERS
+
+
+def test_the_js_reader_scan_sees_the_node_tests():
+    """A JS scan that silently finds nothing would pass every move: it must keep seeing the
+    node tests' reads (the one that broke in phase 1 among them)."""
+    readers = detect_source_readers(_reader_files())
+    js = {p for p in readers if p.endswith(rp.JS_SUFFIXES)}
+    assert "loom/test/import-batches.test.js" in js
+    assert any("moonglade.gallery" in readers[p] for p in js)
+    assert any("moonglade.backup" in readers[p] for p in js)
 
 
 def test_source_readers_touched_by_a_move_were_reviewed():
-    files = _test_files(folder=None)
+    files = _reader_files()
     assert check_source_readers_reviewed(SEAMS, files, SOURCE_READERS,
                                          SOURCE_READERS_REVIEWED) == []
 
@@ -771,16 +817,24 @@ def test_source_reader_detection_and_review_fire():
         "tests/test_argv_only.py": ("import sys\ndef test(monkeypatch):\n"
                                     "    monkeypatch.setattr(sys, 'argv', ['moonglade/backup.py'])\n"),
         "tests/test_plain.py": "from moonglade import gallery as g\ndef test():\n    g.x()\n",
+        "loom/test/reads.test.js": ("// moonglade/backup.py is only named in this comment\n"
+                                    "const re = /[\"'`]/g;\n"
+                                    "const py = src(`${ROOT}/moonglade/gallery.py`);\n"),
+        "loom/test/comment.test.js": "/* moonglade/gallery.py */ const s = 'gallery.py\\'s';\n",
     }
     readers = detect_source_readers(files)
     assert readers == {"tests/test_getsource.py": ("moonglade.gallery",),
                        "tests/test_whole.py": ("moonglade.backup",),
                        "tests/test_by_path.py": ("moonglade.gallery",),
-                       "tests/test_create_app.py": ("moonglade.gallery",)}
+                       "tests/test_create_app.py": ("moonglade.gallery",),
+                       "loom/test/reads.test.js": ("moonglade.gallery",)}
     problems = check_source_readers_reviewed(SYNTH_SEAMS, files, readers, set())
     touched = sorted(p.split()[0] for p in problems)
-    # names scan_library / whole file by path; the create_app reader names neither
-    assert touched == ["tests/test_by_path.py", "tests/test_getsource.py"], problems
+    # names scan_library / whole file by path; the create_app reader names neither; a node
+    # test reads the file whole
+    assert touched == ["loom/test/reads.test.js", "tests/test_by_path.py",
+                       "tests/test_getsource.py"], problems
     reviewed = {("tests/test_by_path.py", "moonglade.fake_seam"),
-                ("tests/test_getsource.py", "moonglade.fake_seam")}
+                ("tests/test_getsource.py", "moonglade.fake_seam"),
+                ("loom/test/reads.test.js", "moonglade.fake_seam")}
     assert check_source_readers_reviewed(SYNTH_SEAMS, files, readers, reviewed) == []
