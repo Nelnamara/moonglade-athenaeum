@@ -360,7 +360,8 @@ It works by riding your own PixAI sign-in from the website:
    **same PixAI account as your API key**; a tab signed in as anyone else is refused. Close
    the window when you're done.
 3. Flip the toggle to **on**. It refuses to turn on until a session is connected, and tells
-   you so.
+   you so. The switch only works from the server machine itself; the bookmark works from any
+   device on your home network.
 4. From then on it renews itself while the app is running. PixAI's session lasts a week from
    each renewal, and Moonglade renews it about once a day, so it survives the app being closed
    for up to about six days. You only need the bookmark again if you sign out of PixAI, or if

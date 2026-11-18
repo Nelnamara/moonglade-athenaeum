@@ -14771,12 +14771,20 @@ def create_app(out_dir: Path):
     @tier(LOGIN)
     def api_mirror_connect_token():
         """Connect from PixAI: store the sign-in the user's own pixai.art tab handed over
-        (body {csrf, token}). LOGIN tier, the session's CSRF token, and a same-origin
-        request only (an Origin header naming another site is refused). READ_ONLY refuses,
+        (body {csrf, token}). LOGIN tier, a client on this machine or a private home network
+        (mirror.home_network_address), the session's CSRF token, and a same-origin request
+        only (an Origin header naming another site is refused). READ_ONLY refuses,
         as Connect always has. Then mirror.accept_site_token checks the token -- a PixAI JWT,
         unexpired, and for the SAME PixAI account the API key resolves to -- before storing
         it. Answers only ok + days left, or a plain sentence; never the token, a claim or the
         account id, and nothing here logs."""
+        # Home network only (2026-11-18). Moonglade is served over plain HTTP, so a sign-in
+        # posted from another device crosses the network unencrypted, like the Moonglade login
+        # itself; never accept one from outside a home network. Same client address the
+        # localhost-only checks read (request.remote_addr, the real TCP peer; no forwarded
+        # header is trusted anywhere in this app).
+        if not _mirror.home_network_address(request.remote_addr):
+            return jsonify({"ok": False, "error": _mirror.SITE_TOKEN_NOT_HOME}), 403
         origin = request.headers.get("Origin")
         if origin and origin.rstrip("/") != request.host_url.rstrip("/"):
             return jsonify({"ok": False, "error": "That request didn't come from this "
@@ -14792,8 +14800,10 @@ def create_app(out_dir: Path):
             return jsonify({"ok": False, "error": _redact_host_paths(str(e))[:160]}), 200
 
         def _api_key_account():
-            s = core._make_session(None)
-            return str(getattr(s, "user_id", "") or core.USER_ID or "")
+            # The account the API key REALLY is, asked of PixAI every time: a USER_ID pinned
+            # in config.json is a legacy override and must not decide whose sign-in is kept.
+            s = core._make_session(None, resolve_user=False)
+            return core.resolve_user_id(s)
         out = _mirror.accept_site_token(body.get("token"), _api_key_account)
         if out.get("ok"):
             return jsonify({"ok": True, "days_left": out.get("days_left")})

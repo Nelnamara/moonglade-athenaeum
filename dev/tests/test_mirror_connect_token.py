@@ -20,6 +20,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import requests
 
 from moonglade import backup as mj
 from moonglade import mirror as mirror_mod
@@ -54,8 +55,8 @@ def armed(tmp_path, monkeypatch):
     monkeypatch.setattr(mj, "READ_ONLY", False)
     monkeypatch.setattr(mj, "_read_only_now", lambda: False)
     looked = []
-    monkeypatch.setattr(mj, "_make_session",
-                        lambda *a, **k: looked.append(1) or SimpleNamespace(user_id=ME))
+    monkeypatch.setattr(mj, "_make_session", lambda *a, **k: SimpleNamespace(user_id=""))
+    monkeypatch.setattr(mj, "resolve_user_id", lambda s: looked.append(1) or ME)
     return SimpleNamespace(path=p, looked=looked)
 
 
@@ -124,14 +125,76 @@ def test_the_api_key_itself_is_refused(tmp_path, armed, monkeypatch):
 
 
 def test_an_account_that_cannot_be_confirmed_refuses(tmp_path, armed, monkeypatch):
+    """A real key problem (none set up, or PixAI refusing it) says to check the key."""
     def _no_key(*a, **k):
         raise mj.PixAIError("No API key found.")
     monkeypatch.setattr(mj, "_make_session", _no_key)
-    monkeypatch.setattr(mj, "USER_ID", "")
     cli = login_client(tmp_path)
     d = _post(cli, _in(7)).get_json()
-    assert d["ok"] is False and "couldn't confirm which PixAI account" in d["error"]
+    assert d["ok"] is False and "Check that the API key is set up" in d["error"]
+    monkeypatch.setattr(mj, "_make_session", lambda *a, **k: SimpleNamespace(user_id=""))
+    monkeypatch.setattr(mj, "resolve_user_id", lambda s: (_ for _ in ()).throw(
+        mj.PixAIError("401 Unauthorized -- API key missing/expired.")))
+    d = _post(cli, _in(7)).get_json()
+    assert d["ok"] is False and "Check that the API key is set up" in d["error"]
     assert mirror_mod.load_mirror_state() == {}
+
+
+@pytest.mark.parametrize("err", [
+    requests.ConnectionError("no route to host"),
+    requests.Timeout("read timed out"),
+    requests.HTTPError("503 Server Error"),
+])
+def test_pixai_out_of_reach_says_so(tmp_path, armed, monkeypatch, err):
+    """No connection, a timeout or a 5xx while asking which account the key is: the words
+    say PixAI couldn't be reached, not that the key is wrong."""
+    monkeypatch.setattr(mj, "resolve_user_id", lambda s: (_ for _ in ()).throw(err))
+    cli = login_client(tmp_path)
+    d = _post(cli, _in(7)).get_json()
+    assert d == {"ok": False, "error": "Couldn't reach PixAI to check which account this is. "
+                                       "Try again in a minute."}
+    assert mirror_mod.load_mirror_state() == {}
+
+
+def test_a_pinned_user_id_does_not_decide_the_account(tmp_path, armed, monkeypatch):
+    """USER_ID pinned in config.json names another account than the key really is: a token
+    for the PINNED id is refused, because the check asks PixAI, not the config."""
+    pinned = "1600000000000000777"
+    monkeypatch.setattr(mj, "USER_ID", pinned)
+    monkeypatch.setattr(mj, "_make_session",
+                        lambda *a, **k: SimpleNamespace(user_id=pinned))   # what the pin feeds
+    cli = login_client(tmp_path)
+    d = _post(cli, _in(7, sub=pinned)).get_json()
+    assert d["ok"] is False and "different PixAI account" in d["error"]
+    assert mirror_mod.load_mirror_state() == {} and armed.looked == [1]
+    assert _post(cli, _in(7)).get_json()["ok"] is True                  # the real account is
+
+
+def test_a_token_claiming_too_long_a_life_is_refused(tmp_path, armed):
+    cli = login_client(tmp_path)
+    d = _post(cli, _in(29)).get_json()
+    assert d["ok"] is False and "longer than any PixAI sign-in" in d["error"]
+    assert mirror_mod.load_mirror_state() == {} and armed.looked == []
+    assert _post(cli, _in(27.5)).get_json()["ok"] is True               # within the ceiling
+
+
+def test_an_older_token_never_replaces_a_later_one_for_the_same_account(tmp_path, armed):
+    cli = login_client(tmp_path)
+    stored = _in(6.8, salt="stored")
+    mirror_mod.save_mirror_state({"jwt": stored})
+    mirror_mod._mirror_renewal.update(fails=2, failed_exp=1, next_try=9e12)
+    d = _post(cli, _in(6.0, salt="older")).get_json()
+    assert d == {"ok": True, "days_left": 6}                           # the stored one's days
+    assert mirror_mod.load_mirror_state()["jwt"] == stored
+    assert mirror_mod._mirror_renewal["fails"] == 0
+    newer = _in(6.95, salt="newer")
+    assert _post(cli, newer).get_json()["ok"] is True
+    assert mirror_mod.load_mirror_state()["jwt"] == newer             # a later one does replace
+    # a later-expiring token for ANOTHER account is never kept over this account's
+    mirror_mod.save_mirror_state({"jwt": _in(20, sub="1600000000000000999")})
+    mine = _in(6.9, salt="mine")
+    assert _post(cli, mine).get_json()["ok"] is True
+    assert mirror_mod.load_mirror_state()["jwt"] == mine
 
 
 def test_read_only_refuses_before_anything(tmp_path, armed, monkeypatch):
@@ -176,6 +239,34 @@ def test_a_cross_origin_request_is_refused_even_with_the_token(tmp_path, armed):
     assert r.get_json()["ok"] is True                                  # the test client's own host
 
 
+@pytest.mark.parametrize("addr, home", [
+    ("127.0.0.1", True), ("::1", True), ("localhost", True), ("10.0.0.68", True),
+    ("172.16.0.1", True), ("172.31.255.254", True), ("192.168.1.20", True),
+    ("169.254.10.10", True), ("fd12:3456::1", True), ("fe80::1%eth0", True),
+    ("::ffff:192.168.1.20", True), ("::ffff:10.0.0.5", True),
+    ("172.32.0.1", False), ("8.8.8.8", False), ("203.0.113.5", False), ("100.64.0.1", False),
+    ("2001:db8::1", False), ("2606:4700::1111", False), ("::ffff:8.8.8.8", False),
+    ("", False), (None, False), ("not-an-address", False),
+])
+def test_home_network_addresses(addr, home):
+    assert mirror_mod.home_network_address(addr) is home
+
+
+@pytest.mark.parametrize("addr, ok", [
+    ("192.168.1.20", True), ("10.0.0.68", True), ("::ffff:192.168.1.20", True),
+    ("203.0.113.5", False), ("::ffff:8.8.8.8", False), ("2001:db8::1", False),
+])
+def test_the_route_takes_a_sign_in_only_from_the_home_network(tmp_path, armed, addr, ok):
+    cli = login_client(tmp_path)
+    tok = _in(7)
+    r = cli.post(ROUTE, json=with_csrf(cli, {"token": tok}), environ_base={"REMOTE_ADDR": addr})
+    if ok:
+        assert r.get_json()["ok"] is True
+    else:
+        assert r.status_code == 403 and "home network" in r.get_json()["error"]
+        assert mirror_mod.load_mirror_state() == {} and armed.looked == []
+
+
 # ---- the page the bookmark opens -------------------------------------------------------
 
 def test_the_connect_page_is_login_gated(tmp_path):
@@ -207,6 +298,8 @@ def test_the_bookmark_checks_where_it_runs_and_names_its_target():
     assert 'w.postMessage({type:"moonglade-mirror-token",token:t},M)' in js
     assert '"*"' not in js and "'*'" not in js
     assert 'credentials:"include"' in js
+    assert "if(!w||w.closed){alert(" in js                          # a blocked window stops
+    assert "},600000);" in js                                       # ten minutes, not three
 
 
 # ---- the renewal regression ------------------------------------------------------------

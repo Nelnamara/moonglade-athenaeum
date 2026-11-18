@@ -17,7 +17,7 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Fixed
-- **Mirror to PixAI connects again.** PixAI changed how it keeps you signed in, so Moonglade can no longer pick up your PixAI sign-in from this computer's browser. The Mirror tile now offers a **Connect from PixAI** link instead: drag it to your bookmarks bar, then click it on any pixai.art tab while you are signed in. It only accepts a sign-in for the same PixAI account as your API key. (2026-11-18)
+- **Mirror to PixAI connects again.** PixAI changed how it keeps you signed in, so Moonglade can no longer pick up your PixAI sign-in from this computer's browser. The Mirror tile now offers a **Connect from PixAI** link instead: drag it to your bookmarks bar, then click it on any pixai.art tab while you are signed in. It only accepts a sign-in for the same PixAI account as your API key, and only from this computer or your home network. (2026-11-18)
 - **The Mirror keeps its sign-in renewed again.** It used to wait until the last three days of PixAI's week-long sign-in, so a few days with the app closed could let it lapse. It now renews once the sign-in is a day old, so it survives the app being closed for up to about six days. (2026-11-18)
 - **The Contests window fits its cards again.** A contest with a long title made the community cards wider than the window, so it scrolled sideways. (2026-11-18)
 

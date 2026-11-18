@@ -70,9 +70,11 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   pixai.art tab you are signed in on: the sign-in goes from that tab to your own Moonglade
   (the address the bookmark was made from) and nowhere else, and Moonglade keeps it only if
   it belongs to the same PixAI account as your API key. It is stored on the server machine;
-  the tile shows how many days it has left, never the credential itself. If you reach
-  Moonglade from another device over your home network, the hand-over crosses that network
-  the same way the rest of the gallery does. And it's a hard switch, not a preference: when
+  the tile shows how many days it has left, never the credential itself. If you click the
+  bookmark on another device on your home network, the sign-in travels **unencrypted** from
+  that device to the server, the same way your Moonglade login does. It is never accepted
+  from outside your home network. HTTPS for using Moonglade over the network is planned.
+  And it's a hard switch, not a preference: when
   mirroring is on and the session isn't usable, the submit **refuses and spends nothing** —
   it never quietly falls back to your API key and files the piece somewhere you didn't
   ask. `python -m moonglade --mirror-check` verifies the session without spending.

@@ -974,6 +974,41 @@ SITE_TOKEN_OTHER_ACCOUNT = ("That pixai.art tab is signed in to a different PixA
                             "than your API key, so nothing was saved. Sign in to pixai.art as "
                             "the same account, then click the bookmark again.")
 SITE_TOKEN_NOT_SAVED = "Moonglade couldn't save the sign-in. Try again."
+SITE_TOKEN_PIXAI_UNREACHABLE = ("Couldn't reach PixAI to check which account this is. Try "
+                                "again in a minute.")
+SITE_TOKEN_TOO_LONG = ("That sign-in claims to last longer than any PixAI sign-in does, so "
+                       "nothing was saved. Click the bookmark again on a pixai.art tab.")
+SITE_TOKEN_NOT_HOME = ("Connect from PixAI only works from this computer or your home "
+                       "network, so nothing was saved.")
+# The longest life a real PixAI sign-in has had, plus a day of slack: ~27 days, measured on
+# the browser's own token in August 2026 (renewals mint 7 days today, MIRROR_TOKEN_LIFE_S).
+# A token claiming more was not issued by PixAI as we know it -- and, kept by the "keep the
+# later-expiring one" rule below, a far-future one would pin itself in place.
+SITE_TOKEN_MAX_LIFE_S = (27 + 1) * 86400
+
+
+def home_network_address(addr):
+    """True when `addr` (the request's remote address) is this machine or a private home
+    network: IPv4 10/8, 172.16/12, 192.168/16, 169.254/16 and loopback; IPv6 ::1, fc00::/7,
+    fe80::/10; and the IPv4-mapped forms of the IPv4 ranges. Anything else -- including an
+    empty or unparseable address -- is False (fails closed). Pure."""
+    import ipaddress
+    a = str(addr or "").strip()
+    if a == "localhost":
+        return True
+    a = a.split("%", 1)[0].strip("[]")                 # an IPv6 zone id / brackets
+    try:
+        ip = ipaddress.ip_address(a)
+    except ValueError:
+        return False
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    if isinstance(ip, ipaddress.IPv4Address):
+        nets = ("127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+                "169.254.0.0/16")
+    else:
+        nets = ("::1/128", "fc00::/7", "fe80::/10")
+    return any(ip in ipaddress.ip_network(n) for n in nets)
 
 
 def _jwt_shaped(tok):
@@ -991,17 +1026,23 @@ def accept_site_token(token, account_id, now=None):
     raises for a bad token, never logs, never returns or echoes the token or any claim.
 
     Checks, cheapest first, all before anything is stored: a JWT's shape; not the API key;
-    `iss == "pixai"`; an `exp` still in the future; and -- the cross-identity guard (invariant
-    #7) -- its `sub` equals the PixAI account the configured API key resolves to. `account_id`
-    is that id, or a no-argument callable returning it, called only once the offline checks
-    pass (resolving it can mean a read over the API key). An empty id refuses: an account that
-    cannot be confirmed is never assumed.
+    `iss == "pixai"`; an `exp` still in the future and no further out than
+    SITE_TOKEN_MAX_LIFE_S; and -- the cross-identity guard (invariant #7) -- its `sub` equals
+    the PixAI account the configured API key resolves to. `account_id` is that id, or a
+    no-argument callable returning it, called only once the offline checks pass (the route's
+    callable asks PixAI, ignoring any USER_ID pinned in config.json). An empty id refuses: an
+    account that cannot be confirmed is never assumed. A lookup that raised
+    requests.RequestException (no connection, a timeout, a 5xx) says PixAI could not be
+    reached; any other failure says to check the API key.
 
-    Then, under _mirror_lock: save_mirror_state({"jwt": token}) (JWT-only, no minted_at -- the
-    app did not mint it) and clear the renewal backoff, so the background tick starts clean on
-    the new token. READ_ONLY and the Mirror switch are the caller's to check (the route refuses
-    under READ_ONLY, as Connect always has; storing a sign-in is allowed with the Mirror off,
-    as Connect always has, since arming needs one)."""
+    Then, under _mirror_lock: when the stored token is still usable, for the same account, and
+    expires LATER than this one, it is kept and its days are answered (a replayed older token
+    never shortens a good one); otherwise save_mirror_state({"jwt": token}) (JWT-only, no
+    minted_at -- the app did not mint it). Either way the renewal backoff is cleared, so the
+    background tick starts clean. READ_ONLY, the client's address and the Mirror switch are the
+    caller's to check (the route refuses under READ_ONLY, as Connect always has, and off the
+    home network; storing a sign-in is allowed with the Mirror off, as Connect always has,
+    since arming needs one)."""
     now = time.time() if now is None else now
     tok = token.strip() if isinstance(token, str) else ""
     if not _jwt_shaped(tok) or _is_api_key(tok):
@@ -1014,8 +1055,12 @@ def accept_site_token(token, account_id, now=None):
     exp = jwt_expiry(tok)
     if exp is None or exp - now <= 0:
         return {"ok": False, "error": SITE_TOKEN_EXPIRED}
+    if exp - now > SITE_TOKEN_MAX_LIFE_S:
+        return {"ok": False, "error": SITE_TOKEN_TOO_LONG}
     try:
         acct = account_id() if callable(account_id) else account_id
+    except requests.RequestException:                  # no connection / timeout / 5xx
+        return {"ok": False, "error": SITE_TOKEN_PIXAI_UNREACHABLE}
     except Exception:                                  # noqa: BLE001 -- a failed lookup refuses
         acct = ""
     acct = str(acct or "").strip()
@@ -1025,10 +1070,18 @@ def accept_site_token(token, account_id, now=None):
     if sub is None or str(sub) != acct:
         return {"ok": False, "error": SITE_TOKEN_OTHER_ACCOUNT}
     with _mirror_lock:
-        if not save_mirror_state({"jwt": tok}):
-            return {"ok": False, "error": SITE_TOKEN_NOT_SAVED}
+        kept = load_mirror_state().get("jwt") or ""
+        kept_exp = jwt_expiry(kept)
+        # exp is already in the future, so a kept_exp beyond it is a still-valid token.
+        if (kept_exp is not None and kept_exp > exp
+                and str(jwt_claims(kept).get("sub")) == acct):
+            winner = kept                              # the stored one outlives this one
+        else:
+            if not save_mirror_state({"jwt": tok}):
+                return {"ok": False, "error": SITE_TOKEN_NOT_SAVED}
+            winner = tok
         _mirror_renewal.update(fails=0, next_try=0.0, failed_exp=None, last_reason="")
-    return {"ok": True, "days_left": jwt_days_left(tok, now=now)}
+    return {"ok": True, "days_left": jwt_days_left(winner, now=now)}
 
 
 def mirror_renew_tick(now=None):

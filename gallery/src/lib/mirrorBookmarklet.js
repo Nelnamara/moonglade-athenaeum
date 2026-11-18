@@ -10,20 +10,21 @@
      3. asks pixai.art for the tab's current sign-in, exactly as the page itself does;
      4. answers the page's ready ping -- only from that window, only from that origin -- with
         postMessage to that exact origin, never "*";
-     5. gives up cleanly after three minutes, and says so.
+     5. gives up cleanly after ten minutes (the page may sit behind a Moonglade sign-in), and
+        says so; and stops at once, saying why, if the window could not open at all.
    The page then checks the sign-in on the server (same PixAI account as the API key, or it is
    refused) and shows the result. */
 
 const BODY = `(function(){var M=__ORIGIN__,P="https://pixai.art";
 if(location.origin!==P){alert("Click this bookmark on a pixai.art tab, signed in to PixAI.");return}
 var w=window.open(M+"/mirror/connect","moonglade_connect","popup,width=480,height=640");
-if(!w){alert("Your browser blocked Moonglade's window. Allow pop-ups for pixai.art, then click the bookmark again.");return}
+if(!w||w.closed){alert("Moonglade's window couldn't open. If your browser blocked a pop-up, allow pop-ups for pixai.art, then click the bookmark again.");return}
 var t=null,sent=0,k;
 function stop(){clearTimeout(k);removeEventListener("message",h)}
 function h(e){if(sent||!t||e.source!==w||e.origin!==M||!e.data||e.data.type!=="moonglade-mirror-ready")return;
 sent=1;stop();w.postMessage({type:"moonglade-mirror-token",token:t},M);t=null}
 addEventListener("message",h);
-k=setTimeout(function(){stop();if(!sent)alert("Moonglade didn't answer. Check that it is running and you are signed in to it, then click the bookmark again.")},180000);
+k=setTimeout(function(){stop();if(!sent)alert("Moonglade didn't answer. Check that it is running and you are signed in to it, then click the bookmark again.")},600000);
 fetch("https://api.pixai.art/v2/auth/refresh-token",{method:"POST",credentials:"include",headers:{"content-type":"application/json"},body:"{}"})
 .then(function(r){if(!r.ok)throw r.status;return r.json()})
 .then(function(d){if(!d||typeof d.token!=="string"||!d.token)throw 0;t=d.token})
