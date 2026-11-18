@@ -183,7 +183,7 @@ def cmd_move(old, start, end, new, header, alias, extra):
         before.pop()
     while after and after[0].strip() == "":
         after.pop(0)
-    nl = "\n"
+    nl = "\r\n" if "\r\n" in text else "\n"        # the old file's own line ends, both files
     rest = "".join(before) + nl + nl + "".join(after) if after else "".join(before) + nl
     edits, conflicts = name_edits(rest, moved)
     if conflicts:
@@ -195,10 +195,10 @@ def cmd_move(old, start, end, new, header, alias, extra):
     base = Path(new).stem
     rest = insert_import(rest, "from moonglade import %s as %s" % (base, alias))
     ast.parse(rest)
-    head = read(header).lstrip("﻿").replace("\r\n", "\n")
-    new_text = head + "".join(extra_lines) + ("\n\n" if extra_lines else "\n") + block
+    head = read(header).lstrip("﻿").replace("\r\n", "\n").replace("\n", nl)
+    new_text = head + "".join(extra_lines) + (nl + nl if extra_lines else nl) + block
     if not new_text.endswith("\n"):
-        new_text += "\n"
+        new_text += nl
     ast.parse(new_text)
     write(old, rest)
     write(new, new_text)
