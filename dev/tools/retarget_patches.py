@@ -734,12 +734,14 @@ def scan_text(path, text, old_modules=OLD_MODULES, module_binding=repo_module_bi
             # Source readers: inspect.getsource(core.x), getsource(g), getsource(fn) ...
             fname = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", None)
             if fname in _SOURCE_FUNCS and args:
-                found_old, unknown = set(), False
+                found_old, found_new, unknown = set(), False, False
                 for sub in ast.walk(args[0]):
                     if isinstance(sub, (ast.Name, ast.Attribute)):
                         mod = model.resolve_expr(sub, scope)
                         if mod in old_modules:
                             found_old.add(mod)
+                        elif mod not in (None, AMBIGUOUS):
+                            found_new = True                    # getsource(newmod.x)
                         elif isinstance(sub, ast.Name) and mod is None:
                             unknown = True
                 whole = model.resolve_expr(args[0], scope)
@@ -747,7 +749,7 @@ def scan_text(path, text, old_modules=OLD_MODULES, module_binding=repo_module_bi
                     _mark(out.reads_source, whole, "whole")     # getsource(g): the whole module
                 for mod in found_old:
                     _mark(out.reads_source, mod, "names")       # getsource(g.create_app)
-                if not found_old and unknown:
+                if not found_old and not found_new and unknown:
                     _mark(out.reads_source, "?", "indirect")    # getsource(fn)
         elif isinstance(node, (ast.Assign, ast.Delete)):
             for t in node.targets:
