@@ -24,7 +24,7 @@ A move is several commands, run from the repo root (`py dev/tools/split_move.py 
       those, from the SEAMS map.
   lazy     NEWFILE MAPFILE
       MAPFILE is {module: [names]}: inserts `from <module> import <names>` as the first
-      statement of every top-level function in NEWFILE that uses them (the lazy-import rule:
+      statement of every top-level function or method in NEWFILE that uses them (the rule:
       a new module never imports backup/gallery at import time). Reports a use outside any
       function, which cannot be made lazy.
   grep     NAMESFILE FILE...
@@ -297,7 +297,9 @@ def cmd_attrs(oldmod, newmod, alias, namesfile, files):
 
 def cmd_lazy(newfile, mapfile):
     """Insert `from <mod> import names` as the first statement (after the docstring) of every
-    top-level function in newfile that uses one of the mapped names. mapfile: {mod: [names]}."""
+    top-level function (and method of a top-level class) in newfile that uses one of the
+    mapped names. mapfile: {mod: [names]}. A use the import cannot reach (module or class
+    level, a default argument, a decorator) is reported and exits 1."""
     mapping = json.loads(Path(mapfile).read_text())
     owner = {n: m for m, ns in mapping.items() for n in ns}
     text = read(newfile)
@@ -306,8 +308,23 @@ def cmd_lazy(newfile, mapfile):
     nl = "\r\n" if lines[0].endswith("\r\n") else "\n"
     inserts = []
     problems = []
+    units = []                  # top-level functions, and the methods of top-level classes
     for node in model.tree.body:
+        if isinstance(node, ast.ClassDef):
+            for item in node.body:
+                units.append(item)
+            units.extend(node.decorator_list + node.bases + [k.value for k in node.keywords])
+        else:
+            units.append(node)
+    for node in units:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if [d for d in node.decorator_list for sub in ast.walk(d)
+                    if isinstance(sub, ast.Name) and sub.id in owner]:
+                problems.append((node.lineno, "a decorator of %s" % node.name))
+            for dflt in node.args.defaults + [d for d in node.args.kw_defaults if d is not None]:
+                for sub in ast.walk(dflt):
+                    if isinstance(sub, ast.Name) and sub.id in owner:
+                        problems.append((sub.lineno, sub.id))
             used = {}
             for sub in ast.walk(node):
                 if isinstance(sub, ast.Name) and sub.id in owner:
