@@ -19,8 +19,8 @@ CHANGELOG and the open issues on 2026-11-12.
 
 ## Now — active
 
-- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.20.7 — Fresh Ink,
-  2026-11-16), per the rule at the top of this file.
+- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.21.0 — Moving Day,
+  2026-11-18), per the rule at the top of this file.
 
 ---
 
@@ -38,20 +38,7 @@ why this section exists.
 
 In the recommended order.
 
-- **Split the two megamodules, phases 0-3 (`moonglade/backup.py` / `moonglade/gallery.py`).** The
-  last open part of Wave 4 (owner, 2026-10-04), planned as 3.21.0, and 3.21.0 is the split only: the
-  stand-in cleanup the old plan put there was already done in the 3.20 rebuild. They are the repo's
-  two largest, most-churned modules (`gallery.py` is 29,875 lines, `backup.py` 18,827) and its top
-  regression risk. Phase 0 maps the seams in a test and retargets the test patches, and it matters
-  most: tests patch these two modules through import aliases about 2,000 times, so a stale patch
-  after a move would pass without testing anything. Phases 1-3 move whole sections verbatim into
-  their own modules (library scan, duplicates, organize and series; health, account state, the job
-  log, training, the PixAI client, the updater; the mirror, media tools, achievements), with no
-  internal re-exports and a full test gate per phase. Phase 3's branding-and-pack module needs a
-  name other than container (`moonglade/container.py` is already the pack format). `create_app`'s
-  route families and the spend path are NOT in this split (see Later).
-
-- **App security review.** Runs AFTER the split, on the new layout (owner, 2026-11-12); its fixes go
+- **App security review.** Runs now that the split has shipped (3.21.0), on the new layout (owner, 2026-11-12); its fixes go
   in a 3.21.x release. A read-only audit that ends in a ranked list: the threat model, login and
   the no-accounts mode, session cookie handling, the localhost and LAN trust model, request
   integrity (the CSRF debt the 3.16.0 coverage guard lists, headers, CSP), file and input handling,
