@@ -17,6 +17,7 @@ import pytest
 
 from moonglade import backup as core
 from tests.conftest import login_client
+from moonglade import mirror as mirror_mod
 
 T3 = "2024383379556065549"
 SDXL = "V-SDXL"
@@ -257,7 +258,7 @@ def test_api_generate_sends_the_palette_it_quoted(tmp_path, rest, monkeypatch):
     cards = []
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, **k: cards.append(dict(params)))
     sent = []
-    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     monkeypatch.setattr(core, "gql_mutate",
                         lambda s, q, v=None: sent.append(v["parameters"])
                         or {"createGenerationTask": {"id": "4242"}})

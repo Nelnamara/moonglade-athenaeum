@@ -5,10 +5,11 @@ The ONE PixAI transport seam: PixAIClient (the six verbs, the credential choice 
 and _client_of, the adapter every road asks for. Moved verbatim out of moonglade/backup.py in
 the 3.21.0 split (phase 2).
 
-The module state it reads (USER_ID, API_URL, REST_API_BASE), the errors, the redirect and
-REST-error helpers and the create-session choke (`_session_for_create`) stay in moonglade.backup
-and are imported from there inside each method that uses them, at call time, so a test's patch
-of backup's binding still reaches them and importing this module never imports the engine.
+The module state it reads (USER_ID, API_URL, REST_API_BASE), the errors and the redirect and
+REST-error helpers stay in moonglade.backup, and the create-session choke (`_session_for_create`)
+lives in moonglade.mirror (since 3.21.0's phase 3). Each is imported inside the method that uses
+it, at call time, so a test's patch of that module's binding still reaches it and importing
+this module never imports the engine.
 """
 import json
 import sys
@@ -289,7 +290,7 @@ class PixAIClient:
         this same client otherwise. Refuses (raises) rather than falling back to the API
         key when the mirror is armed but unavailable. Callers must have already passed
         `_check_read_only` -- building the mirror session may make a renewal call."""
-        from moonglade.backup import _session_for_create
+        from moonglade.mirror import _session_for_create
         chosen = _session_for_create(self)
         if chosen is self:
             return self

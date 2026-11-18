@@ -11,6 +11,7 @@ present as the website. The credential is never touched by that -- Authorization
 """
 from moonglade import backup as core
 from tests.conftest import login_client
+from moonglade import mirror as mirror_mod
 
 
 class _Stub:
@@ -24,18 +25,18 @@ class _Stub:
 
 def test_present_as_web_sets_the_website_identity_and_keeps_the_credential():
     s = _Stub()
-    assert core.present_as_web(s) is s, "the same object comes back -- callers rebind, not copy"
-    assert s.headers["User-Agent"] == core.MIRROR_WEB_USER_AGENT
-    assert s.headers["Origin"] == core.MIRROR_WEB_ORIGIN
-    assert s.headers["Referer"] == core.MIRROR_WEB_ORIGIN + "/"
+    assert mirror_mod.present_as_web(s) is s, "the same object comes back -- callers rebind, not copy"
+    assert s.headers["User-Agent"] == mirror_mod.MIRROR_WEB_USER_AGENT
+    assert s.headers["Origin"] == mirror_mod.MIRROR_WEB_ORIGIN
+    assert s.headers["Referer"] == mirror_mod.MIRROR_WEB_ORIGIN + "/"
     assert s.headers["Authorization"] == "Bearer not-a-real-key", "the identity changes, the key does not"
-    assert set(core.WEB_IDENTITY_HEADERS) == {"User-Agent", "Origin", "Referer"}, \
+    assert set(mirror_mod.WEB_IDENTITY_HEADERS) == {"User-Agent", "Origin", "Referer"}, \
         "the identity is exactly the three headers the mirror session presents -- nothing else"
 
 
 def test_present_as_web_leaves_a_headerless_stand_in_alone():
     o = object()
-    assert core.present_as_web(o) is o
+    assert mirror_mod.present_as_web(o) is o
 
 
 def test_model_search_route_browses_the_market_as_the_website(tmp_path, monkeypatch):
@@ -51,8 +52,8 @@ def test_model_search_route_browses_the_market_as_the_website(tmp_path, monkeypa
     d = cli.get("/api/model-search?kind=lora&size=24&q=cum&src=market&sort=liked").get_json()
     assert not d.get("error"), d
     assert seen["keyword"] == "cum"
-    assert seen["headers"]["User-Agent"] == core.MIRROR_WEB_USER_AGENT
-    assert seen["headers"]["Origin"] == core.MIRROR_WEB_ORIGIN
+    assert seen["headers"]["User-Agent"] == mirror_mod.MIRROR_WEB_USER_AGENT
+    assert seen["headers"]["Origin"] == mirror_mod.MIRROR_WEB_ORIGIN
     assert seen["headers"]["Authorization"] == "Bearer not-a-real-key"
 
 
@@ -67,7 +68,7 @@ def test_bookmark_tab_browses_as_the_website_too(tmp_path, monkeypatch):
     cli = login_client(tmp_path)
     d = cli.get("/api/model-search?kind=lora&size=24&q=&src=bookmark").get_json()
     assert not d.get("error"), d
-    assert seen["headers"]["User-Agent"] == core.MIRROR_WEB_USER_AGENT
+    assert seen["headers"]["User-Agent"] == mirror_mod.MIRROR_WEB_USER_AGENT
 
 
 def test_model_version_route_reads_versions_as_the_website(tmp_path, monkeypatch):
@@ -83,5 +84,5 @@ def test_model_version_route_reads_versions_as_the_website(tmp_path, monkeypatch
     d = cli.get("/api/model-version?model_id=123&all=1").get_json()
     assert d.get("versions") == [], d
     assert seen["mid"] == "123"
-    assert seen["headers"]["User-Agent"] == core.MIRROR_WEB_USER_AGENT
+    assert seen["headers"]["User-Agent"] == mirror_mod.MIRROR_WEB_USER_AGENT
     assert seen["headers"]["Authorization"] == "Bearer not-a-real-key"

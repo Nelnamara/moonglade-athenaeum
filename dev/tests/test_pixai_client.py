@@ -28,6 +28,7 @@ import requests
 from moonglade import backup as core
 from tests.fake_pixai import FakePixAI, UnregisteredOperation, operation_name
 from moonglade import pixai_client as pixai_client_mod
+from moonglade import mirror as mirror_mod
 
 
 class FakeResponse:
@@ -372,15 +373,15 @@ class TestRetryPolicy:
 
 class TestForCreate:
     def test_mirror_off_is_the_same_client(self, monkeypatch):
-        monkeypatch.setattr(core, "mirror_enabled", lambda: False)
+        monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: False)
         c = pixai_client_mod.PixAIClient(RecordingSession())
         assert c.for_create() is c
         assert c.for_create().auth_kind == "api-key"
 
     def test_mirror_on_returns_a_web_jwt_client_over_the_mirror_session(self, monkeypatch):
         mirror = RecordingSession()
-        monkeypatch.setattr(core, "mirror_enabled", lambda: True)
-        monkeypatch.setattr(core, "make_mirror_session", lambda: mirror)
+        monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
+        monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda: mirror)
         c = pixai_client_mod.PixAIClient(RecordingSession())
         made = c.for_create()
         assert made is not c
@@ -390,8 +391,8 @@ class TestForCreate:
     def test_mirror_on_but_unavailable_refuses_and_never_falls_back(self, monkeypatch):
         """F5: if the mirror session is unavailable, refuse and spend nothing -- never
         quietly file the generation under the API key instead."""
-        monkeypatch.setattr(core, "mirror_enabled", lambda: True)
-        monkeypatch.setattr(core, "make_mirror_session", lambda: None)
+        monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
+        monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda: None)
         c = pixai_client_mod.PixAIClient(RecordingSession())
         with pytest.raises(core.PixAIError, match="Mirror to PixAI is ON"):
             c.for_create()
@@ -399,10 +400,10 @@ class TestForCreate:
     def test_it_is_the_same_rule_the_module_choke_uses(self, monkeypatch):
         """`_session_for_create` stays the one place the rule is written; `for_create()`
         is its face on the client, not a second copy of the decision."""
-        monkeypatch.setattr(core, "mirror_enabled", lambda: False)
+        monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: False)
         c = pixai_client_mod.PixAIClient(RecordingSession())
-        assert core._session_for_create(c) is c
-        assert c.for_create() is core._session_for_create(c)
+        assert mirror_mod._session_for_create(c) is c
+        assert c.for_create() is mirror_mod._session_for_create(c)
 
 
 # ---------------------------------------------------------------------------

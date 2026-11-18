@@ -15,6 +15,7 @@ from moonglade import container as _mc
 from moonglade import gallery
 from moonglade import health as health_mod
 from moonglade import migrate as moonglade_migrate
+from moonglade import mirror as mirror_mod
 from moonglade import paths as moonglade_paths
 
 # The sealed achievement-definitions donor (private companion repo). The roster no longer
@@ -954,9 +955,9 @@ def _fresh_mirror_renewal():
     6 h success floor, the 15-minute tick, the failed token's exp) is module state that outlives
     a test. Without this, one test's successful renewal would hold the next test's renewal
     behind the 6 h floor, and a failure would leave the next one in backoff."""
-    core._mirror_renewal_reset()
+    mirror_mod._mirror_renewal_reset()
     yield
-    core._mirror_renewal_reset()
+    mirror_mod._mirror_renewal_reset()
 
 
 @pytest.fixture(autouse=True)

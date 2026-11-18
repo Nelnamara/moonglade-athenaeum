@@ -27,6 +27,7 @@ from moonglade import paths
 from moonglade import settings as msettings
 from tests.conftest import first_party_sources
 from moonglade import about as about_mod
+from moonglade import mirror as mirror_mod
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -76,7 +77,7 @@ _TABLE = [
     ("the pack", lambda: g._container_path(), lambda: _LOCAL / "moonglade.mgpack"),
     ("the pack's marker", lambda: ma._version_marker_path(g._container_path()),
      lambda: _LOCAL / "moonglade.mgpack.version"),
-    ("mirror_session.json", lambda: core._mirror_state_path(),
+    ("mirror_session.json", lambda: mirror_mod._mirror_state_path(),
      lambda: _LOCAL / "mirror_session.json"),
     ("the shortcut icons", lambda: paths.icons_dir(), lambda: _LOCAL / "icons"),
     ("the only-copy banners", lambda: paths.banners_dir(), lambda: _LOCAL / "banners"),

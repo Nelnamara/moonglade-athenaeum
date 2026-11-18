@@ -33,6 +33,7 @@ from moonglade import backup as core
 
 from tests.conftest import login_client
 from moonglade import jobs as jobs_mod
+from moonglade import mirror as mirror_mod
 
 ROOT = Path(__file__).resolve().parents[2]
 NODE = shutil.which("node")
@@ -693,7 +694,7 @@ def test_price_and_submit_card_match_and_send_the_gated_dict(rest, monkeypatch):
     matched, sent = [], []
     monkeypatch.setattr(core, "match_kaisuuken",
                         lambda s, params, **k: matched.append(params) or dict(CARD))
-    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     monkeypatch.setattr(core, "gql_mutate",
                         lambda s, q, v=None: sent.append(v["parameters"])
                         or {"createGenerationTask": {"id": "T1"}})
@@ -734,7 +735,7 @@ class _Stop(Exception):
 def test_run_generate_card_matches_and_submits_the_gated_dict(rest, monkeypatch, tmp_path):
     matched, sent = [], []
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     monkeypatch.setattr(core, "match_kaisuuken",
                         lambda s, params, **k: matched.append(params) or dict(CARD))
     monkeypatch.setattr(core, "submit_generation",
@@ -1191,7 +1192,7 @@ def test_price_answers_a_lane_request_free_with_no_card_check(lane, monkeypatch)
 def test_submit_sends_the_lane_once_with_no_card_whatever_no_card_says(lane, monkeypatch):
     calls = _no_card(monkeypatch)
     sent = []
-    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     monkeypatch.setattr(core, "gql_mutate",
                         lambda s, q, v=None: sent.append(v["parameters"])
                         or {"createGenerationTask": {"id": "T9"}})
@@ -1217,7 +1218,7 @@ def test_a_refused_lane_request_is_never_resubmitted_as_anything_else(refusal, m
     def _refuse(s, q, v=None):
         sent.append(dict(v["parameters"]))
         raise core.PixAIError(refusal)
-    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     monkeypatch.setattr(core, "_gate_params_for_model", lambda s, p: p)
     monkeypatch.setattr(core, "gql_mutate", _refuse)
     monkeypatch.setitem(core._turbo_refused, "seen", False)
@@ -1309,18 +1310,18 @@ def test_status_is_read_and_cached_under_the_identity_that_creates(lane, monkeyp
     API key's."""
     mirror = object()
     assert core.infinite_mode_status("api-session", T3)["owned"] is True
-    monkeypatch.setattr(core, "mirror_enabled", lambda: True)
-    monkeypatch.setattr(core, "load_mirror_state", lambda: {"jwt": "<jwt>"})
-    monkeypatch.setattr(core, "_jwt_usable", lambda jwt: jwt == "<jwt>")
-    monkeypatch.setattr(core, "_mirror_session_from", lambda jwt: mirror)
-    monkeypatch.setattr(core, "make_mirror_session",
+    monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
+    monkeypatch.setattr(mirror_mod, "load_mirror_state", lambda: {"jwt": "<jwt>"})
+    monkeypatch.setattr(mirror_mod, "_jwt_usable", lambda jwt: jwt == "<jwt>")
+    monkeypatch.setattr(mirror_mod, "_mirror_session_from", lambda jwt: mirror)
+    monkeypatch.setattr(mirror_mod, "make_mirror_session",
                         lambda *a, **k: pytest.fail("a status read must not refresh the token"))
     assert core.infinite_mode_status("api-session", T3)["owned"] is True
     assert lane.sessions == ["api-session", mirror]
     assert set(core._unlimited_cache) == {(T3, "key"), (T3, "mirror")}
     # an unusable stored token is a failed read, not an API-key fallback
     core._unlimited_cache.clear()
-    monkeypatch.setattr(core, "_jwt_usable", lambda jwt: False)
+    monkeypatch.setattr(mirror_mod, "_jwt_usable", lambda jwt: False)
     assert core.infinite_mode_status("api-session", T3) is None
     assert len(lane.sessions) == 2
 
@@ -1391,7 +1392,7 @@ def test_api_generate_runs_one_lane_task_at_a_time_off_its_own_job_log(monkeypat
     monkeypatch.setattr(core, "_rest_get", lane)
     calls = _no_card(monkeypatch)
     sent = []
-    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     monkeypatch.setattr(core, "gql_mutate",
                         lambda s, q, v=None: sent.append(v["parameters"])
                         or {"createGenerationTask": {"id": "4242"}})

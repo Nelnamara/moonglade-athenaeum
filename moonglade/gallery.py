@@ -40,6 +40,8 @@ from moonglade import contest_wins
 from moonglade import dupes as _dupes
 from moonglade import health as _health
 from moonglade import jobs as _jobs
+from moonglade import media_tools as _media_tools
+from moonglade import mirror as _mirror
 from moonglade import organize as _organize
 from moonglade import paths as _paths
 from moonglade import pixai_client as _pixai_client
@@ -47,7 +49,6 @@ from moonglade import scan as _scan
 from moonglade import series as _series
 from moonglade import settings as _settings
 from moonglade import updater as _updater
-from moonglade import media_tools as _media_tools
 
 try:
     from flask import (Flask, jsonify, redirect, render_template_string, request,
@@ -12136,16 +12137,16 @@ def create_app(out_dir: Path):
         try:
             import logging as _logging
             from moonglade import backup as _core
-            out = _core.mirror_renew_tick()
+            out = _mirror.mirror_renew_tick()
             _log = _logging.getLogger(__name__)
             if out == "renewed":
-                left = _core.jwt_days_left(_core.load_mirror_state().get("jwt") or "")
+                left = _mirror.jwt_days_left(_mirror.load_mirror_state().get("jwt") or "")
                 _log.info("mirror: renewed the PixAI web session in the background via %s "
-                          "(%s days left)", _core._mirror_renewal.get("last_road") or "jwt",
+                          "(%s days left)", _mirror._mirror_renewal.get("last_road") or "jwt",
                           left)
             elif out == "failed" and _mirror_renew_seen["last"] != "failed":
                 _log.warning("mirror: couldn't renew the PixAI web session (%s); retrying "
-                             "with backoff", _core._mirror_renewal.get("last_reason") or "failed")
+                             "with backoff", _mirror._mirror_renewal.get("last_reason") or "failed")
             if out in ("renewed", "failed"):
                 _mirror_renew_seen["last"] = out
         except Exception:              # noqa: BLE001 -- a renewal must never kill the loop
@@ -16357,7 +16358,7 @@ def create_app(out_dir: Path):
                     payload["results"] = core.annotate_lora_compat(payload["results"], base_type)
                 payload["read_only"] = _read_only_flag(core)
                 return jsonify(payload)
-            session = core.present_as_web(session)
+            session = _mirror.present_as_web(session)
             if src == "bookmark":
                 # Its own operation -- the market connection has no bookmark argument, so this
                 # cannot be folded into the call below. Same row shape, so the grid does not care.
@@ -16432,7 +16433,7 @@ def create_app(out_dir: Path):
         if version_id:
             try:
                 core, session = _gen_session()
-                session = core.present_as_web(session)   # same policy as the search that found it
+                session = _mirror.present_as_web(session)   # same policy as the search that found it
                 return jsonify({"model_id": core.resolve_model_base_id(session, version_id)})
             except Exception as e:
                 return jsonify({"error": _redact_host_paths(str(e))[:200], "model_id": ""}), 200
@@ -16441,7 +16442,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": "model_id required", "version_id": ""}), 400
         try:
             core, session = _gen_session()
-            session = core.present_as_web(session)   # same policy as the search that found it
+            session = _mirror.present_as_web(session)   # same policy as the search that found it
             if (request.args.get("all") or "").strip() in ("1", "true"):
                 return jsonify({"versions": core.list_model_versions(session, mid)})
             # with_profiles: this is a BASE-model resolve whose answer feeds the composer's
@@ -20440,14 +20441,14 @@ def create_app(out_dir: Path):
         failed, paused, expired, off), so the tile warns only when a renewal actually failed
         or cannot run, not whenever the token sits in its normal renewal window."""
         from moonglade import backup as core
-        state = core.load_mirror_state()
+        state = _mirror.load_mirror_state()
         jwt = (state.get("jwt") or "")
-        left_s, span_s = core.mirror_token_span(state)
-        return jsonify({"enabled": core.mirror_enabled(), "connected": bool(jwt),
-                        "days_left": core.jwt_days_left(jwt) if jwt else None,
+        left_s, span_s = _mirror.mirror_token_span(state)
+        return jsonify({"enabled": _mirror.mirror_enabled(), "connected": bool(jwt),
+                        "days_left": _mirror.jwt_days_left(jwt) if jwt else None,
                         "left_s": int(left_s) if left_s is not None else None,
                         "span_s": int(span_s) if span_s is not None else None,
-                        "renewal": core.mirror_renewal_status()})
+                        "renewal": _mirror.mirror_renewal_status()})
 
     @app.route("/api/mirror/enable", methods=["POST"])
     @tier(LOCALHOST)
@@ -20463,7 +20464,7 @@ def create_app(out_dir: Path):
         # mirror with no live session lets every Bridge/enhance submit hit the mirror-ON gate,
         # fail make_mirror_session(), and refuse -- an armed toggle that can run nothing. The
         # DISARM (false-write) is always allowed, so the owner can always turn it back off.
-        if want and not core._jwt_usable(core.load_mirror_state().get("jwt") or ""):
+        if want and not _mirror._jwt_usable(_mirror.load_mirror_state().get("jwt") or ""):
             return jsonify({"error": "Connect the mirror first — not armed",
                             "enabled": False}), 200
         try:
@@ -20484,16 +20485,16 @@ def create_app(out_dir: Path):
             core._check_read_only("connect the PixAI mirror")   # the renewal is account-mutating
             # A press (#71): re-read the browser even for a usable stored token, keep the
             # later-expiring of the two, and try a due renewal even inside a failure backoff.
-            s = core.make_mirror_session(bootstrap_from_browser=True, user_initiated=True)
+            s = _mirror.make_mirror_session(bootstrap_from_browser=True, user_initiated=True)
         except Exception as e:
             return jsonify({"ok": False, "error": _redact_host_paths(str(e))[:160]}), 200
         if s is None:
             return jsonify({"ok": False, "error": "Couldn't read a pixai.art session from a "
                             "browser on this machine. Sign in to pixai.art in Chrome/Edge/Brave "
                             "(reload the page once so the token is written), then try again."}), 200
-        jwt = (core.load_mirror_state().get("jwt") or "")
+        jwt = (_mirror.load_mirror_state().get("jwt") or "")
         return jsonify({"ok": bool(jwt),
-                        "days_left": core.jwt_days_left(jwt) if jwt else None})
+                        "days_left": _mirror.jwt_days_left(jwt) if jwt else None})
 
     @app.route("/api/branding", methods=["GET", "POST"])
     @tier(LOGIN)
@@ -21684,7 +21685,7 @@ def create_app(out_dir: Path):
         mirror session (whose read may refresh a token) is not reached for a quote."""
         if core.READ_ONLY or core._read_only_now():
             return gsession
-        return core._session_for_create(gsession)
+        return _mirror._session_for_create(gsession)
 
     def _recipe_budget_check(core, gsession, built, plan):
         """Review F7: with recipes, a prompt a cell's value made too long would only be
@@ -22324,7 +22325,7 @@ def create_app(out_dir: Path):
         # Stored session (no bootstrap) -- as the gate uses -- and only while the Mirror is ON,
         # like the scene routes: make_mirror_session can renew the token, and nothing may renew
         # it as a side effect while the owner has the Mirror switched off (#71).
-        s = core.make_mirror_session() if core.mirror_enabled() else None
+        s = _mirror.make_mirror_session() if _mirror.mirror_enabled() else None
 
         def _row(pr):
             row = {"key": pr.get("key"), "label": pr.get("label"),
@@ -22379,7 +22380,7 @@ def create_app(out_dir: Path):
         # invariant-#7 cross-identity violation). mirror_enabled() catches OFF; make_mirror_session()
         # is None catches ON-but-no-usable-session. make_mirror_session is READ_ONLY-guarded and
         # never raises, so it is safe to call as a gate.
-        if not core.mirror_enabled() or core.make_mirror_session() is None:
+        if not _mirror.mirror_enabled() or _mirror.make_mirror_session() is None:
             return jsonify({"error": "Mirror to PixAI must be armed to run AI presets — "
                                      "nothing was submitted, no credits spent"}), 409
         try:
@@ -22470,10 +22471,10 @@ def create_app(out_dir: Path):
         Mirror-gated exactly like /api/enhance -- the AI-Tools tier only exists when the
         Bridge is armed. LOGIN tier; read-only, spends nothing."""
         from moonglade import backup as core
-        if not core.mirror_enabled() or core.make_mirror_session() is None:
+        if not _mirror.mirror_enabled() or _mirror.make_mirror_session() is None:
             return jsonify({"error": "Mirror to PixAI must be armed to browse AI Tools"}), 409
         try:
-            raw = scene_catalog(core, core.make_mirror_session())
+            raw = scene_catalog(core, _mirror.make_mirror_session())
         except Exception as e:
             return jsonify({"error": _log_gen_failure("/api/scenes", e, None)[:200]}), 200
         return jsonify({"scenes": [scene_row(sc) for sc in raw if sc.get("sceneId")]})
@@ -22488,7 +22489,7 @@ def create_app(out_dir: Path):
         routes the submit through the JWT. Body: {scene_id, media_ids[], preset, custom?,
         selector_values?}. Login required; returns {task_id}."""
         from moonglade import backup as core
-        if not core.mirror_enabled() or core.make_mirror_session() is None:
+        if not _mirror.mirror_enabled() or _mirror.make_mirror_session() is None:
             return jsonify({"error": "Mirror to PixAI must be armed to run AI Tools — "
                                      "nothing was submitted, no credits spent"}), 409
         try:
@@ -22503,7 +22504,7 @@ def create_app(out_dir: Path):
             if not media:
                 return jsonify({"error": "pick a source image"}), 400
             task_id = core.submit_scene(
-                core.make_mirror_session(), scene_id, media,
+                _mirror.make_mirror_session(), scene_id, media,
                 preset=str(p.get("preset") or "random"), custom=p.get("custom"),
                 selector_values=(p.get("selector_values") or p.get("selectorValues") or []))
             # Doorwarden telemetry is DEFERRED to terminal success (see _fire_scene_telemetry),
@@ -26479,7 +26480,7 @@ __DESIGN_TOKENS__
         try:
             core, gsession = _gen_session()
             return jsonify(_recipes().model_old_bookmarks(
-                gsession, core.present_as_web(gsession), _recipe_user_id(core, gsession),
+                gsession, _mirror.present_as_web(gsession), _recipe_user_id(core, gsession),
                 _saved_kind()))
         except Exception as e:                                   # noqa: BLE001
             return _recipe_fail(e, rows=[])

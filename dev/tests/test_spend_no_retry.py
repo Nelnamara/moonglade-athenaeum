@@ -33,6 +33,7 @@ import requests
 
 from moonglade import backup as core
 from moonglade import pixai_client as pixai_client_mod
+from moonglade import mirror as mirror_mod
 
 
 # Every function that fires a credit-spending or account-mutating GraphQL call. When a new
@@ -510,8 +511,8 @@ class TestWritesNeverFollowRedirects:
         cur = _b({"alg": "none"}) + "." + _b({"exp": int(_time.time()) + 86400,
                                               "iss": "pixai", "sub": "s"}) + ".x"
         s = _Kw(status=307)
-        assert core.refresh_jwt(s, current_jwt=cur) is None
-        assert core._refresh_last["reason"] == "http_307"
+        assert mirror_mod.refresh_jwt(s, current_jwt=cur) is None
+        assert mirror_mod._refresh_last["reason"] == "http_307"
         (_v, _u, kw), = s.calls
         assert kw["allow_redirects"] is False
 

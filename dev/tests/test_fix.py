@@ -17,6 +17,7 @@ from moonglade import gallery as moonglade_gallery
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client
+from moonglade import mirror as mirror_mod
 
 
 REFERENCE_PRO = core.EDIT_MODELS["reference-pro"]["model_id"]
@@ -226,7 +227,7 @@ def test_fix_body_is_the_submit_body(monkeypatch):
              {"x": 1, "y": 1, "width": 5, "height": 5, "tag": "elbow"}]  # not a fixer tag
     boxes += [dict(HAND, x=i) for i in range(20)]                        # 21 usable in all
     posts = _record_posts(monkeypatch)
-    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     assert core.submit_fixer(object(), "700", boxes) == "F1"
     (path, sent), = posts
     assert path == "/task/fixer"
@@ -261,7 +262,7 @@ def test_a_non_finite_box_is_dropped_not_raised(bad, monkeypatch):
 def test_a_non_finite_box_on_the_routes_is_a_note_and_never_sent(raw, tmp_path, monkeypatch):
     """Python's json reads Infinity and NaN, so a hand-rolled request can carry them."""
     cli, seen = _price_client(tmp_path, monkeypatch)
-    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     body = '{"mode":"fix","source":"700","boxes":[{"x":%s,"y":1,"width":5,"height":5,"tag":"face"}]}' % raw
     d = cli.post("/api/price", data=body, content_type="application/json").get_json()
     assert d["cost"] is None and "box" in d["note"]
@@ -290,7 +291,7 @@ def test_fix_body_refuses_two_kinds():
 
 def test_submit_fixer_refuses_two_kinds_before_any_network(monkeypatch):
     monkeypatch.setattr(core, "_rest_post", _tripwire("_rest_post"))
-    monkeypatch.setattr(core, "_session_for_create", _tripwire("_session_for_create"))
+    monkeypatch.setattr(mirror_mod, "_session_for_create", _tripwire("_session_for_create"))
     with pytest.raises(core.PixAIError, match="one kind"):
         core.submit_fixer(object(), "700", [FACE, HAND])
     # READ_ONLY is still checked FIRST: the refusal a read-only install sees is READ_ONLY's.
@@ -331,7 +332,7 @@ def test_price_route_quotes_on_the_fixer_price_route(tmp_path, monkeypatch):
     (path, priced), = seen["posts"]
     assert path == "/task/fixer/price"
     assert uploads == [], "a quote never uploads"
-    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     r = cli.post("/api/fix", json=payload).get_json()
     assert r.get("task_id") == "F1", r
     (spend_path, sent), = seen["posts"][1:]
@@ -357,7 +358,7 @@ def test_fix_price_never_touches_the_spend_route(tmp_path, monkeypatch):
     # price_fixer takes no path: nothing a caller hands it can turn the quote into a spend
     assert list(inspect.signature(core.price_fixer).parameters) == ["session", "body"]
     # it rides the session it is handed -- never the mirror's create session
-    monkeypatch.setattr(core, "_session_for_create", _tripwire("_session_for_create"))
+    monkeypatch.setattr(mirror_mod, "_session_for_create", _tripwire("_session_for_create"))
     cli, seen = _price_client(tmp_path, monkeypatch)
     cli.post("/api/price", json={"mode": "fix", "source": "700", "boxes": [FACE]})
     assert seen["posts"] and all(p != "/task/fixer" for p, _ in seen["posts"])
@@ -410,7 +411,7 @@ def test_fix_route_two_kinds_is_refused_before_any_network(tmp_path, monkeypatch
     """A hand-rolled /api/fix with face and hand boxes: refused, nothing sent -- and under
     READ_ONLY the refusal is READ_ONLY's."""
     cli, seen = _price_client(tmp_path, monkeypatch)
-    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     d = cli.post("/api/fix", json={"mode": "fix", "source": "700",
                                    "boxes": [FACE, HAND]}).get_json()
     assert "one kind" in d["error"] and "task_id" not in d
@@ -439,7 +440,7 @@ def test_an_identical_fix_inside_the_window_is_refused_before_any_network(tmp_pa
     one is accepted again once the window has passed."""
     from moonglade import gallery as g
     cli, seen = _price_client(tmp_path, monkeypatch)
-    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     clock = [1000.0]
     monkeypatch.setattr(g.time, "monotonic", lambda: clock[0])
     payload = {"source": "700", "boxes": [FACE]}
@@ -482,7 +483,7 @@ def test_a_retry_after_pixais_4xx_refusal_goes_straight_through(status, tmp_path
     """PixAI refused the first submit (insufficient balance and the like): nothing was created
     or charged, so the repeat record is dropped and an immediate retry is not refused."""
     cli, _ = _price_client(tmp_path, monkeypatch)
-    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     posts = _failing_then_ok(monkeypatch, _rest_refusal(status))
     payload = {"source": "700", "boxes": [FACE]}
     first = cli.post("/api/fix", json=payload).get_json()
@@ -502,7 +503,7 @@ def test_a_retry_after_a_refusal_before_any_send_goes_straight_through(tmp_path,
         if len(calls) == 1:
             raise core.PixAIError("Mirror mode is on but no mirror session is available")
         return s
-    monkeypatch.setattr(core, "_session_for_create", mirror)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", mirror)
     posts = _record_posts(monkeypatch)
     payload = {"source": "700", "boxes": [FACE]}
     assert "task_id" not in cli.post("/api/fix", json=payload).get_json()
@@ -517,7 +518,7 @@ def test_a_retry_after_an_unknown_outcome_is_still_refused(exc, tmp_path, monkey
     """A timeout, a dropped connection, a 5xx or 408 after the send, or a 2xx with no task id:
     PixAI may have created -- and charged -- the Fix, so the immediate retry is refused."""
     cli, _ = _price_client(tmp_path, monkeypatch)
-    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     if exc == "5xx":
         exc = _rest_refusal(502)
     elif exc == "408":

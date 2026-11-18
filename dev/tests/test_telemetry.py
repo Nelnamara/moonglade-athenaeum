@@ -13,6 +13,7 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import STARFALL_EVENT, ach_event, ach_nonce, login_client, login_test_client, _SEALED_DONOR
+from moonglade import mirror as mirror_mod
 
 # The roster is sealed in the container (built from the private donor), not in source.
 # Gate ONLY the tests that assert sealed roster/skin/criteria CONTENT -- NOT the whole
@@ -616,8 +617,8 @@ def test_contest_metrics_default_to_zero(tmp_path):
 def _arm_mirror_bridge(monkeypatch, core):
     """Mirror ARMED + every spend/collect entry point stubbed -- no network, no spend."""
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "mirror_enabled", lambda: True)
-    monkeypatch.setattr(core, "make_mirror_session", lambda *a, **k: object())
+    monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
+    monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "submit_generation", lambda *a, **k: "T-ENH-9")
 
@@ -687,8 +688,8 @@ def test_scene_and_gen_daymark_hooks_fire_on_terminal_success(tmp_path, monkeypa
     on a failure."""
     from moonglade import backup as core
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "mirror_enabled", lambda: True)
-    monkeypatch.setattr(core, "make_mirror_session", lambda *a, **k: object())
+    monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
+    monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "submit_scene", lambda *a, **k: "T-SCENE-1")
     save_catalog(tmp_path / "catalog.db", [])
     cli = login_client(tmp_path)
@@ -728,7 +729,7 @@ def test_a_regular_mirror_gen_is_not_a_bridge_tool(tmp_path, monkeypatch):
     save_catalog(tmp_path / "catalog.db", [])
     cli = login_client(tmp_path)
     for mirror in (False, True):
-        monkeypatch.setattr(core, "mirror_enabled", lambda m=mirror: m)
+        monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda m=mirror: m)
         cli.get("/api/task-status", query_string={"task_id": "T-GEN-%s" % mirror})
         assert g.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 0, mirror
     # ...and the collect choke still marks the day for a plain gen: narrowing ONE metric

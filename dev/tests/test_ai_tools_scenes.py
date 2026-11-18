@@ -17,6 +17,7 @@ from moonglade import gallery as g
 from moonglade.gallery import save_catalog
 
 from tests.conftest import login_client
+from moonglade import mirror as mirror_mod
 
 _CDN = "https://images-ng.pixai.art/images/thumb/"
 
@@ -205,8 +206,8 @@ def test_an_empty_answer_is_not_cached():
 
 def _armed(monkeypatch, up):
     from moonglade import backup as core
-    monkeypatch.setattr(core, "mirror_enabled", lambda: True)
-    monkeypatch.setattr(core, "make_mirror_session", lambda *a, **k: object())
+    monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
+    monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "chat_editing_scenes", up)
 
 
@@ -227,7 +228,7 @@ def test_api_scenes_serves_every_live_scene_with_its_tile_fields(tmp_path, monke
 
 def test_api_scenes_refuses_when_the_mirror_is_not_armed(tmp_path, monkeypatch):
     from moonglade import backup as core
-    monkeypatch.setattr(core, "mirror_enabled", lambda: False)
+    monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: False)
     save_catalog(tmp_path / "catalog.db", [])
     r = login_client(tmp_path).get("/api/scenes")
     assert r.status_code == 409 and "Mirror" in r.get_json()["error"]

@@ -14,6 +14,7 @@ REAL `{"profiles": [...]}` shape and the real parse. All network is mocked at `_
 import pytest
 
 from moonglade import backup as core
+from moonglade import mirror as mirror_mod
 
 
 def _dit_profiles(default="lite"):
@@ -80,7 +81,7 @@ def test_price_and_submit_apply_identical_gating(monkeypatch):
     steps/cfg/method the server ignores gone from BOTH. The default row here is "pro" (not
     "lite"), so this also proves the gate reads the model's true default."""
     monkeypatch.setattr(core, "_check_read_only", lambda *a, **k: None)
-    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     monkeypatch.setattr(core, "priority_for_submit", lambda p: p)
 
     priced = {}

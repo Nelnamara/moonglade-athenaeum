@@ -19,6 +19,7 @@ BEFORE any of them is reachable.
 import pytest
 
 from moonglade import backup as core
+from moonglade import mirror as mirror_mod
 
 
 # --- the table ---------------------------------------------------------------
@@ -67,7 +68,7 @@ def road(monkeypatch):
     saw with the object the submit sent."""
     seen = {"priced": [], "matched": [], "submitted": [], "fixed": []}
 
-    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     monkeypatch.setattr(core, "price_task",
                         lambda s, params: seen["priced"].append(params) or 1200)
     monkeypatch.setattr(core, "match_kaisuuken",
@@ -156,7 +157,7 @@ def test_a_covering_card_is_attached_on_submit_and_reported_by_price():
     sess = FakeSession()
     seen = {}
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(core, "_session_for_create", lambda s: s)
+        mp.setattr(mirror_mod, "_session_for_create", lambda s: s)
         mp.setattr(core, "price_task", lambda s, params: 1200)
         mp.setattr(core, "match_kaisuuken", lambda s, params, **k: dict(CARD))
         mp.setattr(core, "submit_generation",
@@ -176,7 +177,7 @@ def test_price_says_paid_when_the_card_is_short_and_submit_attaches_nothing():
     sess = FakeSession()
     seen = {}
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(core, "_session_for_create", lambda s: s)
+        mp.setattr(mirror_mod, "_session_for_create", lambda s: s)
         mp.setattr(core, "price_task", lambda s, params: 27500)
         mp.setattr(core, "match_kaisuuken", lambda s, params, **k: dict(short))
         mp.setattr(core, "submit_generation",
@@ -208,9 +209,9 @@ def test_submit_refuses_under_read_only_before_any_network_call(
     req = _build(payload)
     monkeypatch.setattr(core, "READ_ONLY", True)
     for fn in ("match_kaisuuken", "_apply_kaisuuken", "price_task", "price_fixer",
-               "submit_generation", "submit_fixer", "_session_for_create", "gql_mutate",
-               "_rest_post"):
+               "submit_generation", "submit_fixer", "gql_mutate", "_rest_post"):
         monkeypatch.setattr(core, fn, tripwire(fn))
+    monkeypatch.setattr(mirror_mod, "_session_for_create", tripwire("_session_for_create"))
 
     with pytest.raises(core.PixAIError) as err:
         core.submit(FakeSession(), req)
