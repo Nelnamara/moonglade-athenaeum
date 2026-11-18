@@ -73,7 +73,7 @@
 .mgcp-ver { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; line-height: 1.6; color: var(--overlay0); margin-top: auto; }
 /* The About row at the foot (reuses .mghelp-aboutrow from help.css); the library folder sits under it. */
 .mgcp-ver .mghelp-aboutrow { margin: 0 0 8px; }
-.mgcp-verdir { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mgcp-verdir { overflow-wrap: anywhere; }
 
 .mgcp-main { padding: 20px 26px; display: flex; flex-direction: column; gap: 16px; min-width: 0; overflow-y: auto; }
 .mgcp-tabs { display: flex; align-items: center; gap: 12px; }

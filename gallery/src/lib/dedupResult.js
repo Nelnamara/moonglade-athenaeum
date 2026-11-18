@@ -15,8 +15,15 @@ export function parseDedupResult(lines) {
   }
   if (at < 0) return null;
   const sentence = all[at].slice(DEDUP_RESULT_PREFIX.length).trim();
-  const files = all.slice(0, at).filter((ln) => /^ {2}\S/.test(ln) && !STAT_LINE.test(ln))
-    .map((ln) => ln.trim());
+  // The file list is the LAST indented block before the sentence. Earlier indented blocks
+  // are counts, not files (Audit's "Files per bucket:" lines), so they never join it.
+  const indented = (ln) => /^ {2}\S/.test(ln);
+  let end = at - 1;
+  while (end >= 0 && !indented(all[end])) end--;
+  let start = end;
+  while (start - 1 >= 0 && indented(all[start - 1])) start--;
+  const files = end < 0 ? [] : all.slice(start, end + 1)
+    .filter((ln) => !STAT_LINE.test(ln)).map((ln) => ln.trim());
   const m = sentence.match(/\d[\d,]*/);
   return { sentence, files, count: m ? m[0] : String(files.length) };
 }

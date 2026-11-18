@@ -146,3 +146,26 @@ def test_front_end_parser_leads_with_the_sentence_and_folds_the_files():
     assert got["files"] == ["2026-10/a.webp", "... and 12 more"]
     assert got["count"] == "14"
     assert none is None
+
+
+@pytest.mark.skipif(NODE is None, reason="node not installed")
+def test_front_end_parser_folds_only_the_file_list_not_the_bucket_counts():
+    """Audit prints indented per-folder counts ("Files per bucket:") above its file list. The
+    fold is the file list only: the 3.21.1 browser check found "images 38,107" and "other 7"
+    leading the folded list."""
+    mod = Path(__file__).resolve().parents[2] / "gallery" / "src" / "lib" / "dedupResult.js"
+    script = (
+        "import(%s).then(m => {"
+        "const lines = ['Files per bucket:', '  images     38,107', '  other      7', '',"
+        " 'Class A  - same media_id in >1 folder : 0 groups, 0 redundant files', '',"
+        " 'Copies that could be removed:', '  images/a.webp', '  images/b.webp', '',"
+        " 'Detailed report -> x/audit_report.csv', 'Run --dedup to act on this.', '', %s];"
+        "console.log(JSON.stringify(m.parseDedupResult(lines)));"
+        "})" % (json.dumps(mod.as_uri()),
+                json.dumps(P + "Found 2 duplicate files (1.0 MB you could free). Nothing changed."))
+    )
+    out = subprocess.run([NODE, "-e", script], capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout)
+    assert got["files"] == ["images/a.webp", "images/b.webp"]
+    assert got["count"] == "2"
