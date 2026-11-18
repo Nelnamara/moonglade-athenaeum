@@ -24,6 +24,7 @@ from moonglade.scan import (scan_library, files_for, media_id_of, bucket_of,
                             find_files_for_media_id, MediaEntry, QUARANTINE_EXCLUDE,
                             QUARANTINE_EXCLUDE_ANYWHERE, IMPORT_EXCLUDE, BRANDING_DIRNAME)
 from moonglade import scan as scan_mod
+from moonglade import organize as organize_mod
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +279,7 @@ def test_bucket_of_is_the_one_classifier():
     """The classifier moonglade_backup._bucket_of now aliases, and that this
     module used to re-type inline in collection_health and duplicate_groups."""
     from moonglade import backup as core
-    assert core._bucket_of is bucket_of
+    assert organize_mod._bucket_of is bucket_of
     assert bucket_of("images/x.webp") == "images"
     assert bucket_of("batches/some_batch/01_x.webp") == "batches"
     assert bucket_of("2023-10/x.webp") == "month"
@@ -374,7 +375,7 @@ def test_callers_ride_the_scan(library):
 
     # the audit's generator yields exactly its table row
     assert {str(rel).replace("\\", "/")
-            for _p, rel, _b, _m in core._scan_media_files(library)} == \
+            for _p, rel, _b, _m in organize_mod._scan_media_files(library)} == \
         _ALL_IMAGES - _QUARANTINED
 
     # the disk counter splits the quarantine trees out instead of dropping them

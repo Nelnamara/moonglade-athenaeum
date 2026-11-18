@@ -20,6 +20,7 @@ from moonglade import integrity
 from moonglade import paths
 from moonglade import scan as scan_mod
 from moonglade import dupes as dupes_mod
+from moonglade import organize as organize_mod
 
 # moonglade.similar imports numpy and pixeltable at module level, and CI installs a curated list
 # without them (it ignores dev/tests/test_similar.py for the same reason), so only the test that
@@ -77,7 +78,7 @@ def test_a_picture_lookup_never_answers_from_it(library):
 
 
 def test_the_audit_and_dedup_never_see_it(library):
-    seen = {str(rel).replace("\\", "/") for _, rel, _, _ in core._scan_media_files(library)}
+    seen = {str(rel).replace("\\", "/") for _, rel, _, _ in organize_mod._scan_media_files(library)}
     assert seen == {"images/real_100.png"}
     assert dupes_mod.duplicate_groups(library) == []                     # the MCP's and the browser's
 
@@ -113,7 +114,7 @@ def test_organize_never_moves_it(library):
     args = SimpleNamespace(out=str(library), name_length=60, name_sep="_", convert=None,
                            dry_run=False, embed_metadata=False, jpeg_quality=92,
                            jpeg_bg="white", keep_webp=False, progress=None)
-    core.cmd_organize(args, library, library / "images", library / "catalog.db")
+    organize_mod.cmd_organize(args, library, library / "images", library / "catalog.db")
     after = sorted(p.relative_to(library) for p in (library / REC).rglob("*"))
     assert set(before) <= set(after)          # (its own undo list now lands in reports/)
     assert (library / REC / "a_999.png").read_bytes() == b"PNG-IN-RECORDS"

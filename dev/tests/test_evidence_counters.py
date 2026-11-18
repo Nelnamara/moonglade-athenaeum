@@ -29,6 +29,7 @@ from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_client
+from moonglade import organize as organize_mod
 
 
 def _row(**kw):
@@ -209,7 +210,8 @@ def test_no_submit_path_bumps_a_retired_counter():
     for needle in ('telem_bump("edits"', 'telem_bump("lora_used"', 'telem_max("lora_stacked"',
                    'telem_set_add("loras"', 'telem_bump("loras_trained"', 'telem_bump("culled"'):
         assert needle not in src, needle
-    assert 'telem_bump("culled"' not in inspect.getsource(core)
+    for mod in (core, organize_mod):              # organize_mod holds cmd_dedup since 3.21.0
+        assert 'telem_bump("culled"' not in inspect.getsource(mod), mod.__name__
 
 
 # ---------------------------------------------------------------------------
@@ -244,7 +246,7 @@ def test_the_cli_dedup_counts_each_duplicated_picture_once(tmp_path):
         (tmp_path / "2023-10").mkdir(exist_ok=True)
         (tmp_path / "images" / "a_prompt_t1_111.webp").write_bytes(b"AAAA")
         (tmp_path / "2023-10" / "111.webp").write_bytes(b"AAAA")
-        core.cmd_dedup(types.SimpleNamespace(out=None, no_content=True, dedup_delete=True,
+        organize_mod.cmd_dedup(types.SimpleNamespace(out=None, no_content=True, dedup_delete=True,
                                              apply=True, progress=None),
                        tmp_path, tmp_path / "catalog.db")
     init_db(tmp_path / "catalog.db")

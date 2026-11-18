@@ -13,6 +13,7 @@ READ_ONLY at all -- see dev/tests/test_read_only_cli_paths.py for that half."""
 import pytest
 
 from moonglade import backup as core
+from moonglade import organize as organize_mod
 
 
 def test_read_only_defaults_to_false():
@@ -180,7 +181,7 @@ class TestReadOnlyDoesNotTouchLocalOperations:
         # cmd_dedup, so cmd_organize (equally named in the docstring and the test's own
         # name) could grow a _check_read_only call with nothing here to notice.
         import inspect
-        src = inspect.getsource(core.cmd_dedup)
+        src = inspect.getsource(organize_mod.cmd_dedup)
         assert "_check_read_only" not in src
-        organize_src = inspect.getsource(core.cmd_organize)
+        organize_src = inspect.getsource(organize_mod.cmd_organize)
         assert "_check_read_only" not in organize_src

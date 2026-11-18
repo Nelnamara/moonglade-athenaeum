@@ -64,6 +64,10 @@ SEAMS = {
         "_series_is_scaffold", "_series_cap_first", "_series_title", "_series_delta_label",
         "compute_series", "_SERIES_CACHE", "_SERIES_CACHE_LOCK", "_SERIES_RECOMPUTE_FLOOR_S",
         "series_index", "_series_cover_row", "fold_series_units"]},
+    "moonglade.organize": {"from": "moonglade.backup", "names": [
+        "_BUCKET_PRIORITY", "_scan_media_files", "audit_collection", "_fmt_bytes",
+        "cmd_audit", "cmd_dedup", "verify_quarantine", "cmd_verify_dupes",
+        "reconcile_catalog_with_disk", "ORGANIZE_MANIFEST", "cmd_organize", "cmd_undo_organize"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -215,6 +219,28 @@ SOURCE_READERS_REVIEWED = {
     ("tests/test_tsubaki3_image_gate.py", "moonglade.series"),
     ("tests/test_watch.py", "moonglade.series"),
     ("tools/export_design_kit.py", "moonglade.series"),
+    ("tests/test_artworks_adhoc.py", "moonglade.organize"),
+    ("tests/test_cli_doc_coverage.py", "moonglade.organize"),
+    ("tests/test_config_path_routing.py", "moonglade.organize"),
+    ("tests/test_csrf_coverage.py", "moonglade.organize"),
+    ("tests/test_enhance.py", "moonglade.organize"),
+    ("tests/test_evidence_counters.py", "moonglade.organize"),
+    ("tests/test_gen_surface.py", "moonglade.organize"),
+    ("tests/test_history_feed_document.py", "moonglade.organize"),
+    ("tests/test_jwt.py", "moonglade.organize"),
+    ("tests/test_living_library.py", "moonglade.organize"),
+    ("tests/test_loom_notify.py", "moonglade.organize"),
+    ("tests/test_media_tools.py", "moonglade.organize"),
+    ("tests/test_network.py", "moonglade.organize"),
+    ("tests/test_read_only.py", "moonglade.organize"),
+    ("tests/test_settings_store.py", "moonglade.organize"),
+    ("tests/test_setup_prepare.py", "moonglade.organize"),
+    ("tests/test_spend_no_retry.py", "moonglade.organize"),
+    ("tests/test_task_model_detail_document.py", "moonglade.organize"),
+    ("tests/test_training_advanced.py", "moonglade.organize"),
+    ("tests/test_training_parity.py", "moonglade.organize"),
+    ("tests/test_tsubaki3_image_gate.py", "moonglade.organize"),
+    ("tests/test_web_auth.py", "moonglade.organize"),
 }
 
 

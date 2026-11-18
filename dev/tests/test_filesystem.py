@@ -363,7 +363,7 @@ def test_organize_normalizes_to_month_descriptive_no_batches(tmp_path):
     args = SimpleNamespace(out=str(tmp_path), name_length=60, name_sep="_", convert=None,
                            dry_run=False, embed_metadata=False, jpeg_quality=92,
                            jpeg_bg="white", keep_webp=False, progress=None)
-    core.cmd_organize(args, tmp_path, tmp_path / "images", db)
+    organize_mod.cmd_organize(args, tmp_path, tmp_path / "images", db)
 
     assert (tmp_path / "2024-03" / "alpha_T1_m1.png").exists()            # flat -> month
     assert (tmp_path / "2024-05" / "beta_T2_m2.png").exists()             # bare -> descriptive
@@ -379,7 +379,7 @@ def test_organize_normalizes_to_month_descriptive_no_batches(tmp_path):
     import io, contextlib
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        core.cmd_organize(args2, tmp_path, tmp_path / "images", db)
+        organize_mod.cmd_organize(args2, tmp_path, tmp_path / "images", db)
     assert "already organized" in buf.getvalue()
 
 
@@ -410,7 +410,7 @@ def test_organize_never_touches_deleted_quarantine(tmp_path):
     args = SimpleNamespace(out=str(tmp_path), name_length=60, name_sep="_", convert=None,
                            dry_run=False, embed_metadata=False, jpeg_quality=92,
                            jpeg_bg="white", keep_webp=False, progress=None)
-    core.cmd_organize(args, tmp_path, tmp_path / "images", db)
+    organize_mod.cmd_organize(args, tmp_path, tmp_path / "images", db)
 
     assert (qdir / "old_m9.png").exists(), (
         "a file under _deleted/ was moved or deleted by cmd_organize -- quarantine is not immune")
@@ -428,9 +428,9 @@ def test_undo_organize_reverts_moves(tmp_path):
     args = SimpleNamespace(out=str(tmp_path), name_length=60, name_sep="_", convert=None,
                            dry_run=False, embed_metadata=False, jpeg_quality=92,
                            jpeg_bg="white", keep_webp=False, progress=None)
-    core.cmd_organize(args, tmp_path, tmp_path / "images", db)
+    organize_mod.cmd_organize(args, tmp_path, tmp_path / "images", db)
     assert (tmp_path / "2024-03" / "alpha_T1_m1.png").exists()
-    core.cmd_undo_organize(SimpleNamespace(out=str(tmp_path), dry_run=False), tmp_path)
+    organize_mod.cmd_undo_organize(SimpleNamespace(out=str(tmp_path), dry_run=False), tmp_path)
     assert (tmp_path / "images" / "alpha_T1_m1.png").exists()             # back to original
     assert not (tmp_path / "2024-03" / "alpha_T1_m1.png").exists()
     assert not paths.decisions_path(tmp_path, "organize_manifest.csv").exists()              # manifest cleared
@@ -459,7 +459,7 @@ def test_organize_drops_byte_identical_duplicate(tmp_path):
     loc_a.write_bytes(b"identical-bytes")
     loc_b.write_bytes(b"identical-bytes")
 
-    core.cmd_organize(_organize_args(tmp_path), tmp_path, tmp_path / "images", db)
+    organize_mod.cmd_organize(_organize_args(tmp_path), tmp_path, tmp_path / "images", db)
 
     dst = tmp_path / "2024-07" / "dup_T9_dup1.png"
     assert dst.exists() and dst.read_bytes() == b"identical-bytes"
@@ -483,7 +483,7 @@ def test_organize_keeps_differing_content_side_by_side(tmp_path):
     loc_a.write_bytes(b"content-A")
     loc_b.write_bytes(b"totally-different-content-B")
 
-    core.cmd_organize(_organize_args(tmp_path), tmp_path, tmp_path / "images", db)
+    organize_mod.cmd_organize(_organize_args(tmp_path), tmp_path, tmp_path / "images", db)
 
     dst = tmp_path / "2024-07" / "dup_T8_dup2.png"
     assert dst.exists()
@@ -528,6 +528,7 @@ def test_generate_preview_spends_nothing(tmp_path):
 from moonglade.gallery import (CATALOG_FIELDS, init_db, save_catalog, load_catalog,
                             update_rating, delete_from_catalog,
                             update_prompt_full, bulk_replace_prompt, _db_is_empty)
+from moonglade import organize as organize_mod
 
 
 def _make_row(**kwargs):

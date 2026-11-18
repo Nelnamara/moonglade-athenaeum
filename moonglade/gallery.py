@@ -36,6 +36,7 @@ from moonglade import assets as moonglade_assets
 from moonglade import container as moonglade_container
 from moonglade import contest_wins
 from moonglade import dupes as _dupes
+from moonglade import organize as _organize
 from moonglade import paths as _paths
 from moonglade import scan as _scan
 from moonglade import series as _series
@@ -10182,7 +10183,7 @@ def _reconcile_one_row_after_move(out_dir, db_path, media_id, row):
         return
     survivor = matches[0]
     rel_surv = survivor.relative_to(out_dir)
-    bucket = core._bucket_of(rel_surv)
+    bucket = _organize._bucket_of(rel_surv)
     new_batch = (rel_surv.parts[1] if bucket == "batches" and len(rel_surv.parts) > 2
                 else ("" if bucket != "batches" else row.get("batch", "")))
     if row.get("filename") != survivor.name or row.get("batch", "") != new_batch:
@@ -18875,7 +18876,7 @@ def create_app(out_dir: Path):
                            "reclaimable_bytes": reclaim, "members": members})
 
         # ---- identical_file (Class B) ----------------------------------------
-        audit = core.audit_collection(out_dir, content=True)
+        audit = _organize.audit_collection(out_dir, content=True)
         class_b = audit["class_b"]
         mids_b = sorted({str(item[4]) for g in class_b for item in g["files"]})
         rows_b = {r["media_id"]: r for r in rows_for_media_ids(db_path, mids_b)}
