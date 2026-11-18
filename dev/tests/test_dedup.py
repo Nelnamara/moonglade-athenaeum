@@ -70,7 +70,7 @@ def test_audit_ignores_deleted_quarantine(tmp_path):
     verify_quarantine) excluded gallery/ and _duplicates/ but never learned about
     _deleted/ -- so a locally-purged image is reported back as a live Class A
     duplicate of its own quarantined self, and counted in the audit's file total."""
-    from moonglade.gallery import DELETED_DIRNAME
+    from moonglade.scan import DELETED_DIRNAME
     (tmp_path / "images").mkdir()
     (tmp_path / DELETED_DIRNAME).mkdir()
     (tmp_path / "images" / "a_111.webp").write_bytes(b"AAAA")

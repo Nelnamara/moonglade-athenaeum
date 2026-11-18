@@ -350,7 +350,7 @@ def test_resume_ignores_quarantined_deleted_file(tmp_path, mocker):
     about _deleted/ (only 'gallery'/'_duplicates') -- so a media_id purged locally
     (moved to _deleted/ by purge_media_local) is still indexed as 'already done' and
     resume/--update silently never re-downloads it, exactly as if it were a live file."""
-    from moonglade.gallery import DELETED_DIRNAME
+    from moonglade.scan import DELETED_DIRNAME
     qdir = tmp_path / DELETED_DIRNAME
     qdir.mkdir(parents=True)
     (qdir / "x_known.webp").write_bytes(b"img")

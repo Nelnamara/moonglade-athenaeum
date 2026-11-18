@@ -16,6 +16,7 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.conftest import login_client
+from moonglade import scan as scan_mod
 
 
 def _row(**kw):
@@ -65,7 +66,7 @@ def test_bulk_delete_locally_removes_archive_only_pictures_with_the_rest(tmp_pat
     d = cli.post("/api/delete-local", json={"media_ids": ["100", "200", "300"]}).get_json()
     assert d == {"ok": True, "count": 3, "failed": 0}
     for name in ("p_100.png", "p_200.png", "p_300.png"):
-        assert (tmp_path / g.DELETED_DIRNAME / name).exists(), name
+        assert (tmp_path / scan_mod.DELETED_DIRNAME / name).exists(), name
         assert not (tmp_path / "images" / name).exists(), name
     assert load_catalog(db) == []
 
@@ -79,7 +80,7 @@ def test_the_preview_counts_the_only_copies_and_touches_nothing(tmp_path):
                                             "preview": True}).get_json()
     assert d == {"preview": True, "count": 3, "archive_only": 2}
     assert {r["media_id"] for r in load_catalog(db)} == {"100", "200", "300"}
-    assert not (tmp_path / g.DELETED_DIRNAME).exists()
+    assert not (tmp_path / scan_mod.DELETED_DIRNAME).exists()
     assert cli.post("/api/delete-local", json={"media_ids": ["100"], "preview": True}
                     ).get_json() == {"preview": True, "count": 1, "archive_only": 0}
 

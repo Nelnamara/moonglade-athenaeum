@@ -8,6 +8,7 @@ from moonglade import paths
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_test_client, login_existing_client
+from moonglade import scan as scan_mod
 
 
 def _csrf(html):
@@ -93,7 +94,7 @@ def test_panel_summary_trash_count_is_real(tmp_path):
     nothing fetched it until now, the real number only ever resolved once
     TrashSubOverlay's own /api/trash/list call ran."""
     from moonglade import gallery as g
-    qdir = tmp_path / g.DELETED_DIRNAME
+    qdir = tmp_path / scan_mod.DELETED_DIRNAME
     qdir.mkdir()
     (qdir / "a.webp").write_bytes(b"x")
     (qdir / "b.webp").write_bytes(b"x")

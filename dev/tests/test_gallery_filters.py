@@ -532,7 +532,8 @@ def test_duplicate_groups_ignores_deleted(tmp_path):
     view) excluded gallery/ and _duplicates/ but never _deleted/ -- so a locally
     purged image is reported as a live cross-bucket duplicate of its own quarantined
     self."""
-    from moonglade.gallery import duplicate_groups, DELETED_DIRNAME
+    from moonglade.gallery import duplicate_groups
+    from moonglade.scan import DELETED_DIRNAME
     (tmp_path / "images").mkdir()
     (tmp_path / DELETED_DIRNAME).mkdir()
     (tmp_path / "images" / "a_111.webp").write_bytes(b"d")

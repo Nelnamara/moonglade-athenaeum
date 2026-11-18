@@ -20,10 +20,10 @@ from pathlib import Path
 import pytest
 
 from moonglade import gallery as g
-from moonglade.gallery import (scan_library, files_for, media_id_of, bucket_of,
-                               find_files_for_media_id, MediaEntry,
-                               QUARANTINE_EXCLUDE, QUARANTINE_EXCLUDE_ANYWHERE,
-                               IMPORT_EXCLUDE, BRANDING_DIRNAME)
+from moonglade.scan import (scan_library, files_for, media_id_of, bucket_of,
+                            find_files_for_media_id, MediaEntry, QUARANTINE_EXCLUDE,
+                            QUARANTINE_EXCLUDE_ANYWHERE, IMPORT_EXCLUDE, BRANDING_DIRNAME)
+from moonglade import scan as scan_mod
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +242,7 @@ def test_find_files_for_media_id_is_the_named_entry_point(library):
     assert (sorted(find_files_for_media_id(library, "100")) ==
             sorted(files_for(library, "100")))
     assert [p.name for p in find_files_for_media_id(library, "200",
-                                                    exts=g._VIDEO_EXTS)] == \
+                                                    exts=scan_mod._VIDEO_EXTS)] == \
         ["clip_200.mp4"]
     # include_gallery re-admits the thumbnail tree, and only that tree
     got = {str(p.relative_to(library)).replace("\\", "/")

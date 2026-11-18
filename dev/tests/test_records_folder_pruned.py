@@ -18,6 +18,7 @@ from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade import integrity
 from moonglade import paths
+from moonglade import scan as scan_mod
 
 # moonglade.similar imports numpy and pixeltable at module level, and CI installs a curated list
 # without them (it ignores dev/tests/test_similar.py for the same reason), so only the test that
@@ -57,19 +58,19 @@ def _rels(entries):
 @pytest.mark.parametrize("exclude", ["QUARANTINE_EXCLUDE", "QUARANTINE_EXCLUDE_ANYWHERE",
                                      "IMPORT_EXCLUDE", "HEALTH_EXCLUDE"])
 def test_the_scan_never_enters_it(library, exclude):
-    got = _rels(g.scan_library(library, kinds=("image", "video"),
-                               exclude=getattr(g, exclude)))
+    got = _rels(scan_mod.scan_library(library, kinds=("image", "video"),
+                                      exclude=getattr(scan_mod, exclude)))
     assert got == {"images/real_100.png"}
 
 
 def test_the_default_scan_never_enters_it(library):
-    assert _rels(g.scan_library(library)) == {"images/real_100.png"}
+    assert _rels(scan_mod.scan_library(library)) == {"images/real_100.png"}
 
 
 def test_a_picture_lookup_never_answers_from_it(library):
-    assert g.files_for(library, "999") == []
-    assert g.find_files_for_media_id(library, "999") == []
-    assert g.find_files_for_media_id(library, "999", include_gallery=True) == []
+    assert scan_mod.files_for(library, "999") == []
+    assert scan_mod.find_files_for_media_id(library, "999") == []
+    assert scan_mod.find_files_for_media_id(library, "999", include_gallery=True) == []
     assert g.find_image_file(library, "999", "a_999.png") is None
     assert g.find_image_file(library, "100", "real_100.png") == library / "images" / "real_100.png"
 
@@ -120,5 +121,6 @@ def test_organize_never_moves_it(library):
 
 
 def test_an_internal_import_never_brings_it_in(library):
-    got = _rels(g.scan_library(library, kinds=("image", "video"), exclude=g.IMPORT_EXCLUDE))
+    got = _rels(scan_mod.scan_library(library, kinds=("image", "video"),
+                                      exclude=scan_mod.IMPORT_EXCLUDE))
     assert not [r for r in got if r.startswith(REC + "/")]

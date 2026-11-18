@@ -11,6 +11,7 @@ from moonglade import backup as core
 from moonglade.gallery import load_catalog
 
 from tests.conftest import login_client
+from moonglade import scan as scan_mod
 
 
 def _png():
@@ -107,7 +108,7 @@ def test_import_local_reports_the_files_it_did_not_take(monkeypatch, tmp_path):
     `not_taken`, which the page prints. A request inside the cap reports zero."""
     pytest.importorskip("PIL")
     from moonglade import gallery
-    monkeypatch.setattr(gallery, "IMPORT_REQUEST_CAP", 2)
+    monkeypatch.setattr(scan_mod, "IMPORT_REQUEST_CAP", 2)
     cli = login_client(tmp_path)
     r = cli.post("/api/import-local",
                  data={"files": [(_coloured_png((10 * n, 20, 30)), "p%d.png" % n) for n in range(1, 4)]},
@@ -129,4 +130,4 @@ def test_import_local_default_cap_is_the_documented_thousand():
     """The page's batch size (gallery/src/lib/importBatches.js) is pinned under this number in
     loom/test/import-batches.test.js; the route's ceiling is one named constant, not a literal."""
     from moonglade import gallery
-    assert gallery.IMPORT_REQUEST_CAP == 1000
+    assert scan_mod.IMPORT_REQUEST_CAP == 1000

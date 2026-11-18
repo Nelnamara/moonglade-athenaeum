@@ -14,6 +14,7 @@ from moonglade.gallery import (CATALOG_FIELDS, save_catalog, load_catalog,
                            purge_media_local)
 
 from tests.conftest import login_client
+from moonglade import scan as scan_mod
 
 
 def _row(**kw):
@@ -37,7 +38,7 @@ def test_purge_quarantines_file_and_clears_row(tmp_path):
 
     moved = purge_media_local(tmp_path, thumb, db, "55", "55.png")
 
-    assert moved == tmp_path / g.DELETED_DIRNAME / "55.png"
+    assert moved == tmp_path / scan_mod.DELETED_DIRNAME / "55.png"
     assert moved.exists() and moved.read_bytes() == b"DATA"     # file preserved, just moved
     assert not (tmp_path / "images" / "55.png").exists()        # gone from its old spot
     assert not (thumb / "55.jpg").exists()                      # thumb (regenerable) removed
@@ -49,7 +50,7 @@ def test_purge_hard_delete_mode(tmp_path):
     moved = purge_media_local(tmp_path, tmp_path / "t", db, "9", "9.png", quarantine=False)
     assert moved is None
     assert not (tmp_path / "images" / "9.png").exists()
-    assert not (tmp_path / g.DELETED_DIRNAME).exists()          # nothing quarantined
+    assert not (tmp_path / scan_mod.DELETED_DIRNAME).exists()          # nothing quarantined
     assert load_catalog(db) == []
 
 
@@ -107,11 +108,11 @@ def test_purge_keeps_the_row_when_the_hard_delete_fails(tmp_path, monkeypatch):
 def test_quarantined_file_is_invisible_to_resolution(tmp_path):
     # A file already sitting in _deleted/ must not be found as a live media file.
     db = _seed(tmp_path, [], {})
-    qdir = tmp_path / g.DELETED_DIRNAME
+    qdir = tmp_path / scan_mod.DELETED_DIRNAME
     qdir.mkdir()
     (qdir / "77.png").write_bytes(b"old")
     assert g.find_image_file(tmp_path, "77", "77.png") is None
-    assert g.find_files_for_media_id(tmp_path, "77") == []
+    assert scan_mod.find_files_for_media_id(tmp_path, "77") == []
 
 
 def test_bulk_delete_keeps_going_when_one_local_purge_fails(tmp_path, monkeypatch, pixai):
@@ -152,7 +153,7 @@ def test_bulk_delete_keeps_going_when_one_local_purge_fails(tmp_path, monkeypatc
 
     assert job is not None and job["status"] == "failed", (
         "a purge that failed was reported as a clean run")
-    assert (tmp_path / g.DELETED_DIRNAME / "400.png").exists(), (
+    assert (tmp_path / scan_mod.DELETED_DIRNAME / "400.png").exists(), (
         "the second task was abandoned after the first one's file would not move")
     assert {r["media_id"] for r in load_catalog(db)} == {"300"}, (
         "the row for the file still on disk should survive, and only that one")

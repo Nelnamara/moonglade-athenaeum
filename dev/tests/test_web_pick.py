@@ -13,6 +13,7 @@ from moonglade.gallery import CATALOG_FIELDS, _account_key, create_app, save_cat
 
 from tests.conftest import login_client, login_existing_client, with_csrf
 from tests.csshelp import css_rules, element, winning
+from moonglade import scan as scan_mod
 
 
 def _row(**kw):
@@ -907,7 +908,7 @@ def test_loom_handoff_ignores_deleted_quarantine(tmp_path, monkeypatch, pixai):
     No catalog row for this media_id, so the fast path can't shortcut past the
     fallback -- this exercises exactly the buggy branch."""
     from moonglade import gallery as g
-    qdir = tmp_path / g.DELETED_DIRNAME
+    qdir = tmp_path / scan_mod.DELETED_DIRNAME
     qdir.mkdir()
     (qdir / "shot_V9.mp4").write_bytes(b"fake")
 
@@ -977,7 +978,7 @@ def test_loom_video_duration_ignores_deleted_quarantine(tmp_path, monkeypatch):
     _find_local_video_file): a file sitting under _deleted/ must not be probed as if
     it were a live survivor."""
     from moonglade import gallery as g
-    qdir = tmp_path / g.DELETED_DIRNAME
+    qdir = tmp_path / scan_mod.DELETED_DIRNAME
     qdir.mkdir()
     (qdir / "shot_V9.mp4").write_bytes(b"fake")
     calls = []

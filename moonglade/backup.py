@@ -57,7 +57,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from moonglade import paths as _paths
-from moonglade.gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, migrate, load_catalog,
+from moonglade.gallery import (CATALOG_FIELDS, init_db, migrate, load_catalog,
                             save_catalog, _db_is_empty, rows_for_media_ids,
                             # The row-level artwork write (see run_sync_artworks): one
                             # narrow UPDATE of the eleven PixAI-owned columns, keyed by
@@ -68,12 +68,10 @@ from moonglade.gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, migrate, lo
                             # by their own narrow UPDATE because they are read once per
                             # deliberate sync, not on the fifteen-minute sweep's cadence.
                             apply_artwork_views,
-                            media_id_of, find_files_for_media_id, build_thumbnails,
-                            _NO_WINDOW, DELETED_DIRNAME, _redact_host_paths_cli,
-                            # The one library scan (see moonglade/gallery.py's
-                            # "LIBRARY SCAN" section) -- imported the same way the
-                            # SQLite catalog helpers above are, because the gallery
-                            # is the shared base module and this file imports it.
+                            build_thumbnails,
+                            _NO_WINDOW, _redact_host_paths_cli)
+# The one library scan (moonglade/scan.py, out of the gallery since 3.21.0).
+from moonglade.scan import (_IMAGE_EXTS, media_id_of, find_files_for_media_id, DELETED_DIRNAME,
                             scan_library, bucket_of, _VIDEO_EXTS,
                             GALLERY_DIRNAME, DUPLICATES_DIRNAME,
                             QUARANTINE_EXCLUDE, QUARANTINE_EXCLUDE_ANYWHERE,
@@ -8965,7 +8963,8 @@ def make_video_duration_lookup(out_dir, db_path=None):
     The answer is cached per media id for the life of the returned callable (one per gallery
     app, one per CLI run), so a quote and the spend that follows it read the same number even
     if a file lands in between, and a miss does not re-walk the library per keystroke."""
-    from moonglade.gallery import find_local_video_file, get_row
+    from moonglade.gallery import get_row
+    from moonglade.scan import find_local_video_file
     out = Path(out_dir)
     dbp = Path(db_path) if db_path else out / "catalog.db"
     cache = {}

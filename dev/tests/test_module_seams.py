@@ -47,8 +47,16 @@ _spec.loader.exec_module(rp)
 
 OLD_MODULES = rp.OLD_MODULES
 
-# new module -> {"from": old module, "names": [names it owns]}. EMPTY in Phase 0.
-SEAMS = {}
+# new module -> {"from": old module, "names": [names it owns]}. One entry per move.
+SEAMS = {
+    "moonglade.scan": {"from": "moonglade.gallery", "names": [
+        "_IMAGE_EXTS", "GALLERY_DIRNAME", "DUPLICATES_DIRNAME", "DELETED_DIRNAME",
+        "BRANDING_DIRNAME", "RECORDS_DIRNAME", "QUARANTINE_EXCLUDE", "QUARANTINE_EXCLUDE_ANYWHERE",
+        "IMPORT_EXCLUDE", "IMPORT_REQUEST_CAP", "HEALTH_EXCLUDE", "_VIDEO_EXTS", "_EMBED_EXTS",
+        "SCAN_KINDS", "_KIND_BY_EXT", "MediaEntry", "bucket_of", "media_id_of", "_is_under",
+        "_kind_map", "_split_exclusions", "scan_library", "files_for", "find_files_for_media_id",
+        "find_local_video_file"]},
+}
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
 # old module(s). Kept exact: a new reader, or one that stops reading, fails
@@ -109,8 +117,39 @@ SOURCE_READERS = {
 }
 
 # (reader file, new module) pairs someone has checked after a move touched what the reader
-# reads (see check_source_readers_reviewed). Empty while SEAMS is.
-SOURCE_READERS_REVIEWED = set()
+# reads (see check_source_readers_reviewed). One block per move.
+SOURCE_READERS_REVIEWED = {
+    ("tests/test_app_paths.py", "moonglade.scan"),
+    ("tests/test_artworks_adhoc.py", "moonglade.scan"),
+    ("tests/test_bonjour.py", "moonglade.scan"),
+    ("tests/test_branding.py", "moonglade.scan"),
+    ("tests/test_catalog_verbs.py", "moonglade.scan"),
+    ("tests/test_catchup_query.py", "moonglade.scan"),
+    ("tests/test_csrf_coverage.py", "moonglade.scan"),
+    ("tests/test_design_kit_sync.py", "moonglade.scan"),
+    ("tests/test_doc_truth_residuals.py", "moonglade.scan"),
+    ("tests/test_enhance.py", "moonglade.scan"),
+    ("tests/test_evidence_counters.py", "moonglade.scan"),
+    ("tests/test_first_party_sources.py", "moonglade.scan"),
+    ("tests/test_gen_surface.py", "moonglade.scan"),
+    ("tests/test_history_feed_document.py", "moonglade.scan"),
+    ("tests/test_library_dir.py", "moonglade.scan"),
+    ("tests/test_living_library.py", "moonglade.scan"),
+    ("tests/test_logging.py", "moonglade.scan"),
+    ("tests/test_loom_generate_guard.py", "moonglade.scan"),
+    ("tests/test_loom_notify.py", "moonglade.scan"),
+    ("tests/test_loom_p_routes.py", "moonglade.scan"),
+    ("tests/test_media_tools.py", "moonglade.scan"),
+    ("tests/test_network.py", "moonglade.scan"),
+    ("tests/test_panel.py", "moonglade.scan"),
+    ("tests/test_settings_store.py", "moonglade.scan"),
+    ("tests/test_setup_prepare.py", "moonglade.scan"),
+    ("tests/test_task_model_detail_document.py", "moonglade.scan"),
+    ("tests/test_telemetry.py", "moonglade.scan"),
+    ("tests/test_tsubaki3_image_gate.py", "moonglade.scan"),
+    ("tests/test_watch.py", "moonglade.scan"),
+    ("tools/export_design_kit.py", "moonglade.scan"),
+}
 
 
 def production_files():

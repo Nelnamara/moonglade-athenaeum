@@ -20,6 +20,7 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, save_catalog, load_catalog
 
 from tests.conftest import login_client
+from moonglade import scan as scan_mod
 
 
 def _row(**kw):
@@ -64,7 +65,7 @@ def test_delete_local_quarantines_through_the_same_trash_path(tmp_path):
     d = cli.post("/api/delete-local", json={"media_ids": ["a", "b"]}).get_json()
     assert d == {"ok": True, "count": 2, "failed": 0}
 
-    deleted = tmp_path / g.DELETED_DIRNAME
+    deleted = tmp_path / scan_mod.DELETED_DIRNAME
     assert (deleted / "a.png").exists() and (deleted / "b.png").exists()
     assert (tmp_path / "images" / "keep.png").exists(), "an unselected file was taken"
     assert {r["media_id"] for r in load_catalog(db)} == {"keep"}
@@ -114,7 +115,7 @@ def test_delete_local_reports_a_failed_move_without_stranding_the_rest(tmp_path,
     cli = login_client(tmp_path)
     d = cli.post("/api/delete-local", json={"media_ids": ["bad", "good"]}).get_json()
     assert d == {"ok": False, "count": 1, "failed": 1}
-    assert (tmp_path / g.DELETED_DIRNAME / "good.png").exists()
+    assert (tmp_path / scan_mod.DELETED_DIRNAME / "good.png").exists()
     # The failed file keeps BOTH its file and its row (purge_media_local's contract).
     assert (tmp_path / "images" / "bad.png").exists()
     assert {r["media_id"] for r in load_catalog(db)} == {"bad"}
@@ -232,7 +233,7 @@ def test_delete_tasks_by_media_ids_matches_the_page_route(tmp_path, monkeypatch,
     job = _wait_for_delete_job(cli)
     assert job is not None and job["status"] == "done"
     assert calls == ["T1"], "cloud delete must fire once, task-level"
-    deleted = tmp_path / g.DELETED_DIRNAME
+    deleted = tmp_path / scan_mod.DELETED_DIRNAME
     for name in ("m1.png", "m2.png", "loc.png"):
         assert (deleted / name).exists()
     assert load_catalog(db) == []
@@ -276,7 +277,7 @@ def test_delete_tasks_purge_local_false_leaves_the_library_alone(tmp_path, monke
     assert {r["media_id"] for r in load_catalog(db)} == {"m1", "m2", "loc"}
     for name in ("m1.png", "m2.png", "loc.png"):
         assert (tmp_path / "images" / name).exists()
-    assert not (tmp_path / g.DELETED_DIRNAME).exists()
+    assert not (tmp_path / scan_mod.DELETED_DIRNAME).exists()
 
 
 # ---- the only copy left anywhere survives a bulk delete too (2026-09-06) ------------
@@ -323,7 +324,7 @@ def test_bulk_delete_leaves_the_only_copy_left_anywhere_alone(tmp_path, monkeypa
         "the only copy left anywhere was quarantined by a delete of its siblings")
     assert {r["media_id"] for r in load_catalog(db)} == {"gone"}, (
         "the row of an image PixAI had already deleted was purged with the task")
-    deleted = tmp_path / g.DELETED_DIRNAME
+    deleted = tmp_path / scan_mod.DELETED_DIRNAME
     assert (deleted / "m1.png").exists() and (deleted / "m2.png").exists(), (
         "the images PixAI really did delete were not quarantined")
     assert job.get("kept_media") == ["gone"], (

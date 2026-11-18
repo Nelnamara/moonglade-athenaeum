@@ -78,7 +78,8 @@ def test_load_seams_reads_the_literal_without_importing(tmp_path):
                    "SEAMS = {'moonglade.scan': {'from': 'moonglade.gallery', "
                    "'names': ['scan_library']}}\n", encoding="utf-8")
     assert rp.load_seams(src) == SEAMS
-    assert rp.load_seams(DEV / "tests" / "test_module_seams.py") == {}
+    real = rp.load_seams(DEV / "tests" / "test_module_seams.py")
+    assert isinstance(real, dict) and all(set(e) == {"from", "names"} for e in real.values())
 
 
 def test_dry_run_prints_every_site_and_writes_nothing(tmp_path):

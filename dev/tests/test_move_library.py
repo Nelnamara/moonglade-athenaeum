@@ -37,6 +37,7 @@ from moonglade import setup as msetup
 from tests.move_layouts import (KEY_GONE, KEY_NEL, KEY_NEL_LOWER, db_rows, layout_310,
                                 layout_317, layout_c_copy_first, rig, start, write,
                                 write_config)
+from moonglade import scan as scan_mod
 
 
 @pytest.fixture
@@ -444,7 +445,7 @@ def test_the_walkers_never_see_the_moved_loom(r):
     write(r.lib / "loom" / "exports" / "loom_cut.mp4", b"CUT")
     _prepare(r)
     assert (r.lib / "_moonglade" / "loom" / "_frames" / "last.png").is_file()
-    seen = [e.rel.as_posix() for e in g.scan_library(r.lib)]
+    seen = [e.rel.as_posix() for e in scan_mod.scan_library(r.lib)]
     assert not any("loom" in s or "_moonglade" in s for s in seen), seen
 
 

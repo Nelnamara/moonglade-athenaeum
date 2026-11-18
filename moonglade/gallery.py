@@ -36,6 +36,7 @@ from moonglade import assets as moonglade_assets
 from moonglade import container as moonglade_container
 from moonglade import contest_wins
 from moonglade import paths as _paths
+from moonglade import scan as _scan
 from moonglade import settings as _settings
 
 try:
@@ -167,7 +168,6 @@ CATALOG_FIELDS = [
     "views_prev_at",   # ISO timestamp of the sweep that wrote `views_prev`
 ]
 
-_IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
 THUMB_SIZE = (768, 768)
 THUMB_QUALITY = 90
 DHASH_SIZE = 8  # compute_dhash()'s hash dimension: 8x8 -> 64-bit hash, 16 hex chars
@@ -5396,8 +5396,8 @@ def branding_role_upload(out_dir, slot, key, upload=None, media_id="", check_onl
     if upload is not None and getattr(upload, "filename", ""):
         raw = upload.stream.read(ROLE_MAX_BYTES + 1)
     elif media_id:
-        hit = next((p for p in find_files_for_media_id(out_dir, media_id)
-                    if p.suffix.lower() in _IMAGE_EXTS), None)
+        hit = next((p for p in _scan.find_files_for_media_id(out_dir, media_id)
+                    if p.suffix.lower() in _scan._IMAGE_EXTS), None)
         if hit is None:
             return {"error": "no local image for that media id"}, 400
         try:
@@ -9424,7 +9424,7 @@ def backfill_batches(out_dir, db_path):
     that inline copy was one of the two INVARIANT-1 re-implementations.
     """
     updates = {}  # media_id -> batch_name
-    for e in scan_library(out_dir, kinds=("image",), include=("batches",), exclude=()):
+    for e in _scan.scan_library(out_dir, kinds=("image",), include=("batches",), exclude=()):
         if len(e.rel.parts) < 3:
             continue          # a loose file sitting directly in batches/ has no batch dir
         updates[e.media_id] = e.rel.parts[1]
@@ -9498,7 +9498,7 @@ def collection_health(out_dir, db_path):
     # tile says it plainly instead of moving a number the owner already knows (scope 2+3,
     # owner question 1, option a).
     zero_byte = 0
-    for e in scan_library(out_dir, kinds=("image", "video"), exclude=HEALTH_EXCLUDE):
+    for e in _scan.scan_library(out_dir, kinds=("image", "video"), exclude=_scan.HEALTH_EXCLUDE):
         _rel = str(e.rel).replace("\\", "/")
         on_disk_rels.add(_rel)
         if e.size == 0:
@@ -9834,7 +9834,7 @@ def _health_dir_key(out_dir):
     _health_key uses for a missing catalog, and it memoizes the same way.
     """
     root = str(out_dir)
-    top_names, any_names = _split_exclusions(HEALTH_EXCLUDE)
+    top_names, any_names = _scan._split_exclusions(_scan.HEALTH_EXCLUDE)
     skip = {n.lower() for n in top_names} | set(any_names)
     try:
         marks = [os.stat(root).st_mtime_ns]
@@ -9958,7 +9958,7 @@ def duplicate_groups(out_dir, limit=300):
     from collections import defaultdict
     prio = {"batches": 0, "month": 1, "images": 2, "other": 3}
     locs = defaultdict(list)
-    for e in scan_library(out_dir, kinds=("image",), exclude=QUARANTINE_EXCLUDE):
+    for e in _scan.scan_library(out_dir, kinds=("image",), exclude=_scan.QUARANTINE_EXCLUDE):
         locs[e.media_id].append({"rel": str(e.rel), "bucket": e.bucket,
                                  "size": e.size or 0})
 
@@ -10112,439 +10112,14 @@ def near_duplicate_groups(db_path, threshold=NEAR_DUP_HAMMING_THRESHOLD, hash_si
     return out
 
 
-# ---------------------------------------------------------------------------
-# LIBRARY SCAN -- the one tree-walk (2026-08-23)
-# ---------------------------------------------------------------------------
-# Ten places used to walk the library tree, each carrying a private copy of the
-# exclusion set, the `.part` skip, the extension set and the bucket classifier.
-# They drifted twice: B11 (audit 2026-07-21) had to teach `_deleted/` to five
-# walkers one at a time, and `_count_backup_images` only caught up at M06
-# (2026-07-27) -- its own docstring says so. This section is the one module they
-# all ride now. It lives HERE, in the gallery, beside the SQLite catalog helpers,
-# because the import direction runs one way: `moonglade.backup` imports the
-# gallery at module top (see its `from moonglade.gallery import ...`), the gallery
-# only imports the backup lazily inside functions, and `moonglade.similar` imports
-# the gallery lazily inside `scan_dir`. Putting the scan anywhere else would need
-# a new top-level module or a cycle.
-#
-# WHAT IS SHARED: the exclusion vocabulary, the `.part` skip, the extension /
-# `kinds` taxonomy, `bucket_of`, `media_id_of`, and the traversal itself.
-# WHAT IS NOT: the zero-byte rule and every caller-specific filter stay at the
-# caller (INVARIANT 3) -- `scan_library` reports `size` (None on a stat failure)
-# and lets each caller decide, exactly as each one decided before.
-#
-# THE TEN WALKERS (walker -> what it skipped -> what it asks for now):
-#
-#   moonglade/gallery.py
-#     find_files_for_media_id   gallery/ _duplicates/ _deleted/, .part, zero-byte,
-#                               _IMAGE_EXTS (or caller `exts`), exact-id
-#                            -> files_for(kinds=("image",) or exts,
-#                                         exclude=QUARANTINE_EXCLUDE)
-#     duplicate_groups          gallery/ _duplicates/ _deleted/, .part, _IMAGE_EXTS
-#                            -> scan_library(kinds=("image",),
-#                                            exclude=QUARANTINE_EXCLUDE)
-#     collection_health._walk   gallery/ _duplicates/ _deleted/ branding/, .part,
-#                               _IMAGE_EXTS + its own video set
-#                            -> scan_library(kinds=("image","video"),
-#                                            exclude=QUARANTINE_EXCLUDE+(BRANDING_DIRNAME,))
-#     backfill_batches          nothing (rooted at batches/), _IMAGE_EXTS
-#                            -> scan_library(kinds=("image",), include=("batches",),
-#                                            exclude=())
-#
-#   moonglade/backup.py
-#     _scan_media_files         gallery/ _duplicates/ _deleted/, .part, _IMAGE_EXTS
-#                            -> scan_library(kinds=("image",),
-#                                            exclude=QUARANTINE_EXCLUDE)
-#     cmd_organize              gallery/ _duplicates/ _deleted/ videos/ imported/,
-#                               .part, leading-underscore names, _IMAGE_EXTS
-#                            -> scan_library(kinds=("image",),
-#                                            exclude=QUARANTINE_EXCLUDE+("videos","imported"))
-#                               plus its own name.startswith("_") skip, kept at the caller
-#     run_import_local          gallery/ _duplicates/ _deleted/ branding/ (internal
-#                               scan only -- an EXTERNAL source dir excludes nothing),
-#                               .part, _IMAGE_EXTS | _VIDEO_EXTS
-#                            -> scan_library(kinds=("image","video"),
-#                                            exclude=IMPORT_EXCLUDE or ())
-#     _count_backup_images      counts gallery/ as thumbs and _deleted/ as trashed
-#                               rather than dropping them; skips _duplicates/;
-#                               .part, _IMAGE_EXTS
-#                            -> scan_library(kinds=("image",), exclude=())
-#                               plus a split on rel.parts[0] against the shared dirnames
-#     run_download._iter_...    gallery/ _duplicates/ _deleted/ by dir NAME at any
-#                               depth, .part, zero-byte, _IMAGE_EXTS
-#                            -> scan_library(kinds=("image",),
-#                                            exclude=QUARANTINE_EXCLUDE_ANYWHERE)
-#                               plus its own zero-byte skip, kept at the caller
-#
-#   moonglade/similar.py
-#     scan_dir                  gallery/ _duplicates/ _deleted/ by dir NAME at any
-#                               depth, case-insensitively; a NARROWER ext set
-#                            -> scan_library(kinds=("embeddable",),
-#                                            exclude=QUARANTINE_EXCLUDE_ANYWHERE)
-#
-# NAMED DISAGREEMENTS -- kept as caller choices, NOT silently unified:
-#
-#   1. Extension set. `moonglade.similar.scan_dir` indexes only
-#      {.png,.jpg,.jpeg,.webp} -- it does NOT embed `.gif` or `.avif`, which the
-#      other nine walkers do read. That is the `"embeddable"` kind, deliberately a
-#      subset of `"image"`, not a bug to be widened here.
-#   2. Exclusion DEPTH. Eight walkers exclude the top-level subtrees
-#      `out/gallery`, `out/_duplicates`, `out/_deleted` only; `run_download` and
-#      `scan_dir` prune any DIRECTORY OF THAT NAME at any depth. Both survive: a
-#      plain name in `exclude` is the top-level subtree, a `"**/name"` entry is the
-#      any-depth prune. `QUARANTINE_EXCLUDE` and `QUARANTINE_EXCLUDE_ANYWHERE` are
-#      the two spellings. (The any-depth match is case-insensitive, which is what
-#      scan_dir already did; run_download's own name compare was case-sensitive,
-#      a difference that cannot show up on Windows, where the two names are the
-#      same directory.)
-#   3. Zero-byte. Only `files_for` (so `find_files_for_media_id`, resume, and
-#      `find_image_file`) and `run_download` treat a zero-byte file as not-there
-#      (INVARIANT 3). The audit deliberately does not -- it wants to SEE the
-#      zero-byte file so it can never pick it as a keeper (dev/tests/test_dedup.py pins
-#      both halves). So the rule stays at the caller and `scan_library` reports
-#      `size` instead of deciding.
-#   4. Video. Only `collection_health` and `run_import_local` look at videos at
-#      all; the audit, organize, dedup and resume paths are image-only, and stay so.
-#   5. Legacy `branding/`. Only `collection_health` and `run_import_local` exclude
-#      it. Branding moved to the app root on 2026-07-26, so on a current install
-#      this excludes nothing; it is kept because an older install still has files
-#      there. Adding it to the other eight would be a behaviour change, so it is
-#      not added.
-#   6. `cmd_organize` alone also skips `videos/`, `imported/`, and any file whose
-#      name starts with `_`. The two directories are `exclude` entries; the
-#      leading-underscore rule is one line at the caller, because it is a rule
-#      about FILES, not about the shape of the tree.
-#
-# ONE MODULE, TWO TRAVERSALS. `scan_library` walks the whole tree with
-# `os.scandir` and prunes excluded subtrees before descending (so the gallery's
-# thousands of thumbnails are never enumerated). `files_for` answers the one-id
-# question with a targeted `rglob("*<mid>.*")` instead, because it is called once
-# per media id inside loops -- a full walk per id is what made resume scale
-# quadratically before run_download built its index. Same rules, same helpers,
-# two access paths: the SET each yields is identical, only the cost differs.
-# ---------------------------------------------------------------------------
-from collections import namedtuple
-
-# The quarantine / derived-output directory names. One spelling each, shared by
-# every walker and by the code that WRITES them, so a rename can never again be
-# taught to some walkers and not others.
-GALLERY_DIRNAME = "gallery"           # derived thumbnails + regenerable caches
-DUPLICATES_DIRNAME = "_duplicates"    # matches cmd_dedup()'s own quarantine_root name
-# Accidental bulk deletes should be recoverable: purges MOVE files here instead of
-# destroying them (the catalog row is still removed, so the gallery stays clean).
-DELETED_DIRNAME = "_deleted"
-# App chrome (banner/logo/marks). Branding moved to the APP root on 2026-07-26, so
-# under a current out_dir this names nothing -- kept because an install that predates
-# the move still has files here, and a scan that swept them in would catalogue
-# someone's banner and mascots as gallery images.
-BRANDING_DIRNAME = "branding"
-# The app's own folder in a library (_moonglade/): its records, the owner's decisions, every
-# login's stores and the Loom -- never pictures. Every walker prunes it, so nothing in it is
-# ever catalogued, counted, flagged as a stray, organized or quarantined (the Loom's frames
-# and cuts included).
-RECORDS_DIRNAME = _paths.LIBRARY_APP_DIRNAME
-
-# The two spellings of "skip the derived + quarantined trees, and the app's records"
-# (named disagreement 2).
-QUARANTINE_EXCLUDE = (GALLERY_DIRNAME, DUPLICATES_DIRNAME, DELETED_DIRNAME, RECORDS_DIRNAME)
-QUARANTINE_EXCLUDE_ANYWHERE = tuple("**/" + n for n in QUARANTINE_EXCLUDE)
-# --import-local's internal scan: the three above plus legacy branding/.
-IMPORT_EXCLUDE = QUARANTINE_EXCLUDE + (BRANDING_DIRNAME,)
-# Web Import's per-request ceiling on uploaded parts (/api/import-local). The page sends a big
-# folder in batches well under it (gallery/src/lib/importBatches.js); the route keeps it as a
-# guard and reports whatever it did not take.
-IMPORT_REQUEST_CAP = 1000
-# collection_health()'s walk, and therefore _health_dir_key()'s stat set. Same names as
-# IMPORT_EXCLUDE today; kept separate because the two would not have to move together and
-# the health memo's correctness depends on THIS one matching the health walk exactly.
-HEALTH_EXCLUDE = QUARANTINE_EXCLUDE + (BRANDING_DIRNAME,)
-
-_VIDEO_EXTS = frozenset({".mp4", ".webm", ".mov", ".mkv", ".m4v"})
-# What moonglade.similar's CLIP index will actually embed -- deliberately narrower
-# than _IMAGE_EXTS (named disagreement 1).
-_EMBED_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
-
-# The kind taxonomy. `_IMAGE_EXTS` is defined at the top of this module beside the
-# other catalog constants; the other two live here because nothing outside the scan
-# needs them.
-SCAN_KINDS = {
-    "image": _IMAGE_EXTS,
-    "video": _VIDEO_EXTS,
-    "embeddable": _EMBED_EXTS,
-}
-# ext -> the widest kind that owns it ("image" wins over the "embeddable" subset).
-_KIND_BY_EXT = {}
-for _k in ("image", "video", "embeddable"):
-    for _e in SCAN_KINDS[_k]:
-        _KIND_BY_EXT.setdefault(_e, _k)
-del _k, _e
-
-MediaEntry = namedtuple("MediaEntry", "path rel bucket media_id size kind")
-MediaEntry.__doc__ = """One media file the scan found.
-
-    path      absolute Path
-    rel       Path relative to the scan root (native separators, like the
-              `p.relative_to(out_dir)` every caller used to compute itself)
-    bucket    bucket_of(rel) -- "images" | "batches" | "month" | "other"
-    media_id  media_id_of(path) -- INVARIANT 1
-    size      st_size, or None if the stat() failed. None is NOT zero: resume
-              treats an unreadable stat as "probably fine, already done", and a
-              genuine zero means an interrupted download (INVARIANT 3).
-    kind      which entry of SCAN_KINDS matched ("image" | "video" | ...)
-    """
-
-
-def bucket_of(path_or_rel):
-    """THE bucket classifier (was moonglade_backup._bucket_of, which is now an
-    alias onto this, and which this module used to re-type inline twice more).
-    Classifies a path RELATIVE to out_dir into its top-level bucket name:
-    "images", "batches", "month" (YYYY-MM/ or unknown-date/), or "other". Feeds
-    _BUCKET_PRIORITY, which decides which copy of a duplicated media_id is the
-    keeper."""
-    top = str(path_or_rel).replace("\\", "/").split("/")[0]
-    if top == "images":
-        return "images"
-    if top == "batches":
-        return "batches"
-    if top == "unknown-date":
-        return "month"
-    if len(top) == 7 and top[4] == "-" and top[:4].isdigit():
-        return "month"
-    return "other"
-
-
-def media_id_of(path):
-    """Canonical media_id extraction (INVARIANT 1): the last underscore-delimited
-    chunk of the filename stem. Works for every naming layout the tool produces:
-    flat (`prompt_task_<mid>`), batch (`NN_<mid>`), and bare (`<mid>`).
-
-    The two inline re-implementations (backfill_batches here, scan_dir in
-    moonglade_similar.py) are gone -- both now arrive here through the scan."""
-    return Path(path).stem.split("_")[-1]
-
-
-def _is_under(path, parent):
-    try:
-        path.relative_to(parent)
-        return True
-    except ValueError:
-        return False
-
-
-def _kind_map(kinds):
-    """{ext: kind name} for a `kinds` argument.
-
-    `kinds` is a kind name or an iterable of them (keys of SCAN_KINDS). It also
-    accepts a raw iterable of ".ext" strings -- that is the compat path for
-    find_files_for_media_id(exts=...), whose callers pass an extension set
-    directly (e.g. already_downloaded_video's _VIDEO_EXTS)."""
-    if isinstance(kinds, str):
-        kinds = (kinds,)
-    out = {}
-    for k in kinds:
-        if k.startswith("."):
-            ext = k.lower()
-            out.setdefault(ext, _KIND_BY_EXT.get(ext, "other"))
-        else:
-            for ext in SCAN_KINDS[k]:
-                out[ext] = k
-    return out
-
-
-def _split_exclusions(exclude):
-    """(top-level subtree names, any-depth dir names) -- see named disagreement 2.
-
-    A plain "gallery" prunes out_dir/gallery only. A "**/gallery" prunes any
-    directory of that name at any depth, matched case-insensitively (which is what
-    moonglade.similar.scan_dir has always done, and what run_download's own
-    name-based prune does in practice on Windows)."""
-    tops, anywhere = [], set()
-    for name in exclude:
-        if name.startswith("**/"):
-            anywhere.add(name[3:].lower())
-        else:
-            tops.append(name)
-    return tops, anywhere
-
-
-def scan_library(out_dir, *, kinds=("image",), include=(), exclude=QUARANTINE_EXCLUDE):
-    """Walk the library tree once and yield a MediaEntry per media file.
-
-    out_dir   the scan root. Everything (`rel`, `bucket`, `exclude`) is relative
-              to it -- so --import-local can point this at an EXTERNAL folder and
-              get the same rules with no exclusions.
-    kinds     which extension families count. See SCAN_KINDS / _kind_map.
-    include   restrict the walk to these top-level subtrees ("only look under
-              batches/"). Empty = the whole tree. A named subtree that does not
-              exist simply yields nothing.
-    exclude   directory names to prune. Plain name = the top-level subtree;
-              "**/name" = that name at any depth (named disagreement 2).
-
-    Prunes excluded subtrees BEFORE descending, so their entries are never
-    enumerated at all -- that is what made the health panel usable at 35k images
-    (owner report 2026-08-06) and what keeps run_download's startup index cheap.
-    Reads is_file/size straight off the DirEntry, which on Windows comes from the
-    directory read itself: no per-file syscall.
-
-    Skips `.part` temp files (INVARIANT 3). Does NOT apply the zero-byte rule --
-    that one is the caller's, and `size` is reported so the caller can apply it.
-    """
-    root = Path(out_dir)
-    kind_of = _kind_map(kinds)
-    top_names, any_names = _split_exclusions(exclude)
-    pruned = {os.path.normcase(str(root / n)) for n in top_names}
-    starts = [str(root / n) for n in include] or [str(root)]
-
-    for start in starts:
-        stack = [start]
-        while stack:
-            try:
-                with os.scandir(stack.pop()) as it:
-                    for e in it:
-                        try:
-                            if e.is_dir(follow_symlinks=False):
-                                if (os.path.normcase(e.path) not in pruned
-                                        and e.name.lower() not in any_names):
-                                    stack.append(e.path)
-                                continue
-                            if not e.is_file(follow_symlinks=False):
-                                continue
-                        except OSError:
-                            continue
-                        name = e.name
-                        if name.endswith(".part"):
-                            continue
-                        kind = kind_of.get(os.path.splitext(name)[1].lower())
-                        if kind is None:
-                            continue
-                        try:
-                            size = e.stat(follow_symlinks=False).st_size
-                        except OSError:
-                            size = None
-                        p = Path(e.path)
-                        rel = p.relative_to(root)
-                        yield MediaEntry(p, rel, bucket_of(rel), media_id_of(name),
-                                         size, kind)
-            except OSError:
-                continue
-
-
-def files_for(out_dir, media_id, *, kinds=("image",), exclude=QUARANTINE_EXCLUDE):
-    """Every on-disk file whose media_id is exactly `media_id`. The one-id view.
-
-    BOTH naming layouts in one pass:
-      * prefixed   `prompt_task_<mid>.ext` / `NN_<mid>.ext`
-      * bare       `<mid>.ext`   (single-image --organize month files)
-    The exact `media_id_of(p) == mid` check prevents substring collisions (a
-    longer id ending in these digits).
-
-    Zero-byte files are excluded HERE, not left to the caller, because this is the
-    resume/lookup matcher and "the file exists but is empty" has to read as
-    not-downloaded (INVARIANT 3): treating it as present strands the catalog row
-    pointing at a dead file that no --update ever re-fetches.
-
-    Uses a targeted glob rather than scan_library's full walk -- it is called once
-    per media id inside loops, so a whole-tree walk per id is quadratic (see the
-    section header, "one module, two traversals"). The rules are the same ones.
-    """
-    root = Path(out_dir)
-    mid = str(media_id)
-    kind_of = _kind_map(kinds)
-    top_names, any_names = _split_exclusions(exclude)
-    top_dirs = [root / n for n in top_names]
-    matches = []
-    for p in root.rglob("*{}.*".format(mid)):
-        if p.suffix.lower() not in kind_of:
-            continue
-        if p.name.endswith(".part"):
-            continue
-        if media_id_of(p) != mid:
-            continue
-        if any(_is_under(p, d) for d in top_dirs):
-            continue
-        if any_names and any_names & {q.lower() for q in p.relative_to(root).parts[:-1]}:
-            continue
-        try:
-            if not p.is_file() or p.stat().st_size == 0:
-                continue
-        except OSError:
-            continue
-        matches.append(p)
-    return matches
-
-
-def find_files_for_media_id(out_dir, media_id, include_gallery=False, exts=None):
-    """All on-disk files whose media_id matches, anywhere under out_dir.
-
-    The named entry point onto `files_for` above -- kept under this name because
-    resume (`already_downloaded`), the gallery (`find_image_file`), the loom's
-    video fallback and the duplicate audit all call it by it, several of them with
-    an explicit `exts` set.
-
-    `exts` defaults to `_IMAGE_EXTS` (this matcher's historical, still image-only
-    default -- e.g. dev/tests/test_loom_export_bundle.py pins that video media resolves
-    via a separate catalog-row fallback, NOT this matcher). Pass `exts=_VIDEO_EXTS`
-    (B16, audit 2026-07-21) for a video-aware sibling -- see already_downloaded_video
-    in moonglade/backup.py -- so the SAME exact-match + quarantine-exclusion
-    contract applies to videos, not just images.
-    """
-    exclude = (QUARANTINE_EXCLUDE if not include_gallery
-               else (DUPLICATES_DIRNAME, DELETED_DIRNAME, RECORDS_DIRNAME))
-    return files_for(out_dir, media_id,
-                     kinds=(("image",) if exts is None else exts),
-                     exclude=exclude)
-
-
-def find_local_video_file(out_dir, mid, row=None):
-    """Resolve a catalog media_id to its local video file on disk: try the catalog's
-    stored filename first, then fall back to the shared media-id matcher (SAME exact
-    media_id_of(p) == mid check and _duplicates/_deleted quarantine exclusion as every
-    other matcher in this file -- B17, audit 2026-07-21: a bare glob fallback used to
-    have neither, so a quarantined file was a valid hit and a shorter media_id could
-    match as a substring of a longer, unrelated one's filename). find_files_for_media_id
-    defaults to images, hence the explicit exts=_VIDEO_EXTS. Returns a Path or None.
-
-    Lifted out of create_app on 2026-09-26 (moved, not changed) so the CLI's
-    --reference-video length lookup reads the one answer the app's _find_local_video_file
-    gives its four callers. `row` is the media id's catalog row (or None / {} for "none").
-
-    _VIDEO_EXTS, not a hand-written tuple: the local copy was missing .m4v, which
-    run_import_local DOES copy in and catalog as is_video='1' (its media_exts is
-    _IMAGE_EXTS | _VIDEO_EXTS). Harmless while the only callers were Loom handoff/
-    duration -- a .m4v is never a generated shot -- but the detail page's existence
-    check runs over a whole catalog, so the short list would have reported a perfectly
-    present imported clip as missing from disk."""
-    out_dir = Path(out_dir)
-    vid_exts = _VIDEO_EXTS
-    row = row or {}
-    fn = row.get("filename") or ""
-    if fn:
-        cand = out_dir / fn
-        # The catalog's `filename` is joined onto out_dir, so a row carrying a traversing
-        # path resolves outside the library. /video-file already refuses that (relative_to
-        # + send_from_directory's own safe_join), which is exactly why this branch has to
-        # agree: without the check THIS resolver says "present" for a file the serving
-        # route will 404, and the detail page draws a player over it and says nothing --
-        # M30's own symptom, reached by a different road. `.resolve()` is the load-bearing
-        # part: relative_to alone does not normalise, so `..` walks straight through it.
-        if (_is_under(cand.resolve(), out_dir.resolve())
-                and cand.is_file() and cand.suffix.lower() in vid_exts):
-            return cand
-    fallback = find_files_for_media_id(out_dir, mid, exts=vid_exts)
-    return fallback[0] if fallback else None
-# ---------------------------------------------------------------------------
-# END LIBRARY SCAN
-# ---------------------------------------------------------------------------
-
-
 def find_image_file(out_dir, media_id, filename):
     """Locate an image file: try catalog filename first, then media-id fallback.
 
     Excludes out_dir/gallery/ so thumbnails are never returned as full-res images.
     """
     gallery_dir = out_dir / "gallery"
-    deleted_dir = out_dir / DELETED_DIRNAME
-    records_dir = out_dir / RECORDS_DIRNAME
+    deleted_dir = out_dir / _scan.DELETED_DIRNAME
+    records_dir = out_dir / _scan.RECORDS_DIRNAME
     if filename:
         for candidate in out_dir.rglob(filename):
             # The fallback below (find_files_for_media_id) already skips zero-byte
@@ -10554,13 +10129,13 @@ def find_image_file(out_dir, media_id, filename):
             # as if it were the real image (audit 2026-07-21, invariant 3/6).
             try:
                 if (candidate.is_file() and candidate.stat().st_size > 0
-                        and not _is_under(candidate, gallery_dir)
-                        and not _is_under(candidate, deleted_dir)
-                        and not _is_under(candidate, records_dir)):
+                        and not _scan._is_under(candidate, gallery_dir)
+                        and not _scan._is_under(candidate, deleted_dir)
+                        and not _scan._is_under(candidate, records_dir)):
                     return candidate
             except OSError:
                 continue
-    matches = find_files_for_media_id(out_dir, media_id)
+    matches = _scan.find_files_for_media_id(out_dir, media_id)
     return matches[0] if matches else None
 
 
@@ -10612,7 +10187,7 @@ def _trash_meta_path(out_dir, media_id):
     """Sidecar path for a quarantined item's snapshotted catalog row (see
     _snapshot_before_purge). Lives beside the quarantined file itself, keyed by
     media_id rather than filename so it's a one-line lookup from either direction."""
-    return Path(out_dir) / DELETED_DIRNAME / "{}.json".format(media_id)
+    return Path(out_dir) / _scan.DELETED_DIRNAME / "{}.json".format(media_id)
 
 
 def _read_trash_meta(out_dir, media_id):
@@ -10671,7 +10246,7 @@ def purge_media_local(out_dir, thumb_dir, db_path, media_id, filename, quarantin
     moved = None
     if img and img.exists():
         if quarantine:
-            qdir = out_dir / DELETED_DIRNAME
+            qdir = out_dir / _scan.DELETED_DIRNAME
             qdir.mkdir(parents=True, exist_ok=True)
             dest = qdir / img.name
             if dest.exists():                       # don't clobber an earlier delete
@@ -10847,12 +10422,12 @@ def _find_quarantined_file(out_dir, media_id):
     restricts the extension to real media -- a naive media_id_of() match alone would
     pick either file depending on directory order."""
     from moonglade import backup as core
-    qdir = Path(out_dir) / DELETED_DIRNAME
+    qdir = Path(out_dir) / _scan.DELETED_DIRNAME
     if not qdir.exists():
         return None
-    media_exts = _IMAGE_EXTS | core._VIDEO_EXTS
+    media_exts = _scan._IMAGE_EXTS | core._VIDEO_EXTS
     for p in qdir.glob("*"):
-        if p.is_file() and p.suffix.lower() in media_exts and media_id_of(p) == media_id:
+        if p.is_file() and p.suffix.lower() in media_exts and _scan.media_id_of(p) == media_id:
             return p
     return None
 
@@ -10899,11 +10474,11 @@ def _list_quarantined(out_dir, page=1, page_size=60):
     """list_quarantined's body, plus a fourth value: how many media files in the whole trash
     are the only copy (their sidecar snapshot passes is_archive_only). See list_quarantined."""
     from moonglade import backup as core
-    qdir = Path(out_dir) / DELETED_DIRNAME
+    qdir = Path(out_dir) / _scan.DELETED_DIRNAME
     if not qdir.exists():
         return [], 0, 0, 0
 
-    media_exts = _IMAGE_EXTS | core._VIDEO_EXTS
+    media_exts = _scan._IMAGE_EXTS | core._VIDEO_EXTS
     entries = []
     meta_by_id = {}
     with os.scandir(qdir) as it:
@@ -10927,11 +10502,11 @@ def _list_quarantined(out_dir, page=1, page_size=60):
     total = len(entries)
     total_bytes = sum(s for _, s, _ in entries)
     only_total = sum(1 for name, _s, _m in entries
-                     if is_archive_only(meta_by_id.get(media_id_of(name))))
+                     if is_archive_only(meta_by_id.get(_scan.media_id_of(name))))
 
     def _sort_key(entry):
         name, _size, mtime = entry
-        meta = meta_by_id.get(media_id_of(name))
+        meta = meta_by_id.get(_scan.media_id_of(name))
         return (meta or {}).get("_deleted_at") or mtime
 
     entries.sort(key=_sort_key, reverse=True)
@@ -10942,7 +10517,7 @@ def _list_quarantined(out_dir, page=1, page_size=60):
 
     items = []
     for name, size, mtime in page_entries:
-        media_id = media_id_of(name)
+        media_id = _scan.media_id_of(name)
         is_video = Path(name).suffix.lower() in core._VIDEO_EXTS
         meta = meta_by_id.get(media_id)
         deleted_at = (meta or {}).get("_deleted_at") or mtime
@@ -10970,7 +10545,7 @@ def _ensure_trash_thumbs(out_dir, thumb_dir, items, workers=6):
     quarantines the file, so writing back into that SAME slot means the existing,
     unmodified /thumbs/<media_id>.jpg route serves the result -- no new serving
     route needed."""
-    qdir = Path(out_dir) / DELETED_DIRNAME
+    qdir = Path(out_dir) / _scan.DELETED_DIRNAME
     work = []
     for it in items:
         thumb_path = Path(thumb_dir) / "{}.jpg".format(it["media_id"])
@@ -11101,11 +10676,11 @@ def empty_trash(out_dir, thumb_dir):
     (api_trash_empty()). Same per-item cleanup as delete_quarantined_forever(), just
     walked once instead of media_id-by-media_id. Returns the number of MEDIA files
     removed (sidecars don't count toward the number shown to the owner)."""
-    qdir = Path(out_dir) / DELETED_DIRNAME
+    qdir = Path(out_dir) / _scan.DELETED_DIRNAME
     if not qdir.exists():
         return 0
     from moonglade import backup as core
-    media_exts = _IMAGE_EXTS | core._VIDEO_EXTS
+    media_exts = _scan._IMAGE_EXTS | core._VIDEO_EXTS
     removed = 0
     for p in list(qdir.glob("*")):
         if not p.is_file():
@@ -11116,7 +10691,7 @@ def empty_trash(out_dir, thumb_dir):
             except OSError:
                 pass
             continue
-        mid = media_id_of(p)
+        mid = _scan.media_id_of(p)
         tp = Path(thumb_dir) / "{}.jpg".format(mid)
         if tp.exists():
             try:
@@ -11168,7 +10743,7 @@ def _resolve_under(out_dir, rel_path):
         return None
     out_dir = Path(out_dir).resolve()
     candidate = (out_dir / rel_path).resolve()
-    return candidate if _is_under(candidate, out_dir) else None
+    return candidate if _scan._is_under(candidate, out_dir) else None
 
 
 def _reconcile_one_row_after_move(out_dir, db_path, media_id, row):
@@ -11182,7 +10757,7 @@ def _reconcile_one_row_after_move(out_dir, db_path, media_id, row):
     a no-op if the media_id has no surviving file at all (that case is the
     caller's row-delete branch instead, not this function's job)."""
     from moonglade import backup as core
-    matches = find_files_for_media_id(out_dir, media_id)
+    matches = _scan.find_files_for_media_id(out_dir, media_id)
     if not matches:
         return
     survivor = matches[0]
@@ -11245,9 +10820,9 @@ def quarantine_duplicate_file(out_dir, thumb_dir, db_path, media_id, rel_path, g
     src = _resolve_under(out_dir, rel_path)
     if src is None:
         return {"ok": False, "error": "invalid path"}
-    quarantine_root = out_dir / DUPLICATES_DIRNAME
-    deleted_root = out_dir / DELETED_DIRNAME
-    if _is_under(src, quarantine_root) or _is_under(src, deleted_root):
+    quarantine_root = out_dir / _scan.DUPLICATES_DIRNAME
+    deleted_root = out_dir / _scan.DELETED_DIRNAME
+    if _scan._is_under(src, quarantine_root) or _scan._is_under(src, deleted_root):
         return {"ok": False, "error": "already quarantined"}
     if not src.is_file():
         return {"ok": False, "error": "file not found: {}".format(rel_path)}
@@ -11270,7 +10845,7 @@ def quarantine_duplicate_file(out_dir, thumb_dir, db_path, media_id, rel_path, g
 
     row_deleted = False
     if row_before:
-        survivors = find_files_for_media_id(out_dir, media_id)
+        survivors = _scan.find_files_for_media_id(out_dir, media_id)
         if not survivors:
             delete_from_catalog(db_path, media_id)
             row_deleted = True
@@ -11331,9 +10906,9 @@ def restore_quarantined_duplicate(out_dir, thumb_dir, db_path, quarantine_path):
 
     out_dir = Path(out_dir).resolve()   # match _resolve_under()'s own resolution -- see
                                         # quarantine_duplicate_file()'s identical comment
-    quarantine_root = out_dir / DUPLICATES_DIRNAME
+    quarantine_root = out_dir / _scan.DUPLICATES_DIRNAME
     src = _resolve_under(out_dir, quarantine_path)
-    if src is None or not _is_under(src, quarantine_root):
+    if src is None or not _scan._is_under(src, quarantine_root):
         return {"ok": False, "error": "not a quarantined-duplicate path"}
     meta_path = _quarantine_meta_path(src)
     if not src.is_file() or not meta_path.exists():
@@ -11405,7 +10980,7 @@ def _validate_duplicate_pair(out_dir, db_path, match_type, keep, remove):
         path = _resolve_under(out_dir, entry.get("path"))
         if not mid or path is None or not path.is_file():
             return None
-        if media_id_of(path) != mid:
+        if _scan.media_id_of(path) != mid:
             return None
         return mid, path
 
@@ -11529,7 +11104,7 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
                 # exts=_VIDEO_EXTS, not the matcher's image-only default: this fallback
                 # exists for a video whose stored filename is stale or blank, and an
                 # image-only match can never find one, so the row stayed thumbless.
-                m = find_files_for_media_id(Path(out_dir), mid, exts=core._VIDEO_EXTS)
+                m = _scan.find_files_for_media_id(Path(out_dir), mid, exts=core._VIDEO_EXTS)
                 vp = m[0] if m else None
             return bool(vp and make_video_thumbnail(vp, thumb_path))
         img_path = find_image_file(out_dir, mid, filename)
@@ -18164,7 +17739,7 @@ def create_app(out_dir: Path):
         src = out_dir / str(row.get("filename") or "")
         if not (row.get("filename") and src.is_file()):
             from moonglade import backup as core   # lazy, like every other gallery use of it
-            files = find_files_for_media_id(out_dir, media_id, exts=core._VIDEO_EXTS)
+            files = _scan.find_files_for_media_id(out_dir, media_id, exts=core._VIDEO_EXTS)
             if not files:
                 return json.dumps({"ok": False, "error": "video file not found"}), 404, {"Content-Type": "application/json"}
             src = Path(files[0])
@@ -23213,8 +22788,8 @@ def create_app(out_dir: Path):
                 # from the user's own library by media_id, via the same shared resolver
                 # every other media_id->file path uses. Images only; a video id simply
                 # resolves to no usable frame here.
-                hits = find_files_for_media_id(out_dir, media_id)
-                img_hit = next((p for p in hits if p.suffix.lower() in _IMAGE_EXTS), None)
+                hits = _scan.find_files_for_media_id(out_dir, media_id)
+                img_hit = next((p for p in hits if p.suffix.lower() in _scan._IMAGE_EXTS), None)
                 if img_hit is None:
                     return jsonify({"error": "no local image for that media id"}), 400
                 with open(img_hit, "rb") as fh:
@@ -23597,8 +23172,8 @@ def create_app(out_dir: Path):
             # (hooks/useImport.js), so this is only reached by a caller that sends more at
             # once. What it does not take it COUNTS, and says so in the answer (#82) -- it
             # used to drop everything past the cap without a word.
-            not_taken = max(0, len(files) - IMPORT_REQUEST_CAP)
-            for i, f in enumerate(files[:IMPORT_REQUEST_CAP]):
+            not_taken = max(0, len(files) - _scan.IMPORT_REQUEST_CAP)
+            for i, f in enumerate(files[:_scan.IMPORT_REQUEST_CAP]):
                 base = _os.path.basename(f.filename or "")
                 if not base:
                     not_taken += 1          # a part with no file name: nothing to import
@@ -25540,7 +25115,7 @@ def create_app(out_dir: Path):
         d = _loom_beds_dir(user)
         p = d / name
         try:
-            if not _is_under(p.resolve(), d.resolve()) or not p.is_file():
+            if not _scan._is_under(p.resolve(), d.resolve()) or not p.is_file():
                 return None
         except OSError:
             return None
@@ -26524,7 +26099,7 @@ __DESIGN_TOKENS__
         this doesn't repeat a primary-key SELECT they already paid for. It is a cache, not
         an override: pass a DIFFERENT row and you get a different file, which is why only
         the two callers holding this exact mid's row use it."""
-        return find_local_video_file(out_dir, mid,
+        return _scan.find_local_video_file(out_dir, mid,
                                      row if row is not None else get_row(db_path, mid))
 
     @app.route("/api/loom/handoff", methods=["POST"])
@@ -27532,7 +27107,7 @@ __DESIGN_TOKENS__
             return None
         try:
             if (p.name.endswith(".part") or not p.is_file() or p.stat().st_size <= 0
-                    or not _is_under(p.resolve(), out_dir.resolve())):
+                    or not _scan._is_under(p.resolve(), out_dir.resolve())):
                 return None
         except OSError:
             return None
@@ -27942,7 +27517,7 @@ __DESIGN_TOKENS__
     # id already resolvable on the receiving machine is simply skipped (both sides already
     # have it); one that isn't gets copied into imported/ and cataloged fresh. That also
     # makes re-importing the same bundle twice a no-op the second time.
-    _BUNDLE_VIDEO_EXTS = _VIDEO_EXTS   # THE video extension set, not a fourth copy of it.
+    _BUNDLE_VIDEO_EXTS = _scan._VIDEO_EXTS   # THE video extension set, not a fourth copy of it.
     # It used to be a re-typed literal here, because the set lived in backup.py and
     # backup.py imports this file, so a module-level import back the other way is a
     # cycle. The 2026-08-23 library-scan collapse moved the set into THIS module's
@@ -28025,7 +27600,7 @@ __DESIGN_TOKENS__
         images by design. Same fallback /api/loom/export already uses for exactly this
         reason: catalog row -> is_video + filename -> out_dir/filename. Returns a Path
         or None."""
-        paths = find_files_for_media_id(out_dir, mid)
+        paths = _scan.find_files_for_media_id(out_dir, mid)
         if paths:
             return paths[0]
         row = get_row(db_path, mid)
@@ -28224,7 +27799,7 @@ __DESIGN_TOKENS__
                 continue  # already have it -- both sides share this media, nothing to do
             imported_dir.mkdir(parents=True, exist_ok=True)
             dest = imported_dir / "{}{}".format(mid, ext)
-            if not _is_under(dest.resolve(), imported_dir.resolve()):
+            if not _scan._is_under(dest.resolve(), imported_dir.resolve()):
                 continue
             # Streamed under a cap into a temp file, then moved into place: a huge or
             # truncated entry never leaves a partial picture behind (Invariant 3).

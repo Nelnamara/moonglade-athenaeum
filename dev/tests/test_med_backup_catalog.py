@@ -24,7 +24,8 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gallery
-from moonglade.gallery import DELETED_DIRNAME, load_catalog
+from moonglade.gallery import load_catalog
+from moonglade.scan import DELETED_DIRNAME
 
 
 # ---------------------------------------------------------------------------

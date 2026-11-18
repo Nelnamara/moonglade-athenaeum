@@ -24,6 +24,7 @@ from moonglade import logs as mlog
 from moonglade import paths
 from moonglade import runs
 from tests.conftest import first_party_sources
+from moonglade import scan as scan_mod
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -154,7 +155,7 @@ def test_the_loom_lives_in_the_app_folder(tmp_path):
     """The Loom's whole folder is under _moonglade/, which every walker prunes -- so its
     frames and cuts are never counted as pictures."""
     assert paths.loom_root(tmp_path) == tmp_path / "_moonglade" / "loom"
-    assert paths.LIBRARY_APP_DIRNAME in g.QUARANTINE_EXCLUDE
+    assert paths.LIBRARY_APP_DIRNAME in scan_mod.QUARANTINE_EXCLUDE
 
 
 # ---- the lint: no code builds a record's name off out_dir by hand ----------------------

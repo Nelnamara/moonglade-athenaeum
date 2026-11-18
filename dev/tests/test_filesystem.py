@@ -174,7 +174,7 @@ def test_import_local_skips_deleted_quarantine(tmp_path):
     scan that doesn't skip _deleted/ finds the orphaned file, sees no existing row/
     media_id for it, and resurrects it as a brand-new source='local' row. A purged
     image must stay purged, not come back to life on the next --import-local."""
-    from moonglade.gallery import DELETED_DIRNAME
+    from moonglade.scan import DELETED_DIRNAME
     qdir = tmp_path / DELETED_DIRNAME
     qdir.mkdir(parents=True)
     (qdir / "old_prompt_task1_999.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
@@ -396,7 +396,8 @@ def test_organize_never_touches_deleted_quarantine(tmp_path):
     replaces it into the organized tree in place of the live file. Either way the
     _deleted/ file must never be touched at all -- this asserts exactly that,
     regardless of which of the two on-disk copies the walk happens to visit first."""
-    from moonglade.gallery import save_catalog, CATALOG_FIELDS, DELETED_DIRNAME
+    from moonglade.gallery import save_catalog, CATALOG_FIELDS
+    from moonglade.scan import DELETED_DIRNAME
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m9", "task_id": "T9",
         "prompt_preview": "alpha", "created_at": "2024-03-01T00:00:00", "filename": "alpha_T9_m9.png"}])
