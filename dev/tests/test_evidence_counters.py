@@ -208,7 +208,11 @@ def test_old_counters_in_telemetry_no_longer_shadow_the_catalog(tmp_path):
 
 
 def test_no_submit_path_bumps_a_retired_counter():
-    src = inspect.getsource(g)
+    # The gallery and the modules the 3.21.0 split moved gallery code into.
+    from moonglade import branding as branding_mod, contest_sync as contest_sync_mod
+    from moonglade import living as living_mod
+    src = "\n".join(inspect.getsource(mod) for mod in (
+        g, telemetry_mod, achievements_mod, branding_mod, living_mod, contest_sync_mod))
     for needle in ('telem_bump("edits"', 'telem_bump("lora_used"', 'telem_max("lora_stacked"',
                    'telem_set_add("loras"', 'telem_bump("loras_trained"', 'telem_bump("culled"'):
         assert needle not in src, needle

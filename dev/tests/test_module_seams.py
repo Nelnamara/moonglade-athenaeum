@@ -262,7 +262,7 @@ SOURCE_READERS = {
     "tests/test_setup_prepare.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_spend_no_retry.py": ("moonglade.backup",),
     "tests/test_task_model_detail_document.py": ("moonglade.backup", "moonglade.gallery"),
-    "tests/test_telemetry.py": ("moonglade.gallery",),
+    "tests/test_telemetry.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_training_advanced.py": ("moonglade.backup",),
     "tests/test_training_parity.py": ("moonglade.backup",),
     "tests/test_tsubaki3_image_gate.py": ("moonglade.backup", "moonglade.gallery"),
@@ -798,6 +798,14 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_telemetry.py', 'moonglade.branding'),
     ('tests/test_watch.py', 'moonglade.branding'),
     ('tools/export_design_kit.py', 'moonglade.branding'),
+    # After the review: test_telemetry's bridge-set guard reads a tuple of modules, which the
+    # scanner cannot trace. They are the gallery and its split-out modules; nothing moved out
+    # of backup is in it, and no backup-origin module writes the bridge set.
+    ('tests/test_telemetry.py', 'moonglade.organize'),
+    ('tests/test_telemetry.py', 'moonglade.jobs'),
+    ('tests/test_telemetry.py', 'moonglade.pixai_client'),
+    ('tests/test_telemetry.py', 'moonglade.media_tools'),
+    ('tests/test_telemetry.py', 'moonglade.mirror'),
 }
 
 

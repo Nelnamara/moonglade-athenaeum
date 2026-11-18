@@ -767,9 +767,12 @@ def test_only_the_two_tool_terminals_write_the_bridge_set():
     """The narrowing, pinned structurally: after the 2026-09-03 ruling the ONLY writers of
     bridge_gen_tasks are the enhance and scene terminals. Self-computing -- it counts the
     write sites in the source rather than restating where they are, so a third one added
-    anywhere (the collect choke again, a new route) fails here on the day it lands."""
+    anywhere (the collect choke again, a new route) fails here on the day it lands. It reads
+    the gallery and the modules the 3.21.0 split moved gallery code into."""
     import inspect
-    src = inspect.getsource(g)
+    from moonglade import contest_sync as contest_sync_mod, living as living_mod
+    src = "\n".join(inspect.getsource(mod) for mod in (
+        g, telemetry_mod, achievements_mod, branding_mod, living_mod, contest_sync_mod))
     writes = [ln.strip() for ln in src.splitlines()
               if "telem_set_add(" in ln and "bridge_gen_tasks" in ln]
     assert len(writes) == 2, writes
