@@ -16,6 +16,9 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Fixed
+- **The Contests window fits its cards again.** A contest with a long title made the community cards wider than the window, so it scrolled sideways. (2026-11-18)
+
 ## [3.21.0] - 2026-11-18 — Moving Day
 
 ### Changed
