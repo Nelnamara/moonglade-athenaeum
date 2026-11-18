@@ -17,6 +17,7 @@ from tests.csshelp import css_rules, element, winning
 from moonglade import scan as scan_mod
 from moonglade import jobs as jobs_mod
 from moonglade import pixai_client as pixai_client_mod
+from moonglade import media_tools as media_tools_mod
 
 
 def _row(**kw):
@@ -788,9 +789,9 @@ def test_loom_handoff_extracts_and_uploads(tmp_path, monkeypatch, pixai):
         with open(out, "wb") as fh:      # simulate a produced frame
             fh.write(b"png")
         return out
-    monkeypatch.setattr(core, "extract_last_frame", fake_extract)
+    monkeypatch.setattr(media_tools_mod, "extract_last_frame", fake_extract)
     monkeypatch.setattr(core, "upload_media", lambda s, p: "FRAME123")
-    monkeypatch.setattr(core, "duration", lambda p: 5.0)
+    monkeypatch.setattr(media_tools_mod, "duration", lambda p: 5.0)
 
     cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
                                   is_video="1", created_at="2025-01-01T00:00:00")])
@@ -818,9 +819,9 @@ def test_loom_handoff_is_trim_aware(tmp_path, monkeypatch, pixai):
         with open(out, "wb") as fh:
             fh.write(b"png")
         return out
-    monkeypatch.setattr(core, "extract_last_frame", fake_extract)
+    monkeypatch.setattr(media_tools_mod, "extract_last_frame", fake_extract)
     monkeypatch.setattr(core, "upload_media", lambda s, p: "FRAME123")
-    monkeypatch.setattr(core, "duration", lambda p: 5.0)
+    monkeypatch.setattr(media_tools_mod, "duration", lambda p: 5.0)
 
     cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
                                   is_video="1", created_at="2025-01-01T00:00:00")])
@@ -843,9 +844,9 @@ def test_loom_handoff_reports_no_time_for_an_unmeasured_clip(tmp_path, monkeypat
         with open(out, "wb") as fh:
             fh.write(b"png")
         return out
-    monkeypatch.setattr(core, "extract_last_frame", fake_extract)
+    monkeypatch.setattr(media_tools_mod, "extract_last_frame", fake_extract)
     monkeypatch.setattr(core, "upload_media", lambda s, p: "FRAME123")
-    monkeypatch.setattr(core, "duration", lambda p: None)
+    monkeypatch.setattr(media_tools_mod, "duration", lambda p: None)
     cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
                                   is_video="1", created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/loom/handoff", json={"video_media_id": "V9", "trim_out": 3.2}).get_json()
@@ -856,12 +857,12 @@ def test_frame_seek_point_is_the_primitives_rule():
     """The handoff route reports where its frame came from through the same rule
     extract_last_frame seeks by: inside the clip -> that time; no time, at/after the end
     (within 0.05 s), or an unmeasured length -> None (the last frame)."""
-    assert core.frame_seek_point(3.2, 5.0) == 3.2
-    assert core.frame_seek_point(None, 5.0) is None
-    assert core.frame_seek_point(4.96, 5.0) is None
-    assert core.frame_seek_point(7, 5.0) is None
-    assert core.frame_seek_point(2.0, None) is None
-    assert core.frame_seek_point(0.0, 5.0) == 0.0
+    assert media_tools_mod.frame_seek_point(3.2, 5.0) == 3.2
+    assert media_tools_mod.frame_seek_point(None, 5.0) is None
+    assert media_tools_mod.frame_seek_point(4.96, 5.0) is None
+    assert media_tools_mod.frame_seek_point(7, 5.0) is None
+    assert media_tools_mod.frame_seek_point(2.0, None) is None
+    assert media_tools_mod.frame_seek_point(0.0, 5.0) == 0.0
 
 
 def test_loom_handoff_thumbnails_the_frame_it_uploads(tmp_path, monkeypatch, pixai):
@@ -882,9 +883,9 @@ def test_loom_handoff_thumbnails_the_frame_it_uploads(tmp_path, monkeypatch, pix
     def fake_upload(s, p):
         uploaded["path"] = p
         return "771867920444519035"
-    monkeypatch.setattr(core, "extract_last_frame", fake_extract)
+    monkeypatch.setattr(media_tools_mod, "extract_last_frame", fake_extract)
     monkeypatch.setattr(core, "upload_media", fake_upload)
-    monkeypatch.setattr(core, "duration", lambda p: 5.0)
+    monkeypatch.setattr(media_tools_mod, "duration", lambda p: 5.0)
     cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
                                   is_video="1", created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/loom/handoff", json={"video_media_id": "V9"}).get_json()
@@ -916,7 +917,7 @@ def test_loom_handoff_ignores_deleted_quarantine(tmp_path, monkeypatch, pixai):
     (qdir / "shot_V9.mp4").write_bytes(b"fake")
 
     calls = []
-    monkeypatch.setattr(core, "extract_last_frame", lambda *a, **k: calls.append(a) or None)
+    monkeypatch.setattr(media_tools_mod, "extract_last_frame", lambda *a, **k: calls.append(a) or None)
 
     cli = _authed_client(tmp_path, [])
     d = cli.post("/api/loom/handoff", json={"video_media_id": "V9"}).get_json()
@@ -934,7 +935,7 @@ def test_loom_handoff_requires_exact_media_id_match(tmp_path, monkeypatch, pixai
     (tmp_path / "videos" / "other_9V9.mp4").write_bytes(b"fake")   # real media_id is "9V9"
 
     calls = []
-    monkeypatch.setattr(core, "extract_last_frame", lambda *a, **k: calls.append(a) or None)
+    monkeypatch.setattr(media_tools_mod, "extract_last_frame", lambda *a, **k: calls.append(a) or None)
 
     cli = _authed_client(tmp_path, [])
     d = cli.post("/api/loom/handoff", json={"video_media_id": "V9"}).get_json()
@@ -949,7 +950,7 @@ def test_loom_video_duration_probes_local_file(tmp_path, monkeypatch):
     the real local file via ffprobe instead of leaving an imported clip's length wrong."""
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "shot_V9.mp4").write_bytes(b"fake")
-    monkeypatch.setattr(core, "duration", lambda p: 7.25)
+    monkeypatch.setattr(media_tools_mod, "duration", lambda p: 7.25)
 
     cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
                                   is_video="1", created_at="2025-01-01T00:00:00")])
@@ -985,7 +986,7 @@ def test_loom_video_duration_ignores_deleted_quarantine(tmp_path, monkeypatch):
     qdir.mkdir()
     (qdir / "shot_V9.mp4").write_bytes(b"fake")
     calls = []
-    monkeypatch.setattr(core, "duration", lambda p: calls.append(p) or 9.0)
+    monkeypatch.setattr(media_tools_mod, "duration", lambda p: calls.append(p) or 9.0)
 
     cli = _authed_client(tmp_path, [])
     d = cli.get("/api/loom/video-duration?media_id=V9").get_json()

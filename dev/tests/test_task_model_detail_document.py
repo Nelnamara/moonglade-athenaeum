@@ -47,6 +47,7 @@ from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.fake_pixai import FakePixAI, UnregisteredOperation, operation_name
 from moonglade import pixai_client as pixai_client_mod
+from moonglade import media_tools as media_tools_mod
 
 REPO = Path(__file__).resolve().parents[2]
 RECORDED = json.loads((Path(__file__).resolve().parent / "fixtures" /
@@ -418,8 +419,8 @@ def test_the_video_sync_reads_its_task_through_the_document(pixai, tmp_path, mon
         return "ok", dest
     monkeypatch.setattr(core, "download", fake_download)
     monkeypatch.setattr(core, "resolve_media", lambda s, m: ("", {}))
-    monkeypatch.setattr(core, "video_poster_thumb", lambda *a, **k: None)
-    monkeypatch.setattr(core, "video_faststart", lambda p: None)
+    monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
+    monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
     monkeypatch.setattr(g, "make_thumbnail", lambda *a, **k: None)
 
     res = core.run_sync_videos(SimpleNamespace(out=str(tmp_path), token=None, page_size=250,

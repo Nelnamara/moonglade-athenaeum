@@ -14,6 +14,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, save_catalog, load_catalog
+from moonglade import media_tools as media_tools_mod
 
 TBKV = ("tbkv1.0", "tbkv1.0.1")
 TBKV_IDS = {"tbkv1.0": "2042030623542642408", "tbkv1.0.1": "2054378086834851904"}
@@ -288,7 +289,7 @@ def test_a_true_length_can_raise_the_quote_above_the_empty_list_and_can_lower_it
     from tests.conftest import login_test_client
     long_vid, short_vid, unknown_vid = ("766390091666197258", "766390091666197259",
                                         "766390091666197260")
-    monkeypatch.setattr(core, "duration",
+    monkeypatch.setattr(media_tools_mod, "duration",
                         lambda p, **k: 20.5 if long_vid in str(p) else 10.04166698455811)
     save_catalog(tmp_path / "catalog.db", [_video_file(tmp_path, long_vid),
                                            _video_file(tmp_path, short_vid)])
@@ -326,7 +327,7 @@ def _video_file(out, mid, secs_row=""):
 
 def test_lookup_measures_the_local_file_first_then_the_catalog_then_none(tmp_path, monkeypatch):
     measured = []
-    monkeypatch.setattr(core, "duration",
+    monkeypatch.setattr(media_tools_mod, "duration",
                         lambda p, **k: measured.append(p) or 10.04166698455811)
     rows = [_video_file(tmp_path, "700000000000000001", secs_row="10"),
             _row(media_id="700000000000000002", is_video="1", video_duration="5",
@@ -345,7 +346,7 @@ def test_price_and_loom_submit_send_byte_identical_reference_blocks(tmp_path, mo
     """The badge (/api/price) and the Video drawer's / Loom's submit (/api/loom/generate) read
     the SAME cached length lookup, so the referenceVideo they build is one shape."""
     from tests.conftest import login_test_client
-    monkeypatch.setattr(core, "duration", lambda p, **k: 10.04166698455811)
+    monkeypatch.setattr(media_tools_mod, "duration", lambda p, **k: 10.04166698455811)
     vid = "766390091666197254"
     save_catalog(tmp_path / "catalog.db", [_video_file(tmp_path, vid)])
     priced, sent = {}, {}
@@ -369,7 +370,7 @@ def test_price_and_loom_submit_send_byte_identical_reference_blocks(tmp_path, mo
 def test_a_missing_local_file_with_no_catalog_length_prices_the_empty_list(tmp_path,
                                                                            monkeypatch, pixai):
     from tests.conftest import login_test_client
-    monkeypatch.setattr(core, "duration", lambda p, **k: pytest.fail("no file to measure"))
+    monkeypatch.setattr(media_tools_mod, "duration", lambda p, **k: pytest.fail("no file to measure"))
     vid = "766390091666197255"
     save_catalog(tmp_path / "catalog.db", [_row(media_id=vid, is_video="1",
                                                 filename="videos/gone_%s.mp4" % vid)])
@@ -384,7 +385,7 @@ def test_a_missing_local_file_with_no_catalog_length_prices_the_empty_list(tmp_p
 
 
 def test_cli_reference_video_measures_a_catalog_ref_against_out(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(core, "duration", lambda p, **k: 12.25)
+    monkeypatch.setattr(media_tools_mod, "duration", lambda p, **k: 12.25)
     vid = "766390091666197256"
     save_catalog(tmp_path / "catalog.db", [_video_file(tmp_path, vid)])
     core.run_reference_video(_refvid_args(tmp_path, ref_image=None, ref_video=[vid]))
@@ -536,8 +537,8 @@ def _collect(tmp_path, monkeypatch, task, names=None):
         p.write_bytes(b"\x00\x00\x00\x18ftypmp42")
         return "ok", p
     monkeypatch.setattr(core, "download", _dl)
-    monkeypatch.setattr(core, "video_poster_thumb", lambda *a, **k: None)
-    monkeypatch.setattr(core, "video_faststart", lambda p: None)
+    monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
+    monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
     looked = []
     monkeypatch.setattr(core, "model_name_gql",
                         lambda s, mid, **k: looked.append(mid) or (names or {}).get(mid, mid))
@@ -644,8 +645,8 @@ def _recover_i2v(tmp_path, monkeypatch, task, lookup=None):
         p.write_bytes(b"\x00\x00\x00\x18ftypmp42")
         return "ok", p
     monkeypatch.setattr(core, "download", _dl)
-    monkeypatch.setattr(core, "video_poster_thumb", lambda *a, **k: None)
-    monkeypatch.setattr(core, "video_faststart", lambda p: None)
+    monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
+    monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
 
     def _no_title(s, mid, **k):
         raise core.PixAIError("lookup failed")

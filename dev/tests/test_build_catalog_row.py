@@ -32,6 +32,7 @@ from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.conftest import login_test_client
 from moonglade import pixai_client as pixai_client_mod
+from moonglade import media_tools as media_tools_mod
 
 
 # --------------------------------------------------------------------------------------
@@ -311,8 +312,8 @@ def _stub_video_task(monkeypatch, out):
     monkeypatch.setattr(core, "media_file_gql", lambda s, m: {"fileUrl": "https://x/v.mp4"})
     monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(FM))
     monkeypatch.setattr(core, "resolve_media", lambda s, m: ("", {}))
-    monkeypatch.setattr(core, "video_poster_thumb", lambda *a, **k: None)
-    monkeypatch.setattr(core, "video_faststart", lambda p: None)
+    monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
+    monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
     monkeypatch.setattr(g, "make_thumbnail", lambda *a, **k: None)
     return path, result
 
@@ -503,8 +504,8 @@ def _stub_sync_videos(monkeypatch, out):
     monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(FM))
     monkeypatch.setattr(core, "download", lambda s, url, stem: ("ok", path))
     monkeypatch.setattr(core, "resolve_media", lambda s, m: ("", {}))
-    monkeypatch.setattr(core, "video_poster_thumb", lambda *a, **k: None)
-    monkeypatch.setattr(core, "video_faststart", lambda p: None)
+    monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
+    monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
     monkeypatch.setattr(g, "make_thumbnail", lambda *a, **k: None)
     return path, task
 

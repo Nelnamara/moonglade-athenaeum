@@ -196,7 +196,7 @@ def test_import_local_external_copies_in(tmp_path):
 
 
 def test_import_local_video_no_crash_without_ffmpeg(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "ffmpeg_path", lambda: "")
+    monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "")
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "v.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
     res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
@@ -217,24 +217,24 @@ def test_mp4_faststart_detection(tmp_path):
     """moov BEFORE mdat = faststart (iOS-streamable); moov after = not."""
     fs = tmp_path / "fs.mp4"; fs.write_bytes(_mp4(b"ftyp", b"moov", b"mdat"))
     nf = tmp_path / "nf.mp4"; nf.write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
-    assert core._mp4_is_faststart(fs) is True
-    assert core._mp4_is_faststart(nf) is False
+    assert media_tools_mod._mp4_is_faststart(fs) is True
+    assert media_tools_mod._mp4_is_faststart(nf) is False
 
 
 def test_video_faststart_noop_without_ffmpeg(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "ffmpeg_path", lambda: "")
+    monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "")
     nf = tmp_path / "nf.mp4"; nf.write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
     before = nf.read_bytes()
-    assert core.video_faststart(nf) is False       # no ffmpeg -> graceful no-op
+    assert media_tools_mod.video_faststart(nf) is False       # no ffmpeg -> graceful no-op
     assert nf.read_bytes() == before               # original untouched
 
 
 def test_video_faststart_skips_already_faststart(tmp_path, monkeypatch):
     # ffmpeg 'present' but the file is already faststart -> short-circuits, no remux attempt
-    monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "ffmpeg")
     fs = tmp_path / "fs.mp4"; fs.write_bytes(_mp4(b"ftyp", b"moov", b"mdat"))
-    assert core.video_faststart(fs) is False
-    assert core.video_faststart(tmp_path / "x.webm") is False   # non-mp4 ignored
+    assert media_tools_mod.video_faststart(fs) is False
+    assert media_tools_mod.video_faststart(tmp_path / "x.webm") is False   # non-mp4 ignored
 
 
 def test_concurrent_faststart_never_mixes_two_remuxes(tmp_path, monkeypatch):
@@ -254,7 +254,7 @@ def test_concurrent_faststart_never_mixes_two_remuxes(tmp_path, monkeypatch):
     import subprocess
     import threading
 
-    monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "ffmpeg")
     clip = tmp_path / "clip.mp4"
     clip.write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))       # NOT faststart -> both remux
 
@@ -293,8 +293,8 @@ def test_concurrent_faststart_never_mixes_two_remuxes(tmp_path, monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", fake_ffmpeg)
 
-    t1 = threading.Thread(target=core.video_faststart, args=(clip,))
-    t2 = threading.Thread(target=core.video_faststart, args=(clip,))
+    t1 = threading.Thread(target=media_tools_mod.video_faststart, args=(clip,))
+    t2 = threading.Thread(target=media_tools_mod.video_faststart, args=(clip,))
     t1.start(); t2.start()
     t1.join(15); t2.join(15)
     assert not t1.is_alive() and not t2.is_alive()
@@ -308,7 +308,7 @@ def test_concurrent_faststart_never_mixes_two_remuxes(tmp_path, monkeypatch):
 
 
 def test_run_faststart_videos_no_ffmpeg(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "ffmpeg_path", lambda: "")
+    monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "")
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "a.mp4").write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
     res = core.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
@@ -327,7 +327,7 @@ def test_import_local_skips_branding_folder(tmp_path, monkeypatch):
     _isolated_branding redirects branding_root() to tmp_path/"branding"."""
     from moonglade import gallery as g
     from moonglade.gallery import load_catalog
-    monkeypatch.setattr(core, "ffmpeg_path", lambda: "")
+    monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "")
     g._role_dir("marks").mkdir(parents=True)
     (g.branding_root() / "banner.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
     (g._role_dir("marks") / "m1.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
@@ -529,6 +529,7 @@ from moonglade.gallery import (CATALOG_FIELDS, init_db, save_catalog, load_catal
                             update_rating, delete_from_catalog,
                             update_prompt_full, bulk_replace_prompt, _db_is_empty)
 from moonglade import organize as organize_mod
+from moonglade import media_tools as media_tools_mod
 
 
 def _make_row(**kwargs):

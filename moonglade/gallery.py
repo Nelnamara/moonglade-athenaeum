@@ -47,6 +47,7 @@ from moonglade import scan as _scan
 from moonglade import series as _series
 from moonglade import settings as _settings
 from moonglade import updater as _updater
+from moonglade import media_tools as _media_tools
 
 try:
     from flask import (Flask, jsonify, redirect, render_template_string, request,
@@ -9312,20 +9313,20 @@ def make_video_thumbnail(video_path, thumb_path):
     and two differently-shaped subprocess.run() calls."""
     from moonglade import backup as core
     import tempfile
-    if Image is None or not core.ffmpeg_path():
+    if Image is None or not _media_tools.ffmpeg_path():
         return False
     tmp = None
     try:
         fd, tmp = tempfile.mkstemp(suffix=".jpg")
         os.close(fd)
-        r = core.run_ffmpeg(["-y", "-loglevel", "error", "-i", str(video_path),
+        r = _media_tools.run_ffmpeg(["-y", "-loglevel", "error", "-i", str(video_path),
                              "-vf", "thumbnail=72", "-frames:v", "1", tmp],
-                            timeout=core.THUMB_TIMEOUT)
+                            timeout=_media_tools.THUMB_TIMEOUT)
         if not r.ok or not os.path.getsize(tmp):
             # clips shorter than the seek point: take the literal first frame
-            r = core.run_ffmpeg(["-y", "-loglevel", "error", "-i", str(video_path),
+            r = _media_tools.run_ffmpeg(["-y", "-loglevel", "error", "-i", str(video_path),
                                  "-frames:v", "1", tmp],
-                                timeout=core.THUMB_RETRY_TIMEOUT)
+                                timeout=_media_tools.THUMB_RETRY_TIMEOUT)
         if not r.ok or not os.path.getsize(tmp):
             return False
         return make_thumbnail(Path(tmp), thumb_path)
@@ -9986,7 +9987,7 @@ def probe_has_audio(path, timeout=None):
     this one place rather than at each of the export's own branches. `timeout=None` takes
     media_tools' probe policy; the number does not live here any more."""
     from moonglade import backup as core
-    return bool(core.has_audio(path, timeout=timeout))
+    return bool(_media_tools.has_audio(path, timeout=timeout))
 
 
 def probe_duration(path, timeout=None):
@@ -9997,7 +9998,7 @@ def probe_duration(path, timeout=None):
     there is only one implementation of this question now, and why it answers at full
     precision. `timeout=None` takes media_tools' probe policy."""
     from moonglade import backup as core
-    return core.duration(path, timeout=timeout)
+    return _media_tools.duration(path, timeout=timeout)
 
 
 def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, workers=8):
@@ -23963,20 +23964,20 @@ __DESIGN_TOKENS__
             fdir = _paths.loom_root(out_dir) / "_frames"
             fdir.mkdir(parents=True, exist_ok=True)
             png = fdir / (mid + "_last.png")
-            if not core.extract_last_frame(str(vid), str(png), at_seconds=trim_out):
+            if not _media_tools.extract_last_frame(str(vid), str(png), at_seconds=trim_out):
                 return jsonify({"error": "could not extract the last frame (ffmpeg)"}), 200
             frame_mid = core.upload_media(session, str(png))
             make_thumbnail(png, thumb_dir / (str(frame_mid) + ".jpg"))
             # media_tools.duration answers at full precision; 2dp is this route's own
             # display choice for the Edit Bay's reel, made where it is visible.
-            _dur = core.duration(str(vid))
+            _dur = _media_tools.duration(str(vid))
             dur = round(_dur, 2) if _dur is not None else None
             # WHERE the frame came from, by the primitive's own rule (frame_seek_point): the
             # trim point it seeked to, or -- the clip's last frame -- the clip's length (None
             # when it could not be measured). The Loom's anchor records this (owner walk
             # 2026-09-30: a frame spliced from E·01's end was recorded "at 0.0 s", because the
             # card did not know its clip's length).
-            seek = core.frame_seek_point(trim_out, _dur)
+            seek = _media_tools.frame_seek_point(trim_out, _dur)
             at_end = seek is None
             at = dur if at_end else round(seek, 2)
             return jsonify({"frame_media_id": str(frame_mid), "duration": dur,
@@ -24018,7 +24019,7 @@ __DESIGN_TOKENS__
             # explicit-seek branch); None keeps the EOF-relative path for the last frame.
             for key, at in (("first", 0.0), ("last", None)):
                 png = fdir / ("{}_{}.png".format(mid, key))
-                if not core.extract_last_frame(str(vid), str(png), at_seconds=at):
+                if not _media_tools.extract_last_frame(str(vid), str(png), at_seconds=at):
                     continue
                 try:
                     fmid = str(core.upload_media(session, str(png)))
@@ -24055,7 +24056,7 @@ __DESIGN_TOKENS__
             if vid is None:
                 return jsonify({"error": "video file not found locally", "duration": None}), 200
             from moonglade import backup as core
-            _dur = core.duration(str(vid))   # 2dp is this route's display choice, not the probe's
+            _dur = _media_tools.duration(str(vid))   # 2dp is this route's display choice, not the probe's
             return jsonify({"duration": round(_dur, 2) if _dur is not None else None})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "duration": None}), 200
@@ -24148,7 +24149,7 @@ __DESIGN_TOKENS__
         raw = fdir / ".raw-{}-{}.png".format(tag, frame)
         small = fdir / ".small-{}-{}.png".format(tag, frame)
         try:
-            if not core.frame_at(str(vid), seek, str(raw)):
+            if not _media_tools.frame_at(str(vid), seek, str(raw)):
                 return jsonify({"error": "no frame could be taken from that clip (is ffmpeg installed?)"}), 404
             src = raw
             if Image is not None:
@@ -24724,7 +24725,7 @@ __DESIGN_TOKENS__
             proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                     stderr=subprocess.PIPE,
                                     text=True, bufsize=1, encoding="utf-8", errors="replace",
-                                    creationflags=core.NO_WINDOW)
+                                    creationflags=_media_tools.NO_WINDOW)
             with _export_lock:
                 _export_job["proc"] = proc
             # ffmpeg's last few non-progress lines are its whole explanation on a refusal;
@@ -24824,7 +24825,7 @@ __DESIGN_TOKENS__
         dur = None
         try:
             from moonglade import backup as core
-            d = core.duration(str(_loom_beds_dir(user) / name))
+            d = _media_tools.duration(str(_loom_beds_dir(user) / name))
             dur = round(d, 3) if d else None
         except Exception:
             dur = None
@@ -25048,7 +25049,7 @@ __DESIGN_TOKENS__
         nothing is lost) or refuses and names the shot (when real audio would be thrown out
         of sync by it). See the span pre-pass below. body: {clips:[{mid,in,out}], total_seconds}"""
         from moonglade import backup as core
-        if not core.ffmpeg_path():
+        if not _media_tools.ffmpeg_path():
             return jsonify({"error": "ffmpeg is not on PATH -- install it to export."}), 400
         # ffprobe deliberately is NOT gated here alongside ffmpeg -- media_tools resolves the
         # two separately for exactly this reason. It usually ships in the
@@ -25199,7 +25200,7 @@ __DESIGN_TOKENS__
                 % (len(unmeasurable), ", ".join(unmeasurable[:5]),
                    " ffprobe is not installed -- it ships with the full ffmpeg build, and "
                    "installing it restores measured lengths and audio."
-                   if not core.ffprobe_path() else ""))
+                   if not _media_tools.ffprobe_path() else ""))
             try:
                 import logging as _logging
                 _logging.getLogger(__name__).warning(
@@ -25208,7 +25209,7 @@ __DESIGN_TOKENS__
                     "padding with a guessed length.",
                     len(unmeasurable), ", ".join(unmeasurable[:5]),
                     " (ffprobe is not on PATH; it ships with the full ffmpeg build)"
-                    if not core.ffprobe_path() else "")
+                    if not _media_tools.ffprobe_path() else "")
             except Exception:
                 pass
         need_silence = audio_track and any(not ha for (_p, _ci, _co, ha, _cr, _m) in segs)
@@ -25267,7 +25268,7 @@ __DESIGN_TOKENS__
             audio_track = True           # the bed alone is an audio track when the shots had none
         # The binary comes from media_tools, not a bare name on PATH -- the one
         # resolution, shared with every other ffmpeg call in the app.
-        cmd = [core.ffmpeg_path(), "-y"]
+        cmd = [_media_tools.ffmpeg_path(), "-y"]
         for (path, _ci, _co, _ha, _cr, _m) in segs:
             cmd += ["-i", path]
         if need_silence:
@@ -25828,7 +25829,7 @@ __DESIGN_TOKENS__
                 vid = _loom_complete_clip(str(mid))
                 if vid is None:
                     continue
-                d = core.duration(str(vid))
+                d = _media_tools.duration(str(vid))
                 return round(d, 2) if d is not None and d > 0 else None
         except Exception:                                      # noqa: BLE001
             return None

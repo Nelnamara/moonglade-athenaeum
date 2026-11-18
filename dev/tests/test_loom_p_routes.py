@@ -39,6 +39,7 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 from moonglade.account_prefs import _account_key
 from tests.conftest import _TEST_USERNAME, login_test_client
+from moonglade import media_tools as media_tools_mod
 
 REPO = Path(__file__).resolve().parents[2]
 OTHER_USER, OTHER_PW = "someone-else", "another-real-password-2"
@@ -634,8 +635,8 @@ def test_duck_windows_are_runs_of_own_audio_shots():
 def test_render_passes_the_bed_as_an_input_with_the_graph(rig, monkeypatch, clips):
     cli = rig["cli"]
     bed = _upload(cli, FLAC).get_json()["file"]
-    monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg-fake")
-    monkeypatch.setattr(core, "ffprobe_path", lambda: "ffprobe-fake")
+    monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "ffmpeg-fake")
+    monkeypatch.setattr(media_tools_mod, "ffprobe_path", lambda: "ffprobe-fake")
     monkeypatch.setattr(g, "probe_has_audio", lambda p, timeout=None: p.endswith("7002.mp4"))
     monkeypatch.setattr(g, "probe_duration", lambda p, timeout=None: 60.0 if p.endswith(".flac") else 5.0)
     started = []
@@ -667,7 +668,7 @@ def test_render_passes_the_bed_as_an_input_with_the_graph(rig, monkeypatch, clip
 
 def test_render_without_the_bed_file_says_so_and_renders_the_cut(rig, monkeypatch, clips):
     cli = rig["cli"]
-    monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg-fake")
+    monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "ffmpeg-fake")
     monkeypatch.setattr(g, "probe_has_audio", lambda p, timeout=None: True)
     monkeypatch.setattr(g, "probe_duration", lambda p, timeout=None: 5.0)
     started = []
@@ -733,7 +734,7 @@ def frames(clips, monkeypatch):
         calls.append((Path(path).name, t, Path(out).name))
         Image.new("RGB", (640, 360), (40 + len(calls), 60, 120)).save(out, "PNG")
         return out
-    monkeypatch.setattr(core, "frame_at", fake_frame_at)
+    monkeypatch.setattr(media_tools_mod, "frame_at", fake_frame_at)
     clips["calls"] = calls
     clips["fdir"] = _paths.loom_root(clips["tmp"]) / "_frames"
     return clips
@@ -776,7 +777,7 @@ def test_a_clip_not_on_this_machine_or_with_no_frame_is_a_404_and_leaves_nothing
     assert _frame(cli, "9999", "1").status_code == 404
     assert _frame(cli, "7003", "1").status_code == 404, "a zero-byte (half-written) clip is not read"
     assert frames["calls"] == []
-    monkeypatch.setattr(core, "frame_at", lambda *a, **k: None)
+    monkeypatch.setattr(media_tools_mod, "frame_at", lambda *a, **k: None)
     r = _frame(cli, "7001", "2")
     assert r.status_code == 404 and "ffmpeg" in r.get_json()["error"]
     assert [f.name for f in frames["fdir"].iterdir()] == [], "no cache file and no temp file"
@@ -929,7 +930,7 @@ def test_the_end_frame_is_in_the_lru_and_the_splice_frame_is_not(frames, monkeyp
 
 def test_a_missing_clip_or_no_frame_at_the_end_is_a_404(frames, monkeypatch):
     assert _frame_end(frames["cli"], "9999").status_code == 404
-    monkeypatch.setattr(core, "frame_at", lambda *a, **k: None)
+    monkeypatch.setattr(media_tools_mod, "frame_at", lambda *a, **k: None)
     assert _frame_end(frames["cli"], "7002").status_code == 404
     assert not (frames["fdir"] / "7002_end.png").exists()
 
@@ -950,7 +951,7 @@ def poll(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
     monkeypatch.setattr(core, "collect_generation", lambda s, tid, out: dict(got["value"]))
-    monkeypatch.setattr(core, "duration", lambda p, **k: measured.append(Path(p).name) or 10.0417)
+    monkeypatch.setattr(media_tools_mod, "duration", lambda p, **k: measured.append(Path(p).name) or 10.0417)
     for name in ("submit", "submit_generation", "gql_mutate", "upload_media"):
         monkeypatch.setattr(core, name, lambda *a, **k: (_ for _ in ()).throw(AssertionError("spent")))
     cli = login_test_client(create_app(tmp))
@@ -978,7 +979,7 @@ def test_a_reported_length_is_never_replaced(poll):
 
 
 def test_no_ffprobe_leaves_it_blank_and_a_still_is_never_measured(poll):
-    poll["mp"].setattr(core, "duration", lambda p, **k: poll["measured"].append(Path(p).name) or None)
+    poll["mp"].setattr(media_tools_mod, "duration", lambda p, **k: poll["measured"].append(Path(p).name) or None)
     assert _status(poll["cli"])["duration"] is None
     save_catalog(poll["tmp"] / "catalog.db", [])
     poll["got"]["value"] = {"media_ids": ["9"], "saved": 1, "is_video": False}
@@ -990,7 +991,7 @@ def test_no_ffprobe_leaves_it_blank_and_a_still_is_never_measured(poll):
 def test_a_measurement_that_breaks_never_breaks_the_done_answer(poll):
     def boom(p, **k):
         raise TypeError("ffprobe answered something odd")
-    poll["mp"].setattr(core, "duration", boom)
+    poll["mp"].setattr(media_tools_mod, "duration", boom)
     d = _status(poll["cli"])
     assert d["phase"] == "done" and d["media_ids"] == ["7001"] and d["duration"] is None
 

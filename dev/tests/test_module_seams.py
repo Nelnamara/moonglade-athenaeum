@@ -110,6 +110,13 @@ SEAMS = {
         "_wiki_pages_on_disk", "md_headings", "wiki_index", "wiki_glossary", "_changelog_surface",
         "_changelog_item", "changelog_entries", "art_pack_info", "about_payload", "_md_same",
         "wiki_online_differs"]},
+    "moonglade.media_tools": {"from": "moonglade.backup", "names": [
+        "NO_WINDOW", "PROBE_TIMEOUT", "FRAME_TIMEOUT", "THUMB_TIMEOUT", "THUMB_RETRY_TIMEOUT",
+        "REMUX_TIMEOUT", "ToolResult", "_TOOL_PATHS", "_tool_path", "ffmpeg_path", "ffprobe_path",
+        "_reset_tool_cache", "_as_text", "_run_tool", "run_ffmpeg", "run_ffprobe", "duration",
+        "has_audio", "frame_seek_point", "extract_last_frame", "frame_at", "video_poster_thumb",
+        "_mp4_is_faststart", "FASTSTART_REWROTE", "FASTSTART_NOT_NEEDED", "FASTSTART_REFUSED",
+        "_video_faststart_attempt", "video_faststart"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -487,6 +494,28 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_telemetry.py', 'moonglade.about'),
     ('tests/test_watch.py', 'moonglade.about'),
     ('tools/export_design_kit.py', 'moonglade.about'),
+    ('loom/test/ledger-known-reasons.test.js', 'moonglade.media_tools'),
+    ('loom/test/video-roster-parity.test.js', 'moonglade.media_tools'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.media_tools'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.media_tools'),
+    ('tests/test_config_path_routing.py', 'moonglade.media_tools'),
+    ('tests/test_csrf_coverage.py', 'moonglade.media_tools'),
+    ('tests/test_enhance.py', 'moonglade.media_tools'),
+    ('tests/test_evidence_counters.py', 'moonglade.media_tools'),
+    ('tests/test_gen_surface.py', 'moonglade.media_tools'),
+    ('tests/test_history_feed_document.py', 'moonglade.media_tools'),
+    ('tests/test_jwt.py', 'moonglade.media_tools'),
+    ('tests/test_living_library.py', 'moonglade.media_tools'),
+    ('tests/test_loom_notify.py', 'moonglade.media_tools'),
+    ('tests/test_network.py', 'moonglade.media_tools'),
+    ('tests/test_settings_store.py', 'moonglade.media_tools'),
+    ('tests/test_setup_prepare.py', 'moonglade.media_tools'),
+    ('tests/test_spend_no_retry.py', 'moonglade.media_tools'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.media_tools'),
+    ('tests/test_training_advanced.py', 'moonglade.media_tools'),
+    ('tests/test_training_parity.py', 'moonglade.media_tools'),
+    ('tests/test_video_tsubaki.py', 'moonglade.media_tools'),
+    ('tests/test_web_auth.py', 'moonglade.media_tools'),
 }
 
 

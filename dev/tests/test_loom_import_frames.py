@@ -15,6 +15,7 @@ plus a real catalog row so the file resolver resolves a real file.
 from moonglade import backup as core
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_client
+from moonglade import media_tools as media_tools_mod
 
 MID = "42"
 
@@ -60,7 +61,7 @@ def _wire(tmp_path, monkeypatch, frames, with_file=True):
         rows = [_row(media_id=MID, filename="clip.mp4", is_video="1")]
     save_catalog(tmp_path / "catalog.db", rows)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "extract_last_frame", frames.extract)
+    monkeypatch.setattr(media_tools_mod, "extract_last_frame", frames.extract)
     monkeypatch.setattr(core, "upload_media", frames.upload)
     return login_client(tmp_path)
 

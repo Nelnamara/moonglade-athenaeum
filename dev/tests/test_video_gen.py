@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from moonglade import backup as core
+from moonglade import media_tools as media_tools_mod
 
 
 def test_build_video_parameters_matches_real_submit():
@@ -415,7 +416,7 @@ def test_download_video_task_posterless_makes_ffmpeg_thumb(monkeypatch, tmp_path
     calls = []
     def _fake_vpt(video_path, thumb_path):
         calls.append((str(video_path), str(thumb_path))); Path(thumb_path).write_bytes(b"jpg"); return True
-    monkeypatch.setattr(core, "video_poster_thumb", _fake_vpt)
+    monkeypatch.setattr(media_tools_mod, "video_poster_thumb", _fake_vpt)
 
     core._download_video_task(object(), {}, "T1", tmp_path, SimpleNamespace(name_length=60), {})
 
@@ -442,7 +443,7 @@ def test_download_video_task_with_poster_skips_ffmpeg(monkeypatch, tmp_path):
                         lambda src, dst: (Path(dst).write_bytes(b"jpg"), True)[1])
 
     called = []
-    monkeypatch.setattr(core, "video_poster_thumb", lambda *a, **k: called.append(1))
+    monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: called.append(1))
     core._download_video_task(object(), {}, "T2", tmp_path, SimpleNamespace(name_length=60), {})
     assert called == [], "poster present -> ffmpeg fallback should be skipped"
     assert (tmp_path / "gallery" / "thumbs" / "V2.jpg").exists()
@@ -651,8 +652,8 @@ def test_download_video_task_catalogs_video_even_if_poster_fails(monkeypatch, tm
             raise PermissionError(32, "The process cannot access the file ... .jpg.part")
         p = Path(str(stem) + ".mp4"); p.write_bytes(b"\x00\x00\x00\x18ftypmp42"); return "ok", p
     monkeypatch.setattr(core, "download", _dl)
-    monkeypatch.setattr(core, "video_poster_thumb", lambda v, t: False)
-    monkeypatch.setattr(core, "video_faststart", lambda p: None)
+    monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda v, t: False)
+    monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
 
     saved = []
     monkeypatch.setattr(core, "save_catalog", lambda db, rows: saved.extend(rows))

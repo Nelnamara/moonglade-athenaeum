@@ -10,6 +10,7 @@ from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 from tests.conftest import login_test_client, login_existing_client
 from moonglade import scan as scan_mod
 from moonglade import jobs as jobs_mod
+from moonglade import media_tools as media_tools_mod
 
 
 def _csrf(html):
@@ -663,8 +664,8 @@ def test_loom_export_runs_and_downloads(tmp_path, monkeypatch):
     # Re-pinned onto media_tools' availability seam: a global shutil.which patch no
     # longer reaches the export, which asks core.ffmpeg_path(). "ffmpeg" is kept as
     # the resolved path so argv[0] still reads "ffmpeg" for the guard below.
-    monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
-    monkeypatch.setattr(core, "ffprobe_path", lambda: "")
+    monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(media_tools_mod, "ffprobe_path", lambda: "")
 
     class FakeProc:
         def __init__(self, argv):
@@ -697,7 +698,7 @@ def test_loom_export_runs_and_downloads(tmp_path, monkeypatch):
 
 def test_loom_export_needs_a_video(tmp_path, monkeypatch):
     from moonglade import backup as core
-    monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "ffmpeg")
     cli = _authed_client(tmp_path)
     r = cli.post("/api/loom/export", json={"clips": [{"mid": "nope", "in": 0}]})
     assert r.status_code == 400 and "no finished shot" in r.get_json()["error"]
@@ -712,7 +713,7 @@ def test_probe_has_audio(monkeypatch):
     probe still answers True/False, never None, and never raises."""
     import subprocess
     from moonglade import backup as core
-    monkeypatch.setattr(core, "ffprobe_path", lambda: "/bin/ffprobe")
+    monkeypatch.setattr(media_tools_mod, "ffprobe_path", lambda: "/bin/ffprobe")
 
     class R:
         def __init__(self, out, rc=0):
@@ -723,12 +724,12 @@ def test_probe_has_audio(monkeypatch):
     assert g.probe_has_audio("clip.mp4") is True
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: R(""))
     assert g.probe_has_audio("silent.mp4") is False          # no stream index -> no audio
-    monkeypatch.setattr(core, "ffprobe_path", lambda: "")
+    monkeypatch.setattr(media_tools_mod, "ffprobe_path", lambda: "")
     assert g.probe_has_audio("clip.mp4") is False            # ffprobe missing -> fail soft
 
     def _boom(*a, **k):
         raise OSError("gone")
-    monkeypatch.setattr(core, "ffprobe_path", lambda: "/bin/ffprobe")
+    monkeypatch.setattr(media_tools_mod, "ffprobe_path", lambda: "/bin/ffprobe")
     monkeypatch.setattr(subprocess, "run", _boom)
     assert g.probe_has_audio("clip.mp4") is False             # never raises
 
@@ -739,7 +740,7 @@ def test_probe_duration(monkeypatch):
     its own call site."""
     import subprocess
     from moonglade import backup as core
-    monkeypatch.setattr(core, "ffprobe_path", lambda: "/bin/ffprobe")
+    monkeypatch.setattr(media_tools_mod, "ffprobe_path", lambda: "/bin/ffprobe")
 
     class R:
         def __init__(self, out, rc=0):
@@ -750,7 +751,7 @@ def test_probe_duration(monkeypatch):
     assert g.probe_duration("clip.mp4") == 5.234
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: R("not-a-number\n"))
     assert g.probe_duration("clip.mp4") is None                # never raises on garbage
-    monkeypatch.setattr(core, "ffprobe_path", lambda: "")
+    monkeypatch.setattr(media_tools_mod, "ffprobe_path", lambda: "")
     assert g.probe_duration("clip.mp4") is None                # ffprobe missing -> None
 
 
@@ -762,8 +763,8 @@ def _mock_export_ffmpeg(monkeypatch):
     import subprocess, io
     from moonglade import backup as core
     # ffmpeg present, ffprobe absent -- asked of media_tools now, not shutil.which.
-    monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
-    monkeypatch.setattr(core, "ffprobe_path", lambda: "")
+    monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(media_tools_mod, "ffprobe_path", lambda: "")
     captured = []
 
     class FakeProc:
