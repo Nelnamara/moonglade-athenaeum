@@ -18,6 +18,7 @@ from moonglade import scan as scan_mod
 from moonglade import jobs as jobs_mod
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import media_tools as media_tools_mod
+from moonglade import living as living_mod
 
 
 def _row(**kw):
@@ -1422,9 +1423,9 @@ def test_your_art_ranks_published_and_reads_swept_views(tmp_path, pixai):
     ])
     db = tmp_path / "catalog.db"
     # pure helpers
-    assert [r["media_id"] for r in g.top_published_rows(db)] == ["2", "1"]           # by likes
-    assert [r["media_id"] for r in g.top_published_rows(db, order="views")] == ["1", "2"]
-    t = g.published_totals(db)
+    assert [r["media_id"] for r in living_mod.top_published_rows(db)] == ["2", "1"]           # by likes
+    assert [r["media_id"] for r in living_mod.top_published_rows(db, order="views")] == ["1", "2"]
+    t = living_mod.published_totals(db)
     assert t["count"] == 2 and t["likes"] == 44 and t["comments"] == 2
     assert t["views"] == 590 and t["views_rows"] == 2     # 9999 excluded: not published
     # route, no mock of any kind: the swept column is the whole answer

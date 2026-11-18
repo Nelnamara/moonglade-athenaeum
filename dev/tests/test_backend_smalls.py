@@ -181,7 +181,7 @@ def test_similar_wiki_pages_warn_it_is_heavy(page):
 def test_similar_scheduler_rows_warn_it_is_heavy(action):
     """The scheduler starts both jobs unattended (nightly top-up, 60-day rebuild backstop),
     so its note -- the tooltip on the 'Runs itself' row -- carries the warning too."""
-    from moonglade.gallery import LIVING_BY_ACTION
+    from moonglade.living import LIVING_BY_ACTION
     assert HEAVY in LIVING_BY_ACTION[action]["note"]
 
 

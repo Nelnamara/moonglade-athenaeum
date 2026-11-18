@@ -37,6 +37,7 @@ from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.fake_pixai import FakePixAI
 from moonglade import pixai_client as pixai_client_mod
+from moonglade import living as living_mod
 
 REPO = Path(__file__).resolve().parents[2]
 DAY = 86400.0
@@ -115,13 +116,13 @@ class _Endless:
 def _fresh_sweep_state():
     """The sweep's stamps and its once-only refusal latch are module-level; reset them
     around every test so one test's sweep cannot colour the next."""
-    state, said = dict(g._artworks_state), dict(g._artworks_refusal)
-    g._artworks_state.update({"at": 0.0, "deep_at": 0.0, "changed": 0, "pages": 0,
+    state, said = dict(living_mod._artworks_state), dict(living_mod._artworks_refusal)
+    living_mod._artworks_state.update({"at": 0.0, "deep_at": 0.0, "changed": 0, "pages": 0,
                               "kicks": 0})
-    g._artworks_refusal.update(reported=False)
+    living_mod._artworks_refusal.update(reported=False)
     yield
-    g._artworks_state.update(state)
-    g._artworks_refusal.update(said)
+    living_mod._artworks_state.update(state)
+    living_mod._artworks_refusal.update(said)
 
 
 @pytest.fixture()
@@ -149,12 +150,12 @@ def _catalog(tmp_path, mids):
 
 
 def _sweep(tmp_path, db, **kw):
-    return g.artworks_sweep(tmp_path, db, force=True, now=NOW, **kw)
+    return living_mod.artworks_sweep(tmp_path, db, force=True, now=NOW, **kw)
 
 
 def _sweep_lines(caplog, level=logging.WARNING):
     return [r.getMessage() for r in caplog.records
-            if r.levelno >= level and r.name == "moonglade.gallery"
+            if r.levelno >= level and r.name == "moonglade.living"
             and r.getMessage().startswith("artworks sweep")]
 
 
@@ -304,10 +305,10 @@ def test_the_sweep_walks_back_from_the_newest_page_to_the_last(pixai, tmp_path):
     assert res["pages"] == 3 and res["artworks"] == 3 and res["incomplete"] is False
     assert lib.fetched == 3
     assert [v.get("before") for v in lib.variables] == [None, "1", "2"]   # newest end first
-    assert all(v["n"] == g.ARTWORKS_PAGE and v["a"] == "u-test" for v in lib.variables)
+    assert all(v["n"] == living_mod.ARTWORKS_PAGE and v["a"] == "u-test" for v in lib.variables)
     assert {r["media_id"]: r["artwork_id"] for r in load_catalog(db)} == {
         "m1": "a1", "m2": "a2", "m3": "a3"}
-    assert g._artworks_state["at"] == NOW, "a clean finish stamps the sweep"
+    assert living_mod._artworks_state["at"] == NOW, "a clean finish stamps the sweep"
 
 
 def test_the_sweep_stops_at_the_page_cap_and_calls_itself_incomplete(
@@ -315,10 +316,10 @@ def test_the_sweep_stops_at_the_page_cap_and_calls_itself_incomplete(
     db = _catalog(tmp_path, ["e0", "e1", "e2", "e3"])
     lib = _Endless()
     pixai.on("artworks", lib)
-    monkeypatch.setattr(g, "ARTWORKS_MAX_PAGES", 2)
+    monkeypatch.setattr(living_mod, "ARTWORKS_MAX_PAGES", 2)
     res = _sweep(tmp_path, db)
     assert lib.fetched == 2 and res["pages"] == 2 and res["incomplete"] is True
-    assert g._artworks_state["at"] == 0.0 and g._artworks_state["deep_at"] == 0.0
+    assert living_mod._artworks_state["at"] == 0.0 and living_mod._artworks_state["deep_at"] == 0.0
 
 
 def test_the_full_sync_walks_every_page_too(pixai, tmp_path):
@@ -348,7 +349,7 @@ def test_a_refused_read_is_said_once_with_its_reason(pixai, tmp_path, caplog):
     assert "published artworks" in said[0]
     assert not any("fetch failed" in r.getMessage() for r in caplog.records)
     # ...and a refused sweep is not a finished one: no recent-guard, no 48-hour stamp
-    assert g._artworks_state["at"] == 0.0 and g._artworks_state["deep_at"] == 0.0
+    assert living_mod._artworks_state["at"] == 0.0 and living_mod._artworks_state["deep_at"] == 0.0
     assert load_catalog(db)[0]["artwork_id"] == ""   # nothing was written
 
 
@@ -378,7 +379,7 @@ def test_a_later_page_that_cannot_be_read_keeps_the_earlier_pages(pixai, tmp_pat
     assert {r["media_id"]: r["artwork_id"] for r in load_catalog(db)} == {"m1": "a1", "m2": ""}
     [line] = _sweep_lines(caplog)
     assert "page 2" in line and "page two was refused" in line
-    assert g._artworks_state["at"] == 0.0
+    assert living_mod._artworks_state["at"] == 0.0
 
 
 def test_the_reason_leaves_folder_paths_out(pixai, tmp_path, caplog):
@@ -431,7 +432,7 @@ def test_the_retired_saved_request_leaves_nothing_behind():
                  *sorted((REPO / "wiki").glob("*.md"))]
     for doc in live_docs:
         assert "ARTWORK_LIST_HASH" not in doc.read_text(encoding="utf-8"), doc.name
-    for module in (core, g, pixai_client_mod):     # the transport moved out of core
+    for module in (core, g, pixai_client_mod, living_mod):   # the transport, the sweep moved out
         assert "ARTWORK_LIST_HASH" not in inspect.getsource(module)
 
 
@@ -450,5 +451,5 @@ def test_the_sweep_reads_each_page_once_and_the_command_keeps_the_retries(monkey
     monkeypatch.setattr(pixai_client_mod, "_client_of", lambda s: type("C", (), {"user_id": "1"})())
     core.artwork_list_gql(object())
     assert seen == [None]
-    src = inspect.getsource(gallery.artworks_sweep)
+    src = inspect.getsource(living_mod.artworks_sweep)
     assert "artwork_list_gql(session, before=before, last=ARTWORKS_PAGE, retries=0)" in src

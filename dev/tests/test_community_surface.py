@@ -31,6 +31,7 @@ from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
 from moonglade import pixai_client as pixai_client_mod
+from moonglade import living as living_mod
 
 
 def _row(**kw):
@@ -261,7 +262,7 @@ def test_the_fifteen_minute_sweep_never_reads_a_view_count(tmp_path, mocker):
     artwork LISTING, which carries no views and costs nothing; the view read has its own
     weekly job precisely so it cannot end up on that cadence by accident."""
     import inspect
-    src = inspect.getsource(g.artworks_sweep) + inspect.getsource(g.artworks_sweep_kick)
+    src = inspect.getsource(living_mod.artworks_sweep) + inspect.getsource(living_mod.artworks_sweep_kick)
     assert "artwork_views_bulk" not in src and "views" not in src.replace("views_", "")
 
 
@@ -359,8 +360,8 @@ def test_the_first_sweep_of_a_library_announces_nothing():
     against and nothing honest to say. Silence is the answer, not a spike computed
     against zero (which would make every work in a freshly swept library "blow up" at
     once, on the very run that first looked at them)."""
-    assert g.views_spike(_work("5000", "")) is None
-    assert g.views_spike(_work("", "")) is None            # never swept at all
+    assert living_mod.views_spike(_work("5000", "")) is None
+    assert living_mod.views_spike(_work("", "")) is None            # never swept at all
 
 
 def test_a_sweeps_own_read_is_never_a_spike():
@@ -369,16 +370,16 @@ def test_a_sweeps_own_read_is_never_a_spike():
     Reading the counter increments it, so a work nobody looked at still reads +1 between
     two sweeps. Without SPIKE_SELF_READ every work in the library shows a permanent
     trickle -- and the rule's whole claim is that it fires on real attention."""
-    assert g.SPIKE_SELF_READ == 1
-    assert g.views_spike(_work("1001", "1000")) is None          # exactly the self-read
-    assert g.views_spike(_work("1002", "1000")) is None          # +1 real: still nothing
+    assert living_mod.SPIKE_SELF_READ == 1
+    assert living_mod.views_spike(_work("1001", "1000")) is None          # exactly the self-read
+    assert living_mod.views_spike(_work("1002", "1000")) is None          # +1 real: still nothing
 
 
 def test_a_quiet_work_that_takes_off_is_a_spike():
     """1000 views over 62 days is ~0.67/hour. 200 in a day is ~8.3/hour -- twelve times
     its own normal, and past the absolute floor. That is the shape of the thing the owner
     asked to be told about."""
-    s = g.views_spike(_work("1201", "1000"))
+    s = living_mod.views_spike(_work("1201", "1000"))
     assert s is not None
     assert s["gained"] == 200                    # 201 raw, minus the sweep's own read
     assert s["window_hours"] == 24.0
@@ -389,7 +390,7 @@ def test_a_quiet_work_that_takes_off_is_a_spike():
 def test_steady_traffic_is_not_a_spike():
     """Twenty new views in a day on a work already averaging sixteen a day is a work
     doing what it always does. Popularity is not a blow-up."""
-    assert g.views_spike(_work("1021", "1000")) is None
+    assert living_mod.views_spike(_work("1021", "1000")) is None
 
 
 def test_a_busy_work_needs_a_real_surge_to_count():
@@ -397,40 +398,40 @@ def test_a_busy_work_needs_a_real_surge_to_count():
     day does not get to spike on 25 of them just because 25 clears the floor -- but
     quadruple its own pace and it does."""
     busy = dict(made="2026-08-07T00:00:00Z")          # 30 days old
-    assert g.views_spike(_work("1826", "1800", **busy)) is None      # +25, its usual pace
-    assert g.views_spike(_work("2101", "1800", **busy)) is not None  # +300 in a day
+    assert living_mod.views_spike(_work("1826", "1800", **busy)) is None      # +25, its usual pace
+    assert living_mod.views_spike(_work("2101", "1800", **busy)) is not None  # +300 in a day
 
 
 def test_the_absolute_floor_keeps_small_numbers_quiet():
     """A near-dormant work tripling from 3 views to 9 is technically a large multiple and
     is not news. The floor is what stops the rule from being a random-number generator at
     the bottom of the library."""
-    assert g.SPIKE_MIN_GAIN == 25
-    s = g.views_spike(_work("9", "3", made="2026-01-01T00:00:00Z"))
+    assert living_mod.SPIKE_MIN_GAIN == 25
+    s = living_mod.views_spike(_work("9", "3", made="2026-01-01T00:00:00Z"))
     assert s is None
 
 
 def test_a_counter_that_goes_backwards_is_never_a_spike():
     """PixAI recounting, or a work unpublished and republished, can move the number down.
     A negative gain is clamped, never rendered as a spike with a nonsense multiple."""
-    assert g.views_spike(_work("900", "1000")) is None
+    assert living_mod.views_spike(_work("900", "1000")) is None
 
 
 def test_an_unusable_window_is_declined_rather_than_guessed():
     """No timestamps, or a window that runs backwards, means the rate cannot be computed.
     The rule declines: a spike is a claim about a RATE, and inventing the denominator
     would make the claim up."""
-    assert g.views_spike(_work("1201", "1000", at="", prev_at="")) is None
-    assert g.views_spike(_work("1201", "1000", at="2026-09-01T00:00:00Z",
+    assert living_mod.views_spike(_work("1201", "1000", at="", prev_at="")) is None
+    assert living_mod.views_spike(_work("1201", "1000", at="2026-09-01T00:00:00Z",
                                prev_at="2026-09-05T00:00:00Z")) is None
 
 
 def test_two_sweeps_minutes_apart_cannot_manufacture_a_spike():
     """Running --sync-artworks twice in a row makes the window ~0, and dividing by it
     would turn any gain at all into an enormous rate. The window is floored at an hour."""
-    s = g.views_spike(_work("1201", "1000",
+    s = living_mod.views_spike(_work("1201", "1000",
                             prev_at="2026-09-06T00:00:00Z", at="2026-09-06T00:01:00Z"))
-    assert s is None or s["window_hours"] >= g.SPIKE_MIN_WINDOW_H
+    assert s is None or s["window_hours"] >= living_mod.SPIKE_MIN_WINDOW_H
 
 
 def test_published_spikes_reads_the_catalog_and_ranks_them(tmp_path):
@@ -450,10 +451,10 @@ def test_published_spikes_reads_the_catalog_and_ranks_them(tmp_path):
         _row(media_id="m4", artwork_id="aw4", title="Unswept", is_published="1",
              created_at="2026-07-06T00:00:00Z"),
     ])
-    hits = g.published_spikes(db)
+    hits = living_mod.published_spikes(db)
     assert [h["title"] for h in hits] == ["Rocket", "Warm"]     # Quiet and Unswept silent
     assert hits[0]["gained"] == 400
-    assert g.published_spikes(db, limit=1) == hits[:1]
+    assert living_mod.published_spikes(db, limit=1) == hits[:1]
 
 
 def _animated(aid, title, **kw):
@@ -483,7 +484,7 @@ def test_an_animation_is_one_published_work_not_two_in_the_totals(tmp_path):
                          is_published="1", created_at="2026-07-06T00:00:00Z",
                          liked_count="3", comment_count="1", views="100",
                          views_at="2026-09-06T00:00:00Z")])
-    t = g.published_totals(db)
+    t = living_mod.published_totals(db)
     assert t["count"] == 2, "an animation is one published work"
     assert t["likes"] == 7 and t["comments"] == 3
     assert t["views"] == 600, "the lifetime views total must not double an animation"
@@ -501,7 +502,7 @@ def test_a_published_row_with_no_artwork_id_still_counts_once(tmp_path):
         _row(media_id="m2", is_published="1", liked_count="2", views="20",
              views_at="2026-09-06T00:00:00Z"),
     ])
-    t = g.published_totals(db)
+    t = living_mod.published_totals(db)
     assert t["count"] == 2 and t["likes"] == 3 and t["views"] == 30
 
 
@@ -516,7 +517,7 @@ def test_an_animation_takes_one_slot_in_the_blow_up_note_not_two(tmp_path):
                                **window)
                  + [_row(media_id="m2", artwork_id="aw2", title="Second Real Spike",
                          is_published="1", views="1301", views_prev="1000", **window)])
-    hits = g.published_spikes(db, limit=2)
+    hits = living_mod.published_spikes(db, limit=2)
     assert [h["title"] for h in hits] == ["Anim Blowup", "Second Real Spike"]
     assert len({h["artwork_id"] for h in hits}) == 2
     # and the poster row is the one that represents the work, not the mp4
@@ -532,23 +533,23 @@ def test_a_blow_up_from_zero_is_the_clearest_blow_up_there_is():
     None before the rate check ever ran, because a zero baseline gives a rate comparison
     nothing to divide by. It is not a reason for silence; it is a reason the ratio does
     not apply, and the absolute floor is what keeps it honest."""
-    s = g.views_spike(_work("501", "0"))
+    s = living_mod.views_spike(_work("501", "0"))
     assert s is not None
     assert s["gained"] == 500
     assert s["baseline_per_hour"] == 0.0
     assert s["multiple"] is None, "there is no multiple to report against a zero baseline"
     # the floor still governs: nothing under SPIKE_MIN_GAIN gets to shout
-    assert g.views_spike(_work("20", "0")) is None
-    assert g.views_spike(_work("26", "0")) is not None
+    assert living_mod.views_spike(_work("20", "0")) is None
+    assert living_mod.views_spike(_work("26", "0")) is not None
     # a blank previous reading is still the no-announce baseline case -- never swept twice
-    assert g.views_spike(_work("501", "")) is None
+    assert living_mod.views_spike(_work("501", "")) is None
 
 
 def test_the_zero_baseline_case_is_named_in_the_rules_own_docstring():
     """The exclusion was not in the docstring's enumerated Returns-None cases, which is
     part of why it read as an overlooked edge rather than a decision. Whichever way it
     goes, it is written down."""
-    doc = g.views_spike.__doc__
+    doc = living_mod.views_spike.__doc__
     assert "A PREVIOUS READING OF 0 IS A SPIKE" in doc
     assert "A BLANK previous reading" in doc
 
