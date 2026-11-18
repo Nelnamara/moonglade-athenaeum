@@ -26,6 +26,7 @@ from moonglade import migrate as mmig
 from moonglade import paths
 from moonglade import settings as msettings
 from tests.conftest import first_party_sources
+from moonglade import about as about_mod
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -113,8 +114,8 @@ _TABLE = [
     # The one location that moved in 3.20: the manifest is committed with the code.
     ("the pack manifest", lambda: ma.manifest_path(),
      lambda: _REPO / "moonglade" / "manifest.json"),
-    ("wiki/", lambda: g.wiki_dir(), lambda: _REPO / "wiki"),
-    ("CHANGELOG.md", lambda: g.changelog_path(), lambda: _REPO / "CHANGELOG.md"),
+    ("wiki/", lambda: about_mod.wiki_dir(), lambda: _REPO / "wiki"),
+    ("CHANGELOG.md", lambda: about_mod.changelog_path(), lambda: _REPO / "CHANGELOG.md"),
     ("gallery/dist", lambda: paths.gallery_dist(), lambda: _REPO / "gallery" / "dist"),
     ("loom/", lambda: paths.loom_dir(), lambda: _REPO / "loom"),
     ("loom/dist", lambda: paths.loom_dist(), lambda: _REPO / "loom" / "dist"),
@@ -138,7 +139,7 @@ def test_every_path_resolves_where_it_did_before(real_paths, what, ask, before):
 def test_the_shipped_files_are_really_there(real_paths):
     """The table's tracked entries name files a checkout has, so a typo in a helper cannot
     hide behind a path that merely looks right."""
-    for p in (ma.manifest_path(), g.wiki_dir(), g.changelog_path(), paths.loom_dir(),
+    for p in (ma.manifest_path(), about_mod.wiki_dir(), about_mod.changelog_path(), paths.loom_dir(),
               paths.static_dir(), paths.requirements_path(), paths.launcher_path()):
         assert p.exists(), p
 
