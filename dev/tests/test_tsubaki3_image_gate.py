@@ -1413,9 +1413,12 @@ def test_no_code_path_requests_the_claim_route():
     """The app never claims Unlimited Mode (§1: an account action the owner takes on PixAI's
     site). Grep over every shipped module and client source: the only road to the entitlement
     is the status GET, and no path under it -- the claim among them -- is ever built."""
-    shipped = [ROOT / n for n in ("moonglade/backup.py", "moonglade/gallery.py",
-                                  "moonglade/mcp_server.py", "moonglade/similar.py",
-                                  "moonglade/container.py", "moonglade/assets.py")]
+    # every module of the package (it once named six), so a section split out of backup or
+    # gallery stays covered
+    modules = sorted((ROOT / "moonglade").glob("*.py"))
+    assert {p.name for p in modules} >= {"backup.py", "gallery.py", "mcp_server.py",
+                                         "similar.py", "container.py", "assets.py"}
+    shipped = list(modules)
     for folder, globs in ((ROOT / "gallery" / "src", ("*.js", "*.jsx")),
                           (ROOT / "loom", ("*.jsx",)), (ROOT / "loom" / "src", ("*.js",))):
         for g in globs:
@@ -1427,6 +1430,6 @@ def test_no_code_path_requests_the_claim_route():
         hits += ["{}:{}".format(f.name, i) for i, line in enumerate(text.splitlines(), 1)
                  if route.search(line)]
     assert hits == [], "a path under the Unlimited Mode route is built: {}".format(hits)
-    src = (ROOT / "moonglade" / "backup.py").read_text(encoding="utf-8")
-    assert src.count('"/infinite-mode"') == 1, "the status GET is the one read of the route"
+    reads = sum(p.read_text(encoding="utf-8").count('"/infinite-mode"') for p in modules)
+    assert reads == 1, "the status GET is the one read of the route, in any module"
 

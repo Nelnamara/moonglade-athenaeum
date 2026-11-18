@@ -57,7 +57,10 @@ def test_no_art_filter_submit_path_survives():
     Asserted against the SOURCE as well as the module namespace: a builder that survives under
     another name, or a stray `pixai-image-filter` model literal, is the same defect back."""
     assert not hasattr(core, "build_filter_parameters")
-    for mod in ("moonglade/gallery.py", "moonglade/backup.py"):
+    # every module of the package, so a section split out of backup or gallery stays covered
+    modules = sorted(p.relative_to(ROOT).as_posix() for p in (ROOT / "moonglade").glob("*.py"))
+    assert "moonglade/backup.py" in modules and "moonglade/gallery.py" in modules
+    for mod in modules:
         src = (ROOT / mod).read_text(encoding="utf-8")
         assert "pixai-image-filter" not in src, mod + " still names the paid filter model"
         assert "filterId" not in src, mod + " still builds a filter task's inputs"

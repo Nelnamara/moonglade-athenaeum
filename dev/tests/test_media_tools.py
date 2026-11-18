@@ -416,7 +416,10 @@ def test_every_media_spawn_in_the_app_goes_through_the_seam():
     # literal is a call site that skipped the seam.
     pat = re.compile(r"""\[\s*["'](ffmpeg|ffprobe)["']""")
     offenders = []
-    for name in ("moonglade/backup.py", "moonglade/gallery.py"):
+    # every module of the package, so a section split out of backup or gallery stays covered
+    modules = sorted(p.relative_to(repo).as_posix() for p in (repo / "moonglade").glob("*.py"))
+    assert "moonglade/backup.py" in modules and "moonglade/gallery.py" in modules
+    for name in modules:
         src = io.open(repo / name, encoding="utf-8").read()
         for m in pat.finditer(src):
             offenders.append("{}:{}".format(name, src[:m.start()].count("\n") + 1))

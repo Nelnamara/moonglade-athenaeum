@@ -115,7 +115,8 @@ SOURCE_READERS = {
     "tests/test_panel.py": ("moonglade.gallery",),
     "tests/test_pixai_client.py": ("moonglade.backup",),
     "tests/test_read_only.py": ("moonglade.backup",),
-    "tests/test_rest_delete_and_renewal.py": ("moonglade.gallery",),
+    "tests/test_module_seams.py": ("moonglade.backup", "moonglade.gallery"),   # every module
+    "tests/test_rest_delete_and_renewal.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_server_stop_record.py": ("moonglade.gallery",),
     "tests/test_settings_store.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_setup_prepare.py": ("moonglade.backup", "moonglade.gallery"),
@@ -432,7 +433,9 @@ def detect_source_readers(files):
 
 def check_source_readers_reviewed(seams, files, readers, reviewed):
     """A reader of a seam's old module is TOUCHED by the move if it reads the old module whole
-    (its text, getsource(module), something untraceable) or names one of the moved symbols."""
+    (its text, getsource(module), something untraceable) or names one of the moved symbols. One
+    that reads every module of the package (a glob, kind "all") never is: the moved code is
+    still in what it reads."""
     problems = []
     for new_mod, entry in seams.items():
         words = re.compile(r"\b(%s)\b" % "|".join(map(re.escape, entry["names"])))
@@ -440,6 +443,8 @@ def check_source_readers_reviewed(seams, files, readers, reviewed):
             if entry["from"] not in mods or (path, new_mod) in reviewed:
                 continue
             kind = rp.scan_any(path, files[path]).reads_source.get(entry["from"])
+            if kind == "all":
+                continue
             if kind in ("whole", "indirect") or words.search(files[path]):
                 problems.append("%s reads %s's source and the move to %s touches it: check what "
                                 "it reads, then add (%r, %r) to SOURCE_READERS_REVIEWED"
@@ -821,17 +826,22 @@ def test_source_reader_detection_and_review_fire():
                                     "const re = /[\"'`]/g;\n"
                                     "const py = src(`${ROOT}/moonglade/gallery.py`);\n"),
         "loom/test/comment.test.js": "/* moonglade/gallery.py */ const s = 'gallery.py\\'s';\n",
+        "tests/test_glob.py": ("from pathlib import Path\nROOT = Path('.')\ndef test():\n"
+                               "    for p in (ROOT / 'moonglade').glob('*.py'):\n"
+                               "        assert 'scan_library' not in p.read_text()\n"),
     }
     readers = detect_source_readers(files)
     assert readers == {"tests/test_getsource.py": ("moonglade.gallery",),
                        "tests/test_whole.py": ("moonglade.backup",),
                        "tests/test_by_path.py": ("moonglade.gallery",),
                        "tests/test_create_app.py": ("moonglade.gallery",),
-                       "loom/test/reads.test.js": ("moonglade.gallery",)}
+                       "loom/test/reads.test.js": ("moonglade.gallery",),
+                       "tests/test_glob.py": ("moonglade.backup", "moonglade.gallery")}
     problems = check_source_readers_reviewed(SYNTH_SEAMS, files, readers, set())
     touched = sorted(p.split()[0] for p in problems)
     # names scan_library / whole file by path; the create_app reader names neither; a node
-    # test reads the file whole
+    # test reads the file whole; the glob reads every module, so a move cannot hide code from it
+    # even though it names scan_library
     assert touched == ["loom/test/reads.test.js", "tests/test_by_path.py",
                        "tests/test_getsource.py"], problems
     reviewed = {("tests/test_by_path.py", "moonglade.fake_seam"),

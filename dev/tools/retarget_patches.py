@@ -566,13 +566,14 @@ def _module_prefix(model, expr, scope):
     return None
 
 
-_READ_RANK = {"names": 0, "indirect": 1, "whole": 2}
+_READ_RANK = {"all": 0, "names": 1, "indirect": 2, "whole": 3}
 
 
 def _mark(reads, mod, kind):
     """Record how a file reads a module's source, keeping the widest: "whole" (the module's
     text: getsource(module), a path read, __file__), "indirect" (getsource of something this
-    scanner cannot trace), "names" (getsource of named functions only)."""
+    scanner cannot trace), "names" (getsource of named functions only), "all" (every module of
+    the package, by a glob: no move takes code out of its sight)."""
     if _READ_RANK[kind] > _READ_RANK.get(reads.get(mod), -1):
         reads[mod] = kind
 
@@ -724,6 +725,12 @@ def scan_text(path, text, old_modules=OLD_MODULES, module_binding=repo_module_bi
                         model.literal_names(args[1], node))
                 elif mod == AMBIGUOUS:
                     add(node, node.func.id, AMBIGUOUS, "", "dynamic", None)
+            # Source readers: (ROOT / "moonglade").glob("*.py") reads every module of the package
+            if (isinstance(node.func, ast.Attribute) and node.func.attr in ("glob", "rglob")
+                    and args and (_str_const(args[0]) or "").endswith(".py")
+                    and any(_str_const(c) == "moonglade" for c in ast.walk(node.func.value))):
+                for mod in old_modules:
+                    _mark(out.reads_source, mod, "all")
             # Source readers: inspect.getsource(core.x), getsource(g), getsource(fn) ...
             fname = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", None)
             if fname in _SOURCE_FUNCS and args:
