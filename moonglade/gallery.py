@@ -3906,7 +3906,7 @@ def empty_trash(out_dir, thumb_dir):
 # The original path is recorded EXPLICITLY and undo restores to that EXACT
 # location -- unlike trash's restore, which only ever remembered a bare filename
 # and always restores into a flat images/ folder -- because cmd_dedup's own
-# quarantine (moonglade/backup.py's cmd_dedup) preserves the source's
+# quarantine (moonglade/organize.py's cmd_dedup) preserves the source's
 # real subfolder structure under _duplicates/, and this feature's undo is
 # specified to put a file back exactly where it came from.
 # ---------------------------------------------------------------------------
@@ -3935,7 +3935,7 @@ def _resolve_under(out_dir, rel_path):
 
 
 def _reconcile_one_row_after_move(out_dir, db_path, media_id, row):
-    """Targeted, single-row version of moonglade.backup.reconcile_catalog_with_disk
+    """Targeted, single-row version of moonglade.organize.reconcile_catalog_with_disk
     -- point media_id's catalog row at whatever copy is still actually on disk,
     without rescanning/rewriting the whole catalog (that function's own approach,
     fine for a batch CLI run, is wasteful for a single synchronous HTTP request).
@@ -3963,7 +3963,7 @@ def _reconcile_one_row_after_move(out_dir, db_path, media_id, row):
 def quarantine_duplicate_file(out_dir, thumb_dir, db_path, media_id, rel_path, group_id):
     """Move ONE duplicate loser out of the live tree into out_dir/_duplicates/,
     mirroring cmd_dedup()'s DEFAULT (--apply without --dedup-delete) behavior at
-    moonglade/backup.py's cmd_dedup -- quarantine, never hard-delete,
+    moonglade/organize.py's cmd_dedup -- quarantine, never hard-delete,
     same collision-suffix rule (dest already exists -> "_dup" inserted before the
     extension). Called once per file by the /api/duplicates/resolve route, which
     has already re-verified the (group_id, media_id, path) triple names a real
@@ -4918,7 +4918,7 @@ def _redact_host_paths_cli(out_dir, msg):
     """THE redactor -- the one copy. create_app()'s nested `_redact_host_paths`
     delegates here (it existed as a closure twin and the two were documented as
     a drift risk; collapsed 2026-08-14 while fixing issue #14). Also called
-    directly by moonglade/backup.py's `_cli_job_finish`, which logs a
+    directly by moonglade/jobs.py's `_cli_job_finish`, which logs a
     bare-terminal CLI run's failure straight to jobs.jsonl (served to any
     LOGIN-tier caller via /api/jobs). Design choices (resolve()'d out_dir,
     longest-first, case-insensitive separator-agnostic regex, the length
@@ -11460,7 +11460,7 @@ def create_app(out_dir: Path):
                           page's own engine, reused as-is (its 300-row cap is lifted here;
                           see the call below).
           identical_file Class B: byte-identical files under DIFFERENT media_ids.
-                          moonglade.backup.audit_collection(content=True)'s size-bucketed
+                          moonglade.organize.audit_collection(content=True)'s size-bucketed
                           SHA pass -- reused as-is; not naive O(n^2).
           same_seed       Class C: catalog rows sharing (seed, prompt_full) -- a cheap
                           SQL GROUP BY (same_seed_groups(), this module), not a new

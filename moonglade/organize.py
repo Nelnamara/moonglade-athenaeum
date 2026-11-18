@@ -33,9 +33,9 @@ from moonglade.scan import (_IMAGE_EXTS, bucket_of, find_files_for_media_id, med
 _BUCKET_PRIORITY = {"batches": 0, "month": 1, "images": 2, "other": 3}
 
 
-# The bucket classifier is `moonglade.gallery.bucket_of` -- the LIBRARY SCAN
-# section's one copy. This alias keeps the private name every caller (and
-# dev/tests/test_dedup.py's `core._bucket_of` assertions) already uses.
+# The bucket classifier is `moonglade.scan.bucket_of` -- the library scan's
+# one copy. This alias keeps the private name every caller (and
+# dev/tests/test_library_scan.py's `organize_mod._bucket_of` assertion) already uses.
 _bucket_of = bucket_of
 
 

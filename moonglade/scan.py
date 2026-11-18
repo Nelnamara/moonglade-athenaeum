@@ -198,8 +198,8 @@ MediaEntry.__doc__ = """One media file the scan found.
 
 
 def bucket_of(path_or_rel):
-    """THE bucket classifier (was moonglade_backup._bucket_of, which is now an
-    alias onto this, and which this module used to re-type inline twice more).
+    """THE bucket classifier (was moonglade_backup._bucket_of; moonglade.organize._bucket_of is
+    now an alias onto this, and the gallery used to re-type it inline twice more).
     Classifies a path RELATIVE to out_dir into its top-level bucket name:
     "images", "batches", "month" (YYYY-MM/ or unknown-date/), or "other". Feeds
     _BUCKET_PRIORITY, which decides which copy of a duplicated media_id is the

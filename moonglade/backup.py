@@ -12135,7 +12135,7 @@ _CONTEST_PAGE_SIZE = 50
 # board's own `totalPage`; this ceiling only bounds a board that keeps growing -- it was a bare
 # 6, and the 2026-09-26 board already answered totalPage 7 at 50 a page (330 contests), so the
 # oldest page silently fell off. Pages are read 0.35 s apart, the contest sweep's own pace
-# (moonglade.gallery._CONTEST_SYNC_PAUSE): the board is a public read and CLAUDE.md asks for
+# (moonglade.contest_sync._CONTEST_SYNC_PAUSE): the board is a public read and CLAUDE.md asks for
 # paced requests.
 _CONTEST_MAX_PAGES = 20
 _CONTEST_PAGE_PAUSE = 0.35

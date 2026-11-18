@@ -1,10 +1,10 @@
 """The Moonglade asset container -- a custom packed binary format, the app's own MPQ. The
-shipped one is the art pack, `moonglade.mgpack` (moonglade.gallery._container_path()).
+shipped one is the art pack, `moonglade.mgpack` (moonglade.branding._container_path()).
 
 WHAT THIS IS. One opaque file carrying the app's default identity: every branding
 asset (marks, banners, mascots, badges, rewards) plus reserved payload slots for
 non-file data (e.g. the achievement roster). Built by dev/tools/build_container.py from
-a real branding/ tree; read at runtime by moonglade/gallery.py's loose-then-container
+a real branding/ tree; read at runtime by moonglade/branding.py's loose-then-container
 resolution layer, where a real file on disk always wins over the container (branding
 drop-in is a shipped feature and the discovery mechanic depends on it).
 

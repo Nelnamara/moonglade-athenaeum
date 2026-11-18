@@ -547,7 +547,7 @@ def recovery_network(monkeypatch):
 
     Returns (install, bumps): `install(task, video_download)` wires the task getTaskById
     returns and how download() behaves for the .mp4, and `bumps` collects the names passed to
-    moonglade_gallery.telem_bump (imported inside run_generate, so patching the module
+    moonglade.telemetry.telem_bump (imported inside run_generate, so patching the module
     attribute is what the call actually sees).
     """
     from moonglade import gallery

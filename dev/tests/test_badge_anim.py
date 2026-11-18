@@ -3,7 +3,7 @@
 An animated medallion is a `<id>.webp` dropped beside the stills in the badges role.
 The still-PNG route PIL-thumbnails its master, which would flatten an animation to one
 frame, so the webp is served THROUGH instead -- byte-for-byte, unresized, un-re-encoded
-(moonglade_gallery._badge_anim explains why: Pillow reads an animated webp's frames but
+(moonglade.achievements._badge_anim explains why: Pillow reads an animated webp's frames but
 reports every frame's `duration` as None, so a re-encode invents the cadence the art was
 authored at, and re-compresses the chroma-keyed alpha while it is at it).
 

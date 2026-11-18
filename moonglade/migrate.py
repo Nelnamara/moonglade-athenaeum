@@ -264,7 +264,7 @@ SHARED_PRESETS = {
     "toolbox_presets.json": "presets.json",
     "view_presets.json": "views.json",
 }
-# The rendered banner flats (moonglade.gallery._BANNER_FLAT), by slot.
+# The rendered banner flats (moonglade.branding._BANNER_FLAT), by slot.
 BANNER_FLATS = {"banner_main": "banner.png", "banner_login": "login-banner.png",
                 "banner_loom": "banner-loom.png"}
 # Rebuildable caches a library used to hold under gallery\cache\.

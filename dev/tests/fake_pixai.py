@@ -1,6 +1,6 @@
 """FakePixAI -- the second adapter behind the PixAI transport seam.
 
-`moonglade_backup.PixAIClient` is the one road to PixAI. This is the other implementation
+`moonglade.pixai_client.PixAIClient` is the one road to PixAI. This is the other implementation
 of that same road: same five verbs, same credential choice, same identity attributes, but
 answering from responses a test registered instead of from a socket. It carries the
 `_is_pixai_client` marker, so `_client_of()` hands it through untouched and every module
@@ -84,7 +84,7 @@ def operation_name(document):
 class FakePixAI:
     """A PixAI transport adapter that answers from a registry and records every call.
 
-    Interface-compatible with `moonglade_backup.PixAIClient`: `query`, `mutate`,
+    Interface-compatible with `moonglade.pixai_client.PixAIClient`: `query`, `mutate`,
     `rest_get`, `rest_post`, `rest_put`, `rest_patch`, `for_create`, plus
     `user_id` / `auth_kind`. A PUT or PATCH is registered under "PUT <path>" / "PATCH <path>",
     so it can never be answered by the GET or POST registered for the same path.

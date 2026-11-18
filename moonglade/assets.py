@@ -97,7 +97,7 @@ def _write_marker(container_path, manifest):
 
 
 # The pack's file name before pack v7. Only the one-time rename below may name it; every
-# other code path asks moonglade.gallery._container_path() (dev/tests/test_pack_file_name.py).
+# other code path asks moonglade.branding._container_path() (dev/tests/test_pack_file_name.py).
 LEGACY_NAME = "moonglade.dat"
 
 # Where the rename writes down what it did: a child of the app's own logger, which

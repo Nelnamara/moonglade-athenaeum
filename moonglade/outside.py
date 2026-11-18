@@ -1342,7 +1342,7 @@ _LNK_SCRIPT = (
 
 def _save_lnk_with_powershell(path, target, args, workdir, icon, description=None):
     """Write the .lnk at `path` through the shell's own WScript.Shell -- rewriting one, or
-    making a new one (the app's shortcut button, moonglade.gallery.make_launcher_shortcut,
+    making a new one (the app's shortcut button, moonglade.branding.make_launcher_shortcut,
     writes through here too). A field given as None is left as the shortcut has it. The
     script is fixed (_LNK_SCRIPT): the path and the values go to it as environment
     variables, so neither a crafted shortcut nor a path with a quote in it can steer it."""

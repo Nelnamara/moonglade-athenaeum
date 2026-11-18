@@ -32,7 +32,7 @@ from moonglade import paths as _paths
 # existing session (bearer token or session cookie). The token is returned in the body and also written
 # to the `token` response header and the session cookie." Credentials: the mirror JWT as Bearer, and
 # nothing else -- never the API key, never a cookie (MIRROR-SUBMIT INVARIANTS #7, below).
-# The mirror helpers live just after _make_session below.
+# The mirror helpers are below, in this module (before 3.21.0, just after backup's _make_session).
 MIRROR_REFRESH_PATH = "/auth/refresh-token"
 # A renewal mints a token that expires 7 days after the renewal (PROBE 2026-10-02: the site's
 # own renewal and the app's old GraphQL renewal alike; the ~27 days measured in August no longer

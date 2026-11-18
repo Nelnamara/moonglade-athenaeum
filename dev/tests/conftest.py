@@ -366,7 +366,7 @@ def _seed_assets():
 # The instant every server fixture's install is pinned to: 13:00 on a Wednesday. Any
 # daytime weekday reading would do -- what matters is that it never moves, and that it is
 # outside the narrow window in which a collected generation stamps `session_hour`
-# (moonglade_gallery.stamp_session_hour, 2 <= hour < 4). Documentation only: nothing constructs a datetime from it, because
+# (moonglade.telemetry.stamp_session_hour, 2 <= hour < 4). Documentation only: nothing constructs a datetime from it, because
 # the value a pinned clock produces is what the pin below reproduces, not the clock object.
 PINNED_INSTANT = "13:00, Wednesday 2025-06-11, local"
 
@@ -815,7 +815,7 @@ class _NoRealRegistry(types.ModuleType):
 @pytest.fixture(autouse=True)
 def _no_real_registry(monkeypatch):
     """No test may read or write the real Windows registry. The app's one registry write
-    (moonglade_gallery.register_pack_file_type) does a plain `import winreg`, so the module
+    (moonglade.branding.register_pack_file_type) does a plain `import winreg`, so the module
     that import hands back is swapped for a stub that refuses every use; tests that pass a
     fake registry never import it and are untouched. Off Windows there is no real winreg to
     protect, and the stub stands in all the same."""

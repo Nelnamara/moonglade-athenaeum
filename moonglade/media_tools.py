@@ -57,9 +57,9 @@ from moonglade.deps import _NO_WINDOW
 # with different flags), and logging it here would double up on the caller's own,
 # better message.
 #
-# The gallery reaches this section as `core.<name>` through a function-body
-# `from moonglade import backup as core` -- module scope would be an import cycle,
-# since this module imports moonglade.gallery at the top.
+# The gallery reaches this section as `_media_tools.<name>` through a module-level
+# `from moonglade import media_tools as _media_tools`: this module imports neither the
+# gallery nor the engine at module scope, so there is no import cycle.
 
 NO_WINDOW = _NO_WINDOW   # re-exported: no caller of this section reaches for the raw constant
 
