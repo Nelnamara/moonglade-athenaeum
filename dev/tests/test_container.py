@@ -16,6 +16,7 @@ from moonglade import container as mc
 from moonglade import gallery as g
 
 from tests.conftest import login_client
+from moonglade import telemetry as telemetry_mod
 
 # PNG-SHAPED bytes: a real signature and header, but a broken IDAT CRC, so
 # Pillow refuses to decode it. Fine for every test here, which is about bytes
@@ -224,7 +225,7 @@ def test_write_banner_flat_renders_a_container_sourced_active_asset(tmp_path):
 # The discovery mechanic must not false-fire off shipped defaults
 # ---------------------------------------------------------------------------
 def _flag(tmp_path):
-    return (g.load_telemetry(tmp_path).get("flags") or {}).get("branding_custom_file")
+    return (telemetry_mod.load_telemetry(tmp_path).get("flags") or {}).get("branding_custom_file")
 
 
 def test_container_alone_never_earns_the_discovery_flag(tmp_path):
@@ -237,9 +238,9 @@ def test_container_alone_never_earns_the_discovery_flag(tmp_path):
     is the one that could actually fire, and a container-aware check would make
     it fire here with zero user action."""
     _build(tmp_path)
-    g.set_telemetry_out(tmp_path)
-    g.sweep_telemetry(tmp_path)
-    g.sweep_telemetry(tmp_path)
+    telemetry_mod.set_telemetry_out(tmp_path)
+    telemetry_mod.sweep_telemetry(tmp_path)
+    telemetry_mod.sweep_telemetry(tmp_path)
     assert not _flag(tmp_path), (
         "the sealed container alone earned the discovery flag with zero user action")
 
@@ -249,8 +250,8 @@ def test_a_real_loose_mark_still_earns_the_discovery_flag(tmp_path):
     this install's baseline was taken still fires the flag, container or no
     container."""
     _build(tmp_path)
-    g.set_telemetry_out(tmp_path)
-    g.sweep_telemetry(tmp_path)               # baseline: this tree, as shipped
+    telemetry_mod.set_telemetry_out(tmp_path)
+    telemetry_mod.sweep_telemetry(tmp_path)               # baseline: this tree, as shipped
     assert not _flag(tmp_path)
 
     mdir = g._role_dir("marks")
@@ -259,7 +260,7 @@ def test_a_real_loose_mark_still_earns_the_discovery_flag(tmp_path):
         {"marks": [{"id": "dropped", "label": "dropped", "kind": "tile"}]}))
     (mdir / "dropped.png").write_bytes(_real_png())
 
-    g.sweep_telemetry(tmp_path)
+    telemetry_mod.sweep_telemetry(tmp_path)
     assert _flag(tmp_path), (
         "a genuine drop no longer earns the flag -- the guard overcorrected")
 

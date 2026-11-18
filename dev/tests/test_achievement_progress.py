@@ -21,6 +21,7 @@ from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests import synthetic_feats as sf
 from tests.conftest import clear_sealed_caches, login_client
+from moonglade import telemetry as telemetry_mod
 
 HIDDEN_ID = "synth-hidden-feat"
 HIDDEN_NAME = "Synthetic Hidden Feat"
@@ -262,7 +263,7 @@ def test_every_non_feat_metric_in_the_sealed_roster_is_measured(tmp_path, sealed
     # merge every gate uses -- rather than a hand list that drifts when a metric moves.
     g.save_catalog(tmp_path / "catalog.db", [])
     fresh = g.achievement_metrics(tmp_path / "catalog.db", use_cache=False)
-    fresh.update(g.telemetry_metrics(tmp_path))
+    fresh.update(telemetry_mod.telemetry_metrics(tmp_path))
     unmeasured = sorted({
         a["metric"] for a in g._roster()
         if a.get("tier") != "feat" and a.get("bucket") not in ("feat", "meta")

@@ -26,6 +26,7 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client, record_own_sleeps
+from moonglade import telemetry as telemetry_mod
 
 
 def _row(**kw):
@@ -46,11 +47,11 @@ def _contest(cid, slug, active=False, result_at="", end_at=""):
 
 def _entry_keys(out_dir):
     """The raw dedupe set, straight from the store -- the thing the metric counts."""
-    return g.load_telemetry(out_dir)["sets"].get("contest_entry_keys") or []
+    return telemetry_mod.load_telemetry(out_dir)["sets"].get("contest_entry_keys") or []
 
 
 def _entries(out_dir):
-    return g.telemetry_metrics(out_dir)["contest_entries"]
+    return telemetry_mod.telemetry_metrics(out_dir)["contest_entries"]
 
 
 def _client(tmp_path, rows=()):
@@ -353,14 +354,14 @@ def test_sweep_records_entries_and_reads_no_winners(tmp_path, monkeypatch, pixai
     monkeypatch.setattr(core, "contest_winners",
                         lambda s, slug: pytest.fail("the entry sweep must not read winners"))
     assert g._contest_detection_sync(tmp_path) is True
-    m = g.telemetry_metrics(tmp_path)
+    m = telemetry_mod.telemetry_metrics(tmp_path)
     assert m["contest_entries"] == 2
     assert m["contest_wins"] == 0
-    assert "contest_win_keys" not in g.load_telemetry(tmp_path)["sets"]
+    assert "contest_win_keys" not in telemetry_mod.load_telemetry(tmp_path)["sets"]
     assert all(c[2] == pixai.user_id for c in seen if c[0] == "entries")
     # re-sweeping is free: the same rows produce the same keys, which the set already holds
     g._contest_detection_sync(tmp_path)
-    assert g.telemetry_metrics(tmp_path)["contest_entries"] == 2
+    assert telemetry_mod.telemetry_metrics(tmp_path)["contest_entries"] == 2
 
 
 def test_sweep_skips_contests_outside_the_window(tmp_path, monkeypatch, pixai):
@@ -379,7 +380,7 @@ def test_sweep_skips_contests_outside_the_window(tmp_path, monkeypatch, pixai):
     monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
     g._contest_detection_sync(tmp_path)
     assert seen == ["s4"]
-    assert g.telemetry_metrics(tmp_path)["contest_entries"] == 1
+    assert telemetry_mod.telemetry_metrics(tmp_path)["contest_entries"] == 1
 
 
 def test_sweep_survives_one_bad_contest(tmp_path, monkeypatch, pixai):
@@ -395,7 +396,7 @@ def test_sweep_survives_one_bad_contest(tmp_path, monkeypatch, pixai):
     monkeypatch.setattr(core, "contest_my_entries", _my_entries)
     monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
     g._contest_detection_sync(tmp_path)
-    assert g.telemetry_metrics(tmp_path)["contest_entries"] == 2   # the sweep carried on
+    assert telemetry_mod.telemetry_metrics(tmp_path)["contest_entries"] == 2   # the sweep carried on
 
 
 def test_sweep_prefers_the_explicit_artwork_field(tmp_path, monkeypatch, pixai):
@@ -429,7 +430,7 @@ def test_sweep_force_ignores_the_recent_window(tmp_path, monkeypatch, pixai):
     assert seen == []
     g._contest_detection_sync(tmp_path, force=True)           # forced: looked at
     assert seen == ["s1"]
-    assert g.telemetry_metrics(tmp_path)["contest_entries"] == 1
+    assert telemetry_mod.telemetry_metrics(tmp_path)["contest_entries"] == 1
 
 
 def test_sweep_cap_never_drops_a_running_contest(tmp_path, monkeypatch, pixai):
@@ -459,7 +460,7 @@ def test_sweep_never_raises_and_reports_it_gave_up(tmp_path, monkeypatch, pixai)
         raise core.PixAIError("the board is unreachable")
     monkeypatch.setattr(core, "list_contests", _boom)
     assert g._contest_detection_sync(tmp_path) is False       # no exception escapes
-    assert g.telemetry_metrics(tmp_path)["contest_entries"] == 0
+    assert telemetry_mod.telemetry_metrics(tmp_path)["contest_entries"] == 0
 
 
 def test_sweep_without_an_account_id_does_nothing(tmp_path, monkeypatch, pixai):
@@ -499,8 +500,8 @@ def test_sync_route_reports_one_count_and_never_the_win(tmp_path, monkeypatch, p
     assert "contest_wins" not in json.dumps(d)         # the seal, not an oversight
     # The sweep reads entries only (L3 moved win detection to the verified check), so the
     # metric stays where it was and the entries land.
-    assert g.telemetry_metrics(tmp_path)["contest_wins"] == 0
-    assert g.telemetry_metrics(tmp_path)["contest_entries"] == 2
+    assert telemetry_mod.telemetry_metrics(tmp_path)["contest_wins"] == 0
+    assert telemetry_mod.telemetry_metrics(tmp_path)["contest_entries"] == 2
 
 
 def test_sync_route_answers_even_when_the_sweep_gives_up(tmp_path, monkeypatch, pixai):
@@ -621,9 +622,9 @@ def test_winners_route_is_empty_while_running_and_soft_fails(tmp_path, pixai):
 
 def _seed_entries(tmp_path, keys, wins=()):
     for k in keys:
-        g.telem_set_add("contest_entry_keys", k, out_dir=tmp_path)
+        telemetry_mod.telem_set_add("contest_entry_keys", k, out_dir=tmp_path)
     for w in wins:
-        g.telem_set_add("contest_win_keys", w, out_dir=tmp_path)
+        telemetry_mod.telem_set_add("contest_win_keys", w, out_dir=tmp_path)
 
 
 def test_mine_is_telemetry_derived_with_one_board_read(tmp_path, monkeypatch, pixai):
@@ -703,17 +704,17 @@ def test_artwork_media_ids_maps_only_what_the_catalog_holds(tmp_path):
 def test_metrics_are_the_set_cardinalities(tmp_path):
     """Entries count their set. Wins count VERIFIED wins only (L3): the flat `contest_win_keys`
     an older sweep wrote is on disk and is not counted."""
-    assert g.telemetry_metrics(tmp_path)["contest_entries"] == 0
+    assert telemetry_mod.telemetry_metrics(tmp_path)["contest_entries"] == 0
     for key in ("c1:a1", "c1:a1", "c1:a2", "c2:a1"):      # one repeat, deduped
-        g.telem_set_add("contest_entry_keys", key, out_dir=tmp_path)
+        telemetry_mod.telem_set_add("contest_entry_keys", key, out_dir=tmp_path)
     for key in ("c1", "c1", "c2"):
-        g.telem_set_add("contest_win_keys", key, out_dir=tmp_path)
-    m = g.telemetry_metrics(tmp_path)
+        telemetry_mod.telem_set_add("contest_win_keys", key, out_dir=tmp_path)
+    m = telemetry_mod.telemetry_metrics(tmp_path)
     assert (m["contest_entries"], m["contest_wins"]) == (3, 0)
     for cid, aid in (("c1", "a1"), ("c1", "a2"), ("c2", "a1")):   # two contests, three entries
         g._cw_edit(tmp_path, lambda w, ch, cid=cid, aid=aid: g.contest_wins.record_win(
             w, cid, {"artwork_id": aid, "tier": 1, "prize": 1}, "auto", 1.0))
-    m = g.telemetry_metrics(tmp_path)
+    m = telemetry_mod.telemetry_metrics(tmp_path)
     assert (m["contest_entries"], m["contest_wins"]) == (3, 2)
     assert isinstance(m["contest_entries"], int) and isinstance(m["contest_wins"], int)
 

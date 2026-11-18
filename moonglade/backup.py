@@ -62,6 +62,7 @@ from moonglade import mirror as _mirror
 from moonglade import organize as _organize
 from moonglade import paths as _paths
 from moonglade import pixai_client as _pixai_client
+from moonglade import telemetry as _telemetry
 from moonglade.gallery import (CATALOG_FIELDS, init_db, migrate, load_catalog,
                             save_catalog, _db_is_empty, rows_for_media_ids,
                             # The row-level artwork write (see run_sync_artworks): one
@@ -7287,7 +7288,7 @@ def run_generate(args):
     # never moved (M16, 2026-07-27).
     if existing_task and (rows or videos):
         try:
-            from moonglade.gallery import telem_bump
+            from moonglade.telemetry import telem_bump
             telem_bump("recover_events", out_dir=out)
         except Exception:
             pass
@@ -7599,7 +7600,7 @@ def _bump_card_use(params):
     (a card attached to a rejected submit was never spent). Fail-soft no-op."""
     if isinstance(params, dict) and params.get("kaisuukenId"):
         try:
-            from moonglade.gallery import telem_bump
+            from moonglade.telemetry import telem_bump
             telem_bump("free_cards_applied")
         except Exception:
             pass
@@ -13265,7 +13266,7 @@ def run_claims(args):
             print("Failed to claim {}: {}".format(r["id"], str(e)[:150]))
     if claimed:
         try:      # Claimant: the Void pays a small stipend
-            from moonglade.gallery import telem_bump
+            from moonglade.telemetry import telem_bump
             telem_bump("claims", claimed)
         except Exception:
             pass
@@ -14479,7 +14480,7 @@ def _check_time_capsule(created_at, out_dir):
         if not s:
             return
         if (datetime.now() - datetime.fromisoformat(s)).days > 730:
-            from moonglade.gallery import telem_flag
+            from moonglade.telemetry import telem_flag
             telem_flag("old_piece_backed_up", out_dir=out_dir)
     except Exception:
         pass
@@ -14504,7 +14505,7 @@ def walk_end_reached(out_dir):
     """True once some pass over this library has seen pageInfo.hasPreviousPage == False."""
     try:
         from moonglade import gallery as _mg
-        return bool(_mg.load_telemetry(out_dir)["flags"].get(WALK_END_FLAG))
+        return bool(_telemetry.load_telemetry(out_dir)["flags"].get(WALK_END_FLAG))
     except Exception:
         return False
 
@@ -14513,7 +14514,7 @@ def mark_walk_end_reached(out_dir):
     """Record that a pass walked all the way to the oldest page. Idempotent."""
     try:
         from moonglade import gallery as _mg
-        _mg.telem_flag(WALK_END_FLAG, out_dir=out_dir)
+        _telemetry.telem_flag(WALK_END_FLAG, out_dir=out_dir)
     except Exception:
         pass
 
@@ -15653,7 +15654,7 @@ def main():
     img_dir = out / "images"
     db_path  = out / "catalog.db"
     try:      # achievement telemetry: bare telem_* bumps land in this install's ledger
-        from moonglade.gallery import set_telemetry_out
+        from moonglade.telemetry import set_telemetry_out
         set_telemetry_out(out)
     except Exception:
         pass
@@ -15881,7 +15882,7 @@ def main():
                 try:
                     from moonglade import gallery as _mg
                     if walk_end_reached(out):
-                        _mg.telem_flag("first_sync_done", out_dir=out)
+                        _telemetry.telem_flag("first_sync_done", out_dir=out)
                 except Exception:
                     pass
             except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged

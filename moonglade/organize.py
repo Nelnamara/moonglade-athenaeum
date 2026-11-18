@@ -276,7 +276,7 @@ def cmd_dedup(args, out, db_path):
     if culled_keys:
         try:      # The Great Sweep: each redundant copy once, keyed by what it duplicated --
             # copying a file back and deduping it again is not a second piece swept
-            from moonglade.gallery import telem_set_add_many
+            from moonglade.telemetry import telem_set_add_many
             telem_set_add_many("culled_keys", culled_keys, out_dir=out)
         except Exception:
             pass
@@ -630,7 +630,7 @@ def cmd_organize(args, out, img_dir, db_path):
         print("Embedded metadata into {:,} images.".format(embedded))
     print("Reversible manifest: {}  (run --undo-organize to revert)".format(manifest_path))
     try:      # Keeper of Order: a real (non-dry-run) organize completed
-        from moonglade.gallery import telem_bump
+        from moonglade.telemetry import telem_bump
         telem_bump("organize_runs", out_dir=out)
     except Exception:
         pass

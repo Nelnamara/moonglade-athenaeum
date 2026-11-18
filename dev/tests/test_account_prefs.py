@@ -22,6 +22,7 @@ from moonglade.account_prefs import (ACCOUNT_LOCAL, ACCOUNT_PREF_VALUE_MAX, ACCO
                                      AccountPrefsBusy, AccountPrefsError, _account_key,
                                      account_prefs_get, account_prefs_path, account_prefs_update)
 from tests.conftest import login_client, login_test_client
+from moonglade import telemetry as telemetry_mod
 
 URL = "/api/account/prefs"
 
@@ -453,8 +454,8 @@ def test_concurrent_writers_lose_no_update(tmp_path):
 
 def _short_wait(monkeypatch):
     """The real lockfile, with a wait short enough that a refusal costs no test time."""
-    real = g._excl_lockfile
-    monkeypatch.setattr(g, "_excl_lockfile",
+    real = telemetry_mod._excl_lockfile
+    monkeypatch.setattr(telemetry_mod, "_excl_lockfile",
                         lambda lock, wait_s=2.0, stale_s=10.0: real(lock, 0.05, stale_s))
 
 

@@ -9,6 +9,7 @@ from moonglade import paths as moonglade_paths
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_test_client
+from moonglade import telemetry as telemetry_mod
 
 # Captured at IMPORT time -- collection runs before any autouse fixture, so this is the genuine
 # resolver rather than the tmp_path-redirected one conftest._isolated_branding installs. Needed
@@ -38,7 +39,7 @@ def _client(tmp_path):
 
 def _brand_flag(tmp_path):
     """The branding_custom_file telemetry flag, as the tree scan sets it."""
-    return (g.load_telemetry(tmp_path).get("flags") or {}).get("branding_custom_file")
+    return (telemetry_mod.load_telemetry(tmp_path).get("flags") or {}).get("branding_custom_file")
 
 
 def _cut_fake_marks(tmp_path, ids=("mark_4", "mark_7"), ico=True):

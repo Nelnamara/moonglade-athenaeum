@@ -40,6 +40,7 @@ from tests.move_layouts import (KEY_GONE, KEY_NEL, KEY_NEL_LOWER, db_rows, layou
 from moonglade import scan as scan_mod
 from moonglade import account_prefs as account_prefs_mod
 from moonglade import jobs as jobs_mod
+from moonglade import telemetry as telemetry_mod
 
 
 @pytest.fixture
@@ -128,7 +129,7 @@ def test_the_readers_find_the_moved_records(r):
     layout_317(r)
     _prepare(r)
     assert g.load_ach_state(r.lib)["earned_at"] == {"a1": "2026-09-01"}
-    assert g.load_telemetry(r.lib)["counters"] == {"gens": 5}
+    assert telemetry_mod.load_telemetry(r.lib)["counters"] == {"gens": 5}
     from moonglade import runs
     assert runs.RunsStore(r.lib).path.is_file()
     from moonglade import backup as core

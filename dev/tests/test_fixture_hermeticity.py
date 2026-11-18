@@ -36,6 +36,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from moonglade import telemetry as telemetry_mod
 
 _HARNESS = Path(__file__).resolve().parent / "test_render_harness.py"
 
@@ -208,7 +209,7 @@ def _collect_at_three(root, monkeypatch):
         save_catalog(root / "catalog.db", [row])
         return {"media_ids": ["H1"], "saved": 1, "is_video": False}
     monkeypatch.setattr(core, "collect_generation", _collect)
-    monkeypatch.setattr(g, "_utc_now", lambda: (made + _dt.timedelta(minutes=10))
+    monkeypatch.setattr(telemetry_mod, "_utc_now", lambda: (made + _dt.timedelta(minutes=10))
                         .astimezone(_dt.timezone.utc))
     cli = login_client(root)
     assert cli.get("/api/task-status", query_string={"task_id": "TH"}).status_code == 200
@@ -235,7 +236,7 @@ def test_the_clock_pin_keeps_the_hour_out_of_an_installs_ledger(tmp_path, monkey
     unpinned = tmp_path / "unpinned"
     unpinned.mkdir()
     _collect_at_three(unpinned, monkeypatch)
-    assert g.load_telemetry(unpinned)["flags"].get(HOUR_DRIVEN_FLAG) == 1, (
+    assert telemetry_mod.load_telemetry(unpinned)["flags"].get(HOUR_DRIVEN_FLAG) == 1, (
         "the control half never wrote the hour-driven flag, so this test cannot say anything "
         "about the pin: either the collect path stopped stamping it (then delete the pin's hour "
         "half and this test) or the clock seam no longer reaches it (then fix the probe)")
@@ -247,7 +248,7 @@ def test_the_clock_pin_keeps_the_hour_out_of_an_installs_ledger(tmp_path, monkey
     save_catalog(page_only / "catalog.db", [])
     with mock.patch("datetime.datetime", _ThreeAM):
         assert login_client(page_only).get("/api/achievements").status_code == 200
-    assert HOUR_DRIVEN_FLAG not in g.load_telemetry(page_only)["flags"], (
+    assert HOUR_DRIVEN_FLAG not in telemetry_mod.load_telemetry(page_only)["flags"], (
         "a page load at 03:00 armed the hour-driven flag again -- only a new generation may")
 
     pinned = tmp_path / "pinned"
@@ -258,7 +259,7 @@ def test_the_clock_pin_keeps_the_hour_out_of_an_installs_ledger(tmp_path, monkey
         _collect_at_three(pinned, monkeypatch)
     finally:
         mp.undo()
-    assert HOUR_DRIVEN_FLAG not in g.load_telemetry(pinned)["flags"], (
+    assert HOUR_DRIVEN_FLAG not in telemetry_mod.load_telemetry(pinned)["flags"], (
         "conftest's pin_daytime_clock() no longer keeps the hour-driven flag out of an "
         "install's ledger -- every harness server's achievement state is a property of when "
         "the suite ran again")
@@ -294,8 +295,8 @@ def test_the_clock_pin_records_one_day_even_across_midnight(tmp_path):
     unpinned.mkdir()
     for day in (_DayOne, _DayTwo):
         with mock.patch("datetime.date", day):
-            g.telem_mark_day(out_dir=unpinned)
-    assert len(g.load_telemetry(unpinned)["days"]) == 2, (
+            telemetry_mod.telem_mark_day(out_dir=unpinned)
+    assert len(telemetry_mod.load_telemetry(unpinned)["days"]) == 2, (
         "the control half never recorded two days, so this test cannot say anything about "
         "the pin -- the day ledger no longer works the way the pin is written against")
 
@@ -306,10 +307,10 @@ def test_the_clock_pin_records_one_day_even_across_midnight(tmp_path):
     try:
         for day in (_DayOne, _DayTwo):
             with mock.patch("datetime.date", day):
-                g.telem_mark_day(out_dir=pinned)
+                telemetry_mod.telem_mark_day(out_dir=pinned)
     finally:
         mp.undo()
-    assert len(g.load_telemetry(pinned)["days"]) == 1, (
+    assert len(telemetry_mod.load_telemetry(pinned)["days"]) == 1, (
         "conftest's pin_daytime_clock() no longer holds the day ledger at one entry -- a "
         "harness run that crosses local midnight moves days_used and the streak metrics "
         "under whatever is being measured")

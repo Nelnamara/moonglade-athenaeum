@@ -22,6 +22,7 @@ from moonglade.gallery import CATALOG_FIELDS, save_catalog
 from tests import synthetic_feats as sf
 from tests.conftest import _SEALED_DONOR, login_client, login_test_client
 from moonglade import account_prefs as account_prefs_mod
+from moonglade import telemetry as telemetry_mod
 
 URL = "/api/narrator/poke"
 LINES = {
@@ -99,7 +100,7 @@ def test_a_poke_without_the_session_token_is_refused_and_writes_nothing(tmp_path
     r = cli.post(URL, json=body)
     assert r.status_code == 400 and "session expired" in r.get_json()["error"]
     assert not _state_dir(tmp_path).exists()
-    assert "narrator_pokes" not in g.telemetry_metrics(tmp_path)
+    assert "narrator_pokes" not in telemetry_mod.telemetry_metrics(tmp_path)
 
 
 def test_a_body_that_is_not_an_object_is_refused(tmp_path, clock):
@@ -178,15 +179,15 @@ def test_the_installs_metric_is_the_highest_account_not_the_sum(tmp_path, clock)
     for _i in range(3):
         _poke(a)
         clock.advance(3)
-    assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == 3
+    assert telemetry_mod.telemetry_metrics(tmp_path)["narrator_pokes"] == 3
     for _i in range(2):
         _poke(b)
         clock.advance(3)
-    assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == 3, "two accounts never pool"
+    assert telemetry_mod.telemetry_metrics(tmp_path)["narrator_pokes"] == 3, "two accounts never pool"
     for _i in range(2):
         _poke(b)
         clock.advance(3)
-    assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == 4
+    assert telemetry_mod.telemetry_metrics(tmp_path)["narrator_pokes"] == 4
 
 
 def test_only_a_counted_poke_moves_the_metric(tmp_path, clock):
@@ -194,7 +195,7 @@ def test_only_a_counted_poke_moves_the_metric(tmp_path, clock):
     _poke(cli)
     clock.advance(0.5)
     _poke(cli)                                           # spam: not counted
-    assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == 1
+    assert telemetry_mod.telemetry_metrics(tmp_path)["narrator_pokes"] == 1
 
 
 def test_the_browser_cannot_write_or_read_the_ladder_through_the_prefs_store(tmp_path, clock):
@@ -218,7 +219,7 @@ def test_the_beacon_is_not_a_second_road_to_the_count(tmp_path, clock):
     from tests.conftest import ach_event
     cli = _client(tmp_path)
     assert ach_event(cli, "narrator").status_code == 400
-    assert "narrator_pokes" not in g.telemetry_metrics(tmp_path)
+    assert "narrator_pokes" not in telemetry_mod.telemetry_metrics(tmp_path)
     assert not _state_dir(tmp_path).exists()
 
 
@@ -287,7 +288,7 @@ def test_many_pokes_at_one_instant_count_once(tmp_path, clock):
     tok = _token(cli)
     for _i in range(60):
         assert _poke(cli, csrf=tok).status_code == 200
-    assert _count(tmp_path) == 1 and g.telemetry_metrics(tmp_path)["narrator_pokes"] == 1
+    assert _count(tmp_path) == 1 and telemetry_mod.telemetry_metrics(tmp_path)["narrator_pokes"] == 1
 
 
 # ---- the final straw --------------------------------------------------------------------------
@@ -296,7 +297,7 @@ def _at_the_edge(tmp_path, cli, clock, user="tester"):
     """Put the account one counted poke from the end, as the ladder itself would have."""
     st = dict(nar.new_state(), count=nar.FINAL - 1, last_at=clock.t - 10 ** 6, day="day-0")
     account_prefs_mod.account_state_write(account_prefs_mod.account_state_path(tmp_path, user), {"ladder": st})
-    g.telem_max("narrator_pokes", nar.FINAL - 1, out_dir=tmp_path)
+    telemetry_mod.telem_max("narrator_pokes", nar.FINAL - 1, out_dir=tmp_path)
 
 
 def test_the_last_poke_earns_the_feat_through_the_achievement_path(tmp_path, clock):
@@ -364,9 +365,9 @@ def test_the_metric_is_repaired_by_a_later_poke_if_the_first_write_was_lost(tmp_
     cli = _client(tmp_path, ladder_feat=True)
     st = dict(nar.new_state(), count=nar.FINAL, last_at=clock.t - 10 ** 6, day="day-0")
     account_prefs_mod.account_state_write(account_prefs_mod.account_state_path(tmp_path, "tester"), {"ladder": st})
-    assert "narrator_pokes" not in g.telemetry_metrics(tmp_path)
+    assert "narrator_pokes" not in telemetry_mod.telemetry_metrics(tmp_path)
     _poke(cli)
-    assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == nar.FINAL
+    assert telemetry_mod.telemetry_metrics(tmp_path)["narrator_pokes"] == nar.FINAL
 
 
 # ---- the sealed pack's lines never reach public source ---------------------------------------

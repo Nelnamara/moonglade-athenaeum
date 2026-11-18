@@ -21,6 +21,7 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import STARFALL_EVENT, ach_event, login_client
+from moonglade import telemetry as telemetry_mod
 
 
 def _row(**kw):
@@ -266,7 +267,7 @@ def test_sweep_never_adopts_a_tombstoned_marks_file(tmp_path):
     assert (mdir / "mark_12.png").exists()          # not eaten
     data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
     assert [m["id"] for m in data["marks"]] == ["mark_12"]   # nothing adopted
-    assert g.telemetry_metrics(tmp_path).get("branding_custom_file", 0) == 0
+    assert telemetry_mod.telemetry_metrics(tmp_path).get("branding_custom_file", 0) == 0
 
 
 def test_mark_74_tombstoned_not_adopted_on_upgrade(tmp_path):
@@ -281,7 +282,7 @@ def test_mark_74_tombstoned_not_adopted_on_upgrade(tmp_path):
     Image.new("RGBA", (8, 8), (1, 2, 3, 255)).save(mdir / "mark_74.png")
     assert g.sweep_branding_drops(tmp_path) is False       # not adopted
     assert (mdir / "mark_74.png").exists()                 # not eaten
-    assert g.telemetry_metrics(tmp_path).get("branding_custom_file", 0) == 0  # feat NOT fired
+    assert telemetry_mod.telemetry_metrics(tmp_path).get("branding_custom_file", 0) == 0  # feat NOT fired
     # and it never shows in the picker even if a loose manifest carries it
     _cut_marks(tmp_path, ["mark_4", "mark_74"])
     d = cli.get("/api/branding").get_json()

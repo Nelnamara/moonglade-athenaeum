@@ -49,6 +49,7 @@ from moonglade import pixai_client as _pixai_client
 from moonglade import scan as _scan
 from moonglade import series as _series
 from moonglade import settings as _settings
+from moonglade import telemetry as _telemetry
 from moonglade import updater as _updater
 
 try:
@@ -3805,9 +3806,9 @@ def _earned_achievement_ids(out_dir, db_path, need=None):
         if now - _earned_ids_cache["t"] < 5.0 and (need is None or need in ids):
             return ids
     metrics = achievement_metrics(db_path)
-    metrics.update(telemetry_metrics(out_dir))
+    metrics.update(_telemetry.telemetry_metrics(out_dir))
     result = compute_achievements(metrics, (),
-                                  sets=load_telemetry(out_dir).get("sets", {}),
+                                  sets=_telemetry.load_telemetry(out_dir).get("sets", {}),
                                   earned_at=load_ach_state(out_dir).get("earned_at"))
     ids = frozenset(a["id"] for a in result["achievements"] if a["earned"])
     with _earned_ids_lock:
@@ -4505,10 +4506,10 @@ def _mark_earned(out_dir, db_path, ach_id):
     shows unlocked. Pure read (no save_ach_state call), so unlike that route it
     needs no lock -- nothing here can race a concurrent write."""
     metrics = achievement_metrics(db_path)
-    metrics.update(telemetry_metrics(out_dir))
+    metrics.update(_telemetry.telemetry_metrics(out_dir))
     state = load_ach_state(out_dir)
     result = compute_achievements(metrics, state.get("seen"),
-                                   sets=load_telemetry(out_dir).get("sets", {}),
+                                   sets=_telemetry.load_telemetry(out_dir).get("sets", {}),
                                    earned_at=state.get("earned_at"))
     return any(a["id"] == ach_id and a["earned"] for a in result["achievements"])
 
@@ -5397,7 +5398,7 @@ def _branding_baseline(out_dir, telem=None):
     record for a tree that held nothing when the snapshot was taken (a fresh
     install), and it is exactly what makes the first later drop count; None means
     nobody has looked yet, and the next look records rather than judges."""
-    d = load_telemetry(out_dir) if telem is None else telem
+    d = _telemetry.load_telemetry(out_dir) if telem is None else telem
     base = (d.get("baselines") or {}).get(_baseline_key())
     return base if isinstance(base, dict) else None
 
@@ -5432,7 +5433,7 @@ def _record_branding_baseline(out_dir):
 
     def _store(d):
         d.setdefault("baselines", {})[_baseline_key()] = snap
-    _telem_mutate(out_dir, _store)
+    _telemetry._telem_mutate(out_dir, _store)
     return snap
 
 
@@ -5460,7 +5461,7 @@ def _baseline_note_app_write(out_dir, rel):
         cur = d.setdefault("baselines", {}).get(_baseline_key())
         if isinstance(cur, dict):
             cur[rel] = fp
-    _telem_mutate(out_dir, _note)
+    _telemetry._telem_mutate(out_dir, _note)
 
 
 def _branding_tree_has_new_art(out_dir):
@@ -6132,7 +6133,7 @@ def sweep_branding_drops(out_dir, telem=None):
     Returns True if anything was ADOPTED this call -- the flag can fire off the
     scan without that being true."""
     def _raise_flag():
-        telem_flag("branding_custom_file", out_dir=out_dir)
+        _telemetry.telem_flag("branding_custom_file", out_dir=out_dir)
         if isinstance(telem, dict) and isinstance(telem.get("flags"), dict):
             telem["flags"]["branding_custom_file"] = 1
 
@@ -6211,7 +6212,7 @@ def sweep_branding_drops(out_dir, telem=None):
         _raise_flag()
     else:
         try:
-            d = load_telemetry(out_dir) if telem is None else telem
+            d = _telemetry.load_telemetry(out_dir) if telem is None else telem
             already = (d["flags"] or {}).get("branding_custom_file")
         except Exception:                  # noqa: BLE001 -- a broken read must not hide a real drop
             already = False
@@ -6621,7 +6622,7 @@ def achievement_metrics(db_path, use_cache=True):
                 "AND source IN ('api','local') AND COALESCE(task_id,'') != ''")
             # Seven Candles (gen_streak): the best run of consecutive LOCAL days with an in-app
             # generation, from PixAI's own timestamps on the rows rather than a day ledger.
-            m["gen_streak"] = _best_day_streak([
+            m["gen_streak"] = _telemetry._best_day_streak([
                 d for (d,) in con.execute(
                     "SELECT DISTINCT date(created_at, 'localtime') FROM catalog "
                     "WHERE source IN ('api','local') AND COALESCE(created_at,'') != ''")
@@ -7069,540 +7070,6 @@ def _badge_anim(aid):
     return raw
 
 
-# ---------------------------------------------------------------------------
-# Telemetry: the persisted counters behind every achievement metric that is NOT
-# a cheap catalog COUNT (edits run, pieces culled, distinct days, feat events...).
-# One JSON file beside achievements.json; every write is lock-guarded and
-# fail-soft so a telemetry hiccup can NEVER break a backup, a gen, or a page.
-# Call sites bump via telem_*(); out_dir defaults to the process-wide value set
-# once by create_app()/the CLI so deep call sites need no plumbing.
-# ---------------------------------------------------------------------------
-_TELEM_LOCK = threading.Lock()
-_TELEM_OUT = None            # set by set_telemetry_out(); None -> bare bumps no-op
-
-
-def _telemetry_path(out_dir):
-    return _paths.records_path(out_dir, "telemetry.json")
-
-
-def set_telemetry_out(out_dir):
-    """Point the bare telem_* helpers at this install's out_dir (server + CLI)."""
-    global _TELEM_OUT
-    _TELEM_OUT = out_dir
-
-
-_TELEM_EMPTY = {"counters": {}, "maxima": {}, "sets": {}, "flags": {}, "days": [],
-                "day_lists": {}, "baselines": {}, "contest_results": {}}
-# `baselines` is the ONE section telemetry_metrics() deliberately ignores: it is
-# not a metric, it is remembered STATE -- a snapshot of what was already on disk
-# the first time a detector looked, so a later comparison can tell "this was
-# always here" from "this is new". Today the only detector using it is the coded
-# branding tree's, and its keys are _BASELINE_GOODS plus the identity of the app
-# folder whose tree was snapshotted (_baseline_key): this file lives in the
-# LIBRARY, the tree does not, so one library can legitimately hold one snapshot
-# per app folder it has been pointed at. A dict of named snapshots rather than a
-# bare map, so a second detector can never have to rename the first one's key.
-#
-# `contest_results` is the other structured section (L3, moonglade/contest_wins.py): the
-# VERIFIED contest wins ({"wins": {contest_id: {artwork_id: record}}}) and the schedule of the
-# automatic win check ({"checks": {contest_id: row}}). The contest-win metric counts `wins`
-# and nothing else; the flat `contest_win_keys` set an older sweep wrote is left in place,
-# untouched, as the record that a contest was once believed won.
-
-
-def load_telemetry(out_dir):
-    """The persisted counter bundle. Missing/corrupt file -> empty defaults."""
-    try:
-        d = json.loads(_telemetry_path(out_dir).read_text(encoding="utf-8"))
-        if not isinstance(d, dict):
-            raise ValueError("not a dict")
-    except (OSError, ValueError):
-        d = {}
-    out = {}
-    for k, dflt in _TELEM_EMPTY.items():
-        v = d.get(k)
-        if isinstance(v, type(dflt)):
-            out[k] = v
-        else:
-            out[k] = dict(dflt) if isinstance(dflt, dict) else list(dflt)
-    return out
-
-
-def _save_telemetry(out_dir, data):
-    """Atomic write (tmp + os.replace, the same idiom as download's .part) so a
-    reader can never see a half-written file -- a torn read would fail-soft to
-    empty defaults and the next mutate would persist that wipe."""
-    try:
-        p = _telemetry_path(out_dir)
-        tmp = p.with_name(p.name + ".tmp-%d" % os.getpid())
-        tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
-        os.replace(tmp, p)
-    except OSError:
-        pass
-
-
-def _telem_file_lock(out_dir):
-    """Best-effort CROSS-PROCESS lock (the server + a Panel CLI job can both bump
-    the same ledger). O_EXCL lockfile, short spin, stale takeover; on timeout we
-    proceed anyway -- a rarely-lost bump beats a blocked backup. Returns the lock
-    path if acquired (caller unlinks), else None."""
-    return _excl_lockfile(_telemetry_path(out_dir).with_suffix(".lock"))
-
-
-def _excl_lockfile(lock, wait_s=2.0, stale_s=10.0):
-    """The O_EXCL lockfile behind _telem_file_lock, shared with the per-account prefs
-    store: create `lock` exclusively, spinning up to `wait_s`; a lock older than
-    `stale_s` is a crashed writer's and is taken over. Returns the lock path if
-    acquired (the caller unlinks it), else None -- what a None MEANS is the caller's
-    call: telemetry proceeds anyway, the prefs store refuses the write."""
-    import time as _t
-    deadline = _t.monotonic() + wait_s
-    while True:
-        try:
-            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.close(fd)
-            return lock
-        except FileExistsError:
-            try:                       # a crashed writer's lock goes stale fast
-                if _t.time() - lock.stat().st_mtime > stale_s:
-                    lock.unlink()
-                    continue
-            except OSError:
-                pass
-            if _t.monotonic() > deadline:
-                return None
-            _t.sleep(0.02)
-        except OSError:
-            return None
-
-
-def _telem_mutate(out_dir, fn):
-    """Load-mutate-save under both locks (thread + process). fn(data) edits in
-    place. Fail-soft: telemetry must never break a backup, a gen, or a page."""
-    out_dir = out_dir if out_dir is not None else _TELEM_OUT
-    if out_dir is None:
-        return
-    try:
-        with _TELEM_LOCK:
-            lock = _telem_file_lock(out_dir)
-            try:
-                d = load_telemetry(out_dir)
-                fn(d)
-                _save_telemetry(out_dir, d)
-            finally:
-                if lock is not None:
-                    try:
-                        lock.unlink()
-                    except OSError:
-                        pass
-    except Exception:
-        pass
-
-
-def telem_bump(key, n=1, out_dir=None):
-    """counters[key] += n (e.g. 'edits', 'culled', 'uploads', 'narrator_pokes')."""
-    _telem_mutate(out_dir, lambda d: d["counters"].__setitem__(
-        key, int(d["counters"].get(key, 0) or 0) + int(n)))
-
-
-def telem_max(key, value, out_dir=None):
-    """maxima[key] = max(old, value) (e.g. 'lora_stacked')."""
-    _telem_mutate(out_dir, lambda d: d["maxima"].__setitem__(
-        key, max(int(d["maxima"].get(key, 0) or 0), int(value))))
-
-
-def telem_set_discard(key, value, out_dir=None):
-    """sets[key] -= {value}. Returns True when something was actually removed.
-
-    These sets are GROW-ONLY by design -- they are the ladder's memory, and a metric that
-    can fall is a metric that can un-earn an achievement. This exists for the one case
-    that is not a retraction but a CORRECTION: a key written under an identity the app has
-    since learned was wrong, where the true key is being written in the same breath. The
-    count does not fall; a duplicate of something already counted stops being counted
-    twice. Every caller must be able to prove the two keys are the same thing, and the
-    removal is logged."""
-    removed = {"n": 0}
-
-    def _discard(d):
-        cur = d["sets"].get(key)
-        if not isinstance(cur, list):
-            return
-        v = str(value)
-        if v in cur:
-            cur.remove(v)
-            removed["n"] = 1
-        d["sets"][key] = cur
-    _telem_mutate(out_dir, _discard)
-    if removed["n"]:
-        import logging as _logging
-        _logging.getLogger(__name__).info(
-            "telemetry: discarded one superseded %s key", key)
-    return bool(removed["n"])
-
-
-def telem_set_add(key, value, out_dir=None):
-    """sets[key] |= {value} (e.g. 'video_modes', 'tools', 'loras')."""
-    def _add(d):
-        cur = d["sets"].get(key)
-        if not isinstance(cur, list):
-            cur = []
-        v = str(value)
-        if v and v not in cur:
-            cur.append(v)
-        d["sets"][key] = cur
-    _telem_mutate(out_dir, _add)
-
-
-def telem_set_add_many(key, values, out_dir=None):
-    """sets[key] |= set(values), in ONE write. Returns how many were new. A caller with a
-    batch (a Runs read, a bulk delete) must not rewrite the store once per member, and a
-    batch with nothing new does not write at all."""
-    vals = [str(v) for v in (values or []) if str(v)]
-    if not vals:
-        return 0
-    target = out_dir if out_dir is not None else _TELEM_OUT
-    if target is None:
-        return 0
-    have = load_telemetry(target)["sets"].get(key)
-    have = set(have) if isinstance(have, list) else set()
-    if not (set(vals) - have):
-        return 0
-    added = {"n": 0}
-
-    def _add(d):
-        cur = d["sets"].get(key)
-        if not isinstance(cur, list):
-            cur = []
-        seen = set(cur)
-        for v in vals:
-            if v not in seen:
-                cur.append(v)
-                seen.add(v)
-                added["n"] += 1
-        d["sets"][key] = cur
-    _telem_mutate(out_dir, _add)
-    return added["n"]
-
-
-def telem_flag(key, out_dir=None):
-    """flags[key] = 1, once (e.g. 'konami_triggered'). Idempotent."""
-    _telem_mutate(out_dir, lambda d: d["flags"].__setitem__(key, 1))
-
-
-def telem_mark_day(out_dir=None, keys=None):
-    """Record today (idempotent) in the distinct-days ledger. `keys=None` marks the legacy
-    flat `days` list -- byte-identical to before (The Vigil / days_used). Otherwise mark today
-    under each named per-key list in `day_lists` (e.g. gen_days / curation_days / active_days),
-    for the streak + long-watch metrics. A given key records a day at most once."""
-    import datetime as _dt
-    today = _dt.date.today().isoformat()
-
-    def _mark(d):
-        if keys is None:
-            if today not in d["days"]:
-                d["days"].append(today)
-            return
-        dl = d.setdefault("day_lists", {})
-        if not isinstance(dl, dict):
-            dl = {}
-            d["day_lists"] = dl
-        for k in keys:
-            lst = dl.get(k)
-            if not isinstance(lst, list):
-                lst = []
-            if today not in lst:
-                lst.append(today)
-            dl[k] = lst
-    _telem_mutate(out_dir, _mark)
-
-
-def _best_day_streak(days):
-    """Best-ever run of consecutive calendar days in an ISO-date list. A later gap never
-    un-earns an already-reached streak (the metric is a high-water mark, like the maxima).
-    A malformed/empty list -> 0; unparseable dates are skipped."""
-    import datetime as _dt
-    dates = set()
-    for s in (days or []):
-        try:
-            dates.add(_dt.date.fromisoformat(str(s)))
-        except (TypeError, ValueError):
-            continue
-    if not dates:
-        return 0
-    one = _dt.timedelta(days=1)
-    best = 0
-    for d in dates:
-        if (d - one) in dates:
-            continue                       # not a run start
-        run, cur = 1, d
-        while (cur + one) in dates:
-            cur += one
-            run += 1
-        if run > best:
-            best = run
-    return best
-
-
-def vigil_status(days, today=None):
-    """The Vigil chip's numbers (Folio for completionists, O5): {"day": int, "best": int}.
-
-    `days` is the ISO-date list of days that had at least one generation collected (the
-    `gen_days` ledger, marked by the server's LOCAL date, date.today(); Seven Candles read it
-    too until 2026-10-02 and counts the catalog's in-app rows now).
-
-    `day` is the run of consecutive generation days that ends today -- or ends yesterday when
-    today has none YET, because a day that has not finished is not a missed one. A run that
-    ended before yesterday is over: the chip starts again at day 1. It is never 0 and never
-    says a word about a miss; there is no message, no toast and no state to explain, only a
-    smaller number. `best` is the longest run ever recorded, and is never below `day`.
-
-    A malformed list, a date in the future or an unparseable entry is skipped, never raised."""
-    import datetime as _dt
-    if today is None:
-        today = _dt.date.today()
-    elif isinstance(today, str):
-        today = _dt.date.fromisoformat(today)
-    dates = set()
-    for s in (days or []):
-        try:
-            d = _dt.date.fromisoformat(str(s))
-        except (TypeError, ValueError):
-            continue
-        if d <= today:
-            dates.add(d)
-    one = _dt.timedelta(days=1)
-    anchor = today if today in dates else (today - one if (today - one) in dates else None)
-    run = 0
-    if anchor is not None:
-        cur = anchor
-        while cur in dates:
-            run += 1
-            cur -= one
-    day = max(1, run)
-    return {"day": day, "best": max(day, _best_day_streak([d.isoformat() for d in dates]))}
-
-
-def telemetry_metrics(out_dir, telem=None):
-    """Flatten the telemetry store into the achievement metric namespace.
-    Counters/maxima pass through, sets become cardinalities, flags become 0/1.
-
-    `telem` lets a caller that has ALREADY loaded the store hand it in rather than
-    making this parse the file again. /api/achievements needed the store three times
-    over (here, in first_sync_complete, and for compute's `sets`) and was reading and
-    JSON-parsing it three times per request; it now loads once and passes it through.
-    Absent, the behaviour is exactly as before."""
-    d = load_telemetry(out_dir) if telem is None else telem
-    m = {}
-    for src in (d["counters"], d["maxima"]):
-        for k, v in src.items():
-            try:
-                m[k] = int(v or 0)
-            except (TypeError, ValueError):
-                m[k] = 0
-    # Counted from the catalog now (achievement_metrics), and the merge everywhere is
-    # catalog-then-telemetry: an old or hand-edited counter of the same name would win it,
-    # so these names never come out of the store (owner 2026-10-02, evidence-based counts).
-    for k in CATALOG_EVIDENCE_METRICS:
-        m.pop(k, None)
-    sets = d["sets"]
-
-    def _card(key):                 # hostile-but-valid JSON must not len()-crash
-        v = sets.get(key)
-        return len(v) if isinstance(v, list) else 0
-    m["video_modes_used"] = _card("video_modes")
-    m["tools_used"] = _card("tools")
-    m["enhance_workflows_distinct"] = _card("enhance_workflows")
-    # The Academy (loras_trained): training runs PIXAI reports as finished, recorded by id
-    # when Runs is listed (api_train_runs) -- not accepted submits, so a failed run, its
-    # retry and a replayed request add nothing. The old submit counter is not read.
-    m["loras_trained"] = _card("trained_runs")
-    # The Great Sweep (culled): the count kept before 2026-10-02 (no longer written) plus
-    # each picture removed since, ONCE -- keyed by what was removed, so deleting, restoring
-    # and deleting the same picture again is one.
-    m["culled"] = int(m.get("culled", 0) or 0) + _card("culled_keys")
-    # Folio expansion set-cardinalities (count only -- the underlying scene ids / preset
-    # names never leave the store).
-    m["scenes_used"] = _card("scenes")                        # Doorwarden
-    m["bridge_gens"] = _card("bridge_gen_tasks")              # Speak, Friend: distinct bridge tasks (re-poll-safe)
-    # Contests. ONE dedupe set per metric is the whole rule: the publish-time hook, the
-    # explicit entry route and the detection poll all write the SAME keys, so the same
-    # image in the same contest can never count twice no matter which path saw it, an
-    # entry made off-app still lands, and a failed submit writes nothing. Values are
-    # "{contest_id}:{artwork_id}" / "{contest_id}" and never leave the store -- only the
-    # count does. Deliberately NOT also counters: the assignment below would shadow a
-    # same-named counter, and one source of truth is the point.
-    m["contest_entries"] = _card("contest_entry_keys")
-    # VERIFIED wins only (L3). `contest_win_keys` is what the old sweep wrote when a winners
-    # row merely carried this account's authorId: no artwork id, no tier, no receipt. That set
-    # is kept on disk but no longer counted; a win counts once a check has matched the entry's
-    # artwork id to a row with an integer rank (moonglade.contest_wins.verify).
-    _cres = d.get("contest_results")
-    m["contest_wins"] = contest_wins.verified_count(
-        _cres.get("wins") if isinstance(_cres, dict) else None)
-    # Blades of Gondolin (enhance_tools_complete): mastery of all SIX gen-drawer enhance tools.
-    # The five non-emotion presets each count once used; Change Emotion counts only when EVERY
-    # emotion in the universe has been used. The preset keys and the emotion-universe size come
-    # from core -- never hardcoded -- and ONLY the computed count is exposed (the underlying tool
-    # keys and emotion keys never leave the store). Silent-soft: an absent/bad core resolves to 0.
-    try:
-        from moonglade import backup as _core
-        _non_emotion = set()
-        for pp in getattr(_core, "BRIDGE_ENHANCE_PRESETS", ()):
-            _k = str(pp.get("key") or "").strip()
-            if _k and _k != "emotion":
-                _non_emotion.add(_k)
-        _tools = sets.get("enhance_tools")
-        _tools = set(_tools) if isinstance(_tools, list) else set()
-        _universe = len(getattr(_core, "ENHANCE_EMOTION_PROMPTS", ()) or ())
-        _emotion_done = _universe > 0 and _card("enhance_emotions") >= _universe
-        m["enhance_tools_complete"] = len(_tools & _non_emotion) + (1 if _emotion_done else 0)
-    except Exception:
-        m["enhance_tools_complete"] = 0
-    for k, v in d["flags"].items():
-        m[k] = 1 if v else 0
-    m["days_used"] = len(d["days"])
-    # Keyed day-lists -> the streak + long-watch metrics. Each per-key list is validated
-    # here (a hostile file could store a non-list) before it is measured.
-    dl = d.get("day_lists") if isinstance(d.get("day_lists"), dict) else {}
-
-    def _days(key):
-        v = dl.get(key)
-        return v if isinstance(v, list) else []
-    # (gen_streak is the catalog's now -- achievement_metrics; the gen_days ledger still
-    # feeds the Vigil chip.)
-    m["curation_streak"] = _best_day_streak(_days("curation_days"))    # Lamplighter
-    m["distinct_active_days"] = len(set(_days("active_days")))         # Long Vigil / Unbroken Watch
-    return m
-
-
-# Metrics achievement_metrics() counts from the catalog that used to be telemetry counters.
-# telemetry_metrics() drops these names, so an old counter cannot shadow the catalog's count.
-CATALOG_EVIDENCE_METRICS = ("edits", "lora_used", "lora_stacked", "lora_distinct", "gen_streak")
-
-
-# ---- the `session_hour` flag: a NEW generation made in its window ----------------------
-# Owner, 2026-10-02: the honor on this metric is earned by a NEW in-app generation actually
-# MADE in its local hour window -- never by opening a page then (what /api/achievements used
-# to check), and never retroactively by a generation made before this rule. So the flag is
-# stamped at the one moment a generation is new: when this server collects it into the
-# catalog (_collect_single_flight), and only when PixAI's own timestamp on the row
-# (created_at, UTC) is in the window AND recent. "Recent" is what makes it new: collecting or
-# importing an old task that dates from the window is not evidence of anything tonight.
-SESSION_HOUR_WINDOW = (2, 4)              # local hours, [start, end)
-SESSION_HOUR_FRESH_S = 6 * 3600           # older than this when collected is not new
-_SESSION_HOUR_SKEW_S = 300                # PixAI's clock may run a little ahead of ours
-
-
-def _utc_now():
-    """The real clock, aware, in UTC -- one seam so a test can stand at any hour."""
-    import datetime as _dt
-    return _dt.datetime.now(_dt.timezone.utc)
-
-
-def session_hour_generation(created_at, now=None):
-    """True when `created_at` -- a catalog row's PixAI timestamp, ISO UTC -- is a generation
-    made inside SESSION_HOUR_WINDOW local time AND new as of `now` (aware; default the real
-    clock). Unparseable or blank -> False, never raises."""
-    import datetime as _dt
-    raw = str(created_at or "").strip()
-    if not raw:
-        return False
-    try:
-        t = _dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        if t.tzinfo is None:
-            t = t.replace(tzinfo=_dt.timezone.utc)        # the catalog stores UTC
-        age = ((now or _utc_now()) - t).total_seconds()
-        hour = t.astimezone().hour
-    except (ValueError, OverflowError, OSError, TypeError):
-        return False
-    if age < -_SESSION_HOUR_SKEW_S or age > SESSION_HOUR_FRESH_S:
-        return False
-    lo, hi = SESSION_HOUR_WINDOW
-    return lo <= hour < hi
-
-
-def stamp_session_hour(db_path, media_ids, out_dir, now=None):
-    """Set the `session_hour` flag when any of `media_ids` -- just collected -- is an in-app
-    row (source api/local) session_hour_generation() accepts. True when it stamped. Reads the
-    catalog only; fail-soft."""
-    ids = [str(x) for x in (media_ids or []) if str(x).strip()]
-    if not ids:
-        return False
-    try:
-        with catalog(db_path) as con:
-            rows = con.execute(
-                "SELECT created_at FROM catalog WHERE source IN ('api','local') "
-                "AND media_id IN (%s)" % ",".join("?" * len(ids)), ids).fetchall()
-    except sqlite3.Error:
-        return False
-    if any(session_hour_generation(r[0], now) for r in rows):
-        telem_flag("session_hour", out_dir=out_dir)
-        return True
-    return False
-
-
-def first_sync_complete(out_dir, db_path, telem=None):
-    """True once the first FULL library sync has finished -- the gate that stops the
-    achievement unlock toasts from firing mid-first-sync. `first-light` is metric
-    images>=1, so without this gate it pops the instant image #1 lands, seconds into a
-    fresh install's very first sync (and every image rung crosses the same way). While
-    this is False, /api/achievements withholds `newly` and leaves `seen` untouched, so
-    the rungs earned during the first sync fire together AFTER it completes, not during.
-
-    Set by `--sync`'s completion (telem flag 'first_sync_done') -- the CLI path AND the
-    wizard's sync job both run `--sync`, so one setter covers both. Refined 2026-09-07
-    (owner report): --sync used to set it on EVERY exit, so a first backup stopped
-    part-way plus a two-page Sync claimed a finished first sync over a mostly-empty
-    library. It is now set only once that library's walk has reached the end of history
-    (moonglade.backup.WALK_END_FLAG), so this gate says what its name says.
-
-    Backfill for PRE-EXISTING installs so they neither suppress nor spam: keyed on
-    prior achievement recognition (`seen`/`earned_at` present), NOT on images>0. An
-    images-based backfill would re-fire the bug -- during a fresh first sync the image
-    count climbs above zero, so it would flip the flag mid-sync. Any install that has
-    ever surfaced an achievement has a non-empty `seen`/`earned_at`; a fresh mid-first-
-    sync install cannot (the gate keeps `seen` empty until completion). The rare install
-    with a real library but a pristine achievement state simply resolves on its next
-    `--sync`."""
-    try:
-        d = load_telemetry(out_dir) if telem is None else telem
-        if d["flags"].get("first_sync_done"):
-            return True
-        st = load_ach_state(out_dir)
-        if st.get("seen") or st.get("earned_at"):
-            telem_flag("first_sync_done", out_dir=out_dir)
-            return True
-    except Exception:                                    # never let the gate crash the route
-        return True                                      # fail OPEN: a broken gate must not hide trophies forever
-    return False
-
-
-def sweep_telemetry(out_dir):
-    """Set the state-derived flags whose 'event' may predate the telemetry
-    layer: art in the coded branding tree that this install's baseline does not
-    account for, and the eclipse mark animation. Once set they stay set. Cheap;
-    called by the API on a once-a-day cadence.
-
-    A BACKSTOP, and it asks the same question the same way: the coded-tree check
-    here is literally _branding_tree_has_new_art(), the one detector
-    sweep_branding_drops() runs on every /api/achievements fetch. One function,
-    two callers, one answer -- an earlier arrangement had this backstop applying
-    a narrower rule of its own (a loose marks.json entry with loose art), which
-    could contradict the wide scan in both directions: it saw a registered mark
-    the scan had already accepted as a default, and it was blind to a drop
-    anywhere outside the marks folder.
-
-    Nothing is written into the tree and nothing is adopted here -- the scan is
-    read-only, and the only writes are the telemetry flags themselves."""
-    try:
-        if _branding_tree_has_new_art(out_dir):
-            telem_flag("branding_custom_file", out_dir=out_dir)
-        if load_branding(out_dir).get("anim") == "eclipse":
-            telem_flag("eclipse_anim_triggered", out_dir=out_dir)
-    except Exception:
-        pass
-
-
 # --- contest detection sweep ---------------------------------------------------------
 # The two ladder signals this app cannot see for itself: an entry made on pixai.art never
 # touches this process at all, and NOTHING local ever hears "you won" -- there is no local
@@ -7770,14 +7237,14 @@ def _contest_detection_sync(out_dir, force=False):
                     row_id = str(row.get("id") or "")
                     rid = art_id or row_id
                     if rid:
-                        telem_set_add("contest_entry_keys", "%s:%s" % (cid, rid),
+                        _telemetry.telem_set_add("contest_entry_keys", "%s:%s" % (cid, rid),
                                       out_dir=out_dir)
                     # Both ids present and different: upstream has just told us they name
                     # the same entry, so a stored key under the OLD identity is a duplicate
                     # of the one just written, not a second entry. This is the only place
                     # that can know, so this is the only place that heals it.
                     if art_id and row_id and art_id != row_id:
-                        telem_set_discard("contest_entry_keys", "%s:%s" % (cid, row_id),
+                        _telemetry.telem_set_discard("contest_entry_keys", "%s:%s" % (cid, row_id),
                                           out_dir=out_dir)
             except Exception as e:                           # one bad contest, not the sweep
                 log.warning("contest sweep: one contest failed: %s: %s", type(e).__name__,
@@ -7850,7 +7317,7 @@ def _cw_sections(d):
 
 def _cw_edit(out_dir, fn):
     """fn(wins, checks) under the telemetry lock. Fail-soft, like every telemetry write."""
-    _telem_mutate(out_dir, lambda d: fn(*_cw_sections(d)))
+    _telemetry._telem_mutate(out_dir, lambda d: fn(*_cw_sections(d)))
 
 
 def _cw_inputs(d):
@@ -7872,7 +7339,7 @@ def contest_win_due(out_dir, now=None):
     some arithmetic, so the 60-second tick can ask it every minute for nothing."""
     now = time.time() if now is None else now
     try:
-        entries, legacy, wins, checks = _cw_inputs(load_telemetry(out_dir))
+        entries, legacy, wins, checks = _cw_inputs(_telemetry.load_telemetry(out_dir))
     except Exception:                                         # noqa: BLE001
         return False
     plan = contest_wins.plan_pass(entries, legacy, wins, checks, now)
@@ -7914,7 +7381,7 @@ def contest_win_pass(out_dir, now=None, pause=None):
     out = {"ran": False, "checked": [], "recorded": 0, "errors": 0}
     clock = (lambda: now) if now is not None else time.time
     pause = _CW_PAUSE if pause is None else pause
-    entries, legacy, wins, checks = _cw_inputs(load_telemetry(out_dir))
+    entries, legacy, wins, checks = _cw_inputs(_telemetry.load_telemetry(out_dir))
     plan = contest_wins.plan_pass(entries, legacy, wins, checks, clock())
     if not (plan["seed"] or plan["legacy"] or plan["due"]):
         return out
@@ -8048,7 +7515,7 @@ def contest_win_check(out_dir, body, now=None):
             return _say(parsed["reason"])
     elif not (cid_in or slug_in):
         return _say("no_link")
-    entries, _legacy, _wins, checks = _cw_inputs(load_telemetry(out_dir))
+    entries, _legacy, _wins, checks = _cw_inputs(_telemetry.load_telemetry(out_dir))
     lazy = {"board": None}
 
     def _board():
@@ -10552,7 +10019,7 @@ def create_app(out_dir: Path):
     migrate(db_path)          # say the schema upgrade out loud at the entry point --
                               # catalog() would do it lazily anyway, and the per-process
                               # memo makes this call free for every later open
-    set_telemetry_out(out_dir)     # bare telem_* bumps land in this install's ledger
+    _telemetry.set_telemetry_out(out_dir)     # bare telem_* bumps land in this install's ledger
     backfill_batches(out_dir, db_path)
     thumb_dir = out_dir / "gallery" / "thumbs"
     thumb_dir.mkdir(parents=True, exist_ok=True)
@@ -11620,14 +11087,14 @@ def create_app(out_dir: Path):
                 # into the archive marks today. Keyed day-lists, idempotent, silent-soft --
                 # telemetry must never break a collect.
                 try:
-                    telem_mark_day(out_dir=out_dir, keys=("gen_days", "active_days"))
+                    _telemetry.telem_mark_day(out_dir=out_dir, keys=("gen_days", "active_days"))
                 except Exception:
                     pass
                 # A NEW generation is collected only here (the early return above answers
                 # for one already in the catalog), so this is where `session_hour` is
                 # earned: by PixAI's own timestamp on what was just made, never a page load.
                 try:
-                    stamp_session_hour(db_path, (got or {}).get("media_ids"), out_dir)
+                    _telemetry.stamp_session_hour(db_path, (got or {}).get("media_ids"), out_dir)
                 except Exception:
                     pass
                 # bridge_gen_tasks is NOT written here: owner ruling 2026-09-03 -- the metric
@@ -14074,7 +13541,7 @@ def create_app(out_dir: Path):
                 # strand the rest of a whole-task purge.
                 failed.append(_redact_host_paths(str(e))[:160])
         try:                                     # The Great Sweep: each removed picture once
-            telem_set_add_many("culled_keys", ["media:" + m for m in purged], out_dir=out_dir)
+            _telemetry.telem_set_add_many("culled_keys", ["media:" + m for m in purged], out_dir=out_dir)
         except Exception:                        # noqa: BLE001
             pass
         if failed:
@@ -14130,7 +13597,7 @@ def create_app(out_dir: Path):
             except OSError:
                 failed += 1
         try:              # The Great Sweep: each removed picture once (a restore + re-delete is one)
-            telem_set_add_many("culled_keys", ["media:" + m for m in purged], out_dir=out_dir)
+            _telemetry.telem_set_add_many("culled_keys", ["media:" + m for m in purged], out_dir=out_dir)
         except Exception:                                    # noqa: BLE001
             pass
         return jsonify({"ok": failed == 0, "count": len(purged), "failed": failed})
@@ -14696,7 +14163,7 @@ def create_app(out_dir: Path):
             else:
                 errors.append({"media_id": mid, "error": res.get("error", "unknown error")})
         if restored:
-            telem_bump("trash_restored", len(restored), out_dir=out_dir)
+            _telemetry.telem_bump("trash_restored", len(restored), out_dir=out_dir)
         return jsonify({"restored": restored, "errors": errors})
 
     @app.route("/api/trash/delete-forever", methods=["POST"])
@@ -14720,7 +14187,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": "no media_ids given"}), 400
         n = sum(1 for mid in media_ids
                if delete_quarantined_forever(out_dir, thumb_dir, mid))
-        telem_bump("trash_purged_forever", n, out_dir=out_dir)
+        _telemetry.telem_bump("trash_purged_forever", n, out_dir=out_dir)
         return jsonify({"deleted": n})
 
     @app.route("/api/trash/empty", methods=["POST"])
@@ -14734,7 +14201,7 @@ def create_app(out_dir: Path):
         if not body.get("confirm"):
             return jsonify({"error": "confirm required"}), 400
         n = empty_trash(out_dir, thumb_dir)
-        telem_bump("trash_purged_forever", n, out_dir=out_dir)
+        _telemetry.telem_bump("trash_purged_forever", n, out_dir=out_dir)
         return jsonify({"deleted": n})
 
     @app.route("/api/rate/<media_id>", methods=["POST"])
@@ -14749,7 +14216,7 @@ def create_app(out_dir: Path):
         # Lamplighter (curation_streak) + The Long Vigil (active_days): rating a piece --
         # including clearing it to 0 -- is curation. Keyed day-lists, idempotent, silent-soft.
         try:
-            telem_mark_day(out_dir=out_dir, keys=("curation_days", "active_days"))
+            _telemetry.telem_mark_day(out_dir=out_dir, keys=("curation_days", "active_days"))
         except Exception:
             pass
         return json.dumps({"ok": True, "rating": value}), 200, {"Content-Type": "application/json"}
@@ -14914,7 +14381,7 @@ def create_app(out_dir: Path):
         if res["changed"] and isinstance(body.get("op"), dict) and "rating" in body["op"]:
             # Rating is curation whichever door it came through (see /api/rate).
             try:
-                telem_mark_day(out_dir=out_dir, keys=("curation_days", "active_days"))
+                _telemetry.telem_mark_day(out_dir=out_dir, keys=("curation_days", "active_days"))
             except Exception:
                 pass
         return jsonify(dict(res, ok=True))
@@ -16005,7 +15472,7 @@ def create_app(out_dir: Path):
                                 "error": "The similarity index is empty, so there is nothing to "
                                          "compare against. Rebuild it from the Control Panel "
                                          "(Rebuild similar index)."}), 200
-        telem_bump("similar_uses", out_dir=out_dir)       # Kindred Spirits
+        _telemetry.telem_bump("similar_uses", out_dir=out_dir)       # Kindred Spirits
         out = []
         for mid, score in hits:
             r = get_row(db_path, mid)
@@ -16710,7 +16177,7 @@ def create_app(out_dir: Path):
                                   "error": result.get("error")})
 
         if quarantined:
-            telem_bump("duplicates_resolved", len(quarantined), out_dir=out_dir)
+            _telemetry.telem_bump("duplicates_resolved", len(quarantined), out_dir=out_dir)
         return jsonify({"quarantined": quarantined, "errors": errors,
                         "reclaimed_bytes": sum(q.get("size", 0) for q in quarantined)})
 
@@ -16742,7 +16209,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": "quarantine_path required"}), 400
         result = restore_quarantined_duplicate(out_dir, thumb_dir, db_path, quarantine_path)
         if result.get("ok"):
-            telem_bump("duplicates_undone", out_dir=out_dir)
+            _telemetry.telem_bump("duplicates_undone", out_dir=out_dir)
         return jsonify(result)
 
     @app.route("/api/account")
@@ -17104,7 +16571,7 @@ def create_app(out_dir: Path):
                 except Exception:                        # noqa: BLE001
                     pass
             if claimed:
-                telem_bump("claims", claimed, out_dir=out_dir)   # Claimant
+                _telemetry.telem_bump("claims", claimed, out_dir=out_dir)   # Claimant
                 # Terminal the moment it is written: a claim is instantaneous, so the row
                 # is born "done" rather than passing through running. Its own id keeps it
                 # out of the orphan sweep (which only chases numeric PixAI task ids) and
@@ -17310,7 +16777,7 @@ def create_app(out_dir: Path):
         receipt link), `check` says where the daily check stands for the contest, and
         `unverified_legacy` marks a contest an older sweep once believed won that no check
         has confirmed yet. No metric name and no ladder language appears in this payload."""
-        d = load_telemetry(out_dir)
+        d = _telemetry.load_telemetry(out_dir)
         sets = d.get("sets") if isinstance(d.get("sets"), dict) else {}
         raw_keys = sets.get("contest_entry_keys")
         raw_legacy = sets.get("contest_win_keys")
@@ -17441,7 +16908,7 @@ def create_app(out_dir: Path):
         # Same key shape the detection sweep writes -- one dedupe set, so entering the same
         # artwork twice still counts once.
         try:
-            telem_set_add("contest_entry_keys", "%s:%s" % (contest_id, artwork_id),
+            _telemetry.telem_set_add("contest_entry_keys", "%s:%s" % (contest_id, artwork_id),
                           out_dir=out_dir)
         except Exception:
             pass
@@ -17482,7 +16949,7 @@ def create_app(out_dir: Path):
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
-        m = telemetry_metrics(out_dir)
+        m = _telemetry.telemetry_metrics(out_dir)
         entries = int(m.get("contest_entries", 0) or 0)
         # RECENT: nothing to do, and nothing to wait for.
         if (time.time() - _contest_sync_last_ok.get("at", 0.0)) < CONTEST_SYNC_RECENT_S:
@@ -17809,7 +17276,7 @@ def create_app(out_dir: Path):
                                 # every other writer uses -- artwork id, so the set dedupes
                                 # against the sweep's own row rather than double-counting.
                                 try:
-                                    telem_set_add("contest_entry_keys",
+                                    _telemetry.telem_set_add("contest_entry_keys",
                                                   "%s:%s" % (challenge, new_art_id),
                                                   out_dir=out_dir)
                                 except Exception:
@@ -17838,7 +17305,7 @@ def create_app(out_dir: Path):
                 # Lamplighter (curation_streak) + The Long Vigil: tagging is curation.
                 # Keyed day-lists, idempotent, silent-soft.
                 try:
-                    telem_mark_day(out_dir=out_dir, keys=("curation_days", "active_days"))
+                    _telemetry.telem_mark_day(out_dir=out_dir, keys=("curation_days", "active_days"))
                 except Exception:
                     pass
             if title is not None:
@@ -18754,7 +18221,7 @@ def create_app(out_dir: Path):
         payload = {"runs": rows if not light else running, "running": running,
                    "errors": errors}
         try:
-            telem_set_add_many("trained_runs", finished, out_dir=out_dir)
+            _telemetry.telem_set_add_many("trained_runs", finished, out_dir=out_dir)
         except Exception:                               # noqa: BLE001
             pass
         _runs_cache[key] = (time.time(), payload)
@@ -19298,8 +18765,8 @@ def create_app(out_dir: Path):
             today = _dt.date.today().isoformat()
             if _telem_day["day"] != today:
                 _telem_day["day"] = today
-                telem_mark_day(out_dir=out_dir)
-                sweep_telemetry(out_dir)
+                _telemetry.telem_mark_day(out_dir=out_dir)
+                _telemetry.sweep_telemetry(out_dir)
         except Exception:
             pass
         # ONE telemetry read for the whole request. This route wanted the store three
@@ -19313,7 +18780,7 @@ def create_app(out_dir: Path):
         # reads from carries that write -- without that, a store loaded before the
         # sweep is one write stale for the remainder of the request. (A baseline the
         # sweep records is read only by the next scan, so it is not mirrored.)
-        telem = load_telemetry(out_dir)
+        telem = _telemetry.load_telemetry(out_dir)
         # Unlike sweep_telemetry above, this runs EVERY call rather than once a day:
         # a file dropped into the tree since the last fetch is picked up on the next
         # reload, not up to a day later. See sweep_branding_drops()'s own docstring.
@@ -19322,10 +18789,10 @@ def create_app(out_dir: Path):
         except Exception:
             pass
         metrics = achievement_metrics(db_path)
-        metrics.update(telemetry_metrics(out_dir, telem=telem))
+        metrics.update(_telemetry.telemetry_metrics(out_dir, telem=telem))
         # Gate the unlock toasts until the first full sync completes (see first_sync_complete):
         # first-light is images>=1, so without this it pops seconds into a fresh first sync.
-        fsd = first_sync_complete(out_dir, db_path, telem=telem)
+        fsd = _telemetry.first_sync_complete(out_dir, db_path, telem=telem)
         persist_error = None
         with _ach_lock:
             state = load_ach_state(out_dir)
@@ -19402,7 +18869,7 @@ def create_app(out_dir: Path):
         # gen_days ledger; a fresh install with no days answers day 1, best 1.
         try:
             _gd = (telem.get("day_lists") or {}).get("gen_days")
-            result["vigil"] = vigil_status(_gd if isinstance(_gd, list) else [])
+            result["vigil"] = _telemetry.vigil_status(_gd if isinstance(_gd, list) else [])
         except Exception:
             result["vigil"] = {"day": 1, "best": 1}
         result["feats_revealed"] = feats_revealed
@@ -19430,9 +18897,9 @@ def create_app(out_dir: Path):
         # recipe /api/achievements and _mark_earned() use (guarded by
         # dev/tests/test_achievements.py's gate-parity tests).
         _m = achievement_metrics(db_path)
-        _m.update(telemetry_metrics(out_dir))
+        _m.update(_telemetry.telemetry_metrics(out_dir))
         result = compute_achievements(_m,
-                                      sets=load_telemetry(out_dir).get("sets", {}),
+                                      sets=_telemetry.load_telemetry(out_dir).get("sets", {}),
                                       earned_at=load_ach_state(out_dir).get("earned_at"))
         earned = {s["id"] for s in result["skins"] if s["earned"]}
         if skin not in earned:
@@ -19450,7 +18917,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": "could not save skin (disk write failed)",
                             "skin": load_ach_state(out_dir)["skin"]}), 200
         if changed:                       # Interior Decorator: an explicit re-dress
-            telem_bump("skin_changed_runs", out_dir=out_dir)
+            _telemetry.telem_bump("skin_changed_runs", out_dir=out_dir)
         return jsonify({"skin": skin})
 
     def _ach_sid():
@@ -19580,9 +19047,9 @@ def create_app(out_dir: Path):
         if _ach_debounced(sid, ev):
             return jsonify({"ok": True, "debounced": True, "next_nonce": nxt})
         if ev == "starfall":
-            telem_flag("konami_triggered", out_dir=out_dir)
+            _telemetry.telem_flag("konami_triggered", out_dir=out_dir)
             return jsonify({"ok": True, "next_nonce": nxt})
-        telem_bump("docs_opened", out_dir=out_dir)
+        _telemetry.telem_bump("docs_opened", out_dir=out_dir)
         return jsonify({"ok": True, "next_nonce": nxt})
 
     @app.route("/api/narrator/poke", methods=["POST"])
@@ -19633,7 +19100,7 @@ def create_app(out_dir: Path):
         # The metric follows the count: only ever up, and re-asserted once the ladder is
         # done so a write that was lost once is repaired by the next poke.
         if res["counted"] or res["count"] >= _nar.FINAL:
-            telem_max("narrator_pokes", res["count"], out_dir=out_dir)
+            _telemetry.telem_max("narrator_pokes", res["count"], out_dir=out_dir)
         out = {"ok": True, "line": res["line"]}
         if res["final"]:
             final = {}
@@ -19788,9 +19255,9 @@ def create_app(out_dir: Path):
             cfg["glow_color"] = colour
         save_branding(out_dir, cfg)
         if (cfg.get("mark"), cfg.get("anim")) != _before:   # Interior Decorator: a real change only
-            telem_bump("skin_changed_runs", out_dir=out_dir)
+            _telemetry.telem_bump("skin_changed_runs", out_dir=out_dir)
         if cfg["anim"] == "eclipse":           # Eclipse: sun and moon in balance
-            telem_flag("eclipse_anim_triggered", out_dir=out_dir)
+            _telemetry.telem_flag("eclipse_anim_triggered", out_dir=out_dir)
         return jsonify(dict(_branding_tuning(cfg),
                             mark=cfg["mark"], anim=cfg["anim"]))
 
@@ -20146,7 +19613,7 @@ def create_app(out_dir: Path):
             tmp.close()
             core, session = _gen_session()
             mid = core.upload_media(session, tmp.name)
-            telem_bump("uploads", out_dir=out_dir)        # first-upload milestone
+            _telemetry.telem_bump("uploads", out_dir=out_dir)        # first-upload milestone
             return jsonify({"media_id": str(mid)})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
@@ -21476,7 +20943,7 @@ def create_app(out_dir: Path):
                 return jsonify({"error": "describe the edit"}), 400
             task_id = core.submit(gsession, req)["task_id"]
             # (edits is counted from the catalog's edit rows since 2026-10-02.)
-            telem_set_add("tools", "edit", out_dir=out_dir)
+            _telemetry.telem_set_add("tools", "edit", out_dir=out_dir)
             return jsonify({"task_id": task_id})
         except Exception as e:
             return jsonify({"error": _log_gen_failure(
@@ -21844,7 +21311,7 @@ def create_app(out_dir: Path):
             # "which boxes did we actually ask about" is half the diagnosis.
             fix_params = {"mediaId": req.media_id, "boxes": req.boxes}
             task_id = core.submit(session, req)["task_id"]
-            telem_set_add("tools", "fix", out_dir=out_dir)   # Full Toolbox
+            _telemetry.telem_set_add("tools", "fix", out_dir=out_dir)   # Full Toolbox
             return jsonify({"task_id": task_id})
         except Exception as e:
             # Fix is the ONE drawer action that always spends -- no free card ever covers a
@@ -23841,9 +23308,9 @@ __DESIGN_TOKENS__
             try:                       # Master of the Loom + Storyweaver telemetry
                 mode = str(p.get("mode") or "R2V").upper()
                 if mode in ("I2V", "FLF", "R2V"):
-                    telem_set_add("video_modes", mode.lower(), out_dir=out_dir)
+                    _telemetry.telem_set_add("video_modes", mode.lower(), out_dir=out_dir)
                 if str(p.get("origin") or "") == "loom-shot":
-                    telem_bump("storyboards", out_dir=out_dir)
+                    _telemetry.telem_bump("storyboards", out_dir=out_dir)
             except Exception:
                 pass
             _journal(state="submitted", task_id=str(task_id))
@@ -24971,7 +24438,7 @@ __DESIGN_TOKENS__
                         if j.get("status") not in _jobs._JOBS_TERMINAL
                         and (j.get("type") or "generate") == "generate"
                         and str(j.get("job_id") or "") in _confirmed)
-            telem_max("jobs_concurrent", _live, out_dir=out_dir)
+            _telemetry.telem_max("jobs_concurrent", _live, out_dir=out_dir)
         except Exception:
             pass
 
@@ -24996,15 +24463,15 @@ __DESIGN_TOKENS__
             return
         identity, emotion_key = pend
         try:
-            telem_bump("enhances", out_dir=out_dir)                        # first-enhance milestone
-            telem_set_add("tools", "enhance", out_dir=out_dir)             # Full Toolbox
-            telem_set_add("enhance_workflows", identity, out_dir=out_dir)  # Enhance Adept: distinct rituals
-            telem_set_add("bridge_gen_tasks", str(tid), out_dir=out_dir)   # Speak, Friend: any enhance is a bridge gen (distinct task, re-poll-safe)
+            _telemetry.telem_bump("enhances", out_dir=out_dir)                        # first-enhance milestone
+            _telemetry.telem_set_add("tools", "enhance", out_dir=out_dir)             # Full Toolbox
+            _telemetry.telem_set_add("enhance_workflows", identity, out_dir=out_dir)  # Enhance Adept: distinct rituals
+            _telemetry.telem_set_add("bridge_gen_tasks", str(tid), out_dir=out_dir)   # Speak, Friend: any enhance is a bridge gen (distinct task, re-poll-safe)
             key = _BRIDGE_PRESET_KEY_BY_NAME.get(identity)                 # only the six known presets map; a non-preset enhance -> nothing
             if key:
-                telem_set_add("enhance_tools", key, out_dir=out_dir)       # a gen-drawer enhance tool exercised (Blades of Gondolin)
+                _telemetry.telem_set_add("enhance_tools", key, out_dir=out_dir)       # a gen-drawer enhance tool exercised (Blades of Gondolin)
             if emotion_key:                                                # Change-Emotion carried the picked expression
-                telem_set_add("enhance_emotions", emotion_key, out_dir=out_dir)  # one of the emotion universe used
+                _telemetry.telem_set_add("enhance_emotions", emotion_key, out_dir=out_dir)  # one of the emotion universe used
         except Exception:                                                  # noqa: BLE001
             pass
 
@@ -25027,8 +24494,8 @@ __DESIGN_TOKENS__
         if not scene_id:
             return
         try:
-            telem_set_add("scenes", scene_id, out_dir=out_dir)   # Doorwarden: distinct scenes run
-            telem_set_add("bridge_gen_tasks", str(tid), out_dir=out_dir)   # Speak, Friend: a scene is a bridge gen (distinct task, re-poll-safe)
+            _telemetry.telem_set_add("scenes", scene_id, out_dir=out_dir)   # Doorwarden: distinct scenes run
+            _telemetry.telem_set_add("bridge_gen_tasks", str(tid), out_dir=out_dir)   # Speak, Friend: a scene is a bridge gen (distinct task, re-poll-safe)
         except Exception:                                        # noqa: BLE001
             pass
 

@@ -32,6 +32,7 @@ import requests
 
 from moonglade import backup as core
 from moonglade import media_tools as media_tools_mod
+from moonglade import telemetry as telemetry_mod
 
 
 @pytest.fixture()
@@ -563,7 +564,7 @@ def recovery_network(monkeypatch):
         monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: True)
         monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
         monkeypatch.setattr(gallery, "make_thumbnail", lambda *a, **k: None)
-        monkeypatch.setattr(gallery, "telem_bump",
+        monkeypatch.setattr(telemetry_mod, "telem_bump",
                             lambda name, out_dir=None: bumps.append(name))
 
         def fake_download(session, url, stem, **kw):

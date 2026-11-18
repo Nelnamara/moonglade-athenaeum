@@ -14,6 +14,7 @@ from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import STARFALL_EVENT, ach_event, ach_nonce, login_client, login_test_client, _SEALED_DONOR
 from moonglade import mirror as mirror_mod
+from moonglade import telemetry as telemetry_mod
 
 # The roster is sealed in the container (built from the private donor), not in source.
 # Gate ONLY the tests that assert sealed roster/skin/criteria CONTENT -- NOT the whole
@@ -31,18 +32,18 @@ def _row(**kw):
 # ---- the persisted store ----------------------------------------------------
 
 def test_store_roundtrip(tmp_path):
-    g.telem_bump("uploads", out_dir=tmp_path)
-    g.telem_bump("uploads", out_dir=tmp_path)
-    g.telem_bump("culled", 40, out_dir=tmp_path)          # the pre-2026-10-02 count, still read
-    g.telem_max("jobs_concurrent", 2, out_dir=tmp_path)
-    g.telem_max("jobs_concurrent", 1, out_dir=tmp_path)   # max keeps 2
-    g.telem_set_add("tools", "edit", out_dir=tmp_path)
-    g.telem_set_add("tools", "edit", out_dir=tmp_path)    # set dedupes
-    g.telem_set_add("tools", "fix", out_dir=tmp_path)
-    g.telem_flag("konami_triggered", out_dir=tmp_path)
-    g.telem_mark_day(out_dir=tmp_path)
-    g.telem_mark_day(out_dir=tmp_path)                    # same day counts once
-    m = g.telemetry_metrics(tmp_path)
+    telemetry_mod.telem_bump("uploads", out_dir=tmp_path)
+    telemetry_mod.telem_bump("uploads", out_dir=tmp_path)
+    telemetry_mod.telem_bump("culled", 40, out_dir=tmp_path)          # the pre-2026-10-02 count, still read
+    telemetry_mod.telem_max("jobs_concurrent", 2, out_dir=tmp_path)
+    telemetry_mod.telem_max("jobs_concurrent", 1, out_dir=tmp_path)   # max keeps 2
+    telemetry_mod.telem_set_add("tools", "edit", out_dir=tmp_path)
+    telemetry_mod.telem_set_add("tools", "edit", out_dir=tmp_path)    # set dedupes
+    telemetry_mod.telem_set_add("tools", "fix", out_dir=tmp_path)
+    telemetry_mod.telem_flag("konami_triggered", out_dir=tmp_path)
+    telemetry_mod.telem_mark_day(out_dir=tmp_path)
+    telemetry_mod.telem_mark_day(out_dir=tmp_path)                    # same day counts once
+    m = telemetry_mod.telemetry_metrics(tmp_path)
     assert m["uploads"] == 2 and m["culled"] == 40
     assert m["jobs_concurrent"] == 2
     assert m["tools_used"] == 2
@@ -51,23 +52,23 @@ def test_store_roundtrip(tmp_path):
 
 
 def test_store_corrupt_and_unset_fail_soft(tmp_path):
-    g._telemetry_path(tmp_path).write_text("{not json", encoding="utf-8")
-    assert g.telemetry_metrics(tmp_path)["days_used"] == 0   # never raises
-    g.telem_bump("uploads", out_dir=tmp_path)                # overwrites the wreck
-    assert g.telemetry_metrics(tmp_path)["uploads"] == 1
+    telemetry_mod._telemetry_path(tmp_path).write_text("{not json", encoding="utf-8")
+    assert telemetry_mod.telemetry_metrics(tmp_path)["days_used"] == 0   # never raises
+    telemetry_mod.telem_bump("uploads", out_dir=tmp_path)                # overwrites the wreck
+    assert telemetry_mod.telemetry_metrics(tmp_path)["uploads"] == 1
     # valid JSON with hostile inner types must not len()-crash a page
-    g._telemetry_path(tmp_path).write_text(
+    telemetry_mod._telemetry_path(tmp_path).write_text(
         json.dumps({"counters": {"uploads": "x", "culled": "x"}, "sets": {"tools": 1},
                     "flags": {}, "maxima": {}, "days": []}), encoding="utf-8")
-    m = g.telemetry_metrics(tmp_path)
+    m = telemetry_mod.telemetry_metrics(tmp_path)
     assert m["tools_used"] == 0 and m["uploads"] == 0 and m["culled"] == 0
     # bare bumps no-op (not crash) when no out_dir was ever set
-    old = g._TELEM_OUT
+    old = telemetry_mod._TELEM_OUT
     try:
-        g.set_telemetry_out(None)
-        g.telem_bump("uploads")
+        telemetry_mod.set_telemetry_out(None)
+        telemetry_mod.telem_bump("uploads")
     finally:
-        g.set_telemetry_out(old)
+        telemetry_mod.set_telemetry_out(old)
 
 
 # ---- the roster + compute post-passes ------------------------------------
@@ -161,7 +162,7 @@ def test_api_masks_hidden_feats_and_cloaks_tab(tmp_path):
     assert fl["earned"] and fl["roast"] and fl["roast_nsfw"] == ""
     assert d["unleash_available"] is False
     # the day visit was marked (The Vigil)
-    assert g.telemetry_metrics(out)["days_used"] == 1
+    assert telemetry_mod.telemetry_metrics(out)["days_used"] == 1
 
 
 @needs_donor
@@ -200,7 +201,7 @@ def test_api_masked_feats_leak_no_points(tmp_path):
 def test_earn_dates_stamped_persisted_and_no_leak(tmp_path):
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
-    g.telem_flag("first_sync_done", out_dir=out)   # past first sync -> achievements recognize
+    telemetry_mod.telem_flag("first_sync_done", out_dir=out)   # past first sync -> achievements recognize
     d = cli.get("/api/achievements?mark=1").get_json()
     assert "earned_at" in d
     earned_ids = {a["id"] for a in d["achievements"] if a["earned"]}
@@ -255,25 +256,25 @@ def test_api_ach_event_beacon(tmp_path, monkeypatch):
                                        created_at="2025-01-01T00:00:00")])
     r = ach_event(cli, STARFALL_EVENT)
     assert r.status_code == 200
-    assert g.telemetry_metrics(out)["konami_triggered"] == 1
+    assert telemetry_mod.telemetry_metrics(out)["konami_triggered"] == 1
     ach_event(cli, "docs")
-    assert g.telemetry_metrics(out)["docs_opened"] == 1
+    assert telemetry_mod.telemetry_metrics(out)["docs_opened"] == 1
     # the narrator is not a beacon event any more: a valid nonce buys it nothing, and the
     # counter its ladder feeds does not move (no second road to that count)
     r = ach_event(cli, "narrator")
     assert r.status_code == 400 and r.get_json()["error"] == "unknown event"
-    assert "narrator_pokes" not in g.telemetry_metrics(out)
+    assert "narrator_pokes" not in telemetry_mod.telemetry_metrics(out)
     # unknown events are rejected, nonce or no nonce
     assert cli.post("/api/ach-event", json={"event": "nope"}).status_code == 400
     assert ach_event(cli, "nope").status_code == 400
     # ...and so is the key-sequence event's RETIRED public name, with no alias: the beacon is
     # fail-soft, so a stale cached page's refusal costs one press, and an alias would keep the
     # old word in public source. (Derived from the flag key, which keeps its name.)
-    flags_before = dict(g.load_telemetry(out)["flags"])
+    flags_before = dict(telemetry_mod.load_telemetry(out)["flags"])
     retired = "konami_triggered"[:-len("_triggered")]
     r = ach_event(cli, retired)
     assert r.status_code == 400 and r.get_json()["error"] == "unknown event"
-    assert g.load_telemetry(out)["flags"] == flags_before
+    assert telemetry_mod.load_telemetry(out)["flags"] == flags_before
 
 
 def test_ach_nonce_route_hands_out_a_usable_one(tmp_path):
@@ -290,7 +291,7 @@ def test_ach_event_without_a_nonce_is_refused(tmp_path):
     cli = login_client(tmp_path)
     r = cli.post("/api/ach-event", json={"event": STARFALL_EVENT})
     assert r.status_code == 403 and r.get_json()["error"] == "stale page — reload"
-    assert "konami_triggered" not in g.telemetry_metrics(tmp_path)
+    assert "konami_triggered" not in telemetry_mod.telemetry_metrics(tmp_path)
 
 
 def test_ach_nonce_is_spent_once(tmp_path):
@@ -301,7 +302,7 @@ def test_ach_nonce_is_spent_once(tmp_path):
                     ).get_json()["ok"] is True
     r = cli.post("/api/ach-event", json={"event": "docs", "nonce": nonce})
     assert r.status_code == 403 and r.get_json()["error"] == "stale page — reload"
-    assert g.telemetry_metrics(tmp_path)["docs_opened"] == 1   # no counter change
+    assert telemetry_mod.telemetry_metrics(tmp_path)["docs_opened"] == 1   # no counter change
 
 
 def test_ach_nonce_expires(tmp_path):
@@ -313,7 +314,7 @@ def test_ach_nonce_expires(tmp_path):
     g._ach_nonces[nonce] = (issued - (g._ACH_NONCE_TTL_S + 1), sid)
     r = cli.post("/api/ach-event", json={"event": "docs", "nonce": nonce})
     assert r.status_code == 403 and r.get_json()["error"] == "stale page — reload"
-    assert "docs_opened" not in g.telemetry_metrics(tmp_path)
+    assert "docs_opened" not in telemetry_mod.telemetry_metrics(tmp_path)
 
 
 def test_ach_nonce_is_bound_to_its_session(tmp_path):
@@ -329,10 +330,10 @@ def test_ach_nonce_is_bound_to_its_session(tmp_path):
     nonce = ach_nonce(theirs)
     r = mine.post("/api/ach-event", json={"event": "docs", "nonce": nonce})
     assert r.status_code == 403 and r.get_json()["error"] == "stale page — reload"
-    assert "docs_opened" not in g.telemetry_metrics(tmp_path)
+    assert "docs_opened" not in telemetry_mod.telemetry_metrics(tmp_path)
     assert theirs.post("/api/ach-event", json={"event": "docs", "nonce": nonce}
                        ).get_json()["ok"] is True
-    assert g.telemetry_metrics(tmp_path)["docs_opened"] == 1
+    assert telemetry_mod.telemetry_metrics(tmp_path)["docs_opened"] == 1
 
 
 def test_ach_event_debounces_a_double_fire(tmp_path):
@@ -345,10 +346,10 @@ def test_ach_event_debounces_a_double_fire(tmp_path):
     second = cli.post("/api/ach-event",
                       json={"event": "docs", "nonce": first["next_nonce"]}).get_json()
     assert second["debounced"] is True and second["next_nonce"]
-    assert g.telemetry_metrics(tmp_path)["docs_opened"] == 1
+    assert telemetry_mod.telemetry_metrics(tmp_path)["docs_opened"] == 1
     # ...and the debounce is per (session, event): a different event is not held back.
     cli.post("/api/ach-event", json={"event": STARFALL_EVENT, "nonce": second["next_nonce"]})
-    assert g.telemetry_metrics(tmp_path)["konami_triggered"] == 1
+    assert telemetry_mod.telemetry_metrics(tmp_path)["konami_triggered"] == 1
 
 
 def test_ach_debounce_window_is_narrower_than_a_hand(tmp_path):
@@ -376,7 +377,7 @@ def test_ach_debounce_window_is_narrower_than_a_hand(tmp_path):
     d = cli.post("/api/ach-event", json={"event": "docs", "nonce": c["next_nonce"]}
                  ).get_json()
     assert d["debounced"] is True
-    assert g.telemetry_metrics(tmp_path)["docs_opened"] == 3
+    assert telemetry_mod.telemetry_metrics(tmp_path)["docs_opened"] == 3
     # A hand cannot do this; that is the whole basis of the window.
     assert g._ACH_DEBOUNCE_S <= 0.15
 
@@ -393,7 +394,7 @@ def test_ach_event_rate_limited_per_session(tmp_path, monkeypatch):
         nonce = d["next_nonce"]
     r = cli.post("/api/ach-event", json={"event": "docs", "nonce": nonce})
     assert r.status_code == 429 and r.get_json()["error"] == "slow down"
-    assert g.telemetry_metrics(tmp_path)["docs_opened"] == g._ACH_RATE_MAX - 1
+    assert telemetry_mod.telemetry_metrics(tmp_path)["docs_opened"] == g._ACH_RATE_MAX - 1
     assert cli.get("/api/ach-nonce").status_code == 429   # the top-up draws on the same budget
 
 
@@ -427,13 +428,13 @@ def test_ach_rate_limit_binds_across_a_replayed_cookie(tmp_path, monkeypatch):
         assert d.get("nonce"), "round %d refused early: %r" % (i + 1, d)
         r = c.post("/api/ach-event", json={"event": "docs", "nonce": d["nonce"]})
         assert r.status_code == 200, "round %d: %r" % (i + 1, r.get_json())
-    assert g.telemetry_metrics(tmp_path)["docs_opened"] == rounds
+    assert telemetry_mod.telemetry_metrics(tmp_path)["docs_opened"] == rounds
     # call 31 of the window, on a cookie as fresh as every other replay: still refused.
     c = replay()
     assert c.get("/api/ach-nonce").status_code == 429
     assert c.post("/api/ach-event",
                   json={"event": "docs", "nonce": "anything"}).status_code == 429
-    assert g.telemetry_metrics(tmp_path)["docs_opened"] == rounds
+    assert telemetry_mod.telemetry_metrics(tmp_path)["docs_opened"] == rounds
 
 
 @needs_donor
@@ -441,9 +442,9 @@ def test_api_skin_change_bumps_interior_decorator(tmp_path):
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
     cli.post("/api/skin", json={"skin": "nightfallen"})
-    assert g.telemetry_metrics(out)["skin_changed_runs"] == 1
+    assert telemetry_mod.telemetry_metrics(out)["skin_changed_runs"] == 1
     cli.post("/api/skin", json={"skin": "nightfallen"})   # same skin: no re-bump
-    assert g.telemetry_metrics(out)["skin_changed_runs"] == 1
+    assert telemetry_mod.telemetry_metrics(out)["skin_changed_runs"] == 1
 
 
 def test_new_sql_metrics(tmp_path):
@@ -466,11 +467,11 @@ def test_new_sql_metrics(tmp_path):
 def test_time_capsule_only_fires_on_old_insert(tmp_path):
     from moonglade import backup as core
     core._check_time_capsule("2020-01-01T00:00:00", tmp_path)
-    assert g.telemetry_metrics(tmp_path)["old_piece_backed_up"] == 1
-    g._telemetry_path(tmp_path).unlink()
+    assert telemetry_mod.telemetry_metrics(tmp_path)["old_piece_backed_up"] == 1
+    telemetry_mod._telemetry_path(tmp_path).unlink()
     core._check_time_capsule("2099-01-01T00:00:00", tmp_path)   # young: no fire
     core._check_time_capsule("", tmp_path)                       # blank: no crash
-    assert g.telemetry_metrics(tmp_path).get("old_piece_backed_up", 0) == 0
+    assert telemetry_mod.telemetry_metrics(tmp_path).get("old_piece_backed_up", 0) == 0
 
 
 # ---- per-criterion checklists (closed-universe set masteries) ----------------
@@ -505,8 +506,8 @@ def test_compute_attaches_criteria_only_with_sets():
 
 @needs_donor
 def test_api_criteria_on_set_masteries(tmp_path):
-    g.telem_set_add("tools", "edit", out_dir=tmp_path)
-    g.telem_set_add("tools", "fix", out_dir=tmp_path)
+    telemetry_mod.telem_set_add("tools", "edit", out_dir=tmp_path)
+    telemetry_mod.telem_set_add("tools", "fix", out_dir=tmp_path)
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
     d = cli.get("/api/achievements").get_json()
@@ -547,24 +548,24 @@ def test_best_day_streak_and_keyed_daylists(tmp_path):
     """The keyed day-list ledger (day_lists) + _best_day_streak feed the streak/long-watch
     metrics. telem_mark_day(keys=...) writes per-key lists WITHOUT touching the legacy flat
     `days`, and the streak is a high-water mark a later gap never un-earns."""
-    assert g._best_day_streak([]) == 0
-    assert g._best_day_streak(["2026-01-01", "2026-01-02", "2026-01-03"]) == 3
-    assert g._best_day_streak(["2026-01-01", "2026-01-03", "2026-01-04"]) == 2   # gap resets the run
-    assert g._best_day_streak(["2026-01-05", "2026-01-02", "2026-01-01"]) == 2   # order-independent
-    assert g._best_day_streak(["nonsense", "2026-01-01"]) == 1                    # bad dates skipped
+    assert telemetry_mod._best_day_streak([]) == 0
+    assert telemetry_mod._best_day_streak(["2026-01-01", "2026-01-02", "2026-01-03"]) == 3
+    assert telemetry_mod._best_day_streak(["2026-01-01", "2026-01-03", "2026-01-04"]) == 2   # gap resets the run
+    assert telemetry_mod._best_day_streak(["2026-01-05", "2026-01-02", "2026-01-01"]) == 2   # order-independent
+    assert telemetry_mod._best_day_streak(["nonsense", "2026-01-01"]) == 1                    # bad dates skipped
     # keyed mark writes only the named lists; the legacy flat ledger stays empty + idempotent
-    g.telem_mark_day(out_dir=tmp_path, keys=("gen_days", "active_days"))
-    g.telem_mark_day(out_dir=tmp_path, keys=("gen_days", "active_days"))          # same day once
-    t = g.load_telemetry(tmp_path)
+    telemetry_mod.telem_mark_day(out_dir=tmp_path, keys=("gen_days", "active_days"))
+    telemetry_mod.telem_mark_day(out_dir=tmp_path, keys=("gen_days", "active_days"))          # same day once
+    t = telemetry_mod.load_telemetry(tmp_path)
     assert len(t["day_lists"]["gen_days"]) == 1 and len(t["day_lists"]["active_days"]) == 1
     assert t["days"] == []                                                        # legacy Vigil untouched
     # a synthetic multi-day store proves the metric wiring end to end
-    g._telemetry_path(tmp_path).write_text(json.dumps({
+    telemetry_mod._telemetry_path(tmp_path).write_text(json.dumps({
         "counters": {}, "maxima": {}, "sets": {}, "flags": {}, "days": [],
         "day_lists": {"gen_days": ["2026-02-01", "2026-02-02", "2026-02-03"],
                       "curation_days": ["2026-03-01", "2026-03-03"],
                       "active_days": ["2026-02-01", "2026-02-02", "2026-03-01"]}}), encoding="utf-8")
-    m = g.telemetry_metrics(tmp_path)
+    m = telemetry_mod.telemetry_metrics(tmp_path)
     assert m["curation_streak"] == 1
     assert m["distinct_active_days"] == 3
     # gen_streak is counted from the catalog's in-app rows since 2026-10-02 (evidence, not a
@@ -601,7 +602,7 @@ def test_contest_metrics_default_to_zero(tmp_path):
     """Come on Down / Plinko / ... / Laureate: contest_entries AND contest_wins have no catalog
     or telemetry source yet, so both must default to 0 -- the flatten never invents them and
     the contest ladder + Laureate stay locked until a real signal lands."""
-    tm = g.telemetry_metrics(tmp_path)                        # fresh store
+    tm = telemetry_mod.telemetry_metrics(tmp_path)                        # fresh store
     assert tm.get("contest_entries", 0) == 0 and tm.get("contest_wins", 0) == 0
     out = g.compute_achievements({}, [])                      # no contest signal at all
     by = {a["id"]: a for a in out["achievements"]}
@@ -656,28 +657,28 @@ def test_enhance_tools_complete(tmp_path, monkeypatch):
     # nothing recorded at submit-acceptance
     r0 = cli.post("/api/enhance", json={"source": "src0", "workflow_name": presets[non_emotion[0]]})
     assert r0.status_code == 200
-    assert g.telemetry_metrics(tmp_path)["enhance_tools_complete"] == 0
+    assert telemetry_mod.telemetry_metrics(tmp_path)["enhance_tools_complete"] == 0
     cli.get("/api/task-status", query_string={"task_id": r0.get_json()["task_id"]})
-    assert g.telemetry_metrics(tmp_path)["enhance_tools_complete"] == 1   # first tool at terminal
+    assert telemetry_mod.telemetry_metrics(tmp_path)["enhance_tools_complete"] == 1   # first tool at terminal
 
     # the remaining four non-emotion tools -> 5
     for k in non_emotion[1:]:
         _run_enhance(source="src-" + k, workflow_name=presets[k])
-    assert g.telemetry_metrics(tmp_path)["enhance_tools_complete"] == 5
+    assert telemetry_mod.telemetry_metrics(tmp_path)["enhance_tools_complete"] == 5
 
     # the emotion tool with a PARTIAL emotion set stays at 5 (emotion incomplete)
     emo_wf = core.ENHANCE_EMOTION_WORKFLOW
     emo_keys = list(core.ENHANCE_EMOTION_PROMPTS.keys())
     for ek in emo_keys[:-1]:
         _run_enhance(source="src-emo", workflow_name=emo_wf, emotion=ek)
-    assert g.telemetry_metrics(tmp_path)["enhance_tools_complete"] == 5
+    assert telemetry_mod.telemetry_metrics(tmp_path)["enhance_tools_complete"] == 5
 
     # the LAST emotion completes the universe -> tips to 6
     _run_enhance(source="src-emo", workflow_name=emo_wf, emotion=emo_keys[-1])
-    assert g.telemetry_metrics(tmp_path)["enhance_tools_complete"] == 6
+    assert telemetry_mod.telemetry_metrics(tmp_path)["enhance_tools_complete"] == 6
     # a repeat emotion never pushes past 6, and the retired metric is gone
     _run_enhance(source="src-emo", workflow_name=emo_wf, emotion=emo_keys[0])
-    m = g.telemetry_metrics(tmp_path)
+    m = telemetry_mod.telemetry_metrics(tmp_path)
     assert m["enhance_tools_complete"] == 6
     assert "bridge_enhance_distinct" not in m
 
@@ -695,24 +696,24 @@ def test_scene_and_gen_daymark_hooks_fire_on_terminal_success(tmp_path, monkeypa
     cli = login_client(tmp_path)
     r = cli.post("/api/scene", json={"scene_id": "the-sun", "media_ids": ["srcABC"]})
     assert r.get_json().get("task_id") == "T-SCENE-1"
-    assert g.telemetry_metrics(tmp_path)["scenes_used"] == 0          # deferred: nothing at submit
+    assert telemetry_mod.telemetry_metrics(tmp_path)["scenes_used"] == 0          # deferred: nothing at submit
     monkeypatch.setattr(core, "generation_status",
                         lambda s, tid: {"phase": "done", "paid_credit": 0})
     monkeypatch.setattr(core, "collect_generation",
                         lambda s, tid, out, **k: {"media_ids": ["OUT1"], "saved": 1, "is_video": False})
     cli.get("/api/task-status", query_string={"task_id": "T-SCENE-1"})
-    assert g.telemetry_metrics(tmp_path)["scenes_used"] == 1
-    assert g.load_telemetry(tmp_path)["sets"]["scenes"] == ["the-sun"]
+    assert telemetry_mod.telemetry_metrics(tmp_path)["scenes_used"] == 1
+    assert telemetry_mod.load_telemetry(tmp_path)["sets"]["scenes"] == ["the-sun"]
     # a scene run IS a bridge tool -- one of the only two writers left after the
     # 2026-09-03 narrowing (the other is the enhance terminal).
-    assert g.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 1
-    tel = g.load_telemetry(tmp_path)                                   # collect choke marked today
+    assert telemetry_mod.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 1
+    tel = telemetry_mod.load_telemetry(tmp_path)                                   # collect choke marked today
     assert tel["day_lists"]["gen_days"] and tel["day_lists"]["active_days"]
     # a second poll of the same finished task must not double-count -- scenes_used is a set, and
     # bridge_gens is now a distinct-task set too (regression guard: the counter form inflated on re-poll)
     cli.get("/api/task-status", query_string={"task_id": "T-SCENE-1"})
-    assert g.telemetry_metrics(tmp_path)["scenes_used"] == 1
-    assert g.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 1   # re-poll must NOT inflate Speak-Friend
+    assert telemetry_mod.telemetry_metrics(tmp_path)["scenes_used"] == 1
+    assert telemetry_mod.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 1   # re-poll must NOT inflate Speak-Friend
 
 
 def test_a_regular_mirror_gen_is_not_a_bridge_tool(tmp_path, monkeypatch):
@@ -731,10 +732,10 @@ def test_a_regular_mirror_gen_is_not_a_bridge_tool(tmp_path, monkeypatch):
     for mirror in (False, True):
         monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda m=mirror: m)
         cli.get("/api/task-status", query_string={"task_id": "T-GEN-%s" % mirror})
-        assert g.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 0, mirror
+        assert telemetry_mod.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 0, mirror
     # ...and the collect choke still marks the day for a plain gen: narrowing ONE metric
     # must not quietly take the streaks with it.
-    tel = g.load_telemetry(tmp_path)
+    tel = telemetry_mod.load_telemetry(tmp_path)
     assert tel["day_lists"]["gen_days"] and tel["day_lists"]["active_days"]
 
 
@@ -753,11 +754,11 @@ def test_an_enhance_terminal_counts_as_a_bridge_tool(tmp_path, monkeypatch):
     r = cli.post("/api/enhance", json={"source": "src1", "workflow_name": preset})
     assert r.status_code == 200
     tid = r.get_json()["task_id"]
-    assert g.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 0   # nothing at submit
+    assert telemetry_mod.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 0   # nothing at submit
     cli.get("/api/task-status", query_string={"task_id": tid})
-    assert g.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 1
+    assert telemetry_mod.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 1
     cli.get("/api/task-status", query_string={"task_id": tid})
-    assert g.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 1   # re-poll must not inflate
+    assert telemetry_mod.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 1   # re-poll must not inflate
 
 
 def test_only_the_two_tool_terminals_write_the_bridge_set():
@@ -791,7 +792,7 @@ def test_a_train_submit_alone_counts_no_lora_trained(tmp_path, monkeypatch):
     body = {"base_model_id": "bm1", "media_ids": [str(i) for i in range(12)],
             "title": "Nel", "trigger_words": "nel druid", "category": "character",
             "confirm": True, "csrf": csrf}
-    assert g.telemetry_metrics(tmp_path).get("loras_trained", 0) == 0
+    assert telemetry_mod.telemetry_metrics(tmp_path).get("loras_trained", 0) == 0
     d = cli.post("/api/train/submit", json=body).get_json()
     assert d.get("submitted") is True
-    assert g.telemetry_metrics(tmp_path)["loras_trained"] == 0
+    assert telemetry_mod.telemetry_metrics(tmp_path)["loras_trained"] == 0

@@ -195,7 +195,7 @@ def account_prefs_update(out_dir, account, set_=None, unset=None):
 
     Raises AccountPrefsError (refused change), AccountPrefsBusy (another process held
     the lock), OSError (the file could not be read, preserved or written)."""
-    from moonglade.gallery import _excl_lockfile
+    from moonglade.telemetry import _excl_lockfile
     set_ = {} if set_ is None else set_
     unset = [] if unset is None else unset
     if not isinstance(set_, dict):
@@ -291,7 +291,7 @@ def account_state_locked(out_dir, account):
     """Hold this account's state lock (thread + process) for a read-modify-write.
     Yields the path. Raises AccountPrefsBusy when another process held the lockfile past the
     wait -- the caller refuses the request rather than risk a lost update."""
-    from moonglade.gallery import _excl_lockfile
+    from moonglade.telemetry import _excl_lockfile
     p = account_state_path(out_dir, account)
     with _ACCOUNT_STATE_LOCK:
         p.parent.mkdir(parents=True, exist_ok=True)

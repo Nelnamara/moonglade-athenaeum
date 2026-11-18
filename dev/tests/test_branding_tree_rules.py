@@ -43,6 +43,7 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_client
+from moonglade import telemetry as telemetry_mod
 
 
 def _row(**kw):
@@ -86,7 +87,7 @@ def _build_box(tmp_path, assets):
 
 
 def _flag(tmp_path):
-    return (g.load_telemetry(tmp_path).get("flags") or {}).get("branding_custom_file")
+    return (telemetry_mod.load_telemetry(tmp_path).get("flags") or {}).get("branding_custom_file")
 
 
 def _mkdir(p):
@@ -1077,23 +1078,23 @@ def test_the_daily_backstop_uses_the_same_baseline_scan(tmp_path):
     (mdir / "marks.json").write_text(json.dumps(
         {"marks": [{"id": "animated", "label": "animated", "kind": "tile"}]}),
         encoding="utf-8")
-    g.sweep_telemetry(tmp_path)                     # the baseline pass
+    telemetry_mod.sweep_telemetry(tmp_path)                     # the baseline pass
     assert not _flag(tmp_path), "a manifest entry with no art is not art"
 
     from PIL import Image
     buf = io.BytesIO()
     Image.new("RGB", (40, 40), (200, 30, 30)).save(buf, format="WEBP")
     (mdir / "animated.webp").write_bytes(buf.getvalue())
-    g.sweep_telemetry(tmp_path)
+    telemetry_mod.sweep_telemetry(tmp_path)
     assert _flag(tmp_path) == 1, "the backstop missed a .webp mark"
 
 
 def test_the_daily_backstop_sees_a_drop_outside_the_marks_folder(tmp_path):
     """The half the old narrow rule could not see at all."""
     _mkdir(g._role_dir("mascots"))
-    g.sweep_telemetry(tmp_path)                     # the baseline pass
+    telemetry_mod.sweep_telemetry(tmp_path)                     # the baseline pass
     assert not _flag(tmp_path)
 
     (g._role_dir("mascots") / "mine.png").write_bytes(_png_bytes((1, 250, 1)))
-    g.sweep_telemetry(tmp_path)
+    telemetry_mod.sweep_telemetry(tmp_path)
     assert _flag(tmp_path) == 1

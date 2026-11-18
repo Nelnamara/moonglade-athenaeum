@@ -10,6 +10,7 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_client, _SEALED_DONOR
+from moonglade import telemetry as telemetry_mod
 
 # The roster is sealed in the container (built from the private donor), not in source.
 # Gate ONLY the tests that assert sealed roster/skin CONTENT -- NOT the whole module: the
@@ -236,7 +237,7 @@ def test_the_hall_was_renamed_the_folio_of_honors():
 def test_api_achievements_marks_seen_once(tmp_path):
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
-    g.telem_flag("first_sync_done", out_dir=out)   # a normal install past its first sync;
+    telemetry_mod.telem_flag("first_sync_done", out_dir=out)   # a normal install past its first sync;
     # the first-sync gate (celebrations withheld until the first --sync finishes) has its
     # own coverage in test_first_sync_gate_* below.
     d1 = cli.get("/api/achievements").get_json()
@@ -264,7 +265,7 @@ def test_first_sync_gate_withholds_celebrations_until_complete(tmp_path):
     assert any(a["id"] == "first-light" and a["earned"] for a in d1["achievements"])  # earned still computes
     assert d1["newly"] == []                                    # but no celebration mid-first-sync
     assert not g.load_ach_state(out).get("seen")                # and nothing marked seen (not lost)
-    g.telem_flag("first_sync_done", out_dir=out)                # the first --sync completes
+    telemetry_mod.telem_flag("first_sync_done", out_dir=out)                # the first --sync completes
     d2 = cli.get("/api/achievements").get_json()
     assert "first-light" in d2["newly"]                         # now the earned rung fires
 
@@ -282,7 +283,7 @@ def test_first_sync_gate_backfills_for_preexisting_install(tmp_path):
     g.save_ach_state(out, st)
     d = cli.get("/api/achievements").get_json()
     assert d["newly"] == []                                      # already seen -> nothing new
-    assert g.load_telemetry(out)["flags"].get("first_sync_done")  # gate backfilled to done
+    assert telemetry_mod.load_telemetry(out)["flags"].get("first_sync_done")  # gate backfilled to done
 
 
 @needs_donor
@@ -379,7 +380,7 @@ def test_skin_gate_reads_telemetry_metrics_like_every_other_gate(tmp_path):
     for a in fake:
         if a["id"] == "menagerie":
             a["metric"], a["threshold"] = "uploads", 1   # telemetry counter, not catalog
-    g.telem_bump("uploads", out_dir=tmp_path)
+    telemetry_mod.telem_bump("uploads", out_dir=tmp_path)
     with mock.patch.object(g, "_roster", return_value=fake):
         r = client.post("/api/skin", json={"skin": "verdant"})
     assert r.status_code == 200, r.get_json()

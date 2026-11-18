@@ -415,8 +415,8 @@ def pin_daytime_clock(mp):
     Effects are asserted, not assumed: dev/tests/test_fixture_hermeticity.py drives the real
     route at 03:00 with and without this pin.
     """
-    real_flag = gallery.telem_flag
-    real_mark_day = gallery.telem_mark_day
+    real_flag = telemetry_mod.telem_flag
+    real_mark_day = telemetry_mod.telem_mark_day
     marked = set()
 
     def _flag_at_the_pinned_instant(key, out_dir=None):
@@ -436,8 +436,8 @@ def pin_daytime_clock(mp):
         marked.update((str(out_dir), k) for k in fresh)
         return real_mark_day(out_dir=out_dir, keys=None if keys is None else fresh)
 
-    mp.setattr(gallery, "telem_flag", _flag_at_the_pinned_instant)
-    mp.setattr(gallery, "telem_mark_day", _mark_day_at_the_pinned_instant)
+    mp.setattr(telemetry_mod, "telem_flag", _flag_at_the_pinned_instant)
+    mp.setattr(telemetry_mod, "telem_mark_day", _mark_day_at_the_pinned_instant)
 
 
 # The REAL coded goods tree, resolved at conftest IMPORT time -- earlier than any fixture
@@ -1081,6 +1081,7 @@ def _no_live_config(monkeypatch):
 
 
 from moonglade import bonjour as _bonjour_mod   # noqa: E402 -- beside the fixture that stubs it
+from moonglade import telemetry as telemetry_mod
 
 # Captured at import, before `_no_lan_probe` swaps it, for the one test that is about it.
 REAL_LAN_IP = _bonjour_mod.lan_ip

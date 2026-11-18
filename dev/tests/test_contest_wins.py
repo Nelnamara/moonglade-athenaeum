@@ -23,6 +23,7 @@ from moonglade import backup as core
 from moonglade import contest_wins as cw
 from moonglade import gallery as g
 from tests.conftest import login_client, record_own_sleeps
+from moonglade import telemetry as telemetry_mod
 
 DAY = 86400.0
 T0 = 1790000000.0                       # a result time (2026-09-21, UTC); only differences matter
@@ -69,15 +70,15 @@ def _register_board(pixai, rows):
 
 def _enter(tmp_path, *keys):
     for k in keys:
-        g.telem_set_add("contest_entry_keys", k, out_dir=tmp_path)
+        telemetry_mod.telem_set_add("contest_entry_keys", k, out_dir=tmp_path)
 
 
 def _state(tmp_path, cid):
-    return g.load_telemetry(tmp_path)["contest_results"]["checks"].get(cid)
+    return telemetry_mod.load_telemetry(tmp_path)["contest_results"]["checks"].get(cid)
 
 
 def _wins(tmp_path):
-    return g.load_telemetry(tmp_path)["contest_results"].get("wins", {})
+    return telemetry_mod.load_telemetry(tmp_path)["contest_results"].get("wins", {})
 
 
 def _assert_reads_only(pixai):
@@ -403,7 +404,7 @@ class TestTheAutomaticCheck:
         (w,) = cw.wins_for(_wins(tmp_path), "c1")
         assert (w["tier"], w["prize_amount"], w["how"]) == (2, 200000, "auto")
         assert w["receipt_url"] == "https://pixai.art/en/artwork/aw1"
-        assert g.telemetry_metrics(tmp_path)["contest_wins"] == 1
+        assert telemetry_mod.telemetry_metrics(tmp_path)["contest_wins"] == 1
         assert _state(tmp_path, "c1")["status"] == cw.SETTLED
         _assert_reads_only(pixai)
 
@@ -411,13 +412,13 @@ class TestTheAutomaticCheck:
         _setup_contest(tmp_path, pixai, [_placed("someone-else", "u-x", 1)], reward="distributed")
         out = g.contest_win_pass(tmp_path, now=T0 + 60, pause=0)
         assert out["recorded"] == 0 and _wins(tmp_path) == {}
-        assert g.telemetry_metrics(tmp_path)["contest_wins"] == 0
+        assert telemetry_mod.telemetry_metrics(tmp_path)["contest_wins"] == 0
         assert _state(tmp_path, "c1")["status"] == cw.SETTLED and _state(tmp_path, "c1")["decided"]
 
     def test_the_authors_must_be_the_accounts_even_when_the_id_and_tier_match(self, tmp_path, pixai):
         _setup_contest(tmp_path, pixai, [_placed("aw1", "another-account", 1, 500000)])
         g.contest_win_pass(tmp_path, now=T0 + 60, pause=0)
-        assert _wins(tmp_path) == {} and g.telemetry_metrics(tmp_path)["contest_wins"] == 0
+        assert _wins(tmp_path) == {} and telemetry_mod.telemetry_metrics(tmp_path)["contest_wins"] == 0
 
     def test_an_empty_list_is_undecided_and_the_next_check_is_a_day_away(self, tmp_path, pixai):
         _setup_contest(tmp_path, pixai, [], reward="")
@@ -440,10 +441,10 @@ class TestTheAutomaticCheck:
     def test_a_win_that_lands_on_a_later_day_is_caught(self, tmp_path, pixai):
         _setup_contest(tmp_path, pixai, [])
         g.contest_win_pass(tmp_path, now=T0 + 10, pause=0)
-        assert g.telemetry_metrics(tmp_path)["contest_wins"] == 0
+        assert telemetry_mod.telemetry_metrics(tmp_path)["contest_wins"] == 0
         pixai.on("/contest/s1/winners", [_placed("aw1", "u-test", 3, 100000)])
         g.contest_win_pass(tmp_path, now=T0 + 10 + DAY, pause=0)
-        assert g.telemetry_metrics(tmp_path)["contest_wins"] == 1
+        assert telemetry_mod.telemetry_metrics(tmp_path)["contest_wins"] == 1
 
     def test_rewardstatus_distributed_stops_the_schedule_early(self, tmp_path, pixai):
         _setup_contest(tmp_path, pixai, [_placed("aw1", "u-test", 1, 5)], reward="")
@@ -493,7 +494,7 @@ class TestTheAutomaticCheck:
         assert out["errors"] == 1 and out["checked"] == ["c2"], "one bad contest, not the pass"
         assert len(_winners_calls(pixai, "s1")) == 1, "no retry loop"
         assert _state(tmp_path, "c1")["next_at"] == T0 + 5 + 3600
-        assert g.telemetry_metrics(tmp_path)["contest_wins"] == 1
+        assert telemetry_mod.telemetry_metrics(tmp_path)["contest_wins"] == 1
         g.contest_win_pass(tmp_path, now=T0 + 5 + 60, pause=0)
         assert len(_winners_calls(pixai, "s1")) == 1, "not due for an hour"
 
@@ -514,7 +515,7 @@ class TestTheAutomaticCheck:
         _setup_contest(tmp_path, pixai, ["junk", None, 7, {"id": "aw1", "authorId": "u-test",
                                                             "entry": "nope"}])
         g.contest_win_pass(tmp_path, now=T0 + 5, pause=0)
-        assert g.telemetry_metrics(tmp_path)["contest_wins"] == 0
+        assert telemetry_mod.telemetry_metrics(tmp_path)["contest_wins"] == 0
 
     def test_it_never_writes_to_pixai_and_the_pass_source_has_no_write_verb(self):
         src = inspect.getsource(g.contest_win_pass) + inspect.getsource(g.contest_win_check)
@@ -528,20 +529,20 @@ class TestTheAutomaticCheck:
 class TestAlreadyRecordedWins:
     def _legacy(self, tmp_path, *cids):
         for c in cids:
-            g.telem_set_add("contest_win_keys", c, out_dir=tmp_path)
+            telemetry_mod.telem_set_add("contest_win_keys", c, out_dir=tmp_path)
 
     def test_they_stay_recorded_but_do_not_count_until_verified(self, tmp_path):
         self._legacy(tmp_path, "c1", "c2")
-        assert g.telemetry_metrics(tmp_path)["contest_wins"] == 0
-        assert g.load_telemetry(tmp_path)["sets"]["contest_win_keys"] == ["c1", "c2"], "kept"
+        assert telemetry_mod.telemetry_metrics(tmp_path)["contest_wins"] == 0
+        assert telemetry_mod.load_telemetry(tmp_path)["sets"]["contest_win_keys"] == ["c1", "c2"], "kept"
 
     def test_a_check_verifies_one_after_the_fact_and_it_then_counts(self, tmp_path, pixai):
         self._legacy(tmp_path, "c1")
         _setup_contest(tmp_path, pixai, [_placed("aw1", "u-test", 2, 200000)],
                        result_ts=T0 - 40 * DAY)            # long past the 14 days: still re-checked once
         g.contest_win_pass(tmp_path, now=T0, pause=0)
-        assert g.telemetry_metrics(tmp_path)["contest_wins"] == 1
-        assert g.load_telemetry(tmp_path)["sets"]["contest_win_keys"] == ["c1"], "still kept"
+        assert telemetry_mod.telemetry_metrics(tmp_path)["contest_wins"] == 1
+        assert telemetry_mod.load_telemetry(tmp_path)["sets"]["contest_win_keys"] == ["c1"], "still kept"
         assert _state(tmp_path, "c1")["legacy"] is True
 
     def test_one_the_list_does_not_confirm_stays_unverified(self, tmp_path, pixai):
@@ -549,7 +550,7 @@ class TestAlreadyRecordedWins:
         _setup_contest(tmp_path, pixai, [_placed("someone-else", "u-x", 1)],
                        result_ts=T0 - 40 * DAY)
         g.contest_win_pass(tmp_path, now=T0, pause=0)
-        assert g.telemetry_metrics(tmp_path)["contest_wins"] == 0
+        assert telemetry_mod.telemetry_metrics(tmp_path)["contest_wins"] == 0
         cli = login_client(tmp_path)
         row = cli.get("/api/contest/mine").get_json()["contests"][0]
         assert row["won"] is False and row["unverified_legacy"] is True
@@ -568,17 +569,17 @@ class TestAlreadyRecordedWins:
         _register_board(pixai, [_board_row("c1", "s1", T0 - 40 * DAY)])
         pixai.on("/contest/s1/winners", [_placed("aw1", "u-test", 1, 5)])
         g.contest_win_pass(tmp_path, now=T0, pause=0)
-        assert g.telemetry_metrics(tmp_path)["contest_wins"] == 1
+        assert telemetry_mod.telemetry_metrics(tmp_path)["contest_wins"] == 1
 
     def test_an_already_verified_win_is_untouched_by_the_legacy_set(self, tmp_path, pixai):
         g._cw_edit(tmp_path, lambda w, ch: cw.record_win(
             w, "c1", {"artwork_id": "aw1", "tier": 1, "prize": 1}, "auto", T0))
         self._legacy(tmp_path, "c1")
         _setup_contest(tmp_path, pixai, [_placed("aw1", "u-test", 1, 1)], result_ts=T0 - 40 * DAY)
-        assert g.telemetry_metrics(tmp_path)["contest_wins"] == 1
+        assert telemetry_mod.telemetry_metrics(tmp_path)["contest_wins"] == 1
         g.contest_win_pass(tmp_path, now=T0, pause=0)
         assert _winners_calls(pixai, "s1") == [], "a verified contest is not re-verified as legacy"
-        assert g.telemetry_metrics(tmp_path)["contest_wins"] == 1
+        assert telemetry_mod.telemetry_metrics(tmp_path)["contest_wins"] == 1
 
 
 # ============================================================================ the tick and the kick
@@ -657,7 +658,7 @@ class TestTheCheckButton:
         assert d["receipt_url"] == "https://pixai.art/en/artwork/2061111111111111302"
         (w,) = cw.wins_for(_wins(tmp_path), "c1")
         assert w["how"] == "check" and w["receipt_url"] == d["receipt_url"]
-        assert g.telemetry_metrics(tmp_path)["contest_wins"] == 1
+        assert telemetry_mod.telemetry_metrics(tmp_path)["contest_wins"] == 1
         assert len(_winners_calls(pixai, "s1")) == 1, "one GET"
         _assert_reads_only(pixai)
 
@@ -694,7 +695,7 @@ class TestTheCheckButton:
         d = _check(cli, url="pixai.art/en/artwork/2061111111111111302", contest_id="c1").get_json()
         assert d["verified"] is False and d["state"] == "not_found"
         assert "not your entry #2061…302" in d["message"] and "right contest" in d["message"]
-        assert _wins(tmp_path) == {} and g.telemetry_metrics(tmp_path)["contest_wins"] == 0
+        assert _wins(tmp_path) == {} and telemetry_mod.telemetry_metrics(tmp_path)["contest_wins"] == 0
 
     def test_an_empty_list_reads_as_not_published_yet_never_lost(self, tmp_path, pixai):
         _setup_contest(tmp_path, pixai, [], entered=("c1:9",))

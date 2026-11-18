@@ -102,11 +102,9 @@ from moonglade import backup as core
 from moonglade import jobs as jobs_mod
 from moonglade import paths as moonglade_paths
 from moonglade import updater as updater_mod
-from moonglade.gallery import (
-    CATALOG_FIELDS, create_app, load_catalog, save_catalog,
-    achievement_metrics, compute_achievements, save_ach_state,
-    telem_flag, telemetry_metrics, load_telemetry,
-)
+from moonglade.gallery import (CATALOG_FIELDS, create_app, load_catalog, save_catalog,
+                               achievement_metrics, compute_achievements, save_ach_state)
+from moonglade.telemetry import telem_flag, telemetry_metrics, load_telemetry
 
 # No playwright (or no browser) => this whole module skips. .github/workflows/tests.yml installs
 # playwright + chromium, so on CI this module runs; a checkout without them skips it cleanly.
@@ -4827,6 +4825,7 @@ def test_each_tab_keeps_its_own_scroll(
 # The feat the custom-file flag arms, found by the roster flag it carries (never an id
 # literal: pack v5 moved the hidden-feat ids out of public source). None without the donor.
 from tests.conftest import donor_feat as _donor_feat
+from moonglade import telemetry as telemetry_mod
 _UNDER_THE_HOOD = _donor_feat(unlocks="branding_tab")
 _DROP_RGB = (200, 40, 90)              # a colour nothing else in this harness paints, so a
 #                                        served pixel PROVES it came from this exact drop
@@ -4925,7 +4924,7 @@ def test_a_branding_drop_is_adopted_and_the_browser_wears_it(
 
     try:
         # --- put the feat back to genuinely-unearned, and open the celebration gate ---
-        _g._telem_mutate(root, lambda d: d["flags"].pop("branding_custom_file", None))
+        telemetry_mod._telem_mutate(root, lambda d: d["flags"].pop("branding_custom_file", None))
         telem_flag("first_sync_done", out_dir=root)
         save_ach_state(root, dict(
             ach_before,
@@ -5020,7 +5019,7 @@ def test_a_branding_drop_is_adopted_and_the_browser_wears_it(
     finally:
         # The module's shared out_dir goes back byte-for-byte, pass or fail: the flags this
         # test cleared and set, and the `seen`/`earned_at` the ?mark=1 above rewrote.
-        _g._telem_mutate(root, lambda d: d.__setitem__("flags", dict(flags_before)))
+        telemetry_mod._telem_mutate(root, lambda d: d.__setitem__("flags", dict(flags_before)))
         save_ach_state(root, ach_before)
 
 

@@ -13,6 +13,7 @@ from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_test_client
 from moonglade import series as series_mod
+from moonglade import telemetry as telemetry_mod
 
 
 def _row(**kw):
@@ -97,7 +98,7 @@ def test_the_sweep_keys_entries_by_artwork_not_entry_id(tmp_path, monkeypatch, p
                             [{"id": "entry-1", "artwork": {"id": "art-9"}}]))
     monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
     g._contest_detection_sync(tmp_path)
-    assert g.load_telemetry(tmp_path)["sets"]["contest_entry_keys"] == ["c1:art-9"]
+    assert telemetry_mod.load_telemetry(tmp_path)["sets"]["contest_entry_keys"] == ["c1:art-9"]
 
 
 def test_the_sweep_heals_a_legacy_double_key(tmp_path, monkeypatch, pixai):
@@ -111,8 +112,8 @@ def test_the_sweep_heals_a_legacy_double_key(tmp_path, monkeypatch, pixai):
     monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": 0.0})
     monkeypatch.setattr(g, "_CONTEST_SYNC_PAUSE", 0)
     # a store poisoned the old way: the entry id, from a pre-fix sweep
-    g.telem_set_add("contest_entry_keys", "c1:entry-1", out_dir=tmp_path)
-    assert g.telemetry_metrics(tmp_path)["contest_entries"] == 1
+    telemetry_mod.telem_set_add("contest_entry_keys", "c1:entry-1", out_dir=tmp_path)
+    assert telemetry_mod.telemetry_metrics(tmp_path)["contest_entries"] == 1
     monkeypatch.setattr(core, "list_contests", lambda s, **k: [
         {"id": "c1", "slug": "s1", "active": True, "result_at": "", "end_at": ""}])
     monkeypatch.setattr(core, "contest_my_entries",
@@ -121,8 +122,8 @@ def test_the_sweep_heals_a_legacy_double_key(tmp_path, monkeypatch, pixai):
     monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
     g._contest_detection_sync(tmp_path)
     # one entry, one key -- the true one
-    assert g.load_telemetry(tmp_path)["sets"]["contest_entry_keys"] == ["c1:art-9"]
-    assert g.telemetry_metrics(tmp_path)["contest_entries"] == 1
+    assert telemetry_mod.load_telemetry(tmp_path)["sets"]["contest_entry_keys"] == ["c1:art-9"]
+    assert telemetry_mod.telemetry_metrics(tmp_path)["contest_entries"] == 1
 
 
 def test_the_sweep_leaves_an_unpaired_key_alone(tmp_path, monkeypatch, pixai):
@@ -131,14 +132,14 @@ def test_the_sweep_leaves_an_unpaired_key_alone(tmp_path, monkeypatch, pixai):
     is not evidence that some other key is stale."""
     monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": 0.0})
     monkeypatch.setattr(g, "_CONTEST_SYNC_PAUSE", 0)
-    g.telem_set_add("contest_entry_keys", "c1:somebody-else", out_dir=tmp_path)
+    telemetry_mod.telem_set_add("contest_entry_keys", "c1:somebody-else", out_dir=tmp_path)
     monkeypatch.setattr(core, "list_contests", lambda s, **k: [
         {"id": "c1", "slug": "s1", "active": True, "result_at": "", "end_at": ""}])
     monkeypatch.setattr(core, "contest_my_entries",
                         lambda s, slug, uid: [{"artworkId": "art-9"}])   # no entry id
     monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
     g._contest_detection_sync(tmp_path)
-    assert sorted(g.load_telemetry(tmp_path)["sets"]["contest_entry_keys"]) == [
+    assert sorted(telemetry_mod.load_telemetry(tmp_path)["sets"]["contest_entry_keys"]) == [
         "c1:art-9", "c1:somebody-else"]
 
 
@@ -146,13 +147,13 @@ def test_set_discard_is_narrow_and_honest(tmp_path):
     """The primitive itself. These sets are grow-only on purpose -- a metric that can fall
     can un-earn an achievement -- so the one exception reports whether it actually did
     anything and does nothing at all when the key is not there."""
-    g.telem_set_add("contest_entry_keys", "c1:a", out_dir=tmp_path)
-    assert g.telem_set_discard("contest_entry_keys", "c1:nope", out_dir=tmp_path) is False
-    assert g.load_telemetry(tmp_path)["sets"]["contest_entry_keys"] == ["c1:a"]
-    assert g.telem_set_discard("contest_entry_keys", "c1:a", out_dir=tmp_path) is True
-    assert g.load_telemetry(tmp_path)["sets"]["contest_entry_keys"] == []
+    telemetry_mod.telem_set_add("contest_entry_keys", "c1:a", out_dir=tmp_path)
+    assert telemetry_mod.telem_set_discard("contest_entry_keys", "c1:nope", out_dir=tmp_path) is False
+    assert telemetry_mod.load_telemetry(tmp_path)["sets"]["contest_entry_keys"] == ["c1:a"]
+    assert telemetry_mod.telem_set_discard("contest_entry_keys", "c1:a", out_dir=tmp_path) is True
+    assert telemetry_mod.load_telemetry(tmp_path)["sets"]["contest_entry_keys"] == []
     # an absent set is not an error
-    assert g.telem_set_discard("never_existed", "x", out_dir=tmp_path) is False
+    assert telemetry_mod.telem_set_discard("never_existed", "x", out_dir=tmp_path) is False
 
 
 # ---- finding 6: the requires fixed point ------------------------------------
@@ -235,7 +236,7 @@ def test_publish_and_enter_records_the_entry_itself(tmp_path, monkeypatch):
         assert d["published"] is True and d["entered"] is True
     finally:
         g._contest_sync_lock.release()
-    assert g.load_telemetry(tmp_path)["sets"]["contest_entry_keys"] == ["c7:newart1"]
+    assert telemetry_mod.load_telemetry(tmp_path)["sets"]["contest_entry_keys"] == ["c7:newart1"]
 
 
 # ---- finding 12: the sync route ---------------------------------------------
