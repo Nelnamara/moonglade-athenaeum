@@ -5,9 +5,10 @@ Collection Health: the one-walk metrics behind the health dashboard, the storage
 (by type, model and collection) and the health memo that keeps an overlay open a memory read.
 Moved verbatim out of moonglade/gallery.py in the 3.21.0 split (phase 2).
 
-The names it needs from the gallery (the catalog, the collection splitter, the Loom render ids,
-the prompt word counter) are imported from moonglade.gallery inside each function that uses
-them, never at the top, so importing this module never imports the gallery.
+The names it needs from the gallery (the catalog, the collection splitter, the Loom render ids)
+and the prompt word counter (moonglade.achievements, since 3.21.0's phase 3) are imported inside
+each function that uses them, never at the top, so importing this module never imports the
+gallery.
 """
 import os
 import threading
@@ -30,7 +31,8 @@ def collection_health(out_dir, db_path):
     Returns a dict consumed by the /health route. Cheap (no content hashing) so
     it's safe to render on every page load.
     """
-    from moonglade.gallery import catalog, loom_render_ids, _prompt_word_counter
+    from moonglade.gallery import catalog, loom_render_ids
+    from moonglade.achievements import _prompt_word_counter
     from collections import defaultdict, Counter
 
     per_bucket = Counter()

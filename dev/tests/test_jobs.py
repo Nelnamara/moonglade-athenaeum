@@ -1374,7 +1374,7 @@ def test_claim_line_grammar(tmp_path):
     """The wording, in one place. Credits lead when there are any -- grouped, like every
     other figure in the tray -- and a stamina-only claim counts rewards instead of
     announcing "+0 credits", which would read as a bug rather than a fact."""
-    from moonglade.gallery import claim_job_label
+    from moonglade.achievements import claim_job_label
     assert claim_job_label(1, 30000) == "+30,000 credits claimed"
     assert claim_job_label(2, 500) == "+500 credits claimed"
     assert claim_job_label(1, 0) == "1 reward claimed"

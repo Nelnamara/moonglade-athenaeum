@@ -24,6 +24,7 @@ from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests import synthetic_feats as sf
 from tests.conftest import login_client
+from moonglade import achievements as achievements_mod
 
 
 @pytest.fixture(autouse=True)
@@ -230,9 +231,9 @@ def test_the_mask_is_served_the_moment_the_earn_lands_not_after_the_cache_expire
     cache (5 s) must not answer that request with the state from before the earn."""
     cli = _client(tmp_path)
     assert cli.get("/feat-mask/" + "1" * 32 + ".png").status_code == 404   # warms the cache: nothing earned
-    st = g.load_ach_state(tmp_path)
+    st = achievements_mod.load_ach_state(tmp_path)
     st["earned_at"] = {sf.FEAT_IDS[1]: "2026-09-01"}
-    g.save_ach_state(tmp_path, st)                          # NOT clearing the cache, on purpose
+    achievements_mod.save_ach_state(tmp_path, st)                          # NOT clearing the cache, on purpose
     m = _feats(cli)["feats"]["masked"]
     assert cli.get(m["mask_url"]).status_code == 200
 

@@ -15,6 +15,7 @@ from tests.conftest import login_test_client
 from moonglade import series as series_mod
 from moonglade import telemetry as telemetry_mod
 from moonglade import contest_sync as contest_sync_mod
+from moonglade import achievements as achievements_mod
 
 
 def _row(**kw):
@@ -176,11 +177,11 @@ def test_a_meta_of_a_meta_earns_in_one_pass():
          "requires": ["inner-meta"]},
     ]
     import unittest.mock as _mock
-    with _mock.patch.object(g, "_roster", lambda: roster), \
-         _mock.patch.object(g, "_skins", lambda: []), \
-         _mock.patch.object(g, "_skin_unlock", lambda: {}), \
-         _mock.patch.object(g, "_ladder_tracks", lambda: []):
-        by = {a["id"]: a for a in g.compute_achievements({"images": 1})["achievements"]}
+    with _mock.patch.object(achievements_mod, "_roster", lambda: roster), \
+         _mock.patch.object(achievements_mod, "_skins", lambda: []), \
+         _mock.patch.object(achievements_mod, "_skin_unlock", lambda: {}), \
+         _mock.patch.object(achievements_mod, "_ladder_tracks", lambda: []):
+        by = {a["id"]: a for a in achievements_mod.compute_achievements({"images": 1})["achievements"]}
     assert by["inner-meta"]["earned"] is True
     assert by["outer-meta"]["earned"] is True, "a meta of a meta must resolve in one call"
     assert by["outer-meta"]["current"] == 1

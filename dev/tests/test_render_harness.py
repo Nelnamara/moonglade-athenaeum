@@ -102,8 +102,8 @@ from moonglade import backup as core
 from moonglade import jobs as jobs_mod
 from moonglade import paths as moonglade_paths
 from moonglade import updater as updater_mod
-from moonglade.gallery import (CATALOG_FIELDS, create_app, load_catalog, save_catalog,
-                               achievement_metrics, compute_achievements, save_ach_state)
+from moonglade.gallery import CATALOG_FIELDS, create_app, load_catalog, save_catalog
+from moonglade.achievements import achievement_metrics, compute_achievements, save_ach_state
 from moonglade.telemetry import telem_flag, telemetry_metrics, load_telemetry
 
 # No playwright (or no browser) => this whole module skips. .github/workflows/tests.yml installs
@@ -4908,7 +4908,8 @@ def test_a_branding_drop_is_adopted_and_the_browser_wears_it(
     way.
     """
     from moonglade import gallery as _g
-    from moonglade.gallery import list_slot_assets, load_ach_state
+    from moonglade.gallery import list_slot_assets
+    from moonglade.achievements import load_ach_state
 
     slot = "banner_main"
     sdir = _g._slot_dir(slot)          # asked of the app's own ROLE_CODE map, never retyped

@@ -29,6 +29,7 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import STARFALL_EVENT, ach_event, login_client
+from moonglade import achievements as achievements_mod
 
 
 @pytest.fixture(autouse=True)
@@ -79,8 +80,8 @@ def _anim(aid, **kw):
 
 def _visible_id():
     """A roster id that is NOT a hidden feat -- its art serves earned or not."""
-    return "loremaster" if "loremaster" in g._ach_ids() else sorted(
-        g._ach_ids() - g._ach_hidden())[0]
+    return "loremaster" if "loremaster" in achievements_mod._ach_ids() else sorted(
+        achievements_mod._ach_ids() - achievements_mod._ach_hidden())[0]
 
 
 # ---- the still path is untouched --------------------------------------------
@@ -157,10 +158,10 @@ def test_an_oversized_animation_falls_back_to_the_still(tmp_path, monkeypatch,
     aid = _visible_id()
     _still(aid)
     raw = _anim(aid)
-    monkeypatch.setattr(g, "_BADGE_ANIM_MAX_BYTES", len(raw) - 1)
+    monkeypatch.setattr(achievements_mod, "_BADGE_ANIM_MAX_BYTES", len(raw) - 1)
     assert cli.get("/badge-thumb/" + aid + ".webp").status_code == 404
     assert cli.get("/badge-thumb/" + aid + ".png").status_code == 200
-    monkeypatch.setattr(g, "_BADGE_ANIM_MAX_BYTES", len(raw))       # exactly at the cap
+    monkeypatch.setattr(achievements_mod, "_BADGE_ANIM_MAX_BYTES", len(raw))       # exactly at the cap
     assert cli.get("/badge-thumb/" + aid + ".webp").status_code == 200
 
 
@@ -170,7 +171,7 @@ def test_hidden_feat_animation_is_gated_exactly_like_its_still(tmp_path, sealed_
     """An unearned hidden feat's animation must be no more fishable by id than its
     still (dev/tests/test_unlock_split.py's badge-thumb gate, re-proved on the .webp rule)."""
     cli = _client(tmp_path)
-    sf = g._moment_ach()["starfall"]          # the hidden feat the beacon below earns
+    sf = achievements_mod._moment_ach()["starfall"]          # the hidden feat the beacon below earns
     _still(sf)
     _anim(sf)
     assert cli.get("/badge-thumb/" + sf + ".webp").status_code == 404
@@ -185,7 +186,7 @@ def test_webp_gate_is_case_insensitive(tmp_path, sealed_donor_present):
     real sealed master while lowercase id-set membership missed it. Same casefold the
     .png rule takes (2026-08-22), now proved on the .webp one."""
     cli = _client(tmp_path)
-    hid = g._moment_ach()["keyturn"]          # a hidden feat a fresh install has not earned
+    hid = achievements_mod._moment_ach()["keyturn"]          # a hidden feat a fresh install has not earned
     _anim(hid)
     assert cli.get("/badge-thumb/" + hid + ".webp").status_code == 404
     assert cli.get("/badge-thumb/" + hid.upper() + ".webp").status_code == 404
@@ -198,8 +199,8 @@ def test_webp_fails_closed_on_unknown_id_and_missing_roster(tmp_path, monkeypatc
     cli = _client(tmp_path)
     _anim("a-hidden-feat")
     _anim("totally-made-up")
-    monkeypatch.setattr(g, "_ach_ids", lambda: frozenset())
-    monkeypatch.setattr(g, "_ach_hidden", lambda: frozenset())
+    monkeypatch.setattr(achievements_mod, "_ach_ids", lambda: frozenset())
+    monkeypatch.setattr(achievements_mod, "_ach_hidden", lambda: frozenset())
     assert cli.get("/badge-thumb/a-hidden-feat.webp").status_code == 404
     assert cli.get("/badge-thumb/totally-made-up.webp").status_code == 404
 
@@ -231,15 +232,15 @@ def test_badge_anim_reads_through_the_container_path(tmp_path, monkeypatch):
     monkeypatch.setattr(g, "_branding_exists", _exists)
     monkeypatch.setattr(g, "_branding_bytes", _bytes)
 
-    assert g._badge_anim("first-light") == raw
+    assert achievements_mod._badge_anim("first-light") == raw
     assert seen["exists"] == g._role_rel("badges", "first-light.webp")
     assert seen["bytes"] == seen["exists"]
-    assert not g.badge_cache_dir(tmp_path).exists()
+    assert not achievements_mod.badge_cache_dir(tmp_path).exists()
 
 
 def test_badge_anim_is_none_when_there_is_no_animation(tmp_path, monkeypatch):
     monkeypatch.setattr(g, "_branding_exists", lambda rel: False)
-    assert g._badge_anim("first-light") is None
+    assert achievements_mod._badge_anim("first-light") is None
 
 
 # ---- nothing is ever served larger than its source --------------------------
@@ -251,8 +252,8 @@ def test_badge_anim_is_none_when_there_is_no_animation(tmp_path, monkeypatch):
 
 def _only_badges(monkeypatch, *ids):
     """A roster of exactly these visible ids, so no donor is needed."""
-    monkeypatch.setattr(g, "_ach_ids", lambda: frozenset(ids))
-    monkeypatch.setattr(g, "_ach_hidden", lambda: frozenset())
+    monkeypatch.setattr(achievements_mod, "_ach_ids", lambda: frozenset(ids))
+    monkeypatch.setattr(achievements_mod, "_ach_hidden", lambda: frozenset())
 
 
 def _served_size(resp):
@@ -288,8 +289,8 @@ def test_the_in_memory_cut_never_upscales_either(tmp_path, monkeypatch):
     g._container_cache.update(path=None, mtime=None, box=None)
     blocker = tmp_path / "not-a-folder"
     blocker.write_bytes(b"x")                               # mkdir under a file fails
-    monkeypatch.setattr(g, "badge_cache_dir", lambda out_dir: blocker / "_badges")
-    assert isinstance(g._badge_thumb(tmp_path, "syn-small", 384), bytes)
+    monkeypatch.setattr(achievements_mod, "badge_cache_dir", lambda out_dir: blocker / "_badges")
+    assert isinstance(achievements_mod._badge_thumb(tmp_path, "syn-small", 384), bytes)
     assert _served_size(cli.get("/badge-thumb/syn-small.png?size=384")) == (300, 300)
 
 

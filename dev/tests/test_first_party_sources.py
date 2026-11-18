@@ -15,6 +15,7 @@ from tests.conftest import CODE_PACKAGE, REPO_ROOT, first_party_sources
 _TODAY = (
     "Moonglade Launcher.pyw",
     "moonglade/__init__.py", "moonglade/__main__.py", "moonglade/about.py", "moonglade/account_prefs.py",
+    "moonglade/achievements.py",
     "moonglade/assets.py", "moonglade/backup.py", "moonglade/bonjour.py",
     "moonglade/container.py", "moonglade/contest_sync.py", "moonglade/contest_wins.py", "moonglade/curation_io.py", "moonglade/dupes.py",
     "moonglade/gallery.py", "moonglade/health.py", "moonglade/inbox.py", "moonglade/integrity.py", "moonglade/jobs.py",

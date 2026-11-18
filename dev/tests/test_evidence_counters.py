@@ -31,6 +31,7 @@ from moonglade.gallery import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_client
 from moonglade import organize as organize_mod
 from moonglade import telemetry as telemetry_mod
+from moonglade import achievements as achievements_mod
 
 
 def _row(**kw):
@@ -159,7 +160,7 @@ def test_edits_count_in_app_edit_generations_from_the_catalog(tmp_path):
         _row(media_id="4", filename="4.png", task_id="E3", derive_kind="edit", source=""),
         _row(media_id="5", filename="5.png", task_id="G1", derive_kind="", source="api"),
     ])
-    assert g.achievement_metrics(db, use_cache=False)["edits"] == 2
+    assert achievements_mod.achievement_metrics(db, use_cache=False)["edits"] == 2
 
 
 def test_lora_counts_come_from_in_app_rows(tmp_path):
@@ -174,7 +175,7 @@ def test_lora_counts_come_from_in_app_rows(tmp_path):
              loras="Web:1, Web2:1, Web3:1"),
         _row(media_id="5", filename="5.png", task_id="L4", source="api", loras=""),
     ])
-    m = g.achievement_metrics(db, use_cache=False)
+    m = achievements_mod.achievement_metrics(db, use_cache=False)
     assert m["lora_used"] == 2             # distinct in-app generations that used one
     assert m["lora_stacked"] == 2          # most on one in-app generation
     assert m["lora_distinct"] == 2         # Glade, Moonwell
@@ -189,7 +190,7 @@ def test_the_generation_streak_comes_from_in_app_rows(tmp_path):
     rows.append(_row(media_id="9", filename="9.png", source="",
                      created_at=_utc_iso(base + _dt.timedelta(days=3))))
     save_catalog(db, rows)
-    assert g.achievement_metrics(db, use_cache=False)["gen_streak"] == 3
+    assert achievements_mod.achievement_metrics(db, use_cache=False)["gen_streak"] == 3
 
 
 def test_old_counters_in_telemetry_no_longer_shadow_the_catalog(tmp_path):

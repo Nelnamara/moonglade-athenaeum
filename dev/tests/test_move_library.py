@@ -41,6 +41,7 @@ from moonglade import scan as scan_mod
 from moonglade import account_prefs as account_prefs_mod
 from moonglade import jobs as jobs_mod
 from moonglade import telemetry as telemetry_mod
+from moonglade import achievements as achievements_mod
 
 
 @pytest.fixture
@@ -128,7 +129,7 @@ def test_an_install_on_3_10_to_3_16_moves_whole(r):
 def test_the_readers_find_the_moved_records(r):
     layout_317(r)
     _prepare(r)
-    assert g.load_ach_state(r.lib)["earned_at"] == {"a1": "2026-09-01"}
+    assert achievements_mod.load_ach_state(r.lib)["earned_at"] == {"a1": "2026-09-01"}
     assert telemetry_mod.load_telemetry(r.lib)["counters"] == {"gens": 5}
     from moonglade import runs
     assert runs.RunsStore(r.lib).path.is_file()

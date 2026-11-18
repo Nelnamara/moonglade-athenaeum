@@ -288,7 +288,7 @@ def clear_sealed_caches():
     are process globals, so they outlive whichever tmp_path wrote them. Every place that
     re-points `_container_path()` at a different file has to clear all three on both sides
     of the swap, and this is that one place."""
-    gallery._sealed_cache.update(path=None, mtime=None, defs=None)
+    achievements_mod._sealed_cache.update(path=None, mtime=None, defs=None)
     gallery._container_cache.update(path=None, mtime=None, box=None)
     gallery._earned_ids_cache.update(t=0.0, ids=frozenset())
     # The moments' verified-clip cache is keyed on content, not on an install, so it
@@ -939,7 +939,7 @@ def _fresh_perf_memos():
     tmp_path's library walk) answers the next one's request. Same isolation the sealed-defs
     and earned-ids caches above already get, and for the same reason."""
     def _clear():
-        gallery._ACH_METRICS_CACHE.clear()
+        achievements_mod._ACH_METRICS_CACHE.clear()
         contest_sync_mod._contests_cache.clear()
         contest_sync_mod._contest_sync_last_ok.update(at=0.0)
         health_mod._HEALTH_CACHE.update(key=None, payload=None, at=0.0)
@@ -1083,6 +1083,7 @@ def _no_live_config(monkeypatch):
 from moonglade import bonjour as _bonjour_mod   # noqa: E402 -- beside the fixture that stubs it
 from moonglade import telemetry as telemetry_mod
 from moonglade import contest_sync as contest_sync_mod
+from moonglade import achievements as achievements_mod
 
 # Captured at import, before `_no_lan_probe` swaps it, for the one test that is about it.
 REAL_LAN_IP = _bonjour_mod.lan_ip

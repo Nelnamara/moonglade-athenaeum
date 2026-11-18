@@ -15,6 +15,7 @@ from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 from tests.conftest import STARFALL_EVENT, ach_event, ach_nonce, login_client, login_test_client, _SEALED_DONOR
 from moonglade import mirror as mirror_mod
 from moonglade import telemetry as telemetry_mod
+from moonglade import achievements as achievements_mod
 
 # The roster is sealed in the container (built from the private donor), not in source.
 # Gate ONLY the tests that assert sealed roster/skin/criteria CONTENT -- NOT the whole
@@ -75,10 +76,10 @@ def test_store_corrupt_and_unset_fail_soft(tmp_path):
 
 @needs_donor
 def test_roster_shape():
-    roster = g._roster()
+    roster = achievements_mod._roster()
     # self-computed shape invariants -- no magic roster/feat/banner counts.
     assert roster and len(roster) == len({a["id"] for a in roster})   # non-empty, ids unique
-    assert {a["id"] for a in roster} == set(g._ach_ids())
+    assert {a["id"] for a in roster} == set(achievements_mod._ach_ids())
     feats = [a for a in roster if a["tier"] == "feat"]
     assert feats and all(a.get("hidden") for a in feats)              # every feat-tier is hidden
     banners = sum(1 for a in roster if a.get("banner_reward"))
@@ -89,35 +90,35 @@ def test_roster_shape():
 
 @needs_donor
 def test_skin_changer_counts_unlocked_skins():
-    out = g.compute_achievements({}, [])
+    out = achievements_mod.compute_achievements({}, [])
     sc = [a for a in out["achievements"] if a["id"] == "skin-changer"][0]
-    free_n = sum(1 for s in g._skins() if s.get("free"))
+    free_n = sum(1 for s in achievements_mod._skins() if s.get("free"))
     assert sc["current"] == free_n and not sc["earned"]   # only the free skins to start
     # meet every earnable skin's own grant (metric->threshold, self-computed from the
     # roster) -> every skin unlocked -> Skin-Changer's current == the full skin count.
     m = {}
-    for a in g._roster():
+    for a in achievements_mod._roster():
         if a.get("skin"):
             m[a["metric"]] = max(m.get(a["metric"], 0), a["threshold"])
-    sc = [a for a in g.compute_achievements(m, [])["achievements"]
+    sc = [a for a in achievements_mod.compute_achievements(m, [])["achievements"]
           if a["id"] == "skin-changer"][0]
-    assert sc["current"] == len(g._skins()) and sc["earned"]
+    assert sc["current"] == len(achievements_mod._skins()) and sc["earned"]
 
 
 @needs_donor
 def test_completionist_requires_every_non_feat():
     # every non-feat, non-banner achievement satisfied -> completionist earns
-    full = {a["metric"]: 10 ** 9 for a in g._roster()}
-    out = g.compute_achievements(full, [])
+    full = {a["metric"]: 10 ** 9 for a in achievements_mod._roster()}
+    out = achievements_mod.compute_achievements(full, [])
     by = {a["id"]: a for a in out["achievements"]}
     assert by["completionist"]["earned"]
     # drop one ladder metric below its crown -> completionist un-earns
     partial = dict(full, images=49999)                    # great-library is banner-
-    out2 = g.compute_achievements(partial, [])            # exempt, loremaster isn't
+    out2 = achievements_mod.compute_achievements(partial, [])            # exempt, loremaster isn't
     by2 = {a["id"]: a for a in out2["achievements"]}
     assert by2["loremaster"]["earned"] and not by2["the-great-library"]["earned"]
     assert by2["completionist"]["earned"]                 # banner crown NOT required
-    out3 = g.compute_achievements(dict(full, images=24999), [])
+    out3 = achievements_mod.compute_achievements(dict(full, images=24999), [])
     assert not [a for a in out3["achievements"]
                 if a["id"] == "completionist"][0]["earned"]
 
@@ -137,9 +138,9 @@ def test_api_masks_hidden_feats_and_cloaks_tab(tmp_path):
     # every hidden feat is unearned here, and NONE of them is in the array: the one "???"
     # placeholder that used to stand for them all is gone (Session G) -- the payload must not
     # reveal how many remain undiscovered, and an entry count that moved with them would.
-    n_hidden = sum(1 for a in g._roster() if a.get("hidden"))
+    n_hidden = sum(1 for a in achievements_mod._roster() if a.get("hidden"))
     assert n_hidden > 1                     # there really are several hidden feats to hide
-    assert len(d["achievements"]) == len(g._roster()) - n_hidden
+    assert len(d["achievements"]) == len(achievements_mod._roster()) - n_hidden
     assert not [a for a in d["achievements"] if a["tier"] == "feat" and not a["earned"]
                 and a.get("hidden")]
     assert not [a for a in d["achievements"] if a["name"] == "???" or a["id"] == "hidden-feat"]
@@ -149,7 +150,7 @@ def test_api_masks_hidden_feats_and_cloaks_tab(tmp_path):
     # Self-computed: a metric used ONLY by hidden achievements (all unearned here) must be
     # stripped from the echo; a metric shared with any visible achievement must survive.
     by_metric = {}
-    for a in g._roster():
+    for a in achievements_mod._roster():
         by_metric.setdefault(a["metric"], []).append(a)
     hidden_only = {mtr for mtr, rows in by_metric.items() if mtr and all(r.get("hidden") for r in rows)}
     assert hidden_only                        # the roster really does have hidden-only metrics
@@ -167,7 +168,7 @@ def test_api_masks_hidden_feats_and_cloaks_tab(tmp_path):
 
 @needs_donor
 def test_points_rung_scaled_feats_zero_and_aggregates():
-    from moonglade.gallery import compute_achievements, achievement_points, _roster
+    from moonglade.achievements import compute_achievements, achievement_points, _roster
     by_id = {a["id"]: a for a in _roster()}
     # the Archive (images) ladder reproduces the owner's locked example exactly
     seq = ["first-light", "archivist", "hoardsmith", "loremaster", "the-great-library"]
@@ -206,10 +207,10 @@ def test_earn_dates_stamped_persisted_and_no_leak(tmp_path):
     assert "earned_at" in d
     earned_ids = {a["id"] for a in d["achievements"] if a["earned"]}
     assert earned_ids and all(i in d["earned_at"] for i in earned_ids)   # every earned gets a date
-    hidden_unearned = [h for h in g._roster() if h.get("hidden") and h["id"] not in earned_ids]
+    hidden_unearned = [h for h in achievements_mod._roster() if h.get("hidden") and h["id"] not in earned_ids]
     assert hidden_unearned                                               # hidden feats never leak a date
     assert all(h["id"] not in d["earned_at"] for h in hidden_unearned)
-    st = g.load_ach_state(out)                                           # persisted to disk
+    st = achievements_mod.load_ach_state(out)                                           # persisted to disk
     assert st["earned_at"] and all(i in st["earned_at"] for i in earned_ids)
 
 
@@ -219,14 +220,14 @@ def test_badge_thumb_cache(tmp_path):
     # g._role_dir, never a hardcoded hex literal)
     bdir = g._role_dir("badges"); bdir.mkdir(parents=True)
     Image.new("RGBA", (2000, 2000), (10, 20, 30, 255)).save(bdir / "loremaster.png")
-    p = g._badge_thumb(tmp_path, "loremaster", size=256)
+    p = achievements_mod._badge_thumb(tmp_path, "loremaster", size=256)
     assert p and Path(p).exists() and max(Image.open(p).size) <= 256
-    assert g._badge_thumb(tmp_path, "loremaster") == p     # cached copy reused
-    assert g._badge_thumb(tmp_path, "does-not-exist") is None
+    assert achievements_mod._badge_thumb(tmp_path, "loremaster") == p     # cached copy reused
+    assert achievements_mod._badge_thumb(tmp_path, "does-not-exist") is None
     # The cache lives OUTSIDE the coded branding tree (SCOPE_bundle-v2-branding
     # constraint 3: the tree must keep reading as the empty scaffold), and outside every
     # library: local/cache/badges/ (conftest pins local_dir() to tmp_path).
-    assert Path(p) == g.badge_cache_dir(tmp_path) / "loremaster.png"
+    assert Path(p) == achievements_mod.badge_cache_dir(tmp_path) / "loremaster.png"
     assert Path(p).parent == tmp_path / "cache" / "badges"
     assert not (tmp_path / "gallery" / "cache").exists()
     assert g.branding_root() not in Path(p).parents
@@ -458,7 +459,7 @@ def test_new_sql_metrics(tmp_path):
         _row(media_id="4", filename="d_4.png",              # site gen: not local
              created_at="2026-01-01T12:00:00"),
     ])
-    m = g.achievement_metrics(tmp_path / "catalog.db")
+    m = achievements_mod.achievement_metrics(tmp_path / "catalog.db")
     assert m["local_gens"] == 3                # api + local, NOT the site gen
     assert m["gens_in_a_day"] == 2             # two on 2026-01-01
     assert m["distinct_keywords"] == 3         # night, elf, moon (case-folded)
@@ -478,7 +479,7 @@ def test_time_capsule_only_fires_on_old_insert(tmp_path):
 
 @needs_donor
 def test_achievement_criteria_pure():
-    from moonglade.gallery import achievement_criteria
+    from moonglade.achievements import achievement_criteria
     c = achievement_criteria({"tools": ["edit", "fix"], "video_modes": ["i2v"]})
     assert {x["key"]: x["done"] for x in c["full-toolbox"]} == {
         "edit": True, "enhance": False, "fix": True}
@@ -493,7 +494,7 @@ def test_achievement_criteria_pure():
 
 @needs_donor
 def test_compute_attaches_criteria_only_with_sets():
-    from moonglade.gallery import compute_achievements
+    from moonglade.achievements import compute_achievements
     r = compute_achievements({"tools_used": 2}, sets={"tools": ["edit", "enhance"]})
     by = {a["id"]: a for a in r["achievements"]}
     assert {x["key"]: x["done"] for x in by["full-toolbox"]["criteria"]} == {
@@ -532,14 +533,14 @@ def test_folio_catalog_metrics(tmp_path):
         _row(media_id="4", filename="d_4.png", rating="5", loras="",
              seed="123", prompt_preview="knight"),        # seed too short (3 digits)
     ])
-    m = g.achievement_metrics(tmp_path / "catalog.db")
+    m = achievements_mod.achievement_metrics(tmp_path / "catalog.db")
     assert m["rated"] == 2               # media 1 (4) + 4 (5); "0" and "" don't count (health-identical)
     assert m["loras_distinct"] == 3      # styleA, charB, newC -- weights dropped, deduped
     assert m["palindrome_seeds"] == 3    # 12321, 45654, 98789 (after lstrip '-'); 123 is <5 digits
     assert m["top_word_uses"] == 4       # "knight" x4 across the four previews (the word never leaves)
     # an empty catalog degrades to 0s, never KeyErrors
     save_catalog(tmp_path / "empty.db", [])
-    z = g.achievement_metrics(tmp_path / "empty.db")
+    z = achievements_mod.achievement_metrics(tmp_path / "empty.db")
     for k in ("rated", "loras_distinct", "palindrome_seeds", "top_word_uses"):
         assert z[k] == 0
 
@@ -578,22 +579,22 @@ def test_requires_meta_earns_when_prereqs_earned():
     """The generic `requires` meta-loop (the Glories + The Way Is Shut): a meta earns exactly
     when every prereq id is earned. Self-computed from the roster's own `requires` lists; the
     prereq list itself never reaches the payload (compute builds entries without copying it)."""
-    roster = g._roster()
+    roster = achievements_mod._roster()
     by_id_r = {a["id"]: a for a in roster}
     metas = [a for a in roster if a.get("requires")]
     assert metas                                             # the roster really has requires-metas
     # the built entries must NOT carry a `requires` field (it is a seal -- never leaks)
-    built = {a["id"]: a for a in g.compute_achievements({}, [])["achievements"]}
+    built = {a["id"]: a for a in achievements_mod.compute_achievements({}, [])["achievements"]}
     assert all("requires" not in built[m["id"]] for m in metas)
     for meta in metas:
         reqs = meta["requires"]
         full = {a["metric"]: 10 ** 9 for a in roster}        # meet every prereq's own threshold
-        by = {a["id"]: a for a in g.compute_achievements(full, [])["achievements"]}
+        by = {a["id"]: a for a in achievements_mod.compute_achievements(full, [])["achievements"]}
         assert by[meta["id"]]["earned"] and by[meta["id"]]["current"] == len(reqs), meta["id"]
         # drop one threshold-driven prereq below its bar -> the meta un-earns
         drop = next(r for r in reqs if not by_id_r[r].get("requires"))
         partial = dict(full, **{by_id_r[drop]["metric"]: 0})
-        by2 = {a["id"]: a for a in g.compute_achievements(partial, [])["achievements"]}
+        by2 = {a["id"]: a for a in achievements_mod.compute_achievements(partial, [])["achievements"]}
         assert not by2[meta["id"]]["earned"], meta["id"]
 
 
@@ -604,12 +605,12 @@ def test_contest_metrics_default_to_zero(tmp_path):
     the contest ladder + Laureate stay locked until a real signal lands."""
     tm = telemetry_mod.telemetry_metrics(tmp_path)                        # fresh store
     assert tm.get("contest_entries", 0) == 0 and tm.get("contest_wins", 0) == 0
-    out = g.compute_achievements({}, [])                      # no contest signal at all
+    out = achievements_mod.compute_achievements({}, [])                      # no contest signal at all
     by = {a["id"]: a for a in out["achievements"]}
-    contest_ids = [a["id"] for a in g._roster()
+    contest_ids = [a["id"] for a in achievements_mod._roster()
                    if a["metric"] in ("contest_entries", "contest_wins")]
     assert contest_ids                                        # both metrics are really in the roster
-    assert {"contest_entries", "contest_wins"} == {a["metric"] for a in g._roster()
+    assert {"contest_entries", "contest_wins"} == {a["metric"] for a in achievements_mod._roster()
                                                    if a["metric"] in ("contest_entries", "contest_wins")}
     for aid in contest_ids:
         assert by[aid]["current"] == 0 and not by[aid]["earned"], aid

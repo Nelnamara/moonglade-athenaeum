@@ -28,6 +28,7 @@ from moonglade import scan as scan_mod
 from moonglade import account_prefs as account_prefs_mod
 from moonglade import jobs as jobs_mod
 from moonglade import telemetry as telemetry_mod
+from moonglade import achievements as achievements_mod
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -76,7 +77,7 @@ def test_asking_never_makes_a_folder_outside_a_library(tmp_path):
 def test_the_app_resolvers_are_in_the_new_homes(tmp_path):
     key = account_prefs_mod._account_key("alice")
     app = tmp_path / "_moonglade"
-    assert g._ach_state_path(tmp_path) == app / "records" / "achievements.json"
+    assert achievements_mod._ach_state_path(tmp_path) == app / "records" / "achievements.json"
     assert telemetry_mod._telemetry_path(tmp_path) == app / "records" / "telemetry.json"
     assert jobs_mod._jobs_path(tmp_path) == app / "records" / "jobs.jsonl"
     assert account_prefs_mod.account_prefs_path(tmp_path, "alice") == app / "accounts" / key / "prefs.json"
@@ -104,7 +105,7 @@ def moved(monkeypatch):
 
 def test_the_app_resolvers_follow_records_path(tmp_path, moved):
     r = tmp_path / "_r"
-    assert g._ach_state_path(tmp_path) == r / "achievements.json"
+    assert achievements_mod._ach_state_path(tmp_path) == r / "achievements.json"
     assert telemetry_mod._telemetry_path(tmp_path) == r / "telemetry.json"
     assert jobs_mod._jobs_path(tmp_path) == r / "jobs.jsonl"
     assert runs.RunsStore(tmp_path).path == r / "runs.db"

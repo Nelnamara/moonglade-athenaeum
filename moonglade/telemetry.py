@@ -514,7 +514,7 @@ def first_sync_complete(out_dir, db_path, telem=None):
     sync install cannot (the gate keeps `seen` empty until completion). The rare install
     with a real library but a pristine achievement state simply resolves on its next
     `--sync`."""
-    from moonglade.gallery import load_ach_state
+    from moonglade.achievements import load_ach_state
     try:
         d = load_telemetry(out_dir) if telem is None else telem
         if d["flags"].get("first_sync_done"):

@@ -10,6 +10,7 @@ from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_test_client
 from moonglade import telemetry as telemetry_mod
+from moonglade import achievements as achievements_mod
 
 # Captured at IMPORT time -- collection runs before any autouse fixture, so this is the genuine
 # resolver rather than the tmp_path-redirected one conftest._isolated_branding installs. Needed
@@ -1135,7 +1136,7 @@ def test_the_desktop_shortcut_s_paths_never_go_into_the_powershell_script(tmp_pa
 # not announce that feat's name to a user who hasn't earned it -- leak class HIGH #2 (owner
 # 2026-08-21), the same rule /api/achievements enforces by masking the feat to "???". ----
 def _a_hidden_achievement():
-    for a in g._roster():
+    for a in achievements_mod._roster():
         if isinstance(a, dict) and a.get("hidden") and (a.get("name") or "").strip():
             return a["id"], a["name"].strip()
     return None, None
@@ -1202,8 +1203,8 @@ def test_list_marks_fails_closed_when_the_roster_is_unavailable(tmp_path, monkey
     aid, name = _a_hidden_achievement()
     assert aid
     _cut_mark_bound_to(aid)
-    monkeypatch.setattr(g, "_sealed_defs", lambda: g._derive_sealed({"roster": []}))
-    assert not g._ach_hidden() and not g._ach_ids()      # the state under test
+    monkeypatch.setattr(achievements_mod, "_sealed_defs", lambda: achievements_mod._derive_sealed({"roster": []}))
+    assert not achievements_mod._ach_hidden() and not achievements_mod._ach_ids()      # the state under test
     for earned in (set(), None, {aid}):
         m = {x["id"]: x for x in g.list_marks(tmp_path, earned_ids=earned)}["mark_h"]
         assert m["unlock_name"] == "", (

@@ -19,6 +19,7 @@ from moonglade import container as _mc
 from moonglade import gallery as g
 
 from tests.conftest import clear_sealed_caches
+from moonglade import achievements as achievements_mod
 
 # The masked feat's distinctive numbers: a leak test greps the serialized payload for these.
 DISTINCT_THRESHOLD = 7331
@@ -95,10 +96,10 @@ def all_badges():
 
 def earn(out_dir, *ids, day="2026-09-01"):
     """Pin `ids` as earned (pin-once), the way a real earn persists."""
-    st = g.load_ach_state(out_dir)
+    st = achievements_mod.load_ach_state(out_dir)
     ea = dict(st.get("earned_at") or {})
     for i in ids:
         ea[i] = day
     st["earned_at"] = ea
-    assert g.save_ach_state(out_dir, st)
+    assert achievements_mod.save_ach_state(out_dir, st)
     g._earned_ids_cache.update(t=0.0, ids=frozenset())

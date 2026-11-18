@@ -17,6 +17,7 @@ from tests.conftest import login_test_client
 from moonglade import health as health_mod
 from moonglade import telemetry as telemetry_mod
 from moonglade import contest_sync as contest_sync_mod
+from moonglade import achievements as achievements_mod
 
 
 def _row(**kw):
@@ -34,7 +35,7 @@ def _client(tmp_path, rows=()):
 
 
 def _fresh_metrics_cache(monkeypatch):
-    monkeypatch.setattr(g, "_ACH_METRICS_CACHE", {})
+    monkeypatch.setattr(achievements_mod, "_ACH_METRICS_CACHE", {})
 
 
 # ---- the achievement-metrics memo -------------------------------------------
@@ -45,7 +46,7 @@ def test_metrics_are_memoized_between_calls(tmp_path, monkeypatch):
     _fresh_metrics_cache(monkeypatch)
     db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png", rating="5",
                                created_at="2026-01-01T00:00:00")])
-    first = g.achievement_metrics(db)
+    first = achievements_mod.achievement_metrics(db)
     calls = {"n": 0}
     real = g.catalog_counts
 
@@ -53,7 +54,7 @@ def test_metrics_are_memoized_between_calls(tmp_path, monkeypatch):
         calls["n"] += 1
         return real(p)
     monkeypatch.setattr(g, "catalog_counts", _counted)
-    again = g.achievement_metrics(db)
+    again = achievements_mod.achievement_metrics(db)
     assert calls["n"] == 0, "a second call inside the window must not recompute"
     assert again == first
 
@@ -64,10 +65,10 @@ def test_the_memo_hands_out_copies_not_its_own_dict(tmp_path, monkeypatch):
     _fresh_metrics_cache(monkeypatch)
     db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png",
                                created_at="2026-01-01T00:00:00")])
-    a = g.achievement_metrics(db)
+    a = achievements_mod.achievement_metrics(db)
     a["images"] = 999999
     a["injected"] = True
-    b = g.achievement_metrics(db)
+    b = achievements_mod.achievement_metrics(db)
     assert b.get("injected") is None and b["images"] != 999999
 
 
@@ -79,10 +80,10 @@ def test_a_changed_catalog_invalidates_the_memo(tmp_path, monkeypatch):
     _fresh_metrics_cache(monkeypatch)
     db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png",
                                created_at="2026-01-01T00:00:00")])
-    before = g.achievement_metrics(db)["images"]
+    before = achievements_mod.achievement_metrics(db)["images"]
     save_catalog(db, [_row(media_id="1", filename="a_1.png", created_at="2026-01-01T00:00:00"),
                       _row(media_id="2", filename="b_2.png", created_at="2026-01-02T00:00:00")])
-    assert g.achievement_metrics(db)["images"] == before + 1
+    assert achievements_mod.achievement_metrics(db)["images"] == before + 1
 
 
 def test_a_gate_reads_a_catalog_that_changed_one_line_ago(tmp_path, monkeypatch):
@@ -91,20 +92,20 @@ def test_a_gate_reads_a_catalog_that_changed_one_line_ago(tmp_path, monkeypatch)
     _fresh_metrics_cache(monkeypatch)
     db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png",
                                created_at="2026-01-01T00:00:00")])
-    g.achievement_metrics(db)                                  # warm the memo
+    achievements_mod.achievement_metrics(db)                                  # warm the memo
     save_catalog(db, [_row(media_id=str(i), filename="a_%d.png" % i,
                            created_at="2026-01-0%dT00:00:00" % ((i % 9) + 1))
                       for i in range(1, 6)])
-    assert g.achievement_metrics(db)["images"] == 5
+    assert achievements_mod.achievement_metrics(db)["images"] == 5
 
 
 def test_use_cache_false_always_reads_for_real(tmp_path, monkeypatch):
     _fresh_metrics_cache(monkeypatch)
     db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png",
                                created_at="2026-01-01T00:00:00")])
-    g.achievement_metrics(db)
-    g._ACH_METRICS_CACHE[str(db)]["metrics"]["images"] = 4242
-    assert g.achievement_metrics(db, use_cache=False)["images"] != 4242
+    achievements_mod.achievement_metrics(db)
+    achievements_mod._ACH_METRICS_CACHE[str(db)]["metrics"]["images"] = 4242
+    assert achievements_mod.achievement_metrics(db, use_cache=False)["images"] != 4242
 
 
 def test_the_achievements_route_still_answers_correctly(tmp_path, monkeypatch):

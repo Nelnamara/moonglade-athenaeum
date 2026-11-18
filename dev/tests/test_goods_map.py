@@ -23,6 +23,7 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client, login_test_client
+from moonglade import achievements as achievements_mod
 
 # A real (tiny) PNG so PIL-facing paths get decodable bytes.
 PNG_1PX = bytes.fromhex(
@@ -167,8 +168,8 @@ def test_translation_raw_coded_paths_pass_through_and_stay_judged(monkeypatch):
     and therefore faces the exact same seal verdict the public form would.
     Translation must never be the thing standing between a guesser and sealed
     art."""
-    monkeypatch.setattr(g, "_ach_ids", lambda: frozenset({"first-light"}))
-    monkeypatch.setattr(g, "_moment_ach", lambda: {"starfall": "starfall-feat"})
+    monkeypatch.setattr(achievements_mod, "_ach_ids", lambda: frozenset({"first-light"}))
+    monkeypatch.setattr(achievements_mod, "_moment_ach", lambda: {"starfall": "starfall-feat"})
     for coded, verdict in (
             (g._role_rel("badges", "first-light.png"), ("earned", "first-light")),
             (g._role_rel("rewards", "secret.png"), ("deny", None)),
@@ -190,7 +191,7 @@ def test_route_judges_direct_coded_probes(tmp_path, monkeypatch):
     r = cli.get("/branding/" + g._role_rel("rewards", "claim.png"))
     assert r.status_code == 200 and r.data == b"CLAIM ICON"
     _seed(g._role_rel("starfall", "ee_nelstarfall.png"), b"STARFALL BYTES")
-    monkeypatch.setattr(g, "_moment_ach", lambda: {"starfall": "starfall-feat"})
+    monkeypatch.setattr(achievements_mod, "_moment_ach", lambda: {"starfall": "starfall-feat"})
     monkeypatch.setattr(g, "_earned_achievement_ids", lambda *a, **k: frozenset())
     assert cli.get("/branding/" + g._role_rel("starfall", "ee_nelstarfall.png")).status_code == 404
     monkeypatch.setattr(g, "_earned_achievement_ids",
@@ -206,8 +207,8 @@ def test_seal_table_round_trip(monkeypatch):
     ROLE_CODE -- a retyped prefix is how a seal silently fails open. The moment
     buckets resolve their feat through the roster's `moment` flag (stubbed here --
     the real roster's flags are proved in dev/tests/test_moment_serve.py)."""
-    monkeypatch.setattr(g, "_ach_ids", lambda: frozenset({"first-light"}))
-    monkeypatch.setattr(g, "_moment_ach",
+    monkeypatch.setattr(achievements_mod, "_ach_ids", lambda: frozenset({"first-light"}))
+    monkeypatch.setattr(achievements_mod, "_moment_ach",
                         lambda: {"starfall": "starfall-feat", "keyturn": "keyturn-feat"})
     rr = g._role_rel
     cases = [
@@ -260,8 +261,8 @@ def test_seal_is_case_insensitive_no_leak(monkeypatch):
     sealed path must NEVER fall through to the fail-open ('open', None). The
     reported hole: GET /branding/mascots/ACH/<id> translated to A02/ACH/... and
     dodged a case-sensitive A02/ach/ prefix check, and the FS served it anyway."""
-    monkeypatch.setattr(g, "_ach_ids", lambda: frozenset({"first-light"}))
-    monkeypatch.setattr(g, "_moment_ach",
+    monkeypatch.setattr(achievements_mod, "_ach_ids", lambda: frozenset({"first-light"}))
+    monkeypatch.setattr(achievements_mod, "_moment_ach",
                         lambda: {"starfall": "starfall-feat", "keyturn": "keyturn-feat"})
     rr = g._role_rel
 

@@ -10,6 +10,7 @@ from pathlib import Path
 from PIL import Image
 
 from moonglade import gallery as G
+from moonglade import achievements as achievements_mod
 
 
 def test_badge_thumb_returns_bytes_when_cache_unwritable(monkeypatch, tmp_path):
@@ -28,7 +29,7 @@ def test_badge_thumb_returns_bytes_when_cache_unwritable(monkeypatch, tmp_path):
 
     monkeypatch.setattr(Path, "mkdir", boom_mkdir)
 
-    out = G._badge_thumb(str(tmp_path), "first-light")
+    out = achievements_mod._badge_thumb(str(tmp_path), "first-light")
 
     assert isinstance(out, (bytes, bytearray)), f"expected in-memory bytes, got {type(out)!r}"
     im = Image.open(io.BytesIO(bytes(out)))
@@ -38,4 +39,4 @@ def test_badge_thumb_returns_bytes_when_cache_unwritable(monkeypatch, tmp_path):
 def test_badge_thumb_returns_none_when_master_absent(monkeypatch, tmp_path):
     # No master at all -> still None (route 404 is correct here; there is nothing to serve).
     monkeypatch.setattr(G, "_branding_exists", lambda rel: False)
-    assert G._badge_thumb(str(tmp_path), "does-not-exist") is None
+    assert achievements_mod._badge_thumb(str(tmp_path), "does-not-exist") is None

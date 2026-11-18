@@ -22,6 +22,7 @@ from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import STARFALL_EVENT, ach_event, login_client
 from moonglade import telemetry as telemetry_mod
+from moonglade import achievements as achievements_mod
 
 
 def _row(**kw):
@@ -171,7 +172,7 @@ def test_badge_thumb_hidden_gate(tmp_path, sealed_donor_present):
     cli = _client(tmp_path)
     bdir = g._role_dir("badges")
     bdir.mkdir(parents=True, exist_ok=True)
-    sf = g._moment_ach()["starfall"]          # the hidden feat the beacon below earns
+    sf = achievements_mod._moment_ach()["starfall"]          # the hidden feat the beacon below earns
     Image.new("RGBA", (64, 64), (10, 20, 30, 255)).save(bdir / (sf + ".png"))
     Image.new("RGBA", (64, 64), (10, 20, 30, 255)).save(bdir / "loremaster.png")
     assert cli.get("/badge-thumb/" + sf + ".png").status_code == 404
@@ -191,8 +192,8 @@ def test_badge_thumb_fails_closed_when_roster_unavailable(tmp_path, monkeypatch)
     bdir = g._role_dir("badges"); bdir.mkdir(parents=True, exist_ok=True)
     Image.new("RGBA", (64, 64), (7, 22, 30, 255)).save(bdir / "a-hidden-feat.png")
     Image.new("RGBA", (64, 64), (7, 22, 30, 255)).save(bdir / "totally-made-up.png")
-    monkeypatch.setattr(g, "_ach_ids", lambda: frozenset())      # roster unavailable
-    monkeypatch.setattr(g, "_ach_hidden", lambda: frozenset())   # ...so hidden set is empty too
+    monkeypatch.setattr(achievements_mod, "_ach_ids", lambda: frozenset())      # roster unavailable
+    monkeypatch.setattr(achievements_mod, "_ach_hidden", lambda: frozenset())   # ...so hidden set is empty too
     assert cli.get("/badge-thumb/a-hidden-feat.png").status_code == 404   # fail closed
     assert cli.get("/badge-thumb/totally-made-up.png").status_code == 404  # unknown id denied
 
@@ -204,7 +205,7 @@ def test_badge_thumb_hidden_gate_is_case_insensitive(tmp_path, sealed_donor_pres
     the 2026-08-22 badge_thumb casefold (mirrors _seal_rule's own casefold)."""
     from PIL import Image
     cli = _client(tmp_path)
-    hid = g._moment_ach()["keyturn"]          # a hidden feat a fresh install has not earned
+    hid = achievements_mod._moment_ach()["keyturn"]          # a hidden feat a fresh install has not earned
     bdir = g._role_dir("badges"); bdir.mkdir(parents=True, exist_ok=True)
     Image.new("RGBA", (64, 64), (7, 22, 30, 255)).save(bdir / (hid + ".png"))
     assert cli.get("/badge-thumb/" + hid + ".png").status_code == 404

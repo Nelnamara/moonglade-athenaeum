@@ -28,6 +28,7 @@ from moonglade import settings as msettings
 from tests.conftest import first_party_sources
 from moonglade import about as about_mod
 from moonglade import mirror as mirror_mod
+from moonglade import achievements as achievements_mod
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -83,7 +84,7 @@ _TABLE = [
     ("the only-copy banners", lambda: paths.banners_dir(), lambda: _LOCAL / "banners"),
     ("the only-copy banners, gallery", lambda: g.banner_keep_dir(), lambda: _LOCAL / "banners"),
     ("the caches", lambda: paths.cache_dir(), lambda: _LOCAL / "cache"),
-    ("the badge thumbs", lambda: g.badge_cache_dir(_LIB), lambda: _LOCAL / "cache" / "badges"),
+    ("the badge thumbs", lambda: achievements_mod.badge_cache_dir(_LIB), lambda: _LOCAL / "cache" / "badges"),
     ("the feat masks", lambda: g.feat_mask_cache_dir(_LIB), lambda: _LOCAL / "cache" / "masks"),
     ("the banner renders", lambda: g.banner_cache_dir(_LIB),
      lambda: _LOCAL / "cache" / "banners"),
@@ -188,7 +189,7 @@ def test_machine_files_follow_local_dir_not_the_art_tree(monkeypatch, tmp_path):
     assert g._container_path() == local / "moonglade.mgpack"
     assert paths.settings_path() == local / "settings.json"
     assert paths.icons_dir() == local / "icons"
-    assert g.badge_cache_dir() == local / "cache" / "badges"
+    assert achievements_mod.badge_cache_dir() == local / "cache" / "badges"
     # ...and the art tree itself still follows branding_root().
     assert g._role_dir("marks").is_relative_to(art)
 

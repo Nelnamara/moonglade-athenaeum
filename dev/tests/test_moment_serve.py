@@ -21,6 +21,7 @@ from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import (STARFALL_EVENT, _SEALED_DONOR, MOMENT_FIXTURE_CLIP, ach_event, clear_sealed_caches,
                             first_party_sources, login_client, moment_clip_keys)
+from moonglade import achievements as achievements_mod
 
 _REPO = Path(__file__).resolve().parents[2]
 _KEYTURN_URL = "/branding/" + g._MOMENT_CLIPS["keyturn"]
@@ -112,7 +113,7 @@ def test_clip_urls_name_no_roster_feat(sealed_donor_present):
 # ---- the seal resolves by the `moment` flag, and fails closed without it -------
 
 def test_moment_buckets_are_gated_on_the_flagged_feat(monkeypatch):
-    monkeypatch.setattr(g, "_moment_ach", lambda: {"starfall": "feat-a", "keyturn": "feat-b"})
+    monkeypatch.setattr(achievements_mod, "_moment_ach", lambda: {"starfall": "feat-a", "keyturn": "feat-b"})
     rr = g._role_rel
     assert g._seal_rule(rr("starfall", "ee_nelstarfall.png")) == ("earned", "feat-a")
     assert g._seal_rule(rr("starfall", g._MOMENT_CLIPS["starfall"])) == ("earned", "feat-a")
@@ -129,7 +130,7 @@ def test_moment_buckets_are_gated_on_the_flagged_feat(monkeypatch):
 def test_moment_buckets_deny_when_no_feat_carries_the_flag(monkeypatch):
     """An older pack (no `moment` flags) or no pack at all: both buckets DENY. Falling
     through would be the seal's fail-open default -- sealed art served to anyone."""
-    monkeypatch.setattr(g, "_moment_ach", lambda: {})
+    monkeypatch.setattr(achievements_mod, "_moment_ach", lambda: {})
     for rel in (g._role_rel("starfall", "ee_nelstarfall.png"),
                 g._role_rel("breadcrumb", "README.txt"),
                 g._role_rel("keyturn", g._MOMENT_CLIPS["keyturn"])):
@@ -137,19 +138,19 @@ def test_moment_buckets_deny_when_no_feat_carries_the_flag(monkeypatch):
 
 
 def test_a_roster_without_flags_derives_no_moments():
-    defs = g._derive_sealed({"roster": [{"id": "x", "hidden": True}]})
+    defs = achievements_mod._derive_sealed({"roster": [{"id": "x", "hidden": True}]})
     assert defs["_moment_ach"] == {}
-    defs = g._derive_sealed({"roster": [{"id": "a", "moment": "starfall"},
+    defs = achievements_mod._derive_sealed({"roster": [{"id": "a", "moment": "starfall"},
                                         {"id": "b", "moment": "starfall"},
                                         {"id": "c", "moment": ""}]})
     assert defs["_moment_ach"] == {"starfall": "a"}          # first entry wins; "" is no flag
 
 
 def test_the_sealed_roster_flags_both_moments_on_hidden_feats(sealed_donor_present):
-    moments = g._moment_ach()
+    moments = achievements_mod._moment_ach()
     assert set(moments) >= {"starfall", "keyturn"}
     for m in ("starfall", "keyturn"):
-        assert moments[m] in g._ach_hidden(), m
+        assert moments[m] in achievements_mod._ach_hidden(), m
     assert moments["starfall"] != moments["keyturn"]
 
 
@@ -240,7 +241,7 @@ def _clip_client(tmp_path, monkeypatch, assets):
     stub feat that is earned -- the clip mechanics without a roster."""
     cli = _client(tmp_path)
     _write_box(tmp_path, assets)
-    monkeypatch.setattr(g, "_moment_ach", lambda: {"keyturn": "feat-k"})
+    monkeypatch.setattr(achievements_mod, "_moment_ach", lambda: {"keyturn": "feat-k"})
     monkeypatch.setattr(g, "_earned_achievement_ids", lambda *a, **k: frozenset({"feat-k"}))
     return cli
 
@@ -350,7 +351,7 @@ def test_moment_flags_arrive_with_the_earn(tmp_path, sealed_donor_present):
     donor = _donor_copy()
     for moment, a in by_moment.items():
         assert a["earned"] is True
-        assert a["id"] == g._moment_ach()[moment]
+        assert a["id"] == achievements_mod._moment_ach()[moment]
         assert a["moment_clip"] == "/branding/" + g._MOMENT_CLIPS[moment]
         assert set(a["moment_copy"]) == _COPY_KEYS[moment], moment
         assert a["moment_copy"] == donor[moment]
