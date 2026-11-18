@@ -101,9 +101,10 @@ def name_edits(text, names):
                     break
             if bound_in is None:
                 edits.append(node)
-            else:
-                where = "module" if bound_in is model.scopes[0] else getattr(bound_in.node, "name", "?")
-                conflicts.append((node.lineno, node.id, where, type(node.ctx).__name__))
+            elif bound_in is model.scopes[0]:
+                conflicts.append((node.lineno, node.id, "module", type(node.ctx).__name__))
+            # else: a local (a parameter, say) shadows the moved name there. That use never
+            # meant the module's binding, so it is left alone, and it is no conflict.
         elif isinstance(node, ast.Global):
             for n in node.names:
                 if n in names:
