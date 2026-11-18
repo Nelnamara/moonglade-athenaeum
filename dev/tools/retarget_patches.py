@@ -26,7 +26,9 @@ import gallery as x`, `import moonglade.gallery` (then `moonglade.gallery.name`)
 CONSERVATIVE. Text-level edits of exactly the alias expression (or the dotted string), checked
 by re-parsing the result. A site whose receiver it cannot resolve to a module (a fixture
 parameter, a name bound two ways, a computed string, `patch.multiple`) is REPORTED, never
-guessed. `--dry-run` (the default) prints `file:line old_target -> new_target`; `--apply`
+guessed -- except a computed name that is the variable of an enclosing `for name in ("a",
+"b")` over string literals, which is checked against those literals (reported only if one of
+them moved). `--dry-run` (the default) prints `file:line old_target -> new_target`; `--apply`
 rewrites and adds `from moonglade import <mod> as <alias>` to each touched file.
 
     py dev/tools/retarget_patches.py                 # dry run over dev/tests
@@ -281,6 +283,8 @@ class Site:
     kind: str                 # "expr" | "string" | "dynamic"
     span: tuple = None        # (lineno, col, end_lineno, end_col) of the node to rewrite
     text: str = ""            # the source text of that node
+    candidates: tuple = None  # a "dynamic" name that is the variable of an enclosing
+                              # `for name in ("a", "b")`: the literals it takes
 
 
 @dataclass
@@ -364,6 +368,24 @@ def _is_path_read(const, parents):
     return False
 
 
+def _loop_literals(name_node, node, parents):
+    """The string literals a computed patch name takes when it is the variable of the nearest
+    enclosing `for <name> in ("a", "b", ...)` (a tuple or list of string literals only), else
+    None. Stops at the enclosing def/lambda/class."""
+    if not isinstance(name_node, ast.Name):
+        return None
+    cur = parents.get(id(node))
+    while cur is not None and not isinstance(cur, _SCOPE_TYPES):
+        if (isinstance(cur, (ast.For, ast.AsyncFor)) and isinstance(cur.target, ast.Name)
+                and cur.target.id == name_node.id):
+            elts = cur.iter.elts if isinstance(cur.iter, (ast.Tuple, ast.List)) else []
+            if elts and all(_str_const(e) is not None for e in elts):
+                return tuple(e.value for e in elts)
+            return None
+        cur = parents.get(id(cur))
+    return None
+
+
 def _root_name(expr):
     while isinstance(expr, (ast.Attribute, ast.Subscript, ast.Call)):
         expr = expr.value if not isinstance(expr, ast.Call) else expr.func
@@ -384,11 +406,12 @@ def scan_text(path, text, old_modules=OLD_MODULES):
                 if kind == "mod" and val in old_modules:
                     out.aliases.append((name, val))
 
-    def add(node, form, module, name, kind, span_node):
+    def add(node, form, module, name, kind, span_node, candidates=None):
         out.sites.append(Site(path=str(path), line=node.lineno, form=form, module=module,
                               name=name, kind=kind,
                               span=_span(span_node) if span_node is not None else None,
-                              text=model.segment(span_node) if span_node is not None else ""))
+                              text=model.segment(span_node) if span_node is not None else "",
+                              candidates=candidates))
 
     def receiver_site(node, form, receiver, name_node, scope):
         hit = _module_prefix(model, receiver, scope)
@@ -402,7 +425,8 @@ def scan_text(path, text, old_modules=OLD_MODULES):
                     if name is not None:
                         add(node, form, mod, name, "expr", span_node)
                     elif name_node is not None:
-                        add(node, form, mod, "", "dynamic", None)
+                        add(node, form, mod, "", "dynamic", None,
+                            _loop_literals(name_node, node, parents))
             elif mod == AMBIGUOUS:
                 name = _str_const(name_node) if name_node is not None else None
                 add(node, form, AMBIGUOUS, attr or name or "", "dynamic", None)
@@ -624,7 +648,14 @@ def plan_file(path, text, seams, aliases=None):
                               _existing_alias(model, new) is None))
         elif s.module in OLD_MODULES and s.kind == "dynamic":
             # setattr(core, name, ...): only a question when something moved out of that module
-            if any(old == s.module for old, _ in moved):
+            if s.candidates is not None:
+                # `for name in ("a", "b"): setattr(core, name, ...)`: the names are known
+                hit = [n for n in s.candidates if (s.module, n) in moved]
+                if hit:
+                    unresolved.append((s.line, "%s on %s with a loop name that includes moved %s: "
+                                               "retarget by hand" % (s.form, s.module,
+                                                                     ", ".join(hit))))
+            elif any(old == s.module for old, _ in moved):
                 unresolved.append((s.line, "%s on %s with a computed name: check by hand"
                                    % (s.form, s.module)))
         elif s.module in (None, AMBIGUOUS) and s.name and s.name in moved_names:

@@ -174,3 +174,27 @@ def test_main_exit_code_and_flags(tmp_path, capsys):
     path.write_text(clean, encoding="utf-8")
     assert rp.main(argv + ["--apply", "--alias", "moonglade.scan=scan_x"]) == 0
     assert "scan_x.scan_library = 1" in path.read_text(encoding="utf-8")
+
+
+def test_a_loop_over_literal_names_is_checked_against_them(tmp_path):
+    """`for name in ("a", "b"): setattr(core, name, ...)` names its targets in the loop: it is
+    reported only when one of them moved, and a name the loop cannot pin stays a question."""
+    text = '''\
+from moonglade import gallery as gg
+
+
+def test_loops(monkeypatch, names):
+    for name in ("load_catalog", "save_catalog"):
+        monkeypatch.setattr(gg, name, None)
+    for name in ["load_catalog", "scan_library"]:
+        monkeypatch.setattr(gg, name, None)
+    for name in names:
+        monkeypatch.setattr(gg, name, None)
+'''
+    edits, unresolved, _ = rp.plan_file("test_loops.py", text, SEAMS)
+    assert edits == []
+    assert [line for line, _ in unresolved] == [8, 10], unresolved
+    assert "includes moved scan_library" in unresolved[0][1]
+    assert "computed name: check by hand" in unresolved[1][1]
+    edits, unresolved, _ = rp.plan_file("test_loops.py", text, {})
+    assert (edits, unresolved) == ([], [])
