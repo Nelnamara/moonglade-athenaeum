@@ -18,6 +18,7 @@ from moonglade import gallery as g
 from tests.conftest import login_client
 from moonglade import updater as updater_mod
 from moonglade import about as about_mod
+from moonglade import branding as branding_mod
 
 
 def _wiki(tmp_path, files):
@@ -236,7 +237,7 @@ def test_a_real_start_never_asks_the_owner_to_delete_an_old_pack(tmp_path, monke
 def test_the_running_version_has_a_changelog_entry():
     """About and what's new read the running version's block; a release cut without one
     would show an empty card on every install that runs it."""
-    a = about_mod.about_payload(core.__version__, g._container_path())
+    a = about_mod.about_payload(core.__version__, branding_mod._container_path())
     assert a["title"] and a["items"], "CHANGELOG.md has no [%s] block" % core.__version__
 
 

@@ -20,6 +20,7 @@ from moonglade import gallery as g
 
 from tests.conftest import clear_sealed_caches
 from moonglade import achievements as achievements_mod
+from moonglade import branding as branding_mod
 
 # The masked feat's distinctive numbers: a leak test greps the serialized payload for these.
 DISTINCT_THRESHOLD = 7331
@@ -80,7 +81,7 @@ def seed(container_path, poke_lines=None, ladder_feat=False, **kw):
 def badge_png(aid, color=(200, 30, 60, 255), size=300):
     """A loose badge master for `aid`: a coloured disc on a transparent ground, so the mask's
     silhouette is the disc and any colour that leaks into it is visible. Returns the path."""
-    bdir = g._role_dir("badges")
+    bdir = branding_mod._role_dir("badges")
     bdir.mkdir(parents=True, exist_ok=True)
     im = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     ImageDraw.Draw(im).ellipse((size // 6, size // 6, size - size // 6, size - size // 6), fill=color)
@@ -102,4 +103,4 @@ def earn(out_dir, *ids, day="2026-09-01"):
         ea[i] = day
     st["earned_at"] = ea
     assert achievements_mod.save_ach_state(out_dir, st)
-    g._earned_ids_cache.update(t=0.0, ids=frozenset())
+    branding_mod._earned_ids_cache.update(t=0.0, ids=frozenset())

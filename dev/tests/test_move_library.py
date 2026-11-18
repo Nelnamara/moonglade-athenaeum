@@ -42,6 +42,7 @@ from moonglade import account_prefs as account_prefs_mod
 from moonglade import jobs as jobs_mod
 from moonglade import telemetry as telemetry_mod
 from moonglade import achievements as achievements_mod
+from moonglade import branding as branding_mod
 
 
 @pytest.fixture
@@ -411,10 +412,10 @@ def test_the_banners_b6(r):
     assert not (r.local / "banners" / "banner.png").exists(), "an earned render is rebuilt"
     assert not (r.lib / "gallery" / "cache" / "_banners").exists()
     assert not (r.lib / "gallery" / "cache" / "_masks").exists()
-    assert not g.branding_root().exists() or not list(g.branding_root().rglob("*.png"))
+    assert not branding_mod.branding_root().exists() or not list(branding_mod.branding_root().rglob("*.png"))
     # what the app serves for the migrated slot is the kept copy
-    assert g._served_flat_dir(r.lib, "banner_login") == r.local / "banners"
-    assert g._ensure_banner_flat(r.lib, "banner_login") == r.local / "banners" / "login-banner.png"
+    assert branding_mod._served_flat_dir(r.lib, "banner_login") == r.local / "banners"
+    assert branding_mod._ensure_banner_flat(r.lib, "banner_login") == r.local / "banners" / "login-banner.png"
 
 
 def test_a_slot_render_is_simply_rebuilt(r):

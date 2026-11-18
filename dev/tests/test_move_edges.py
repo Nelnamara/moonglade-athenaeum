@@ -715,6 +715,7 @@ import types  # noqa: E402
 
 from tests.conftest import stub_code_module  # noqa: E402
 from tests.test_launcher_gets_ready_first import _ready, _setup, launch  # noqa: E402,F401
+from moonglade import branding as branding_mod
 
 
 def test_a_later_failure_is_not_given_an_earlier_start_s_sentence(launch, monkeypatch):
@@ -798,4 +799,4 @@ def test_the_pack_builder_names_the_place_it_really_writes(r):
     src = (REPO_ROOT / "dev" / "tools" / "build_container.py").read_text(encoding="utf-8")
     assert "<app root>/moonglade.mgpack" not in src
     assert src.count("<app root>/local/moonglade.mgpack") == 2
-    assert g._container_path() == r.local / paths.PACK_NAME
+    assert branding_mod._container_path() == r.local / paths.PACK_NAME

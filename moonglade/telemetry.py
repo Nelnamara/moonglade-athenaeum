@@ -545,7 +545,7 @@ def sweep_telemetry(out_dir):
 
     Nothing is written into the tree and nothing is adopted here -- the scan is
     read-only, and the only writes are the telemetry flags themselves."""
-    from moonglade.gallery import _branding_tree_has_new_art, load_branding
+    from moonglade.branding import _branding_tree_has_new_art, load_branding
     try:
         if _branding_tree_has_new_art(out_dir):
             telem_flag("branding_custom_file", out_dir=out_dir)

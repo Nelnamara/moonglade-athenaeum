@@ -328,15 +328,15 @@ def test_import_local_skips_branding_folder(tmp_path, monkeypatch):
     from moonglade import gallery as g
     from moonglade.gallery import load_catalog
     monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "")
-    g._role_dir("marks").mkdir(parents=True)
-    (g.branding_root() / "banner.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
-    (g._role_dir("marks") / "m1.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
+    branding_mod._role_dir("marks").mkdir(parents=True)
+    (branding_mod.branding_root() / "banner.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
+    (branding_mod._role_dir("marks") / "m1.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "v.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
     res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
     assert res["imported"] == 1                       # only the video, not the 2 branding pngs
     files = [r.get("filename", "") for r in load_catalog(tmp_path / "catalog.db")]
-    root_name = g.branding_root().name                 # derived, not retyped
+    root_name = branding_mod.branding_root().name                 # derived, not retyped
     assert not any(root_name in f for f in files)      # branding stayed out of the gallery
     assert any(f.endswith("v.mp4") for f in files)
 
@@ -530,6 +530,7 @@ from moonglade.gallery import (CATALOG_FIELDS, init_db, save_catalog, load_catal
                             update_prompt_full, bulk_replace_prompt, _db_is_empty)
 from moonglade import organize as organize_mod
 from moonglade import media_tools as media_tools_mod
+from moonglade import branding as branding_mod
 
 
 def _make_row(**kwargs):

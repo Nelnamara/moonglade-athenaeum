@@ -23,6 +23,7 @@ from moonglade import migrate
 from moonglade import settings
 from moonglade import setup as msetup
 from tests.move_layouts import read_config, rig, write, write_config
+from moonglade import branding as branding_mod
 
 
 @pytest.fixture
@@ -133,7 +134,7 @@ def test_the_branding_files_fold_into_settings_and_go(r):
     assert b["slots"] == {"banner_main": "a1"}
     assert not (r.app / "branding.json").exists()
     assert not (r.app / "branding_slots.json").exists()
-    assert g._recorded_slot_active(r.lib) == {"banner_main": "a1"}
+    assert branding_mod._recorded_slot_active(r.lib) == {"banner_main": "a1"}
 
 
 def test_every_hand_edited_value_stays_in_config_json(r):

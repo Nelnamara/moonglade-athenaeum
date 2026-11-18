@@ -30,15 +30,16 @@ from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import STARFALL_EVENT, ach_event, login_client
 from moonglade import achievements as achievements_mod
+from moonglade import branding as branding_mod
 
 
 @pytest.fixture(autouse=True)
 def _fresh_seal_cache():
     """Same isolation test_unlock_split takes: the earned-ids cache is module-global,
     and one test's earns must not leak an allow into the next one's fresh tmp_path."""
-    g._earned_ids_cache.update(t=0.0, ids=frozenset())
+    branding_mod._earned_ids_cache.update(t=0.0, ids=frozenset())
     yield
-    g._earned_ids_cache.update(t=0.0, ids=frozenset())
+    branding_mod._earned_ids_cache.update(t=0.0, ids=frozenset())
 
 
 def _client(tmp_path):
@@ -50,7 +51,7 @@ def _client(tmp_path):
 
 def _still(aid, size=300, color=(10, 20, 30, 255)):
     """Seed a loose STILL master at its coded rel and return its bytes."""
-    bdir = g._role_dir("badges")
+    bdir = branding_mod._role_dir("badges")
     bdir.mkdir(parents=True, exist_ok=True)
     Image.new("RGBA", (size, size), color).save(bdir / (aid + ".png"))
     return (bdir / (aid + ".png")).read_bytes()
@@ -71,7 +72,7 @@ def _anim_bytes(frames=4, size=300):
 
 def _anim(aid, **kw):
     """Seed a loose ANIMATED master beside the stills and return its bytes."""
-    bdir = g._role_dir("badges")
+    bdir = branding_mod._role_dir("badges")
     bdir.mkdir(parents=True, exist_ok=True)
     raw = _anim_bytes(**kw)
     (bdir / (aid + ".webp")).write_bytes(raw)
@@ -229,17 +230,17 @@ def test_badge_anim_reads_through_the_container_path(tmp_path, monkeypatch):
         seen["bytes"] = rel
         return raw if rel.endswith(".webp") else None
 
-    monkeypatch.setattr(g, "_branding_exists", _exists)
-    monkeypatch.setattr(g, "_branding_bytes", _bytes)
+    monkeypatch.setattr(branding_mod, "_branding_exists", _exists)
+    monkeypatch.setattr(branding_mod, "_branding_bytes", _bytes)
 
     assert achievements_mod._badge_anim("first-light") == raw
-    assert seen["exists"] == g._role_rel("badges", "first-light.webp")
+    assert seen["exists"] == branding_mod._role_rel("badges", "first-light.webp")
     assert seen["bytes"] == seen["exists"]
     assert not achievements_mod.badge_cache_dir(tmp_path).exists()
 
 
 def test_badge_anim_is_none_when_there_is_no_animation(tmp_path, monkeypatch):
-    monkeypatch.setattr(g, "_branding_exists", lambda rel: False)
+    monkeypatch.setattr(branding_mod, "_branding_exists", lambda rel: False)
     assert achievements_mod._badge_anim("first-light") is None
 
 
@@ -284,9 +285,9 @@ def test_the_in_memory_cut_never_upscales_either(tmp_path, monkeypatch):
     _only_badges(monkeypatch, "syn-small")
     buf = io.BytesIO()
     Image.new("RGBA", (300, 300), (10, 20, 30, 255)).save(buf, format="PNG")
-    mc.write_container(g._container_path(),
-                       {g._role_rel("badges", "syn-small.png"): buf.getvalue()}, {})
-    g._container_cache.update(path=None, mtime=None, box=None)
+    mc.write_container(branding_mod._container_path(),
+                       {branding_mod._role_rel("badges", "syn-small.png"): buf.getvalue()}, {})
+    branding_mod._container_cache.update(path=None, mtime=None, box=None)
     blocker = tmp_path / "not-a-folder"
     blocker.write_bytes(b"x")                               # mkdir under a file fails
     monkeypatch.setattr(achievements_mod, "badge_cache_dir", lambda out_dir: blocker / "_badges")

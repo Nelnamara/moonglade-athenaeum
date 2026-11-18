@@ -23,6 +23,7 @@ from tests import synthetic_feats as sf
 from tests.conftest import _SEALED_DONOR, login_client, login_test_client
 from moonglade import account_prefs as account_prefs_mod
 from moonglade import telemetry as telemetry_mod
+from moonglade import branding as branding_mod
 
 URL = "/api/narrator/poke"
 LINES = {
@@ -56,16 +57,16 @@ def clock(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _fresh_earned_cache():
-    g._earned_ids_cache.update(t=0.0, ids=frozenset())
+    branding_mod._earned_ids_cache.update(t=0.0, ids=frozenset())
     yield
-    g._earned_ids_cache.update(t=0.0, ids=frozenset())
+    branding_mod._earned_ids_cache.update(t=0.0, ids=frozenset())
 
 
 def _client(tmp_path, poke_lines=LINES, **seed_kw):
     """A logged-in client on an install whose sealed pack is the synthetic one."""
     save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "1", "filename": "a_1.png", "created_at": "2025-01-01T00:00:00"}])
-    sf.seed(g._container_path(), poke_lines=poke_lines, **seed_kw)
+    sf.seed(branding_mod._container_path(), poke_lines=poke_lines, **seed_kw)
     return login_client(tmp_path)
 
 

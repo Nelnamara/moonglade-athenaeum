@@ -37,6 +37,7 @@ from unittest import mock
 
 import pytest
 from moonglade import telemetry as telemetry_mod
+from moonglade import branding as branding_mod
 
 _HARNESS = Path(__file__).resolve().parent / "test_render_harness.py"
 
@@ -330,7 +331,7 @@ def unpinned_module_view():
     from moonglade import gallery as _g
     from moonglade import migrate as _m
     from moonglade import paths as _p
-    return SimpleNamespace(root=_g.branding_root(), container=_g._container_path(),
+    return SimpleNamespace(root=branding_mod.branding_root(), container=branding_mod._container_path(),
                            settings_json=_p.settings_path(),
                            local_dir=_p.local_dir(),
                            old_pack=_m.old_app_root() / "moonglade.mgpack")

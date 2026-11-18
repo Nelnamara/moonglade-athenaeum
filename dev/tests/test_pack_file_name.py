@@ -12,6 +12,7 @@ from moonglade import assets as ma
 from moonglade import gallery as g
 from moonglade import paths as moonglade_paths
 from tests.conftest import first_party_sources
+from moonglade import branding as branding_mod
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -40,13 +41,13 @@ def _code_files():
 
 
 def test_the_pack_is_moonglade_mgpack_beside_the_program():
-    p = g._container_path()
+    p = branding_mod._container_path()
     assert p.name == "moonglade.mgpack"
     assert p == moonglade_paths.local_path("moonglade.mgpack")    # a machine file
 
 
 def test_the_version_marker_follows_the_pack_name():
-    assert ma._version_marker_path(g._container_path()).name == "moonglade.mgpack.version"
+    assert ma._version_marker_path(branding_mod._container_path()).name == "moonglade.mgpack.version"
 
 
 def test_the_asset_check_asks_about_the_new_name(tmp_path):

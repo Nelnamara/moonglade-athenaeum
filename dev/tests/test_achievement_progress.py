@@ -23,6 +23,7 @@ from tests import synthetic_feats as sf
 from tests.conftest import clear_sealed_caches, login_client
 from moonglade import telemetry as telemetry_mod
 from moonglade import achievements as achievements_mod
+from moonglade import branding as branding_mod
 
 HIDDEN_ID = "synth-hidden-feat"
 HIDDEN_NAME = "Synthetic Hidden Feat"
@@ -65,7 +66,7 @@ def _roster():
 def _seed(tmp_path):
     defs = {"roster": _roster(), "skins": [], "skin_unlock": {}, "ach_criteria": {},
             "ladder_tracks": [{"id": "syn-images", "name": "Synthetic Images", "metric": "images"}]}
-    _mc.write_container(g._container_path(), {"_seed.txt": b"x"},
+    _mc.write_container(branding_mod._container_path(), {"_seed.txt": b"x"},
                         {"achievements": json.dumps(defs).encode("utf-8")})
     clear_sealed_caches()
 
@@ -73,7 +74,7 @@ def _seed(tmp_path):
 def _marks(bindings):
     """marks.json + art for {mark_id: awarding achievement id or ''}. Written BEFORE the app
     is built (create_app sweeps the tree), the way dev/tests/test_branding.py does."""
-    mdir = g._role_dir("marks")
+    mdir = branding_mod._role_dir("marks")
     mdir.mkdir(parents=True, exist_ok=True)
     entries = []
     for mid, unlock in bindings.items():

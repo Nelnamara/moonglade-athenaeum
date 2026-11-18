@@ -170,6 +170,47 @@ SEAMS = {
         "_MEASURED_METRICS", "achievement_progress", "claim_job_label", "_ach_state_path",
         "load_ach_state", "save_ach_state", "badge_cache_dir", "_badge_thumb",
         "_BADGE_ANIM_MAX_BYTES", "_badge_anim"]},
+    "moonglade.branding": {"from": "moonglade.gallery", "names": [
+        "MARK_ANIMS", "MARK_ANIMS_RETIRED", "_BRAND_NUM_RANGES", "_HEX_COLOR_RE",
+        "_BRAND_DEFAULTS", "_brand_num", "_brand_color", "branding_root", "_GOODS_ROOT_NAME",
+        "_GOODS_MID", "_LEGACY_THUMB_DIR", "ROLE_CODE", "_MOMENT_CLIPS", "_MOMENT_CLIP_ROLES",
+        "_role_rel", "_role_dir", "_SYSTEM_TOP_FILES", "_public_rel_to_coded", "_container_path",
+        "_container_cache", "_container_lock", "_get_container", "_branding_bytes",
+        "_branding_exists", "_branding_mtime", "_moment_clip_cache", "_moment_clip_cache_lock",
+        "_moment_clip_rels", "_container_clip_bytes", "_ranged_bytes_response", "_seal_rule",
+        "_earned_ids_cache", "_earned_ids_lock", "_earned_achievement_ids",
+        "_seed_loose_manifest", "_MARK_TOMBSTONES", "MARK_EXTS", "mark_art_ext", "list_marks",
+        "_earned_roster_flags", "earned_relic_marks", "FEAT_MASK_PX", "feat_mask_png",
+        "_feat_riddles", "_pick_masked_feat", "_feat_mask_token", "_feats_payload",
+        "feat_mask_cache_dir", "_feat_mask_bytes", "_ach_name", "_mark_unlock_for",
+        "BANNER_SLOTS", "ROLE_SLOTS", "BRANDING_SLOTS", "ROLE_MAX_BYTES", "ROLE_MAX_SIDE",
+        "ROLE_ASPECT_TOLERANCE", "ROLE_SEE_THROUGH_MIN", "ROLE_MAX_FRAMES",
+        "ROLE_MAX_ANIM_PIXELS", "ROLE_OPEN_FORMATS", "BANNER_MAX_SIDE", "_slot_dir",
+        "_asset_transform", "list_slot_assets", "_recorded_slot_active", "resolve_slot_active",
+        "load_slot_active", "save_slot_active", "add_slot_asset", "set_slot_crop",
+        "set_slot_active", "_mark_earned", "ICO_SIZES", "_cut_mark_ico", "add_custom_mark",
+        "remove_custom_mark", "branding_slots_payload", "_ratio_label", "role_image_spec",
+        "_aspect_words", "role_spec_failures", "_ROLE_NEED_VERB", "role_refusal_text",
+        "ImageRefused", "_UNREADABLE", "webp_declared_size", "guard_webp_canvas", "role_measure",
+        "_ROLE_KEEP_CHUNKS", "_role_animation_bytes", "_role_coded_rel", "_role_override_path",
+        "_role_coded_rels", "_role_decode_memo", "_role_file_decodes", "branding_roles_payload",
+        "_role_payload", "branding_role_upload", "branding_role_restore", "_BRANDING_README",
+        "_BRANDING_DISCOVERY_SLOTS", "_migrate_legacy_branding_root",
+        "ensure_branding_discovery_tree", "_migrate_root_banner_flats", "_is_readable_image",
+        "_BRANDING_WALK_MAX_DEPTH", "_BASELINE_GOODS", "_BASELINE_HEAD", "_BASELINE_SETTLE_NS",
+        "_BASELINE_CLEAN_MEMO", "_BASELINE_CLEAN_MEMO_MAX", "_branding_tree_files",
+        "_file_fingerprint", "_baseline_key", "_branding_baseline", "_record_branding_baseline",
+        "_baseline_note_app_write", "_branding_tree_has_new_art", "_adopt_dropped_file",
+        "_adopt_mark", "_SWEEPABLE_SLOTS", "_BANNER_FLAT", "_BANNER_FLAT_DEFAULT",
+        "_flat_default_rel", "banner_cache_dir", "banner_keep_dir", "_EARNED_BANNERS",
+        "_served_flat_dir", "_worn_banner", "_set_worn_banner", "_BANNER_RATIO", "_BANNER_OUT",
+        "_banner_window", "_banner_record_path", "_read_banner_record", "_write_banner_record",
+        "_slot_render_record", "_render_banner_flat", "_write_banner_flat", "_earned_banner_ok",
+        "_ensure_banner_flat", "_record_slot_resolution", "_ensure_banner_renders",
+        "sweep_branding_drops", "load_branding", "save_branding", "_branding_tuning",
+        "brand_context", "_mark_ico_path", "make_launcher_shortcut", "PACK_PROGID",
+        "PACK_TYPE_NAME", "register_pack_file_type", "_pack_type_icon",
+        "_tell_explorer_file_types_changed"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -720,6 +761,43 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_telemetry.py', 'moonglade.achievements'),
     ('tests/test_watch.py', 'moonglade.achievements'),
     ('tools/export_design_kit.py', 'moonglade.achievements'),
+    ('loom/test/med-loom-bundle-missing-report.test.js', 'moonglade.branding'),
+    ('loom/test/mg-art-filters.test.js', 'moonglade.branding'),
+    ('loom/test/mg-notify-queue-phase.test.js', 'moonglade.branding'),
+    ('loom/test/mg-notify-website-source.test.js', 'moonglade.branding'),
+    ('loom/test/phone-back-layers.test.js', 'moonglade.branding'),
+    ('tests/test_app_paths.py', 'moonglade.branding'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.branding'),
+    ('tests/test_bonjour.py', 'moonglade.branding'),
+    ('tests/test_branding.py', 'moonglade.branding'),
+    ('tests/test_branding_tree_rules.py', 'moonglade.branding'),
+    ('tests/test_catalog_verbs.py', 'moonglade.branding'),
+    ('tests/test_catchup_query.py', 'moonglade.branding'),
+    ('tests/test_csrf_coverage.py', 'moonglade.branding'),
+    ('tests/test_design_kit_sync.py', 'moonglade.branding'),
+    ('tests/test_doc_truth_residuals.py', 'moonglade.branding'),
+    ('tests/test_evidence_counters.py', 'moonglade.branding'),
+    ('tests/test_first_party_sources.py', 'moonglade.branding'),
+    ('tests/test_gen_surface.py', 'moonglade.branding'),
+    ('tests/test_history_feed_document.py', 'moonglade.branding'),
+    ('tests/test_library_dir.py', 'moonglade.branding'),
+    ('tests/test_living_library.py', 'moonglade.branding'),
+    ('tests/test_logging.py', 'moonglade.branding'),
+    ('tests/test_loom_generate_guard.py', 'moonglade.branding'),
+    ('tests/test_loom_notify.py', 'moonglade.branding'),
+    ('tests/test_loom_p_routes.py', 'moonglade.branding'),
+    ('tests/test_move_edges.py', 'moonglade.branding'),
+    ('tests/test_network.py', 'moonglade.branding'),
+    ('tests/test_outside_notice.py', 'moonglade.branding'),
+    ('tests/test_pack_file_name.py', 'moonglade.branding'),
+    ('tests/test_pack_file_type.py', 'moonglade.branding'),
+    ('tests/test_panel.py', 'moonglade.branding'),
+    ('tests/test_settings_store.py', 'moonglade.branding'),
+    ('tests/test_setup_prepare.py', 'moonglade.branding'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.branding'),
+    ('tests/test_telemetry.py', 'moonglade.branding'),
+    ('tests/test_watch.py', 'moonglade.branding'),
+    ('tools/export_design_kit.py', 'moonglade.branding'),
 }
 
 
@@ -768,7 +846,12 @@ def check_defined_in(seams, load, source_of):
                 problems.append("%s.%s does not exist" % (new_mod, name))
                 continue
             obj = getattr(mod, name)
-            if (inspect.isfunction(obj) or inspect.isclass(obj)) and obj.__module__ != new_mod:
+            # A stand-in the suite itself installs for the whole session (conftest pins
+            # branding_root() before any test runs) is not an import; the source check below
+            # still has to find the real definition.
+            stand_in = (getattr(obj, "__module__", None) or "").startswith("tests.")
+            if ((inspect.isfunction(obj) or inspect.isclass(obj)) and obj.__module__ != new_mod
+                    and not stand_in):
                 problems.append("%s.%s is defined in %s" % (new_mod, name, obj.__module__))
             elif name not in defined:
                 problems.append("%s.%s is imported there, not defined" % (new_mod, name))

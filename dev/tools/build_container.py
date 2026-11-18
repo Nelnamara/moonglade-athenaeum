@@ -59,6 +59,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from moonglade import assets as ma
 from moonglade import backup as core
+from moonglade import branding as branding_mod
 from moonglade import container as mc
 from moonglade import gallery as g
 
@@ -141,9 +142,10 @@ def carried_login_sources(root):
             if p.is_file():
                 return p
         return None
-    mascot = first(g._role_rel("system", "login_nel.webp"), g._role_rel("system", "login_nel.png"),
+    mascot = first(branding_mod._role_rel("system", "login_nel.webp"),
+                   branding_mod._role_rel("system", "login_nel.png"),
                    "login_nel.webp", "login_nel.png")
-    banner = first(g._flat_default_rel("banner_login"), "banner_login/banner_login.png")
+    banner = first(branding_mod._flat_default_rel("banner_login"), "banner_login/banner_login.png")
     return mascot, banner
 
 
@@ -240,7 +242,7 @@ def main():
                          "no manifest")
     args = ap.parse_args()
 
-    root = Path(args.root).resolve() if args.root else g.branding_root()
+    root = Path(args.root).resolve() if args.root else branding_mod.branding_root()
     if not root.is_dir():
         sys.exit("No source tree at %s -- nothing to pack." % root)
     if args.carry_only:
@@ -252,7 +254,7 @@ def main():
     # Output defaults to the APP root even when --root points elsewhere: it IS
     # _container_path(), the one place the app looks for the pack, and the manifest
     # written below describes that file. --out overrides for anything unusual.
-    out_path = Path(args.out) if args.out else g._container_path()
+    out_path = Path(args.out) if args.out else branding_mod._container_path()
 
     assets = gather(root)
     if not assets:

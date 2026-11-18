@@ -23,6 +23,7 @@ from moonglade.gallery import CATALOG_FIELDS, save_catalog
 from tests.conftest import STARFALL_EVENT, ach_event, login_client
 from moonglade import telemetry as telemetry_mod
 from moonglade import achievements as achievements_mod
+from moonglade import branding as branding_mod
 
 
 def _row(**kw):
@@ -34,9 +35,9 @@ def _fresh_seal_cache():
     """The earned-ids seal cache is module-global (one install per real process);
     the suite runs MANY installs per process, and a previous test's earns must
     not leak an allow into this one's fresh tmp_path."""
-    g._earned_ids_cache.update(t=0.0, ids=frozenset())
+    branding_mod._earned_ids_cache.update(t=0.0, ids=frozenset())
     yield
-    g._earned_ids_cache.update(t=0.0, ids=frozenset())
+    branding_mod._earned_ids_cache.update(t=0.0, ids=frozenset())
 
 
 def _client(tmp_path, n_images=1):
@@ -62,15 +63,15 @@ def test_sealed_paths_deny_while_unearned(tmp_path):
     # loremaster needs 25k images; the starfall feat needs the beacon -- neither is
     # earned with a 1-image catalog and no flags. Each pair: (public GET rel,
     # coded seed rel) -- the URL vocabulary never changed, only where files live.
-    crumb = g._role_rel("breadcrumb", "README.txt")
+    crumb = branding_mod._role_rel("breadcrumb", "README.txt")
     pairs = [
-        ("badges/loremaster.png",      g._role_rel("badges", "loremaster.png")),
-        ("mascots/ach/loremaster.png", g._role_rel("mascots_ach", "loremaster.png")),
-        ("rewards/ach/loremaster.png", g._role_rel("rewards", "ach/loremaster.png")),
+        ("badges/loremaster.png",      branding_mod._role_rel("badges", "loremaster.png")),
+        ("mascots/ach/loremaster.png", branding_mod._role_rel("mascots_ach", "loremaster.png")),
+        ("rewards/ach/loremaster.png", branding_mod._role_rel("rewards", "ach/loremaster.png")),
         ("_thumbs/loremaster.png",     "_thumbs/loremaster.png"),  # literal, never coded
-        ("ee_nelstarfall.png",         g._role_rel("starfall", "ee_nelstarfall.png")),
-        ("ee_starfall_cast.ogg",       g._role_rel("starfall", "ee_starfall_cast.ogg")),
-        ("ee_starfall_loop.ogg",       g._role_rel("starfall", "ee_starfall_loop.ogg")),
+        ("ee_nelstarfall.png",         branding_mod._role_rel("starfall", "ee_nelstarfall.png")),
+        ("ee_starfall_cast.ogg",       branding_mod._role_rel("starfall", "ee_starfall_cast.ogg")),
+        ("ee_starfall_loop.ogg",       branding_mod._role_rel("starfall", "ee_starfall_loop.ogg")),
         # a probe that GUESSES the coded GONK breadcrumb path passes through
         # translation unchanged and faces the same starfall-prefix seal
         (crumb,                        crumb),
@@ -80,7 +81,7 @@ def test_sealed_paths_deny_while_unearned(tmp_path):
         r = cli.get("/branding/" + public)
         assert r.status_code == 404, public   # sealed == indistinguishable from absent
     # unknown files in the sealed buckets stay sealed too
-    _seed(tmp_path, g._role_rel("badges", "not-an-achievement.png"))
+    _seed(tmp_path, branding_mod._role_rel("badges", "not-an-achievement.png"))
     assert cli.get("/branding/badges/not-an-achievement.png").status_code == 404
 
 
@@ -90,7 +91,7 @@ def test_reward_ui_icons_open_rest_of_rewards_sealed(tmp_path):
     ✉ Inbox button (owner's art, 2026-10-04), so they stay OPEN -- while every
     other file in the rewards bucket stays sealed shut."""
     cli = _client(tmp_path)
-    rdir = g._role_dir("rewards")
+    rdir = branding_mod._role_dir("rewards")
     rdir.mkdir(parents=True, exist_ok=True)
     for name in ("claim.png", "gift.png", "inbox.png"):
         (rdir / name).write_bytes(b"\x89PNG fake")
@@ -101,24 +102,24 @@ def test_reward_ui_icons_open_rest_of_rewards_sealed(tmp_path):
 
 def test_sealed_paths_serve_once_earned(tmp_path, sealed_donor_present):
     cli = _client(tmp_path)   # 1 image -> first-light IS earned
-    _seed(tmp_path, g._role_rel("badges", "first-light.png"))
-    _seed(tmp_path, g._role_rel("mascots_ach", "first-light.png"))
+    _seed(tmp_path, branding_mod._role_rel("badges", "first-light.png"))
+    _seed(tmp_path, branding_mod._role_rel("mascots_ach", "first-light.png"))
     assert cli.get("/branding/badges/first-light.png").status_code == 200
     assert cli.get("/branding/mascots/ach/first-light.png").status_code == 200
     # the Konami earn is the beacon; the egg's asset fetch follows it (App.jsx
     # awaits the beacon), so the very first trigger must already serve -- the
     # art, BOTH audio files, and the GONK breadcrumb: the whole starfall
     # prefix unseals together
-    _seed(tmp_path, g._role_rel("starfall", "ee_nelstarfall.png"))
-    _seed(tmp_path, g._role_rel("starfall", "ee_starfall_cast.ogg"))
-    _seed(tmp_path, g._role_rel("starfall", "ee_starfall_loop.ogg"))
+    _seed(tmp_path, branding_mod._role_rel("starfall", "ee_nelstarfall.png"))
+    _seed(tmp_path, branding_mod._role_rel("starfall", "ee_starfall_cast.ogg"))
+    _seed(tmp_path, branding_mod._role_rel("starfall", "ee_starfall_loop.ogg"))
     assert cli.get("/branding/ee_nelstarfall.png").status_code == 404
     assert ach_event(cli, STARFALL_EVENT).status_code == 200
     assert cli.get("/branding/ee_nelstarfall.png").status_code == 200
     assert cli.get("/branding/ee_starfall_cast.ogg").status_code == 200
     assert cli.get("/branding/ee_starfall_loop.ogg").status_code == 200
     # the breadcrumb README (materialized by the discovery scaffold at startup)
-    crumb = g._role_rel("breadcrumb", "README.txt")
+    crumb = branding_mod._role_rel("breadcrumb", "README.txt")
     assert cli.get("/branding/" + crumb).status_code == 200
 
 
@@ -128,8 +129,8 @@ def test_earned_banner_gated_and_void_banner_never_serves(tmp_path, sealed_donor
     void_banner.png is an UNWIRED future reward (achievements #57-60) and
     NEVER serves, no matter how much is earned."""
     cli = _client(tmp_path)   # 1 image: the-great-library (50k crown) unearned
-    _seed(tmp_path, g._role_rel("earned_banners", "great_library.png"))
-    _seed(tmp_path, g._role_rel("earned_banners", "void_banner.png"))
+    _seed(tmp_path, branding_mod._role_rel("earned_banners", "great_library.png"))
+    _seed(tmp_path, branding_mod._role_rel("earned_banners", "void_banner.png"))
     assert cli.get("/branding/earned_banners/great_library.png").status_code == 404
     assert cli.get("/branding/earned_banners/void_banner.png").status_code == 404
     # earn it for real: 50k catalog rows crosses the crown (the seal's denied-
@@ -147,10 +148,10 @@ def test_system_chrome_stays_open(tmp_path):
     tracker art, celebration present_* fallbacks, banners) serves ungated."""
     cli = _client(tmp_path)
     pairs = [
-        ("mascots/nel_narrator.png", g._role_rel("mascots", "nel_narrator.png")),
-        ("mascots/trk_done.png",     g._role_rel("mascots", "trk_done.png")),
-        ("mascots/present_1.png",    g._role_rel("mascots", "present_1.png")),
-        ("marks/mark_4.png",         g._role_rel("marks", "mark_4.png")),
+        ("mascots/nel_narrator.png", branding_mod._role_rel("mascots", "nel_narrator.png")),
+        ("mascots/trk_done.png",     branding_mod._role_rel("mascots", "trk_done.png")),
+        ("mascots/present_1.png",    branding_mod._role_rel("mascots", "present_1.png")),
+        ("marks/mark_4.png",         branding_mod._role_rel("marks", "mark_4.png")),
     ]
     for public, coded in pairs:
         _seed(tmp_path, coded)
@@ -158,7 +159,7 @@ def test_system_chrome_stays_open(tmp_path):
     # The banner flat is ungated too, but it is not a tree asset: since
     # 2026-09-10 the route reads a flat from this install's render cache only,
     # never from the coded root. Seed it where it actually lives.
-    cdir = g.banner_cache_dir(tmp_path)
+    cdir = branding_mod.banner_cache_dir(tmp_path)
     cdir.mkdir(parents=True, exist_ok=True)
     (cdir / "banner.png").write_bytes(b"\x89PNG fake")
     assert cli.get("/branding/banner.png").status_code == 200
@@ -170,7 +171,7 @@ def test_badge_thumb_hidden_gate(tmp_path, sealed_donor_present):
     achievements keep their thumbs (the Folio's locked tiles show art)."""
     from PIL import Image
     cli = _client(tmp_path)
-    bdir = g._role_dir("badges")
+    bdir = branding_mod._role_dir("badges")
     bdir.mkdir(parents=True, exist_ok=True)
     sf = achievements_mod._moment_ach()["starfall"]          # the hidden feat the beacon below earns
     Image.new("RGBA", (64, 64), (10, 20, 30, 255)).save(bdir / (sf + ".png"))
@@ -189,7 +190,7 @@ def test_badge_thumb_fails_closed_when_roster_unavailable(tmp_path, monkeypatch)
     badge branch already avoids (adversarial, 2026-08-22). Also denies an unknown id."""
     from PIL import Image
     cli = _client(tmp_path)
-    bdir = g._role_dir("badges"); bdir.mkdir(parents=True, exist_ok=True)
+    bdir = branding_mod._role_dir("badges"); bdir.mkdir(parents=True, exist_ok=True)
     Image.new("RGBA", (64, 64), (7, 22, 30, 255)).save(bdir / "a-hidden-feat.png")
     Image.new("RGBA", (64, 64), (7, 22, 30, 255)).save(bdir / "totally-made-up.png")
     monkeypatch.setattr(achievements_mod, "_ach_ids", lambda: frozenset())      # roster unavailable
@@ -206,7 +207,7 @@ def test_badge_thumb_hidden_gate_is_case_insensitive(tmp_path, sealed_donor_pres
     from PIL import Image
     cli = _client(tmp_path)
     hid = achievements_mod._moment_ach()["keyturn"]          # a hidden feat a fresh install has not earned
-    bdir = g._role_dir("badges"); bdir.mkdir(parents=True, exist_ok=True)
+    bdir = branding_mod._role_dir("badges"); bdir.mkdir(parents=True, exist_ok=True)
     Image.new("RGBA", (64, 64), (7, 22, 30, 255)).save(bdir / (hid + ".png"))
     assert cli.get("/badge-thumb/" + hid + ".png").status_code == 404
     assert cli.get("/badge-thumb/" + hid.upper() + ".png").status_code == 404
@@ -216,7 +217,7 @@ def test_badge_thumb_hidden_gate_is_case_insensitive(tmp_path, sealed_donor_pres
 # ---- the mark_12 tombstone ---------------------------------------------------
 
 def _cut_marks(tmp_path, ids):
-    mdir = g._role_dir("marks")
+    mdir = branding_mod._role_dir("marks")
     mdir.mkdir(parents=True, exist_ok=True)
     for i in ids:
         (mdir / (i + ".png")).write_bytes(b"\x89PNG fake")
@@ -256,7 +257,7 @@ def test_sweep_never_adopts_a_tombstoned_marks_file(tmp_path):
     door. A tombstoned stem must read as known: untouched file, no adoption,
     no achievement fire."""
     cli = _client(tmp_path)
-    mdir = g._role_dir("marks")
+    mdir = branding_mod._role_dir("marks")
     mdir.mkdir(parents=True, exist_ok=True)
     from PIL import Image
     Image.new("RGBA", (8, 8), (1, 2, 3, 255)).save(mdir / "mark_12.png")
@@ -264,7 +265,7 @@ def test_sweep_never_adopts_a_tombstoned_marks_file(tmp_path):
                                            "kind": "tile"}]}
     (mdir / "marks.json").write_text(json.dumps(_cut_marks_manifest_only),
                                      encoding="utf-8")
-    assert g.sweep_branding_drops(tmp_path) is False
+    assert branding_mod.sweep_branding_drops(tmp_path) is False
     assert (mdir / "mark_12.png").exists()          # not eaten
     data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
     assert [m["id"] for m in data["marks"]] == ["mark_12"]   # nothing adopted
@@ -279,9 +280,9 @@ def test_mark_74_tombstoned_not_adopted_on_upgrade(tmp_path):
     feat. Same guard as the mark_12 near-miss (2026-08-13)."""
     from PIL import Image
     cli = _client(tmp_path)
-    mdir = g._role_dir("marks"); mdir.mkdir(parents=True, exist_ok=True)
+    mdir = branding_mod._role_dir("marks"); mdir.mkdir(parents=True, exist_ok=True)
     Image.new("RGBA", (8, 8), (1, 2, 3, 255)).save(mdir / "mark_74.png")
-    assert g.sweep_branding_drops(tmp_path) is False       # not adopted
+    assert branding_mod.sweep_branding_drops(tmp_path) is False       # not adopted
     assert (mdir / "mark_74.png").exists()                 # not eaten
     assert telemetry_mod.telemetry_metrics(tmp_path).get("branding_custom_file", 0) == 0  # feat NOT fired
     # and it never shows in the picker even if a loose manifest carries it
@@ -296,8 +297,8 @@ def test_adopt_never_reuses_a_tombstoned_id(tmp_path):
     show, a silent black hole for the user's own file."""
     _client(tmp_path)   # builds the app tree
     _cut_marks(tmp_path, ["mark_4"])
-    g._adopt_mark(tmp_path, "mark_12", b"\x89PNG fake bytes")
-    data = json.loads((g._role_dir("marks") / "marks.json")
+    branding_mod._adopt_mark(tmp_path, "mark_12", b"\x89PNG fake bytes")
+    data = json.loads((branding_mod._role_dir("marks") / "marks.json")
                       .read_text(encoding="utf-8"))
     ids = {m["id"] for m in data["marks"]}
     assert "mark_12" not in ids

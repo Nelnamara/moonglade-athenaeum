@@ -15,6 +15,7 @@ import pytest
 from moonglade import container as mc
 from moonglade import gallery as g
 from moonglade import paths as moonglade_paths
+from moonglade import branding as branding_mod
 
 ICO = b"\x00\x00\x01\x00fake-ico"          # bytes only; nothing here decodes an icon
 PNG = bytes.fromhex(
@@ -93,19 +94,19 @@ def _icon_file(lad):
 def told(monkeypatch):
     """Stands in for the Explorer refresh; counts the calls."""
     calls = []
-    monkeypatch.setattr(g, "_tell_explorer_file_types_changed", lambda: calls.append(1))
+    monkeypatch.setattr(branding_mod, "_tell_explorer_file_types_changed", lambda: calls.append(1))
     return calls
 
 
 def _install_pack(tmp_path, ico=ICO):
     """A pack carrying the default mark and its launcher .ico, as the shipped pack does."""
     marks = {"marks": [{"id": "mark_4", "label": "Mark", "kind": "tile"}]}
-    mc.write_container(g._container_path(), {
-        g._role_rel("marks", "marks.json"): json.dumps(marks).encode("utf-8"),
-        g._role_rel("marks", "mark_4.png"): PNG,
-        g._role_rel("marks", "mark_4.ico"): ico,
+    mc.write_container(branding_mod._container_path(), {
+        branding_mod._role_rel("marks", "marks.json"): json.dumps(marks).encode("utf-8"),
+        branding_mod._role_rel("marks", "mark_4.png"): PNG,
+        branding_mod._role_rel("marks", "mark_4.ico"): ico,
     }, {})
-    g._container_cache.update(path=None, mtime=None, box=None)
+    branding_mod._container_cache.update(path=None, mtime=None, box=None)
 
 
 def _want(icon):
@@ -121,7 +122,7 @@ def _want(icon):
 def test_a_start_writes_the_per_user_file_type(tmp_path, lad, told):
     _install_pack(tmp_path)
     reg = FakeWinreg()
-    assert g.register_pack_file_type(tmp_path, winreg=reg, platform="win32") is True
+    assert branding_mod.register_pack_file_type(tmp_path, winreg=reg, platform="win32") is True
     assert reg.table() == _want(_icon_file(lad))
     assert _icon_file(lad).read_bytes() == ICO        # a real file: Windows reads icons off disk
     assert {w[3] for w in reg.writes} == {FakeWinreg.REG_SZ}
@@ -136,34 +137,34 @@ def test_the_icon_is_the_desktop_shortcuts_copied_to_one_place_outside_any_insta
     or deleting an install never leaves Explorer pointing at a file that is gone."""
     _install_pack(tmp_path)
     reg = FakeWinreg()
-    g.register_pack_file_type(tmp_path, winreg=reg, platform="win32")
-    shortcut_icon = g._mark_ico_path(g.load_branding(tmp_path)["mark"])
+    branding_mod.register_pack_file_type(tmp_path, winreg=reg, platform="win32")
+    shortcut_icon = branding_mod._mark_ico_path(branding_mod.load_branding(tmp_path)["mark"])
     assert _icon_file(lad).read_bytes() == shortcut_icon.read_bytes()
     icon_key = ("HKCU", "software\\classes\\moongladeathenaeum.artpack\\defaulticon", "")
     assert reg.table()[icon_key] == str(_icon_file(lad)) + ",0"
     assert "_container_cache" not in reg.table()[icon_key]
-    assert "_mark_ico_path" in inspect.getsource(g.make_launcher_shortcut)
+    assert "_mark_ico_path" in inspect.getsource(branding_mod.make_launcher_shortcut)
     # a second install on the same account names the very same path
     other = tmp_path / "second-install"
     other.mkdir()
-    monkeypatch.setattr(g, "branding_root", lambda: other / "branding")
+    monkeypatch.setattr(branding_mod, "branding_root", lambda: other / "branding")
     monkeypatch.setattr(moonglade_paths, "local_path", lambda name: other / name)
     _install_pack(other)
-    g.register_pack_file_type(other, winreg=reg, platform="win32")
+    branding_mod.register_pack_file_type(other, winreg=reg, platform="win32")
     assert reg.table()[icon_key] == str(_icon_file(lad)) + ",0"
 
 
 def test_the_icon_copy_is_rewritten_only_when_its_bytes_differ(tmp_path, lad, told):
     _install_pack(tmp_path)
     reg = FakeWinreg()
-    g.register_pack_file_type(tmp_path, winreg=reg, platform="win32")
+    branding_mod.register_pack_file_type(tmp_path, winreg=reg, platform="win32")
     stamp = _icon_file(lad).stat().st_mtime_ns
     import time
     time.sleep(0.05)
-    assert g.register_pack_file_type(tmp_path, winreg=reg, platform="win32") is False
+    assert branding_mod.register_pack_file_type(tmp_path, winreg=reg, platform="win32") is False
     assert _icon_file(lad).stat().st_mtime_ns == stamp          # same bytes: untouched
     _install_pack(tmp_path, ico=ICO + b"-recut")                  # the mark's icon changed
-    assert g.register_pack_file_type(tmp_path, winreg=reg, platform="win32") is True
+    assert branding_mod.register_pack_file_type(tmp_path, winreg=reg, platform="win32") is True
     assert _icon_file(lad).read_bytes() == ICO + b"-recut"
     assert told == [1, 1]                                         # Explorer told about the new icon
 
@@ -179,7 +180,7 @@ def test_a_failed_icon_copy_keeps_the_registrys_icon_and_logs_once(
     reg.keys.add(icon_key[:2])
     reg.values[icon_key] = "C:\\before\\mgpack.ico,0"
     with caplog.at_level(logging.INFO):
-        assert g.register_pack_file_type(tmp_path, winreg=reg, platform="win32") is True
+        assert branding_mod.register_pack_file_type(tmp_path, winreg=reg, platform="win32") is True
     assert reg.table()[icon_key] == "C:\\before\\mgpack.ico,0"     # today's icon kept
     assert reg.table()[("HKCU", "software\\classes\\.mgpack", "")] == "MoongladeAthenaeum.ArtPack"
     assert len([r for r in caplog.records if r.levelno >= logging.WARNING]) == 1
@@ -188,26 +189,26 @@ def test_a_failed_icon_copy_keeps_the_registrys_icon_and_logs_once(
 def test_it_reads_first_and_writes_only_what_differs(tmp_path, told):
     _install_pack(tmp_path)
     reg = FakeWinreg()
-    g.register_pack_file_type(tmp_path, winreg=reg, platform="win32")
+    branding_mod.register_pack_file_type(tmp_path, winreg=reg, platform="win32")
     first = len(reg.writes)
-    assert g.register_pack_file_type(tmp_path, winreg=reg, platform="win32") is False
+    assert branding_mod.register_pack_file_type(tmp_path, winreg=reg, platform="win32") is False
     assert len(reg.writes) == first                   # all in place: nothing written
     assert told == [1]                                # and Explorer not bothered again
     reg.values[("HKCU", "software\\classes\\moongladeathenaeum.artpack",
                 "friendlytypename")] = "something else"
-    assert g.register_pack_file_type(tmp_path, winreg=reg, platform="win32") is True
+    assert branding_mod.register_pack_file_type(tmp_path, winreg=reg, platform="win32") is True
     assert [w[2] for w in reg.writes[first:]] == ["FriendlyTypeName"]
 
 
 def test_it_never_leaves_the_current_user_and_adds_no_open_command(tmp_path, told):
     _install_pack(tmp_path)
     reg = FakeWinreg()
-    g.register_pack_file_type(tmp_path, winreg=reg, platform="win32")
+    branding_mod.register_pack_file_type(tmp_path, winreg=reg, platform="win32")
     assert reg.opened and reg.created
     assert {root for root, _ in reg.opened + reg.created} == {"HKCU"}
     assert all(p.lower().startswith("software\\classes\\") for _, p in reg.created)
     assert not [p for _, p in reg.created if "shell" in p.lower()], "a pack must not open"
-    src = inspect.getsource(g.register_pack_file_type)
+    src = inspect.getsource(branding_mod.register_pack_file_type)
     for other in ("HKEY_LOCAL_MACHINE", "HKEY_CLASSES_ROOT", "HKEY_USERS"):
         assert other not in src
 
@@ -215,15 +216,15 @@ def test_it_never_leaves_the_current_user_and_adds_no_open_command(tmp_path, tol
 def test_off_windows_it_does_nothing(tmp_path, told):
     _install_pack(tmp_path)
     reg = FakeWinreg()
-    assert g.register_pack_file_type(tmp_path, winreg=reg, platform="linux") is False
+    assert branding_mod.register_pack_file_type(tmp_path, winreg=reg, platform="linux") is False
     assert reg.opened == reg.created == reg.writes == []
     assert told == []
 
 
 def test_without_a_pack_it_does_nothing(tmp_path, told):
-    g._container_path().unlink(missing_ok=True)
+    branding_mod._container_path().unlink(missing_ok=True)
     reg = FakeWinreg()
-    assert g.register_pack_file_type(tmp_path, winreg=reg, platform="win32") is False
+    assert branding_mod.register_pack_file_type(tmp_path, winreg=reg, platform="win32") is False
     assert reg.opened == reg.created == reg.writes == []
 
 
@@ -231,7 +232,7 @@ def test_a_registry_that_refuses_logs_once_and_the_start_carries_on(tmp_path, to
     _install_pack(tmp_path)
     reg = FakeWinreg(fail_writes=True)
     with caplog.at_level(logging.INFO):
-        assert g.register_pack_file_type(tmp_path, winreg=reg, platform="win32") is False
+        assert branding_mod.register_pack_file_type(tmp_path, winreg=reg, platform="win32") is False
     warned = [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert len(warned) == 1
     assert told == []
@@ -267,6 +268,6 @@ def test_no_test_can_reach_the_real_registry(tmp_path, lad, told):
     with pytest.raises(OSError):
         winreg.HKEY_CURRENT_USER
     _install_pack(tmp_path)
-    assert g.register_pack_file_type(tmp_path, platform="win32") is False
+    assert branding_mod.register_pack_file_type(tmp_path, platform="win32") is False
     assert not _icon_file(lad).exists()
     assert told == []

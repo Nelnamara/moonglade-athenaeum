@@ -34,6 +34,7 @@ from moonglade import settings
 from moonglade import setup as msetup
 from tests.move_layouts import read_config, rig, write, write_config
 from moonglade import health as health_mod
+from moonglade import branding as branding_mod
 
 
 @pytest.fixture
@@ -196,7 +197,7 @@ def test_a_server_stopped_cleanly_counts_its_start_and_prepare_alone_never_does(
     monkeypatch.setattr(werkzeug.serving, "make_server", _Served)
     monkeypatch.setattr(health_mod, "_health_prime", lambda *a, **k: None)
     monkeypatch.setattr(g, "_outside_prime", lambda *a, **k: None)
-    monkeypatch.setattr(g, "register_pack_file_type", lambda *a, **k: None)
+    monkeypatch.setattr(branding_mod, "register_pack_file_type", lambda *a, **k: None)
     assert g.main() == 0
     assert counted == ["server"]
     journal = json.loads((r.lib / "_moonglade" / ".journal.json").read_text())

@@ -7,9 +7,9 @@ compute, the progress lines, the toast state, and the badge thumbnails and anima
 verbatim out of moonglade/gallery.py in the 3.21.0 split (phase 3), from its two places there.
 
 It reaches telemetry as `_telemetry.X`, as the gallery did once telemetry moved out. The names
-it needs from the gallery (the catalog and its counts, the pack and branding-tree readers) are
-imported inside each function that uses them, never at the top, so importing this module never
-imports the gallery.
+it needs from the gallery (the catalog and its counts) and from moonglade.branding (the pack and
+branding-tree readers) are imported inside each function that uses them, never at the top, so
+importing this module never imports the gallery and branding can import it at its top.
 """
 import json
 import re
@@ -60,7 +60,7 @@ def _sealed_defs():
     the lock, so a cold-cache race (N workers hitting /api/achievements at once) decodes
     it once, not once per request. Fallback (free skins only) when there is no valid
     container OR the sealed roster is malformed -- the Folio degrades, never 500s."""
-    from moonglade.gallery import _container_path, _get_container
+    from moonglade.branding import _container_path, _get_container
     p = _container_path()
     try:
         mtime = p.stat().st_mtime
@@ -661,8 +661,8 @@ def _badge_thumb(out_dir, aid, size=256):
     only ever shrinks, so a master smaller than the size asked (the toast's 384 against a
     smaller drop-in) is served at its own size, never blown up; keep it that way in both
     cuts below rather than resizing to `size` (dev/tests/test_badge_anim.py holds it)."""
-    from moonglade.gallery import (_branding_bytes, _branding_exists, _branding_mtime, _role_dir,
-                                   _role_rel)
+    from moonglade.branding import (_branding_bytes, _branding_exists, _branding_mtime, _role_dir,
+                                    _role_rel)
     rel = _role_rel("badges", aid + ".png")
     if not _branding_exists(rel):
         return None
@@ -729,7 +729,7 @@ def _badge_anim(aid):
     _branding_bytes(), so a loose master wins over the container's, same as the
     stills. NO cache entry: there is no derived artefact to cache -- the bytes
     served ARE the master."""
-    from moonglade.gallery import _branding_bytes, _branding_exists, _role_rel
+    from moonglade.branding import _branding_bytes, _branding_exists, _role_rel
     rel = _role_rel("badges", aid + ".webp")
     if not _branding_exists(rel):
         return None

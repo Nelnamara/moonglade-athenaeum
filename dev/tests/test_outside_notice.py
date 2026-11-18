@@ -33,6 +33,7 @@ from moonglade import gallery as g
 from moonglade import outside
 from moonglade import paths
 from tests.conftest import REPO_ROOT, login_client, session_csrf, stub_code_module, with_csrf
+from moonglade import branding as branding_mod
 
 LAN = {"REMOTE_ADDR": "192.168.1.9"}
 _ITEMS = [outside.Item("task", "\\Moonglade sync", "the scheduled task “Moonglade sync”", {}),
@@ -154,7 +155,7 @@ def test_one_fix_at_a_time(tmp_path, fixer):
 
 def test_a_shortcuts_icon_is_only_ever_a_plain_mark_name(monkeypatch):
     asked = []
-    monkeypatch.setattr(g, "_branding_bytes", lambda rel: asked.append(rel) or b"ICO")
+    monkeypatch.setattr(branding_mod, "_branding_bytes", lambda rel: asked.append(rel) or b"ICO")
     assert g._shortcut_icon_bytes("mark_4") == b"ICO"
     for bad in ("..\\..\\secret", "a/b", "", None, "mark 4"):
         assert g._shortcut_icon_bytes(bad) is None

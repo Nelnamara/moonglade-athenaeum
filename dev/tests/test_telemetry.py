@@ -16,6 +16,7 @@ from tests.conftest import STARFALL_EVENT, ach_event, ach_nonce, login_client, l
 from moonglade import mirror as mirror_mod
 from moonglade import telemetry as telemetry_mod
 from moonglade import achievements as achievements_mod
+from moonglade import branding as branding_mod
 
 # The roster is sealed in the container (built from the private donor), not in source.
 # Gate ONLY the tests that assert sealed roster/skin/criteria CONTENT -- NOT the whole
@@ -218,7 +219,7 @@ def test_badge_thumb_cache(tmp_path):
     from PIL import Image
     # bundle-v2: badge masters live at the CODED badges dir (built via
     # g._role_dir, never a hardcoded hex literal)
-    bdir = g._role_dir("badges"); bdir.mkdir(parents=True)
+    bdir = branding_mod._role_dir("badges"); bdir.mkdir(parents=True)
     Image.new("RGBA", (2000, 2000), (10, 20, 30, 255)).save(bdir / "loremaster.png")
     p = achievements_mod._badge_thumb(tmp_path, "loremaster", size=256)
     assert p and Path(p).exists() and max(Image.open(p).size) <= 256
@@ -230,8 +231,8 @@ def test_badge_thumb_cache(tmp_path):
     assert Path(p) == achievements_mod.badge_cache_dir(tmp_path) / "loremaster.png"
     assert Path(p).parent == tmp_path / "cache" / "badges"
     assert not (tmp_path / "gallery" / "cache").exists()
-    assert g.branding_root() not in Path(p).parents
-    assert not (g.branding_root() / "_thumbs").exists()
+    assert branding_mod.branding_root() not in Path(p).parents
+    assert not (branding_mod.branding_root() / "_thumbs").exists()
 
 
 # ---- the feat beacon and its nonce ------------------------------------------

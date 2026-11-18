@@ -12,6 +12,7 @@ from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 from tests.conftest import login_client, _SEALED_DONOR
 from moonglade import telemetry as telemetry_mod
 from moonglade import achievements as achievements_mod
+from moonglade import branding as branding_mod
 
 # The roster is sealed in the container (built from the private donor), not in source.
 # Gate ONLY the tests that assert sealed roster/skin CONTENT -- NOT the whole module: the
@@ -313,13 +314,13 @@ def test_malformed_sealed_roster_degrades_not_500(tmp_path):
     container that opens fine but derives badly, and _sealed_defs only wrapped json.loads.)"""
     import json as _json
     from moonglade import container as mc
-    cpath = g._container_path()          # tmp_path/moonglade.mgpack via _isolated_branding
+    cpath = branding_mod._container_path()          # tmp_path/moonglade.mgpack via _isolated_branding
     # "roster" is a string -> `a["id"] for a in roster` iterates characters -> TypeError.
     for bad in (_json.dumps({"roster": "not-a-list"}).encode(),
                 _json.dumps({"roster": [{"name": "x"}]}).encode()):     # entry lacks "id"
         mc.write_container(cpath, {"seed.txt": b"x"}, {"achievements": bad})
         achievements_mod._sealed_cache.update(path=None, mtime=None, defs=None)
-        g._container_cache.update(path=None, mtime=None, box=None)
+        branding_mod._container_cache.update(path=None, mtime=None, box=None)
         defs = achievements_mod._sealed_defs()                     # must fall back, not raise
         assert defs["roster"] == [] and defs["_ach_ids"] == frozenset()
     # and the live route serves 200 on the degraded roster, never a 500
