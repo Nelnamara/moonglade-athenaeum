@@ -29,7 +29,7 @@ Like every page in the gallery, it needs a login (see [Setup](Setup)).
 
 The round **?** in the Panel's header opens the app's [guide](Home#help-inside-the-app) on this
 page. The first time you open the Panel, a welcome card offers a short tour of the console, **Runs
-itself**, **Sync now** and the version stamp (see
+itself**, **Sync now** and the About row (see
 [The first-run guide](Home#the-first-run-guide)).
 
 ## Library at a glance
@@ -91,9 +91,13 @@ the server's own disk.
   manifest to undo the undo.
 - **Dedup** — a chain of five steps: **Audit → Preview → Quarantine → Verify → Delete**.
   Each step is greyed out until the one before it has finished (hover it: *Run the earlier
-  stages first*), so you can't reach the end by accident. **Audit** writes the location-only
-  duplicate report to `audit_report.csv` in the library's `_moonglade/records/` folder; the
-  slower byte-compare pass is `python -m moonglade --audit` on the command line. **Preview**
+  stages first*), so you can't reach the end by accident. **Audit** runs the full check
+  (identical files under different names too, so it finds the same copies Preview does) and
+  writes the report to `audit_report.csv` in the library's `_moonglade/records/` folder; the
+  quick same-id-only check is `python -m moonglade --audit --no-content` on the command line.
+  Each step ends with one plain sentence saying what it found or did (for example *"14
+  duplicate files would move to _duplicates/ (25.6 MB). Nothing moved yet."*), and the file
+  list sits folded under **Show the 14 files**. **Preview**
   shows the plan without moving anything. **Quarantine** (marked with a lock) moves redundant
   copies aside to `_duplicates/`, keeping the most-organized one. **Verify** confirms every
   quarantined file is byte-identical to a surviving copy, and flags orphans, before you
@@ -392,10 +396,10 @@ running, reopening it picks the wait back up instead of showing an idle Panel.
 
 Moonglade watches for new releases **while it is running** — it asks about once an hour, so
 you find out that a version is out without having to come and look. When one turns up it
-says so in three places at once: the **version stamp** at the foot of this sidebar turns
-gold and reads *"v3.7.3 available — view"*, a strip appears across the top of
+says so in three places at once: the **About** row at the foot of this sidebar gains a gold
+dot and reads *"About Moonglade · ● 3.7.3 available"*, a strip appears across the top of
 whatever screen you are on — *"Moonglade v3.7.3 is ready"*, with **Update** and **Not now** —
-and the stamp opens **About** when you click it. **Not now** folds the strip into a small
+and the row opens **About** when you click it. **Not now** folds the strip into a small
 *v3.7.3 ready* pill.
 
 **It never installs anything by itself.** The check tells you a release exists and stops

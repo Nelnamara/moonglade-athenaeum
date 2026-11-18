@@ -13,6 +13,7 @@ import BonjourCard from "./BonjourCard.jsx";
 import { isBlurOff, setBlurOff, applyBlurClass } from "../lib/blurPref.js";
 import { lastRanAt } from "../lib/livingRow.js";
 import { PAIRINGS, DEFAULT_PAIRING_ID, pairingById, readPairing, setPairing } from "../lib/fonts.js";
+import JobResultBox from "./JobResultBox.jsx";
 import Icon from "../icons/Icons.jsx";
 import UpdatePhases, { UpdateRefusal, UPDATE_WHAT } from "./UpdatePhases.jsx";
 import { takeOpenIntent, subscribeOpenIntent } from "../notify/bannerStore.js";
@@ -21,6 +22,7 @@ import useBrandingBeat from "../hooks/useBrandingBeat.js";
 import HelpButton from "../help/HelpButton.jsx";
 import GuideHost from "../help/GuideHost.jsx";
 import { openAbout } from "../help/helpStore.js";
+import { versionFromStamp } from "../notify/updateStore.js";
 import { useSwrGet } from "../hooks/swrCache.js";
 import { openBrokenFiles } from "../lib/brokenFilesNav.js";
 import { reviewLabel } from "../lib/brokenFilesCore.js";
@@ -358,6 +360,8 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
     apiGet("/api/watch/status").then((d) => { if (!d.error) setWatch(d); });
   }, []);
 
+  const aboutVer = versionFromStamp((boot && boot.build_stamp) || "");
+
   const {
     summary, summaryErr, skins, activeSkin, pickSkin, brandingUnlocked, achievementsFresh, achievements,
     panelHistory, schedule, saveSchedule, saveLivingJob, runLiving,
@@ -609,35 +613,31 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
 
               <BonjourCard isLocal={isLocal} />
 
-              {/* Control Panel.dc.html:77 -- a version/date footer, margin-top:auto to sit
-                  at the sidebar's bottom. boot.build_stamp (git short SHA + version) is the
-                  real content for this slot -- it used to occupy the HEADER's credits slot
-                  instead (see the credits fix above); this is where it actually belongs.
-                  out_dir (local-only) stays as a real, useful addition alongside it. */}
-              {/* The version stamp WAKES UP when a newer release exists (owner ruling
-                  2026-09-01, Variant A): no new chrome, the stamp that was always here
-                  just becomes the notice. Up to date, it is byte-identical to what it
-                  has always rendered -- the whole point of the variant. */}
-              {/* ...and since Session I (decision 3a) the stamp is also About's door: up to
-                  date it opens the About card; with a release out it keeps its "vX available
-                  — view" wording and About LEADS with the update card, whose button opens the
-                  same update modal this stamp used to open directly. Mid-apply it still goes
-                  straight to the modal that is reporting the apply. */}
+              {/* The foot of the left column is About's door: the phone's own About row (owner pick,
+                  2026-11-18, option A). Up to date it opens the About card; with a release out
+                  the row carries the gold dot and "<latest> available" and About LEADS with the
+                  update card; mid-apply it goes straight to the modal reporting the apply.
+                  out_dir (local-only) stays beneath it. */}
               <div className="mgcp-ver">
                 {update?.behind ? (
-                  <button type="button" className="mgcp-verup"
+                  <button type="button" className="mghelp-aboutrow"
                     title={"You are on " + (update.current || "?") + "; " + update.latest + " is out"}
                     onClick={() => (updPhase === "applying" || updPhase === "done"
                       ? setUpdOpen(true) : openAbout("update"))}>
-                    <span className="dot" aria-hidden="true">●</span>
-                    {updPhase === "applying" || updPhase === "done" ? "updating…"
-                      : update.latest + " available — view"}
+                    <span>About Moonglade · <span className="v mgcp-verup">
+                      <span className="dot" aria-hidden="true">●</span>{" "}
+                      {updPhase === "applying" || updPhase === "done" ? "updating…" : update.latest + " available"}
+                    </span></span>
+                    <span className="c" aria-hidden="true">›</span>
                   </button>
                 ) : (
-                  <button type="button" className="mgcp-verbtn" title="About Moonglade Athenaeum"
-                    onClick={() => openAbout("")}>{boot?.build_stamp || "—"}</button>
+                  <button type="button" className="mghelp-aboutrow" title="About Moonglade Athenaeum"
+                    onClick={() => openAbout("")}>
+                    <span>About Moonglade{aboutVer ? " · " : ""}<span className="v">{aboutVer}</span></span>
+                    <span className="c" aria-hidden="true">›</span>
+                  </button>
                 )}
-                {isLocal && summary.out_dir ? <><br /><span title={summary.out_dir}>{summary.out_dir}</span></> : null}
+                {isLocal && summary.out_dir ? <div className="mgcp-verdir" title={summary.out_dir}>{summary.out_dir}</div> : null}
               </div>
             </div>
 
@@ -671,19 +671,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                           </div>
                           <span className="mgcp-consolehint">one job at a time</span>
                         </div>
-                        {jobResult && (
-                          <div className={"mgcp-runresult" + (jobResult.ok ? "" : " warn")}>
-                            <div className="mgcp-runresulthead">
-                              {jobResult.ok ? "✓ Finished" : <><Icon name="warning" /> {"Finished with " + jobResult.warnCount + " warning" + (jobResult.warnCount !== 1 ? "s" : "")}</>}
-                              <button type="button" className="mgcp-run" onClick={() => setJobResult(null)}>dismiss</button>
-                            </div>
-                            {jobResult.lines.length > 0 && (
-                              <div className="mgcp-runresultlog">
-                                {jobResult.lines.map((ln, i) => <div key={i}>{ln}</div>)}
-                              </div>
-                            )}
-                          </div>
-                        )}
+                        {jobResult && <JobResultBox jobResult={jobResult} onDismiss={() => setJobResult(null)} />}
                         {heart === "pipelines" && (
                         <>
                         {/* ---- RUNS ITSELF: the living library (2026-09-06) ------------

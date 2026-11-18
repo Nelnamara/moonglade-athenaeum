@@ -164,6 +164,20 @@ def _fmt_bytes(n):
         n /= 1024
 
 
+# Every Dedup command ends with ONE plain sentence behind this prefix. The Control Panel's
+# result box (gallery/src/hooks/useControlPanel.js, DEDUP_RESULT_PREFIX) finds the line by it,
+# leads with the sentence and folds the file lines above it. Keep the two in step.
+RESULT_PREFIX = "Result: "
+
+
+def _result(sentence):
+    print("\n" + RESULT_PREFIX + sentence)
+
+
+def _files(n):
+    return "{:,} duplicate file{}".format(n, "" if n == 1 else "s")
+
+
 def cmd_audit(args, out):
     """Read-only duplicate audit. Prints a summary and writes audit_report.csv.
     Touches nothing on disk. Independent of catalog.db."""
@@ -185,6 +199,15 @@ def cmd_audit(args, out):
     print("Reclaimable if deduped                : {}".format(
         _fmt_bytes(t["reclaimable_bytes"])))
 
+    losers = [rel for g in rep["class_a"] for (_, rel, _, _) in g["losers"]]
+    losers += [rel for g in rep["class_b"] for (_, rel, _, _, _) in g["losers"]]
+    if losers:
+        print("\nCopies that could be removed:")
+        for rel in losers[:8]:
+            print("  {}".format(rel))
+        if len(losers) > 8:
+            print("  ... and {:,} more".format(len(losers) - 8))
+
     # Write detailed CSV
     report_path = _paths.records_path(out, "audit_report.csv")
     with open(report_path, "w", newline="", encoding="utf-8") as f:
@@ -203,6 +226,11 @@ def cmd_audit(args, out):
     print("\nDetailed report -> {}".format(report_path.relative_to(out.parent)
                                             if out.parent else report_path))
     print("Run --dedup to act on this (quarantine by default; nothing deleted yet).")
+    if losers:
+        _result("Found {} ({} you could free). Nothing changed.".format(
+            _files(len(losers)), _fmt_bytes(t["reclaimable_bytes"])))
+    else:
+        _result("No duplicates found. Nothing changed.")
     return rep
 
 
@@ -241,6 +269,14 @@ def cmd_dedup(args, out, db_path):
 
     if not apply:
         print("\nDry run -- nothing changed. Re-run with --apply to perform it.")
+        if not losers:
+            _result("No duplicates found. Nothing changed.")
+        elif delete:
+            _result("{} would be deleted ({}). Nothing deleted yet.".format(
+                _files(len(losers)), _fmt_bytes(rep["totals"]["reclaimable_bytes"])))
+        else:
+            _result("{} would move to _duplicates/ ({}). Nothing moved yet.".format(
+                _files(len(losers)), _fmt_bytes(rep["totals"]["reclaimable_bytes"])))
         return rep
 
     quarantine_root = out / "_duplicates"
@@ -302,6 +338,16 @@ def cmd_dedup(args, out, db_path):
         else:
             print("All quarantined files confirmed redundant -- _duplicates/ is safe "
                   "to delete to reclaim the space.")
+    if not losers:
+        _result("No duplicates found. Nothing changed.")
+    elif delete:
+        _result("Deleted {:,} duplicate file{}.{}".format(
+            removed, "" if removed == 1 else "s",
+            " {:,} could not be deleted.".format(failed) if failed else ""))
+    else:
+        _result("Moved {:,} file{} to _duplicates/.{}".format(
+            moved, "" if moved == 1 else "s",
+            " {:,} could not be moved.".format(failed) if failed else ""))
     return rep
 
 
@@ -377,6 +423,7 @@ def cmd_verify_dupes(args, out):
                             progress=getattr(args, "progress", None))
     if res["total"] == 0:
         print("No _duplicates/ folder (nothing quarantined yet).")
+        _result("_duplicates/ is empty, so there is nothing to check.")
         return res
 
     print("\nQuarantined files checked : {:,}".format(res["total"]))
@@ -407,6 +454,15 @@ def cmd_verify_dupes(args, out):
         print("\nDo NOT blanket-delete yet -- review the flagged items above first.")
         if res["orphan"] and not restore:
             print("Re-run with --restore-orphans to move orphans back to images/.")
+    if not res["differs"] and not res["orphan"]:
+        _result("All {:,} file{} in _duplicates/ {} a copy kept in the library. Safe to delete.".format(
+            res["total"], "" if res["total"] == 1 else "s",
+            "has" if res["total"] == 1 else "have"))
+    else:
+        flagged = len(res["differs"]) + len(res["orphan"])
+        _result("Not safe to delete yet: {:,} of {:,} file{} in _duplicates/ need a look. "
+                "Review the flagged items above.".format(
+                    flagged, res["total"], "" if res["total"] == 1 else "s"))
     return res
 
 

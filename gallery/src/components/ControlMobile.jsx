@@ -4,6 +4,7 @@ import {
   ActionChip, SkinsRow, BrandingTab, UsersSubOverlay, TrashSubOverlay, PowerModal,
   MarkArt, fmtEvery, BlurToggleTile,
 } from "./ControlPanelOverlay.jsx";
+import JobResultBox from "./JobResultBox.jsx";
 import Icon from "../icons/Icons.jsx";
 import MobileScreen from "./MobileScreen.jsx";
 import DataSaverRow from "./DataSaverRow.jsx";
@@ -373,19 +374,7 @@ export default function ControlMobile({ account, brandRequest }) {
 
       <div className="ctm-sec">
         <div className="mgcp-sidehead">Job console</div>
-        {jobResult && (
-          <div className={"mgcp-runresult" + (jobResult.ok ? "" : " warn")}>
-            <div className="mgcp-runresulthead">
-              {jobResult.ok ? "✓ Finished" : <><Icon name="warning" /> {"Finished with " + jobResult.warnCount + " warning" + (jobResult.warnCount !== 1 ? "s" : "")}</>}
-              <button type="button" className="mgcp-run" onClick={() => setJobResult(null)}>dismiss</button>
-            </div>
-            {jobResult.lines.length > 0 && (
-              <div className="mgcp-runresultlog">
-                {jobResult.lines.map((ln, i) => <div key={i}>{ln}</div>)}
-              </div>
-            )}
-          </div>
-        )}
+        {jobResult && <JobResultBox jobResult={jobResult} onDismiss={() => setJobResult(null)} />}
         {jobError && <div className="mgcp-runerr">{jobError}</div>}
 
         {running ? (

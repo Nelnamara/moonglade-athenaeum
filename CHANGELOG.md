@@ -16,6 +16,11 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Changed
+- **About is a clear row at the foot of the Control Panel's left column, like the phone's.** It reads "About Moonglade · 3.21.1 ›" in place of the tiny version text, and when a release is out it shows the gold dot and "3.21.1 available". The library folder stays under it. (2026-11-18)
+- **Dedup results now say what they found in one sentence.** Audit, Preview, Quarantine, Verify and Delete each end with a plain line such as "14 duplicate files would move to _duplicates/ (25.6 MB). Nothing moved yet.", and the file list is folded under "Show the 14 files". The phone's Control tab does the same. The command line prints the same line, starting "Result:". (2026-11-18)
+- **The Panel's Audit now runs the full check,** so it finds the same copies Preview does. It used to stop at the quick same-id check and report none while Preview found byte-identical copies. (2026-11-18)
+
 ### Fixed
 - **The Contests window fits its cards again.** A contest with a long title made the community cards wider than the window, so it scrolled sideways. (2026-11-18)
 
