@@ -115,6 +115,17 @@ def test_apply_keeps_crlf_and_reuses_an_existing_alias(tmp_path):
     assert "scan_mod" not in after                      # no second import of the same module
 
 
+def test_a_unicode_line_separator_in_a_string_does_not_shift_the_edits(tmp_path):
+    """U+2028 inside a string is one line to ast but two to str.splitlines; the edits must land
+    on ast's lines (dev/tests/test_move_edges.py carries one)."""
+    text = BEFORE.replace('"""Doc."""', '"""Doc with a   line separator."""')
+    tests, path = _fixture(tmp_path, text=text)
+    _run(tests, apply=True)
+    after = path.read_text(encoding="utf-8")
+    assert after == AFTER.replace('"""Doc."""', '"""Doc with a   line separator."""')
+    ast.parse(after)
+
+
 def test_an_alias_name_already_in_use_is_reported_not_guessed(tmp_path):
     text = BEFORE + "\n\ndef scan_mod():\n    pass\n"
     tests, path = _fixture(tmp_path, text=text)

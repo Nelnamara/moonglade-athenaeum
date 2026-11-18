@@ -1075,9 +1075,21 @@ def _import_insert_line(model):
     return last
 
 
+def source_lines(text):
+    """`text` split into lines the way ast numbers them: at "\n" only (a "\r\n" stays one
+    line end). str.splitlines also splits at U+2028, a form feed and the other Unicode line
+    breaks, which Python source may carry inside a string or a comment; that puts every later
+    ast line number one off, and an edit lands on the line above its node."""
+    lines = text.split("\n")
+    out = [l + "\n" for l in lines[:-1]]
+    if lines[-1]:
+        out.append(lines[-1])
+    return out
+
+
 def apply_edits(text, edits, alias_for):
     """The rewritten text. Byte-exact edits (ast offsets are UTF-8), right to left."""
-    lines = text.splitlines(keepends=True)
+    lines = source_lines(text)
     newline = "\r\n" if lines and lines[0].endswith("\r\n") else "\n"
     by_line = {}
     for e in edits:

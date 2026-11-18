@@ -78,7 +78,7 @@ def top_defines(src):
 
 
 def cut(text, start, end, extra):
-    lines = text.splitlines(keepends=True)
+    lines = rp.source_lines(text)
     idx = set(range(start - 1, end))
     extra_lines = [lines[i - 1] for i in extra]
     block = "".join(lines[start - 1:end])
@@ -113,7 +113,7 @@ def name_edits(text, names):
 
 
 def apply_name_edits(text, nodes, alias):
-    lines = text.splitlines(keepends=True)
+    lines = rp.source_lines(text)
     by_line = {}
     for n in nodes:
         assert n.lineno == n.end_lineno
@@ -144,7 +144,7 @@ def free_names(block):
 
 def insert_import(text, line):
     """Insert `line` into the top-level run of `from moonglade import X as Y` lines, alphabetically."""
-    lines = text.splitlines(keepends=True)
+    lines = rp.source_lines(text)
     tree = ast.parse(text)
     runs = [n for n in tree.body if isinstance(n, ast.ImportFrom) and n.module == "moonglade"
             and n.col_offset == 0]
@@ -217,7 +217,7 @@ def cmd_attrs(oldmod, newmod, alias, namesfile, files):
     for f in files:
         text = read(f)
         model = rp.FileModel(text)
-        lines = text.splitlines(keepends=True)
+        lines = rp.source_lines(text)
         spans = []          # (line, c0, c1, replacement)
         line_repl = {}      # whole-line ImportFrom rewrites: lineno -> (end_lineno, new text)
         used_alias = False
@@ -285,7 +285,7 @@ def cmd_attrs(oldmod, newmod, alias, namesfile, files):
             # recompute against new text: insert after last top-level import
             m2 = rp.FileModel(out)
             at = rp._import_insert_line(m2)
-            ol = out.splitlines(keepends=True)
+            ol = rp.source_lines(out)
             ol[at:at] = ["from %s import %s as %s%s" % (pkg, base, alias, nl)]
             out = "".join(ol)
         ast.parse(out)
@@ -305,7 +305,7 @@ def cmd_lazy(newfile, mapfile):
     owner = {n: m for m, ns in mapping.items() for n in ns}
     text = read(newfile)
     model = rp.FileModel(text)
-    lines = text.splitlines(keepends=True)
+    lines = rp.source_lines(text)
     nl = "\r\n" if lines[0].endswith("\r\n") else "\n"
     inserts = []
     problems = []

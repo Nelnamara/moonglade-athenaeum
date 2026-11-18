@@ -31,6 +31,13 @@ WORK = Path(os.environ.get("MOONGLADE_SPLIT_WORK")
             or Path(tempfile.gettempdir()) / "moonglade_split")
 
 
+def _lines(text):
+    """Lines as ast and grep -n number them: split at "\n" only (str.splitlines also splits
+    at U+2028 and the other Unicode line breaks a string or comment may carry)."""
+    parts = text.split("\n")
+    return [p + "\n" for p in parts[:-1]] + ([parts[-1]] if parts[-1] else [])
+
+
 def strip_lazy(src):
     """Drop indented `from moonglade.backup|gallery import ...` statements (the lazy wiring)."""
     drop = set()
@@ -38,7 +45,7 @@ def strip_lazy(src):
         if (isinstance(node, ast.ImportFrom) and node.col_offset > 0
                 and node.module in ("moonglade.backup", "moonglade.gallery")):
             drop.update(range(node.lineno, node.end_lineno + 1))
-    ls = src.splitlines(keepends=True)
+    ls = _lines(src)
     return "".join(l for i, l in enumerate(ls, 1) if i not in drop), len(drop)
 
 
@@ -47,7 +54,7 @@ def main(argv):
     extra = [int(x) for x in argv[5:]]
     orig = subprocess.run(["git", "show", "HEAD:%s" % old_rel], cwd=REPO, capture_output=True,
                           text=True, encoding="utf-8").stdout.replace("\r\n", "\n")
-    lines = orig.splitlines(keepends=True)
+    lines = _lines(orig)
     block = "".join(lines[start - 1:end])
     new = (REPO / new_rel).read_text(encoding="utf-8").replace("\r\n", "\n")
 
