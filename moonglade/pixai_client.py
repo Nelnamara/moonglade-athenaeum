@@ -72,6 +72,15 @@ except ImportError:
 # ===========================================================================
 
 
+#: How long, after PixAI refuses the API key on a read, reads go straight to the Mirror
+#: sign-in before the key is tried again (so a renewed membership is noticed within this).
+KEY_REFUSED_HOLD_S = 600
+_key_refused = {"until": 0.0}
+
+#: The only host a Mirror sign-in is ever sent to by the read fallback.
+_PIXAI_API_PREFIX = "https://api.pixai.art/"
+
+
 def _is_mutation_document(query):
     """True when `query` is a GraphQL MUTATION document rather than a query.
 
@@ -103,10 +112,58 @@ class PixAIClient:
     #: it satisfies the interface, it does not inherit the implementation.
     _is_pixai_client = True
 
-    def __init__(self, session, auth_kind="api-key", user_id=None):
+    def __init__(self, session, auth_kind="api-key", user_id=None, read_fallback=False):
         self._session = session
         self._auth_kind = auth_kind
         self._user_id = user_id
+        # Only _make_session's client sets this. A hand-built client (the pasted-key check
+        # in /api/setup/save-key) must never answer with anything but the key it was handed.
+        self._read_fallback = bool(read_fallback)
+
+    # -- a refused key: READS ride the Mirror sign-in (2026-11-19) -----------
+    # PixAI began answering this account's API key 401 on 2026-11-19 ("This API key needs an
+    # active PixAI membership") while the same account's website sign-in kept working. A READ
+    # the key is refused on is asked once more on the stored Mirror sign-in -- the one the
+    # user's own pixai.art tab handed over through Connect from PixAI, already checked then to
+    # be this same account. Never a write: mutate, rest_post/put/patch and a mutation document
+    # keep the key alone, so nothing that spends or changes the account switches credential.
+    # The token is used as stored and never renewed here (a read must not roll it forward).
+    def _read_fallback_session(self):
+        """A Bearer session on the stored Mirror sign-in, for a READ the API key was refused
+        on -- or None (not this client's to do, no usable sign-in, or a sign-in for another
+        account than this client's). Never raises."""
+        if not self._read_fallback:
+            return None
+        try:
+            from moonglade import mirror as _mirror
+            jwt = _mirror.load_mirror_state().get("jwt") or ""
+            if not _mirror._jwt_usable(jwt):
+                return None
+            sub = str(_mirror.jwt_claims(jwt).get("sub") or "")
+            mine = str(self.user_id or "")
+            if not sub or (mine and mine != sub):
+                return None
+            return _mirror._mirror_session_from(jwt)
+        except Exception:                                   # noqa: BLE001 -- None, never raise
+            return None
+
+    def _first_reader(self):
+        """The session a READ tries first: the Mirror sign-in while the key was refused in
+        the last KEY_REFUSED_HOLD_S (so every read does not pay a refusal first), else the
+        key's own session."""
+        if self._read_fallback and time.monotonic() < _key_refused["until"]:
+            fb = self._read_fallback_session()
+            if fb is not None:
+                return fb
+        return self._session
+
+    def _after_key_refused(self):
+        """The key's session was just refused (401) on a read: note it and return the
+        Mirror session to ask once more on, or None."""
+        fb = self._read_fallback_session()
+        if fb is not None:
+            _key_refused["until"] = time.monotonic() + KEY_REFUSED_HOLD_S
+        return fb
 
     # -- identity ----------------------------------------------------------
     @property
@@ -130,7 +187,17 @@ class PixAIClient:
 
     # -- the transition surface: the raw Session, delegated ------------------
     def get(self, *args, **kwargs):
-        return self._session.get(*args, **kwargs)
+        """A raw GET (the /v1/media reads and file bodies). One the key is refused on, to
+        PixAI's API host only, is asked once more on the Mirror sign-in (see above)."""
+        url = args[0] if args else kwargs.get("url", "")
+        on_api = isinstance(url, str) and url.startswith(_PIXAI_API_PREFIX)
+        sess = self._first_reader() if on_api else self._session
+        r = sess.get(*args, **kwargs)
+        if on_api and sess is self._session and getattr(r, "status_code", None) == 401:
+            fb = self._after_key_refused()
+            if fb is not None:
+                r = fb.get(*args, **kwargs)
+        return r
 
     def post(self, *args, **kwargs):
         return self._session.post(*args, **kwargs)
@@ -186,9 +253,16 @@ class PixAIClient:
         follow_redirects = not _is_mutation_document(document)
         send = {} if follow_redirects else {"allow_redirects": False}
         delay = 2.0
+        # A query may ride the Mirror sign-in when the key is refused; a mutation never.
+        sess = self._first_reader() if follow_redirects else self._session
         for attempt in range(retries + 1):
             try:
-                r = self._session.post(API_URL, json=body, timeout=timeout, **send)
+                r = sess.post(API_URL, json=body, timeout=timeout, **send)
+                if r.status_code == 401 and follow_redirects and sess is self._session:
+                    fb = self._after_key_refused()
+                    if fb is not None:
+                        sess = fb
+                        r = sess.post(API_URL, json=body, timeout=timeout, **send)
             except requests.exceptions.SSLError:
                 raise PixAIError(_ssl_help())
             except requests.RequestException:
@@ -230,7 +304,12 @@ class PixAIClient:
 
         Single-attempt by construction, like `rest_post` -- see its note."""
         from moonglade.backup import REST_API_BASE, _rest_error
-        r = self._session.get(REST_API_BASE + path, params=params, timeout=timeout)
+        sess = self._first_reader()
+        r = sess.get(REST_API_BASE + path, params=params, timeout=timeout)
+        if r.status_code == 401 and sess is self._session:
+            fb = self._after_key_refused()
+            if fb is not None:
+                r = fb.get(REST_API_BASE + path, params=params, timeout=timeout)
         if not r.ok:
             raise _rest_error("GET", path, r)
         return r.json()

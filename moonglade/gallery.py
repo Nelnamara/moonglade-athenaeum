@@ -15680,7 +15680,14 @@ def create_app(out_dir: Path):
             # The account the API key REALLY is, asked of PixAI every time: a USER_ID pinned
             # in config.json is a legacy override and must not decide whose sign-in is kept.
             s = core._make_session(None, resolve_user=False)
-            return core.resolve_user_id(s)
+            try:
+                return core.resolve_user_id(s)
+            except core.PixAIAuthError:
+                # PixAI refuses the key and no usable sign-in could answer for it (2026-11-19):
+                # the account the STORED sign-in names, expired or not, is one this key was
+                # already confirmed to be when that sign-in was connected. None stored: refuse.
+                old = _mirror.load_mirror_state().get("jwt") or ""
+                return str(_mirror.jwt_claims(old).get("sub") or "") if old else ""
         out = _mirror.accept_site_token(body.get("token"), _api_key_account)
         if out.get("ok"):
             return jsonify({"ok": True, "days_left": out.get("days_left")})

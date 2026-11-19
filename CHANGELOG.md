@@ -17,6 +17,7 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Added
+- **A refused API key no longer empties the app.** When PixAI refuses the API key (as it did on 2026-11-19 for an account whose membership had lapsed), what the app READS — your history, catch-up, Contests, credits, free cards — is asked once more on your Mirror sign-in, the one your own pixai.art tab handed over, for the same account. Nothing that spends or changes your account ever switches: generating, claiming, deleting and every other change still use the key alone. Connect from PixAI also keeps working while the key is refused, checked against the account your stored sign-in names. (2026-11-19)
 - **Sign out all devices**, beside your name in Control Panel → Accounts. It signs your account out everywhere, this device included, without changing your password. (2026-11-19)
 - **Disconnect on the Mirror tile.** On this PC, it makes Moonglade forget the stored PixAI sign-in, stop renewing it and turn the Mirror off. (2026-11-19)
 - **Search understands numbers and date ranges.** `lora:detail>0.7` and `lora:*>=0.5` compare a LoRA's weight (`>`, `>=`, `<`, `<=`, `=`); `created:2026Q3` is a quarter, `created:2026-08..2026-10` an inclusive range (either end can be left open), and `created:>=2026-09-15` starts from a day. The Advanced search help and the Gallery wiki page list them, and both now say that ticked pictures are rated all at once with 1–5. (2026-11-19)

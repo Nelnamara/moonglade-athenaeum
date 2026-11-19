@@ -4410,11 +4410,13 @@ def _make_session(token_val, resolve_user=True):
         "apollo-require-preflight": "true",
         "x-apollo-operation-name": OPERATION_NAME,
     })
-    # Auto-resolve the user id from the API key when it isn't pinned in config.
+    # Auto-resolve the user id from the API key when it isn't pinned in config. Asked through
+    # the client, so a key PixAI refuses still resolves on the Mirror sign-in (a read).
     if not USER_ID and resolve_user:
         if have_api_key:
             try:
-                USER_ID = resolve_user_id(session)
+                USER_ID = resolve_user_id(
+                    _pixai_client.PixAIClient(session, auth_kind="api-key", read_fallback=True))
                 vlog("resolved USER_ID from API key: {}".format(USER_ID))
             except Exception as e:
                 raise PixAIError(
@@ -4427,7 +4429,8 @@ def _make_session(token_val, resolve_user=True):
     # Hand the resolved account id to the client so `client.user_id` carries it directly.
     # The module global stays as the config seed / resolution home and the client's own
     # `or USER_ID` fallback, but business logic now reads the id off the client, not here.
-    return _pixai_client.PixAIClient(session, auth_kind="api-key", user_id=USER_ID)
+    return _pixai_client.PixAIClient(session, auth_kind="api-key", user_id=USER_ID,
+                                     read_fallback=True)
 
 
 def run_probe(args):

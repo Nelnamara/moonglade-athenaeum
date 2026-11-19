@@ -140,6 +140,24 @@ def test_an_account_that_cannot_be_confirmed_refuses(tmp_path, armed, monkeypatc
     assert mirror_mod.load_mirror_state() == {}
 
 
+def test_a_refused_key_checks_against_the_stored_signins_account(tmp_path, armed, monkeypatch):
+    """PixAI refusing the key (2026-11-19, a lapsed membership) must not lock the owner out of
+    reconnecting: the account the STORED sign-in names -- confirmed against this key when it
+    was connected -- answers instead, even once that sign-in has expired. Another account's
+    token is still refused, and with nothing stored the account cannot be confirmed at all."""
+    monkeypatch.setattr(mj, "resolve_user_id", lambda s: (_ for _ in ()).throw(
+        mj.PixAIAuthError("401 Unauthorized -- API key missing/expired.")))
+    cli = login_client(tmp_path)
+    d = _post(cli, _in(7)).get_json()
+    assert d["ok"] is False and "Check that the API key is set up" in d["error"]
+    mirror_mod.save_mirror_state({"jwt": _in(-2)})                        # expired, ours
+    d = _post(cli, _in(7, sub="1600000000000000999")).get_json()
+    assert d["ok"] is False and "different PixAI account" in d["error"]
+    tok = _in(7)
+    assert _post(cli, tok).get_json()["ok"] is True
+    assert mirror_mod.load_mirror_state()["jwt"] == tok
+
+
 @pytest.mark.parametrize("err", [
     requests.ConnectionError("no route to host"),
     requests.Timeout("read timed out"),
