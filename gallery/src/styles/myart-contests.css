@@ -792,3 +792,12 @@ button.mgpub-ctclear { flex: none; width: 20px; height: 20px; display: grid; pla
   .mgct-badge.official { animation: none; }
   button.mgct-enter, button.mgctc-go { transition: none; }
 }
+
+/* The All time / 30 days switch (owner pick 2026-11-19, look board round 2 topic 6 A): the mock's
+   .seg -- a bordered pair of segments, the chosen one filled -- in the toolbar's own tokens. */
+.mgma2-seg { display: inline-flex; border: 1px solid var(--surface1); border-radius: var(--radius-control);
+  overflow: hidden; background: rgba(33,31,58,.5); }
+.mgma2-seg button { font: inherit; font-size: 12px; padding: 8px 13px; cursor: pointer; border: 0;
+  background: transparent; color: var(--subtext); white-space: nowrap; }
+.mgma2-seg button.on { background: var(--accent); color: var(--base); font-weight: 600; }
+.mgma2-seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

@@ -17,6 +17,8 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Added
+- **Download and Remix on the viewer's top bar**, on the desktop and the phone. The bar is now two groups with a thin line between: Edit, To Video, Remix, Upscale, then Download, Publish, Make a recipe, Similar, Details, then Slideshow and Close. Download is the bright button, as it is on a picture's record; Publish is a plain button now. `D` downloads the open picture. Remix loads the recipe into the Generate drawer and spends nothing, exactly as on the record. (2026-11-19)
+- **My Art has an All time / 30 days switch.** Beside Sort, it changes the totals, each card's views bar and hearts, and the Most viewed and Most liked sorts to the last 30 days. PixAI only reports lifetime counts, so Moonglade now keeps one reading per day; until 30 days of them exist the totals say "since" and the first day instead of "30 days". (2026-11-19)
 - **Sign out all devices**, beside your name in Control Panel → Accounts. It signs your account out everywhere, this device included, without changing your password. (2026-11-19)
 - **Disconnect on the Mirror tile.** On this PC, it makes Moonglade forget the stored PixAI sign-in, stop renewing it and turn the Mirror off. (2026-11-19)
 - **Search understands numbers and date ranges.** `lora:detail>0.7` and `lora:*>=0.5` compare a LoRA's weight (`>`, `>=`, `<`, `<=`, `=`); `created:2026Q3` is a quarter, `created:2026-08..2026-10` an inclusive range (either end can be left open), and `created:>=2026-09-15` starts from a day. The Advanced search help and the Gallery wiki page list them, and both now say that ticked pictures are rated all at once with 1–5. (2026-11-19)
@@ -25,6 +27,7 @@ git tags. Full prose notes for tagged versions live on
 - **The README and Setup page open with "Start here".** First line: you need a PixAI membership for the API key; then download, double-click the installer, paste the key, open the gallery. (2026-11-19)
 
 ### Changed
+- **Delete locally moved off Download's row** on a picture's record, to the end of the second row, just before Delete from PixAI. (2026-11-19)
 - **Your other devices reach Moonglade over HTTPS.** Once Moonglade is on your home network, a phone, tablet or Mac opens it at an `https://` address, so your password, your session and the Mirror's PixAI sign-in cross the network encrypted; an old `http://` address takes them there. This PC keeps `http://localhost`. Moonglade makes its own certificate once and keeps it; install it once on a device, from the link on the Control Panel's LAN discovery card, and that device stops warning. The card shows its fingerprint to check first. If the certificate can't be made, Moonglade starts anyway on plain `http://` and says why. `--https` now also puts this PC on HTTPS, and no longer makes a new certificate at every start. (2026-11-19)
 - **Connect from PixAI from another device works only at the `https://` address.** Over plain `http://` it is refused with a sentence saying where to go, so a PixAI sign-in never crosses your network unencrypted. (2026-11-19)
 - **Log Out really ends that session.** A copy of the signed-out cookie stops working too, and a sign-in now lasts at most 30 days however often it is used. Each device signs in once more after this update. (2026-11-19)

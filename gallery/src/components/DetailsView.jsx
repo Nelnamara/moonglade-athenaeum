@@ -468,7 +468,7 @@ export default function DetailsView({
           {/* FILE ACTIONS -- Image Details.dc.html:56-60 + :389-396 fileActions, drawn UNDER
               THE HERO in the picture column (the previous build had them in the record).
               Download is THE metal button (the DC's `metal` const = shell.css's shared
-              .mgx-metal face); Delete locally is the red-outline danger chip. */}
+              .mgx-metal face); Delete locally is the red-outline danger chip (moved to the end of the second row, 2026-11-19: it no longer shares a row with Download). */}
           <div className="p-actions p-actions-primary">
             <a className="btn mgx-metal" title="Full-resolution file"
               href={"/full/" + encodeURIComponent(row.media_id) + "?dl=1"}><Icon name="download" /> Download</a>
@@ -491,8 +491,6 @@ export default function DetailsView({
               <button className="btn" title="Upscale or Hires"
                 onClick={() => upEl.current && upEl.current.open(row.media_id)}>⇱ Upscale</button>
             ) : null}
-            <button className="btn btn-danger" disabled={busy} title="Remove from your library only"
-              onClick={deleteLocal}>Delete locally</button>
           </div>
 
           {/* STARS ROW -- Image Details.dc.html:61-70: the stars, the "N / 5" label, a
@@ -834,6 +832,10 @@ export default function DetailsView({
                   if (d && d.ok && d.thumb) setPosterSrc(d.thumb);
                 }}>{posterBusy ? "Rebuilding…" : <><Icon name="image" /> Rebuild poster</>}</button>
             ) : null}
+            {/* Delete locally lives here since the 2026-11-19 viewer-bar pick: the end of the second row,
+                just before the irreversible cloud delete, off the row it shared with Download. */}
+            <button className="btn btn-danger" disabled={busy} title="Remove from your library only"
+              onClick={deleteLocal}>Delete locally</button>
             {state.data.can_delete_cloud && row.task_id ? (
               <button className="btn btn-danger" disabled={busy} onClick={deleteCloud}>Delete from PixAI</button>
             ) : null}

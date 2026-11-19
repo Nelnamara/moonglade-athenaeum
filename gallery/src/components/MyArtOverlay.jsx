@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import Icon from "../icons/Icons.jsx";
 import { apiGet, apiPost } from "../api.js";
 import { invalidate, peek, put } from "../hooks/swrCache.js";
-import useMyArt, { fmt, artworksNeverSynced, NEVER_SYNCED_WHY } from "../hooks/useMyArt.js";
+import useMyArt, { fmt, artworksNeverSynced, NEVER_SYNCED_WHY, SPAN_OPTS, spanStats, spanViews, spanLikes, windowTag } from "../hooks/useMyArt.js";
 import useContests, { qualifies, dayOf } from "../hooks/useContests.js";
 import "../styles/overlays.css";
 import "../styles/myart-contests.css";
@@ -107,7 +107,7 @@ const dateLabel = (iso) => {
 
 export default function MyArtOverlay({ onClose, onOpenPost }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
-  const { d, err, stats } = useMyArt();          // stat row: live views, as before
+  const { d, err, stats: allStats } = useMyArt();          // stat row: live views, as before
   /* The ROWS are seeded from the shared read cache (hooks/swrCache.js) so a reopen paints
      the artwork grid in the first frame; the mount read below still runs and replaces them.
      THE TOKEN IS NOT: /api/myart/items answers with a `csrf` alongside its items, and the
@@ -120,6 +120,9 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
   // grid from the cache paints the REASON it is empty in that first frame too, rather
   // than flashing the bare "Nothing here yet." until the live read lands.
   const [coverage, setCoverage] = useState(() => (peek("/api/myart/items") || {}).coverage || null);
+  const [win, setWin] = useState(() => (peek("/api/myart/items") || {}).window || null);
+  // All time / 30 days (owner pick 2026-11-19): one switch beside Sort flips the whole panel.
+  const [span, setSpan] = useState("all");
   const [rowsErr, setRowsErr] = useState(null);
   const [csrf, setCsrf] = useState("");
   const csrfRef = useRef("");
@@ -182,6 +185,7 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
     if (dead) return;
     setRows(j.items || []);
     setCoverage(j.coverage || null);
+    setWin(j.window || null);
     setCsrf(j.csrf || "");
   };
 
@@ -277,29 +281,34 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
     await load();
   };
 
+  const stats = useMemo(() => spanStats(allStats, rows, win, span), [allStats, rows, win, span]);
+
   const media = useMemo(() => {
     const all = rows || [];
     let list = all.filter((r) => (tab === "animations" ? r.is_video : !r.is_video));
     if (vis !== "all") list = list.filter((r) => (vis === "public" ? r.public : !r.public));
     if (sort === "oldest") list = [...list].reverse();          // base order is latest-first
-    else if (sort === "liked") list = [...list].sort((a, b) => b.likes - a.likes);
+    else if (sort === "liked") list = [...list].sort((a, b) => spanLikes(b, span) - spanLikes(a, span));
     // A never-swept row sorts as -1, not 0, so it lands BELOW a work that really was
     // looked at zero times rather than tying with it. Blank and zero stay different
     // answers all the way to the bottom of the list.
     else if (sort === "viewed") {
-      list = [...list].sort((a, b) => (b.views == null ? -1 : b.views) - (a.views == null ? -1 : a.views));
+      list = [...list].sort((a, b) => {
+        const bv = spanViews(b, span), av = spanViews(a, span);
+        return (bv == null ? -1 : bv) - (av == null ? -1 : av);
+      });
     }
     return list;
-  }, [rows, tab, vis, sort]);
+  }, [rows, tab, vis, sort, span]);
 
   /* The comparison bar's denominator, over WHAT IS ON SCREEN. useMyArt's own maxViews
      measures /api/your-art's ranked page; this grid is the whole library through the
      Visibility filter, so a bar drawn against the other list's maximum would be
      systematically wrong on every card. Same derivation, its own population. */
   const gridMaxViews = useMemo(() => {
-    const vs = media.map((r) => r.views).filter((v) => v != null);
+    const vs = media.map((r) => spanViews(r, span)).filter((v) => v != null);
     return vs.length ? Math.max(1, ...vs) : 1;
-  }, [media]);
+  }, [media, span]);
 
   const counts = useMemo(() => {
     const all = rows || [];
@@ -354,6 +363,16 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
             <div className="mgma2-toolbar">
               <Dropdown kick="Visibility" value={vis} opts={VIS_OPTS} onPick={setVis} />
               <Dropdown kick="Sort" value={sort} opts={SORT_OPTS} onPick={setSort} />
+              {/* All time / 30 days (owner pick 2026-11-19, look board round 2 topic 6 A): one switch
+                  beside Sort flips the totals, each picture's views bar and the Most viewed / Most
+                  liked sorts. Until 30 days of readings exist the title says "since <date>". */}
+              <span className="mgma2-seg" role="group" aria-label="Count over"
+                title={span === "30" ? "Counted " + windowTag(win) : undefined}>
+                {SPAN_OPTS.map(([k, l]) => (
+                  <button type="button" key={k} className={span === k ? "on" : ""}
+                    aria-pressed={span === k} onClick={() => setSpan(k)}>{l}</button>
+                ))}
+              </span>
               <button type="button" className={"mgma2-toolbtn" + (manageOn ? " on" : "")}
                 onClick={toggleManage}>
                 {manageOn ? "Done" : "✎ Manage"}
@@ -560,7 +579,8 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
                         <span className="mgma2-avatar">NL</span>
                         <span className="mgma2-ftitle" title={it.title}>{it.title}</span>
                         <span className="mgma2-fdate">{dateLabel(it.date)}</span>
-                        <span className="mgma2-likes" style={{ color: heartCol(it.likes) }}><Icon name="heart" /> {fmt(it.likes)}</span>
+                        <span className="mgma2-likes" title={span === "30" ? "likes, " + windowTag(win) : undefined}
+                          style={{ color: heartCol(spanLikes(it, span)) }}><Icon name="heart" /> {fmt(spanLikes(it, span))}</span>
                         {/* Owner, 2026-09-06: comment badges on the cards, same idiom as
                             likes. The count was already fetched for every card and already
                             summed into the COMMENTS stat -- it simply never reached a card. */}
@@ -579,12 +599,12 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
                           Drawn only for a PUBLISHED work that has actually been swept.
                           views == null is "--sync-artworks has never read this", which is a
                           different fact from a real zero and must not be painted as one. */}
-                      {it.public && it.views != null && (
+                      {it.public && spanViews(it, span) != null && (
                         <div className="mgma2-fviews">
-                          <span className="n">{fmt(it.views)} views</span>
+                          <span className="n">{fmt(spanViews(it, span))} views</span>
                           <div className="mgma-barwrap">
                             <div className="mgma-bar"
-                              style={{ width: Math.max(2, (it.views / gridMaxViews) * 100) + "%" }} />
+                              style={{ width: Math.max(2, (spanViews(it, span) / gridMaxViews) * 100) + "%" }} />
                           </div>
                         </div>
                       )}

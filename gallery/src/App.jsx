@@ -1923,7 +1923,7 @@ export default function App({ boot }) {
           onEdit={requestEdit} onToVideo={requestVideo}
           onOpenDetails={openDetails}
           onPublish={openPublish}
-          onSimilar={showSimilar}
+          onSimilar={showSimilar} onRemix={requestRemix}
           member={account ? account.is_member : null}
         />
       )}

@@ -8952,7 +8952,8 @@ def test_a_turn_back_upright_puts_the_phone_grid_back_to_two_columns(phone_q_ser
 _Q_ACTS_JS = """() => {
     const row = document.querySelector('.lbm-actsrow');
     const vw = innerWidth;
-    const chips = [...row.children].map((c) => { const b = c.getBoundingClientRect();
+    // the group rules (.lbm-vsep) are not buttons: only the chips are measured for room to tap
+    const chips = [...row.children].filter((c) => !c.classList.contains('lbm-vsep')).map((c) => { const b = c.getBoundingClientRect();
         const e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
         return {t: c.textContent.trim(), l: b.left, r: b.right, top: Math.round(b.top), h: b.height, hit: !!(e && c.contains(e))}; });
     const rb = row.getBoundingClientRect();
@@ -11218,3 +11219,195 @@ def test_a_page_on_another_port_is_refused_by_the_front_door(logged_in_page, ren
     assert seen == [403], seen
     # ...and this server is still up and still has the session
     assert page.goto(target + "/api/ping").status == 200
+
+
+# ---------------------------------------------------------------------------
+# 3.21.x look picks, round 2 (owner, 2026-11-19; look board LOOK_BOARD_2026-11-19_round2.html):
+#   topic 2 option B -- Download and Remix on the viewer's bar, in two groups: make | keep
+#   topic 6 option A -- My Art's All time / 30 days switch
+# ---------------------------------------------------------------------------
+
+_BAR_LABELS_JS = """(sel) => [...document.querySelector(sel).children].flatMap((c) => {
+    if (/(^|\\s)(lbx|lbm)-vsep(\\s|$)/.test(c.className)) return ['|'];
+    if (/(^|\\s)lbx-group(\\s|$)/.test(c.className)) return [...c.children].map((k) => k.textContent.trim());
+    return [c.textContent.trim()]; })"""
+
+
+def test_the_desktop_viewer_bar_is_make_then_keep_with_download_and_remix(
+        phone_q_server, render_browser, monkeypatch):
+    """Look board round 2, topic 2 B: the bar is two groups with a thin rule between -- make (Edit, To
+    Video, Remix, Upscale), keep (Download, Publish, Make a recipe, Similar, Details) -- then Slideshow
+    and Close. Download takes the metal, Publish is a plain chip, Download is the same /full/<id>?dl=1
+    link Details has, D downloads, and Remix does what Details' Remix does: closes the viewer, opens the
+    Generate dock, spends nothing. Delete locally left Details' first row for the end of its second."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch, touch=False, viewport=DESKTOP)
+    try:
+        _visit(page, "/")
+        page.wait_for_selector(".mgg-card")
+        _dismiss_any_achievement_toast(page)
+        page.locator('.mgg-card:has(img[src*="/thumbs/500.jpg"])').first.click()
+        page.wait_for_selector(".lbx .lbx-hero img")
+        _settle(page)
+        labels = page.evaluate(_BAR_LABELS_JS, ".lbx-acts")
+        assert labels.count("|") == 2, labels
+        bars = [i for i, x in enumerate(labels) if x == "|"]
+
+        def at(word):
+            return next(i for i, x in enumerate(labels) if word in x)
+        order = [at("Edit"), at("To Video"), at("Remix"), at("Upscale"), bars[0], at("Download"), at("Publish"),
+                 at("Similar"), at("Details"), bars[1], at("Slideshow"), at("Close")]
+        assert order == sorted(order) and len(set(order)) == len(order), labels
+        dl = page.locator(".lbx-acts a.lbx-download")
+        assert dl.get_attribute("href") == "/full/500?dl=1"
+        assert "lbx-chip-metal" in dl.get_attribute("class")
+        assert "lbx-chip-metal" not in page.locator(".lbx-chip:has-text('Publish')").get_attribute("class")
+        assert "lbx-chip-metal" in page.locator(".lbx-chip:has-text('Slideshow')").get_attribute("class")
+        assert "D download" in page.locator(".lbx-hint").inner_text()
+        # the whole bar is on screen at a normal desktop width
+        r = _q_box(page, ".lbx-acts")
+        assert r["l"] >= 0 and r["r"] <= DESKTOP["width"], r
+        # D downloads through the same link
+        with page.expect_download() as dlinfo:
+            page.keyboard.press("d")
+        assert "dl=1" in dlinfo.value.url
+        # Remix: the viewer closes, the dock opens, nothing is sent
+        page.click(".lbx-chip:has-text('Remix')")
+        page.wait_for_selector(".lbx", state="detached")
+        page.wait_for_selector(".mgdock")
+        assert _q_generation_posts(seen) == []
+        # Details: Delete locally is on the second row, off the Download row
+        _visit(page, "/")
+        page.wait_for_selector(".mgg-card")
+        _dismiss_any_achievement_toast(page)
+        page.locator('.mgg-card:has(img[src*="/thumbs/500.jpg"])').first.click()
+        page.wait_for_selector(".lbx .lbx-hero img")
+        page.click(".lbx-acts a:has-text('Details')")
+        page.wait_for_selector(".p-actions-more")
+        assert page.locator(".p-actions-primary .btn-danger").count() == 0
+        assert page.locator(".p-actions-primary:has-text('Download')").count() == 1
+        last = page.evaluate("""() => [...document.querySelectorAll('.p-actions-more > *')].map((e) => e.textContent.trim())""")
+        assert "Delete locally" in last, last
+        assert last.index("Delete locally") >= len(last) - 2, last
+    finally:
+        ctx.close()
+
+
+def test_the_phone_viewer_row_has_remix_and_download_in_make_then_keep(
+        phone_q_server, render_browser, monkeypatch):
+    """Look board round 2, topic 2 B on the phone: the same two groups in the viewer's action row,
+    Remix after To Video, Download (the record's link) opening the keep group. A tap on Remix leaves
+    the viewer and sends nothing."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch)
+    try:
+        _q_open(page)
+        _q_tile(page, 0).click()
+        page.wait_for_selector(".lbm-actsrow .lbm-similar")
+        labels = page.evaluate(_BAR_LABELS_JS, ".lbm-actsrow")
+        assert labels.count("|") == 2, labels
+        i1, i2 = labels.index("|"), len(labels) - 1 - labels[::-1].index("|")
+        make, keep = labels[:i1], labels[i1 + 1:i2]
+        assert [m for m in make if "Remix" in m] and [m for m in make if "To Video" in m] \
+            and [m for m in make if "Upscale" in m], labels
+        assert make.index(next(m for m in make if "To Video" in m)) < make.index(next(m for m in make if "Remix" in m)), labels
+        assert "Download" in keep[0] and any("Similar" in k for k in keep) and any("Details" in k for k in keep), labels
+        assert "Slideshow" in labels[-1], labels
+        assert page.locator(".lbm-actsrow a.lbm-download").get_attribute("href") == "/full/500?dl=1"
+        _dismiss_any_achievement_toast(page)
+        page.click(".lbm-actsrow .lbm-remix")
+        page.wait_for_selector(".lbm-root", state="detached")
+        assert _q_generation_posts(seen) == []
+    finally:
+        ctx.close()
+
+
+_MYART_STUB = {
+    "items": [
+        {"media_id": "m%d" % i, "artwork_id": "a%d" % i, "title": "Work %d" % i, "thumb": "/thumbs/500.jpg",
+         "is_video": False, "is_nsfw": False, "date": "2026-10-0%d" % i, "created_at": "2026-10-0%dT00:00:00Z" % i,
+         "tags": [], "public": True, "sensitive": False, "likes": likes, "comments": 0, "views": views,
+         "views_30": v30, "likes_30": l30}
+        for i, (views, likes, v30, l30) in enumerate(
+            [(5000, 40, 100, 1), (900, 10, 700, 3), (300, 5, 200, 7)], start=1)],
+    "csrf": "x", "coverage": {"media": 3, "artworks": 3},
+    "window": {"days": 30, "since": "2026-11-19", "full": False, "seen": True},
+}
+_YOURART_STUB = {"items": [], "totals": {"count": 3, "views": 6200, "likes": 55, "comments": 0, "views_rows": 3},
+                 "views_synced": True, "views_at": "", "spikes": []}
+
+
+def _myart_stats(page, sel):
+    return page.evaluate("""(s) => [...document.querySelectorAll(s)].map((e) => [...e.children].map((c) => c.textContent.trim()).join(' '))""", sel)
+
+
+def test_the_desktop_my_art_switch_flips_totals_bars_and_sorts_and_says_since(
+        phone_q_server, render_browser, monkeypatch):
+    """Look board round 2, topic 6 A: an All time / 30 days switch beside Sort. All time is today's
+    panel unchanged; 30 days swaps Views and Likes in the stat row for the window's totals (labelled
+    'since <date>' while fewer than 30 days of readings exist), each card's views and bar to the
+    window's number, and Most viewed to the window's order."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch, touch=False, viewport=DESKTOP)
+    try:
+        page.route("**/api/myart/items", lambda r: _q_json(r, _MYART_STUB))
+        page.route("**/api/your-art", lambda r: _q_json(r, _YOURART_STUB))
+        _visit(page, "/")
+        page.wait_for_selector(".mgg-card")
+        _dismiss_any_achievement_toast(page)
+        page.click("button:has-text('My Art')")
+        page.wait_for_selector(".mgma2-seg")
+        page.wait_for_selector(".mgma2-fviews")
+        assert [b.strip() for b in page.locator(".mgma2-seg button").all_inner_texts()] == ["All time", "30 days"]
+        assert page.locator(".mgma2-seg button.on").inner_text() == "All time"
+        stats = _myart_stats(page, ".mgma2-stat")
+        assert "6,200" in stats[1] and "Total views" in stats[1], stats
+        page.click(".mgma2-seg button:has-text('30 days')")
+        _settle(page)
+        stats = _myart_stats(page, ".mgma2-stat")
+        assert stats[1] == "1,000 Views, since Nov 19", stats
+        assert stats[2] == "11 Likes, since Nov 19", stats
+        assert stats[0].startswith("3") and "Published" in stats[0], stats
+        views = [v.strip() for v in page.locator(".mgma2-fviews .n").all_inner_texts()]
+        assert sorted(views) == ["100 views", "200 views", "700 views"], views
+        # the best card's bar is full, the others a share of it
+        widths = page.evaluate("""() => [...document.querySelectorAll('.mgma2-fviews')].map((f) => [f.querySelector('.n').textContent,
+            f.querySelector('.mgma-bar').style.width])""")
+        assert dict(widths)["700 views"] == "100%", widths
+        # a full 30 days says "30 days"
+        full = dict(_MYART_STUB, window={"days": 30, "since": "2026-10-01", "full": True, "seen": True})
+        page.unroute("**/api/myart/items")
+        page.route("**/api/myart/items", lambda r: _q_json(r, full))
+        page.click("button:has-text('Close')") if page.locator("button.mgv-x").count() == 0 else page.click("button.mgv-x")
+        page.click("button:has-text('My Art')")
+        page.wait_for_selector(".mgma2-seg")
+        page.click(".mgma2-seg button:has-text('30 days')")
+        _settle(page)
+        assert _myart_stats(page, ".mgma2-stat")[1] == "1,000 Views, 30 days"
+        assert _q_generation_posts(seen) == []
+    finally:
+        ctx.close()
+
+
+def test_the_phone_my_art_switch_flips_the_totals_and_the_card_numbers(
+        phone_q_server, render_browser, monkeypatch):
+    """Look board round 2, topic 6 A on the phone: the same switch in the toolbar, the same numbers."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch)
+    try:
+        _q_open(page)
+        page.route("**/api/myart/items", lambda r: _q_json(r, _MYART_STUB))
+        page.route("**/api/your-art", lambda r: _q_json(r, _YOURART_STUB))
+        page.click("button[title=More]")
+        page.click(".glm-menu-item:has-text('My Art')")
+        page.wait_for_selector(".myam-spanseg")
+        page.wait_for_selector(".mgma2-fviews")
+        assert [b.strip() for b in page.locator(".myam-spanseg button").all_inner_texts()] == ["All time", "30 days"]
+        r = _q_box(page, ".myam-spanseg")
+        assert r["l"] >= 0 and r["r"] <= PHONE["width"], r
+        assert "6,200" in _myart_stats(page, ".myam-statcell")[1]
+        page.click(".myam-spanseg button:has-text('30 days')")
+        _settle(page)
+        stats = _myart_stats(page, ".myam-statcell")
+        assert stats[1] == "1,000 Views, since Nov 19", stats
+        assert stats[2] == "11 Likes, since Nov 19", stats
+        views = [v.strip() for v in page.locator(".mgma2-fviews .n").all_inner_texts()]
+        assert sorted(views) == ["100 views", "200 views", "700 views"], views
+    finally:
+        ctx.close()
