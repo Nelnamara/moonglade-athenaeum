@@ -50,14 +50,16 @@ def test_jwt_expiry_and_days_left():
 
 
 def test_needs_refresh_cushion():
-    """#71: a renewal mints a 7-day token (PROBE 2026-10-02), so the cushion is 3 days, and it
-    is measured on the token's real seconds left, not on floored whole days (the old 5-day rule
-    on floored days renewed with up to 6 days left, i.e. on nearly every submitting day)."""
-    assert mirror_mod.MIRROR_REFRESH_WHEN_DAYS_LEFT == 3
+    """#71: a renewal mints a 7-day token (PROBE 2026-10-02). The cushion is 6 days (2026-11-18:
+    at 3 the whole renewal window fit inside one closed spell of the app -- see
+    test_mirror_connect_token.py's regression), measured on the token's real seconds left, not
+    on floored whole days."""
+    assert mirror_mod.MIRROR_REFRESH_WHEN_DAYS_LEFT == 6
     assert mirror_mod.mirror_needs_refresh(_jwt(NOW + 20 * 86400), now=NOW) is False   # plenty
-    assert mirror_mod.mirror_needs_refresh(_jwt(NOW + 5 * 86400), now=NOW) is False    # a fresh-ish one
-    assert mirror_mod.mirror_needs_refresh(_jwt(NOW + 3 * 86400 + 60), now=NOW) is False
-    assert mirror_mod.mirror_needs_refresh(_jwt(NOW + 3 * 86400), now=NOW) is True     # at cushion
+    assert mirror_mod.mirror_needs_refresh(_jwt(NOW + 7 * 86400), now=NOW) is False    # just renewed
+    assert mirror_mod.mirror_needs_refresh(_jwt(NOW + 6 * 86400 + 60), now=NOW) is False
+    assert mirror_mod.mirror_needs_refresh(_jwt(NOW + 6 * 86400), now=NOW) is True     # at cushion
+    assert mirror_mod.mirror_needs_refresh(_jwt(NOW + 5 * 86400), now=NOW) is True     # a day old
     assert mirror_mod.mirror_needs_refresh(_jwt(NOW - 3600), now=NOW) is True          # expired
     assert mirror_mod.mirror_needs_refresh(None, now=NOW) is True                       # no token
     assert mirror_mod.mirror_needs_refresh("garbage", now=NOW) is True                  # unparseable
@@ -722,7 +724,7 @@ def test_the_renew_tick_matrix(tmp_path, monkeypatch):
     assert tick(now=NOW + 2 * step) == "no_session"
     _armed(tmp_path, monkeypatch, jwt=_jwt(NOW - 60))
     assert tick(now=NOW + 3 * step) == "expired"
-    _armed(tmp_path, monkeypatch, jwt=_jwt(NOW + 5 * DAY))
+    _armed(tmp_path, monkeypatch, jwt=_jwt(NOW + 6.5 * DAY))
     assert tick(now=NOW + 4 * step) == "fresh"
     assert calls == []
 
@@ -735,7 +737,7 @@ def test_the_renew_tick_matrix(tmp_path, monkeypatch):
 
 def test_the_tick_keeps_its_own_fifteen_minute_cadence(tmp_path, monkeypatch):
     """The scheduler's heartbeat is every minute; the tick looks at the token every fifteen."""
-    _armed(tmp_path, monkeypatch, jwt=_jwt(NOW + 5 * DAY))
+    _armed(tmp_path, monkeypatch, jwt=_jwt(NOW + 6.5 * DAY))
     reads = []
     real = mirror_mod.load_mirror_state
     monkeypatch.setattr(mirror_mod, "load_mirror_state", lambda: reads.append(1) or real())
@@ -879,7 +881,7 @@ def test_failed_is_reported_only_for_the_token_that_failed(tmp_path, monkeypatch
     _refresh_spy(monkeypatch, None)
     assert mirror_mod.mirror_renew_tick(now=NOW) == "failed"
     assert mirror_mod.mirror_renewal_status(now=NOW)["state"] == "failed"
-    mirror_mod.save_mirror_state({"jwt": _jwt(NOW + 6 * DAY)})     # what Connect saves
+    mirror_mod.save_mirror_state({"jwt": _jwt(NOW + 7 * DAY)})     # what Connect saves
     assert mirror_mod.mirror_renewal_status(now=NOW)["state"] == "ok"
     mirror_mod.save_mirror_state({"jwt": _jwt(NOW + 2 * DAY + 5)})  # another due token, never tried
     assert mirror_mod.mirror_renewal_status(now=NOW)["state"] == "ok"
@@ -895,7 +897,7 @@ def test_status_states_paused_off_and_expired_from_seconds(tmp_path, monkeypatch
     assert mirror_mod.mirror_renewal_status(now=NOW)["state"] == "expired"
     _armed(tmp_path, monkeypatch, jwt=_jwt(NOW + 2 * DAY), read_only=True)
     assert mirror_mod.mirror_renewal_status(now=NOW)["state"] == "paused"
-    _armed(tmp_path, monkeypatch, jwt=_jwt(NOW + 6 * DAY), read_only=True)
+    _armed(tmp_path, monkeypatch, jwt=_jwt(NOW + 6.5 * DAY), read_only=True)
     assert mirror_mod.mirror_renewal_status(now=NOW)["state"] == "ok"   # READ_ONLY, but nothing due
     _armed(tmp_path, monkeypatch, jwt=_jwt(NOW + 2 * DAY), enabled=False)
     assert mirror_mod.mirror_renewal_status(now=NOW)["state"] == "off"
@@ -904,16 +906,16 @@ def test_status_states_paused_off_and_expired_from_seconds(tmp_path, monkeypatch
 def test_a_connect_reads_the_browser_and_keeps_the_later_expiring_token(tmp_path, monkeypatch):
     """A press of Connect reads the browser even when the stored token is still usable (PixAI
     can revoke a token before its exp), and keeps whichever of the two expires later."""
-    stored = _jwt_in(5)
+    stored = _jwt_in(6.3)
     _armed(tmp_path, monkeypatch, jwt=stored)
     monkeypatch.setattr(mirror_mod, "refresh_jwt", lambda *a, **k: (_ for _ in ()).throw(
         AssertionError("nothing here is due")))
-    later = _jwt_in(6)
+    later = _jwt_in(6.8)
     monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: later)
     s = mirror_mod.make_mirror_session(bootstrap_from_browser=True, user_initiated=True)
     assert s.headers["Authorization"] == "Bearer " + later
     assert mirror_mod.load_mirror_state()["jwt"] == later
-    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: _jwt_in(4))
+    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: _jwt_in(6.1))
     s = mirror_mod.make_mirror_session(bootstrap_from_browser=True, user_initiated=True)
     assert mirror_mod.load_mirror_state()["jwt"] == later                 # the earlier one is not kept
     # and an ordinary (not user-initiated) call never reads the browser for a usable token

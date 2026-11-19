@@ -37,11 +37,20 @@ MIRROR_REFRESH_PATH = "/auth/refresh-token"
 # A renewal mints a token that expires 7 days after the renewal (PROBE 2026-10-02: the site's
 # own renewal and the app's old GraphQL renewal alike; the ~27 days measured in August no longer
 # holds). Renew once fewer than this many days are left -- measured in the token's real
-# seconds, not floored whole days -- which leaves the background tick (mirror_renew_tick) three
-# days of retries before a failing renewal could let the token lapse (#71).
-MIRROR_REFRESH_WHEN_DAYS_LEFT = 3
+# seconds, not floored whole days.
+#
+# Six, not three (2026-11-18). The renewal only runs while the server runs, so this number is
+# also the shortest time the app can be closed without the token lapsing. At three, a token
+# renewed on 2 Nov did not come due until 6 Nov; the server went down ten hours before that
+# and was not started again until 11 Nov, two days after
+# the token expired -- the whole three-day window fell inside one closed spell, and an expired
+# token cannot renew itself. At six, a token is renewed on any day the app runs once it is a
+# day old, so it always carries six to seven days, a week-long closed spell is survivable, and
+# the 6 h success floor (MIRROR_RENEW_FLOOR_S) still caps renewals at four a day. pixai.art
+# itself renews about hourly. (#71)
+MIRROR_REFRESH_WHEN_DAYS_LEFT = 6
 # What one renewal grants. Only the Control Panel's ring reads it: a token the app did not mint
-# itself (a browser read on Connect, or one stored before #71) has no known start, so its ring
+# itself (one Connect stored, or one stored before #71) has no known start, so its ring
 # is drawn out of max(seconds left, this) -- see mirror_token_span.
 MIRROR_TOKEN_LIFE_S = 7 * 86400
 # The localStorage key the pixai.art frontend keeps the live JWT under (confirmed on a
@@ -77,9 +86,12 @@ MIRROR_WEB_ORIGIN = "https://pixai.art"
 #   - Renewal is POST /v2/auth/refresh-token with no body (MIRROR_REFRESH_PATH, #92), the
 #     route pixai.art itself calls: the fresh token comes back in the response body and in
 #     the `token` response header.
-# So: read the live JWT from the local browser's localStorage ONCE (read_browser_jwt), then
-# the renewal rolls it -- zero paste. A one-time paste field is the break-glass fallback
-# only.
+# So: get the live JWT ONCE, then the renewal rolls it -- zero paste. Since PixAI stopped
+# keeping the token where an outside program can read it (~10 Nov 2026), the way in is the
+# Control Panel's "Connect from PixAI" bookmark: clicked on a signed-in pixai.art tab, it hands
+# the tab's own sign-in to this server's /mirror/connect page, which checks it with
+# accept_site_token before storing it. The local-browser read (read_browser_jwt) stays for
+# --mirror-check and the old Connect route, and finds nothing on a current pixai.art.
 #
 # SAFETY: only touched when the mirror toggle is ON (pure API-key mode never calls
 # these). The credential never leaves this machine and is never printed, logged, or
@@ -925,7 +937,10 @@ def make_mirror_session(bootstrap_from_browser=False, user_initiated=False):
     # (review). The browser read is slow, so it happens before the lock.
     if bootstrap_from_browser and (user_initiated or not _jwt_usable(jwt)):
         bj = read_browser_jwt()
-        if bj:
+        # Only a USABLE browser token replaces the stored one: an old, already-expired value
+        # left in the browser's store used to overwrite an expired stored token (and drop its
+        # minted_at) for nothing.
+        if bj and _jwt_usable(bj):
             with _mirror_lock:
                 cur = load_mirror_state().get("jwt") or ""
                 if not _jwt_usable(cur) or (jwt_expiry(bj) or 0) > (jwt_expiry(cur) or 0):
@@ -939,6 +954,134 @@ def make_mirror_session(bootstrap_from_browser=False, user_initiated=False):
     if not _jwt_usable(jwt):
         return None                        # absent/expired -> refuse, never API-key (F5)
     return _mirror_session_from(jwt)
+
+
+# --- Connect from PixAI: a sign-in handed over by the user's own pixai.art tab ---------------
+# The bookmark posts the tab's sign-in to /mirror/connect, which sends it here. Everything is
+# checked before anything is stored, and every refusal is a fixed plain sentence: never the
+# token, a claim, or the account id.
+_SITE_TOKEN_MAX = 8192                       # a real one is well under 1 KB
+_B64URL = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+SITE_TOKEN_NOT_A_SIGNIN = ("That isn't a PixAI sign-in, so nothing was saved. Click the "
+                           "Connect from PixAI bookmark on a pixai.art tab.")
+SITE_TOKEN_NOT_PIXAI = ("That sign-in wasn't issued by PixAI, so nothing was saved.")
+SITE_TOKEN_EXPIRED = ("That PixAI sign-in has already expired, so nothing was saved. Reload "
+                      "pixai.art, sign in, and click the bookmark again.")
+SITE_TOKEN_NO_ACCOUNT = ("Moonglade couldn't confirm which PixAI account your API key belongs "
+                         "to, so nothing was saved. Check that the API key is set up, then try "
+                         "again.")
+SITE_TOKEN_OTHER_ACCOUNT = ("That pixai.art tab is signed in to a different PixAI account "
+                            "than your API key, so nothing was saved. Sign in to pixai.art as "
+                            "the same account, then click the bookmark again.")
+SITE_TOKEN_NOT_SAVED = "Moonglade couldn't save the sign-in. Try again."
+SITE_TOKEN_PIXAI_UNREACHABLE = ("Couldn't reach PixAI to check which account this is. Try "
+                                "again in a minute.")
+SITE_TOKEN_TOO_LONG = ("That sign-in claims to last longer than any PixAI sign-in does, so "
+                       "nothing was saved. Click the bookmark again on a pixai.art tab.")
+SITE_TOKEN_NOT_HOME = ("Connect from PixAI only works from this computer or your home "
+                       "network, so nothing was saved.")
+# The longest life a real PixAI sign-in has had, plus a day of slack: ~27 days, measured on
+# the browser's own token in August 2026 (renewals mint 7 days today, MIRROR_TOKEN_LIFE_S).
+# A token claiming more was not issued by PixAI as we know it -- and, kept by the "keep the
+# later-expiring one" rule below, a far-future one would pin itself in place.
+SITE_TOKEN_MAX_LIFE_S = (27 + 1) * 86400
+
+
+def home_network_address(addr):
+    """True when `addr` (the request's remote address) is this machine or a private home
+    network: IPv4 10/8, 172.16/12, 192.168/16, 169.254/16 and loopback; IPv6 ::1, fc00::/7,
+    fe80::/10; and the IPv4-mapped forms of the IPv4 ranges. Anything else -- including an
+    empty or unparseable address -- is False (fails closed). Pure."""
+    import ipaddress
+    a = str(addr or "").strip()
+    if a == "localhost":
+        return True
+    a = a.split("%", 1)[0].strip("[]")                 # an IPv6 zone id / brackets
+    try:
+        ip = ipaddress.ip_address(a)
+    except ValueError:
+        return False
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    if isinstance(ip, ipaddress.IPv4Address):
+        nets = ("127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+                "169.254.0.0/16")
+    else:
+        nets = ("::1/128", "fc00::/7", "fe80::/10")
+    return any(ip in ipaddress.ip_network(n) for n in nets)
+
+
+def _jwt_shaped(tok):
+    """True for three non-empty base64url segments of sane total length. Offline, no decode."""
+    if not isinstance(tok, str) or not tok or len(tok) > _SITE_TOKEN_MAX:
+        return False
+    parts = tok.split(".")
+    return len(parts) == 3 and all(p and set(p) <= _B64URL for p in parts)
+
+
+def accept_site_token(token, account_id, now=None):
+    """Store a PixAI sign-in the user's own pixai.art tab handed over ("Connect from PixAI").
+
+    Returns {"ok": True, "days_left": N} or {"ok": False, "error": <fixed sentence>}; never
+    raises for a bad token, never logs, never returns or echoes the token or any claim.
+
+    Checks, cheapest first, all before anything is stored: a JWT's shape; not the API key;
+    `iss == "pixai"`; an `exp` still in the future and no further out than
+    SITE_TOKEN_MAX_LIFE_S; and -- the cross-identity guard (invariant #7) -- its `sub` equals
+    the PixAI account the configured API key resolves to. `account_id` is that id, or a
+    no-argument callable returning it, called only once the offline checks pass (the route's
+    callable asks PixAI, ignoring any USER_ID pinned in config.json). An empty id refuses: an
+    account that cannot be confirmed is never assumed. A lookup that raised
+    requests.RequestException (no connection, a timeout, a 5xx) says PixAI could not be
+    reached; any other failure says to check the API key.
+
+    Then, under _mirror_lock: when the stored token is still usable, for the same account, and
+    expires LATER than this one, it is kept and its days are answered (a replayed older token
+    never shortens a good one); otherwise save_mirror_state({"jwt": token}) (JWT-only, no
+    minted_at -- the app did not mint it). Either way the renewal backoff is cleared, so the
+    background tick starts clean. READ_ONLY, the client's address and the Mirror switch are the
+    caller's to check (the route refuses under READ_ONLY, as Connect always has, and off the
+    home network; storing a sign-in is allowed with the Mirror off, as Connect always has,
+    since arming needs one)."""
+    now = time.time() if now is None else now
+    tok = token.strip() if isinstance(token, str) else ""
+    if not _jwt_shaped(tok) or _is_api_key(tok):
+        return {"ok": False, "error": SITE_TOKEN_NOT_A_SIGNIN}
+    claims = jwt_claims(tok)
+    if not claims:
+        return {"ok": False, "error": SITE_TOKEN_NOT_A_SIGNIN}
+    if claims.get("iss") != "pixai":
+        return {"ok": False, "error": SITE_TOKEN_NOT_PIXAI}
+    exp = jwt_expiry(tok)
+    if exp is None or exp - now <= 0:
+        return {"ok": False, "error": SITE_TOKEN_EXPIRED}
+    if exp - now > SITE_TOKEN_MAX_LIFE_S:
+        return {"ok": False, "error": SITE_TOKEN_TOO_LONG}
+    try:
+        acct = account_id() if callable(account_id) else account_id
+    except requests.RequestException:                  # no connection / timeout / 5xx
+        return {"ok": False, "error": SITE_TOKEN_PIXAI_UNREACHABLE}
+    except Exception:                                  # noqa: BLE001 -- a failed lookup refuses
+        acct = ""
+    acct = str(acct or "").strip()
+    if not acct:
+        return {"ok": False, "error": SITE_TOKEN_NO_ACCOUNT}
+    sub = claims.get("sub")
+    if sub is None or str(sub) != acct:
+        return {"ok": False, "error": SITE_TOKEN_OTHER_ACCOUNT}
+    with _mirror_lock:
+        kept = load_mirror_state().get("jwt") or ""
+        kept_exp = jwt_expiry(kept)
+        # exp is already in the future, so a kept_exp beyond it is a still-valid token.
+        if (kept_exp is not None and kept_exp > exp
+                and str(jwt_claims(kept).get("sub")) == acct):
+            winner = kept                              # the stored one outlives this one
+        else:
+            if not save_mirror_state({"jwt": tok}):
+                return {"ok": False, "error": SITE_TOKEN_NOT_SAVED}
+            winner = tok
+        _mirror_renewal.update(fails=0, next_try=0.0, failed_exp=None, last_reason="")
+    return {"ok": True, "days_left": jwt_days_left(winner, now=now)}
 
 
 def mirror_renew_tick(now=None):
@@ -1019,9 +1162,10 @@ def _session_for_create(api_session):
     m = make_mirror_session()
     if m is None:
         raise PixAIError(
-            "Mirror to PixAI is ON but its browser session is expired or unavailable -- "
-            "run `--mirror-check` (or re-bootstrap from a logged-in browser). Nothing was "
-            "submitted and no credits were spent.")
+            "Mirror to PixAI is ON but its website sign-in is expired or unavailable -- "
+            "click your Connect from PixAI bookmark on a signed-in pixai.art tab (it is on "
+            "the Mirror to PixAI tile in the Control Panel). Nothing was submitted and no "
+            "credits were spent.")
     return m
 
 
@@ -1098,12 +1242,16 @@ def run_mirror_check(args):
 #  3. READ_ONLY fires before any mirror network call: the renewal (POST
 #     /v2/auth/refresh-token: make_mirror_session, run_mirror_check, /api/mirror/connect,
 #     mirror_renew_tick -- and again inside _mirror_try_renew's lock) and the create
-#     (submit_generation/submit_fixer).
+#     (submit_generation/submit_fixer). /api/mirror/connect-token (Connect from PixAI) refuses
+#     under READ_ONLY too, as Connect always has, before it stores anything.
 #  4. No credential emission: the JWT is never printed/logged/returned; diagnostics report
 #     only days-left + ok/None + a fixed reason word; the credential travels only in a POST
 #     body/Authorization. The renewal's response body carries the fresh token and is read
 #     for that only -- never logged, never put in a message. The renewal never carries the
-#     API key (refresh_jwt refuses one before sending anything).
+#     API key (refresh_jwt refuses one before sending anything). Connect from PixAI carries
+#     the user's own sign-in from their pixai.art tab to THIS server only: the bookmark posts it
+#     to the one Moonglade address baked into it, the page takes it only from
+#     https://pixai.art, and accept_site_token's refusals are fixed sentences.
 #  5. No silent API-key fallback: make_mirror_session decides refuse-vs-allow OFFLINE from a
 #     usable-JWT check and returns None on failure; _session_for_create raises rather than
 #     using the API key when the mirror is ON.
@@ -1113,8 +1261,13 @@ def run_mirror_check(args):
 #     them across browser profiles risked a cross-identity submit); the fresh token's `sub`
 #     must match the stored one's, the renewal never follows a redirect (a 3xx's Set-Cookie
 #     would ride the next hop), and any cookie PixAI writes back is cleared off the session
-#     after the renewal. The same-session cookie read the 2026-08-17 ruling allows is not
-#     built: #92's B0 check (2026-10-28) found no installed profile's pixai.art cookies
+#     after the renewal. A sign-in handed over by Connect from PixAI is the token alone (the
+#     tab's cookies never leave the browser), and accept_site_token stores it only when its
+#     `sub` is the account the API key resolves to -- a tab signed in as anyone else is
+#     refused, so the bookmark can never move the Mirror to a second identity. A browser read
+#     (the old Connect, --mirror-check) has no such check: it keeps whatever pixai.art token
+#     the profile holds, and every later renewal is held to that token's `sub`. The
+#     same-session cookie read the 2026-08-17 ruling allows is not built: #92's B0 check (2026-10-28) found no installed profile's pixai.art cookies
 #     readable -- the running browser holds the Cookies file locked (Chrome and Edge Default;
 #     Brave not installed), and current Chrome encrypts cookie values with app-bound "v20"
 #     anyway -- so the ruling's own clause applies and the renewal is JWT-only.

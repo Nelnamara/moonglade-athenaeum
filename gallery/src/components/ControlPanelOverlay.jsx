@@ -27,6 +27,7 @@ import { useSwrGet } from "../hooks/swrCache.js";
 import { openBrokenFiles } from "../lib/brokenFilesNav.js";
 import { reviewLabel } from "../lib/brokenFilesCore.js";
 import { trashOnlyCopyNote } from "../lib/onlyCopy.js";
+import { mirrorBookmarklet } from "../lib/mirrorBookmarklet.js";
 
 /* A status line that is an error carries a flag, not a glyph: errLine(text) makes one, and
    <MsgLine> draws the warning icon where it renders. Plain strings stay plain lines. */
@@ -138,14 +139,18 @@ function ledgerResult(j) {
 }
 
 /* "Mirror to PixAI website" — the credential-switch toggle. Self-contained: loads its
-   own status (offline days-left, never the token), flips MIRROR_TO_PIXAI, and Connect
-   runs the server-side browser-session bootstrap (the server reads ITS OWN local browser;
-   no credential crosses the network). See moonglade_backup.py's mirror helpers + the
+   own status (offline days-left, never the token) and flips MIRROR_TO_PIXAI. Connecting is
+   the "Connect from PixAI" bookmark (2026-11-18, lib/mirrorBookmarklet.js): PixAI no longer
+   keeps its sign-in where the server could read it from this machine's browser, so the user
+   drags the link to the bookmarks bar and clicks it on a signed-in pixai.art tab, which hands
+   that tab's sign-in to this Moonglade's /mirror/connect page. The link is the old Connect
+   button's own chip (.mgbr-connect), in its place. See moonglade/mirror.py's helpers + the
    submit-path invariants. */
 function MirrorTile() {
   const [st, setSt] = useState(null);      // {enabled, connected, days_left} — null until loaded
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const bookmarkRef = useRef(null);
   const refresh = async () => {
     // Always drive the tile from the SERVER's real state, never a fabricated object -- a
     // fabricated {connected:true} with no `enabled` key drove the toggle from `undefined`.
@@ -158,11 +163,24 @@ function MirrorTile() {
     window.dispatchEvent(new CustomEvent("mg-mirror-changed", { detail: j }));
   };
   useEffect(() => { refresh(); }, []);
+  // The bookmark's href is set on the element, not through JSX: React warns on (and later
+  // versions block) a javascript: URL in href. Built from THIS page's origin, so the bookmark
+  // comes back to whichever address this Moonglade was reached at.
+  useEffect(() => {
+    if (bookmarkRef.current) bookmarkRef.current.setAttribute("href", mirrorBookmarklet(window.location.origin));
+  }, []);
+  // A connect finishes in the window the bookmark opened; re-read the status when the user
+  // comes back to this tab so the tile shows it without a reload.
+  useEffect(() => {
+    const onFocus = () => { refresh(); };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
   const toggle = async () => {
     if (!st || busy) return;
     const want = !st.enabled;
     if (want && !st.connected) {            // never enable the credential switch with no session
-      setMsg("Connect a session first (the button below), then turn this on.");
+      setMsg("Connect a session first (the Connect from PixAI bookmark below), then turn this on.");
       return;
     }
     setBusy(true); setMsg("");
@@ -171,14 +189,10 @@ function MirrorTile() {
     if (d && d.error) { setMsg(errLine(d.error)); return; }
     await refresh();                        // reflect the real persisted flag
   };
-  const connect = async () => {
-    if (busy) return;
-    setBusy(true); setMsg("Reading this machine's browser session…");
-    const d = await apiPost("/api/mirror/connect", {});
-    setBusy(false);
-    if (!d || !d.ok) { setMsg(errLine((d && d.error) || "couldn't connect")); return; }
-    setMsg("Connected.");
-    await refresh();                        // re-read real status (enabled + connected + days)
+  // Clicked here rather than dragged: it would run on this page, not on pixai.art.
+  const bookmarkClick = (e) => {
+    e.preventDefault();
+    setMsg("Drag it to your bookmarks bar first, then click it on a pixai.art tab.");
   };
   // §1 "The gate" (The Bridge.dc.html 65-135, renderVals 386-432): armed drives the chrome and
   // the same four rungs colour the ring -- emerald healthy / peach low / ruby expired / grey off.
@@ -186,7 +200,7 @@ function MirrorTile() {
   //   - the arc is the token's seconds left out of its OWN life (the server's left_s / span_s;
   //     never iat to exp, which grows with every renewal), not out of a fixed 40 days;
   //   - peach means a renewal FAILED or cannot run (READ_ONLY), not "7 days or fewer" -- a
-  //     7-day token sits under 7 days for its whole healthy life and renews itself at 3;
+  //     7-day token sits under 7 days for its whole healthy life and renews itself at 6;
   //   - ruby is decided by the real seconds left, not the floored days (10 h left is 0 days).
   const armed = !!(st && st.enabled);
   const days = st && st.days_left != null ? Math.max(0, st.days_left) : 0;
@@ -197,10 +211,10 @@ function MirrorTile() {
   const renewal = (st && st.renewal && st.renewal.state) || "ok";
   const daysLeft = days >= 1 ? days + " day" + (days === 1 ? "" : "s") + " left" : "less than a day left";
   const C = 163.4;  // 2*pi*26
-  let ringMod, sessionSub, connectLabel = "Refresh session";
-  if (!st) { ringMod = "off"; sessionSub = "…"; connectLabel = "Connect"; }
-  else if (!armed) { ringMod = "off"; sessionSub = "Not connected — Connect to arm the tier."; connectLabel = "Connect"; }
-  else if (expired) { ringMod = "expired"; sessionSub = "Session expired — reconnect to keep tools live."; connectLabel = "Reconnect"; }
+  let ringMod, sessionSub;
+  if (!st) { ringMod = "off"; sessionSub = "…"; }
+  else if (!armed) { ringMod = "off"; sessionSub = "Not connected — Connect to arm the tier."; }
+  else if (expired) { ringMod = "expired"; sessionSub = "Session expired — reconnect to keep tools live."; }
   else if (renewal === "failed") { ringMod = "low"; sessionSub = "Couldn't renew — " + daysLeft + ". Retrying."; }
   else if (renewal === "paused") { ringMod = "low"; sessionSub = "Renewal is paused while READ_ONLY is on — " + daysLeft + "."; }
   else { ringMod = "healthy"; sessionSub = "Healthy — renews itself while the app runs."; }
@@ -236,9 +250,9 @@ function MirrorTile() {
         </div>
 
         <div className="mgbr-connectrow">
-          <button type="button" className={"mgbr-connect" + (armed ? " armed" : "")}
-            onClick={connect} disabled={busy}>↻ {connectLabel}</button>
-          <div className="mgbr-jwtnote">re-reads the browser JWT</div>
+          <a ref={bookmarkRef} className={"mgbr-connect" + (armed ? " armed" : "")} draggable="true"
+            onClick={bookmarkClick} title="Drag to your bookmarks bar">Connect from PixAI</a>
+          <div className="mgbr-jwtnote">Drag it to your bookmarks bar, then click it on a pixai.art tab while signed in.</div>
         </div>
         {msg && <div className={"mgbr-msg" + (lineIsErr(msg) ? " err" : "")}><MsgLine m={msg} /></div>}
       </div>
