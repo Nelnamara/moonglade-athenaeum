@@ -656,7 +656,8 @@ def test_download_video_task_catalogs_video_even_if_poster_fails(monkeypatch, tm
     monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
 
     saved = []
-    monkeypatch.setattr(core, "save_catalog", lambda db, rows: saved.extend(rows))
+    monkeypatch.setattr(core, "save_catalog_over_snapshot",
+                        lambda db, rows, snapshot: saved.extend(rows))
 
     core._download_video_task(object(), {}, "T7", tmp_path, SimpleNamespace(name_length=60), {})
     assert any(r.get("media_id") == "V7" and r.get("is_video") == "1" for r in saved), \

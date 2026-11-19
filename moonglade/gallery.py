@@ -659,6 +659,72 @@ def save_catalog(db_path, rows):
         con.commit()
 
 
+def merge_over_current(row, snapshot_row, current_row, blank_keeps=True):
+    """One row a long-running writer built, merged over the row the catalog holds NOW.
+
+    `snapshot_row` is what the writer read when it started (None when the media_id was not
+    cataloged then); `current_row` is what the catalog holds at write time (None when it has
+    no row). A value in `row` equal to the snapshot's is only the snapshot echoed back, so
+    whatever the catalog holds now wins -- that is how a rating, a collection, a prompt
+    correction or a `cloud_deleted_at` set while a Sync ran survives the Sync's save. A
+    value that differs from the snapshot is the writer's own news and wins.
+
+    `blank_keeps`: a download row's blank means "not known here" and never clobbers (the
+    `carry_local_fields` rule). A writer that loaded whole rows and edited them passes False,
+    so a value it cleared on purpose is written as cleared."""
+    snap = snapshot_row or {}
+    base = dict(current_row or {})
+    for k, v in row.items():
+        if current_row is not None and k in snap and str(snap.get(k) or "") == str(v or ""):
+            base.setdefault(k, v)            # an echo of the snapshot: the catalog's value wins
+        elif v in ("", None) and blank_keeps:
+            base.setdefault(k, "")
+        else:
+            base[k] = v
+    return base
+
+
+def save_catalog_over_snapshot(db_path, rows, snapshot, blank_keeps=True):
+    """Upsert rows a writer built from an earlier read of the catalog (`snapshot`:
+    media_id -> the row as it read it, the map `carry_local_fields` takes), without undoing
+    anything another writer did in between.
+
+    The current rows are re-read inside the same write transaction as the upsert, so no
+    edit can land between the read and the write. Each row is merged with
+    `merge_over_current`. A media_id the snapshot held that the catalog no longer holds was
+    deleted while the writer worked, and is NOT written back. Returns the rows written.
+
+    Before 2026-11-19 `run_download` merged its page rows over a snapshot taken when the
+    Sync started and `_UPSERT` overwrote every column, so a rating, a collection or a delete
+    made in the gallery during a Sync was undone by the next page save."""
+    db_path = Path(db_path)
+    init_db(db_path)
+    snapshot = snapshot or {}
+    ids = [str(r.get("media_id")) for r in rows if r.get("media_id")]
+    written = []
+    with catalog(db_path) as con:
+        con.execute("BEGIN IMMEDIATE")
+        current = {}
+        for i in range(0, len(ids), 400):
+            chunk = ids[i:i + 400]
+            ph = ",".join("?" * len(chunk))
+            for r in con.execute(
+                    "SELECT * FROM catalog WHERE media_id IN ({})".format(ph), chunk):
+                current[str(r["media_id"])] = dict(r)
+        for r in rows:
+            mid = str(r.get("media_id") or "")
+            if mid in snapshot and mid not in current:
+                continue   # deleted while the writer worked: never resurrect it
+            written.append(merge_over_current(r, snapshot.get(mid), current.get(mid),
+                                              blank_keeps=blank_keeps))
+        con.executemany(
+            _UPSERT,
+            [tuple(r.get(f, "") or "" for f in CATALOG_FIELDS) for r in written],
+        )
+        con.commit()
+    return written
+
+
 def update_rating(db_path, media_id, value):
     """Update a single row's rating without touching the rest of the catalog."""
     with catalog(db_path) as con:
@@ -20401,7 +20467,7 @@ __DESIGN_TOKENS__
                 created_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
                 prompt_preview=dest.stem[:100], is_video="1" if is_vid else ""))
         if rows:
-            save_catalog(db_path, rows)
+            save_catalog_over_snapshot(db_path, rows, known)
         # Session P (review F4/F17): a board exported mid-render never imports with that
         # render's markers -- the render belongs to the original. The client strips too
         # (stripInFlight); this makes the bundle's own answer honest on its way out.

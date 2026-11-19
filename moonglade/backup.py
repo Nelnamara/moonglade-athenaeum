@@ -65,6 +65,10 @@ from moonglade import pixai_client as _pixai_client
 from moonglade import telemetry as _telemetry
 from moonglade.gallery import (CATALOG_FIELDS, init_db, migrate, load_catalog,
                             save_catalog, _db_is_empty, rows_for_media_ids,
+                            # A save of rows built from an earlier read: re-reads the
+                            # current rows in the write transaction so an edit made
+                            # meanwhile is never undone (2026-11-19).
+                            save_catalog_over_snapshot,
                             # The row-level artwork write (see run_sync_artworks): one
                             # narrow UPDATE of the eleven PixAI-owned columns, keyed by
                             # media_id -- imported the same way its whole-table siblings
@@ -4123,8 +4127,13 @@ def carry_local_fields(row, known):
         wiped exactly the fields listed above; a finished generation polled twice was
         enough to do it. Four of the seven builders still had no carry at all until the
         helper gave them one.
-      * run_download's page saves and its backfill pass, which build their rows from
-        the feed rather than through build_catalog_row and so still apply it directly.
+      * run_download's page saves, which build their rows from the feed rather than
+        through build_catalog_row; `save_catalog_over_snapshot` applies the same rule.
+
+    `known` is a snapshot, so it goes stale while a writer works: every writer that
+    carries saves through `save_catalog_over_snapshot`, which merges over the rows as they
+    are at write time and never writes back a row deleted meanwhile (2026-11-19: a Sync
+    undid ratings, collections and deletes made in the gallery while it ran).
     """
     base = dict(known.get(row.get("media_id", ""), {}))
     for k, v in row.items():
@@ -5016,7 +5025,7 @@ def run_sync_videos(args):
             elif item == "missing":
                 missing += 1
     if new_rows:
-        save_catalog(db_path, new_rows)   # the carry already happened in build_catalog_row
+        save_catalog_over_snapshot(db_path, new_rows, known)   # carried in build_catalog_row; merged over the rows as they are NOW
     print("Videos saved/present: {}{}.".format(
         ok, " | {} had no resolvable file url".format(missing) if missing else ""))
     return {"i2v_tasks": len(i2v_nodes), "videos": ok}
@@ -5226,7 +5235,7 @@ def run_import_local(args):
         vlog("imported {} ({})".format(rel, "video" if is_vid else "image"))
 
     if rows:
-        save_catalog(db_path, rows)
+        save_catalog_over_snapshot(db_path, rows, known)
     print("Imported {} new local file(s){}; {} already cataloged.".format(
         made, " (copied into the backup)" if external else "", skipped))
     # Anything imported before content-addressing came in still carries its original
@@ -7304,7 +7313,7 @@ def run_generate(args):
         saved.append(str(path))
 
     if rows:
-        save_catalog(db_path, rows)
+        save_catalog_over_snapshot(db_path, rows, known)
 
     videos = []
     if vouts:
@@ -7489,7 +7498,7 @@ def _download_video_task(session, result, task_id, out, args, params):
         rows.append(full)
         saved.append(str(path))
     if rows:
-        save_catalog(db_path, rows)
+        save_catalog_over_snapshot(db_path, rows, known)
     return saved
 
 
@@ -7645,7 +7654,7 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
         make_thumbnail(path, thumb_dir / "{}.jpg".format(mid))
         saved.append(str(path))
     if rows:
-        save_catalog(db_path, rows)
+        save_catalog_over_snapshot(db_path, rows, known)
     return saved
 
 
@@ -10503,7 +10512,7 @@ def run_edit_image(args):
         saved.append(str(path))
 
     if rows:
-        save_catalog(db_path, rows)
+        save_catalog_over_snapshot(db_path, rows, known)
     print("Edited + cataloged {} image(s):".format(len(saved)))
     for s in saved:
         print("  " + s)
@@ -10547,6 +10556,8 @@ def run_fix_models(args):
     db_path = _ensure_db(out)
     session = _make_session(getattr(args, "token", None))
     rows = load_catalog(db_path)
+    # As loaded: the save at the end merges over the rows as they are THEN (a Sync step).
+    snapshot = {r["media_id"]: dict(r) for r in rows if r.get("media_id")}
 
     to_resolve = {}   # version_id -> rows needing it
     for r in rows:
@@ -10603,7 +10614,7 @@ def run_fix_models(args):
                 print("  could not resolve model {} (left as-is)".format(vid))
 
     if fixed or relabeled:
-        save_catalog(db_path, rows)
+        save_catalog_over_snapshot(db_path, rows, snapshot, blank_keeps=False)
     print("\nFixed {} row(s) across {} model(s); {} id(s) unresolved{}{}.".format(
         fixed, len(to_resolve) - unresolved - len(lookup_failed), unresolved,
         " (relabeled {} rows to '{}')".format(relabeled, removed_label) if relabeled else "",
@@ -14158,6 +14169,8 @@ def run_backfill_full_meta(args):
     session = _make_session(getattr(args, "token", None))
 
     rows = load_catalog(db_path)
+    # As loaded, so a checkpoint save keeps a rating or collection set while this runs.
+    snapshot = {r["media_id"]: dict(r) for r in rows if r.get("media_id")}
     with_loras = getattr(args, "with_loras", False)
     with_credit = getattr(args, "with_credit", False)
     with_surface = getattr(args, "with_surface", False)
@@ -14316,7 +14329,7 @@ def run_backfill_full_meta(args):
 
     def _checkpoint():
         if pending:
-            save_catalog(db_path, pending)
+            save_catalog_over_snapshot(db_path, pending, snapshot, blank_keeps=False)
             pending.clear()
 
     for tid, fm in _parallel_map(task_ids, _fetch_task, workers, _prog, delay=args.delay,
@@ -14864,7 +14877,7 @@ def run_download(args, progress=None):
                             _tick()
 
                 if page_rows:
-                    save_catalog(db_path, [carry_local_fields(r, known) for r in page_rows])
+                    save_catalog_over_snapshot(db_path, page_rows, known)
                 seen += len(edges)
                 if args.max and seen >= args.max:
                     print("Reached --max limit.")
@@ -14988,11 +15001,12 @@ def run_download(args, progress=None):
                         _check_time_capsule(meta.get("created_at"), out)
                         time.sleep(args.delay)
 
-            # Upsert this page's rows so progress is durable even on interrupt.
-            # _carry() re-merges each row over its existing catalog row so a
-            # re-pull never blanks local curation (collections/rating/tags/...).
+            # Upsert this page's rows so progress is durable even on interrupt. Each row
+            # is merged over the row the catalog holds NOW, not over `known` (read when
+            # the run started): a re-pull never blanks local curation, and a rating,
+            # collection or delete made in the gallery during the run is not undone.
             if page_rows:
-                save_catalog(db_path, [carry_local_fields(r, known) for r in page_rows])
+                save_catalog_over_snapshot(db_path, page_rows, known)
 
             # Count TASKS, not pages -- exactly as the parallel branch above does. Counting
             # one per page made every single-worker run (which is what --collect-only always
