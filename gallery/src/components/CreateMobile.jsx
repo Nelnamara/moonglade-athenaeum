@@ -438,7 +438,7 @@ export default function CreateMobile({
   return (
     <div className="glm-tab cm-tab" ref={rootRef}>
       <div className="cm-pad">
-        <div className="cm-seg3">
+        <div className="cm-seg3" data-phone-top="">
           {MODES.map(([k, label, title]) => (
             <button key={k} type="button" title={title}
               className={"cm-segbtn" + (cmode === k ? " on" : "")}
@@ -448,7 +448,7 @@ export default function CreateMobile({
 
         {cmode === "edit" && (
           <>
-            <div className="cm-seg3">
+            <div className="cm-seg3" data-phone-top="">
               {[
                 ["edit", "Edit", "Edit Pro / Reference Pro — instruction edits"],
                 ["fixer", "Fixer", "Box a hand or face — PixAI repairs it (always spends)"],
@@ -571,7 +571,7 @@ export default function CreateMobile({
                 topic 3, option B, Create screen). Prompt | Model | Frame | Recipes | More, one at a
                 time, so the price and Generate below sit on the first screen. A section that is not
                 showing stays mounted (hidden), so nothing in it loses its state or its handle. */}
-            <div className="cm-secchips" role="tablist" aria-label="Composer sections">
+            <div className="cm-secchips" role="tablist" aria-label="Composer sections" data-phone-top="">
               {CREATE_SECTIONS.map(([k, label]) => (
                 <button key={k} type="button" role="tab" aria-selected={sec === k}
                   className={"cm-secchip" + (sec === k ? " on" : "")}

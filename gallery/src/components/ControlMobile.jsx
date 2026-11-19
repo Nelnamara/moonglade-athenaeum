@@ -20,6 +20,7 @@ import { versionFromStamp } from "../notify/updateStore.js";
 import { useSwrGet } from "../hooks/swrCache.js";
 import { openBrokenFiles } from "../lib/brokenFilesNav.js";
 import { reviewLabel } from "../lib/brokenFilesCore.js";
+import { autoSync } from "../lib/livingRow.js";
 import "../styles/control-panel.css";
 import "../styles/create-mobile.css";
 import "../styles/control-mobile.css";
@@ -298,6 +299,12 @@ export default function ControlMobile({
   const lastSyncLine = lastSync
     ? "last run " + fmtWhen(lastSync.ts) + " · " + ledgerResult(lastSync).text
     : "no sync recorded yet";
+  /* ONE TRUTH for Sync (2026-11-18, the desktop Panel's own fix, lib/livingRow.js autoSync): two
+     schedulers can run it -- the legacy standing order and the Runs-itself Sync row -- and the
+     answer is the one the server's tick gives: who runs Sync, and how often. The phone's job
+     console draws Sync ONCE from it; the standing order's own row stays in the Ledger, where the
+     desktop keeps it. */
+  const sync = schedule ? autoSync(schedule) : null;
 
   return (
     <div className="glm-tab" ref={rootRef}>
@@ -318,7 +325,7 @@ export default function ControlMobile({
           topic 3, option B's Control screen). Jobs opens first, with Sync now on the first
           screen; Health holds the counts and storage; This phone holds Library paging, Data
           saver and About. The section is held by AppMobile so it survives a tab switch. */}
-      <div className="cm-seg3 ctm-sections" role="tablist" aria-label="Control sections">
+      <div className="cm-seg3 ctm-sections" role="tablist" aria-label="Control sections" data-phone-top="">
         {CONTROL_SECTIONS.map(([k, label]) => (
           <button key={k} type="button" role="tab" aria-selected={section === k}
             className={"cm-segbtn" + (section === k ? " on" : "")}
@@ -329,7 +336,9 @@ export default function ControlMobile({
       {section === "jobs" && (
         <>
           <div className="ctm-sec ctm-jobsec">
-            <div className="ctm-syncrow">
+            {/* data-phone-top: Sync now and Tidy are the Jobs section's first controls, so a corner
+                notice sits under them too (AppMobile.jsx, THE CORNER TOASTS) */}
+            <div className="ctm-syncrow" data-phone-top="">
               <button type="button" className="mgcp-syncbtn ctm-syncnow" onClick={() => runAction("sync")} disabled={!!running}
                 title="Pull new pictures and fill their metadata">
                 <b>↻ Sync now</b>
@@ -381,19 +390,19 @@ export default function ControlMobile({
                 always was: every write on this surface is localhost-only server-side, and the
                 phone is a LAN session by definition. */}
             <div className="ctm-joblist">
-              {schedule && (
-                <div className="ctm-jobrow">
-                  <span className="ctm-jobname">
-                    <Icon name="timer" /> {(summary.all_actions || summary.actions || []).find((a) => a.action === schedule.action)?.label || schedule.action}
-                  </span>
-                  <span className="ctm-jobwhen">
-                    every {schedule.interval_hours || 6}h · <b className={schedule.enabled ? "ok" : ""}>{schedule.enabled ? "on" : "off"}</b>
-                    {" · "}{schedule.workers || 4} workers
-                  </span>
-                </div>
-              )}
               {schedule && (schedule.catalog || []).map((c) => {
                 const row = (schedule.jobs || []).find((j) => j.action === c.action) || {};
+                if (c.action === "sync") {
+                  return (
+                    <div className="ctm-jobrow" key={c.action} data-action="sync">
+                      <span className="ctm-jobname">{c.label}</span>
+                      <span className="ctm-jobwhen">
+                        {sync.on ? <>every {sync.every} · <b className="ok">on</b>{sync.by ? " · " + sync.by : ""}</>
+                          : <><b>off</b> · only when you press it</>}
+                      </span>
+                    </div>
+                  );
+                }
                 return (
                   <div className="ctm-jobrow" key={c.action}>
                     <span className="ctm-jobname">{c.label}</span>
@@ -497,6 +506,16 @@ export default function ControlMobile({
                 </>
               ) : (
                 <div className="ctm-ledger">
+                  {/* The standing order, read-only, where the desktop keeps it (its Ledger). */}
+                  {schedule && (
+                    <div className="ctm-standing">
+                      <b><Icon name="timer" /> Standing order</b>{" "}
+                      run <b>{(summary.all_actions || summary.actions || []).find((a) => a.action === schedule.action)?.label || schedule.action}</b>
+                      {" every "}<b>{schedule.interval_hours || 6}h</b>
+                      {" — "}<b className={schedule.enabled ? "ok" : ""}>{schedule.enabled ? "on" : "off"}</b>
+                      {" · "}{schedule.workers || 4} workers
+                    </div>
+                  )}
                   {panelHistory.length === 0 && (
                     <div className="ctm-ledgernote">
                       No maintenance runs recorded yet — jobs land here as they finish.

@@ -292,8 +292,8 @@ The same switch is on the phone's **Control** screen, in its **This phone** sect
 
 **On a phone** the Control tab is in three sections. **Jobs** opens first: **↻ Sync now** and
 **Tidy** (the duplicates, the same review Health opens) side by side, when Sync last ran, then the
-job console — each scheduled job with how often it runs and whether it is on — and under it the
-Pipelines and Ledger, Recover a task by ID, the Live Mirror with Restart and Stop, and Accounts.
+job console — each scheduled job with how often it runs and whether it is on, Sync once, read
+the way the desktop Panel reads it — and under it the Pipelines and the Ledger (with the standing order), Recover a task by ID, the Live Mirror with Restart and Stop, and Accounts.
 **Health** has At a glance and [Collection Health](Health), Trash and the two downloads. **This
 phone** has Library paging, Data saver and About, then the blur switch, Branding and the skins.
 

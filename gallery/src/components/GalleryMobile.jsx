@@ -428,7 +428,7 @@ export default function GalleryMobile({
       <PullToRefresh onRefresh={onPullRefresh} enabled={!similar && !selectMode && !!onPullRefresh}>
       {/* The search bar and the media chips ride together, sticky at the top of the list (look pick B,
           2026-11-19: "the header slides away as you scroll, search and chips stay"). */}
-      <div className="glm-bars">
+      <div className="glm-bars" data-phone-top="">
       <div className="glm-bar">
         <div className="glm-search">
           <span className="glm-search-icon" onClick={() => submitQuery()} title="Search"><Icon name="search" /></span>

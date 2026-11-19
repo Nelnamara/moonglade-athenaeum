@@ -6288,7 +6288,7 @@ body.mg-moment-up > #root {
 #mg-toasts {
   position: fixed;
   right: calc(16px + var(--mg-safe-r,0px));
-  top: 64px;
+  top: var(--mg-phone-toast-top,64px);
   z-index: 511;
   display: flex;
   flex-direction: column;

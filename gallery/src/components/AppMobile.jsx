@@ -785,6 +785,51 @@ export default function AppMobile({ boot }) {
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
+  /* THE CORNER TOASTS SIT BELOW THE TOP CHROME, never on it (2026-11-19, with look pick B). The
+     notify toasts are a fixed stack at top 64 px, made for the desktop's banner; on the phone's
+     new short header that line ran through the controls under it -- Create's Image · Edit · Video
+     and its section chips, Control's Jobs · Health · This phone -- and a sticky toast (the update
+     receipt) held them covered until its x was found. So the phone sets the stack's top itself
+     (notify.css reads --mg-phone-toast-top; the desktop never sets it and keeps its 64 px): 8 px
+     under the lowest of the marked top controls (`data-phone-top`: the header, the gallery's
+     sticky search and chips and the strips under them -- the Home Screen nudge, a smart
+     collection's -- Create's mode and section rows, Control's sections and Sync now) that is on
+     screen in the upper half of it. Rects are the viewport's, so the safe area and the update
+     strip are already in them. Measured on every scroll of the tab, a resize, and any change of
+     tab, section or header. */
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    let raf = 0;
+    const measure = () => {
+      raf = 0;
+      let floor = 0;
+      const half = window.innerHeight / 2;
+      for (const el of document.querySelectorAll(".glm-stage [data-phone-top]")) {
+        const r = el.getBoundingClientRect();
+        if (r.height > 0 && r.bottom > 0 && r.top < half) floor = Math.max(floor, r.bottom);
+      }
+      root.style.setProperty("--mg-phone-toast-top", Math.round(floor + 8) + "px");
+    };
+    const soon = () => { if (!raf) raf = requestAnimationFrame(measure); };
+    measure();
+    const el = bodyRef.current;
+    if (el) el.addEventListener("scroll", soon, { passive: true });
+    window.addEventListener("resize", soon);
+    // the header's slide is a transition: measure again once it has landed
+    const late = setTimeout(soon, 320);
+    // and when a tab's own top row arrives late (Control draws its sections once its summary
+    // read answers), or a section swaps what is under the header
+    const mo = typeof MutationObserver !== "undefined" && el ? new MutationObserver(soon) : null;
+    if (mo) mo.observe(el, { childList: true, subtree: true });
+    return () => {
+      if (mo) mo.disconnect();
+      cancelAnimationFrame(raf);
+      clearTimeout(late);
+      if (el) el.removeEventListener("scroll", soon);
+      window.removeEventListener("resize", soon);
+    };
+  }, [tab, createSection, ctlSection, cmode, heroAway, sideways]);
+  useEffect(() => () => document.documentElement.style.removeProperty("--mg-phone-toast-top"), []);
   // turned sideways, the header is one slim bar and never slides
   useEffect(() => { if (sideways) setHeroAway(false); }, [sideways]);
   // the slide's distance is the header's own height, measured
@@ -1428,7 +1473,7 @@ export default function AppMobile({ boot }) {
           list scrolls (see THE GALLERY'S HEADER SLIDES AWAY above). Activity and the guide moved
           into the Menu. On Create and Control it is one small row: the mark, the name and the
           credits (and the Saver chip while it acts), so their sections start near the top. */}
-      <header ref={heroRef}
+      <header ref={heroRef} data-phone-top=""
         className={"glm-hero " + (tab === "gallery" ? "glm-hero-full" : "glm-hero-compact") + (heroAway ? " away" : "")}
         style={heroH ? { "--glm-hero-h": heroH + "px" } : undefined}>
         <div className="glm-hero-bg" aria-hidden="true" />
