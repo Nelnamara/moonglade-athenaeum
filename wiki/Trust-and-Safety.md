@@ -82,7 +82,7 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   the server **encrypted, always**: from another device Moonglade takes it only over its
   `https://` address and refuses it over plain `http://` (see
   [The Gallery → Using HTTPS](Gallery#using-https)). It is never accepted from outside your
-  home network. **Disconnect** on the tile makes Moonglade forget it and stop renewing it;
+  home network. **Disconnect** on the tile (from any device on your home network) makes Moonglade forget it and stop renewing it;
   pixai.art's own sessions page is where the sign-in itself is ended.
   And it's a hard switch, not a preference: when
   mirroring is on and the session isn't usable, the submit **refuses and spends nothing** —

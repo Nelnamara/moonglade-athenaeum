@@ -17,6 +17,7 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Added
+- **One-click Connect is back, now checked to be the same account as the API key.** The Mirror to PixAI tile's Connect button reads the pixai.art sign-in from this PC's Chrome, Edge or Brave again (the Connect from PixAI bookmark stays); a sign-in for any other PixAI account is refused and nothing is stored. Disconnect now shows for any device on your home network, not only the page opened on this PC. (2026-11-19)
 - **A refused API key no longer empties the app.** When PixAI refuses the API key (as it did on 2026-11-19 for an account whose membership had lapsed), what the app READS — your history, catch-up, Contests, credits, free cards — is asked once more on your Mirror sign-in, the one your own pixai.art tab handed over, for the same account. Nothing that spends or changes your account ever switches: generating, claiming, deleting and every other change still use the key alone. Connect from PixAI also keeps working while the key is refused, checked against the account your stored sign-in names. (2026-11-19)
 - **Sign out all devices**, beside your name in Control Panel → Accounts. It signs your account out everywhere, this device included, without changing your password. (2026-11-19)
 - **Disconnect on the Mirror tile.** On this PC, it makes Moonglade forget the stored PixAI sign-in, stop renewing it and turn the Mirror off. (2026-11-19)

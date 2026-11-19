@@ -660,23 +660,37 @@ def test_disconnect_forgets_the_sign_in_stops_renewal_and_disarms(tmp_path):
     assert st["connected"] is False
 
 
-def test_disconnect_needs_the_token_and_this_pc(tmp_path):
+def test_disconnect_needs_the_token_and_the_home_network(tmp_path):
     p = _stored_sign_in(tmp_path)
     cli = login_client(tmp_path)
     assert cli.post("/api/mirror/disconnect", json={}).status_code == 400
     r = cli.post("/api/mirror/disconnect", json=with_csrf(cli),
-                 environ_base={"REMOTE_ADDR": LAN})
+                 environ_base={"REMOTE_ADDR": "8.8.8.8"})          # not a home network
     assert r.status_code == 403
     assert p.exists()
+    # a device on the home network may disconnect, as it may Connect from PixAI
+    r = cli.post("/api/mirror/disconnect", json=with_csrf(cli),
+                 environ_base={"REMOTE_ADDR": "10.0.0.68"})
+    assert r.get_json() == {"ok": True, "enabled": False}
+    assert not p.exists()
 
 
-def test_the_tile_offers_disconnect_on_this_pc_only():
+def test_the_panel_summary_says_whether_the_viewer_is_on_the_home_network(tmp_path):
+    cli = login_client(tmp_path)
+    assert cli.get("/api/panel/summary").get_json()["home_network"] is True
+    r = cli.get("/api/panel/summary", environ_base={"REMOTE_ADDR": "10.0.0.68"})
+    assert r.get_json()["home_network"] is True and r.get_json()["panel_is_local"] is False
+    r = cli.get("/api/panel/summary", environ_base={"REMOTE_ADDR": "8.8.8.8"})
+    assert r.get_json()["home_network"] is False
+
+
+def test_the_tile_offers_disconnect_on_the_home_network():
     from pathlib import Path
     src = (Path(__file__).resolve().parents[2] / "gallery" / "src" / "components"
            / "ControlPanelOverlay.jsx").read_text(encoding="utf-8")
     start = src.index("function MirrorTile(")
     tile = src[start:src.index("\nexport function", start)]
-    assert '"/api/mirror/disconnect"' in tile and "isLocal && st && st.connected" in tile
+    assert '"/api/mirror/disconnect"' in tile and "homeNet && st && st.connected" in tile
 
 
 # ---------------------------------------------------------------------------
