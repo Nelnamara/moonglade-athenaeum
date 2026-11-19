@@ -1568,7 +1568,7 @@ export default function AppMobile({ boot }) {
           onSimilar={showSimilar}
           onEnterContest={openContestFor}
           member={account ? account.is_member : null}
-          onSendToVideo={sendPictureToVideo}
+          onSendToVideo={sendPictureToVideo} onRemix={remixPicture}
           {...(continuous ? { page: 1, pages: 1, offset: 0, continuous: true, loadMore } : null)}
         />
       )}

@@ -93,3 +93,46 @@ export default function useMyArt() {
            spikes: (d && d.spikes) || [],
            viewsAt: (d && d.views_at) || "" };
 }
+
+/* THE ALL TIME / 30 DAYS SWITCH (owner pick, look board round 2 topic 6 option A, 2026-11-19).
+   One pure set of helpers for both shells, so the desktop overlay and the phone screen cannot
+   drift on WHAT the switch counts.
+
+   /api/myart/items carries per-work `views_30` / `likes_30` (the gain since a baseline snapshot)
+   and a `window` {days, since, full, seen}. The app only began keeping daily readings the day
+   this shipped, so until 30 days of them exist the "30 days" is honestly "since <date>": the
+   label says so (windowTag) and the switch itself stays "30 days" -- the owner's own words. */
+export const SPAN_OPTS = [["all", "All time"], ["30", "30 days"]];
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+export const shortDay = (iso) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || "");
+  return m ? MONTHS[Number(m[2]) - 1] + " " + Number(m[3]) : "";
+};
+
+/* "30 days" once the history reaches back that far, else "since Nov 19". */
+export function windowTag(win) {
+  if (!win || win.full) return "30 days";
+  return win.since ? "since " + shortDay(win.since) : "30 days";
+}
+
+/* A work's number under the chosen span: lifetime, or its gain in the window. null stays null
+   (views never swept is not a zero). */
+export const spanViews = (r, span) => (span === "30" ? (r.views_30 == null ? null : r.views_30) : r.views);
+export const spanLikes = (r, span) => (span === "30" ? (r.likes_30 || 0) : r.likes);
+
+/* The stat row under the switch: Published and Comments stay lifetime (the mock leaves them);
+   Views and Likes become the window's totals over the published works. `stats` is useMyArt's
+   own array -- index 1 views, index 2 likes -- so the all-time row is unchanged. */
+export function spanStats(stats, rows, win, span) {
+  if (span !== "30" || !stats || !stats.length) return stats;
+  const pub = (rows || []).filter((r) => r.public);
+  const viewed = pub.filter((r) => r.views_30 != null);
+  const tag = windowTag(win);
+  const out = stats.slice();
+  out[1] = { ...stats[1], value: viewed.length ? fmt(viewed.reduce((s, r) => s + r.views_30, 0)) : "—",
+    label: "Views, " + tag };
+  out[2] = { ...stats[2], value: fmt(pub.reduce((s, r) => s + (r.likes_30 || 0), 0)),
+    label: "Likes, " + tag };
+  return out;
+}

@@ -33,7 +33,7 @@ import useScrollLock from "../hooks/useScrollLock.js";
    page-level close back to the gallery. */
 export default function Lightbox({
   items, index, setIndex, onClose, onRate, page, pages, loadPage, onEdit, onToVideo,
-  onOpenDetails, onPublish, onSimilar, member, offset, total,
+  onOpenDetails, onPublish, onSimilar, onRemix, member, offset, total,
 }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const it = items[index];
@@ -131,6 +131,18 @@ export default function Lightbox({
         if (editOpen && barRef.current) { barRef.current.focus(); focusBar.current = false; }
         else setEditOpen(true);
       }
+      else if ((e.key === "d" || e.key === "D") && !e.metaKey && !e.ctrlKey && !e.altKey && items[index]) {
+        // D downloads the full-resolution file -- the same link the ↓ Download chip carries.
+        e.preventDefault();
+        const a = document.createElement("a");
+        a.href = "/full/" + encodeURIComponent(items[index].media_id) + "?dl=1";
+        a.download = "";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+      // R already means "Remix with a new seed" app-wide (the command palette's Again row, a global
+      // capture-phase key that runs first), so the viewer adds nothing for R.
       else if (e.key === "f" || e.key === "F") setSlideOn((v) => !v);
       else if (e.key === "Escape") {
         // innermost-first still, with the prompt slab gone: an open edit bar closes first,
@@ -271,46 +283,64 @@ export default function Lightbox({
             {it.date ? <span className="lbx-fig">{it.date}</span> : null}
             {hasAR ? <span className="lbx-fig">{W}×{H}</span> : null}
           </div>
+          {/* THE BAR IN TWO GROUPS (owner pick, look board round 2 topic 2, option B, 2026-11-19):
+              what MAKES a new picture -- Edit, To Video, Remix, Upscale -- then what KEEPS or
+              shares this one -- Download, Publish, Make a recipe, Similar, Details -- then the
+              show and the way out, with a thin rule between the groups. Download takes the metal, as
+              it does in Details; Publish is a plain chip now. Remix and Download are the SAME doors
+              Details has: Remix is App's requestRemix (prefill only, never a spend), Download is the
+              same /full/<id>?dl=1 link. */}
           <div className="lbx-acts">
-            <button className="lbx-chip"
-              title={it.tsubaki_edit ? (editOpen ? "Close the edit bar (Esc)" : "Describe an edit (E)") : "Send to the Edit tab"}
-              aria-expanded={it.tsubaki_edit ? editOpen : undefined}
-              onClick={() => { focusBar.current = true; it.tsubaki_edit ? toggleEdit() : onEdit(it.media_id); }}>✎ Edit</button>
-            <button className="lbx-chip" title="Send as a start frame"
-              onClick={() => onToVideo(it.media_id, it.thumb)}>▶ To Video</button>
-            {/* ◈ Similar NAVIGATES (Lightbox.dc.html:354 sends it to the gallery): the viewer
-                closes and the library shows the lookalike set in the grid's place, with the
-                ◈ token in the search bar -- the same destination every other ◈ in the app
-                reaches. It no longer stacks a modal on the viewer ("Where the Refit Broke"
-                #6), and since B2 (2026-09-04) it is not a modal at all. The mark is ◈, not
-                the ✧ this chip used to wear: one glyph for visual similarity, app-wide. */}
-            <button className="lbx-chip lbx-similar" title="Lookalikes by eye — the 48 closest"
-              onClick={() => onSimilar && onSimilar(it.media_id)}>◈ Similar</button>
-            {/* ⁂ Make a recipe (Recipes Handoff K decision 4): between Similar and Upscale,
-                only for a picture whose model takes recipes; opens the creator's step 2. */}
-            <MakeRecipeChip className="lbx-chip" mediaId={it.media_id} isVideo={!!it.is_video} />
-            {/* Stills only (owner walk 2026-09-29): a video's Upscale could only say it applies
-                to images. */}
-            {!it.is_video ? (
-              <button className="lbx-chip" title="Upscale or Hires this picture"
-                onClick={() => upEl.current && upEl.current.open(it.media_id)}>⇱ Upscale</button>
-            ) : null}
-            {/* ☁ Publish -- the cross-page hand-off (Lightbox.dc.html:357), REAL since
-                2026-08-06: it hands this image to the Publish panel, which runs the actual
-                createArtworkFromTaskV2 pipeline (preview, then confirm). The DC builds it
-                with btn(..., true) -- the PRIMARY/metal treatment, same as Slideshow -- which
-                the refit had dropped to a plain chip ("Where the Refit Broke" #6). */}
-            <button className="lbx-chip lbx-chip-metal" title="Publish this image to PixAI"
-              onClick={() => onPublish && onPublish(it.media_id)}><Icon name="publish" /> Publish</button>
-            <a className="lbx-chip" title="Open the full record"
-              href={"/?image=" + encodeURIComponent(it.media_id)}
-              onClick={(e) => {
-                if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
-                e.preventDefault();
-                onOpenDetails(it.media_id);
-              }}>
-              Details
-            </a>
+            <div className="lbx-group lbx-group-make" role="group" aria-label="Make something new">
+              <button className="lbx-chip"
+                title={it.tsubaki_edit ? (editOpen ? "Close the edit bar (Esc)" : "Describe an edit (E)") : "Send to the Edit tab"}
+                aria-expanded={it.tsubaki_edit ? editOpen : undefined}
+                onClick={() => { focusBar.current = true; it.tsubaki_edit ? toggleEdit() : onEdit(it.media_id); }}>✎ Edit</button>
+              <button className="lbx-chip" title="Send as a start frame"
+                onClick={() => onToVideo(it.media_id, it.thumb)}>▶ To Video</button>
+              {/* ↺ Remix: the Details door, same handler -- the full recipe prefilled into the
+                  Generate drawer (App's requestRemix closes the viewer and opens the dock). Prefill
+                  only: nothing is spent until Generate is pressed. */}
+              <button className="lbx-chip lbx-remix" title={it.is_video
+                ? "Load this video's full recipe into the Video composer"
+                : "Load this picture's full recipe into Generate"}
+                onClick={() => onRemix && onRemix(it.media_id)}>↺ Remix</button>
+              {/* Stills only (owner walk 2026-09-29): a video's Upscale could only say it applies
+                  to images. */}
+              {!it.is_video ? (
+                <button className="lbx-chip" title="Upscale or Hires this picture"
+                  onClick={() => upEl.current && upEl.current.open(it.media_id)}>⇱ Upscale</button>
+              ) : null}
+            </div>
+            <span className="lbx-vsep" aria-hidden="true" />
+            <div className="lbx-group lbx-group-keep" role="group" aria-label="Keep or share this one">
+              {/* ↓ Download: the same full-resolution link Details' metal button carries. */}
+              <a className="lbx-chip lbx-chip-metal lbx-download" title="Full-resolution file (D)"
+                href={"/full/" + encodeURIComponent(it.media_id) + "?dl=1"}><Icon name="download" /> Download</a>
+              {/* ☁ Publish -- the cross-page hand-off (Lightbox.dc.html:357), REAL since
+                  2026-08-06: it hands this image to the Publish panel (preview, then confirm).
+                  A plain chip since the 2026-11-19 two-group bar: Download takes the metal. */}
+              <button className="lbx-chip" title="Publish this image to PixAI"
+                onClick={() => onPublish && onPublish(it.media_id)}><Icon name="publish" /> Publish</button>
+              {/* ⁂ Make a recipe (Recipes Handoff K decision 4): only for a picture whose model
+                  takes recipes; opens the creator's step 2. */}
+              <MakeRecipeChip className="lbx-chip" mediaId={it.media_id} isVideo={!!it.is_video} />
+              {/* ◈ Similar NAVIGATES: the viewer closes and the library shows the lookalike set in
+                  the grid's place, with the ◈ token in the search bar -- the same destination every
+                  other ◈ in the app reaches (B2, 2026-09-04). */}
+              <button className="lbx-chip lbx-similar" title="Lookalikes by eye — the 48 closest"
+                onClick={() => onSimilar && onSimilar(it.media_id)}>◈ Similar</button>
+              <a className="lbx-chip" title="Open the full record"
+                href={"/?image=" + encodeURIComponent(it.media_id)}
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                  e.preventDefault();
+                  onOpenDetails(it.media_id);
+                }}>
+                Details
+              </a>
+            </div>
+            <span className="lbx-vsep" aria-hidden="true" />
             <button className="lbx-chip lbx-chip-metal" title="F toggles the slideshow"
               onClick={() => setSlideOn((v) => !v)}>
               {slideOn ? "⏸ Pause" : "▶ Slideshow"}
@@ -378,7 +408,7 @@ export default function Lightbox({
                 );
               })}
             </div>
-            <div className="lbx-hint">← → to browse · F slideshow{it.tsubaki_edit ? " · ✎ or E edits with Tsubaki" : ""} · Esc closes · swipe or double-tap on tablet</div>
+            <div className="lbx-hint">← → to browse · D download · R remix with a new seed · F slideshow{it.tsubaki_edit ? " · ✎ or E edits with Tsubaki" : ""} · Esc closes · swipe or double-tap on tablet</div>
           </div>
         </div>
       </div>

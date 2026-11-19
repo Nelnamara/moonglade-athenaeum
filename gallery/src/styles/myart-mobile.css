@@ -115,3 +115,8 @@ button.myam-sheetrow:disabled { opacity: .5; cursor: not-allowed; }
 .myam-tagopts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .myam-tagadd { font-size: 10px; font-weight: 600; padding: 4px 9px; border-radius: 999px; cursor: pointer;
   color: var(--subtext); background: var(--surface0); border: 1px solid var(--surface1); }
+
+/* The All time / 30 days switch (owner pick 2026-11-19): the Visibility segment's own look. */
+.myam-spanseg { display: flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--surface0);
+  border: 1px solid var(--surface1); }
+.myam-spanseg button.myam-vischip { flex: none; padding: 5px 10px; }

@@ -224,3 +224,8 @@
   .lbm-herowrap { transition: none !important; }
   .lbm-sheet-scrim, .lbm-sheet-slab { transition: none; }
 }
+
+/* Make | keep | show: the viewer's two groups on the phone too (owner pick 2026-11-19, look board
+   round 2 topic 2 B). The desktop bar's thin rule, laid across the wrapped row between the groups. */
+.lbm-actsrow > .lbm-vsep { flex: none; width: 100%; height: 1px; min-height: 0; margin: 2px 0; padding: 0; background: rgba(255,255,255,.12); }
+.lbm-chip.lbm-download { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }

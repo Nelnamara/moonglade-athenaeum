@@ -477,6 +477,17 @@ _MIGRATIONS = [
     "CREATE TABLE IF NOT EXISTS collection_order ("
     "name TEXT NOT NULL, media_id TEXT NOT NULL, position INTEGER NOT NULL, "
     "PRIMARY KEY (name, media_id))",
+    # MY ART'S 30 DAYS (2026-11-19, owner pick: an All time / 30 days switch). PixAI keeps only a
+    # lifetime count, and the catalog only the latest reading (plus the one before it), so a
+    # 30-day number needs history the app did not keep. One row per artwork per local day, the
+    # day's freshest reading, written after each artwork sweep (record_artwork_snapshots) and
+    # pruned past 120 days. `views` is NULL until a views sweep has read it: blank is not zero.
+    # Its own table, not catalog columns: every catalog rewrite goes through _UPSERT, which would
+    # not know to keep it. Local; never sent anywhere.
+    "CREATE TABLE IF NOT EXISTS artwork_snapshots ("
+    "artwork_id TEXT NOT NULL, day TEXT NOT NULL, views INTEGER, "
+    "likes INTEGER NOT NULL DEFAULT 0, comments INTEGER NOT NULL DEFAULT 0, "
+    "PRIMARY KEY (artwork_id, day))",
 ]
 
 # ---------------------------------------------------------------------------
@@ -3002,6 +3013,109 @@ def myart_items(db_path):
         return [dict(r) for r in rows]
 
 
+SNAPSHOT_KEEP_DAYS = 120
+MYART_WINDOW_DAYS = 30
+
+
+def _local_day(today=None):
+    import datetime as _dt
+    return (today or _dt.date.today()).strftime("%Y-%m-%d")
+
+
+def record_artwork_snapshots(db_path, today=None):
+    """Write today's reading of every published artwork into artwork_snapshots -- the
+    history My Art's 30-day switch is computed from.
+
+    One row per artwork per local day; a second call the same day REPLACES the row with the
+    freshest numbers, so the sweep's fifteen-minute cadence costs nothing but a rewrite. The
+    numbers are the catalog's own current ones (likes/comments from the meta sweep, views from
+    the views sweep), so this reads nothing from PixAI. `views` stays NULL while the catalog's
+    views are blank -- never swept is not zero. An animation's poster row and its mp4 row share
+    one artwork_id; the larger reading of the two wins. Prunes past SNAPSHOT_KEEP_DAYS.
+
+    Called after apply_artwork_meta and apply_artwork_views. Fails soft: history is a
+    nicety and must never break a sweep. Returns the number of rows written."""
+    import datetime as _dt
+    day = _local_day(today)
+    try:
+        with catalog(db_path) as con:
+            cur = con.execute(
+                "INSERT OR REPLACE INTO artwork_snapshots (artwork_id, day, views, likes, comments)"
+                " SELECT artwork_id, ?,"
+                " MAX(CASE WHEN COALESCE(views,'') = '' THEN NULL"
+                "          ELSE CAST(views AS INTEGER) END),"
+                " MAX(CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER)),"
+                " MAX(CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER))"
+                " FROM catalog WHERE COALESCE(artwork_id,'') != ''"
+                " GROUP BY artwork_id", (day,))
+            n = cur.rowcount or 0
+            cutoff = ((today or _dt.date.today())
+                      - _dt.timedelta(days=SNAPSHOT_KEEP_DAYS)).strftime("%Y-%m-%d")
+            con.execute("DELETE FROM artwork_snapshots WHERE day < ?", (cutoff,))
+            con.commit()
+            return n
+    except sqlite3.Error:
+        return 0
+
+
+def myart_window(db_path, today=None, days=MYART_WINDOW_DAYS):
+    """The last-`days` views and likes of each published artwork, from artwork_snapshots.
+
+    Returns (per_artwork, window):
+      per_artwork = {artwork_id: {"views": int|None, "likes": int}} -- the gain since the
+                    baseline snapshot. views is None when this artwork's views were never swept.
+      window      = {"days": N, "since": "YYYY-MM-DD", "full": bool, "seen": bool (any history)}
+
+    THE BASELINE, and what is honest about it: the newest snapshot taken on or before
+    (today - days) when the history reaches that far back -- then `full` is true and the number
+    really is a 30-day figure. Until it does, the baseline is the artwork's OLDEST snapshot, the
+    number is "since that day", and `full` is false so the surface says "since <date>" instead
+    of "30 days". `since` is the oldest snapshot day anywhere (today when there is none yet). A
+    gain never goes below zero (a work PixAI removed likes from reads as no change, not as a
+    negative). Pure catalog read."""
+    import datetime as _dt
+    t = today or _dt.date.today()
+    today_s = _local_day(t)
+    edge = (t - _dt.timedelta(days=days)).strftime("%Y-%m-%d")
+    try:
+        with catalog(db_path) as con:
+            snaps = con.execute(
+                "SELECT artwork_id, day, views, likes FROM artwork_snapshots"
+                " ORDER BY artwork_id, day").fetchall()
+            cur_rows = con.execute(
+                "SELECT artwork_id,"
+                " MAX(CASE WHEN COALESCE(views,'') = '' THEN NULL ELSE CAST(views AS INTEGER) END) AS views,"
+                " MAX(CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER)) AS likes"
+                " FROM catalog WHERE COALESCE(artwork_id,'') != '' GROUP BY artwork_id").fetchall()
+    except sqlite3.Error:
+        return {}, {"days": days, "since": today_s, "full": False, "seen": False}
+    by_art = {}
+    for r in snaps:
+        by_art.setdefault(r["artwork_id"], []).append(r)
+    since = min((r["day"] for r in snaps), default=today_s)
+    out = {}
+    for c in cur_rows:
+        hist = by_art.get(c["artwork_id"]) or []
+        base = None
+        for r in hist:                       # newest snapshot on or before the edge
+            if r["day"] <= edge:
+                base = r
+        if base is None and hist:
+            base = hist[0]                   # not 30 days of history yet: the oldest we have
+        if base is None:
+            out[c["artwork_id"]] = {"views": None if c["views"] is None else 0, "likes": 0}
+            continue
+        v = None
+        if c["views"] is not None:
+            # the baseline's own views may be NULL (swept later); the first swept reading is it
+            bv = base["views"]
+            if bv is None:
+                bv = next((h["views"] for h in hist if h["views"] is not None), c["views"])
+            v = max(0, int(c["views"]) - int(bv))
+        out[c["artwork_id"]] = {"views": v, "likes": max(0, int(c["likes"] or 0) - int(base["likes"] or 0))}
+    return out, {"days": days, "since": since, "full": since <= edge, "seen": bool(snaps)}
+
+
 def myart_coverage(db_path):
     """WHY My Art is empty, when it is (#42) -- the two counts that tell "you have
     published nothing" apart from "--sync-artworks has never run on this library".
@@ -3136,6 +3250,8 @@ def apply_artwork_meta(db_path, metas):
                               + [str(m["media_id"])])
             changed += cur.rowcount or 0
         con.commit()
+    if changed:
+        record_artwork_snapshots(db_path)   # My Art's 30-day history (2026-11-19)
     return changed
 
 
@@ -3198,6 +3314,8 @@ def apply_artwork_views(db_path, views_by_artwork_id, now_iso):
                     (str(int(fresh)), prev, now_iso, prev_at, str(r["media_id"])))
                 changed += upd.rowcount or 0
         con.commit()
+    if changed:
+        record_artwork_snapshots(db_path)   # My Art's 30-day history (2026-11-19)
     return changed
 
 
@@ -13516,6 +13634,12 @@ def create_app(out_dir: Path):
         empty: an unsynced library and a genuinely unpublished one produce the same
         zero rows here, and only the catalog-wide counts separate them. See
         myart_coverage()."""
+        # First read on a library with no history yet: take today's reading now, so the window
+        # has a baseline from the first open (a same-day rewrite is harmless).
+        win, window = myart_window(db_path)
+        if not window["seen"]:
+            record_artwork_snapshots(db_path)
+            win, window = myart_window(db_path)
         items = []
         for r in myart_items(db_path):
             mid, title, preview = r["media_id"], r["title"], r["prompt_preview"]
@@ -13534,12 +13658,17 @@ def create_app(out_dir: Path):
                 # null (never swept) vs 0 (swept, nobody looked) -- the card draws a
                 # dash for the first and a real 0 for the second.
                 "views": r["views"] if (r["views_raw"] or "") != "" else None,
+                "views_30": win.get(r["artwork_id"], {}).get("views"),
+                "likes_30": win.get(r["artwork_id"], {}).get("likes", 0),
             })
         # The card actions POST to /api/myart/publish, which is in the explicit-token
         # CSRF class; MG_BOOT doesn't carry the token, so it rides along here rather
         # than making the overlay fetch the whole Control Panel summary for one field.
         return jsonify({"items": items, "csrf": session.get("csrf", ""),
-                        "coverage": myart_coverage(db_path)})
+                        "coverage": myart_coverage(db_path),
+                        # the All time / 30 days switch: `window` says whether the 30 is a full
+                        # 30 days or only "since <date>" (history starts the day this shipped)
+                        "window": window})
 
     @app.route("/api/myart/publish", methods=["POST"])
     @tier(LOGIN)

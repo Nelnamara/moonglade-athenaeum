@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Icon from "../icons/Icons.jsx";
 import { apiGet, apiPost } from "../api.js";
-import { fmt, artworksNeverSynced, NEVER_SYNCED_WHY } from "../hooks/useMyArt.js";
+import { fmt, artworksNeverSynced, NEVER_SYNCED_WHY, SPAN_OPTS, spanStats, spanViews, spanLikes } from "../hooks/useMyArt.js";
 import useSheet from "../hooks/useSheet.js";
 import MobileSheet from "./MobileSheet.jsx";
 import PullToRefresh from "./PullToRefresh.jsx";
@@ -76,6 +76,9 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
   const [rowsErr, setRowsErr] = useState("");
   const [csrf, setCsrf] = useState("");
   const [stats, setStats] = useState(null);
+  // All time / 30 days (owner pick 2026-11-19): the same switch the desktop panel has.
+  const [win, setWin] = useState(null);
+  const [span, setSpan] = useState("all");
   const [tab, setTab] = useState("artworks");
   const [vis, setVis] = useState("all");
   const [sort, setSort] = useState("latest");
@@ -98,7 +101,7 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
   const load = () => apiGet("/api/myart/items")
     .then((j) => {
       if (j.error) throw new Error(j.error);
-      setRows(j.items || []); setCoverage(j.coverage || null); setCsrf(j.csrf || "");
+      setRows(j.items || []); setCoverage(j.coverage || null); setWin(j.window || null); setCsrf(j.csrf || "");
     });
 
   // The totals row -- one read, used on open and again by a pull to refresh (Session Q, Q6).
@@ -158,25 +161,30 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
     return () => { dead = true; clearTimeout(t); };
   }, [tagDraft]);
 
+  const shownStats = useMemo(() => spanStats(stats, rows, win, span), [stats, rows, win, span]);
+
   const media = useMemo(() => {
     const all = rows || [];
     let list = all.filter((r) => (tab === "animations" ? r.is_video : !r.is_video));
     if (vis !== "all") list = list.filter((r) => (vis === "public" ? r.public : !r.public));
     if (sort === "oldest") list = [...list].reverse();
-    else if (sort === "liked") list = [...list].sort((a, b) => b.likes - a.likes);
+    else if (sort === "liked") list = [...list].sort((a, b) => spanLikes(b, span) - spanLikes(a, span));
     // Never-swept sorts as -1, below a real zero -- see MyArtOverlay.jsx's copy.
     else if (sort === "viewed") {
-      list = [...list].sort((a, b) => (b.views == null ? -1 : b.views) - (a.views == null ? -1 : a.views));
+      list = [...list].sort((a, b) => {
+        const bv = spanViews(b, span), av = spanViews(a, span);
+        return (bv == null ? -1 : bv) - (av == null ? -1 : av);
+      });
     }
     return list;
-  }, [rows, tab, vis, sort]);
+  }, [rows, tab, vis, sort, span]);
 
   // The bar's denominator, over what this list actually shows -- same derivation and same
   // reason as the desktop shell's.
   const gridMaxViews = useMemo(() => {
-    const vs = media.map((r) => r.views).filter((v) => v != null);
+    const vs = media.map((r) => spanViews(r, span)).filter((v) => v != null);
     return vs.length ? Math.max(1, ...vs) : 1;
-  }, [media]);
+  }, [media, span]);
 
   const counts = useMemo(() => {
     const all = rows || [];
@@ -252,9 +260,9 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
     <>
       <PullToRefresh onRefresh={pullRefresh}
         labels={{ idle: "pull to refresh", armed: "release to refresh", busy: "refreshing\u2026" }}>
-      {stats && (
+      {shownStats && (
         <div className="myam-statrow">
-          {stats.map((st) => (
+          {shownStats.map((st) => (
             <div className="myam-statcell" key={st.label}>
               <div className="myam-statval" style={{ color: st.accent ? "var(--lavender)" : "var(--text)" }}>{st.value}</div>
               <div className="myam-statlabel">{st.label}</div>
@@ -286,6 +294,14 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
             <button type="button" className="myam-sortbtn" onClick={() => openSheet("sort")}>
               ↕ {sort === "oldest" ? "Oldest" : sort === "liked" ? "Liked" : sort === "viewed" ? "Most viewed" : "Latest"}
             </button>
+            {/* All time / 30 days (owner pick 2026-11-19): beside Sort, flips the totals, the views
+                bars and the Most viewed / Most liked sorts. */}
+            <div className="myam-spanseg" role="group" aria-label="Count over">
+              {SPAN_OPTS.map(([k, l]) => (
+                <button type="button" key={k} className={"myam-vischip" + (span === k ? " on" : "")}
+                  aria-pressed={span === k} onClick={() => setSpan(k)}>{l}</button>
+              ))}
+            </div>
           </>
         )}
         {tab === "loras" && onOpenTrain && (
@@ -351,7 +367,7 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
                       <div className="myam-title">{it.title}</div>
                       <div className="myam-date">{dateLabel(it.date)}</div>
                     </div>
-                    <span className="myam-likes" style={{ color: heartCol(it.likes) }}><Icon name="heart" /> {fmt(it.likes)}</span>
+                    <span className="myam-likes" style={{ color: heartCol(spanLikes(it, span)) }}><Icon name="heart" /> {fmt(spanLikes(it, span))}</span>
                     {/* Comment badge, same idiom as likes (owner, 2026-09-06) -- and the
                         same two-rung colour rule the desktop card uses, for the same
                         reason: comments never reach the heart's mauve threshold here. */}
@@ -360,12 +376,12 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
                   {/* Per-card views + the comparison bar, on every published card. Same
                       .mgma-barwrap/.mgma-bar the desktop card restores -- one bar, one
                       spec, both shells. null views = never swept, and is not a zero. */}
-                  {it.public && it.views != null && (
+                  {it.public && spanViews(it, span) != null && (
                     <div className="mgma2-fviews">
-                      <span className="n">{fmt(it.views)} views</span>
+                      <span className="n">{fmt(spanViews(it, span))} views</span>
                       <div className="mgma-barwrap">
                         <div className="mgma-bar"
-                          style={{ width: Math.max(2, (it.views / gridMaxViews) * 100) + "%" }} />
+                          style={{ width: Math.max(2, (spanViews(it, span) / gridMaxViews) * 100) + "%" }} />
                       </div>
                     </div>
                   )}
