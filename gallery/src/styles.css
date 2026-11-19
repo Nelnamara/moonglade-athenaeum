@@ -722,3 +722,23 @@ button:disabled { cursor: default; }
 .p-sim-tile:hover { opacity: 1; transform: translateY(-2px); }
 .p-sim-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .p-sim-tile .vbadge { top: 4px; right: 4px; font-size: 8px; padding: 1px 4px; }
+
+/* INSTANT TIPS: one tooltip for every element that carries data-tip="...". The look is the
+   gallery picker's close-button tip, lifted here (its own rule now only places it). A native
+   title= waits on a mouse and never shows on a phone, so the app's own words use data-tip:
+   a pointer shows it at once, keyboard focus shows it, and lib/tips.js adds .is-tip-open on a
+   long press. Below the element by default; data-tip-pos="above" flips it for elements near
+   the bottom of the screen, data-tip-align="end" right-aligns it for ones near the right. */
+:where([data-tip]) { position: relative; }
+[data-tip]::after {
+  content: attr(data-tip); position: absolute; top: calc(100% + 6px); left: 0; z-index: 600;
+  width: max-content; max-width: 260px;
+  background: rgba(9,7,22,.96); border: 1px solid rgba(182,146,230,.4); border-radius: 8px;
+  padding: 6px 10px; font: 600 10.5px/1.2 system-ui; color: var(--text, #d6d2e2);
+  white-space: normal; text-align: left; text-transform: none; letter-spacing: normal;
+  box-shadow: 0 10px 26px rgba(0,0,0,.6); pointer-events: none; opacity: 0; transform: translateY(-4px);
+  transition: opacity .18s cubic-bezier(.2,.9,.24,1), transform .18s cubic-bezier(.2,.9,.24,1);
+}
+[data-tip][data-tip-pos="above"]::after { top: auto; bottom: calc(100% + 6px); transform: translateY(4px); }
+[data-tip][data-tip-align="end"]::after { left: auto; right: 0; }
+[data-tip]:hover::after, [data-tip]:focus-visible::after, [data-tip].is-tip-open::after { opacity: 1; transform: none; }

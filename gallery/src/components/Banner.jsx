@@ -166,12 +166,12 @@ export default function Banner({
             </button>
             <a className="mgx-metal mgx-metal-loom mgx-metal-md" href="/loom"
               style={{ textDecoration: "none" }}
-              title="The Loom — plan a video as a storyboard, shot by shot, and render the clips into one reel">
+              data-tip="The Loom — plan a video as a storyboard, shot by shot, and render the clips into one reel" data-tip-align="end" aria-label="The Loom — plan a video as a storyboard, shot by shot, and render the clips into one reel">
               ▰ The Loom
             </a>
             <button type="button" className="mgx-metal mgx-metal-folio mgx-metal-md"
               onClick={onFolio}
-              title="The Folio of Honors — the shelf of badges, points and skins you earn by using the app">
+              data-tip="The Folio of Honors — the shelf of badges, points and skins you earn by using the app" data-tip-align="end" aria-label="The Folio of Honors — the shelf of badges, points and skins you earn by using the app">
               <Icon name="folio" /> Folio
             </button>
           </div>
