@@ -58,9 +58,10 @@ not come back on a reload. It only explains adding the app to the Home Screen, a
 Control Panel is still just the address — you sign in the normal way when you get there.
 
 A phone gets its own layout: three tabs along the bottom — **Gallery**, **Create** (the Generate
-dock as a screen of its own) and **Control** — and a row of icons at the top for the Folio,
-The Loom, Activity, the **?** guide and the **Menu** (My Art, Collections, Publish, Train a LoRA,
-Import, Contests, Health and Log Out). Turned sideways it is still the phone app, laid out for a
+dock as a screen of its own, in sections) and **Control** (Jobs, Health and This phone) — and on the
+Gallery a short header with three round buttons for the Folio, The Loom and the **Menu** (cards for
+My Art, Collections, Publish, Contests, Train a LoRA, Inbox, Gift box, Import, Activity and the
+Guide, then Log Out). The header slides away as you scroll the library. Turned sideways it is still the phone app, laid out for a
 wide, short screen. See
 [The Gallery](Gallery) for the phone's feed, pull to refresh and landscape layout.
 

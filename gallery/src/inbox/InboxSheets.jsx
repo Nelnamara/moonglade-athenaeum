@@ -28,14 +28,35 @@ export function MenuBadge({ st }) {
   return b ? <span className="ib-menubadge" aria-label={b + " new on PixAI"}>{b}</span> : null;
 }
 
-/* The Menu's first two rows: "Inbox  N new ›" (the unread notifications) and
+/* The Menu's two inbox entries (its first two rows until the 2026-11-19 grid of cards): "Inbox  N new ›" (the unread notifications) and
    "Gift box  <soonest expiry, peach, else the pending gifts> ›", each led by its picture at 18 px:
    the owner's mailbox (InboxIcon, the ✉ glyph if it cannot load) and the pack's gift. */
-export function MenuInboxRows({ st, account, onInbox, onGifts }) {
+export function MenuInboxRows({ st, account, onInbox, onGifts, cards = false }) {
   const cardsBy = (account && account.cards_by ? account.cards_by : []).filter((c) => c.count > 0);
   const expiry = expiringLines(cardsBy, Date.now());
   const meta = giftBoxMeta(expiry, st ? st.gifts : 0);
   const n = st ? badgeText(st.unread) : "";
+  /* `cards`: the Menu's grid of cards (the 2026-11-19 phone layout, look pick B) -- the same two
+     doors, each a card with its picture and name on top and its line under it: "N new ›" or
+     "messages", and the Gift box's soonest expiry (peach) or "rewards". */
+  if (cards) {
+    return (
+      <>
+        <button type="button" className="glm-menu-item glm-menu-card" onClick={onInbox}>
+          <span className="glm-menu-card-h">
+            <span className="glm-menu-icon" aria-hidden="true"><InboxIcon small /></span>Inbox
+          </span>
+          <span className="glm-menu-card-s ib-mrow-meta">{n ? n + " new ›" : "messages"}</span>
+        </button>
+        <button type="button" className="glm-menu-item glm-menu-card" onClick={onGifts}>
+          <span className="glm-menu-card-h">
+            <span className="glm-menu-icon" aria-hidden="true"><span className="ib-giftic small" /></span>Gift box
+          </span>
+          <span className={"glm-menu-card-s ib-mrow-meta" + (meta.peach ? " peach" : "")}>{meta.text || "rewards"}</span>
+        </button>
+      </>
+    );
+  }
   return (
     <>
       <button type="button" className="glm-menu-item" onClick={onInbox}>

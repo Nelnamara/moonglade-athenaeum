@@ -9,6 +9,7 @@ import Icon from "../icons/Icons.jsx";
 import MobileScreen from "./MobileScreen.jsx";
 import DataSaverRow from "./DataSaverRow.jsx";
 import PagingRow from "./PagingRow.jsx";
+import DuplicateReviewMobile from "./DuplicateReviewMobile.jsx";
 import UpdatePhases, { UpdateRefusal, UPDATE_WHAT } from "./UpdatePhases.jsx";
 import useLayerHistory from "../hooks/useLayerHistory.js";
 import { subscribe as subscribeBanner, takeOpenIntent, subscribeOpenIntent } from "../notify/bannerStore.js";
@@ -114,7 +115,36 @@ function ledgerResult(j) {
   return { text: j.status || "…", good: false };
 }
 
-export default function ControlMobile({ account, brandRequest }) {
+/* The Control tab's three sections (look pick B, 2026-11-19): the key AppMobile holds, and the
+   label on the segmented control. */
+export const CONTROL_SECTIONS = [
+  ["jobs", "Jobs"],
+  ["health", "Health"],
+  ["phone", "This phone"],
+];
+
+export default function ControlMobile({
+  account, brandRequest, section = "jobs", setSection, health = null, csrf = "", onDuplicatesResolved,
+}) {
+  // A section is a fresh page: it opens at its top (the tab's own scroll memory banks the offset).
+  const rootRef = useRef(null);
+  const pickSection = (k) => {
+    if (setSection) setSection(k);
+    const body = rootRef.current && rootRef.current.closest(".glm-body");
+    if (body && !body.querySelector(".glm-screen")) body.scrollTop = 0;
+  };
+  /* Tidy, beside Sync now (the board's Jobs screen): the duplicates the library holds, in the
+     same Duplicate Review screen Collection Health opens from its Duplicates tile -- the same
+     hook and routes, one more door to it. A pushed screen, with the Back gesture as its second
+     way out, like Branding below. */
+  const [tidyOpen, setTidyOpen] = useState(false);
+  const [tidyClosing, setTidyClosing] = useState(false);
+  const openTidy = () => { setTidyClosing(false); setTidyOpen(true); };
+  const closeTidy = () => {
+    setTidyClosing(true);
+    setTimeout(() => { setTidyOpen(false); setTidyClosing(false); }, 220);
+  };
+  useLayerHistory(tidyOpen, closeTidy);
   const {
     summary, summaryErr, skins, activeSkin, pickSkin, brandingUnlocked, achievements, fetchAchievements,
     panelHistory, schedule,
@@ -263,11 +293,17 @@ export default function ControlMobile({ account, brandRequest }) {
   const updShown = (updBusy && updTarget) ? updTarget
     : update || (pending ? { latest: pending.version, current: "" } : null);
 
+  // the Sync line under the two buttons: when Sync last ran here, and how it ended
+  const lastSync = lastByAction.sync;
+  const lastSyncLine = lastSync
+    ? "last run " + fmtWhen(lastSync.ts) + " · " + ledgerResult(lastSync).text
+    : "no sync recorded yet";
+
   return (
-    <div className="glm-tab">
+    <div className="glm-tab" ref={rootRef}>
       <div className="cm-pad">
-      {/* ABOVE "At a glance", because a release being out is the one thing on this tab that
-          is news rather than status. Same tile primitive as Branding below. */}
+      {/* ABOVE the sections, because a release being out is the one thing on this tab that is
+          news rather than status. Same tile primitive as Branding. */}
       {pending && (
         <div className="ctm-sec">
           <div className="mgcp-tile click" onClick={() => setUpdScreen(true)}>
@@ -278,332 +314,367 @@ export default function ControlMobile({ account, brandRequest }) {
         </div>
       )}
 
-      {/* About (Session I decision 3a): under the update row, always -- the phone's door to
-          the version, this release's changelog, the guide and the release pages. Opens as a
-          sheet (help/AboutLayers.jsx). */}
-      <div className="ctm-sec">
-        <button type="button" className="mghelp-aboutrow" onClick={() => openAbout(pending ? "update" : "")}>
-          <span>About Moonglade{aboutVer ? " · " : ""}<span className="v">{aboutVer}</span></span>
-          <span className="c" aria-hidden="true">›</span>
-        </button>
+      {/* THE TAB IN THREE SECTIONS (look pick B, 2026-11-19; pixel source: the look board,
+          topic 3, option B's Control screen). Jobs opens first, with Sync now on the first
+          screen; Health holds the counts and storage; This phone holds Library paging, Data
+          saver and About. The section is held by AppMobile so it survives a tab switch. */}
+      <div className="cm-seg3 ctm-sections" role="tablist" aria-label="Control sections">
+        {CONTROL_SECTIONS.map(([k, label]) => (
+          <button key={k} type="button" role="tab" aria-selected={section === k}
+            className={"cm-segbtn" + (section === k ? " on" : "")}
+            onClick={() => pickSection(k)}>{label}</button>
+        ))}
       </div>
 
-      <div className="ctm-sec">
-        <div className="mgcp-sidehead">At a glance</div>
-        <div className="ctm-statgrid">
-          {[
-            ["images", summary.stats.images], ["videos", summary.stats.videos],
-            ["collections", summary.stats.collections], ["credits", credits],
-          ].map(([label, num]) => (
-            <div className="ctm-statcard" key={label}>
-              <div className="ctm-statnum">{typeof num === "number" ? num.toLocaleString() : num}</div>
-              <div className="ctm-statlabel">{label}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* THE TWO PER-DEVICE PHONE CHOICES, FIRST (owner's walk 2026-10-04: he could not find
-          Continuous paging -- the long-press on the gallery's layout keys was unknown to him and
-          this row sat at the foot of the screen). Library paging is the first settings row, right
-          under At a glance, and Data saver sits beside it.
-          Session U (U1b): Library paging -- Pages | Continuous, the same per-device value the
-          gallery's long-press sheet on its layout keys sets; a tap here also counts as finding it
-          (the hint dot under the keys goes). Session Q (Q7): Data saver -- Off / Auto on metered /
-          Always, per device. */}
-      <div className="ctm-sec">
-        <PagingRow />
-      </div>
-      <div className="ctm-sec">
-        <DataSaverRow />
-      </div>
-
-      {/* Branding is INVISIBLE until earned -- exactly like the desktop Control
-          Panel, which hides the whole tab (ControlPanelOverlay: brandingUnlocked &&).
-          The 2026-08-09 branding-integration handoff had drawn a locked tile here whose
-          label NAMED the hidden feat that unlocks it, to every signed-in user -- the one
-          real spoiler the sealing review found in the front-end (HIGH #2; the feat's name
-          stays out of this source by design). Owner call 2026-08-21: no tile, no hint --
-          the feat is discovered, never announced. Sits right under the phone's two per-device
-          choices, near the top, so once earned its presence reads early, matching the desktop
-          tab pair. */}
-      {brandingUnlocked && (
-        <div className="ctm-sec">
-          <div className="mgcp-tile click" onClick={openBrand}>
-            <div className="mgcp-mkick">✦ Branding</div>
-            {/* Each button wears its OWN mark (owner's G2 ruling, Glyph Ledger
-                2026-09-05). This row used to draw a moon for the mark whose id is
-                "logo" and a diamond for every other one, so five different marks read
-                as five identical diamonds -- and the art was right there in `m.png`
-                the whole time. MarkArt is the same component the desktop Panel's two
-                mark rows use. */}
-            <div className="mgcp-marks">
-              {(summary.branding.marks || []).slice(0, 6).map((m) => (
-                <button type="button" key={m.id}
-                  className={"mgcp-mark" + (m.id === summary.branding.mark ? " on" : "")}
-                  title={m.label || m.id} onClick={(e) => { e.stopPropagation(); openBrand(); }}>
-                  <MarkArt mark={m} />
-                </button>
-              ))}
-            </div>
-            <div className="mgcp-tilenote">mark · animation — open Branding</div>
-          </div>
-        </div>
-      )}
-
-      <div className="ctm-sec">
-        <div className="ctm-mirror">
-          <span className={"mgcp-mirrordot" + (watch?.connected ? "" : " off")} style={{ marginTop: 5 }} />
-          <div className="ctm-mirrortext">
-            <div className="ctm-mirrorline"><b>Live Mirror</b> {mirrorLine}</div>
-            <div className="ctm-mirrorchips">
-              <span className={"mgcp-svtag" + (summary.supervised ? "" : " off")}>
-                {summary.supervised ? "Supervised" : "Unsupervised"}
-              </span>
-              <button type="button" className="mgcp-chip" onClick={() => clickPower("restart")}
-                disabled={!summary.supervised} title={summary.supervised ? "" : "Restart needs the managed launcher"}>
-                {powerConfirm === "restart" ? "Confirm — Restart?" : "⟳ Restart"}
+      {section === "jobs" && (
+        <>
+          <div className="ctm-sec ctm-jobsec">
+            <div className="ctm-syncrow">
+              <button type="button" className="mgcp-syncbtn ctm-syncnow" onClick={() => runAction("sync")} disabled={!!running}
+                title="Pull new pictures and fill their metadata">
+                <b>↻ Sync now</b>
               </button>
-              <button type="button" className="mgcp-chip dgr" onClick={() => clickPower("stop")}>
-                {powerConfirm === "stop" ? "Confirm — Stop?" : "■ Stop"}
-              </button>
+              <button type="button" className="mgcp-chip ctm-tidy" onClick={openTidy}
+                title="Duplicates: review the copies and keep one">Tidy</button>
+            </div>
+            <div className="ctm-lastrun">{lastSyncLine}</div>
+          </div>
+
+          <div className="ctm-sec">
+            <div className="mgcp-sidehead">The job console</div>
+            {jobResult && <JobResultBox jobResult={jobResult} onDismiss={() => setJobResult(null)} />}
+            {jobError && <div className="mgcp-runerr">{jobError}</div>}
+
+            {running ? (
+              <div className="mgcp-running">
+                <div className="mgcp-runhead">
+                  <span className="mgcp-runspin" />
+                  <b className="mgcp-runname">{running.label}</b>
+                  <button type="button" className="mgcp-chip dgr" style={{ marginLeft: "auto" }}
+                    onClick={stopJob}>■ Stop</button>
+                </div>
+                <div className="mgcp-runbar">
+                  <i className={progress?.pct == null ? "indeterminate" : ""}
+                    style={progress?.pct != null ? { width: progress.pct + "%" } : undefined} />
+                </div>
+                <div className="mgcp-runlog">
+                  {log.slice(-6).map((ln, i) => (
+                    <div key={i} className={ln.indexOf("✓") === 0 ? "ok" : ""}>{ln}</div>
+                  ))}
+                </div>
+                <div className="mgcp-lockedrow">
+                  {(summary.actions || []).filter((a) => a.action !== running.action)
+                    .slice(0, 3).map((a) => (
+                      <span className="mgcp-lockchip" key={a.action}>{a.label}</span>
+                    ))}
+                  {(summary.actions || []).length - 1 > 3 && (
+                    <span className="mgcp-lockchip">
+                      +{(summary.actions || []).length - 1 - 3} more · one job at a time
+                    </span>
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+            {/* Runs itself -- the living library (2026-09-06): each scheduled job, its cadence and
+                whether it is on, as the board's job console lists them. READ-ONLY here, as it
+                always was: every write on this surface is localhost-only server-side, and the
+                phone is a LAN session by definition. */}
+            <div className="ctm-joblist">
+              {schedule && (
+                <div className="ctm-jobrow">
+                  <span className="ctm-jobname">
+                    <Icon name="timer" /> {(summary.all_actions || summary.actions || []).find((a) => a.action === schedule.action)?.label || schedule.action}
+                  </span>
+                  <span className="ctm-jobwhen">
+                    every {schedule.interval_hours || 6}h · <b className={schedule.enabled ? "ok" : ""}>{schedule.enabled ? "on" : "off"}</b>
+                    {" · "}{schedule.workers || 4} workers
+                  </span>
+                </div>
+              )}
+              {schedule && (schedule.catalog || []).map((c) => {
+                const row = (schedule.jobs || []).find((j) => j.action === c.action) || {};
+                return (
+                  <div className="ctm-jobrow" key={c.action}>
+                    <span className="ctm-jobname">{c.label}</span>
+                    <span className="ctm-jobwhen">
+                      {c.stale ? "only if idle " : "every "}{fmtEvery(row.interval_s)}
+                      {" · "}<b className={row.enabled ? "ok" : ""}>{row.enabled ? "on" : "off"}</b>
+                      {/* The standing order above owns this action, so this row is not the one
+                          running it -- say so rather than show a cadence taken for the truth. */}
+                      {c.deferred && " · the standing order runs this one"}
+                    </span>
+                  </div>
+                );
+              })}
+              {!schedule && <div className="ctm-ledgernote">Reading the schedule…</div>}
             </div>
           </div>
-        </div>
-      </div>
 
-      <div className="ctm-sec">
-        <div className="mgcp-sidehead">Job console</div>
-        {jobResult && <JobResultBox jobResult={jobResult} onDismiss={() => setJobResult(null)} />}
-        {jobError && <div className="mgcp-runerr">{jobError}</div>}
+          {!running && (
+            <div className="ctm-sec">
+              <div className="cm-seg3 ctm-jobseg">
+                <button type="button" className={"cm-segbtn" + (jobTab === "pipelines" ? " on" : "")}
+                  onClick={() => setJobTab("pipelines")}>Pipelines</button>
+                <button type="button" className={"cm-segbtn" + (jobTab === "ledger" ? " on" : "")}
+                  onClick={() => setJobTab("ledger")}>Ledger</button>
+              </div>
 
-        {running ? (
-          <div className="mgcp-running">
-            <div className="mgcp-runhead">
-              <span className="mgcp-runspin" />
-              <b className="mgcp-runname">{running.label}</b>
-              <button type="button" className="mgcp-chip dgr" style={{ marginLeft: "auto" }}
-                onClick={stopJob}>■ Stop</button>
-            </div>
-            <div className="mgcp-runbar">
-              <i className={progress?.pct == null ? "indeterminate" : ""}
-                style={progress?.pct != null ? { width: progress.pct + "%" } : undefined} />
-            </div>
-            <div className="mgcp-runlog">
-              {log.slice(-6).map((ln, i) => (
-                <div key={i} className={ln.indexOf("✓") === 0 ? "ok" : ""}>{ln}</div>
-              ))}
-            </div>
-            <div className="mgcp-lockedrow">
-              {(summary.actions || []).filter((a) => a.action !== running.action)
-                .slice(0, 3).map((a) => (
-                  <span className="mgcp-lockchip" key={a.action}>{a.label}</span>
-                ))}
-              {(summary.actions || []).length - 1 > 3 && (
-                <span className="mgcp-lockchip">
-                  +{(summary.actions || []).length - 1 - 3} more · one job at a time
-                </span>
+              {jobTab === "pipelines" ? (
+                <>
+                  <div className="mgcp-grp">Tend — care for the files</div>
+                  <div className="mgcp-tendrow">
+                    <div className="mgcp-tendlbl">Organize into month folders</div>
+                    <div className="mgcp-chips">
+                      <ActionChip spec={actionSpec("organize-dry")} armed={confirmArm === "organize-dry"} onRun={() => runAction("organize-dry")} />
+                      <span className="mgcp-arr">→</span>
+                      <span className="mgcp-res">{organizeRes || "—"}</span>
+                      <span className="mgcp-arr">→</span>
+                      <ActionChip spec={actionSpec("organize")} dgr armed={confirmArm === "organize"} onRun={() => runAction("organize")} />
+                      <ActionChip spec={actionSpec("undo-organize")} dgr label="Undo" armed={confirmArm === "undo-organize"} onRun={() => runAction("undo-organize")} />
+                    </div>
+                  </div>
+                  <div className="mgcp-tendrow">
+                    <div className="mgcp-tendlbl">Dedup</div>
+                    <div className="mgcp-chips">
+                      {DEDUP_STAGES.map((st, i) => (
+                        <React.Fragment key={st.key}>
+                          <ActionChip spec={actionSpec(st.key)} label={st.label}
+                            armed={confirmArm === st.key} onRun={() => runAction(st.key)}
+                            disabled={i > dedupDone}
+                            title={i > dedupDone ? "Run the earlier stages first" : undefined} />
+                          {st.locked && <Icon name="lock" title="Changes files: serving machine only" />}
+                          {i < DEDUP_STAGES.length - 1 && <span className="mgcp-arr">→</span>}
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="mgcp-tendrow">
+                    <div className="mgcp-tendlbl">Thumbnails &amp; Similar index</div>
+                    <div className="mgcp-chips">
+                      <ActionChip spec={actionSpec("rebuild-thumbs")} label="Rebuild ALL thumbnails" armed={confirmArm === "rebuild-thumbs"} onRun={() => runAction("rebuild-thumbs")} />
+                      <ActionChip spec={actionSpec("sync-similar")} label="Top up Similar" title="Heavy: don't run it beside GPU- or RAM-heavy programs." onRun={() => runAction("sync-similar")} />
+                      <ActionChip spec={actionSpec("rebuild-similar")} label="Rebuild Similar (slow)" title="Heavy: don't run it beside GPU- or RAM-heavy programs." onRun={() => runAction("rebuild-similar")} />
+                      <ActionChip spec={actionSpec("backfill-phash")} label="Backfill perceptual hashes" onRun={() => runAction("backfill-phash")} />
+                    </div>
+                  </div>
+
+                  <div className="mgcp-grp" style={{ marginTop: 16 }}>Check — read-only</div>
+                  {[["stats", "Catalog stats"], ["inventory", "Inventory count"],
+                    ["verify-dupes", "Verify _duplicates/"],
+                    ["verify-library", "Verify library integrity"],
+                    ["sync-artworks", "Sync published-artwork metadata"],
+                    ["sync-videos", "Sync i2v videos"]].map(([key, label]) => (
+                    actionSpec(key) ? (
+                      <div className="mgcp-checkrow" key={key}>
+                        <b>{label}</b>
+                        <span className={"mgcp-checklast" + (lastByAction[key] && ledgerResult(lastByAction[key]).good ? " ok" : "")}>
+                          {lastByAction[key] ? fmtWhen(lastByAction[key].ts) : "—"}
+                        </span>
+                        {key === "verify-library" && brokenReview ? (
+                          <button type="button" className="mgcp-review"
+                            onClick={() => openBrokenFiles("all")}>{brokenReview}</button>
+                        ) : null}
+                        <button type="button" className="mgcp-run" onClick={() => runAction(key)}>run ▸</button>
+                      </div>
+                    ) : null
+                  ))}
+                  <div className="mgcp-tendrow" style={{ marginTop: 10 }}>
+                    <div className="mgcp-tendlbl">Test pull</div>
+                    <div className="mgcp-chips">
+                      <input type="number" min={1} max={200} value={testPullN}
+                        onChange={(e) => setTestPullN(Math.max(1, Math.min(200, Number(e.target.value) || 1)))}
+                        className="mgcp-taskinput" style={{ width: 60 }} />
+                      <ActionChip spec={actionSpec("test-pull")} label="Fetch N recent"
+                        onRun={() => runAction("test-pull", testPullN)} />
+                    </div>
+                  </div>
+                  {!isLocal && (
+                    <div className="mgcp-footnote" style={{ marginTop: 12 }}>
+                      <span><Icon name="lock" /> destructive stages: serving machine only</span>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="ctm-ledger">
+                  {panelHistory.length === 0 && (
+                    <div className="ctm-ledgernote">
+                      No maintenance runs recorded yet — jobs land here as they finish.
+                    </div>
+                  )}
+                  {panelHistory.slice(0, 12).map((j) => {
+                    const res = ledgerResult(j);
+                    return (
+                      <div className="ctm-ledgerrow" key={j.job_id}>
+                        <span className="ctm-ledger-when">{fmtWhen(j.ts)}</span>
+                        <b className="ctm-ledger-name">{j.label || j.action || j.job_id}</b>
+                        <span className={"ctm-ledger-result" + (res.good ? " ok" : "")}>{res.text}</span>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
-          </div>
-        ) : (
-          <>
-            <div className="cm-seg3 ctm-jobseg">
-              <button type="button" className={"cm-segbtn" + (jobTab === "pipelines" ? " on" : "")}
-                onClick={() => setJobTab("pipelines")}>Pipelines</button>
-              <button type="button" className={"cm-segbtn" + (jobTab === "ledger" ? " on" : "")}
-                onClick={() => setJobTab("ledger")}>Ledger</button>
-            </div>
+          )}
 
-            {jobTab === "pipelines" ? (
-              <>
-                <div className="mgcp-grp">Sync — the daily pull</div>
-                <button type="button" className="mgcp-syncbtn" onClick={() => runAction("sync")}>
-                  <b>↻ Sync now</b>
-                  <span>pull new + fill metadata</span>
-                </button>
-
-                <div className="mgcp-grp" style={{ marginTop: 16 }}>Tend — care for the files</div>
-                <div className="mgcp-tendrow">
-                  <div className="mgcp-tendlbl">Organize into month folders</div>
-                  <div className="mgcp-chips">
-                    <ActionChip spec={actionSpec("organize-dry")} armed={confirmArm === "organize-dry"} onRun={() => runAction("organize-dry")} />
-                    <span className="mgcp-arr">→</span>
-                    <span className="mgcp-res">{organizeRes || "—"}</span>
-                    <span className="mgcp-arr">→</span>
-                    <ActionChip spec={actionSpec("organize")} dgr armed={confirmArm === "organize"} onRun={() => runAction("organize")} />
-                    <ActionChip spec={actionSpec("undo-organize")} dgr label="Undo" armed={confirmArm === "undo-organize"} onRun={() => runAction("undo-organize")} />
-                  </div>
-                </div>
-                <div className="mgcp-tendrow">
-                  <div className="mgcp-tendlbl">Dedup</div>
-                  <div className="mgcp-chips">
-                    {DEDUP_STAGES.map((st, i) => (
-                      <React.Fragment key={st.key}>
-                        <ActionChip spec={actionSpec(st.key)} label={st.label}
-                          armed={confirmArm === st.key} onRun={() => runAction(st.key)}
-                          disabled={i > dedupDone}
-                          title={i > dedupDone ? "Run the earlier stages first" : undefined} />
-                        {st.locked && <Icon name="lock" title="Changes files: serving machine only" />}
-                        {i < DEDUP_STAGES.length - 1 && <span className="mgcp-arr">→</span>}
-                      </React.Fragment>
-                    ))}
-                  </div>
-                </div>
-                <div className="mgcp-tendrow">
-                  <div className="mgcp-tendlbl">Thumbnails &amp; Similar index</div>
-                  <div className="mgcp-chips">
-                    <ActionChip spec={actionSpec("rebuild-thumbs")} label="Rebuild ALL thumbnails" armed={confirmArm === "rebuild-thumbs"} onRun={() => runAction("rebuild-thumbs")} />
-                    <ActionChip spec={actionSpec("sync-similar")} label="Top up Similar" title="Heavy: don't run it beside GPU- or RAM-heavy programs." onRun={() => runAction("sync-similar")} />
-                    <ActionChip spec={actionSpec("rebuild-similar")} label="Rebuild Similar (slow)" title="Heavy: don't run it beside GPU- or RAM-heavy programs." onRun={() => runAction("rebuild-similar")} />
-                    <ActionChip spec={actionSpec("backfill-phash")} label="Backfill perceptual hashes" onRun={() => runAction("backfill-phash")} />
-                  </div>
-                </div>
-
-                <div className="mgcp-grp" style={{ marginTop: 16 }}>Check — read-only</div>
-                {[["stats", "Catalog stats"], ["inventory", "Inventory count"],
-                  ["verify-dupes", "Verify _duplicates/"],
-                  ["verify-library", "Verify library integrity"],
-                  ["sync-artworks", "Sync published-artwork metadata"],
-                  ["sync-videos", "Sync i2v videos"]].map(([key, label]) => (
-                  actionSpec(key) ? (
-                    <div className="mgcp-checkrow" key={key}>
-                      <b>{label}</b>
-                      <span className={"mgcp-checklast" + (lastByAction[key] && ledgerResult(lastByAction[key]).good ? " ok" : "")}>
-                        {lastByAction[key] ? fmtWhen(lastByAction[key].ts) : "—"}
-                      </span>
-                      {key === "verify-library" && brokenReview ? (
-                        <button type="button" className="mgcp-review"
-                          onClick={() => openBrokenFiles("all")}>{brokenReview}</button>
-                      ) : null}
-                      <button type="button" className="mgcp-run" onClick={() => runAction(key)}>run ▸</button>
-                    </div>
-                  ) : null
-                ))}
-                <div className="mgcp-tendrow" style={{ marginTop: 10 }}>
-                  <div className="mgcp-tendlbl">Test pull</div>
-                  <div className="mgcp-chips">
-                    <input type="number" min={1} max={200} value={testPullN}
-                      onChange={(e) => setTestPullN(Math.max(1, Math.min(200, Number(e.target.value) || 1)))}
-                      className="mgcp-taskinput" style={{ width: 60 }} />
-                    <ActionChip spec={actionSpec("test-pull")} label="Fetch N recent"
-                      onRun={() => runAction("test-pull", testPullN)} />
-                  </div>
-                </div>
-                {!isLocal && (
-                  <div className="mgcp-footnote" style={{ marginTop: 12 }}>
-                    <span><Icon name="lock" /> destructive stages: serving machine only</span>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="ctm-ledger">
-                {schedule && (
-                  <div className="ctm-standing">
-                    <b><Icon name="timer" /> Standing order</b>{" "}
-                    run <b>{(summary.all_actions || summary.actions || []).find((a) => a.action === schedule.action)?.label || schedule.action}</b>
-                    {" every "}<b>{schedule.interval_hours || 6}h</b>
-                    {" — "}<b className={schedule.enabled ? "ok" : ""}>{schedule.enabled ? "on" : "off"}</b>
-                    {" · "}{schedule.workers || 4} workers
-                  </div>
-                )}
-                {/* Runs itself — the living library (2026-09-06). READ-ONLY here, exactly
-                    as the standing order above it is: every write on this surface is
-                    localhost-only server-side, and the phone is a LAN session by
-                    definition. What it owes the owner is the answer to "is it keeping
-                    itself up to date?", and that is what it gives. */}
-                {schedule && (schedule.catalog || []).map((c) => {
-                  const row = (schedule.jobs || []).find((j) => j.action === c.action) || {};
-                  return (
-                    <div className="ctm-standing" key={c.action}>
-                      <b>{c.label}</b>{" "}
-                      {c.stale ? "only if idle " : "every "}
-                      <b>{fmtEvery(row.interval_s)}</b>
-                      {" — "}<b className={row.enabled ? "ok" : ""}>{row.enabled ? "on" : "off"}</b>
-                      {/* The standing order above owns this action, so this row is not the
-                          one running it — say so here too rather than show a cadence the
-                          phone's owner would take for the truth. */}
-                      {c.deferred && " · the standing order runs this one"}
-                    </div>
-                  );
-                })}
-                {panelHistory.length === 0 && (
-                  <div className="ctm-ledgernote">
-                    No maintenance runs recorded yet — jobs land here as they finish.
-                  </div>
-                )}
-                {panelHistory.slice(0, 12).map((j) => {
-                  const res = ledgerResult(j);
-                  return (
-                    <div className="ctm-ledgerrow" key={j.job_id}>
-                      <span className="ctm-ledger-when">{fmtWhen(j.ts)}</span>
-                      <b className="ctm-ledger-name">{j.label || j.action || j.job_id}</b>
-                      <span className={"ctm-ledger-result" + (res.good ? " ok" : "")}>{res.text}</span>
-                    </div>
-                  );
-                })}
+          <div className="ctm-sec">
+            <div className="mgcp-tile mgcp-tile4">
+              <div className="mgcp-mkick">Recover a task by ID</div>
+              <div className="mgcp-taskrow">
+                <input className="mgcp-taskinput" value={taskId} placeholder="task or media id…"
+                  onChange={(e) => setTaskId(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") importTask(); }} />
+                <button type="button" className="mgcp-chip" onClick={importTask}><Icon name="download" /> Import</button>
               </div>
-            )}
-          </>
-        )}
-      </div>
-
-      <div className="ctm-sec">
-        <div className="mgcp-tile mgcp-tile4">
-          <div className="mgcp-mkick">Recover a task by ID</div>
-          <div className="mgcp-taskrow">
-            <input className="mgcp-taskinput" value={taskId} placeholder="task or media id…"
-              onChange={(e) => setTaskId(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") importTask(); }} />
-            <button type="button" className="mgcp-chip" onClick={importTask}><Icon name="download" /> Import</button>
+              <div className={"mgcp-tilenote" + (taskState === "running" ? " busy" : taskState?.done ? " ok" : "")}>
+                {taskState === "running" ? "⟳ resolving the task on PixAI…"
+                  : taskState?.done ? (taskState.already
+                    ? "✓ already in your library — nothing new to fetch"
+                    : "✓ imported — " + taskState.saved + " added to the catalog")
+                  : taskState?.error ? <><Icon name="warning" /> {taskState.error}</>
+                  : "spends nothing — edits and Favorites strays Sync misses"}
+              </div>
+            </div>
           </div>
-          <div className={"mgcp-tilenote" + (taskState === "running" ? " busy" : taskState?.done ? " ok" : "")}>
-            {taskState === "running" ? "⟳ resolving the task on PixAI…"
-              : taskState?.done ? (taskState.already
-                ? "✓ already in your library — nothing new to fetch"
-                : "✓ imported — " + taskState.saved + " added to the catalog")
-              : taskState?.error ? <><Icon name="warning" /> {taskState.error}</>
-              : "spends nothing — edits and Favorites strays Sync misses"}
+
+          {/* The server the jobs run on: the Live Mirror, Restart / Stop, and who may sign in. */}
+          <div className="ctm-sec">
+            <div className="cm-subhead">Server</div>
+            <div className="ctm-mirror">
+              <span className={"mgcp-mirrordot" + (watch?.connected ? "" : " off")} style={{ marginTop: 5 }} />
+              <div className="ctm-mirrortext">
+                <div className="ctm-mirrorline"><b>Live Mirror</b> {mirrorLine}</div>
+                <div className="ctm-mirrorchips">
+                  <span className={"mgcp-svtag" + (summary.supervised ? "" : " off")}>
+                    {summary.supervised ? "Supervised" : "Unsupervised"}
+                  </span>
+                  <button type="button" className="mgcp-chip" onClick={() => clickPower("restart")}
+                    disabled={!summary.supervised} title={summary.supervised ? "" : "Restart needs the managed launcher"}>
+                    {powerConfirm === "restart" ? "Confirm — Restart?" : "⟳ Restart"}
+                  </button>
+                  <button type="button" className="mgcp-chip dgr" onClick={() => clickPower("stop")}>
+                    {powerConfirm === "stop" ? "Confirm — Stop?" : "■ Stop"}
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
-
-      <div className="ctm-sec ctm-tiles">
-        <div className="mgcp-tile click" onClick={() => setSubOverlay("trash")}>
-          <div className="mgcp-mkick">Trash</div>
-          <div className="mgcp-tilebig">{summary.trash_count.toLocaleString()}</div>
-          <button type="button" className="mgcp-smallchip">Open…</button>
-        </div>
-        <div className="mgcp-tile click" onClick={() => setSubOverlay("users")}>
-          <div className="mgcp-mkick">Accounts</div>
-          <div className="mgcp-tilesmall">
-            {(summary.web_users || []).map((u) => u.username).join(" · ") || "none yet"}
+          <div className="ctm-sec">
+            <div className="mgcp-tile click" onClick={() => setSubOverlay("users")}>
+              <div className="mgcp-mkick">Accounts</div>
+              <div className="mgcp-tilesmall">
+                {(summary.web_users || []).map((u) => u.username).join(" · ") || "none yet"}
+              </div>
+              <button type="button" className="mgcp-smallchip">Manage…</button>
+            </div>
           </div>
-          <button type="button" className="mgcp-smallchip">Manage…</button>
-        </div>
-      </div>
+        </>
+      )}
 
-      <div className="ctm-sec">
-        <a className="mgcp-smallchip" href="/export-csv" style={{ textDecoration: "none" }}><Icon name="download" /> Download catalog (CSV)</a>
-        <a className="mgcp-smallchip" href="/export-curation" style={{ textDecoration: "none" }}
-          title="Ratings, collections and their order, smart collections, tags, marks and notes, as one file. It goes back in with --import-curation."><Icon name="download" /> Download curation (JSON)</a>
-      </div>
+      {section === "health" && (
+        <>
+          <div className="ctm-sec">
+            <div className="mgcp-sidehead">At a glance</div>
+            <div className="ctm-statgrid">
+              {[
+                ["images", summary.stats.images], ["videos", summary.stats.videos],
+                ["collections", summary.stats.collections], ["credits", credits],
+              ].map(([label, num]) => (
+                <div className="ctm-statcard" key={label}>
+                  <div className="ctm-statnum">{typeof num === "number" ? num.toLocaleString() : num}</div>
+                  <div className="ctm-statlabel">{label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
 
-      {/* The blur toggle, in its own ctm-sec exactly like Skins below -- the same shared
-          component the desktop Panel renders, so one flip means one behaviour on both.
-          This is the surface it matters MOST on: a phone is the machine the owner's
-          ruling names as wanting the blur off while the home desktop keeps it. The tile
-          takes no span class here; ctm-sec is a full-width block, not the 12-col grid. */}
-      <div className="ctm-sec">
-        <BlurToggleTile className="mgcp-tile" />
-      </div>
+          {/* Collection Health -- the counts, storage, months, models, tags and folders, with its
+              Duplicates and Broken files screens (it was the Menu's Health screen). */}
+          <div className="ctm-sec ctm-health">
+            <div className="mgcp-sidehead">Collection Health</div>
+            {health}
+          </div>
 
-      {skins.length > 0 && (
-        <div className="ctm-sec">
-          <div className="cm-subhead">Skins</div>
-          <div className="mgcp-tilesmall">Cosmetic palette swaps for the whole suite — unlock more by earning achievements.</div>
-          <SkinsRow skins={skins} active={activeSkin} onPick={pickSkin} />
-        </div>
+          <div className="ctm-sec ctm-tiles">
+            <div className="mgcp-tile click" onClick={() => setSubOverlay("trash")}>
+              <div className="mgcp-mkick">Trash</div>
+              <div className="mgcp-tilebig">{summary.trash_count.toLocaleString()}</div>
+              <button type="button" className="mgcp-smallchip">Open…</button>
+            </div>
+          </div>
+
+          <div className="ctm-sec">
+            <a className="mgcp-smallchip" href="/export-csv" style={{ textDecoration: "none" }}><Icon name="download" /> Download catalog (CSV)</a>
+            <a className="mgcp-smallchip" href="/export-curation" style={{ textDecoration: "none" }}
+              title="Ratings, collections and their order, smart collections, tags, marks and notes, as one file. It goes back in with --import-curation."><Icon name="download" /> Download curation (JSON)</a>
+          </div>
+        </>
+      )}
+
+      {section === "phone" && (
+        <>
+          {/* THE TWO PER-DEVICE PHONE CHOICES, FIRST (owner's walk 2026-10-04: he could not find
+              Continuous paging). Library paging is this section's first row, Data saver beside it,
+              then About -- the board's "This phone holds Library paging, Data saver and About".
+              Session U (U1b): Library paging -- Pages | Continuous, the same per-device value the
+              gallery's long-press sheet on its layout keys sets; a tap here also counts as finding it
+              (the hint dot under the keys goes). Session Q (Q7): Data saver -- Off / Auto on metered /
+              Always, per device. */}
+          <div className="ctm-sec">
+            <PagingRow />
+          </div>
+          <div className="ctm-sec">
+            <DataSaverRow />
+          </div>
+
+          {/* About (Session I decision 3a): the phone's door to the version, this release's
+              changelog, the guide and the release pages. Opens as a sheet (help/AboutLayers.jsx). */}
+          <div className="ctm-sec">
+            <button type="button" className="mghelp-aboutrow" onClick={() => openAbout(pending ? "update" : "")}>
+              <span>About Moonglade{aboutVer ? " · " : ""}<span className="v">{aboutVer}</span></span>
+              <span className="c" aria-hidden="true">›</span>
+            </button>
+          </div>
+
+          {/* The blur toggle -- the same shared component the desktop Panel renders, so one flip
+              means one behaviour on both. This is the surface it matters MOST on: a phone is the
+              machine the owner's ruling names as wanting the blur off while the home desktop keeps
+              it. */}
+          <div className="ctm-sec">
+            <BlurToggleTile className="mgcp-tile" />
+          </div>
+
+          {/* Branding is INVISIBLE until earned -- exactly like the desktop Control Panel, which
+              hides the whole tab (ControlPanelOverlay: brandingUnlocked &&). Owner call 2026-08-21:
+              no tile, no hint -- the feat is discovered, never announced. */}
+          {brandingUnlocked && (
+            <div className="ctm-sec">
+              <div className="mgcp-tile click" onClick={openBrand}>
+                <div className="mgcp-mkick">✦ Branding</div>
+                {/* Each button wears its OWN mark (owner's G2 ruling, Glyph Ledger 2026-09-05):
+                    MarkArt is the same component the desktop Panel's two mark rows use. */}
+                <div className="mgcp-marks">
+                  {(summary.branding.marks || []).slice(0, 6).map((m) => (
+                    <button type="button" key={m.id}
+                      className={"mgcp-mark" + (m.id === summary.branding.mark ? " on" : "")}
+                      title={m.label || m.id} onClick={(e) => { e.stopPropagation(); openBrand(); }}>
+                      <MarkArt mark={m} />
+                    </button>
+                  ))}
+                </div>
+                <div className="mgcp-tilenote">mark · animation — open Branding</div>
+              </div>
+            </div>
+          )}
+
+          {skins.length > 0 && (
+            <div className="ctm-sec">
+              <div className="cm-subhead">Skins</div>
+              <div className="mgcp-tilesmall">Cosmetic palette swaps for the whole suite — unlock more by earning achievements.</div>
+              <SkinsRow skins={skins} active={activeSkin} onPick={pickSkin} />
+            </div>
+          )}
+        </>
       )}
       </div>
 
@@ -625,7 +696,11 @@ export default function ControlMobile({ account, brandRequest }) {
           I decision 1: Branding's guide exists only where its tab does). Held while one of
           this tab's own layers covers it. */}
       <GuideHost key={brandOpen ? "branding" : "panel"} surface={brandOpen ? "branding" : "panel"} phone
-        paused={!!subOverlay || !!power || updScreen} />
+        paused={!!subOverlay || !!power || updScreen || tidyOpen} />
+
+      <MobileScreen open={tidyOpen} closing={tidyClosing} onClose={closeTidy} title="Duplicates">
+        <DuplicateReviewMobile csrf={csrf} onResolved={onDuplicatesResolved} />
+      </MobileScreen>
 
       <MobileScreen open={brandOpen} closing={brandClosing} onClose={closeBrand} title="Branding">
         <BrandingTab summary={summary} onSaved={fetchSummary} isLocal={isLocal} phone

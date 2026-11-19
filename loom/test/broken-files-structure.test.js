@@ -161,6 +161,8 @@ describe("phone (W6a)", () => {
     assert.match(c, /openBrokenFiles\("all"\)/);
     const a = code("components/AppMobile.jsx");
     assert.match(a, /registerBrokenFilesOpener\(/);
-    assert.match(a, /openScreenKey\("health"\)/);
+    // since the 2026-11-19 layout (look pick B) Health is the Control tab's Health section
+    assert.match(a, /setCtlSection\("health"\);\s*setTab\("control"\);/);
+    assert.doesNotMatch(a, /openScreenKey\("health"\)/);
   });
 });

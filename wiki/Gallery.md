@@ -177,10 +177,10 @@ out this device only (to sign out every device, see [Trust & Safety](Trust-and-S
     opens PixAI's page in a new tab. The app never checks in, claims or plays an event for you, and
     the banner list is read without your API key (PixAI only answers it that way), at most once an
     hour.
-- **On a phone** the header stays as it was: the **Menu** button (three lines) carries one badge (unread
-  notifications plus waiting gifts), and **Inbox** and **Gift box** are the Menu's first two rows,
+- **On a phone** the **Menu** button (three lines) in the Gallery's header carries one badge (unread
+  notifications plus waiting gifts), and **Inbox** and **Gift box** are two cards in the Menu,
   each opening a full-height sheet. Inbox is the same list as the desktop's Inbox panel. Gift box is
-  the desktop's Gift box panel: the event cards, the free cards about to expire and your gifts; its row
+  the desktop's Gift box panel: the event cards, the free cards about to expire and your gifts; its card
   shows the soonest expiry, or how many gifts are waiting.
 - **Free cards about to expire.** When any free card you hold expires within three days, the
   **Cards** half of the credits chip gets a thin peach underline, and hovering the chip lists
@@ -188,7 +188,7 @@ out this device only (to sign out every device, see [Trust & Safety](Trust-and-S
   *"… today"*; never a countdown in hours. With nothing that close, there is no underline and
   the hover reads as it always did. Free cards aren't billing, so the mark is peach, not gold.
   The dates come from the same card summary the chip already reads. The **Gift box** lists
-  them too, and on a phone, where there is no hover, the **Menu**'s **Gift box** row shows the
+  them too, and on a phone, where there is no hover, the **Menu**'s **Gift box** card shows the
   soonest one.
 - **Panel** (the gear) — the Control Panel overlay: maintenance jobs with live logs and progress,
   the `Runs itself` job list, server Stop/Restart, accounts, updates and **About**.
@@ -496,12 +496,25 @@ the same honest count and 10-second **Undo** as the desktop. In the full-screen 
 to take the rating off. **Details** carries the same **Your layer** card as the desktop. See
 [Collections](Collections).
 
+**The phone's layout.** On the **Gallery** tab the header is two short rows: the mark, the name
+and its line, and three round buttons — the **Folio**, **The Loom** and the **Menu** — then the
+counts, the claim and the credits. Scroll down the library and the header slides away; the search
+box and the media chips (All · Images · Videos, Grid · Feed, Sort) stay at the top. Scroll back up a
+little, or reach the top, and it comes back. **Create** and **Control** have a one-row header (the
+mark, the name and the credits) and are split into sections: Create into **Prompt**, **Model**,
+**Frame**, **Recipes** and **More**, with the price and Generate in one bar above the tab bar;
+Control into **Jobs**, **Health** and **This phone** (see [Control Panel](Control-Panel)). Each tab
+remembers its section while you are on another one. The **Menu** is a grid of cards — My Art,
+Collections, Publish, Contests, Train a LoRA, Inbox, Gift box, Import, **Activity** (the
+generations and syncs the app is following) and **Guide** — with Log Out under them. While
+something is running, the Menu button shows a small dot.
+
 **On a phone, three more things about where you are.** Each of the three tabs —
 **Gallery**, **Create**, **Control** — keeps its own scroll position, so reading deep into
 your library and stepping over to the composer no longer drops you into the middle of it,
 and the library is still deep when you come back. Turning the page with **‹ Prev** or
-**Next ›** starts you at the top of the page you asked for, with the search box and the
-media pills back on screen. And while a sheet is up — **Sort**, **Advanced Search**,
+**Next ›** starts you at the top of the page you asked for, with the header back on screen.
+And while a sheet is up — **Sort**, **Advanced Search**,
 **Actions** — the library behind the dim is held still, and is exactly where you left it
 when the sheet goes. See the [FAQ](FAQ) for what the phone's Back gesture closes.
 
