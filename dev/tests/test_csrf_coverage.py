@@ -8,28 +8,22 @@ the other per-account writes (`/api/account/prefs`, the user-admin routes). They
 a POST without the session's token -- 400 with the same "reload" wording, BEFORE any read,
 write or network call -- and GET is untouched.
 
-THE GUARD. `test_every_state_changing_route_checks_the_token_or_is_known_debt` walks
-`app.url_map` for every POST / PUT / PATCH / DELETE rule and decides, from the handler's
-own syntax tree, whether it calls `_check_csrf` -- directly or through a helper that does
-(`_train_csrf_body`, `_recipe_write_body`). A route that does not must be listed in
-`CSRF_KNOWN_DEBT` with a one-word reason. That list is the debt the app security review
-takes on (scope 2026-10-02, platform item 1); it is generated, never hand-typed, and it can
-only SHRINK: a listed route that gains the token fails here until its line is deleted, so
-the list never claims a gap that is closed.
+THE FRONT DOOR (app security review 2026-11-19, finding 2). Every POST / PUT / PATCH / DELETE
+now passes one origin check in the request gate (gallery.py's `_refuse_cross_origin_writes`,
+the rule in `same_origin_write`) before any route reads its body: it must come from this
+server's own origin. That closes the old CSRF debt -- 58 state-changing routes without the
+explicit token, 14 of them reachable by any same-site page, a page on another port of this PC
+above all -- in one place, so `CSRF_KNOWN_DEBT` is empty and stays empty.
+`test_the_front_door_covers_every_state_changing_route` proves it the only way that counts:
+for EVERY state-changing (rule, method) the app registers, a signed-in request from another
+port of this PC is refused 403 before its handler runs, and the same request from the app's
+own origin reaches the handler. The handlers are swapped for a recorder first, so nothing that
+spends or deletes ever runs here (the stance dev/tests/test_route_tiers.py documents).
 
-Static on purpose: these handlers spend credits and delete files, so the guard never runs
-one (the stance dev/tests/test_route_tiers.py documents).
-
-The reason classes:
-  store    -- a per-account or install-wide settings store (skins, branding, the Loom's
-              boards, the job log);
-  data     -- changes or removes library data, local or on the PixAI account;
-  spend    -- reaches PixAI's paid generation path (prices, submits);
-  control  -- server control or a long local job (stop/restart, Panel jobs, exports);
-  loopback -- LOCALHOST tier: refused to every non-local session by the front door;
-  nonce    -- carries its own per-render witness instead (the feat beacon).
-Why the debt is not wide open today: the session cookie is SameSite=Lax, and the JSON
-routes read `request.get_json(silent=True)`, which ignores a cross-site form post's body.
+THE TOKEN WALK, kept: `_walk` decides from each handler's own syntax tree whether it calls
+`_check_csrf` -- directly or through a helper that does (`_train_csrf_body`,
+`_recipe_write_body`) -- and the lane routes below must, with zero exceptions. The explicit
+token stays a second lock where routes have it; the front door is the one every route has.
 """
 import ast
 import inspect
@@ -41,7 +35,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import paths
-from moonglade.gallery import LOCALHOST, create_app, route_tier
+from moonglade.gallery import create_app
 from moonglade.account_prefs import _account_key
 from tests.conftest import login_test_client, session_csrf, with_csrf
 
@@ -49,72 +43,16 @@ _GALLERY = Path(__file__).resolve().parents[2] / "moonglade" / "gallery.py"
 _STATE_CHANGING = {"POST", "PUT", "PATCH", "DELETE"}
 _REFUSAL = "Your session expired. Reload the page and try again."
 
-# THE KNOWN DEBT -- generated from the walk below, never hand-authored. One line per
-# (rule, method) that changes state without the explicit token. Do NOT add a NEW route
-# here to make this test pass: give the route the check (`_check_csrf(body)` after the
-# body parse, refusing 400 with the session-expired wording) and send `csrf` from its
-# client. This list is for the security review, and it only shrinks.
-CSRF_KNOWN_DEBT = {
-    "/api/ach-event [POST]": "nonce",
-    "/api/assets/fetch [POST]": "data",
-    "/api/bonjour/settings [POST]": "control",
-    "/api/branding [POST]": "store",
-    "/api/branding/banner/earned [POST]": "store",
-    "/api/branding/mark/custom [POST]": "store",
-    "/api/branding/mark/custom/remove [POST]": "store",
-    "/api/branding/shortcut [POST]": "loopback",
-    "/api/branding/slot [POST]": "store",
-    "/api/branding/slot/active [POST]": "store",
-    "/api/branding/slot/crop [POST]": "store",
-    "/api/claim [POST]": "data",
-    "/api/collection [POST]": "data",
-    "/api/delete-image [POST]": "loopback",
-    "/api/delete-local [POST]": "data",
-    "/api/delete-preview [POST]": "loopback",
-    "/api/delete-tasks [POST]": "loopback",
-    "/api/edit [POST]": "spend",
-    "/api/edit-prompt/<media_id> [POST]": "data",
-    "/api/enhance [POST]": "spend",
-    "/api/fix [POST]": "spend",
-    "/api/generate [POST]": "spend",
-    "/api/import-local [POST]": "loopback",
-    "/api/import-task [POST]": "data",
-    "/api/jobs [POST]": "store",
-    "/api/jobs/dismiss [POST]": "store",
-    "/api/library-path [POST]": "control",
-    "/api/loom/delete [POST]": "store",
-    "/api/loom/export [POST]": "control",
-    "/api/loom/export-bundle [POST]": "control",
-    "/api/loom/export-cancel [POST]": "control",
-    "/api/loom/generate [POST]": "spend",
-    "/api/loom/handoff [POST]": "store",
-    "/api/loom/import-bundle [POST]": "control",
-    "/api/loom/import-frames [POST]": "store",
-    "/api/loom/set [POST]": "store",
-    "/api/loom/spend [POST]": "spend",
-    "/api/mirror/enable [POST]": "loopback",
-    "/api/panel/cancel [POST]": "loopback",
-    "/api/panel/run [POST]": "control",
-    "/api/panel/schedule [POST]": "control",
-    "/api/panel/sweep [POST]": "loopback",
-    "/api/price [POST]": "spend",
-    "/api/rate/<media_id> [POST]": "data",
-    "/api/rebuild-poster/<media_id> [POST]": "data",
-    "/api/replace-prompts [POST]": "data",
-    "/api/scene [POST]": "spend",
-    "/api/series [POST]": "data",
-    "/api/server/restart [POST]": "control",
-    "/api/server/stop [POST]": "control",
-    "/api/setup/save-key [POST]": "loopback",
-    "/api/siblings [POST]": "data",
-    "/api/skin [POST]": "store",
-    "/api/trash/delete-forever [POST]": "loopback",
-    "/api/trash/empty [POST]": "loopback",
-    "/api/trash/restore [POST]": "data",
-    "/api/upload [POST]": "data",
-    "/export-zip [POST]": "data",
-}
-_REASONS = {"store", "data", "spend", "control", "loopback", "nonce"}
+# THE KNOWN DEBT -- empty since the front door's origin check (2026-11-19) covers every
+# state-changing route. It stays named so the old shape cannot quietly come back: a route
+# listed here would be a route the front door is assumed NOT to cover, and there is none.
+CSRF_KNOWN_DEBT = {}
+
+# The two origins the sweep below uses: the app's own, and a page on another port of the
+# same PC (the D: install's 5757 against this one's 5057 -- same-site, so the Lax cookie
+# rides its requests).
+_OWN = "http://localhost:5057"
+_CROSS_PORT = "http://localhost:5757"
 
 
 # ---------------------------------------------------------------------------
@@ -176,26 +114,127 @@ def app(tmp_path):
     return create_app(tmp_path)
 
 
-def test_every_state_changing_route_checks_the_token_or_is_known_debt(app):
-    walked = _walk(app)
-    missing = sorted(k for k, checks in walked.items() if not checks)
-    unlisted = [k for k in missing if k not in CSRF_KNOWN_DEBT]
-    closed = sorted(k for k in CSRF_KNOWN_DEBT if walked.get(k) is True)
-    gone = sorted(k for k in CSRF_KNOWN_DEBT if k not in walked)
-    replacement = "\n".join('    "{}": "{}",'.format(k, CSRF_KNOWN_DEBT.get(k, "?"))
-                            for k in missing)
-    assert not unlisted, (
-        "state-changing route(s) with no CSRF token check: {}. Add `_check_csrf(body)` to "
-        "the handler (and send `csrf` from its client) -- do not list a new route as "
-        "debt.".format(unlisted))
-    assert not closed and not gone, (
-        "CSRF_KNOWN_DEBT names route(s) that now check the token ({}) or no longer exist "
-        "({}). The list only shrinks; replace it with:\n{}".format(closed, gone, replacement))
+def _concrete_path(rule):
+    """A real URL for a rule: every <converter:name> filled with a value it accepts."""
+    import re as _re
+    return _re.sub(r"<(?:(\w+)(?:\([^)]*\))?:)?(\w+)>",
+                   lambda m: "1" if m.group(1) in ("int",) else "x1", rule.rule)
 
 
-def test_the_known_debt_list_is_well_formed():
-    assert set(CSRF_KNOWN_DEBT.values()) <= _REASONS, CSRF_KNOWN_DEBT
-    assert list(CSRF_KNOWN_DEBT) == sorted(CSRF_KNOWN_DEBT), "keep the list sorted"
+def _sweep(app, origin, extra_headers=None):
+    """Every state-changing (rule, method), sent by a signed-in session on this PC with
+    `origin`. Each handler is swapped for a recorder first, so none of them really runs.
+    Returns {"<rule> [<METHOD>]": (status, reached_handler)}."""
+    reached = set()
+
+    def _recorder(endpoint):
+        def _view(*a, **k):
+            reached.add(endpoint)
+            return "recorded"
+        return _view
+    cli = login_test_client(app)
+    for ep in list(app.view_functions):
+        if ep != "static":
+            app.view_functions[ep] = _recorder(ep)
+    out = {}
+    for rule in app.url_map.iter_rules():
+        for m in sorted((rule.methods or set()) & _STATE_CHANGING):
+            reached.discard(rule.endpoint)
+            headers = dict(extra_headers or {})
+            if origin is not None:
+                headers["Origin"] = origin
+            r = cli.open(_concrete_path(rule), method=m, headers=headers,
+                         base_url=_OWN, json={})
+            out["{} [{}]".format(rule.rule, m)] = (r.status_code, rule.endpoint in reached,
+                                                   r.get_data(as_text=True))
+    return out
+
+
+def test_the_front_door_covers_every_state_changing_route(app):
+    """The headline: EVERY POST/PUT/PATCH/DELETE the app registers -- the 58 that once had no
+    token among them -- is refused for a page on another port of this PC, before its handler
+    runs, with the plain sentence; and the same request from the app's own origin goes
+    through to the handler (so the refusal is the origin, not something else)."""
+    from moonglade.gallery import CROSS_ORIGIN_REFUSED
+    cross = _sweep(app, _CROSS_PORT)
+    assert len(cross) > 100, "the sweep found too few state-changing routes to mean anything"
+    leaked = sorted(k for k, (status, ran, _body) in cross.items() if ran or status != 403)
+    assert not leaked, "a cross-port page reached these handlers: %s" % leaked
+    assert all(CROSS_ORIGIN_REFUSED in body for _s, _r, body in cross.values())
+
+
+def test_the_apps_own_pages_still_reach_every_route(tmp_path):
+    """The other half: the app's own origin (and a client that sends no origin at all, the
+    test client and curl) is NOT refused -- every handler is reached."""
+    own = _sweep(create_app(tmp_path), _OWN)
+    blocked = sorted(k for k, (status, ran, _b) in own.items() if not ran)
+    assert not blocked, "the app's own origin was refused at: %s" % blocked
+
+
+def test_no_origin_header_at_all_reaches_the_handlers(tmp_path):
+    bare = _sweep(create_app(tmp_path), None)
+    assert all(ran for _s, ran, _b in bare.values())
+
+
+@pytest.mark.parametrize("headers", [
+    {"Origin": _CROSS_PORT},                                  # another port of this PC
+    {"Origin": "http://127.0.0.1:5057"},                      # same port, another name
+    {"Origin": "https://localhost:5057"},                     # same host, another scheme
+    {"Origin": "null"},                                       # a sandboxed or no-referrer page
+    {"Origin": ""},
+    {"Referer": _CROSS_PORT + "/branding/x.html"},            # no Origin: the Referer decides
+    {"Sec-Fetch-Site": "same-site"},                          # the browser says so outright
+    {"Sec-Fetch-Site": "cross-site", "Origin": _OWN},         # contradicting itself: refused
+    {"Sec-Fetch-Site": "none"},
+])
+def test_the_review_scenario_a_cross_port_page_cannot_import_or_stop(tmp_path, headers):
+    """Finding 2's own scenario, end to end with the real handlers: a page on localhost:5757
+    sends a multipart POST to /api/import-local (LOCALHOST tier -- the browser IS on this PC)
+    and a bare POST to /api/server/stop. Both are refused 403 and nothing happens."""
+    import io
+    from moonglade.gallery import CROSS_ORIGIN_REFUSED
+    app = create_app(tmp_path)
+    cli = login_test_client(app)
+    r = cli.post("/api/import-local", base_url=_OWN, headers=headers,
+                 data={"files": (io.BytesIO(b"\x89PNG\r\n\x1a\nplanted"), "x.png")},
+                 content_type="multipart/form-data")
+    assert r.status_code == 403 and r.get_json() == {"error": CROSS_ORIGIN_REFUSED}
+    assert not (tmp_path / "imported").exists()
+    r = cli.post("/api/server/stop", base_url=_OWN, headers=headers)
+    assert r.status_code == 403
+
+
+@pytest.mark.parametrize("headers", [
+    {"Origin": _OWN}, {"Origin": _OWN + "/"}, {"Referer": _OWN + "/?page=2"},
+    {"Sec-Fetch-Site": "same-origin", "Origin": _OWN}, {"Sec-Fetch-Site": "same-origin"},
+])
+def test_the_apps_own_page_passes(tmp_path, headers):
+    app = create_app(tmp_path)
+    cli = login_test_client(app)
+    r = cli.post("/api/view-presets", base_url=_OWN, headers=headers,
+                 json=with_csrf(cli, {"name": "mine", "query": "?q=1"}))
+    assert r.status_code == 200, r.get_json()
+
+
+def test_the_rule_itself():
+    from moonglade.gallery import same_origin_write as ok
+    assert ok("http://localhost:5057", None, None, "http", "localhost:5057")
+    assert ok("http://LOCALHOST:5057", None, "same-origin", "http", "localhost:5057")
+    assert ok("https://192.168.1.5:5057", None, None, "https", "192.168.1.5:5057")
+    assert ok("https://moonglade.local", None, None, "https", "moonglade.local:443")
+    assert ok("http://[::1]:5057", None, None, "http", "[::1]:5057")
+    assert ok(None, None, None, "http", "localhost:5057")          # not a browser
+    assert not ok("http://localhost:5757", None, None, "http", "localhost:5057")
+    assert not ok("http://192.168.1.5:5057", None, None, "https", "192.168.1.5:5057")
+    assert not ok("null", None, None, "http", "localhost:5057")
+    assert not ok(None, "http://evil.example/x", None, "http", "localhost:5057")
+    assert not ok(None, None, "same-site", "http", "localhost:5057")
+    assert not ok("http://localhost:5057", None, None, "http", "")
+    assert not ok("http://localhost:99999", None, None, "http", "localhost:5057")
+
+
+def test_the_known_debt_list_is_empty_for_good():
+    assert CSRF_KNOWN_DEBT == {}
 
 
 def test_the_walk_sees_the_checks_it_claims_to(app):
@@ -255,25 +294,6 @@ def test_every_lane_post_checks_the_token_with_zero_debt(app):
     assert {"/api/loom/bed [POST]", "/api/loom/beds/sweep [POST]",
             "/api/loom/export-edl [POST]", "/api/collections/order [POST]",
             "/api/loom/frame-thumbs [POST]"} <= checked, sorted(checked)
-
-
-def test_the_lists_classes_match_the_route_tiers(app):
-    """`loopback` means the front door already refuses every non-local session, so it is
-    only honest on a LOCALHOST route -- and every LOCALHOST debt route says so."""
-    by_key = {}
-    for rule in app.url_map.iter_rules():
-        for m in (rule.methods or set()) & _STATE_CHANGING:
-            by_key["{} [{}]".format(rule.rule, m)] = route_tier(
-                app.view_functions[rule.endpoint], m)
-    for key, reason in CSRF_KNOWN_DEBT.items():
-        if key not in by_key:
-            continue                     # the shrink test above names it
-        if reason == "loopback":
-            assert by_key[key] == LOCALHOST, key
-        elif by_key[key] == LOCALHOST:
-            assert key.split(" [")[0] in ("/api/bonjour/settings", "/api/library-path",
-                                          "/api/panel/schedule"), (
-                "{} is LOCALHOST: classify it `loopback`".format(key))
 
 
 # ---------------------------------------------------------------------------

@@ -1459,8 +1459,8 @@ def test_gallery_starts_an_ipv6_loopback_companion():
     import pathlib
     src = pathlib.Path("moonglade/gallery.py").read_text(encoding="utf-8")
     assert 'if args.host in ("127.0.0.1", "0.0.0.0", "localhost"):' in src
-    assert '_make_server6("::1", args.port, app' in src
-    assert src.index('_make_server6("::1"') < src.index(
+    assert '_make_server("::1", args.port, app' in src
+    assert src.index('_make_server("::1"') < src.index(
         "srv.serve_forever()"), \
         "the companion must be up BEFORE the main serve loop blocks"
 

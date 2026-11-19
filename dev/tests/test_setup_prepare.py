@@ -178,7 +178,7 @@ def test_a_server_stopped_cleanly_counts_its_start_and_prepare_alone_never_does(
         r, monkeypatch):
     """S1: the count is the server's, after it served: prepare() never counts (a server that
     refused its port has run it too)."""
-    import werkzeug.serving
+    from moonglade import tls as moonglade_tls
     write_config(r)
     settings.set_values(library_dir=str(r.lib), launch_args=["--skip-thumbs"], port=5223)
     write(r.lib / "jobs.jsonl", '{"id": 1}\n')
@@ -194,7 +194,7 @@ def test_a_server_stopped_cleanly_counts_its_start_and_prepare_alone_never_does(
     assert g.main() == 2
     assert counted == [], "refused at its port: not a clean start"
     monkeypatch.setattr(g, "port_owner", lambda host, port: "")
-    monkeypatch.setattr(werkzeug.serving, "make_server", _Served)
+    monkeypatch.setattr(moonglade_tls, "make_server", _Served)       # main()'s server factory
     monkeypatch.setattr(health_mod, "_health_prime", lambda *a, **k: None)
     monkeypatch.setattr(g, "_outside_prime", lambda *a, **k: None)
     monkeypatch.setattr(branding_mod, "register_pack_file_type", lambda *a, **k: None)

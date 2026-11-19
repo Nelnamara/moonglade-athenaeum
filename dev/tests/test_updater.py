@@ -210,9 +210,13 @@ def _apply_ready(monkeypatch, branch="master", dirty="", supervised=True,
 
     `incoming` is what the pending release touches -- the paths `git diff HEAD..@{u}`
     would list -- which is what the untracked half of the dirty check is measured
-    against. `fetch_rc`/`fetch_out` stand in for a fetch that can't reach the remote."""
+    against. `fetch_rc`/`fetch_out` stand in for a fetch that can't reach the remote.
+
+    Since 2026-11-19 the apply moves to the ANNOUNCED release tag, so the machine has one:
+    the last check found ANNOUNCED, newer than this install."""
     _idle_state(monkeypatch)
     monkeypatch.setattr(g, "_supervised", lambda: supervised)
+    _announce(monkeypatch)
 
     def _git(args, **k):
         if args[:2] == ["rev-parse", "--abbrev-ref"]:
@@ -228,6 +232,18 @@ def _apply_ready(monkeypatch, branch="master", dirty="", supervised=True,
         return 0, ""
     monkeypatch.setattr(updater_mod, "_git", _git)
     return _git
+
+
+ANNOUNCED = "v99.0.0"
+
+
+def _announce(monkeypatch, tag=ANNOUNCED, behind=True):
+    """The check already ran and found `tag` (the cache the apply reads; it never fetches)."""
+    monkeypatch.setattr(updater_mod, "_update_notice",
+                        {"version": "", "seq": 0, "at": 0.0, "payload": None})
+    monkeypatch.setattr(updater_mod, "_update_cache", {"at": 0.0, "ttl": 1800, "payload": {
+        "current": core.__version__, "latest": tag, "behind": behind, "title": "",
+        "notes_url": "", "checked_at": 0.0}})
 
 
 def _apply(cli, **body):
@@ -519,6 +535,151 @@ def test_every_refusal_carries_a_kind_the_modal_can_dispatch_on(
 
 # ---- the apply sequence ----------------------------------------------------
 
+def _run_update(restart_fn, **kw):
+    """run_update toward ANNOUNCED, over whatever `_git` stub the test installed. The tests
+    below were written when the apply was `git pull --ff-only`; since 2026-11-19 it is a fetch,
+    the tag's commit, and `git merge --ff-only <commit>`. This answers the fetch and the tag
+    lookup and hands the merge to the stub AS the pull it modelled, so each test keeps saying
+    what it said about the step that moves the checkout."""
+    inner = updater_mod._git
+
+    def _git(args, **k):
+        if args[:2] == ["rev-parse", "--verify"]:
+            return 0, "TAGCOMMIT"
+        if args[:1] == ["fetch"]:
+            return 0, ""
+        if args[:2] == ["merge", "--ff-only"]:
+            assert args[2:] == ["TAGCOMMIT"], args
+            return inner(["pull", "--ff-only"], **k)
+        return inner(args, **k)
+    updater_mod._git = _git
+    try:
+        return updater_mod.run_update(restart_fn, ANNOUNCED, **kw)
+    finally:
+        updater_mod._git = inner
+
+
+def test_run_update_moves_to_the_tag_commit_never_to_masters_head(monkeypatch):
+    """Finding 10 of the 2026-11-19 review: the apply fetches, resolves the ANNOUNCED tag to
+    its commit, and fast-forwards to exactly that commit -- no `git pull`, which would take
+    master's head, whatever was merged after the release."""
+    _idle_state(monkeypatch)
+    seen = []
+
+    def _git(args, **k):
+        seen.append(list(args))
+        if args[:2] == ["rev-parse", "--verify"]:
+            return 0, "c0ffee"
+        if args[:1] == ["rev-parse"]:
+            return 0, "SAME"
+        return 0, ""
+    monkeypatch.setattr(updater_mod, "_git", _git)
+    assert updater_mod.run_update(lambda: None, "v3.22.0", pip_fn=lambda: (0, "")) is True
+    assert ["merge", "--ff-only", "c0ffee"] in seen, seen
+    assert ["rev-parse", "--verify", "--quiet", "refs/tags/v3.22.0^{commit}"] in seen
+    assert not any(a[:1] == ["pull"] for a in seen), "the apply must not pull master's head"
+    assert seen.index(["fetch", "--quiet"]) < seen.index(["merge", "--ff-only", "c0ffee"])
+
+
+def test_a_tag_the_fetch_did_not_bring_is_fetched_by_its_own_name(monkeypatch):
+    seen = []
+    have = {"tag": False}
+
+    def _git(args, **k):
+        seen.append(list(args))
+        if args[:2] == ["rev-parse", "--verify"]:
+            return (0, "abc") if have["tag"] else (1, "")
+        if args[:1] == ["fetch"]:
+            have["tag"] = True
+            return 0, ""
+        return 0, ""
+    monkeypatch.setattr(updater_mod, "_git", _git)
+    assert updater_mod.release_commit("v3.22.0") == ("abc", "")
+    assert ["fetch", "--quiet", "origin", "refs/tags/v3.22.0:refs/tags/v3.22.0"] in seen
+
+
+def test_a_missing_tag_stops_the_update_and_changes_nothing(monkeypatch):
+    _idle_state(monkeypatch)
+    seen = []
+
+    def _git(args, **k):
+        seen.append(list(args))
+        if args[:2] == ["rev-parse", "--verify"]:
+            return 1, ""
+        if args[:1] == ["fetch"] and len(args) > 2:
+            return 1, "fatal: couldn't find remote ref refs/tags/v3.22.0"
+        return 0, "SAME"
+    monkeypatch.setattr(updater_mod, "_git", _git)
+    assert updater_mod.run_update(lambda: None, "v3.22.0", pip_fn=lambda: (0, "")) is False
+    assert not any(a[:1] in (["merge"], ["pull"], ["reset"]) for a in seen), seen
+    st = updater_mod.update_state()
+    assert st["phase"] == "failed" and "v3.22.0" in st["error"]
+
+
+@pytest.mark.parametrize("bad", ["", "master", "v3.22", "v3.22.0;rm", "--upload-pack=x",
+                                 "refs/heads/master", None])
+def test_only_a_real_release_tag_ever_reaches_git(monkeypatch, bad):
+    seen = []
+    monkeypatch.setattr(updater_mod, "_git", lambda args, **k: seen.append(args) or (0, "x"))
+    commit, why = updater_mod.release_commit(bad)
+    assert commit is None and why and seen == []
+
+
+def test_the_announced_release_is_read_never_fetched(monkeypatch):
+    monkeypatch.setattr(updater_mod, "fetch_releases",
+                        lambda **k: (_ for _ in ()).throw(AssertionError("fetched")))
+    _announce(monkeypatch, tag="v4.5.6")
+    assert updater_mod.announced_release() == "v4.5.6"
+    _announce(monkeypatch, tag="v4.5.6", behind=False)
+    assert updater_mod.announced_release() == ""
+    _announce(monkeypatch, tag="assets-2026-11-01")
+    assert updater_mod.announced_release() == ""
+
+
+def test_apply_refuses_when_no_release_was_announced(tmp_path, monkeypatch):
+    _apply_ready(monkeypatch)
+    _announce(monkeypatch, behind=False)
+    cli = _client(tmp_path)
+    started = _started(monkeypatch)
+    r = _apply(cli)
+    assert r.status_code == 409 and r.get_json()["kind"] == "failed"
+    assert "announced" in r.get_json()["error"] and started["n"] == 0
+
+
+def test_apply_refuses_a_release_that_is_not_newer(tmp_path, monkeypatch):
+    _apply_ready(monkeypatch)
+    _announce(monkeypatch, tag="v" + core.__version__)
+    cli = _client(tmp_path)
+    started = _started(monkeypatch)
+    r = _apply(cli)
+    assert r.status_code == 409 and "already on" in r.get_json()["error"]
+    assert started["n"] == 0
+
+
+def test_apply_hands_the_announced_tag_to_the_update(tmp_path, monkeypatch):
+    _apply_ready(monkeypatch)
+    cli = _client(tmp_path)
+    got = {}
+    monkeypatch.setattr(g.threading, "Thread",
+                        lambda target=None, args=(), kwargs=None, daemon=None: type(
+                            "T", (), {"start": lambda self_: got.update(args=args)})())
+    assert _apply(cli).status_code == 200
+    assert got["args"][1] == ANNOUNCED
+
+
+def test_the_untracked_check_measures_against_the_tag_commit(monkeypatch):
+    seen = []
+
+    def _git(args, **k):
+        seen.append(list(args))
+        if args[:2] == ["rev-parse", "--verify"]:
+            return 0, "tagsha"
+        return 0, "a.py"
+    monkeypatch.setattr(updater_mod, "_git", _git)
+    assert updater_mod.incoming_paths("v9.9.9") == ({"a.py"}, "")
+    assert ["diff", "--name-only", "HEAD..tagsha"] in seen
+
+
 def test_run_update_skips_pip_when_requirements_did_not_move(monkeypatch):
     """The common case. A dependency install is slow, and running one on every code
     update would make "nothing changed" the expensive path."""
@@ -535,7 +696,7 @@ def test_run_update_skips_pip_when_requirements_did_not_move(monkeypatch):
     monkeypatch.setattr(updater_mod, "_git", _git)
     pip = {"n": 0}
     restarted = {"n": 0}
-    assert updater_mod.run_update(lambda: restarted.update(n=1),
+    assert _run_update(lambda: restarted.update(n=1),
                         pip_fn=lambda: pip.update(n=pip["n"] + 1) or (0, "")) is True
     assert pip["n"] == 0 and restarted["n"] == 1
     assert updater_mod.update_state()["phase"] == "restarting"
@@ -554,7 +715,7 @@ def test_run_update_installs_deps_when_requirements_moved(monkeypatch):
         return 0, ""
     monkeypatch.setattr(updater_mod, "_git", _git)
     pip = {"n": 0}
-    assert updater_mod.run_update(lambda: None, pip_fn=lambda: pip.update(n=1) or (0, "ok")) is True
+    assert _run_update(lambda: None, pip_fn=lambda: pip.update(n=1) or (0, "ok")) is True
     assert pip["n"] == 1
 
 
@@ -576,7 +737,7 @@ def test_a_failed_pull_stops_and_keeps_the_error_verbatim(monkeypatch):
                         else (1, "fatal: Not possible to fast-forward, aborting."))
     pip = {"n": 0}
     restarted = {"n": 0}
-    assert updater_mod.run_update(lambda: restarted.update(n=1),
+    assert _run_update(lambda: restarted.update(n=1),
                         pip_fn=lambda: pip.update(n=1) or (0, "")) is False
     st = updater_mod.update_state()
     assert st["phase"] == "failed" and "fast-forward" in st["error"]
@@ -595,7 +756,7 @@ def test_a_failed_pip_stops_before_restarting(monkeypatch):
         return 0, ""
     monkeypatch.setattr(updater_mod, "_git", _git)
     restarted = {"n": 0}
-    assert updater_mod.run_update(lambda: restarted.update(n=1),
+    assert _run_update(lambda: restarted.update(n=1),
                         pip_fn=lambda: (1, "ERROR: could not install")) is False
     st = updater_mod.update_state()
     assert st["phase"] == "failed" and "could not install" in st["error"]
@@ -608,7 +769,7 @@ def test_a_refused_restart_is_reported_not_swallowed(monkeypatch):
 
     def _restart():
         raise RuntimeError("the managed launcher is gone")
-    assert updater_mod.run_update(_restart, pip_fn=lambda: (0, "")) is False
+    assert _run_update(_restart, pip_fn=lambda: (0, "")) is False
     assert "launcher is gone" in updater_mod.update_state()["error"]
 
 
@@ -639,7 +800,7 @@ def test_a_failed_pip_rolls_the_pull_back(monkeypatch):
             return 0, "requirements.txt"
         return 0, ""
     monkeypatch.setattr(updater_mod, "_git", _git)
-    assert updater_mod.run_update(lambda: None,
+    assert _run_update(lambda: None,
                         pip_fn=lambda: (1, "ERROR: no matching distribution")) is False
     assert ["reset", "--hard", "OLD"] in seen, seen
     st = updater_mod.update_state()
@@ -657,7 +818,7 @@ def test_a_failed_rollback_says_so_loudly(monkeypatch):
                         else (0, "requirements.txt") if args[:1] == ["diff"]
                         else (1, "fatal: cannot reset") if args[:1] == ["reset"]
                         else (0, ""))
-    assert updater_mod.run_update(lambda: None, pip_fn=lambda: (1, "boom")) is False
+    assert _run_update(lambda: None, pip_fn=lambda: (1, "boom")) is False
     err = updater_mod.update_state()["error"]
     assert "ROLLBACK ALSO FAILED" in err and "git reset --hard OLD" in err
 
@@ -689,10 +850,10 @@ def test_retrying_after_a_pip_failure_really_re_runs_pip(monkeypatch):
         return (0, "ok") if pip["ok"] else (1, "ERROR: transient")
     monkeypatch.setattr(updater_mod, "_git", _git)
 
-    assert updater_mod.run_update(lambda: None, pip_fn=_pip) is False
+    assert _run_update(lambda: None, pip_fn=_pip) is False
     assert pip["n"] == 1 and repo["head"] == "OLD"        # rolled back, so...
     pip["ok"] = True
-    assert updater_mod.run_update(lambda: None, pip_fn=_pip) is True
+    assert _run_update(lambda: None, pip_fn=_pip) is True
     assert pip["n"] == 2, "the retry must actually re-run pip"
 
 
@@ -702,14 +863,14 @@ def test_both_outcomes_are_written_to_the_activity_log(monkeypatch):
     _idle_state(monkeypatch)
     logged = []
     monkeypatch.setattr(updater_mod, "_git", lambda args, **k: (0, "SAME"))
-    assert updater_mod.run_update(lambda: None, pip_fn=lambda: (0, ""),
+    assert _run_update(lambda: None, pip_fn=lambda: (0, ""),
                         log_fn=lambda status, error="": logged.append((status, error))) is True
     assert logged == [("done", "")]
 
     logged.clear()
     monkeypatch.setattr(updater_mod, "_git", lambda args, **k:
                         (0, "HEAD") if args[:1] == ["rev-parse"] else (1, "fatal: refusing"))
-    assert updater_mod.run_update(lambda: None,
+    assert _run_update(lambda: None,
                         log_fn=lambda status, error="": logged.append((status, error))) is False
     assert logged[0][0] == "failed" and "fatal: refusing" in logged[0][1]
 
@@ -720,7 +881,7 @@ def test_a_logging_failure_never_breaks_the_update(monkeypatch):
 
     def _boom(status, error=""):
         raise OSError("disk full")
-    assert updater_mod.run_update(lambda: None, pip_fn=lambda: (0, ""), log_fn=_boom) is True
+    assert _run_update(lambda: None, pip_fn=lambda: (0, ""), log_fn=_boom) is True
 
 
 def test_the_update_records_a_line_in_the_real_activity_log(tmp_path, monkeypatch):

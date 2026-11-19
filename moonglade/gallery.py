@@ -54,10 +54,13 @@ from moonglade import series as _series
 from moonglade import settings as _settings
 from moonglade import telemetry as _telemetry
 from moonglade import updater as _updater
+from moonglade import secure_files as _secure_files
+from moonglade import web_sessions as _web_sessions
 
 try:
-    from flask import (Flask, jsonify, redirect, render_template_string, request,
+    from flask import (Flask, g as _flask_g, jsonify, redirect, render_template_string, request,
                        send_file, send_from_directory, session, url_for)
+    from flask.sessions import SecureCookieSessionInterface
 except ImportError:
     sys.exit("Flask is required for the gallery server.\n"
              "Install it with:  pip install flask")
@@ -1113,6 +1116,57 @@ LOOM_BED_MIMES = {"mp3": "audio/mpeg", "wav": "audio/wav", "m4a": "audio/mp4", "
 
 
 # ---------------------------------------------------------------------------
+# SIZE CAPS (app security review 2026-11-19, finding 9)
+# ---------------------------------------------------------------------------
+# Every request body has a ceiling, and every zip the app opens has one on what it unpacks.
+# REQUEST_MAX_BYTES is the app-wide default (Flask's MAX_CONTENT_LENGTH): JSON bodies, the
+# branding uploads, everything that names no larger cap. The few routes that take big files
+# raise it for themselves before their form is read. A refusal is a 413 with a plain sentence.
+REQUEST_MAX_BYTES = 64 * 1024 * 1024
+UPLOAD_MAX_BYTES = 512 * 1024 * 1024            # /api/upload: one file handed to PixAI
+IMPORT_REQUEST_MAX_BYTES = 2 * 1024 * 1024 * 1024   # /api/import-local: one batch (the page
+                                                # sends batches of at most 256 MB; a lone
+                                                # bigger video travels alone)
+LOOM_BUNDLE_REQUEST_MAX_BYTES = 2 * 1024 * 1024 * 1024   # /api/loom/import-bundle
+# What one zip may unpack to (Import's zips and Loom bundles): its member count, and the bytes
+# actually written -- counted as they are written, never taken from the zip's own headers.
+ZIP_MAX_MEMBERS = 10000
+ZIP_MAX_TOTAL_BYTES = 8 * 1024 * 1024 * 1024
+ZIP_TOO_MANY_MEMBERS = ("That zip holds more than {:,} files, so nothing in it was imported. "
+                        "Split it into smaller zips.".format(ZIP_MAX_MEMBERS))
+ZIP_TOO_BIG = ("That zip unpacks to more than {} GB, so nothing in it was imported. Split it "
+               "into smaller zips.".format(ZIP_MAX_TOTAL_BYTES // (1024 ** 3)))
+
+
+class ZipTooBig(ValueError):
+    """A zip over ZIP_MAX_MEMBERS or ZIP_MAX_TOTAL_BYTES; str() is the plain sentence."""
+
+
+def _too_large_sentence(limit):
+    """The 413's words for a body over `limit` bytes."""
+    if limit and limit >= 1024 ** 3:
+        size = "{:g} GB".format(round(limit / 1024 ** 3, 1))
+    elif limit:
+        size = "{:g} MB".format(round(limit / 1024 ** 2, 1))
+    else:
+        size = "the limit"
+    return ("That is more than Moonglade takes in one go ({}), so nothing was sent. Send "
+            "fewer or smaller files at a time.".format(size))
+
+
+# ---------------------------------------------------------------------------
+# SESSIONS (app security review 2026-11-19, finding 6)
+# ---------------------------------------------------------------------------
+# A sign-in lasts at most SESSION_ABSOLUTE_LIFETIME_S from the moment it was made, however
+# often it is used (the cookie itself still renews on use, Flask's permanent session, so an
+# idle one also ends after SESSION_IDLE_LIFETIME_DAYS). Every session carries its own id, and
+# Log Out records that id as signed out (moonglade.web_sessions), so a copy of the cookie stops
+# working the moment the device that made it signs out.
+SESSION_ABSOLUTE_LIFETIME_S = 30 * 86400
+SESSION_IDLE_LIFETIME_DAYS = 30
+
+
+# ---------------------------------------------------------------------------
 # FILES FROM THE LIBRARY NEVER RUN AS A PAGE (red team, 2026-11-18)
 # ---------------------------------------------------------------------------
 # Every route that hands back a file someone else made -- a library picture or clip, a
@@ -1168,6 +1222,82 @@ def harden_file_response(resp, filename=None):
         if not (resp.headers.get("Content-Disposition") or "").lower().startswith("attachment"):
             resp.headers["Content-Disposition"] = _attachment_disposition(filename)
     return resp
+
+
+# ---------------------------------------------------------------------------
+# THE APP'S OWN PAGES, AND WHERE A WRITE MAY COME FROM (app security review 2026-11-19)
+# ---------------------------------------------------------------------------
+# The policy every HTML page goes out with (create_app's _protective_headers). Scripts: this
+# origin's files, plus the inline ones the page templates mark with CSP_NONCE_MARK, which the
+# serving route replaces with a fresh nonce per request (_noncify) -- no 'unsafe-inline', no
+# 'unsafe-eval' (neither bundle evaluates strings; the Loom has shipped pre-built since the
+# Babel-standalone retirement). Styles may be inline: React writes style attributes and the
+# pages carry their design tokens in a <style>, and a style cannot run anything. Pictures and
+# video may come from https: (PixAI's own covers), data: and blob: (QR codes, import previews).
+# Nothing may frame a page, and no page may submit a form or open a plugin elsewhere.
+CSP_NONCE_MARK = "__CSP_NONCE__"
+CSP_PAGE_POLICY = ("default-src 'self'; script-src 'self'{nonce}; "
+                   "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; "
+                   "media-src 'self' data: blob: https:; font-src 'self' data:; "
+                   "connect-src 'self'; worker-src 'self'; manifest-src 'self'; "
+                   "object-src 'none'; base-uri 'none'; form-action 'self'; "
+                   "frame-ancestors 'none'")
+
+
+def page_csp(nonce=None):
+    """CSP_PAGE_POLICY for one response: with its nonce when the page used one."""
+    return CSP_PAGE_POLICY.format(nonce=(" 'nonce-%s'" % nonce) if nonce else "")
+
+
+CROSS_ORIGIN_REFUSED = ("That request came from a page that isn't one of this Moonglade's own, "
+                        "so nothing was done. Open Moonglade itself and try again there.")
+PLAIN_HTTP_REFUSED = ("Moonglade only takes this over an encrypted connection from another "
+                      "device. Open Moonglade at {url} and try again there.")
+CONNECT_TOKEN_NEEDS_HTTPS = ("Connect from PixAI from another device only works over an "
+                             "encrypted connection, so nothing was saved. Open Moonglade at its "
+                             "https:// address (the Control Panel's LAN card shows it), make the "
+                             "Connect from PixAI bookmark again there, and click it on a "
+                             "pixai.art tab.")
+
+
+def _origin_tuple(url):
+    """(scheme, host, port) of an http(s) URL or origin, the default port filled in; None for
+    anything else ("null", an empty value, another scheme, a malformed port)."""
+    from urllib.parse import urlsplit
+    try:
+        parts = urlsplit(str(url or "").strip())
+        scheme = parts.scheme.lower()
+        host = (parts.hostname or "").lower()
+        port = parts.port
+    except ValueError:
+        return None
+    if scheme not in ("http", "https") or not host:
+        return None
+    return scheme, host, port or (443 if scheme == "https" else 80)
+
+
+def same_origin_write(origin, referer, fetch_site, scheme, host):
+    """Does a state-changing request come from this server's own origin? Pure.
+
+    `origin`, `referer` and `fetch_site` are the request's Origin, Referer and Sec-Fetch-Site
+    headers (None when absent); `scheme` and `host` are the request's own (request.scheme,
+    request.host -- what the browser addressed). The rule, in order:
+      * a Sec-Fetch-Site other than "same-origin" refuses (same-site is NOT enough: another
+        port on this PC is same-site);
+      * an Origin header decides alone, and "null" or anything unparseable refuses;
+      * with no Origin, a Referer decides the same way;
+      * with none of the three, the caller is not a browser and passes (it has no ambient
+        cookie for another page to ride)."""
+    own = _origin_tuple("{}://{}".format(scheme or "", host or ""))
+    if own is None:
+        return False
+    if fetch_site is not None and fetch_site.strip().lower() != "same-origin":
+        return False
+    if origin is not None:
+        return _origin_tuple(origin) == own
+    if referer:
+        return _origin_tuple(referer) == own
+    return True
 # A bed added in the last few minutes may belong to a board whose save has not landed yet, so
 # the unused list never offers it (the sweep re-checks the same rule).
 LOOM_BED_UNUSED_GRACE_S = 10 * 60
@@ -4609,7 +4739,7 @@ def _upscale_const_js():
     originally built for.
     """
     from moonglade import backup as core
-    return ("<script>window.MG_UPSCALE={};window.MG_LORA={};</script>".format(
+    return ("<script nonce=\"__CSP_NONCE__\">window.MG_UPSCALE={};window.MG_LORA={};</script>".format(
         json.dumps({
             "enlargeModels": list(core.ENLARGE_MODELS),
             "defaultEnlargeModel": core.DEFAULT_ENLARGE_MODEL,
@@ -4653,7 +4783,7 @@ def _upscale_const_js():
 # ONE COPY, three shells. The skin line used to be hand-pasted into APP_PAGE, LOGIN_PAGE
 # and _LOOM_SHELL separately; a second stored look would have made that three drifting
 # copies of two things instead of one.
-_PREPAINT_BOOT_JS = r"""<script>/* apply the saved skin + type pairing before first paint (no FOUC)
+_PREPAINT_BOOT_JS = r"""<script nonce="__CSP_NONCE__">/* apply the saved skin + type pairing before first paint (no FOUC)
    -- see _PREPAINT_BOOT_JS in moonglade_gallery.py. Same keys/origin the gallery writes,
    so a change made there re-dresses the Loom too. */
 try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}
@@ -4680,7 +4810,7 @@ try{var _ft=JSON.parse(localStorage.getItem('fonts')||'null');if(_ft&&typeof _ft
 # Defined ONCE here and injected into both shells. Today produced two separate
 # bugs from hand-synced duplicate copies (the Loom hook preamble, and a login
 # CSS block) -- not adding a third.
-_AUTH_401_GUARD_JS = r"""<script>/* Global 401 guard -- see _AUTH_401_GUARD_JS in moonglade_gallery.py */
+_AUTH_401_GUARD_JS = r"""<script nonce="__CSP_NONCE__">/* Global 401 guard -- see _AUTH_401_GUARD_JS in moonglade_gallery.py */
 (function(){
   if (!window.fetch) return;
   var orig = window.fetch, redirecting = false;
@@ -4769,7 +4899,7 @@ __UPSCALE_CONST__
      were rendered by the portaled React <ActivityTray> with the same ids. Both are gone as
      of 2026-08-09 (Claude Design handoff, drift item 39): the Activity control is inline in
      the toolbar (master-storyboard.jsx's own .lv-top-act-wrap) now, not body-level. -->
-<script>
+<script nonce="__CSP_NONCE__">
 /* Session P (BUILD-w5-p s3.5, review F15): every call now REJECTS on a failed answer instead
    of reading one as "nothing there" -- a failed or unreadable get used to come back null, and
    the boot path seeded a blank board over the key. get also hands back the board's rev (and
@@ -4799,9 +4929,16 @@ __RUNTIME_SCRIPT_BLOCK__
 <!-- The Loom's "?" (Session I decision 2): the hand-written quick guide that used to open
      here retired; the button opens the in-app guide (the wiki this install carries) on The
      Loom's page, through the verb the bundle publishes (gallery/src/help/helpStore.js). -->
-<button id="eb-help-btn" onclick="if(window.mgHelp)window.mgHelp.open('The-Loom')"
+<button id="eb-help-btn"
   style="position:fixed;bottom:18px;right:18px;z-index:401;width:38px;height:38px;border-radius:50%;background:var(--accent);color:var(--base);border:none;font-size:19px;font-weight:700;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.5);"
   title="The Loom's page of the guide (?)" aria-label="Open the guide">?</button>
+<!-- Its click is wired here, not in an onclick attribute: the page's script policy runs only
+     nonced scripts (CSP_PAGE_POLICY), and an inline handler is not one. -->
+<script nonce="__CSP_NONCE__">
+document.getElementById("eb-help-btn").addEventListener("click", function () {
+  if (window.mgHelp) window.mgHelp.open('The-Loom');
+});
+</script>
 </body></html>"""
 
 # The Loom's ONE delivery path (bundle-only since the Babel-standalone retirement,
@@ -4817,7 +4954,7 @@ LOOM_PAGE_BUNDLE = (_LOOM_SHELL
              # 404 until the bundle is built.
              '<link rel="stylesheet" href="/loom/dist/master-storyboard.bundle.css">\n'
              '<script src="/loom/dist/master-storyboard.bundle.js"></script>\n'
-             '<script>ReactDOM.createRoot(document.getElementById("root"))'
+             '<script nonce="__CSP_NONCE__">ReactDOM.createRoot(document.getElementById("root"))'
              '.render(React.createElement(LoomBundle.default));</script>')
     .replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS))
 
@@ -5711,6 +5848,17 @@ def watch_close_info(exc, redact=None):
     return {"kind": "error", "type": type(exc).__name__}
 
 
+class _PerRequestSecureSessions(SecureCookieSessionInterface):
+    """Flask's signed-cookie sessions, with the cookie's Secure flag taken from the request
+    that sets it: Secure over HTTPS, not over this PC's plain-HTTP loopback (see create_app)."""
+
+    def get_cookie_secure(self, app):
+        try:
+            return bool(request.is_secure)
+        except RuntimeError:                       # no request (never, in save_session)
+            return bool(app.config.get("SESSION_COOKIE_SECURE"))
+
+
 def create_app(out_dir: Path):
     # Both named explicitly, because Flask's defaults are this MODULE's folder and both
     # belong to the app folder (moonglade.paths), wherever the module sits: root_path is
@@ -5751,14 +5899,20 @@ def create_app(out_dir: Path):
     app.secret_key = _core_auth.get_or_create_secret_key()
     app.config["SESSION_COOKIE_HTTPONLY"] = True   # JS can never read the session cookie
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"   # blocks cross-site POST/nav CSRF vectors
-    # SESSION_COOKIE_SECURE is deliberately left False: this app is typically served
-    # over plain HTTP on a LAN (`python -m moonglade.gallery`, no TLS terminator). A Secure
-    # cookie would just get silently dropped by the browser over http:// and break
-    # login entirely. Real hardening of this flag needs HTTPS, which means putting a
-    # reverse proxy (nginx/Caddy) in front of this process -- out of scope for a
-    # LAN-only tool. This is a known, accepted tradeoff, not an oversight.
+    # Secure PER REQUEST (2026-11-19): the cookie is marked Secure whenever the request that
+    # sets it came over HTTPS -- every other device on the home network since moonglade.tls --
+    # so a browser never sends it back over plain http://. This PC's own loopback may stay
+    # plain HTTP, and a Secure cookie set there would be dropped by the browser and break
+    # sign-in, so the flag follows the request rather than one app-wide setting.
+    app.session_interface = _PerRequestSecureSessions()
     import datetime as _dt
-    app.permanent_session_lifetime = _dt.timedelta(days=30)
+    app.permanent_session_lifetime = _dt.timedelta(days=SESSION_IDLE_LIFETIME_DAYS)
+    # The app-wide body ceiling (finding 9): routes that take big files raise it for themselves.
+    app.config["MAX_CONTENT_LENGTH"] = REQUEST_MAX_BYTES
+    # Which plain-HTTP visits the request gate sends to https:// (moonglade.tls's TLS_* names).
+    # main() sets it from the listener it opened; a test sets it to try a mode.
+    app.config.setdefault("MG_TLS_MODE", "off")
+    app.config.setdefault("MG_TLS_FINGERPRINT", "")
 
     db_path = out_dir / "catalog.db"
     build_stamp = _build_stamp()
@@ -7646,6 +7800,11 @@ def create_app(out_dir: Path):
         session["user"] = username
         session["sess_epoch"] = core.get_web_user_session_epoch(username)
         session["csrf"] = secrets.token_hex(16)
+        # This session's own id, and when it was made (finding 6): Log Out ends exactly this
+        # id (moonglade.web_sessions), and the gate refuses it SESSION_ABSOLUTE_LIFETIME_S
+        # after `born`, however often it is used.
+        session["sid"] = secrets.token_urlsafe(18)
+        session["born"] = int(time.time())
         session.permanent = True
 
     @app.route("/login")
@@ -7690,7 +7849,7 @@ def create_app(out_dir: Path):
             "glow_angle": brand.get("glow_angle", 0.0),
         }
         return render_template_string(
-            LOGIN_PAGE.replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS),
+            _noncify(LOGIN_PAGE.replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS)),
             boot=boot)
 
     @app.route("/api/login", methods=["POST"])
@@ -7811,9 +7970,11 @@ def create_app(out_dir: Path):
         captured -- is its own explicit request, `scope: "everywhere"`, which bumps the
         account's session epoch (core.bump_web_user_session_epoch) so every outstanding
         cookie for it stops working. Only that exact word reaches the other devices; a
-        missing, older ("this-device") or unknown scope is an ordinary Log Out. No
-        screen sends "everywhere" today; changing your password in Panel -> Users bumps
-        the same epoch and keeps the device you changed it from.
+        missing, older ("this-device") or unknown scope is an ordinary Log Out. The
+        Accounts window's "Sign out all devices" sends "everywhere"; changing your password
+        in Panel -> Users bumps the same epoch and keeps the device you changed it from.
+        Either way the session that asked is recorded as signed out server-side (its `sid`,
+        moonglade.web_sessions), so a copied cookie for it stops working at once.
 
         A sign-out that would revoke checks the session's CSRF token first, and a bad
         token is a loud 400 that leaves the session intact. Public (@tier(PUBLIC)): an
@@ -7837,6 +7998,11 @@ def create_app(out_dir: Path):
                 return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
             if body.get("scope") == "everywhere":
                 core.bump_web_user_session_epoch(user)
+            # Server-side, this session only (finding 6): its id is recorded as signed out,
+            # so a copy of this cookie taken before the Log Out stops working too. A dead
+            # cookie never gets here (`authorized`), so it can record nothing.
+            _web_sessions.sign_out(session.get("sid"), session.get("born"),
+                                   SESSION_ABSOLUTE_LIFETIME_S)
         session.clear()
         return jsonify({"ok": True})
 
@@ -7937,6 +8103,101 @@ def create_app(out_dir: Path):
         if level == LOCALHOST and not _is_local_request():
             return jsonify({"error": route_tier_message(view)}), 403
         return None
+
+    # ------------------------------------------------------------------
+    # The request gate's two transport rules (app security review 2026-11-19). Each is its own
+    # before_request hook, kept apart from _enforce_front_door (who may reach a route) on
+    # purpose: these decide whether a request is ALLOWED TO ARRIVE THE WAY IT DID.
+    # ------------------------------------------------------------------
+    def _send_plain_lan_visits_to_https():
+        """Finding 1: once the server speaks HTTPS (moonglade.tls), a plain-HTTP visit from
+        another device is sent to the https:// address -- a GET or HEAD by a temporary
+        redirect (never a cached one: a later start without HTTPS must not be redirected by the
+        browser's memory), anything else refused with a sentence naming the address. This PC's
+        own loopback keeps plain HTTP in the default mode (TLS_LAN); --https (TLS_ALL) sends
+        every plain visit over. Runs FIRST, ahead of the front door, so a visitor's very first
+        hop is already to https."""
+        mode = app.config.get("MG_TLS_MODE") or "off"
+        if mode not in ("lan", "all") or request.is_secure:
+            return None
+        if mode == "lan" and _is_local_request():
+            return None
+        home = "https://" + request.host + "/"
+        if request.method in ("GET", "HEAD"):
+            target = "https://" + request.host + (
+                request.full_path if request.query_string else request.path)
+            return redirect(target, code=307)
+        msg = PLAIN_HTTP_REFUSED.format(url=home)
+        if request.path.startswith(_JSON_GATE_PREFIXES):
+            return jsonify({"error": msg}), 403
+        return app.response_class(msg, status=403, mimetype="text/plain")
+
+    app.before_request_funcs.setdefault(None, []).insert(0, _send_plain_lan_visits_to_https)
+
+    @app.before_request
+    def _refuse_cross_origin_writes():
+        """Finding 2: ONE front-door check for every state-changing request. A POST, PUT,
+        PATCH or DELETE passes only when it comes from one of this server's own pages: its
+        Origin header (else its Referer) names this request's own scheme, host and port, and
+        a Sec-Fetch-Site header, when the browser sends one, says same-origin
+        (same_origin_write). A page on another port of this PC (the D: install on 5757, a dev
+        server, any other local web app) is same-SITE, so the Lax session cookie rides its
+        requests -- and is refused here, before any route reads its body. Routes that check
+        the explicit CSRF token still do, after this.
+
+        A request carrying none of those three headers is not from a browser (a browser
+        sends Origin on every POST and Sec-Fetch-Site on every request), so there is no
+        ambient cookie to abuse and it passes to the route's own checks."""
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return None
+        h = request.headers
+        if same_origin_write(h.get("Origin"), h.get("Referer"), h.get("Sec-Fetch-Site"),
+                             request.scheme, request.host):
+            return None
+        if request.path.startswith(_JSON_GATE_PREFIXES):
+            return jsonify({"error": CROSS_ORIGIN_REFUSED}), 403
+        return app.response_class(CROSS_ORIGIN_REFUSED, status=403, mimetype="text/plain")
+
+    def _csp_nonce():
+        """This response's script nonce, made on first use (one per request)."""
+        n = getattr(_flask_g, "mg_csp_nonce", None)
+        if not n:
+            n = _flask_g.mg_csp_nonce = secrets.token_urlsafe(18)
+        return n
+
+    def _noncify(page_source):
+        """A page TEMPLATE with its __CSP_NONCE__ marks filled in. Applied to the template's
+        own source, before Jinja or any request value touches it, so nothing a request
+        supplies can ever carry the nonce."""
+        return page_source.replace(CSP_NONCE_MARK, _csp_nonce())
+
+    @app.after_request
+    def _protective_headers(resp):
+        """Finding 4: every response says nosniff, may not be framed, and sends no Referer
+        off this origin; every HTML page carries the Content-Security-Policy its inline
+        scripts were written for (CSP_PAGE_POLICY, with this request's nonce). A response
+        that set its own policy keeps it (served files carry `sandbox`, harden_file_response),
+        and so does one that set its own Referrer-Policy (the connect page's no-referrer)."""
+        h = resp.headers
+        h.setdefault("X-Content-Type-Options", "nosniff")
+        h.setdefault("X-Frame-Options", "DENY")
+        h.setdefault("Referrer-Policy", "same-origin")
+        if "Content-Security-Policy" not in h and (resp.mimetype or "") == "text/html":
+            h["Content-Security-Policy"] = page_csp(getattr(_flask_g, "mg_csp_nonce", None))
+        return resp
+
+    @app.errorhandler(413)
+    def _too_large(_e):
+        """Finding 9's refusal: the body was over the route's cap (REQUEST_MAX_BYTES unless the
+        route raised it). A plain sentence, JSON for the API."""
+        try:
+            limit = request.max_content_length
+        except Exception:                                  # noqa: BLE001
+            limit = REQUEST_MAX_BYTES
+        msg = _too_large_sentence(limit)
+        if request.path.startswith(_JSON_GATE_PREFIXES):
+            return jsonify({"error": msg}), 413
+        return app.response_class(msg, status=413, mimetype="text/plain")
 
     @app.route("/api/health")
     @tier(LOGIN)
@@ -8554,13 +8815,25 @@ def create_app(out_dir: Path):
                                      "would overwrite them. In the way: "
                                      + _redact_host_paths(", ".join(tracked[:6])),
                             "kind": "failed"}), 409
+        # The release the modal offered, and only that (app security review 2026-11-19,
+        # finding 10): the apply fast-forwards to this tag's commit, never master's head.
+        # Read from the last check, never fetched here.
+        tag = _updater.announced_release()
+        if not tag:
+            return jsonify({"error": "no release has been announced to this install yet — "
+                                     "open the Control Panel so it checks, then try again.",
+                            "kind": "failed"}), 409
+        cur_v, tag_v = _updater.version_tuple(core.__version__), _updater.version_tuple(tag)
+        if cur_v and tag_v and tag_v <= cur_v:
+            return jsonify({"error": "this install is already on %s or newer." % tag,
+                            "kind": "failed"}), 409
         # Untracked entries are judged against what the update actually brings, not
         # blocked on sight -- see split_porcelain and untracked_in_the_way. This costs a
-        # fetch, but only on a checkout that HAS stray files, and only the fetch the pull
+        # fetch, but only on a checkout that HAS stray files, and only the fetch the apply
         # was about to do regardless.
         ignored_untracked = 0
         if untracked:
-            incoming, why = _updater.incoming_paths()
+            incoming, why = _updater.incoming_paths(tag)
             if incoming is None:
                 return jsonify({"error": "couldn't work out what the update brings, so "
                                          "whether your untracked files are in its way is "
@@ -8609,7 +8882,7 @@ def create_app(out_dir: Path):
             _log_job(job_id, status=status, type="update", label=label,
                      error=(_redact_host_paths(error)[:600] or None))
 
-        threading.Thread(target=_updater.run_update, args=(_restart,),
+        threading.Thread(target=_updater.run_update, args=(_restart, tag),
                          kwargs={"log_fn": _log_update}, daemon=True).start()
         return jsonify({"ok": True, "phase": "pulling"})
 
@@ -8646,6 +8919,12 @@ def create_app(out_dir: Path):
             "lan_bind": lan_bind, "lan_ip": ip, "reachable_urls": urls,
             "zeroconf_available": moonglade_bonjour.zeroconf_available(),
             "supervised": _supervised(),
+            # HTTPS on the home network (moonglade.tls): the mode this start runs in, the
+            # certificate's SHA-256 fingerprint for a device to check its warning against
+            # (public, like the certificate itself), and why there is none when there isn't.
+            "tls": str(app.config.get("MG_TLS_MODE") or "off"),
+            "tls_fingerprint": str(app.config.get("MG_TLS_FINGERPRINT") or ""),
+            "tls_problem": str(app.config.get("MG_TLS_PROBLEM") or ""),
         })
 
     @app.route("/api/bonjour/settings", methods=["POST"])
@@ -10508,7 +10787,24 @@ def create_app(out_dir: Path):
         if current_epoch is None or current_epoch != session.get("sess_epoch"):
             session.clear()   # stale/revoked -- drop it so later requests short-circuit above
             return False
+        if not _session_is_current():
+            session.clear()   # too old, signed out, or from before sessions had an id
+            return False
         return True
+
+    def _session_is_current(now=None):
+        """The session's own id is not signed out (Log Out, moonglade.web_sessions) and it is
+        younger than SESSION_ABSOLUTE_LIFETIME_S (finding 6). A cookie from before sessions
+        carried an id and a birth time has neither and is refused: one sign-in per device
+        after this update, so that every live session can be ended on its own."""
+        sid = session.get("sid")
+        born = session.get("born")
+        if not sid or not isinstance(born, (int, float)) or isinstance(born, bool):
+            return False
+        now = time.time() if now is None else now
+        if now - born > SESSION_ABSOLUTE_LIFETIME_S or born - now > 300:
+            return False
+        return not _web_sessions.is_signed_out(sid)
 
     # ---- Login rate limiting: in-memory per-IP failed-attempt counter ----------
     # Lives in this closure (one dict per running server PROCESS), not config.json
@@ -11510,9 +11806,15 @@ def create_app(out_dir: Path):
             title = "Recent"
 
         mids = [str(r.get("media_id")) for r in rows if r.get("media_id")]
-        _autoprint = ("<script>window.addEventListener('load',function(){"
+        # The page's two scripts carry this response's nonce (CSP_PAGE_POLICY runs nothing
+        # else), and the Print button is wired from the nonced script, not an onclick.
+        _nonce = _csp_nonce()
+        _autoprint = ("<script nonce='" + _nonce + "'>"
+                      "var _p=document.getElementById('mg-print');"
+                      "if(_p)_p.addEventListener('click',function(){window.print();});"
+                      "window.addEventListener('load',function(){"
                       "setTimeout(function(){window.print();},350);});</script>")
-        _bar = ("<div class='bar'><h1>{t}</h1><button onclick='window.print()'>"
+        _bar = ("<div class='bar'><h1>{t}</h1><button id='mg-print'>"
                 "\U0001f5a8 Print</button><a href='/' style='margin-left:auto'>"
                 "&larr; gallery</a></div>")
 
@@ -11583,11 +11885,12 @@ def create_app(out_dir: Path):
   @media print {{ .bar {{ display: none; }} body {{ margin: 0; }} }}
 </style></head><body>
 <div class="bar"><h1>{title} &middot; {n} images</h1>
-  <button onclick="window.print()">&#128424; Print</button>
+  <button id="mg-print">&#128424; Print</button>
   <a href="/" style="margin-left:auto;">&larr; back to gallery</a></div>
 <div class="grid">{cells}</div>
-<script>window.addEventListener('load', function(){{ setTimeout(function(){{ window.print(); }}, 350); }});</script>
-</body></html>""".format(title=title, cols=cols, n=len(cells), cells="".join(cells))
+{autoprint}
+</body></html>""".format(title=title, cols=cols, n=len(cells), cells="".join(cells),
+                         autoprint=_autoprint)
         return html
 
     @app.route("/api/contact-sheet")
@@ -14923,6 +15226,30 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:160]}), 200
         return jsonify({"enabled": want})
 
+    @app.route("/api/mirror/disconnect", methods=["POST"])
+    @tier(LOCALHOST)
+    def api_mirror_disconnect():
+        """The Mirror tile's Disconnect (app security review 2026-11-19, finding 7): forget the
+        stored PixAI sign-in and stop renewing it (mirror.disconnect_mirror), and turn the
+        switch off, since an armed Mirror with no sign-in refuses every create. LOCALHOST, like
+        the switch beside it; the session's CSRF token. Body {csrf}. Answers ok, or a plain
+        sentence; the sign-in is never read back."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        if not _mirror.disconnect_mirror():
+            return jsonify({"error": "Moonglade couldn't delete the stored PixAI sign-in. "
+                                     "Close anything that has its local folder open, then "
+                                     "try again."}), 200
+        try:
+            if _mirror.mirror_enabled():
+                _settings.set_values(**{_settings.MIRROR_TO_PIXAI: False})
+        except (OSError, _settings.SettingsBusy) as e:
+            return jsonify({"ok": True, "enabled": True,
+                            "error": "The sign-in is gone, but the switch couldn't be turned "
+                                     "off: " + _redact_host_paths(str(e))[:160]}), 200
+        return jsonify({"ok": True, "enabled": False})
+
     # The old Connect (POST /api/mirror/connect) read whatever pixai.art sign-in a browser
     # profile on THIS machine held and stored it with no check that it was the API key's
     # account. PixAI no longer keeps its sign-in where that read looked, and the route was a
@@ -14941,7 +15268,7 @@ def create_app(out_dir: Path):
         itself; the page is marked no-store all the same."""
         session.setdefault("csrf", secrets.token_hex(16))
         resp = app.response_class(render_template_string(
-            MIRROR_CONNECT_PAGE.replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS),
+            _noncify(MIRROR_CONNECT_PAGE.replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS)),
             boot={"csrf": session["csrf"]}), mimetype="text/html")
         resp.headers["Cache-Control"] = "no-store"
         resp.headers["Referrer-Policy"] = "no-referrer"
@@ -14952,19 +15279,24 @@ def create_app(out_dir: Path):
     def api_mirror_connect_token():
         """Connect from PixAI: store the sign-in the user's own pixai.art tab handed over
         (body {csrf, token}). LOGIN tier, a client on this machine or a private home network
-        (mirror.home_network_address), the session's CSRF token, and a same-origin request
+        (mirror.home_network_address) -- over HTTPS unless it is this machine -- the session's
+        CSRF token, and a same-origin request
         only (an Origin header naming another site is refused). READ_ONLY refuses,
         as Connect always has. Then mirror.accept_site_token checks the token -- a PixAI JWT,
         unexpired, and for the SAME PixAI account the API key resolves to -- before storing
         it. Answers only ok + days left, or a plain sentence; never the token, a claim or the
         account id, and nothing here logs."""
-        # Home network only (2026-11-18). Moonglade is served over plain HTTP, so a sign-in
-        # posted from another device crosses the network unencrypted, like the Moonglade login
-        # itself; never accept one from outside a home network. Same client address the
-        # localhost-only checks read (request.remote_addr, the real TCP peer; no forwarded
-        # header is trusted anywhere in this app).
+        # Home network only (2026-11-18): never accept a sign-in from outside a home network.
+        # Same client address the localhost-only checks read (request.remote_addr, the real
+        # TCP peer; no forwarded header is trusted anywhere in this app).
         if not _mirror.home_network_address(request.remote_addr):
             return jsonify({"ok": False, "error": _mirror.SITE_TOKEN_NOT_HOME}), 403
+        # And from another device, only over HTTPS (app security review 2026-11-19, finding
+        # 1): a PixAI sign-in posted over plain http:// crosses the network readable by anyone
+        # on it, and renews itself for whoever holds it. This PC's own loopback never leaves
+        # the PC, so it may stay plain. Checked before the body is read.
+        if not request.is_secure and not _is_local_request():
+            return jsonify({"ok": False, "error": CONNECT_TOKEN_NEEDS_HTTPS}), 403
         origin = request.headers.get("Origin")
         if origin and origin.rstrip("/") != request.host_url.rstrip("/"):
             return jsonify({"ok": False, "error": "That request didn't come from this "
@@ -15405,7 +15737,8 @@ def create_app(out_dir: Path):
     def api_upload():
         """Upload a local file from the picker -> PixAI media_id (the same free
         3-step S3 handshake as the CLI's --upload). Login required,
-        spends nothing."""
+        spends nothing. At most UPLOAD_MAX_BYTES (a 413 with a plain sentence past it)."""
+        request.max_content_length = UPLOAD_MAX_BYTES
         f = request.files.get("file")
         if f is None or not f.filename:
             return jsonify({"error": "no file"}), 400
@@ -15428,24 +15761,38 @@ def create_app(out_dir: Path):
             except OSError:
                 pass
 
-    def _safe_extract_zip(zip_path, dest_dir):
+    def _safe_extract_zip(zip_path, dest_dir, max_members=None, max_total=None):
         """Extract a zip into dest_dir, dropping any member whose resolved path would escape
         dest_dir (zip-slip). Localhost-only caller, but a crafted archive still shouldn't be
-        able to write outside the temp dir."""
+        able to write outside the temp dir.
+
+        Capped (app security review 2026-11-19, finding 9): a zip with more than
+        ZIP_MAX_MEMBERS files is refused before anything is written, and extraction stops
+        the moment the bytes WRITTEN pass ZIP_MAX_TOTAL_BYTES -- counted as they are written,
+        never taken from the zip's own size fields, which a zip bomb lies in. Either raises
+        ZipTooBig with its plain sentence; the caller's temp dir is then thrown away."""
         import os as _os
         import zipfile as _zip
-        import shutil as _sh
+        max_members = ZIP_MAX_MEMBERS if max_members is None else max_members
+        max_total = ZIP_MAX_TOTAL_BYTES if max_total is None else max_total
         root = _os.path.realpath(dest_dir)
+        written = 0
         with _zip.ZipFile(zip_path) as z:
-            for m in z.namelist():
-                if m.endswith("/"):
-                    continue
+            members = [m for m in z.namelist() if not m.endswith("/")]
+            if len(members) > max_members:
+                raise ZipTooBig(ZIP_TOO_MANY_MEMBERS)
+            for m in members:
                 target = _os.path.realpath(_os.path.join(dest_dir, m))
                 if target != root and not target.startswith(root + _os.sep):
                     continue                          # zip-slip -> skip
                 _os.makedirs(_os.path.dirname(target), exist_ok=True)
                 with z.open(m) as src, open(target, "wb") as dst:
-                    _sh.copyfileobj(src, dst)
+                    for chunk in iter(lambda: src.read(1024 * 1024), b""):
+                        written += len(chunk)
+                        if written > max_total:
+                            raise ZipTooBig(ZIP_TOO_BIG)
+                        dst.write(chunk)
+        return written
 
     @app.route("/api/import-local", methods=["POST"])
     @tier(LOCALHOST, message="this imports files onto the server's machine; localhost-only")
@@ -15467,6 +15814,9 @@ def create_app(out_dir: Path):
         import shutil
         from types import SimpleNamespace
         from moonglade import backup as core
+        # Finding 9: one request is at most IMPORT_REQUEST_MAX_BYTES (the page's batches stay
+        # far under it), and everything its zips unpack shares one ZIP_MAX_TOTAL_BYTES budget.
+        request.max_content_length = IMPORT_REQUEST_MAX_BYTES
         files = request.files.getlist("files")
         if not files:
             return jsonify({"error": "no files"}), 400
@@ -15478,6 +15828,7 @@ def create_app(out_dir: Path):
         tmp = tempfile.mkdtemp(prefix="mg_import_")
         try:
             saved = 0
+            unzip_left = ZIP_MAX_TOTAL_BYTES
             # A guard, not the design: the web page sends a big folder in several requests
             # (hooks/useImport.js), so this is only reached by a caller that sends more at
             # once. What it does not take it COUNTS, and says so in the answer (#82) -- it
@@ -15497,7 +15848,9 @@ def create_app(out_dir: Path):
                 f.save(dest)
                 if base.lower().endswith(".zip"):
                     try:
-                        _safe_extract_zip(dest, sub)
+                        unzip_left -= _safe_extract_zip(dest, sub, max_total=unzip_left)
+                    except ZipTooBig as e:
+                        return jsonify({"error": str(e)}), 413
                     finally:
                         try: _os.unlink(dest)
                         except OSError: pass
@@ -17770,7 +18123,7 @@ __DESIGN_TOKENS__
    names from any account). One "</script>" in a model title would break out of
    this inline script and run in a session that can POST the CSRF-exempt
    /api/generate -- i.e. spend without consent. Jinja's tojson escapes < > &. #}
-<script>window.MG_BOOT = {{ boot|tojson }};</script>
+<script nonce="__CSP_NONCE__">window.MG_BOOT = {{ boot|tojson }};</script>
 __UPSCALE_CONST__
 <script type="module" src="/next/assets/app.js"></script>
 </body></html>"""
@@ -17813,7 +18166,7 @@ __DESIGN_TOKENS__
 {# |tojson, NOT json.dumps|safe -- same XSS reasoning as APP_PAGE's own boot
    script: Jinja's tojson escapes < > & so a stray "</script>" in, say, a
    redirected `next` path can never break out of this inline script. #}
-<script>window.MG_BOOT = {{ boot|tojson }};</script>
+<script nonce="__CSP_NONCE__">window.MG_BOOT = {{ boot|tojson }};</script>
 <script type="module" src="/next/assets/app.js"></script>
 </body></html>"""
 
@@ -17847,8 +18200,8 @@ __DESIGN_TOKENS__
     </div>
   </div>
 </div>
-<script>window.MG_MIRROR_CONNECT = {{ boot|tojson }};</script>
-<script>
+<script nonce="__CSP_NONCE__">window.MG_MIRROR_CONNECT = {{ boot|tojson }};</script>
+<script nonce="__CSP_NONCE__">
 (function () {
   var PIXAI = "https://pixai.art";
   var boot = window.MG_MIRROR_CONNECT || {};
@@ -17973,7 +18326,7 @@ __DESIGN_TOKENS__
             "glow_angle": brand.get("glow_angle", 0.0),
         }
         return render_template_string(
-            APP_PAGE.replace("__UPSCALE_CONST__", _upscale_const_js())
+            _noncify(APP_PAGE.replace("__UPSCALE_CONST__", _upscale_const_js()))
                      .replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS),
             boot=boot)
 
@@ -18504,7 +18857,7 @@ __DESIGN_TOKENS__
         # __ACH_NONCE__ is the Read the Manual beacon's per-render nonce (2026-09-07
         # ruling). token_urlsafe is [A-Za-z0-9_-] only, so it cannot break out of the
         # double-quoted JS string it lands in.
-        return (LOOM_PAGE_BUNDLE.replace("__UPSCALE_CONST__", _upscale_const_js())
+        return (_noncify(LOOM_PAGE_BUNDLE.replace("__UPSCALE_CONST__", _upscale_const_js()))
                                 .replace("__ACH_NONCE__", _ach_mint(_ach_sid())))
 
     @app.route("/api/loom/get")
@@ -20283,12 +20636,28 @@ __DESIGN_TOKENS__
         import zipfile
 
         from moonglade import backup as core
+        # Finding 9: the upload is capped (LOOM_BUNDLE_REQUEST_MAX_BYTES) and read as the file
+        # Werkzeug already spooled it to, never copied whole into memory; a bundle with more
+        # than ZIP_MAX_MEMBERS entries is refused before anything is read out of it.
+        request.max_content_length = LOOM_BUNDLE_REQUEST_MAX_BYTES
         f = request.files.get("file")
         if f is None or not f.filename:
             return jsonify({"error": "no file"}), 400
         try:
-            z = zipfile.ZipFile(io.BytesIO(f.read()))
-            data = json.loads(z.read("project.json").decode("utf-8"))
+            z = zipfile.ZipFile(f.stream)
+        except Exception:
+            return jsonify({"error": "not a valid bundle (couldn't read project.json)"}), 400
+        if len(z.infolist()) > ZIP_MAX_MEMBERS:
+            return jsonify({"error": ZIP_TOO_MANY_MEMBERS}), 413
+        try:
+            info = z.getinfo("project.json")
+            if info.file_size > REQUEST_MAX_BYTES:
+                raise ValueError("project.json too large")
+            with z.open(info) as pj:
+                raw = pj.read(REQUEST_MAX_BYTES + 1)
+            if len(raw) > REQUEST_MAX_BYTES:
+                raise ValueError("project.json too large")
+            data = json.loads(raw.decode("utf-8"))
         except Exception:
             return jsonify({"error": "not a valid bundle (couldn't read project.json)"}), 400
         project = data.get("project")
@@ -20357,6 +20726,7 @@ __DESIGN_TOKENS__
                 project["bed"] = dict(pbed, file=got)
             elif not LOOM_BED_FILE_RE.match(str(pbed.get("file") or "")):
                 project.pop("bed", None)          # a bed naming no storable file is no bed
+        bundle_written = 0                 # bytes this import has unpacked (ZIP_MAX_TOTAL_BYTES)
         for m in media_entries:
             name, mid, ext = m.group(0), m.group(1), "." + m.group(2)
             if _loom_resolve_media(mid):
@@ -20373,12 +20743,17 @@ __DESIGN_TOKENS__
                 with open(part, "wb") as out, z.open(name) as src:
                     for chunk in iter(lambda: src.read(1024 * 1024), b""):
                         total += len(chunk)
-                        if total > LOOM_BUNDLE_MEDIA_MAX_BYTES:
+                        if total > LOOM_BUNDLE_MEDIA_MAX_BYTES or \
+                                bundle_written + total > ZIP_MAX_TOTAL_BYTES:
                             break
                         out.write(chunk)
+                if bundle_written + total > ZIP_MAX_TOTAL_BYTES:
+                    _unlink_quiet(part)        # the whole bundle's budget is spent (finding 9):
+                    break                      # nothing more is unpacked from it
                 if total == 0 or total > LOOM_BUNDLE_MEDIA_MAX_BYTES:
                     _unlink_quiet(part)
                     continue
+                bundle_written += total
                 os.replace(part, dest)
             except (OSError, KeyError, zipfile.BadZipFile, RuntimeError):
                 _unlink_quiet(part)
@@ -21732,9 +22107,11 @@ def main():
                          "default because Windows lets a SECOND server bind an actively "
                          "serving port, after which requests hit either one at random.")
     ap.add_argument("--https", action="store_true",
-                    help="serve over self-signed HTTPS (needed for PWA install / service "
-                         "worker on a phone over LAN; requires the 'cryptography' package; "
-                         "browsers show a one-time certificate warning)")
+                    help="serve EVERY connection over HTTPS, this PC's own included. Other "
+                         "devices on the home network get HTTPS without it whenever the server "
+                         "listens there; this switch adds this PC. One self-signed certificate, "
+                         "made once in local\\ (needs the 'cryptography' package); a browser "
+                         "shows a one-time certificate warning")
     ap.add_argument("--rebuild-thumbs", action="store_true",
                     help="regenerate all thumbnails even if they already exist")
     ap.add_argument("--skip-thumbs", action="store_true",
@@ -21820,16 +22197,38 @@ def main():
         print("Building thumbnails (new only — use --rebuild-thumbs to force all)...")
         build_thumbnails(rows, out_dir, thumb_dir, force=args.rebuild_thumbs)
 
-    ssl_context = None
-    scheme = "http"
-    if getattr(args, "https", False):
+    # Secrets at rest (app security review 2026-11-19, finding 5): the copies already on disk
+    # are limited to this user's account once per start; every later write does the same.
+    _secure_files.restrict_existing_secrets()
+
+    # HTTPS on the home network (finding 1; moonglade.tls). A server other devices can reach
+    # speaks HTTPS to them with ONE certificate made once in local\ (its fingerprint shown in
+    # the Control Panel's LAN card), while this PC's own loopback keeps plain HTTP; --https
+    # makes every client, this PC included, use https://. Both protocols answer on the same
+    # port, so the address only changes its scheme. Without the 'cryptography' package (or
+    # with a certificate that can't be saved) it serves plain HTTP and says so.
+    from moonglade import bonjour as moonglade_bonjour
+    from moonglade import tls as _tls
+    tls_mode, tls_ctx, tls_fp, tls_problem = _tls.TLS_OFF, None, "", ""
+    want_tls_everywhere = bool(getattr(args, "https", False))
+    if want_tls_everywhere or moonglade_bonjour.is_lan_bind(args.host):
         try:
-            import cryptography  # noqa: F401  (werkzeug 'adhoc' needs it)
-            ssl_context = "adhoc"
-            scheme = "https"
-        except ImportError:
-            print("--https needs the 'cryptography' package:  pip install cryptography\n"
-                  "Falling back to HTTP.")
+            import socket as _socket
+            _here = _socket.gethostname()
+            cert_p, key_p = _tls.ensure_certificate(
+                dns_names=[_here, _here + ".local",
+                           moonglade_bonjour.hostname_label(_srv["bonjour_name"]) + ".local"],
+                ip_addresses=[moonglade_bonjour.lan_ip() or ""])
+            tls_ctx = _tls.server_context(cert_p, key_p)
+            tls_mode = _tls.TLS_ALL if want_tls_everywhere else _tls.TLS_LAN
+            tls_fp = _tls.fingerprint(cert_p)
+        except _tls.TLSUnavailable as e:
+            tls_problem = str(e)
+            print("{}\nServing plain HTTP: another device's traffic is not encrypted, and "
+                  "Connect from PixAI works only on this PC.".format(tls_problem))
+    # The scheme this PC's own address uses, and the one other devices use.
+    scheme = "https" if tls_mode == _tls.TLS_ALL else "http"
+    lan_scheme = "https" if tls_mode != _tls.TLS_OFF else "http"
 
     # REFUSE to become the second server on this port -- see port_owner()'s docstring
     # for why the OS will happily let us, and what that silently costs.
@@ -21859,14 +22258,21 @@ def main():
     # the rename and the scaffold, so the pack and a custom mark's .ico are where it looks.
     _branding.register_pack_file_type(out_dir)
     app = create_app(out_dir)
+    app.config["MG_TLS_MODE"] = tls_mode
+    app.config["MG_TLS_FINGERPRINT"] = tls_fp
+    app.config["MG_TLS_PROBLEM"] = tls_problem
     url = "{}://{}:{}/".format(
         scheme, "localhost" if args.host == "0.0.0.0" else args.host, args.port)
     print("\nGallery ready ->  {}".format(url))
     import logging as _ready_logging
-    _ready_logging.getLogger(__name__).info("server started: pid %d, supervised %s",
-                                            os.getpid(), _supervised())
-    if ssl_context:
-        print("(self-signed HTTPS: your browser/phone will show a one-time 'proceed anyway' warning)")
+    _ready_logging.getLogger(__name__).info("server started: pid %d, supervised %s, https %s",
+                                            os.getpid(), _supervised(), tls_mode)
+    if tls_mode != _tls.TLS_OFF:
+        _lan = moonglade_bonjour.lan_ip()
+        if tls_mode == _tls.TLS_LAN and _lan:
+            print("Other devices: https://{}:{}/".format(_lan, args.port))
+        print("(self-signed HTTPS: a browser shows a one-time certificate warning; check it "
+              "shows this SHA-256 fingerprint:\n {})".format(tls_fp))
     print("Press Ctrl+C to stop.\n")
     if getattr(args, "open_browser", False):
         # fire just after app.run() starts blocking (a timer thread is the only way to
@@ -21897,12 +22303,14 @@ def main():
     # first attempt succeed instead. The main IPv4 bind below is UNTOUCHED (LAN via
     # --host 0.0.0.0 keeps working exactly as before); an explicit non-loopback
     # --host skips this; no IPv6 stack on the machine -> fail-soft, nothing changes.
+    # Both listeners are moonglade.tls's server (Werkzeug's threaded server, answering HTTPS
+    # and plain HTTP on one port; plain only when tls_ctx is None), read once here so a test
+    # that stands a fake in for moonglade.tls.make_server replaces both.
+    _make_server = _tls.make_server
     if args.host in ("127.0.0.1", "0.0.0.0", "localhost"):
         try:
             import threading as _threading
-            from werkzeug.serving import make_server as _make_server6
-            _srv6 = _make_server6("::1", args.port, app, threaded=True,
-                                  ssl_context=ssl_context)
+            _srv6 = _make_server("::1", args.port, app, tls_context=tls_ctx)
             _SERVER_CONTROL["companion"] = _srv6
             _threading.Thread(target=_srv6.serve_forever, daemon=True,
                               name="moonglade-ipv6-loopback").start()
@@ -21913,9 +22321,8 @@ def main():
     # make_server the [::1] companion above already uses. serve_forever() blocks until shutdown()
     # (web Stop/Restart) or Ctrl+C; the pending exit code then rides `sys.exit(main())` to the
     # supervisor (0 = stop, 42 = relaunch).
-    from werkzeug.serving import make_server as _make_server
     try:
-        srv = _make_server(args.host, args.port, app, threaded=True, ssl_context=ssl_context)
+        srv = _make_server(args.host, args.port, app, tls_context=tls_ctx)
     except OSError as e:
         _say_port_unbindable(args.port, e)
         return 2
@@ -21933,15 +22340,16 @@ def main():
     # finally below -- which now actually runs, thanks to step 1's graceful shutdown. The
     # advertiser (and the running host/port/scheme with it) is stashed so the Control Panel's
     # Bonjour chip can toggle or re-point it live, no restart.
-    from moonglade import bonjour as moonglade_bonjour
+    # The scheme stashed and advertised is the one OTHER devices use (https:// once
+    # moonglade.tls is on), since they are who the broadcast and the LAN card's address are for.
     _bonjour = moonglade_bonjour.BonjourAdvertiser()
     _SERVER_CONTROL["bonjour"] = _bonjour
-    _SERVER_CONTROL["serving"] = {"host": args.host, "port": args.port, "scheme": scheme}
+    _SERVER_CONTROL["serving"] = {"host": args.host, "port": args.port, "scheme": lan_scheme}
     try:
         if _srv["bonjour_enabled"] and moonglade_bonjour.is_lan_bind(args.host):
-            if _bonjour.start(_srv["bonjour_name"], args.port, scheme):
+            if _bonjour.start(_srv["bonjour_name"], args.port, lan_scheme):
                 print("Bonjour: broadcasting as {}  ({}://{}:{}/)".format(
-                    _bonjour.hostname, scheme, _bonjour.hostname, args.port))
+                    _bonjour.hostname, lan_scheme, _bonjour.hostname, args.port))
     except Exception:                    # noqa: BLE001 -- advertising must never stop the server
         pass
     # Warm the Health memo off-thread, now that the socket is bound and requests can already

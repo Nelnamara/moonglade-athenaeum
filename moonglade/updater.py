@@ -2,8 +2,8 @@
 moonglade/updater.py
 ====================
 The auto-updater: the release check against GitHub (numeric version tuples, real vX.Y.Z tags
-only), the hourly announcement tick, and the one-click apply (git pull, a requirements install
-when they changed, a restart). Notify and apply, never silent. Moved verbatim out of
+only), the hourly announcement tick, and the one-click apply (a fast-forward to the announced release
+tag, a requirements install when they changed, a restart). Notify and apply, never silent. Moved verbatim out of
 moonglade/gallery.py in the 3.21.0 split (phase 2).
 
 The one name it needs from the gallery (the Windows no-console-window flag) is imported from
@@ -307,22 +307,61 @@ def split_porcelain(dirty):
     return tracked, untracked
 
 
-def incoming_paths():
+def announced_release():
+    """The release tag the update modal offered (vX.Y.Z), or "" when none is known. Read from
+    what the last check already found -- the standing announcement, else the cached check --
+    and NEVER fetched here: the apply moves to exactly the release that was announced, so
+    "what was offered" and "what ran" are the same thing (app security review 2026-11-19,
+    finding 10)."""
+    for p in ((_update_notice.get("payload") or {}), (_update_cache.get("payload") or {})):
+        tag = str(p.get("latest") or "")
+        if p.get("behind") and _VERSION_TAG_RE.match(tag):
+            return tag
+    return ""
+
+
+def release_commit(tag):
+    """(commit sha, "") for release tag `tag` in this checkout, or (None, why-not).
+
+    Only a real vX.Y.Z tag is ever looked up (nothing else reaches a git command line). The
+    tag usually arrives with the fetch (git follows tags on the branch it fetches); when it
+    did not, it is fetched by its own exact name once."""
+    if not _VERSION_TAG_RE.match(str(tag or "")):
+        return None, "not a release tag: %r" % (str(tag or "")[:40],)
+    ref = "refs/tags/%s^{commit}" % tag
+    rc, out = _git(["rev-parse", "--verify", "--quiet", ref])
+    if rc != 0 or not out.strip():
+        rc, fout = _git(["fetch", "--quiet", "origin",
+                         "refs/tags/%s:refs/tags/%s" % (tag, tag)], timeout=UPDATE_FETCH_TIMEOUT)
+        if rc != 0:
+            return None, fout or ("the release tag %s isn't on GitHub" % tag)
+        rc, out = _git(["rev-parse", "--verify", "--quiet", ref])
+        if rc != 0 or not out.strip():
+            return None, "the release tag %s isn't in this checkout" % tag
+    return out.strip().splitlines()[-1].strip(), ""
+
+
+def incoming_paths(tag=None):
     """The paths the pending update would write: (set, "") or (None, why-not).
 
-    Measured against the SAME ref `git pull --ff-only` will merge -- the branch's
-    configured upstream, `@{u}` -- and only after FETCHING it, because an un-fetched
-    remote-tracking ref is a picture of whenever this checkout last looked. Reading a
-    stale one would answer "nothing is incoming" and make the untracked check below
+    Measured against the SAME commit the apply will move to -- release tag `tag`'s commit
+    (run_update), or the branch's upstream `@{u}` when no tag is named -- and only after
+    FETCHING, because an un-fetched ref is a picture of whenever this checkout last looked.
+    Reading a stale one would answer "nothing is incoming" and make the untracked check below
     silently permissive; a pre-check that exists to give a better answer than git's own
     error has to be right about what is actually in the way.
 
-    The fetch writes nothing but remote-tracking refs -- precisely what the pull is about
-    to do anyway, one round trip earlier -- so it cannot change this install."""
+    The fetch writes nothing but remote-tracking refs and tags -- precisely what the apply is
+    about to fetch anyway, one round trip earlier -- so it cannot change this install."""
     rc, out = _git(["fetch", "--quiet"], timeout=UPDATE_FETCH_TIMEOUT)
     if rc != 0:
         return None, out
-    rc, out = _git(["diff", "--name-only", "HEAD..@{u}"])
+    target = "@{u}"
+    if tag:
+        target, why = release_commit(tag)
+        if target is None:
+            return None, why
+    rc, out = _git(["diff", "--name-only", "HEAD.." + target])
     if rc != 0:
         return None, out
     return {p.strip() for p in out.splitlines() if p.strip()}, ""
@@ -354,15 +393,24 @@ def untracked_in_the_way(untracked, incoming):
     return hits
 
 
-def run_update(restart_fn, pip_fn=None, log_fn=None):
-    """Pull, install deps if they moved, then restart. Runs on its own thread, OFF the
-    panel-job slot, so the restart it asks for is not refused by the job it is itself.
+def run_update(restart_fn, tag, pip_fn=None, log_fn=None):
+    """Move to release `tag`, install deps if they moved, then restart. Runs on its own
+    thread, OFF the panel-job slot, so the restart it asks for is not refused by the job it
+    is itself.
+
+    THE TARGET IS THE ANNOUNCED RELEASE TAG (app security review 2026-11-19, finding 10),
+    not master's head: fetch, resolve the tag to its commit (release_commit), then
+    `git merge --ff-only <that commit>` -- fast-forward ONLY, so a checkout on master behind
+    the tag moves exactly to the tagged commit, and one whose history does not lead to it
+    (a local commit, a rewritten branch) is refused by git with nothing changed. Master may
+    then sit behind origin/master by whatever was merged after the tag; the next update
+    fast-forwards from there the same way, and a plain `git pull` still works.
 
     Every failure stops the sequence and records the tool's own words verbatim -- a git
     or pip failure is the one thing the person watching actually needs to read, and
     paraphrasing it would cost them the fix.
 
-    A FAILED PULL changes nothing: --ff-only either fast-forwards or refuses. A FAILED
+    A FAILED MOVE changes nothing: --ff-only either fast-forwards or refuses. A FAILED
     PIP is the dangerous one, and it ROLLS BACK: the tree was verified free of TRACKED
     edits before the pull (the apply route refuses those), and `reset --hard` does not
     touch untracked files, so `git reset --hard <old head>` loses nothing and returns the
@@ -386,9 +434,21 @@ def run_update(restart_fn, pip_fn=None, log_fn=None):
     rc, head_out = _git(["rev-parse", "HEAD"])
     old_head = head_out.strip() if rc == 0 else ""
     _set_update_state("pulling")
-    rc, out = _git(["pull", "--ff-only"])
+    rc, out = _git(["fetch", "--quiet"], timeout=UPDATE_FETCH_TIMEOUT)
     if rc != 0:
-        msg = "git pull failed:\n" + out[:600]
+        msg = "git fetch failed:\n" + out[:600]
+        _set_update_state("failed", msg)
+        _record("failed", msg)
+        return False
+    commit, why = release_commit(tag)
+    if commit is None:
+        msg = "couldn't find release %s:\n%s" % (str(tag)[:40], why[:600])
+        _set_update_state("failed", msg)
+        _record("failed", msg)
+        return False
+    rc, out = _git(["merge", "--ff-only", commit])
+    if rc != 0:
+        msg = "git couldn't move this checkout to %s:\n%s" % (tag, out[:600])
         _set_update_state("failed", msg)
         _record("failed", msg)
         return False

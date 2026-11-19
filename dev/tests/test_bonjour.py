@@ -166,7 +166,8 @@ def test_main_wires_bonjour_gated_on_lan_bind_with_a_goodbye():
     import pathlib
     src = pathlib.Path("moonglade/gallery.py").read_text(encoding="utf-8")
     assert '_srv["bonjour_enabled"] and moonglade_bonjour.is_lan_bind(args.host)' in src
-    assert '_bonjour.start(_srv["bonjour_name"], args.port, scheme)' in src
+    # lan_scheme: the scheme OTHER devices use (https:// once moonglade.tls is on, 2026-11-19)
+    assert '_bonjour.start(_srv["bonjour_name"], args.port, lan_scheme)' in src
     assert 'b = _SERVER_CONTROL.get("bonjour")' in src and "b.stop()" in src
     assert src.index("_bonjour.start(") < src.index("srv.serve_forever()"),         "register must happen before the serve loop blocks"
     assert src.index("srv = _make_server(args.host") < src.index("_bonjour = moonglade_bonjour"),         "register must happen after make_server has bound the socket"

@@ -254,6 +254,7 @@ SOURCE_READERS = {
     "tests/test_read_only.py": ("moonglade.backup",),
     "tests/test_module_seams.py": ("moonglade.backup", "moonglade.gallery"),   # every module
     "tests/test_rest_delete_and_renewal.py": ("moonglade.backup", "moonglade.gallery"),
+    "tests/test_security_review_fixes.py": ("moonglade.gallery",),
     "tests/test_server_stop_record.py": ("moonglade.gallery",),
     "tests/test_settings_store.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_setup_prepare.py": ("moonglade.backup", "moonglade.gallery"),
@@ -803,6 +804,20 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_telemetry.py', 'moonglade.pixai_client'),
     ('tests/test_telemetry.py', 'moonglade.media_tools'),
     ('tests/test_telemetry.py', 'moonglade.mirror'),
+    # 2026-11-19 security review: it reads gallery.py for main()'s startup secrets sweep and
+    # three upload routes' named caps -- names that live in gallery.py itself, none moved.
+    ('tests/test_security_review_fixes.py', 'moonglade.about'),
+    ('tests/test_security_review_fixes.py', 'moonglade.account_prefs'),
+    ('tests/test_security_review_fixes.py', 'moonglade.achievements'),
+    ('tests/test_security_review_fixes.py', 'moonglade.branding'),
+    ('tests/test_security_review_fixes.py', 'moonglade.contest_sync'),
+    ('tests/test_security_review_fixes.py', 'moonglade.dupes'),
+    ('tests/test_security_review_fixes.py', 'moonglade.health'),
+    ('tests/test_security_review_fixes.py', 'moonglade.living'),
+    ('tests/test_security_review_fixes.py', 'moonglade.scan'),
+    ('tests/test_security_review_fixes.py', 'moonglade.series'),
+    ('tests/test_security_review_fixes.py', 'moonglade.telemetry'),
+    ('tests/test_security_review_fixes.py', 'moonglade.updater'),
 }
 
 

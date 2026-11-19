@@ -62,6 +62,7 @@ from moonglade import mirror as _mirror
 from moonglade import organize as _organize
 from moonglade import paths as _paths
 from moonglade import pixai_client as _pixai_client
+from moonglade import secure_files as _secure_files
 from moonglade import telemetry as _telemetry
 from moonglade.gallery import (CATALOG_FIELDS, init_db, migrate, load_catalog,
                             save_catalog, _db_is_empty, rows_for_media_ids,
@@ -332,9 +333,14 @@ def _save_config(cfg):
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
+        # Secrets at rest (app security review 2026-11-19, finding 5): the API key, the
+        # session signing key and the account hashes are this user's alone. Set on the temp
+        # file, so the replace never exposes the new copy, and again on the result.
+        _secure_files.restrict_to_owner(tmp)
         for attempt in range(5):
             try:
                 os.replace(tmp, path)
+                _secure_files.restrict_to_owner(path)
                 return
             except PermissionError:
                 # Windows only: an AV scanner or indexer can transiently hold the

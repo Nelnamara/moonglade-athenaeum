@@ -26,7 +26,7 @@ it, and `python -m pip` installs for the `python` you typed.
 | `truststore` | fixes HTTPS cert errors behind corporate proxies / AV (`requirements.txt` installs it on Python 3.10+) |
 | `numpy` | the "more like this" picture search (`moonglade/similar.py`) |
 | `zeroconf` | the Bonjour name on your network, so devices can find Moonglade (the app runs without it, just not announced) |
-| `cryptography` (**not** in `requirements.txt` — `pip install cryptography` separately) | optional — only for the gallery's `--https` mode |
+| `cryptography` | the gallery's HTTPS certificate for your other devices ([Using HTTPS](Gallery#using-https)); without it they reach Moonglade over plain `http://` |
 | `ffmpeg` (on PATH) | optional — posters for backed-up/imported videos; required for The Loom's video export, last-frame splice, re-anchor and music bed, and it cuts the frames the Loom's continuity ribbon shows |
 | `pytest`, `pytest-mock`, `pytest-cov`, `pytest-xdist` | dev only — running the test suite (`requirements-dev.txt`, which includes `requirements.txt`) |
 

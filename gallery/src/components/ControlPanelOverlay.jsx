@@ -145,8 +145,11 @@ function ledgerResult(j) {
    drags the link to the bookmarks bar and clicks it on a signed-in pixai.art tab, which hands
    that tab's sign-in to this Moonglade's /mirror/connect page. The link is the old Connect
    button's own chip (.mgbr-connect), in its place. See moonglade/mirror.py's helpers + the
-   submit-path invariants. */
-function MirrorTile() {
+   submit-path invariants.
+   Disconnect (2026-11-19, app security review finding 7): a text control in the session block,
+   on this PC only (the route is LOCALHOST, like the switch), shown while a sign-in is stored.
+   It deletes the stored sign-in, stops its renewal and turns the switch off. */
+function MirrorTile({ isLocal, csrf }) {
   const [st, setSt] = useState(null);      // {enabled, connected, days_left} — null until loaded
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -188,6 +191,15 @@ function MirrorTile() {
     setBusy(false);
     if (d && d.error) { setMsg(errLine(d.error)); return; }
     await refresh();                        // reflect the real persisted flag
+  };
+  const disconnect = async () => {
+    if (!st || busy) return;
+    setBusy(true); setMsg("");
+    const d = await apiPost("/api/mirror/disconnect", { csrf: csrf || "" });
+    setBusy(false);
+    if (d && d.error) { setMsg(errLine(d.error)); if (!d.ok) return; }
+    else setMsg("Disconnected. Moonglade no longer keeps or renews that PixAI sign-in; to end it on PixAI too, sign it out on pixai.art's sessions page.");
+    await refresh();
   };
   // Clicked here rather than dragged: it would run on this page, not on pixai.art.
   const bookmarkClick = (e) => {
@@ -246,6 +258,10 @@ function MirrorTile() {
           <div className="mgbr-session">
             <div className="mgbr-session-lbl">Web session</div>
             <div className={"mgbr-session-sub " + ringMod}>{sessionSub}</div>
+            {isLocal && st && st.connected && (
+              <button type="button" className="mgcp-useraction" onClick={disconnect} disabled={busy}
+                title="Forget the stored PixAI sign-in and stop renewing it">Disconnect</button>
+            )}
           </div>
         </div>
 
@@ -1074,7 +1090,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                       <button type="button" className="mgcp-smallchip">Open…</button>
                     </div>
 
-                    <MirrorTile />
+                    <MirrorTile isLocal={isLocal} csrf={summary.csrf} />
 
                     <div className="mgcp-tile mgcp-tile3">
                       <div className="mgcp-mkick">Catalog &amp; files</div>
@@ -2058,6 +2074,23 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
     if (!d.error) { setPwNew(""); setPwCurrent(""); }
   };
 
+  /* Sign out all devices (2026-11-19, app security review finding 6): the route Log Out already
+     uses, with scope "everywhere" -- every cookie for this account stops working, this one
+     included, so it ends like Log Out does: caches purged, then the sign-in page. */
+  const [allOutBusy, setAllOutBusy] = useState(false);
+  const signOutEverywhere = async () => {
+    if (allOutBusy) return;
+    setAllOutBusy(true);
+    const d = await apiPost("/api/logout", { csrf: summary.csrf || "", scope: "everywhere" });
+    if (d && d.error) { setAllOutBusy(false); setPwMsg(errLine(d.error)); return; }
+    const go = () => { window.location.href = "/login"; };
+    if ("caches" in window) {
+      caches.keys().then((ks) => Promise.all(ks.map((k) => caches.delete(k)))).catch(() => {}).then(go);
+    } else {
+      go();
+    }
+  };
+
   const resetOtherPassword = async (username) => {
     if (resetBusy || !resetNew) return;
     setResetBusy(true); setResetMsg("");
@@ -2085,6 +2118,13 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
               <div className="mgcp-userrow">
                 <b>{u.username}</b>
                 {u.username === summary.current_username && <span>(you)</span>}
+                {u.username === summary.current_username && (
+                  <button type="button" className="mgcp-useraction" disabled={allOutBusy}
+                    title="Signs this account out on every device, this one included"
+                    onClick={signOutEverywhere}>
+                    {allOutBusy ? "signing out…" : "sign out all devices"}
+                  </button>
+                )}
                 {u.username !== summary.current_username && (
                   <>
                     {isLocal && (

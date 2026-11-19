@@ -27,6 +27,7 @@ except ImportError:
     sys.exit("Missing dependency. Run:  pip install requests")
 
 from moonglade import paths as _paths
+from moonglade import secure_files as _secure
 # The Mirror renews its website session the way pixai.art does: POST /v2/auth/refresh-token, no body
 # (the GET recorded on 2026-08-17 answers 404 today). PixAI's contract (09-26 bundle): "Requires an
 # existing session (bearer token or session cookie). The token is returned in the body and also written
@@ -371,7 +372,9 @@ def save_mirror_state(state):
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(record, f, indent=2)
+        _secure.restrict_to_owner(tmp)                 # secrets at rest (review 2026-11-19, #5)
         os.replace(tmp, p)
+        _secure.restrict_to_owner(p)
         return True
     except OSError:
         try:
@@ -380,6 +383,26 @@ def save_mirror_state(state):
         except OSError:
             pass
         return False
+
+
+def disconnect_mirror():
+    """Forget the stored PixAI sign-in (the Mirror tile's Disconnect, app security review
+    2026-11-19 finding 7): delete local/mirror_session.json and clear the renewal state, so
+    nothing renews it again. Under _mirror_lock, the lock every renewal and every Connect saves
+    under, so a renewal in flight either finishes first (and its fresh token is then deleted)
+    or finds no token. Returns True when no stored sign-in is left. Never raises, never logs a
+    value. PixAI itself still honours the sign-in until it expires or is ended on PixAI's own
+    sessions page; this only makes Moonglade let go of it."""
+    with _mirror_lock:
+        p = _mirror_state_path()
+        try:
+            p.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return False
+        _mirror_renewal_reset()
+    return True
 
 
 def mirror_enabled():

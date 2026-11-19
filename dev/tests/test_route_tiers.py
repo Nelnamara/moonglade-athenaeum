@@ -245,6 +245,7 @@ TIER_SNAPSHOT = [
     "/api/loom/submit-status [GET] LOGIN",
     "/api/loom/video-duration [GET] LOGIN",
     "/api/mirror/connect-token [POST] LOGIN",
+    "/api/mirror/disconnect [POST] LOCALHOST",
     "/api/mirror/enable [POST] LOCALHOST",
     "/api/mirror/status [GET] LOGIN",
     "/api/model-saved/old [GET] LOGIN",
