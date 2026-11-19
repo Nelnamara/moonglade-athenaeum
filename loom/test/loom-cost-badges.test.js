@@ -74,10 +74,10 @@ test("confirmSpend's window.confirm gate is UNCHANGED and still runs at submit t
   // (quotedSendBody), so one that went with no ask because it was FREE is sent expect_free.
   assert.match(src, /const body = buildImgGenBody\(imgModel, imgLoras, imgAdv, prompt\);\s*\n\s*const ok = await confirmSpend\(body, `Generate a reference image[^\n]*\n\s*if \(!ok\) return;/,
     "genImage must still gate its real submit on confirmSpend, pricing the exact body it submits");
-  assert.match(src, /body: JSON\.stringify\(quotedSendBody\(body, ok\.quote\)\) \}\);/,
-    "genImage and runGen must send the quote's verdict with the body they priced");
-  assert.equal((src.match(/JSON\.stringify\(quotedSendBody\(body, ok\.quote\)\)/g) || []).length, 2,
-    "both Loom sends (genImage, runGen) carry it");
+  assert.match(src, /body: JSON\.stringify\(\{ \.\.\.quotedSendBody\(body, ok\.quote\), \.\.\.loomTargetOf\(c\.id\) \}\) \}\);/,
+    "genImage must send the quote's verdict with the body it priced, and its board");
+  assert.match(src, /body: JSON\.stringify\(\{ \.\.\.quotedSendBody\(body, ok\.quote\), \.\.\.loomTargetOf\(cardId\) \}\) \}\);/,
+    "runGen (Edit, Reference, Fix) must send the quote's verdict, and its board");
   assert.match(src, /if \(pr && pr\.free\) return \{ quote: pr \};/,
     "a FREE quote, sent with no ask, hands that quote to the send");
   // The trailing `jobLabel` param (2026-07-24 Job Tracker registration fix -- see

@@ -15906,6 +15906,28 @@ def create_app(out_dir: Path):
         the single-send record or PixAI."""
         return bool(body.pop("expect_free", False)) if isinstance(body, dict) else False
 
+    def _pop_loom_target(body):
+        """The Loom's {board_id, card_id} on a send from one of its tabs (Image, Edit,
+        Reference, Fix), popped so it never reaches the builder or PixAI. (board, card) or
+        None; a card id that is not one is kept as "" (the board still owns the send)."""
+        t = body.pop("loom_target", None) if isinstance(body, dict) else None
+        if not isinstance(t, dict):
+            return None
+        b, c = str(t.get("board_id") or ""), str(t.get("card_id") or "")
+        if not _LOOM_ID_RE.match(b):
+            return None
+        return (b, c if _LOOM_ID_RE.match(c) else "")
+
+    def _record_loom_send(target, task_id, params, kind):
+        """A Loom tab's send into its board's send record (the one source of the board's
+        "spent" figure): the task, 0 when a free card was attached, else the catalog's charge
+        once known. Fail-soft, and a no-op for any send that did not come from a board."""
+        if not target or not task_id:
+            return
+        _loom_send_note(str(session.get("user") or ""), board=target[0], card=target[1],
+                        task_id=str(task_id), submit_id=None, kind=kind,
+                        cost=0 if (params or {}).get("kaisuukenId") else None)
+
     def _quoted_free_hooks(core, req, expect_free):
         """core.submit's before_send for a send quoted FREE: runs after the card step, before
         the one mutation, and refuses when no card was attached. An Unlimited Mode request is
@@ -15981,6 +16003,7 @@ def create_app(out_dir: Path):
             core, session = _gen_session()
             body = request.get_json(silent=True) or {}
             expect_free = _pop_expect_free(body)
+            loom_target = _pop_loom_target(body)
             # Session M (BUILD-w5-m review F2): this route is a SINGLE send. More than one
             # generation goes through the confirm (/api/generate/plan -> /run), so a count
             # other than 1 is refused here -- never clamped -- whoever sent it (a stale
@@ -16038,6 +16061,7 @@ def create_app(out_dir: Path):
                                              len(req.lora_version_ids) - _cap)}), 400
             task_id = core.submit(session, req,
                                   **_quoted_free_hooks(core, req, expect_free))["task_id"]
+            _record_loom_send(loom_target, task_id, req.parameters, "image")
             if req.unlimited:
                 # The lane mark on the job, written by the server rather than trusted from the
                 # client's own registration, so the one-at-a-time rule above can read it.
@@ -16444,6 +16468,7 @@ def create_app(out_dir: Path):
         # A single send through this road (a template prompt) carries what its badge showed,
         # as /api/generate does (2026-11-18): popped here, before anything reads the body.
         expect_free = _pop_expect_free(body)
+        loom_target = _pop_loom_target(body)
         from moonglade import backup as core
         try:
             core._check_read_only(core._SUBMIT_ACTION_DEFAULT)
@@ -16488,12 +16513,13 @@ def create_app(out_dir: Path):
                 return jsonify({"error": "That run id is taken — nothing was sent."}), 200
             _run_inflight.update(run_id=run_id, account=user, done=0, total=0)
         try:
-            return _run_send(core, store, run_id, body, user, expect_free=expect_free)
+            return _run_send(core, store, run_id, body, user, expect_free=expect_free,
+                             loom_target=loom_target)
         finally:
             with _run_lock:
                 _run_inflight.clear()
 
-    def _run_send(core, store, run_id, body, user, expect_free=False):
+    def _run_send(core, store, run_id, body, user, expect_free=False, loom_target=None):
         from moonglade import runs
         try:
             # Step 5, local: expand and count before any network call.
@@ -16582,6 +16608,9 @@ def create_app(out_dir: Path):
                          source="web")
                 store.set_job(run_id, cell, state="sent", task_id=task_id,
                               request=_strip_request(request_), card=int(bool(card)))
+                # A run sent from a Loom board is that board's spend, job by job.
+                _record_loom_send(loom_target, task_id,
+                                  {"kaisuukenId": "card"} if card else {}, "image")
 
             def failed(self, cell, state, error, request_):
                 store.set_job(run_id, cell, state=state, error=error,
@@ -16729,6 +16758,7 @@ def create_app(out_dir: Path):
             core, gsession = _gen_session()
             p = request.get_json(silent=True) or {}
             expect_free = _pop_expect_free(p)
+            loom_target = _pop_loom_target(p)
             req = core.build_request(p, mode="edit", user=user,
                                      resolve=_submit_resolver(core, gsession))
             params = req.parameters          # bound for _log_gen_failure's locals().get()
@@ -16738,6 +16768,7 @@ def create_app(out_dir: Path):
                 return jsonify({"error": "describe the edit"}), 400
             task_id = core.submit(gsession, req,
                                   **_quoted_free_hooks(core, req, expect_free))["task_id"]
+            _record_loom_send(loom_target, task_id, req.parameters, "edit")
             # (edits is counted from the catalog's edit rows since 2026-10-02.)
             _telemetry.telem_set_add("tools", "edit", out_dir=out_dir)
             return jsonify({"task_id": task_id})
@@ -16785,7 +16816,7 @@ def create_app(out_dir: Path):
     # stable (source- AND priority-independent, verified live 2026-08-18), so a slab mount
     # need not be a dozen live REST calls. Only a REAL (mirror-reached) result is cached; a
     # null-priced result is not, so it retries once the mirror is back. TTL in seconds.
-    _enh_price_cache = {"at": 0.0, "presets": None}
+    _enh_price_cache = {"at": 0.0, "presets": None, "gen": 0}
     _ENH_PRICE_TTL = 3600.0
 
     @app.route("/api/enhance/presets")
@@ -16806,6 +16837,9 @@ def create_app(out_dir: Path):
         cached = _enh_price_cache["presets"]
         if cached is not None and (now - _enh_price_cache["at"]) < _ENH_PRICE_TTL:
             return jsonify({"presets": cached})
+        # The cache's generation when this read began: a send or refusal that lands while it
+        # runs bumps it, and this read's (older) answer is then never cached.
+        gen0 = _enh_price_cache["gen"]
         # Stored session (no bootstrap) -- as the gate uses -- and only while the Mirror is ON,
         # like the scene routes: make_mirror_session can renew the token, and nothing may renew
         # it as a side effect while the owner has the Mirror switched off (#71).
@@ -16823,7 +16857,8 @@ def create_app(out_dir: Path):
                     row["price"] = core.price_task(s, params)
                     # card_covers, the one coverage verdict the send reads too (2026-11-18): a
                     # card that matched but does not cover the job is not "free".
-                    row["free_card"] = core.card_covers(core.match_kaisuuken(s, params))
+                    row["free_card"] = core.card_covers(
+                        core.match_kaisuuken(s, params, enrich=True))
                 except Exception:
                     row["price"] = None
             return row
@@ -16840,7 +16875,8 @@ def create_app(out_dir: Path):
                 out = list(ex.map(_row, core.BRIDGE_ENHANCE_PRESETS))
         else:
             out = [_row(pr) for pr in core.BRIDGE_ENHANCE_PRESETS]
-        if s is not None and all(r["price"] is not None for r in out):   # cache only a fully-real result
+        if s is not None and all(r["price"] is not None for r in out) \
+                and _enh_price_cache["gen"] == gen0:     # cache only a fully-real, current result
             _enh_price_cache["presets"] = out
             _enh_price_cache["at"] = now
         return jsonify({"presets": out})
@@ -16888,6 +16924,7 @@ def create_app(out_dir: Path):
             # the presets' cached verdicts are dropped, so the tab's next read asks PixAI
             # again instead of offering "free" for an hour (2026-11-18).
             _enh_price_cache["presets"] = None
+            _enh_price_cache["gen"] += 1
             task_id = core.submit(session, req,
                                   **_quoted_free_hooks(core, req, expect_free))["task_id"]
             # [BLOCKER] Telemetry is DEFERRED, not fired here: submit_generation returns the id at
@@ -17093,6 +17130,7 @@ def create_app(out_dir: Path):
         try:
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
+            loom_target = _pop_loom_target(p)
             # READ_ONLY first: the submit resolver below uploads the local file (a network
             # call), so the refusal has to come before it, not only inside submit_fixer.
             core._check_read_only(core._SUBMIT_ACTIONS["fix"])
@@ -17115,6 +17153,7 @@ def create_app(out_dir: Path):
             # "which boxes did we actually ask about" is half the diagnosis.
             fix_params = {"mediaId": req.media_id, "boxes": req.boxes}
             task_id = core.submit(session, req)["task_id"]
+            _record_loom_send(loom_target, task_id, req.parameters, "fix")
             _telemetry.telem_set_add("tools", "fix", out_dir=out_dir)   # Full Toolbox
             return jsonify({"task_id": task_id})
         except Exception as e:

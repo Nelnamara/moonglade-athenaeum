@@ -9719,6 +9719,10 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     setTimeout(tick, 2500);
   };
   const pollImg = (cardId, tid) => pollTaskWithCeiling(tid, setGenImgState, cardId);
+  // The board (and shot) a tab's send comes from: the server records the send in that
+  // board's send record, the one source of its "spent" figure (2026-11-18).
+  const loomTargetOf = (cardId) => ({ loom_target: {
+    board_id: String((activeIdRef && activeIdRef.current) || activeId || ""), card_id: String(cardId || "") } });
   // Review S2 (Session M): the Image tab's ×2-4, or a prompt using the template syntax -- which
   // /api/generate refuses -- goes through the run road, as the Generate dock's does: /plan, this
   // file's window.confirm carrying the server's own quote, then ONE /run with the plan's
@@ -9728,7 +9732,7 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
   const genImageRun = async (entry, body) => {
     const c = entry.c;
     const label = `Generate ${body.count > 1 ? body.count + " reference images" : "a reference image"} for ${c.title || "this shot"}?`;
-    const out = await sendImgRun(body, label, LOOM_RUN_DEPS, { key: c.id,
+    const out = await sendImgRun(body, label, LOOM_RUN_DEPS, { key: c.id, loomTarget: loomTargetOf(c.id).loom_target,
       onSending: () => setGenImgState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting…" } })) });
     if (!out.ok) { if (out.error) setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: out.error } })); return; }
     const jobLabel = "Image · " + entry.code + " · " + (c.title || "untitled");
@@ -9756,7 +9760,7 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     setGenImgState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting…" } }));
     try {
       const r = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(quotedSendBody(body, ok.quote)) });
+        body: JSON.stringify({ ...quotedSendBody(body, ok.quote), ...loomTargetOf(c.id) }) });
       const d = await r.json();
       if (d.error || !d.task_id) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
       // Register this submission in the shared Job Tracker (notify/jobs.js -> /api/jobs)
@@ -9810,7 +9814,7 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     const poll = (tid) => pollTaskWithCeiling(tid, setState, cardId);
     try {
       const r = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(quotedSendBody(body, ok.quote)) });
+        body: JSON.stringify({ ...quotedSendBody(body, ok.quote), ...loomTargetOf(cardId) }) });
       const d = await r.json();
       if (d.error || !d.task_id) { setState((s) => ({ ...s, [cardId]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
       // Same register-ONLY call, same reasoning, as genImage above -- this helper is the whole

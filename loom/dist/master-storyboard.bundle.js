@@ -13371,8 +13371,9 @@ ${"=".repeat(48)}
       if (!plan || plan.error) return { ok: false, error: plan && plan.error || "Couldn't price this \u2014 nothing was sent." };
       if (plan.read_only) return { ok: false, error: "READ_ONLY is on in config.json, so nothing can be sent." };
       const multi = Number(plan.count) > 1;
-      const freeSingle = !multi && plan.total === 0;
-      if (!freeSingle && !deps.confirm(runConfirmText(plan, label))) return { ok: false };
+      const freeSingle = !multi && !plan.unlimited && Number(plan.covered) >= 1;
+      const laneFree = !multi && !!plan.unlimited && plan.total === 0;
+      if (!freeSingle && !laneFree && !deps.confirm(runConfirmText(plan, label))) return { ok: false };
       if (opts.onSending) opts.onSending();
       const runId = opts.runId || newRunId();
       const ans = await deps.run({
@@ -13380,7 +13381,9 @@ ${"=".repeat(48)}
         csrf,
         run_id: runId,
         ...multi ? { ack: ackOf(plan) } : {},
-        ...freeSingle ? { expect_free: true } : {}
+        ...freeSingle ? { expect_free: true } : {},
+        // The board this run is sent from, so its board's send record counts every job.
+        ...opts.loomTarget ? { loom_target: opts.loomTarget } : {}
       });
       if (!ans || ans.lost) return { ok: false, error: LOST_POST_WORDS };
       const d = ans.data || {};
@@ -21627,11 +21630,16 @@ Generate anyway?`)) return { go: false };
       setTimeout(tick, 2500);
     };
     const pollImg = (cardId, tid) => pollTaskWithCeiling(tid, setGenImgState, cardId);
+    const loomTargetOf = (cardId) => ({ loom_target: {
+      board_id: String(activeIdRef && activeIdRef.current || activeId || ""),
+      card_id: String(cardId || "")
+    } });
     const genImageRun = async (entry, body) => {
       const c = entry.c;
       const label = `Generate ${body.count > 1 ? body.count + " reference images" : "a reference image"} for ${c.title || "this shot"}?`;
       const out = await sendImgRun(body, label, LOOM_RUN_DEPS, {
         key: c.id,
+        loomTarget: loomTargetOf(c.id).loom_target,
         onSending: () => setGenImgState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting\u2026" } }))
       });
       if (!out.ok) {
@@ -21672,7 +21680,7 @@ Generate anyway?`)) return { go: false };
         const r = await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(quotedSendBody(body, ok.quote))
+          body: JSON.stringify({ ...quotedSendBody(body, ok.quote), ...loomTargetOf(c.id) })
         });
         const d = await r.json();
         if (d.error || !d.task_id) {
@@ -21706,7 +21714,7 @@ Generate anyway?`)) return { go: false };
         const r = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(quotedSendBody(body, ok.quote))
+          body: JSON.stringify({ ...quotedSendBody(body, ok.quote), ...loomTargetOf(cardId) })
         });
         const d = await r.json();
         if (d.error || !d.task_id) {
