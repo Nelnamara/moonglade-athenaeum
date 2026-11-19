@@ -149,9 +149,9 @@ function ledgerResult(j) {
    button's own chip (.mgbr-connect), in its place. See moonglade/mirror.py's helpers + the
    submit-path invariants.
    Disconnect (2026-11-19, app security review finding 7): a text control in the session block,
-   on this PC only (the route is LOCALHOST, like the switch), shown while a sign-in is stored.
+   on the home network (the route is LOGIN plus a home-network check, the reach of Connect from PixAI), shown while a sign-in is stored.
    It deletes the stored sign-in, stops its renewal and turns the switch off. */
-function MirrorTile({ isLocal, csrf }) {
+function MirrorTile({ isLocal, csrf, homeNet }) {
   const [st, setSt] = useState(null);      // {enabled, connected, days_left} — null until loaded
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -202,6 +202,17 @@ function MirrorTile({ isLocal, csrf }) {
     if (d && d.error) { setMsg(errLine(d.error)); if (!d.ok) return; }
     else setMsg("Disconnected. Moonglade no longer keeps or renews that PixAI sign-in; to end it on PixAI too, sign it out on pixai.art's sessions page.");
     await refresh();
+  };
+  // One-click Connect: the server reads this PC's Chrome/Edge/Brave pixai.art sign-in and stores
+  // it only when it is the API key's own account.
+  const connect = async () => {
+    if (busy) return;
+    setBusy(true); setMsg("Reading this machine's browser session…");
+    const d = await apiPost("/api/mirror/connect", { csrf: csrf || "" });
+    setBusy(false);
+    if (!d || !d.ok) { setMsg(errLine((d && d.error) || "couldn't connect")); return; }
+    setMsg("Connected.");
+    await refresh();                        // re-read real status (enabled + connected + days)
   };
   // Clicked here rather than dragged: it would run on this page, not on pixai.art.
   const bookmarkClick = (e) => {
@@ -262,7 +273,7 @@ function MirrorTile({ isLocal, csrf }) {
           <div className="mgbr-session">
             <div className="mgbr-session-lbl">Web session</div>
             <div className={"mgbr-session-sub " + ringMod}>{sessionSub}</div>
-            {isLocal && st && st.connected && (
+            {homeNet && st && st.connected && (
               <button type="button" className="mgcp-useraction" onClick={disconnect} disabled={busy}
                 title="Forget the stored PixAI sign-in and stop renewing it">Disconnect</button>
             )}
@@ -272,6 +283,9 @@ function MirrorTile({ isLocal, csrf }) {
         <div className="mgbr-connectrow">
           <a ref={bookmarkRef} className={"mgbr-connect" + (armed ? " armed" : "")} draggable="true"
             onClick={bookmarkClick} title="Drag to your bookmarks bar">Connect from PixAI</a>
+          <button type="button" className={"mgbr-connect" + (armed ? " armed" : "")}
+            onClick={connect} disabled={busy}
+            title="Read the pixai.art sign-in from this PC's Chrome, Edge or Brave">↻ Connect</button>
           <div className="mgbr-jwtnote">Drag the <b>Connect from PixAI</b> button on the left up to your browser's bookmarks bar. Then open pixai.art, signed in, and click that bookmark.</div>
         </div>
         {msg && <div className={"mgbr-msg" + (lineIsErr(msg) ? " err" : "")}><MsgLine m={msg} /></div>}
@@ -1100,7 +1114,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                       <button type="button" className="mgcp-smallchip">Open…</button>
                     </div>
 
-                    <MirrorTile isLocal={isLocal} csrf={summary.csrf} />
+                    <MirrorTile isLocal={isLocal} csrf={summary.csrf} homeNet={!!summary.home_network} />
 
                     <div className="mgcp-tile mgcp-tile3">
                       <div className="mgcp-mkick">Catalog &amp; files</div>
