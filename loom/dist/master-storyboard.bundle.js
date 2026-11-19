@@ -6633,6 +6633,11 @@ ${"=".repeat(48)}
   var SEND_HOLD_MS = 6e4;
   var UNCLEAR_SEND_MSG = "PixAI may have started this. It was not sent again; check the Activity tray (or pixai.art) before sending it again.";
   var HELD_SEND_MSG = "The last one may still be starting, so this was not sent. Check the Activity tray (or pixai.art) before sending it again.";
+  function unclearText(d) {
+    if (d && d.held) return d.error || HELD_SEND_MSG;
+    const detail = d && typeof d.detail === "string" ? d.detail.trim() : "";
+    return detail ? UNCLEAR_SEND_MSG + " PixAI's answer: " + detail : UNCLEAR_SEND_MSG;
+  }
   function isUnclearAnswer(d) {
     return !!d && (d.unclear === true || d.state === "may_have_started");
   }
@@ -6705,7 +6710,7 @@ ${"=".repeat(48)}
     if (onAnswer) onAnswer({ threw: false, status, body: d });
     if (!journalled && isUnclearAnswer(d)) {
       holds.hold(key);
-      emit7({ kind: "err", text: d.held ? d.error || HELD_SEND_MSG : UNCLEAR_SEND_MSG });
+      emit7({ kind: "err", text: unclearText(d) });
       return null;
     }
     if (d.error || !d.task_id) {
@@ -21863,7 +21868,7 @@ Generate anyway?`)) return { go: false };
         const d = await r.json();
         if (isUnclearAnswer(d)) {
           sendHolds.hold(holdKey);
-          setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: d.held ? d.error || HELD_SEND_MSG : UNCLEAR_SEND_MSG } }));
+          setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: unclearText(d) } }));
           return;
         }
         if (d.error || !d.task_id) {
@@ -21908,7 +21913,7 @@ Generate anyway?`)) return { go: false };
         const d = await r.json();
         if (isUnclearAnswer(d)) {
           sendHolds.hold(holdKey);
-          setState((s) => ({ ...s, [cardId]: { phase: "error", msg: d.held ? d.error || HELD_SEND_MSG : UNCLEAR_SEND_MSG } }));
+          setState((s) => ({ ...s, [cardId]: { phase: "error", msg: unclearText(d) } }));
           return;
         }
         if (d.error || !d.task_id) {

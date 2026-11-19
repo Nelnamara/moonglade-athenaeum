@@ -933,7 +933,7 @@ def test_run_generate_still_self_heals_after_delegating_to_submit_generation(mon
         if "inferenceProfile" in params:
             raise core.graphql_error(
                 '[{"message": "unknown inferenceProfile \\"ultra\\" '
-                'for model type \\"SDXL_MODEL\\""}]')
+                'for model type \\"SDXL_MODEL\\""}]', code="BAD_REQUEST")
         return {"createGenerationTask": {"id": "T1"}}
 
     monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", fake_gql)
@@ -1006,7 +1006,7 @@ def test_submit_generation_retries_on_inferenceprofile_rejection(monkeypatch):
         if "inferenceProfile" in v["parameters"]:
             raise core.graphql_error(
                 '[{"message": "unknown inferenceProfile \\"ultra\\" '
-                'for model type \\"SDXL_MODEL\\""}]')
+                'for model type \\"SDXL_MODEL\\""}]', code="BAD_REQUEST")
         return {"createGenerationTask": {"id": "T10"}}
 
     monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", fake_gql)
@@ -1025,7 +1025,7 @@ def test_submit_generation_does_not_retry_unrelated_errors(monkeypatch):
     import pytest
 
     def fake_gql(s, q, v=None, retries=None):
-        raise core.graphql_error("something else entirely")
+        raise core.graphql_error("something else entirely", code="BAD_REQUEST")
 
     monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", fake_gql)
     with pytest.raises(core.PixAIError, match="something else entirely"):
@@ -1041,7 +1041,7 @@ def test_submit_generation_no_retry_when_param_absent(monkeypatch):
 
     def fake_gql(s, q, v=None, retries=None):
         calls.append(1)
-        raise core.graphql_error("inferenceProfile is unsupported here")
+        raise core.graphql_error("inferenceProfile is unsupported here", code="BAD_REQUEST")
 
     monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", fake_gql)
     with pytest.raises(core.PixAIError):

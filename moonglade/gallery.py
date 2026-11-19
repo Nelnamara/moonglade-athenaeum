@@ -14336,7 +14336,7 @@ def create_app(out_dir: Path):
                     category, training_task_id=dataset_task_id if reuse else "",
                     kaisuuken_id=(card["id"] if free_by_card else ""), config=cfg)
             except Exception as e:
-                if core.definite_refusal(e):
+                if core.definite_refusal(e, codes=core.TRAINING_CODES):
                     train_guard.basic_resolve(key, "refused")
                     return jsonify({"error": str(e)}), 502
                 train_guard.basic_resolve(key, "ambiguous")
@@ -14881,7 +14881,7 @@ def create_app(out_dir: Path):
             try:
                 status = core.start_training_captions(session, tid)
             except Exception as e:                      # noqa: BLE001
-                if core.definite_refusal(e):
+                if core.definite_refusal(e, codes=core.TRAINING_CODES):
                     train_guard.paid_resolve("caption", tid, "refused")
                     return _train_refusal(e)
                 train_guard.paid_resolve("caption", tid, "ambiguous")
@@ -14962,7 +14962,7 @@ def create_app(out_dir: Path):
             try:
                 status = core.submit_advanced_training(session, tid)
             except Exception as e:                      # noqa: BLE001
-                if core.definite_refusal(e):
+                if core.definite_refusal(e, codes=core.TRAINING_CODES):
                     train_guard.paid_resolve("submit", tid, "refused")
                     return _train_refusal(e)
                 train_guard.paid_resolve("submit", tid, "ambiguous")
@@ -15033,7 +15033,7 @@ def create_app(out_dir: Path):
             try:
                 res = core.retry_training(session, tid)
             except Exception as e:                      # noqa: BLE001
-                if core.definite_refusal(e):
+                if core.definite_refusal(e, codes=core.TRAINING_CODES):
                     train_guard.retry_resolve(tid, "refused")
                     return _train_refusal(e)
                 train_guard.retry_resolve(tid, "ambiguous")
@@ -16790,12 +16790,24 @@ def create_app(out_dir: Path):
         from moonglade import backup as core
         return core.spend_watch()
 
-    def _send_failed(where, exc, reached, params, key):
-        """A failed single send's answer. An unknown outcome is said plainly and held
-        (SEND_UNCLEAR_S); anything else carries `state` (not_sent | refused), the record is
-        dropped, and the caller's own refusal shape is returned as before. (response, msg,
-        state): response is None unless the outcome is unknown."""
+    def _send_failed(where, exc, reached, params, key, task_id=None):
+        """A failed single send's answer. An unknown outcome is said plainly, with PixAI's own
+        reason as `detail`, and held (SEND_UNCLEAR_S); anything else carries `state`
+        (not_sent | refused), the record is dropped, and the caller's own refusal shape is
+        returned as before. (response, msg, state): response is None unless the outcome is
+        unknown -- or the send had already SUCCEEDED (`task_id`) and only the bookkeeping
+        after it failed: then the failure is logged and the task id answered as the success
+        it is, so the job is registered and the record stays "sent"."""
         from moonglade import backup as core
+        if task_id:
+            try:
+                import logging as _logging
+                _logging.getLogger(__name__).error(
+                    "%s: task %s was created; recording it afterwards failed: %s: %s", where,
+                    task_id, type(exc).__name__, _redact_host_paths(str(exc))[:300])
+            except Exception:                                # noqa: BLE001
+                pass
+            return (jsonify({"task_id": task_id}), 200), "", "sent"
         msg = _log_gen_failure(where, exc, params)[:300]
         try:
             state = core.send_outcome(exc, bool(reached))
@@ -16803,7 +16815,11 @@ def create_app(out_dir: Path):
             state = "may_have_started" if reached else "not_sent"
         _send_settle(key, state)
         if state == "may_have_started":
-            return (jsonify({"error": _UNCLEAR_SEND, "detail": msg, "state": state,
+            try:
+                detail = _redact_host_paths(core.outcome_reason(exc))[:300]
+            except Exception:                                # noqa: BLE001
+                detail = msg
+            return (jsonify({"error": _UNCLEAR_SEND, "detail": detail, "state": state,
                              "unclear": True}), 200), msg, state
         return None, msg, state
 
@@ -16968,7 +16984,8 @@ def create_app(out_dir: Path):
             return jsonify(out)
         except Exception as e:
             unclear, msg, state = _send_failed("/api/generate", e, reached.v,
-                                               locals().get("params"), held_key)
+                                               locals().get("params"), held_key,
+                                               task_id=locals().get("task_id"))
             if unclear:
                 return unclear
             # Lane w2-recipes: PixAI's RECIPE_UNAVAILABLE / RECIPE_INCOMPATIBLE, structured
@@ -17670,7 +17687,8 @@ def create_app(out_dir: Path):
             return jsonify({"task_id": task_id})
         except Exception as e:
             unclear, msg, state = _send_failed("/api/edit", e, reached.v,
-                                               locals().get("params"), held_key)
+                                               locals().get("params"), held_key,
+                                               task_id=locals().get("task_id"))
             return unclear or (jsonify({"error": msg, "state": state}), 200)
 
     # PixAI's official colour palettes change rarely (26 on 2026-09-26); one read an hour is
@@ -17859,7 +17877,8 @@ def create_app(out_dir: Path):
             return jsonify({"task_id": task_id})
         except Exception as e:
             unclear, msg, state = _send_failed("/api/enhance", e, reached.v,
-                                               locals().get("params"), held_key)
+                                               locals().get("params"), held_key,
+                                               task_id=locals().get("task_id"))
             return unclear or (jsonify({"error": msg, "state": state}), 200)
 
     @app.route("/api/enhance/emotions")
@@ -17975,7 +17994,8 @@ def create_app(out_dir: Path):
                 "/api/scene", e, reached.v,
                 {"scene_id": locals().get("scene_id"),
                  "preset": (p.get("preset") if "p" in locals() else None),
-                 "media_ct": len(locals().get("media") or [])}, held_key)
+                 "media_ct": len(locals().get("media") or [])}, held_key,
+                task_id=locals().get("task_id"))
             return unclear or (jsonify({"error": msg, "state": state}), 200)
 
     # One Fix at a time (#93 review F4). Every Fix spends, and the clients' own gates (one in
@@ -18076,7 +18096,8 @@ def create_app(out_dir: Path):
             # classifier (kept unless the Fix is known to have cost nothing) and answers an
             # unknown outcome as "may have started" (3.21.2, L1/L2).
             unclear, msg, state = _send_failed("/api/fix", e, reached.v,
-                                               locals().get("fix_params"), fix_key)
+                                               locals().get("fix_params"), fix_key,
+                                               task_id=locals().get("task_id"))
             return unclear or (jsonify({"error": msg, "state": state}), 200)
 
     # --- The Loom (Seedance storyboard) -------------------------------------
@@ -20240,8 +20261,19 @@ __DESIGN_TOKENS__
                 # The Video tab: the single sends' rule (3.21.2, L1) -- an unknown outcome is
                 # said plainly and held; anything else carries its state, as before.
                 unclear, msg, state = _send_failed("/api/loom/generate", e, video_mark.v,
-                                                   locals().get("params"), held_key)
+                                                   locals().get("params"), held_key,
+                                                   task_id=locals().get("task_id"))
                 return unclear or (jsonify({"error": msg, "state": state}), 200)
+            created = locals().get("task_id")
+            if created:
+                # The render WAS created; only the bookkeeping after it failed (3.21.2 review).
+                # The journal says so (submitted), and the answer is the success it is.
+                try:
+                    _journal(state="submitted", task_id=str(created))
+                except Exception:                            # noqa: BLE001
+                    pass
+                _send_failed("/api/loom/generate", e, True, None, None, task_id=created)
+                return jsonify({"task_id": created})
             msg = _log_gen_failure("/api/loom/generate", e, locals().get("params"))[:300]
             if not attempt["sent"]:
                 state = "not_sent"

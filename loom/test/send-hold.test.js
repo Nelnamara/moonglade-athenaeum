@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  SEND_HOLD_MS, UNCLEAR_SEND_MSG, HELD_SEND_MSG, isUnclearAnswer, sendKey, makeSendHolds,
+  SEND_HOLD_MS, UNCLEAR_SEND_MSG, HELD_SEND_MSG, isUnclearAnswer, sendKey, makeSendHolds, unclearText,
 } from "../../gallery/src/gen/sendHold.js";
 import { submitTask } from "../../gallery/src/gen/submitTask.js";
 
@@ -72,6 +72,14 @@ describe("submitTask", () => {
     const later = await submitTask("/api/generate", BODY, { label: "x", emit: r.emit, holds: r.holds });
     assert.equal(later, "T2");
     assert.equal(r.posts.length, 2);
+  });
+  test("PixAI's own reason follows the sentence when the server has one", async () => {
+    const r = rig([{ body: { error: "x", state: "may_have_started", unclear: true,
+                             detail: "HTTP 403: NSFW_DETECTED -- flagged" } }]);
+    await submitTask("/api/fix", BODY, { label: "x", emit: r.emit, holds: r.holds });
+    assert.equal(r.lines.at(-1).text, UNCLEAR_SEND_MSG + " PixAI's answer: HTTP 403: NSFW_DETECTED -- flagged");
+    assert.equal(unclearText({ held: true, error: "wait" }), "wait");
+    assert.equal(unclearText({ unclear: true, detail: "  " }), UNCLEAR_SEND_MSG);
   });
   test("no answer at all holds it too", async () => {
     const r = rig([new TypeError("Failed to fetch")]);

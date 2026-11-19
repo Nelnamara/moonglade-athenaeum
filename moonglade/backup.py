@@ -151,13 +151,14 @@ class PixAIAuthError(PixAIError):
     message's "401 " prefix (DESIGN_3.22 2.6). Still a PixAIError with the same message."""
 
 
-def graphql_error(errors, data=None):
+def graphql_error(errors, data=None, code=None):
     """The exception the GraphQL transport raises for an answer carrying `errors`: a PixAIError
     whose message is "GraphQL error: <errors>" (500 characters), with the whole list on
     `graphql_errors` and the answer's `data` on `graphql_data`. `errors` may be a list of
     error dicts, or text -- a JSON list, else one error of that message -- for a caller (or a
-    test) that only has words. The spend classifier reads the two attributes, never the
-    message."""
+    test) that only has words; `code` puts PixAI's code where its site reads one
+    (`extensions.exception.name`) on a text error. The spend classifier reads the
+    attributes, never the message."""
     if isinstance(errors, str):
         try:
             parsed = json.loads(errors)
@@ -166,6 +167,9 @@ def graphql_error(errors, data=None):
         errors = parsed if isinstance(parsed, list) else [{"message": errors}]
     elif not isinstance(errors, list):
         errors = [{"message": str(errors)}]
+    if code:
+        errors = [dict(e, extensions={"exception": {"name": code}}) if isinstance(e, dict)
+                  and "extensions" not in e else e for e in errors]
     err = PixAIError("GraphQL error: " + json.dumps(errors)[:500])
     err.graphql_errors = errors
     err.graphql_data = data
@@ -11420,6 +11424,17 @@ PIXAI_REJECTED_CODES = frozenset({
 # code needs evidence and a design note: "unknown" costs a held button, never money.
 DEFINITE_CODES = PIXAI_REJECTED_CODES | {"UNAUTHORIZED", "VALIDATION_ERROR",
                                          "INFINITE_MODE_NOT_ELIGIBLE"}
+# The training routes' family (DESIGN_3.22 2.6, V5): PixAI's list plus every code the training
+# routes declare in their error maps (harvest 938fb68efeea `trainingTask-DTATiVlJ.js`). Each
+# refuses the request against the task's current state, so no new run exists after it -- a clear
+# training refusal never holds Start, Describe or Retry. Never used for a create.
+TRAINING_CODES = PIXAI_REJECTED_CODES | {
+    "BAD_REQUEST", "INVALID_INPUT", "UNAUTHORIZED",                 # request and auth
+    "NOT_FOUND", "FORBIDDEN", "CONFLICT",                           # the task
+    "TRAINING_IMAGE_REJECTED", "TRAINING_DATASET_TOO_SMALL",         # the dataset
+    "MODEL_PUBLISH_CONFLICT", "LORA_REBATE_REQUIRES_PUBLIC",         # publishing
+    "INSUFFICIENT_BALANCE",                                          # credits
+}
 # `codes=ANY_PIXAI_CODE`: any code in PixAI's oRPC error body is a refusal -- for a non-spend
 # write whose route answers its own codes before it acts and whose caller reads the outcome
 # back (the inbox: mark read, reply, delete a reply, claim a gift). A spend never uses it.
@@ -11470,8 +11485,65 @@ def classify_outcome(exc, codes=DEFINITE_CODES):
             partial = getattr(exc, "graphql_data", None)
             if isinstance(partial, dict) and any(v is not None for v in partial.values()):
                 return "unknown"
+            # 3.21.2 review: an `errors` answer with no data is a refusal ONLY when every error
+            # names a definite code. An INTERNAL_SERVER_ERROR, an "upstream request timeout"
+            # with no code, or any code outside the table may sit in front of a task PixAI made.
+            for err in errors:
+                code = graphql_error_code(err)
+                if code is None or (codes is not None and code not in codes):
+                    return "unknown"
             return "refused"
     return "unknown"
+
+
+# A numeric GraphQL code with a known name. Evidence: 40300047 is PixAI's members-only refusal
+# (private/CLASS4_PROBE_2026-07-28.md section 6, live 403s; the Turbo resubmit has keyed on it
+# since 2026-07, DESIGN_3.22 2.7). Other numbers seen (40300027 LORA_NUM_EXCEEDED, 40300032
+# NSFW_DETECTED) name codes outside the definite tables, so they are left unknown.
+_GRAPHQL_NUMERIC_CODES = {40300047: "REQUIRE_MEMBERSHIP"}
+
+
+def graphql_error_code(err):
+    """One GraphQL error's code name, or None. Read where PixAI's own site reads it
+    (errorUtil `c`: `errors[i].extensions.exception.name`), then `extensions.code`, then a
+    top-level `code`; a known numeric code is mapped to its name. Never the message."""
+    if not isinstance(err, dict):
+        return None
+    ext = err.get("extensions") if isinstance(err.get("extensions"), dict) else {}
+    exc = ext.get("exception") if isinstance(ext.get("exception"), dict) else {}
+    for raw in (exc.get("name"), exc.get("code"), ext.get("code"), err.get("code")):
+        if isinstance(raw, str) and raw:
+            return raw
+        if isinstance(raw, int) and not isinstance(raw, bool) and raw in _GRAPHQL_NUMERIC_CODES:
+            return _GRAPHQL_NUMERIC_CODES[raw]
+    return None
+
+
+def outcome_reason(exc):
+    """PixAI's own reason for a failed send, in a short line for the user beside "may have
+    started" (an NSFW_DETECTED or INPUT_IMAGE_TOO_LARGE that is not a definite refusal, an
+    expired sign-in's 401): the oRPC code and message, the GraphQL errors' messages and codes,
+    else the exception's text. Display only -- never an input to classify_outcome."""
+    if isinstance(exc, PixAIRestError):
+        f = exc.fields
+        code = f.get("code") if isinstance(f.get("code"), str) else ""
+        text = f.get("message") if isinstance(f.get("message"), str) else ""
+        head = "HTTP {}".format(exc.status) if exc.status is not None else "PixAI"
+        if code or text:
+            return "{}: {}".format(head, " -- ".join(x for x in (code, text.strip()) if x))
+        return "{}: {}".format(head, str(exc).split(": ", 1)[-1][:200])
+    errors = getattr(exc, "graphql_errors", None)
+    if isinstance(errors, list) and errors:
+        bits = []
+        for e in errors:
+            if isinstance(e, dict):
+                code = graphql_error_code(e)
+                msg = str(e.get("message") or "").strip()
+                bits.append(msg + (" ({})".format(code) if code else ""))
+        if any(bits):
+            return "; ".join(b for b in bits if b)
+    return "{}: {}".format(type(exc).__name__, str(exc)) if not isinstance(exc, PixAIError) \
+        else str(exc)
 
 
 def definite_refusal(exc, codes=DEFINITE_CODES):
