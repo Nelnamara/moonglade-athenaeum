@@ -58,8 +58,9 @@ In the recommended order.
   integrity (the CSRF debt the 3.16.0 coverage guard lists, headers, CSP), file and input handling,
   credentials at rest. Owner's go of 2026-10-02 ("after Wave 1"); Wave 1 shipped in 3.16.0. Already
   ruled: a signed-in LAN device keeps spending and deleting with no extra step. Its rulings unblock
-  remember-this-device and the QR change below. Also takes (2026-11-18): HTTPS for using Moonglade
-  over the home network (the Mirror sign-in now crosses it), and PixAI's new sign-in and session
+  remember-this-device and the QR change below. Also takes (2026-11-18): whether the opt-in
+  `--https` switch (self-signed, off by default) should become the way Moonglade is used over the
+  home network, now that the Mirror sign-in crosses it, and PixAI's new sign-in and session
   options as context. Runs beside the 3.22 design step.
 
 - **Convert the rest of the tests that read code as text.** *(test review, 2026-10-05)* Many Loom

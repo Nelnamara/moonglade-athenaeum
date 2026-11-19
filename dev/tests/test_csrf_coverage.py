@@ -92,7 +92,6 @@ CSRF_KNOWN_DEBT = {
     "/api/loom/import-frames [POST]": "store",
     "/api/loom/set [POST]": "store",
     "/api/loom/spend [POST]": "spend",
-    "/api/mirror/connect [POST]": "data",
     "/api/mirror/enable [POST]": "loopback",
     "/api/panel/cancel [POST]": "loopback",
     "/api/panel/run [POST]": "control",

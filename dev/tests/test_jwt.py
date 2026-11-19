@@ -3,9 +3,9 @@ Lives in moonglade_backup.py alongside _make_session/gql_mutate.
 
 Pure/mocked only: JWT expiry decode, the refresh-decision cushion, and refresh_jwt's
 body-first/header-fallback parsing of POST /v2/auth/refresh-token (#92) against a fake
-session. No browser, no network, no account — the live "read the real browser + renew" step
-self-verifies on the owner's machine (an agent sandbox can't reach the browser). The full
-credential matrix for the renewal is in test_rest_delete_and_renewal.py."""
+session. No browser, no network, no account. A sign-in gets in only through Connect from
+PixAI (test_mirror_connect_token.py); the old browser read is gone, and the tests below pin
+that. The full credential matrix for the renewal is in test_rest_delete_and_renewal.py."""
 import base64
 import json
 import sys
@@ -14,17 +14,6 @@ import pytest
 
 from moonglade import backup as mj
 from moonglade import mirror as mirror_mod
-
-# read_browser_jwt resolves *Windows* browser profiles (LOCALAPPDATA +
-# backslash Chrome/Edge/Brave paths). Tests that build a real on-disk profile layout and call the
-# un-mocked reader are Windows-only by construction: on a Linux runner the backslash path is
-# malformed, so the reader finds nothing and returns ''. Guard those rather than fail CI's Linux
-# runner. (Tests that MOCK the reader stay cross-platform and are deliberately left unguarded.)
-WINDOWS_ONLY = pytest.mark.skipif(
-    sys.platform != "win32",
-    reason="reads Windows browser profiles (LOCALAPPDATA + Windows Chrome paths); Windows-only",
-)
-
 
 def _b64(d):
     return base64.urlsafe_b64encode(json.dumps(d).encode()).decode().rstrip("=")
@@ -257,11 +246,16 @@ def test_run_mirror_check_never_prints_the_token(tmp_path, monkeypatch, capsys):
     assert "Mirror OK" in out and "days left" in out
 
 
-def test_run_mirror_check_no_session(tmp_path, monkeypatch):
-    monkeypatch.setattr(mirror_mod, "_mirror_state_path", lambda: tmp_path / "none.json")
-    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: "")   # no localStorage JWT
+def test_run_mirror_check_no_session(tmp_path, monkeypatch, capsys):
+    """No stored sign-in: --mirror-check says how to connect, sends nothing, stores nothing."""
+    p = tmp_path / "none.json"
+    monkeypatch.setattr(mirror_mod, "_mirror_state_path", lambda: p)
+    monkeypatch.setattr(mirror_mod, "refresh_jwt", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("nothing stored, so nothing to renew")))
     res = mirror_mod.run_mirror_check(SimpleNamespace())
     assert res["ok"] is False and res["source"] == "none"
+    assert "Connect from PixAI" in capsys.readouterr().out
+    assert not p.exists()
 
 
 def test_mirror_enabled_reads_flag(tmp_path):
@@ -372,282 +366,52 @@ def test_api_mirror_enable_arms_only_with_a_usable_jwt(tmp_path, monkeypatch):
     assert d["enabled"] is False and captured.get("flag") is False
 
 
-def test_api_mirror_connect_degrades_without_a_browser(tmp_path, monkeypatch):
+def test_the_old_browser_read_connect_is_gone(tmp_path):
+    """The old Connect stored whatever pixai.art sign-in a browser profile on this machine held,
+    with no check that it was the API key's account (red team, 2026-11-18). Its route, its
+    reader and make_mirror_session's browser switch are removed; Connect from PixAI is the one
+    way in."""
+    import inspect
     from tests.conftest import login_client
-    monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda **k: None)
-    d = login_client(tmp_path).post("/api/mirror/connect", json={}).get_json()
-    assert d["ok"] is False and d.get("error")
+    r = login_client(tmp_path).post("/api/mirror/connect", json={})
+    assert r.status_code in (404, 405)
+    for name in ("read_browser_jwt", "_pick_pixai_token", "_lvldb_sstable_entries",
+                 "_lvldb_log_entries", "_snappy_decompress", "LOCALSTORAGE_JWT_KEY"):
+        assert not hasattr(mirror_mod, name), name
+    assert "bootstrap_from_browser" not in inspect.signature(mirror_mod.make_mirror_session).parameters
 
 
-# ---- localStorage JWT reader (Connect on a modern-Chrome/v20-cookie machine) --------
-# The pixai.art JWT lives in Local Storage/leveldb, which is NOT app-bound(v20)-encrypted
-# the way modern Chrome cookies are. An established profile compacts to .ldb SSTables with
-# PREFIX-COMPRESSED keys and SNAPPY-COMPRESSED blocks, so the reader parses leveldb for
-# real (SSTable + Snappy + WAL) and validates the token's issuer is "pixai". These build
-# genuine leveldb structures to prove the parsers, the iss guard, and freshest-wins.
-# (The end-to-end read against a real browser store self-verifies on the owner's machine.)
-import struct
-
-
-def _varint(n):
-    out = bytearray()
-    while True:
-        b = n & 0x7F
-        n >>= 7
-        out.append(b | 0x80 if n else b)
-        if not n:
-            return bytes(out)
-
-
-def _jwt_iss(exp, iss="pixai", alg="EdDSA", sig_len=86):
-    """A JWT with a given issuer/alg and a signature of `sig_len` base64url chars (pixai's
-    real token is EdDSA / iss='pixai' / 86-char sig). The reader trusts a token only when
-    iss == 'pixai'."""
-    h = base64.urlsafe_b64encode(json.dumps({"alg": alg, "typ": "JWT"}).encode()).rstrip(b"=").decode()
-    p = base64.urlsafe_b64encode(json.dumps({"exp": exp, "iss": iss, "sub": "u"}).encode()).rstrip(b"=").decode()
-    return "%s.%s.%s" % (h, p, "A" * sig_len)
-
-
-_LS_KEY = b"_https://pixai.art\x00\x01" + mirror_mod.LOCALSTORAGE_JWT_KEY   # full leveldb key
-
-
-def _ls_value(jwt):
-    return b"\x01" + jwt.encode("ascii")                # encoding byte 0x01 (Latin-1) + JWT
-
-
-def _snappy_literal(data):
-    """A valid all-literal Snappy stream for `data` (no back-references) -- enough to feed a
-    snappy-compressed SSTable block through the real _snappy_decompress path."""
-    out = bytearray(_varint(len(data)))                 # preamble: uncompressed length
-    if data:
-        lm1 = len(data) - 1
-        if lm1 < 60:
-            out.append(lm1 << 2)
-        else:
-            nbytes = (lm1.bit_length() + 7) // 8
-            out.append(((59 + nbytes) << 2))
-            for i in range(nbytes):
-                out.append((lm1 >> (8 * i)) & 0xFF)
-        out += data
-    return bytes(out)
-
-
-def _lvldb_block(pairs):
-    """A leveldb block (no prefix compression: shared=0 for every entry) + a 1-restart
-    trailer, matching what _lvldb_block_pairs decodes."""
-    body = bytearray()
-    for k, v in pairs:
-        body += _varint(0) + _varint(len(k)) + _varint(len(v)) + k + v
-    body += struct.pack("<I", 0)                         # one restart at offset 0
-    body += struct.pack("<I", 1)                         # num_restarts = 1
-    return bytes(body)
-
-
-def _lvldb_sstable(data_pairs, compress=False):
-    """A minimal but real leveldb .ldb SSTable: one data block, one index entry, a footer.
-    Optionally snappy-compresses the data block (comp type 1)."""
-    dblock = _lvldb_block(data_pairs)
-    stored = _snappy_literal(dblock) if compress else dblock
-    comp = b"\x01" if compress else b"\x00"
-    data_region = stored + comp + b"\x00\x00\x00\x00"    # + 4-byte CRC (unchecked)
-    data_handle = _varint(0) + _varint(len(stored))      # BlockHandle(offset=0, size=stored)
-    iblock = _lvldb_block([(b"\xff" * 4, data_handle)])  # index: one entry -> the data block
-    idx_off = len(data_region)
-    index_region = iblock + b"\x00" + b"\x00\x00\x00\x00"
-    handles = _varint(0) + _varint(0) + _varint(idx_off) + _varint(len(iblock))
-    footer = handles + b"\x00" * (40 - len(handles)) + struct.pack("<Q", mirror_mod._LVLDB_SSTABLE_MAGIC)
-    return data_region + index_region + footer
-
-
-def _internal_key(user_key, seq, is_del=False):
-    """A leveldb SSTable internal key: user_key + 8-byte trailer (seq<<8 | type), LE."""
-    trailer = (seq << 8) | (0 if is_del else 1)
-    return user_key + trailer.to_bytes(8, "little")
-
-
-def _lvldb_log(entries, base_seq=1):
-    """A leveldb .log holding one WriteBatch as a single FULL record. `entries` are
-    (key, value, is_del); a deletion is written as kTypeDeletion (tag 0, key only). The
-    batch header carries base_seq; entry i is seq base_seq+i."""
-    batch = bytearray(int(base_seq).to_bytes(8, "little") + struct.pack("<I", len(entries)))
-    for k, v, is_del in entries:
-        if is_del:
-            batch += b"\x00" + _varint(len(k)) + k                       # kTypeDeletion
-        else:
-            batch += b"\x01" + _varint(len(k)) + k + _varint(len(v)) + v  # kTypeValue
-    crc = b"\x00\x00\x00\x00"
-    header = crc + struct.pack("<H", len(batch)) + b"\x01"              # len(2) + type FULL(1)
-    return bytes(header + batch)
-
-
-def test_snappy_decompress_literal_and_copy():
-    assert mirror_mod._snappy_decompress(_snappy_literal(b"hello world" * 40)) == b"hello world" * 40
-    # a back-reference: literal "ABC" then copy(len=3, offset=3) -> "ABCABC"
-    # copy tag (2-byte offset, kind=2): (length-1)<<2 | 2, then offset as uint16 LE
-    stream = _varint(6) + bytes([(3 - 1) << 2]) + b"ABC" + bytes([((3 - 1) << 2) | 2]) + b"\x03\x00"
-    assert mirror_mod._snappy_decompress(stream) == b"ABCABC"
-    assert mirror_mod._snappy_decompress(b"\x05\x00") is None          # claims 5 bytes, delivers 0
-
-
-def test_lvldb_sstable_uncompressed_and_snappy_roundtrip():
-    tok = _jwt_iss(NOW + 20 * 86400)
-    for compress in (False, True):
-        blob = _lvldb_sstable([(_internal_key(_LS_KEY, 100), _ls_value(tok))], compress=compress)
-        entries = list(mirror_mod._lvldb_sstable_entries(blob))
-        assert (_LS_KEY, _ls_value(tok), 100, False) in entries   # key/value/seq/type recovered
-        assert mirror_mod._pick_pixai_token(entries) == tok
-
-
-def test_lvldb_log_roundtrip_values_and_seq():
-    tok = _jwt_iss(NOW + 20 * 86400)
-    blob = _lvldb_log([(_LS_KEY, _ls_value(tok), False)], base_seq=5)
-    assert (_LS_KEY, _ls_value(tok), 5, False) in list(mirror_mod._lvldb_log_entries(blob))
-
-
-def test_pick_pixai_token_iss_guard_and_newest_seq_wins():
-    older = _jwt_iss(NOW + 30 * 86400)                         # higher exp but LOWER seq
-    newer = _jwt_iss(NOW + 3 * 86400)                          # the live write (highest seq)
-    other = _jwt_iss(NOW + 99 * 86400, iss="intercom")         # later exp, WRONG issuer
-    intercom_key = b"_https://pixai.art\x00\x01https://api.pixai.art:intercom-user-jwt"
-    entries = [
-        (_LS_KEY, _ls_value(older), 100, False),
-        (_LS_KEY, _ls_value(newer), 200, False),              # newest write -> wins by SEQ, not exp
-        (intercom_key, _ls_value(other), 300, False),         # right origin, wrong key + iss
-        (b"_https://evil.example\x00\x01ev:token", _ls_value(_jwt_iss(NOW + 999 * 86400)), 999, False),
-    ]
-    assert mirror_mod._pick_pixai_token(entries) == newer
-
-
-def test_pick_pixai_token_logout_tombstone_and_relogin():
-    tok = _jwt_iss(NOW + 30 * 86400)
-    # PUT then a later DELETE (logout) -> the newest op is a tombstone -> no token
-    assert mirror_mod._pick_pixai_token([
-        (_LS_KEY, _ls_value(tok), 100, False),
-        (_LS_KEY, b"", 200, True),
-    ]) == ""
-    # logout then re-login -> the newest PUT wins over the earlier tombstone
-    fresh = _jwt_iss(NOW + 40 * 86400)
-    assert mirror_mod._pick_pixai_token([
-        (_LS_KEY, _ls_value(_jwt_iss(NOW + 3 * 86400)), 100, False),
-        (_LS_KEY, b"", 200, True),
-        (_LS_KEY, _ls_value(fresh), 300, False),
-    ]) == fresh
-
-
-@WINDOWS_ONLY
-def test_read_browser_jwt_reads_real_sstable_across_profiles(tmp_path, monkeypatch):
-    base = int(_time.time())
-    old = _jwt_iss(base + 3 * 86400)
-    new = _jwt_iss(base + 40 * 86400)                          # furthest exp -> chosen ACROSS profiles
-    root = tmp_path / "Google" / "Chrome" / "User Data"
-    for prof, tok, compress in (("Default", old, False), ("Profile 1", new, True)):
-        d = root / prof / "Local Storage" / "leveldb"
-        d.mkdir(parents=True)
-        (d / "000005.ldb").write_bytes(
-            _lvldb_sstable([(_internal_key(_LS_KEY, 100), _ls_value(tok))], compress=compress))
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-    assert mirror_mod.read_browser_jwt(browsers=("chrome",)) == new    # freshest live token, incl. a snappy block
-    assert mirror_mod.read_browser_jwt(browsers=()) == ""              # no browsers -> '' (no raise)
-
-
-@WINDOWS_ONLY
-def test_read_browser_jwt_logout_tombstone_across_ldb_and_log(tmp_path, monkeypatch):
-    """Within one profile the .ldb + .log share a sequence space: a value in a compacted
-    SSTable, then a later logout DELETE in the .log, must resolve to '' -- never resurface the
-    logged-out token. (This is the adversarial-review finding the fix closes.)"""
-    tok = _jwt_iss(int(_time.time()) + 20 * 86400)
-    d = tmp_path / "Google" / "Chrome" / "User Data" / "Default" / "Local Storage" / "leveldb"
-    d.mkdir(parents=True)
-    (d / "000005.ldb").write_bytes(
-        _lvldb_sstable([(_internal_key(_LS_KEY, 100), _ls_value(tok))]))       # PUT seq 100
-    (d / "000007.log").write_bytes(_lvldb_log([(_LS_KEY, b"", True)], base_seq=200))  # DELETE seq 200
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-    assert mirror_mod.read_browser_jwt(browsers=("chrome",)) == ""     # logged out -> no token
-
-
-def test_make_mirror_session_bootstraps_from_localstorage_jwt_without_cookies(tmp_path, monkeypatch):
-    """The v20-cookie case: the cookie store can't be decrypted (and the app no longer reads
-    it), but the JWT reads from localStorage -> a JWT-only mirror session is built AND
-    persisted, so a later call needs no browser. This is exactly what Connect does on a
-    current Chrome."""
-    p = tmp_path / "m.json"
+def test_mirror_check_command_never_reads_a_browser(tmp_path, monkeypatch, capsys):
+    """The `--mirror-check` command line, end to end through main(): with no stored session it
+    stores nothing and reads no browser (an installed browser_cookie3 is never asked for);
+    with one, it renews THAT token. Nothing is printed of the token, and nothing leaves the
+    test: the renewal is stubbed."""
+    p = tmp_path / "mirror.json"
     monkeypatch.setattr(mirror_mod, "_mirror_state_path", lambda: p)
-    monkeypatch.setattr(mj, "_make_session", _fake_make_session)
-    fresh = _jwt_in(27)
-    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: fresh)
-    monkeypatch.setattr(mirror_mod, "refresh_jwt", lambda *a, **k: (_ for _ in ()).throw(
-        AssertionError("a fresh ~27d jwt must not trigger refresh")))
-    s = mirror_mod.make_mirror_session(bootstrap_from_browser=True)
-    assert s is not None and s.headers["Authorization"] == "Bearer " + fresh
-    assert mirror_mod.load_mirror_state()["jwt"] == fresh                # persisted for next time
-
-
-def test_run_mirror_check_uses_localstorage_jwt(tmp_path, monkeypatch, capsys):
-    """--mirror-check with no stored session still connects off the localStorage JWT, and
-    still never prints the token."""
-    monkeypatch.setattr(mirror_mod, "_mirror_state_path", lambda: tmp_path / "none.json")
-    browser_jwt = _jwt_in(27)
-    fresh = _jwt_in(27)
-    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: browser_jwt)
-    monkeypatch.setattr(mirror_mod, "refresh_jwt", lambda session, current_jwt=None, **k: fresh)
-    res = mirror_mod.run_mirror_check(SimpleNamespace())
-    out = capsys.readouterr().out
-    assert res["ok"] is True and res["source"] == "browser"
-    assert browser_jwt not in out and fresh not in out
-
-
-def test_mirror_check_command_runs_on_the_jwt_reader_alone(tmp_path, monkeypatch, capsys):
-    """The `--mirror-check` command line, end to end through main(): with no stored session
-    it signs in through read_browser_jwt and nothing else. An installed browser_cookie3 is
-    never asked for. Nothing is printed of the token, and nothing leaves the test:
-    the renewal is stubbed."""
-    monkeypatch.setattr(mirror_mod, "_mirror_state_path", lambda: tmp_path / "mirror.json")
-    browser_jwt = _jwt_in(5)
-    fresh = _jwt_in(27)
-    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: browser_jwt)
+    fresh = _jwt_in(7)
     monkeypatch.setattr(mirror_mod, "refresh_jwt", lambda session, current_jwt=None, **k: fresh)
     monkeypatch.setitem(sys.modules, "browser_cookie3", None)   # an import of it would raise
     monkeypatch.setattr(sys, "argv", ["prog", "--mirror-check", "--out", str(tmp_path)])
     mj.main()
+    assert "no session saved" in capsys.readouterr().out
+    assert not p.exists()                                        # nothing was stored
+    stored = _jwt_in(5)
+    mirror_mod.save_mirror_state({"jwt": stored})
+    mj.main()
     out = capsys.readouterr().out
-    assert "Mirror OK (source: browser, renewed via jwt)" in out
-    assert browser_jwt not in out and fresh not in out
+    assert "Mirror OK (source: stored, renewed via jwt)" in out
+    assert stored not in out and fresh not in out
     assert mirror_mod.load_mirror_state()["jwt"] == fresh               # the renewed token is kept
 
 
 # ---- ultrareview fixes (2026-08-15) ---------------------------------------------------
-def test_lvldb_log_skips_zero_type_record_without_desync():
-    """Review: a kZeroType record with a payload must have its payload CONSUMED, or the reader
-    resyncs inside it and silently drops every later WAL record (the live token among them)."""
-    tok = _jwt_iss(NOW + 20 * 86400)
-    zero = b"\x00\x00\x00\x00" + struct.pack("<H", 8) + b"\x00" + b"\x00" * 8   # kZeroType, 8B payload
-    blob = zero + _lvldb_log([(_LS_KEY, _ls_value(tok), False)])                # then a real FULL record
-    assert (_LS_KEY, _ls_value(tok), 1, False) in list(mirror_mod._lvldb_log_entries(blob))
-
-
 def test_jwt_claims_non_object_payload_never_raises():
-    """Review: a JWT whose payload decodes to a non-object made jwt_expiry/_pick_pixai_token
-    raise AttributeError, breaking their 'never raises' contracts."""
+    """Review: a JWT whose payload decodes to a non-object made jwt_expiry raise
+    AttributeError, breaking its 'never raises' contract."""
     tok = "eyJhIjoxfQ.MQ.sig"                    # payload segment "MQ" decodes to the integer 1
     assert mirror_mod.jwt_claims(tok) == {}
     assert mirror_mod.jwt_expiry(tok) is None            # must NOT raise
     assert mirror_mod.jwt_days_left(tok, now=NOW) is None
-    assert mirror_mod._pick_pixai_token([(_LS_KEY, b"\x01" + tok.encode(), 1, False)]) == ""
-
-
-def test_make_mirror_session_rebootstraps_when_stored_jwt_expired(tmp_path, monkeypatch):
-    """Review: gating the browser re-read on `not jwt` meant an EXPIRED stored token could
-    never be replaced -- both recovery paths were dead. Re-read whenever it's UNUSABLE."""
-    p = tmp_path / "m.json"
-    monkeypatch.setattr(mirror_mod, "_mirror_state_path", lambda: p)
-    mirror_mod.save_mirror_state({"jwt": _jwt_in(-2)})                    # expired stored token
-    fresh = _jwt_in(27)
-    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: fresh)
-    monkeypatch.setattr(mirror_mod, "refresh_jwt", lambda *a, **k: (_ for _ in ()).throw(
-        AssertionError("a freshly-read 27d jwt needs no refresh")))
-    s = mirror_mod.make_mirror_session(bootstrap_from_browser=True)
-    assert s is not None and s.headers["Authorization"] == "Bearer " + fresh
-    assert mirror_mod.load_mirror_state()["jwt"] == fresh
 
 
 def test_make_mirror_session_skips_refresh_under_read_only(tmp_path, monkeypatch):
@@ -668,8 +432,8 @@ def test_make_mirror_session_skips_refresh_under_read_only(tmp_path, monkeypatch
 def test_run_mirror_check_refused_under_read_only(monkeypatch):
     monkeypatch.setattr(mj, "READ_ONLY", False)
     monkeypatch.setattr(mj, "_read_only_now", lambda: True)
-    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: (_ for _ in ()).throw(
-        AssertionError("must not read the browser or refresh under READ_ONLY")))
+    monkeypatch.setattr(mirror_mod, "refresh_jwt", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("must not refresh under READ_ONLY")))
     res = mirror_mod.run_mirror_check(SimpleNamespace())
     assert res["ok"] is False and res["source"] == "read_only"
 
@@ -797,15 +561,15 @@ def test_read_only_turning_on_between_the_check_and_the_lock_stops_the_post(tmp_
     assert calls == []
 
 
-def test_the_tick_and_a_connect_renew_once_between_them(tmp_path, monkeypatch):
+def test_the_tick_and_a_create_renew_once_between_them(tmp_path, monkeypatch):
     """Both go through _mirror_try_renew under _mirror_lock and re-read the stored token
     inside it, so whichever comes second sees the fresh token and makes no call. Real clock
-    here, because make_mirror_session (what Connect calls) reads it."""
+    here, because make_mirror_session (what a create calls) reads it."""
     import threading
     import time as _t
     stale, fresh = _jwt_in(2), _jwt_in(7)
     _armed(tmp_path, monkeypatch, jwt=stale)
-    entered, release, b_reading = threading.Event(), threading.Event(), threading.Event()
+    entered, release = threading.Event(), threading.Event()
     calls = []
 
     def _slow_refresh(session, current_jwt=None, **k):
@@ -814,16 +578,14 @@ def test_the_tick_and_a_connect_renew_once_between_them(tmp_path, monkeypatch):
         release.wait(5)
         return fresh
     monkeypatch.setattr(mirror_mod, "refresh_jwt", _slow_refresh)
-    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: b_reading.set() or "")
     out = {}
     a = threading.Thread(target=lambda: out.update(tick=mirror_mod.mirror_renew_tick()))
     b = threading.Thread(target=lambda: out.update(s=mirror_mod.make_mirror_session(
-        bootstrap_from_browser=True, user_initiated=True)))
+        user_initiated=True)))
     a.start()
     assert entered.wait(5)
     b.start()
-    assert b_reading.wait(5)
-    _t.sleep(0.2)                               # let Connect reach the lock
+    _t.sleep(0.2)                               # let the create reach the lock
     release.set()
     a.join(5)
     b.join(5)
@@ -854,12 +616,12 @@ def test_a_renewal_while_offline_fails_quietly_and_says_why(tmp_path, monkeypatc
 def test_the_span_is_the_tokens_own_life_never_iat(tmp_path, monkeypatch):
     """`iat` stays at the original sign-in through every renewal, so exp - iat grows without
     bound. The span is exp - minted_at for a token the app renewed itself, and
-    max(left, 7 days) for one read from the browser (or stored before #71)."""
+    max(left, 7 days) for one Connect from PixAI stored (or stored before #71)."""
     _armed(tmp_path, monkeypatch, jwt=_jwt(NOW + 7 * DAY), minted_at=NOW)
     left, span = mirror_mod.mirror_token_span(mirror_mod.load_mirror_state(), now=NOW + DAY)
     assert (left, span) == (6 * DAY, 7 * DAY)
-    browser = _jwt(NOW + 4 * DAY)
-    mirror_mod.save_mirror_state({"jwt": browser})          # a different token, no minted_at: dropped
+    handed = _jwt(NOW + 4 * DAY)
+    mirror_mod.save_mirror_state({"jwt": handed})           # a different token, no minted_at: dropped
     assert "minted_at" not in mirror_mod.load_mirror_state()
     assert mirror_mod.mirror_token_span(mirror_mod.load_mirror_state(), now=NOW) == (4 * DAY, 7 * DAY)
     legacy = _jwt(NOW + 20 * DAY)
@@ -903,27 +665,6 @@ def test_status_states_paused_off_and_expired_from_seconds(tmp_path, monkeypatch
     assert mirror_mod.mirror_renewal_status(now=NOW)["state"] == "off"
 
 
-def test_a_connect_reads_the_browser_and_keeps_the_later_expiring_token(tmp_path, monkeypatch):
-    """A press of Connect reads the browser even when the stored token is still usable (PixAI
-    can revoke a token before its exp), and keeps whichever of the two expires later."""
-    stored = _jwt_in(6.3)
-    _armed(tmp_path, monkeypatch, jwt=stored)
-    monkeypatch.setattr(mirror_mod, "refresh_jwt", lambda *a, **k: (_ for _ in ()).throw(
-        AssertionError("nothing here is due")))
-    later = _jwt_in(6.8)
-    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: later)
-    s = mirror_mod.make_mirror_session(bootstrap_from_browser=True, user_initiated=True)
-    assert s.headers["Authorization"] == "Bearer " + later
-    assert mirror_mod.load_mirror_state()["jwt"] == later
-    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: _jwt_in(6.1))
-    s = mirror_mod.make_mirror_session(bootstrap_from_browser=True, user_initiated=True)
-    assert mirror_mod.load_mirror_state()["jwt"] == later                 # the earlier one is not kept
-    # and an ordinary (not user-initiated) call never reads the browser for a usable token
-    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: (_ for _ in ()).throw(
-        AssertionError("only a press of Connect re-reads a usable token's browser")))
-    mirror_mod.make_mirror_session(bootstrap_from_browser=True)
-
-
 def test_api_mirror_status_carries_the_span_and_the_renewal_state(tmp_path, monkeypatch):
     from tests.conftest import login_client
     import json as _json
@@ -934,14 +675,6 @@ def test_api_mirror_status_carries_the_span_and_the_renewal_state(tmp_path, monk
     assert d["renewal"]["state"] == "ok"
     text = _json.dumps(d)
     assert "eyJ" not in text and "iat" not in text                 # never the token or a claim
-
-
-def test_connect_is_user_initiated(tmp_path, monkeypatch):
-    from tests.conftest import login_client
-    seen = {}
-    monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda **k: seen.update(k) or None)
-    login_client(tmp_path).post("/api/mirror/connect", json={})
-    assert seen == {"bootstrap_from_browser": True, "user_initiated": True}
 
 
 def test_the_price_probe_never_touches_the_mirror_while_it_is_off(tmp_path, monkeypatch):

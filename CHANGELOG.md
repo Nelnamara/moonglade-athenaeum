@@ -17,12 +17,16 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Changed
+- **Mirror connects only through Connect from PixAI.** The old way, which picked up whatever PixAI sign-in a browser on this computer held without checking it was your API key's account, is gone, and `--mirror-check` now only renews the sign-in you already connected. (2026-11-18)
+- **The help pages tell one story about HTTPS.** Moonglade serves plain `http://` unless you turn on its `--https` switch; The Gallery page now says how, and Trust & Safety, the FAQ, the Control Panel page and the Control Panel's network card all say the same: your password, your session and the Mirror's sign-in are encrypted across your network only at an `https://` address. (2026-11-18)
 - **V3.2 leaves the video pickers when PixAI retires it on 23 Nov.** From 03:00 UTC that day it is no longer offered, a remix or saved setting that names it uses the default engine and says so, and a V3.2 submit is refused before anything is sent. Old V3.2 videos in your library keep their "V3.2" label. (2026-11-18)
 - **About is a clear row at the foot of the Control Panel's left column, like the phone's.** It reads "About Moonglade · 3.21.1 ›" in place of the tiny version text, and when a release is out it shows the gold dot and "3.21.1 available". The library folder stays under it. (2026-11-18)
 - **Dedup results now say what they found in one sentence.** Audit, Preview, Quarantine, Verify and Delete each end with a plain line such as "14 duplicate files would move to _duplicates/ (25.6 MB). Nothing moved yet.", and the file list is folded under "Show the 14 files". The phone's Control tab does the same. The command line prints the same line, starting "Result:". (2026-11-18)
 - **The Panel's Audit now runs the full check,** so it finds the same copies Preview does. It used to stop at the quick same-id check and report none while Preview found byte-identical copies. (2026-11-18)
 
 ### Fixed
+- **An SVG in your library opens as a download, never as a page.** Opening one at its own address could run code inside it as Moonglade. Pictures and videos still show as before, and every file the gallery hands out now tells the browser not to run it. (2026-11-18)
+- **The branding folder only serves pictures.** A web page or SVG dropped into it is no longer handed to anyone who asks. The art pack's moment clips and sounds still play. (2026-11-18)
 - **An SVG result from Edit is saved as .svg.** It used to be saved as a .png that no program could open. The file is kept and catalogued; it has no thumbnail yet and is left out of Similar. (2026-11-18)
 - **The corner notice after a Control Panel job no longer says "Added to your gallery."** Duplicate audit, Catalog stats, Organize preview and the other maintenance jobs now say just "done"; generations, imports and syncs that collect art keep the old line. (2026-11-18)
 - **Mirror to PixAI connects again.** PixAI changed how it keeps you signed in, so Moonglade can no longer pick up your PixAI sign-in from this computer's browser. The Mirror tile now offers a **Connect from PixAI** link instead: drag it to your bookmarks bar, then click it on any pixai.art tab while you are signed in. It only accepts a sign-in for the same PixAI account as your API key, and only from this computer or your home network. (2026-11-18)

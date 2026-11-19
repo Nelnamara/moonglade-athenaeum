@@ -71,9 +71,12 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   (the address the bookmark was made from) and nowhere else, and Moonglade keeps it only if
   it belongs to the same PixAI account as your API key. It is stored on the server machine;
   the tile shows how many days it has left, never the credential itself. If you click the
-  bookmark on another device on your home network, the sign-in travels **unencrypted** from
-  that device to the server, the same way your Moonglade login does. It is never accepted
-  from outside your home network. HTTPS for using Moonglade over the network is planned.
+  bookmark on another device on your home network, the sign-in travels from that device to
+  the server **encrypted only when you reach Moonglade over `https://`**. Moonglade serves
+  plain `http://` unless you turn on its `--https` switch (see
+  [The Gallery](Gallery#running-it-from-a-terminal)), and over plain `http://` the sign-in
+  travels **unencrypted**, the same way your Moonglade login does. It is never accepted
+  from outside your home network.
   And it's a hard switch, not a preference: when
   mirroring is on and the session isn't usable, the submit **refuses and spends nothing** —
   it never quietly falls back to your API key and files the piece somewhere you didn't
@@ -99,7 +102,9 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   still be cleared locally), and the static pieces the login page needs to render: your
   branding art and the web-app manifest, none of which carries any library content. Sessions
   are signed cookies over scrypt-hashed passwords,
-  rate-limited per address. **Log Out** signs out the device you pressed it on and nothing
+  rate-limited per address. Over the network, your password and that cookie are encrypted
+  only when you reach Moonglade over `https://`: plain `http://` is the default, and the
+  `--https` switch ([The Gallery](Gallery#running-it-from-a-terminal)) turns encryption on. **Log Out** signs out the device you pressed it on and nothing
   else — your other devices stay signed in. If a device is lost, or you think a session was
   captured, **change your password** in **Control Panel → Accounts → Manage…**: that signs out every other
   device on your account at once and keeps the one you changed it from. (Nothing that merely

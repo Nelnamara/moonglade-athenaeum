@@ -1110,6 +1110,64 @@ LOOM_BED_FILE_RE = re.compile(r"^[0-9a-f]{40}\.(mp3|wav|m4a|aac|ogg|flac)$")
 LOOM_BUNDLE_MAX_BEDS = 1
 LOOM_BED_MIMES = {"mp3": "audio/mpeg", "wav": "audio/wav", "m4a": "audio/mp4", "aac": "audio/aac",
                   "ogg": "audio/ogg", "flac": "audio/flac"}
+
+
+# ---------------------------------------------------------------------------
+# FILES FROM THE LIBRARY NEVER RUN AS A PAGE (red team, 2026-11-18)
+# ---------------------------------------------------------------------------
+# Every route that hands back a file someone else made -- a library picture or clip, a
+# thumb, a music bed, a PixAI CDN cover, an export -- goes out through
+# harden_file_response. A browser shown only a raster picture, a video or a sound has
+# nothing to run; anything else (an SVG above all: Edit Pro makes them, the library
+# catalogs them, and an SVG may carry <script>) opened at its own URL would run AS
+# Moonglade, with the signed-in session. So: every such response says nosniff (the
+# browser keeps to the stated type) and a CSP sandbox (no script, no same-origin even if
+# it did render), and a type outside the list below is sent as a download. An <img>,
+# <video> or <audio> ignores Content-Disposition, so in-page display is unchanged.
+_INLINE_FILE_TYPES = frozenset({
+    "image/png", "image/jpeg", "image/pjpeg", "image/webp", "image/gif", "image/avif",
+    "image/bmp", "image/x-icon", "image/vnd.microsoft.icon",
+    "video/mp4", "video/webm", "video/quicktime", "video/x-m4v",
+    "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/wave", "audio/mp4",
+    "audio/aac", "audio/ogg", "audio/flac", "audio/x-flac",
+})
+FILE_RESPONSE_CSP = "sandbox"
+# The library's own picture and clip types, named here rather than asked of the system's
+# type table (on Windows that reads the registry, which can say anything).
+_MEDIA_TYPE_BY_EXT = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
+    ".gif": "image/gif", ".avif": "image/avif", ".mp4": "video/mp4", ".webm": "video/webm",
+    ".mov": "video/quicktime", ".m4v": "video/x-m4v",
+}
+
+
+def media_type_for(name):
+    """The fixed type for a library picture or clip by its extension; None for anything
+    else (the caller's guess then stands, and harden_file_response makes it a download)."""
+    return _MEDIA_TYPE_BY_EXT.get(os.path.splitext(str(name or ""))[1].lower())
+
+
+def _attachment_disposition(name):
+    """`attachment; filename=...` for any name: an ASCII fallback plus the RFC 5987 form."""
+    from urllib.parse import quote
+    name = os.path.basename(str(name or "")) or "download"
+    plain = re.sub(r'[^\x20-\x7e]|["\\]', "_", name)
+    return "attachment; filename=\"{}\"; filename*=UTF-8''{}".format(plain, quote(name, safe=""))
+
+
+def harden_file_response(resp, filename=None):
+    """Stamp a served file's response so it can never run as a page on this origin.
+
+    Always: X-Content-Type-Options: nosniff and Content-Security-Policy: sandbox. And a
+    type that is not a raster picture, a video or a sound goes out as a download
+    (Content-Disposition: attachment), whatever the route asked for. Returns resp."""
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Content-Security-Policy"] = FILE_RESPONSE_CSP
+    mime = (resp.mimetype or "").lower()
+    if mime not in _INLINE_FILE_TYPES:
+        if not (resp.headers.get("Content-Disposition") or "").lower().startswith("attachment"):
+            resp.headers["Content-Disposition"] = _attachment_disposition(filename)
+    return resp
 # A bed added in the last few minutes may belong to a board whose save has not landed yet, so
 # the unused list never offers it (the sweep re-checks the same rule).
 LOOM_BED_UNUSED_GRACE_S = 10 * 60
@@ -10069,13 +10127,14 @@ def create_app(out_dir: Path):
                 and "\\" not in media_id and ".." not in media_id:
             p = _sized_thumb(media_id, size_key)
             if p is not None:
-                resp = send_from_directory(str(p.parent), p.name, max_age=86400)
+                resp = send_from_directory(str(p.parent), p.name, max_age=86400,
+                                           mimetype="image/jpeg")
                 resp.headers["Cache-Control"] = _STRIP_CACHE
-                return resp
+                return harden_file_response(resp, p.name)
         resp = send_from_directory(str(thumb_dir), "{}.jpg".format(media_id),
-                                   max_age=300)
+                                   max_age=300, mimetype="image/jpeg")
         resp.headers["Cache-Control"] = _THUMB_CACHE
-        return resp
+        return harden_file_response(resp, "{}.jpg".format(media_id))
 
     @app.route("/video-file/<media_id>")
     @tier(LOGIN)
@@ -10104,9 +10163,10 @@ def create_app(out_dir: Path):
             # it here keeps "found" meaning the same thing to the resolver and to the serve.
             return "Video not found.", 404
         # send_from_directory supports HTTP Range, so the <video> can seek
-        resp = send_from_directory(str(out_dir), rel, max_age=31536000)
+        resp = send_from_directory(str(out_dir), rel, max_age=31536000,
+                                   mimetype=media_type_for(p.name))
         resp.headers["Cache-Control"] = _IMMUTABLE
-        return resp
+        return harden_file_response(resp, p.name)
 
     @app.route("/full/<media_id>")
     @tier(LOGIN)
@@ -10119,11 +10179,14 @@ def create_app(out_dir: Path):
             return "Not found", 404
         # ?dl=1 -> force a SAVE with the real filename (the detail page's plain Download);
         # without it, inline (the lightbox displays the image). Same file either way.
+        # A type that is not a raster picture (an SVG from Edit Pro) is a download either
+        # way: harden_file_response never lets it open as a page on this origin.
         dl = bool(request.args.get("dl"))
         resp = send_from_directory(str(p.parent), p.name, max_age=31536000,
+                                   mimetype=media_type_for(p.name),
                                    as_attachment=dl, download_name=(p.name if dl else None))
         resp.headers["Cache-Control"] = _IMMUTABLE
-        return resp
+        return harden_file_response(resp, p.name)
 
     @app.route("/export-zip", methods=["POST"])
     @tier(LOGIN)
@@ -11101,6 +11164,12 @@ def create_app(out_dir: Path):
         except (ValueError, OSError):
             abort(404)
         coded = _branding._public_rel_to_coded(target.relative_to(bdir).as_posix())
+        # Pictures only (owner, 2026-11-18): any other type -- a hand-dropped .html or
+        # .svg above all, on this PUBLIC route -- is a 404 before anything is read,
+        # loose or packed. branding_serves_type names the one carve-out (the shipped
+        # moments' clips and sounds) and why.
+        if not _branding.branding_serves_type(coded):
+            abort(404)
         # The unlock split, enforced (see _seal_rule, which judges the CODED
         # rel -- a probe that guesses a coded path passes through translation
         # unchanged, so it faces the same verdict): achievement-bound art only
@@ -11126,7 +11195,7 @@ def create_app(out_dir: Path):
             if have_render:
                 resp = send_from_directory(str(cdir), coded)
                 resp.headers["Cache-Control"] = "no-cache, must-revalidate"
-                return resp
+                return harden_file_response(resp, coded)
             # Container-ONLY read (not _branding_bytes, which would try the
             # coded root loose first): an older pack may carry a top-level flat.
             box = _branding._get_container()
@@ -11155,7 +11224,7 @@ def create_app(out_dir: Path):
         elif (bdir / coded).is_file():
             resp = send_from_directory(str(bdir), coded)
             resp.headers["Cache-Control"] = "no-cache, must-revalidate"   # branding art gets re-cut; never serve a stale copy
-            return resp
+            return harden_file_response(resp, coded)
         elif coded in _branding._moment_clip_rels():
             # A moment's clip, container-sourced (no loose copy): verified once,
             # then sliced from memory for every range the <video> asks for.
@@ -11171,7 +11240,8 @@ def create_app(out_dir: Path):
         # send_from_directory streams, so it gets the Range handling that would
         # have given a loose file.
         mime = mimetypes.guess_type(coded)[0] or "application/octet-stream"
-        return _branding._ranged_bytes_response(app.response_class, raw, mime)
+        return harden_file_response(
+            _branding._ranged_bytes_response(app.response_class, raw, mime), coded)
 
     @app.route("/badge-thumb/<aid>.png", defaults={"ext": "png"})
     @app.route("/badge-thumb/<aid>.webp", defaults={"ext": "webp"})
@@ -13235,7 +13305,9 @@ def create_app(out_dir: Path):
             resp = app.response_class(r.content,
                                       mimetype=r.headers.get("content-type", "image/webp"))
             resp.headers["Cache-Control"] = "public, max-age=86400"
-            return resp
+            # Someone else's file under this origin: a cover that is not a raster
+            # picture goes out as a download, never as a page.
+            return harden_file_response(resp, _up.urlparse(raw).path.rsplit("/", 1)[-1])
         except Exception:
             return ("fetch failed", 502)
 
@@ -14726,28 +14798,11 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:160]}), 200
         return jsonify({"enabled": want})
 
-    @app.route("/api/mirror/connect", methods=["POST"])
-    @tier(LOGIN)
-    def api_mirror_connect():
-        """Bootstrap/refresh the mirror session: read the pixai.art session from THIS
-        machine's browser, renew the JWT, store it. Reports only ok +
-        days-left -- NEVER the token (review F13). No credential crosses the network: the
-        server reads its own local browser store. LOGIN tier."""
-        from moonglade import backup as core
-        try:
-            core._check_read_only("connect the PixAI mirror")   # the renewal is account-mutating
-            # A press (#71): re-read the browser even for a usable stored token, keep the
-            # later-expiring of the two, and try a due renewal even inside a failure backoff.
-            s = _mirror.make_mirror_session(bootstrap_from_browser=True, user_initiated=True)
-        except Exception as e:
-            return jsonify({"ok": False, "error": _redact_host_paths(str(e))[:160]}), 200
-        if s is None:
-            return jsonify({"ok": False, "error": "Couldn't read a pixai.art session from a "
-                            "browser on this machine. Sign in to pixai.art in Chrome/Edge/Brave "
-                            "(reload the page once so the token is written), then try again."}), 200
-        jwt = (_mirror.load_mirror_state().get("jwt") or "")
-        return jsonify({"ok": bool(jwt),
-                        "days_left": _mirror.jwt_days_left(jwt) if jwt else None})
+    # The old Connect (POST /api/mirror/connect) read whatever pixai.art sign-in a browser
+    # profile on THIS machine held and stored it with no check that it was the API key's
+    # account. PixAI no longer keeps its sign-in where that read looked, and the route was a
+    # cross-account risk, so it is gone (2026-11-18). Connect from PixAI, below, is the one way
+    # in: the user's own pixai.art tab hands its sign-in over and accept_site_token checks it.
 
     @app.route("/mirror/connect")
     @tier(LOGIN)
@@ -18536,7 +18591,7 @@ __DESIGN_TOKENS__
                 os.utime(png, None)            # used now: the LRU keeps it
             except OSError:
                 pass
-            return send_file(str(png), mimetype="image/png", max_age=3600)
+            return harden_file_response(send_file(str(png), mimetype="image/png", max_age=3600))
         # A COMPLETE library file only (Invariant 3): a .part download or a zero-byte file is
         # never read -- the same resolver the EDL zip uses.
         vid = _loom_complete_clip(mid)
@@ -18573,7 +18628,7 @@ __DESIGN_TOKENS__
             _loom_frame_sweep(fdir)
         if not png.is_file():
             return jsonify({"error": "the frame cache is full"}), 404
-        return send_file(str(png), mimetype="image/png", max_age=3600)
+        return harden_file_response(send_file(str(png), mimetype="image/png", max_age=3600))
 
     # ---- FRAMES SPLICED BEFORE 3.15.0 (GitHub #62) -------------------------------------------
     # 3.15.0 writes a thumbnail when a splice uploads a frame, but a frame spliced earlier is a
@@ -19243,8 +19298,9 @@ __DESIGN_TOKENS__
         p = _loom_bed_path(user, name)
         if p is None:
             return jsonify({"error": "no such music bed"}), 404
-        return send_file(str(p), mimetype=LOOM_BED_MIMES.get(p.suffix.lstrip("."), "application/octet-stream"),
-                         conditional=True, max_age=3600)
+        return harden_file_response(
+            send_file(str(p), mimetype=LOOM_BED_MIMES.get(p.suffix.lstrip("."), "application/octet-stream"),
+                      conditional=True, max_age=3600), p.name)
 
     @app.route("/api/loom/beds/unused")
     @tier(LOGIN)
@@ -19707,8 +19763,9 @@ __DESIGN_TOKENS__
         name = _export_job.get("out") or "loom_cut.mp4"
         if not (_export_dir / name).exists():
             return "No export available.", 404
-        return send_from_directory(str(_export_dir), name, as_attachment=True,
-                                   download_name="moonglade-loom-cut.mp4")
+        return harden_file_response(
+            send_from_directory(str(_export_dir), name, as_attachment=True,
+                                download_name="moonglade-loom-cut.mp4"), name)
 
     @app.route("/api/loom/export-cancel", methods=["POST"])
     @tier(LOGIN)
