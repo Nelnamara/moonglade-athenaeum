@@ -19,10 +19,13 @@ CHANGELOG and the open issues on 2026-11-12.
 
 ## Now — active
 
-- **3.21.1**, on `fix/3.21.1`: the 3.21.0 walk's fixes (Contests side scroll, the About row, Dedup
-  results in one sentence, Mirror's Connect from PixAI bookmark), V3.2 leaving the video pickers when
-  PixAI retires it on 23 Nov, SVG results saved as `.svg`, and the Control Panel's done notice. Must
-  ship before 23 Nov. What shipped is in `CHANGELOG.md` (latest: 3.21.0 — Moving Day, 2026-11-18).
+- **3.21.2**, on `next/3.21.2`: the 2026-11-18 review's no-look fixes in three lanes — data safety
+  (a sync no longer undoes edits made during it, Dedup's keeper, Undo organize, the V3.2 check on the
+  CLI's raw-settings flags, a delete confirm carries its plan), small fixes (host-name check, the
+  contest rules link, a catalog backup before updates, contest eligibility, the training finish
+  notice, what "Backed up" counts, maintenance jobs out of the tracker) and search/CLI/docs. The app
+  security review and the 3.22 design (with split phase 5) run beside it. What shipped is in
+  `CHANGELOG.md` (latest: 3.21.1 — The Right Key, 2026-11-19).
 
 ---
 

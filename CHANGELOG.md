@@ -16,6 +16,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.21.1] - 2026-11-19 — The Right Key
+
 ### Changed
 - **Mirror connects only through Connect from PixAI.** The old way, which picked up whatever PixAI sign-in a browser on this computer held without checking it was your API key's account, is gone, and `--mirror-check` now only renews the sign-in you already connected. (2026-11-18)
 - **The help pages tell one story about HTTPS.** Moonglade serves plain `http://` unless you turn on its `--https` switch; The Gallery page now says how, and Trust & Safety, the FAQ, the Control Panel page and the Control Panel's network card all say the same: your password, your session and the Mirror's sign-in are encrypted across your network only at an `https://` address. (2026-11-18)
