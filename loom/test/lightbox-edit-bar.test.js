@@ -36,7 +36,9 @@ describe("the bar's send path is untouched", () => {
   test("price, gate, latch and send(): byte for byte", () => {
     const send = slice(bar, "  const ready = ", "}, [words, ready, state, probe]);");
     assert.ok(send, "TsubakiEditBar.jsx: the ready ... send() block moved -- re-point this test, never drop it");
-    assert.equal(sha(send), "add3fdc4ad7714ac2fdffdaf9757d6e6c3042e06f9e8209adf2bcec2ef737f4a");
+    // 2026-11-18: send() hands submitTask the settled quote (`quote: probe.response`), so a
+    // send the badge called FREE carries expect_free -- the one deliberate change here.
+    assert.equal(sha(send), "ea70ac50b343b4ca6659aeee5ab400a8e86c1da1be0f86e44f5f184b336a13b0");
   });
   test("Enter sends through the same guard", () => {
     const enter = slice(bar, '    if (e.key === "Enter" && !e.shiftKey) {', "      return;\n    }");

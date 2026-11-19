@@ -116,7 +116,7 @@ export default function EditTab({ visible, s, setS, onDroppedNote, dock }) {
     if (!probe.canSubmit) { probe.refresh(); return; }
     busyRef.current = true; setBusy(true);
     const emit = openLine("Submitting…");
-    await submitTask("/api/edit", buildEditPayload(s), { label: "Edited", emit });
+    await submitTask("/api/edit", buildEditPayload(s), { label: "Edited", emit, quote: probe.response });
     busyRef.current = false; setBusy(false);
     // The submit DEBITED credits or a card; the payload is byte-identical, so only a
     // FORCED re-price gets past the short-circuit.

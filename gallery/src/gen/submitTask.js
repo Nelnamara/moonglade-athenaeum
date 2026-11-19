@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { adjustedText, friendlyGenErr } from "./genCore.js";
+import { quotedSendBody } from "./priceProbeCore.js";
 
 /* ONE submit path for every spend route the pilot touches: /api/generate, /api/edit,
    /api/fix, /api/enhance, /api/scene, /api/loom/generate. The classic has runTask; this is
@@ -41,14 +42,18 @@ import { adjustedText, friendlyGenErr } from "./genCore.js";
    answer or it could not be read, else {threw: false, status, body}. The Loom needs to tell
    "no answer" (the render MAY exist: keep the shot locked, ask the server's journal) apart from
    a refusal (nothing was sent), and the return value (a task id, or null for both) cannot say
-   which. It changes nothing about what this function does or returns. */
-export async function submitTask(route, payload, { label, emit, count, onPhase, onAnswer }) {
+   which. It changes nothing about what this function does or returns.
+
+   `quote` (optional) is the settled /api/price answer the send was allowed on. When it was
+   FREE the POST carries expect_free (priceProbeCore.quotedSendBody), and the server refuses
+   rather than charge if the card that quote found is gone by the time it sends (2026-11-18). */
+export async function submitTask(route, payload, { label, emit, count, onPhase, onAnswer, quote }) {
   let d, status = 0;
   try {
     const r = await fetch(route, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(quotedSendBody(payload, quote)),
     });
     status = r.status;
     d = await r.json();

@@ -322,7 +322,7 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
 
     let tid = null;
     try {
-      tid = await submitTask("/api/generate", payload(), { label: "Upscaled", emit });
+      tid = await submitTask("/api/generate", payload(), { label: "Upscaled", emit, quote: probe.response });
     } finally {
       // The latch releases the moment the road answers, accepted or rejected -- never on a
       // later phase, and never left stuck by a throw on the way back.

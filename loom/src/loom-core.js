@@ -1065,6 +1065,14 @@ export const spendLandedKey = (...maps) => maps.map((m, i) => Object.keys(m || {
   .filter(Boolean).join(",")).join("|");
 
 /* ---------- per-project spend ledger: what this project ALREADY spent ----------
+   2026-11-18: THE FIGURE IS THE BOARD'S SEND RECORD, and only that (tallySends below; the
+   server keeps it, see /api/loom/spend). It used to be every media id the cards pointed at,
+   joined to the catalog -- which billed whatever was attached to a shot, so each clip that
+   was not a render sent here (linked, imported, a split's twin, a seeded example) needed its
+   own fence, and the figure kept breaking. collectSpendMids survives for two jobs only: the
+   imported-clip disclosure in the hover, and as the refresh trigger (a take landing changes
+   it). The notes below describe that walk.
+
    The historical sibling of the cost-to-finish pill above. That one is a QUOTE -- it asks
    /api/price what the unrendered shots would cost. This one is a RECORD: every finished
    shot's result media_id joined to the catalog's `paid_credit`, which is PixAI's own
@@ -1123,53 +1131,37 @@ export const collectSpendMids = (project) => {
   return { mids: byAct.reduce((all, b) => all.concat(b.mids), []), byAct, imported };
 };
 
-// Join the collected ids against the server's catalog answer -> the buckets the pill reads.
-// `rows` is {media_id: {paid_credit: n|null, task_id}} from POST /api/loom/spend. The two
-// "no number" cases are kept APART all the way to the tooltip, because they have different
-// causes and only one of them is fixable: a row that exists with a blank paid_credit is
-// `unpriced` (PixAI never told us), and an id with no catalog row at all is `missing` (the
-// local file was deleted, or the id never resolved). Neither is ever folded into 0 -- the
-// hard rule formatCostEstimate states above applies here identically: a displayed "0 cr"
-// must only ever mean a genuinely settled, zero-cost result.
-export const tallySpend = (collected, rows) => {
-  const src = rows || {};
-  const col = collected || { byAct: [], imported: 0 };
-  // task_id -> the act NAME that was billed for it (see note 2 above). The name, not just
-  // a flag: an act whose only results were billed to a sibling has to be able to say WHICH
-  // sibling, or its line reads as a free act.
-  const counted = Object.create(null);
-  const zeroB = () => ({ paid: 0, credits: 0, zero: 0, unpriced: 0, missing: 0, results: 0,
-                         sharedElsewhere: 0, sharedWith: "" });
-  const total = zeroB();
-  const byAct = (col.byAct || []).map((b) => {
-    const acc = zeroB();
-    (b.mids || []).forEach((m) => {
-      const row = Object.prototype.hasOwnProperty.call(src, m) ? (src[m] || {}) : null;
-      const add = (k, n) => { acc[k] += n; total[k] += n; };
-      add("results", 1);
-      if (row === null) { add("missing", 1); return; }
-      const tid = String(row.task_id || "");
-      // hasOwnProperty, not truthiness: an act named "" is still an act that was billed.
-      if (tid && Object.prototype.hasOwnProperty.call(counted, tid)) {
-        /* SAME TASK AS AN ID ALREADY BILLED -- one charge, and this act is not the one
-           that carries it. Its own bucket, because falling through to the all-zero shape
-           made formatSpend print "0 cr" for an act whose shot really did cost money, and
-           the hard rule above is that a displayed "0 cr" only ever means a genuinely
-           settled, zero-cost result. */
-        add("sharedElsewhere", 1);
-        if (!acc.sharedWith) acc.sharedWith = counted[tid];
-        return;
-      }
-      if (tid) counted[tid] = b.name || "";
-      const pc = row.paid_credit;
-      if (typeof pc !== "number" || !isFinite(pc)) { add("unpriced", 1); return; }
-      if (pc <= 0) { add("zero", 1); return; }
-      add("paid", 1);
-      add("credits", pc);
-    });
-    return { ...acc, name: b.name };
+// THE ONE SUM: the renders this board SENT, from POST /api/loom/spend's `sends`
+// ([{task_id, card, kind, cost}]). A cost that is a number is PixAI's charge for that send
+// (0 = a free card covered it); anything else is a send whose charge is not known yet, and it
+// is counted as `unpriced` -- never folded into 0: a displayed "0 cr" only ever means settled
+// and free. Each send is filed under the act its shot is in now; a draft's send, or one whose
+// shot has since been deleted, goes under its own heading -- the money was spent either way.
+// Nothing on the board itself is summed: attach, import, link or remix a clip and this
+// number does not move.
+export const tallySends = (sends, project) => {
+  const zeroB = () => ({ paid: 0, credits: 0, zero: 0, unpriced: 0, missing: 0, results: 0 });
+  const actOf = Object.create(null);
+  const byAct = ((project || {}).acts || []).map((a, ai) => {
+    const b = { ...zeroB(), name: (a || {}).name || `Act ${ai + 1}` };
+    ((a || {}).cards || []).forEach((c) => { if (c && c.id != null && c.id !== "") actOf[String(c.id)] = b; });
+    return b;
   });
-  return { ...total, imported: col.imported || 0, byAct };
+  const offBoard = { ...zeroB(), name: "Drafts and deleted shots" };
+  const total = zeroB();
+  (Array.isArray(sends) ? sends : []).forEach((x) => {
+    if (!x || typeof x !== "object") return;
+    const card = String(x.card == null ? "" : x.card);
+    const b = (card && Object.prototype.hasOwnProperty.call(actOf, card)) ? actOf[card] : offBoard;
+    const add = (k, n) => { b[k] += n; total[k] += n; };
+    add("results", 1);
+    const c = x.cost;
+    if (typeof c !== "number" || !isFinite(c)) { add("unpriced", 1); return; }
+    if (c <= 0) { add("zero", 1); return; }
+    add("paid", 1);
+    add("credits", c);
+  });
+  return { ...total, imported: 0, byAct: offBoard.results ? byAct.concat([offBoard]) : byAct };
 };
 
 // The pill's face. Branch-for-branch the same exhaustive ladder as formatCostEstimate, minus
@@ -1250,31 +1242,17 @@ export const makeLatestOnly = () => {
 export const spendPillShown = (s) =>
   ((s || {}).results || 0) > 0 || ((s || {}).imported || 0) > 0;
 
-// The pill's hover: the one sentence, then the per-act breakdown, then the standing caveat.
-// The caveat is not decoration -- a board only remembers the attempts it recorded, so a shot
-// re-rolled before this ledger existed spent money nothing on the board can still point at.
-// Saying so is cheaper than a number the owner would otherwise have to trust blindly.
+// The pill's hover: the one sentence, then the per-act breakdown, then what the number is.
 export const spendTooltip = (s = {}) => {
-  const paid = s.paid || 0, credits = s.credits || 0;
-  const head = `Spent so far: ${paid} paid (~${Math.round(credits).toLocaleString()} credits), ` +
-    `${s.zero || 0} free-card/zero-cost, ${s.unpriced || 0} unpriced, ` +
-    `${s.missing || 0} with no catalog row` +
+  const n = s.results || 0, paid = s.paid || 0, credits = s.credits || 0;
+  const head = `Spent so far: ${n} render${n === 1 ? "" : "s"} sent from this board — ` +
+    `${paid} paid (~${Math.round(credits).toLocaleString()} credits), ` +
+    `${s.zero || 0} covered by a free card, ${s.unpriced || 0} with the charge not known yet` +
     (s.imported ? `, plus ${s.imported} imported clip(s) not counted — paid for elsewhere` : "") + ".";
   const acts = (s.byAct || []).filter((a) => a.results > 0);
-  /* An act whose every result was billed to a sibling has no number of its own to show,
-     and "0 cr" would be a lie about it (that mark means settled and free). Say where the
-     charge went instead -- the money is on the board, just under another act's name. */
-  const actLine = (a) => {
-    const own = formatSpend(a);
-    if (own) return own;
-    if (a.sharedElsewhere > 0) {
-      return a.sharedWith ? `counted in ${a.sharedWith}` : "counted in an earlier act";
-    }
-    return "0 cr";
-  };
-  const lines = acts.length > 1 ? acts.map((a) => `  ${a.name}: ${actLine(a)}`) : [];
+  const lines = acts.length > 1 ? acts.map((a) => `  ${a.name}: ${formatSpend(a) || "0 cr"}`) : [];
   return [head].concat(lines).join("\n") +
-    "\n" + "Counts every attempt this board recorded; re-rolls from before the ledger existed aren't in it.";
+    "\n" + "Counts only renders sent from this board. A clip linked, imported or remixed onto a shot is never counted; renders from before 29 Sep 2026 count where the board kept their task.";
 };
 
 // ---------- duration / pricing math feeding the timeline reel ----------

@@ -1136,7 +1136,11 @@ describe("Fixer: the real, mandatory spend warning and confirm-gated submit thro
     await genFix(entries[0], boxes);
     assert.deepEqual(browser.trail.map((x) => x[0] + " " + x[1]), ["fetch /api/price", "confirm Repair 1 face area?\n\n"
       + "The price could not be verified, and a Fix ALWAYS spends credits (no free card can ever cover it).", "fetch /api/fix"]);
-    assert.deepEqual(fetched("/api/fix")[0][2], { source: MID.open1, boxes });
+    // 2026-11-18: the Fix names its board and shot, so the board's send record counts it.
+    const { loom_target: tgt, ...fixBody } = fetched("/api/fix")[0][2];
+    assert.deepEqual(fixBody, { source: MID.open1, boxes });
+    assert.equal(tgt.card_id, entries[0].c.id);
+    assert.equal(typeof tgt.board_id, "string");
   });
 
   test("one Fix in flight per shot: a second tap before the first settles sends nothing (review F4)", async () => {

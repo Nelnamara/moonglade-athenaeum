@@ -535,8 +535,12 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     // Loom adds its keys (a draft has no shot, so no loom_target), which the server pops before
     // anything is priced or sent.
     const sent = loomIds ? { ...p, submit_id: submitId,
-      ...(target.draft ? {} : { loom_target: { board_id: target.board_id, card_id: target.card_id } }),
-      ...(expectFree ? { expect_free: true } : {}) } : p;
+      // A draft has no shot yet, so it names its board alone: the board's send record counts it.
+      ...(target.draft ? { loom_board: target.board_id } : { loom_target: { board_id: target.board_id, card_id: target.card_id } }),
+      ...(expectFree ? { expect_free: true } : {}) }
+      // The gallery's own Video tab is held to the same rule (2026-11-18): a send its badge
+      // quoted FREE says so, and the server refuses rather than charge if the card is gone.
+      : (expectFree ? { ...p, expect_free: true } : p);
     let answer = null;       // loomCtx: what the POST itself answered, for the host's classification
 
     const startedAt = Date.now();
