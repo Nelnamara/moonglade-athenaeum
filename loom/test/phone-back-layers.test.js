@@ -261,7 +261,9 @@ describe("each tab keeps its own scroll", () => {
 describe("viewport-fit=cover, so every safe-area inset in this app means something", () => {
   test("every shell a phone reaches asks for it, including the dev twin", () => {
     const metas = server.match(/<meta name="viewport" content="[^"]*">/g) || [];
-    assert.equal(metas.length, 3, "the served shells are " + JSON.stringify(metas));
+    // APP_PAGE, LOGIN_PAGE, MIRROR_CONNECT_PAGE (3.21.1: the "Connect from PixAI" bookmark
+    // opens it, from a phone too) and the Loom shell.
+    assert.equal(metas.length, 4, "the served shells are " + JSON.stringify(metas));
     for (const m of metas) {
       assert.match(m, /viewport-fit=cover/, m + " does not open the safe area");
       assert.match(m, /width=device-width, initial-scale=1/, m + " lost the rest of the meta");

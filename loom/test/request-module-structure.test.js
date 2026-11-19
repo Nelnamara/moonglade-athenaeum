@@ -44,6 +44,10 @@ const EXEMPT = {
   "notify/jobs.js":
     "the /api/task-status poller: the fetch REJECTION is its retry trigger (again(4000)), and an "
     + "{error} body would read as a non-terminal phase and re-poll at the wrong cadence",
+  "lib/mirrorBookmarklet.js":
+    "not a Moonglade request at all: the source of the 'Connect from PixAI' bookmark, which runs "
+    + "on a pixai.art tab and asks PixAI (not this app) for the user's sign-in. api.js does not "
+    + "exist on that page, and the token reaches Moonglade by postMessage, never by a fetch (3.21.1)",
 };
 
 function walk(dir, out = []) {
@@ -68,7 +72,7 @@ const fileNamed = (r) => {
 };
 
 describe("api.js is the only place a request is made", () => {
-  test("fetch( appears only in api.js and the three named exemptions", () => {
+  test("fetch( appears only in api.js and the named exemptions", () => {
     const callers = files.filter((f) => /\bfetch\(/.test(codeOnly(read(f)))).map(rel).sort();
     const expected = [MODULE, ...Object.keys(EXEMPT)].sort();
     assert.deepEqual(callers, expected,
