@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { adjustedText, friendlyGenErr } from "./genCore.js";
 import { quotedSendBody } from "./priceProbeCore.js";
+import { HELD_SEND_MSG, UNCLEAR_SEND_MSG, isUnclearAnswer, sendHolds, sendKey } from "./sendHold.js";
 
 /* ONE submit path for every spend route the pilot touches: /api/generate, /api/edit,
    /api/fix, /api/enhance, /api/scene, /api/loom/generate. The classic has runTask; this is
@@ -47,7 +48,16 @@ import { quotedSendBody } from "./priceProbeCore.js";
    `quote` (optional) is the settled /api/price answer the send was allowed on. When it was
    FREE the POST carries expect_free (priceProbeCore.quotedSendBody), and the server refuses
    rather than charge if the card that quote found is gone by the time it sends (2026-11-18). */
-export async function submitTask(route, payload, { label, emit, count, onPhase, onAnswer, quote }) {
+export async function submitTask(route, payload, { label, emit, count, onPhase, onAnswer, quote, holds = sendHolds }) {
+  // 3.21.2 (L1): a send whose last answer was unclear (or never came) is held for
+  // SEND_HOLD_MS -- pressing it again posts nothing. A journalled Loom render (it carries a
+  // submit_id) keeps its own journal's way-out and is not held here.
+  const journalled = !!(payload && payload.submit_id);
+  const key = journalled ? null : sendKey(route, payload);
+  if (key && holds.held(key)) {
+    emit({ kind: "err", text: HELD_SEND_MSG });
+    return null;
+  }
   let d, status = 0;
   try {
     const r = await fetch(route, {
@@ -58,6 +68,7 @@ export async function submitTask(route, payload, { label, emit, count, onPhase, 
     status = r.status;
     d = await r.json();
   } catch {
+    if (key) holds.hold(key);
     if (onAnswer) onAnswer({ threw: true });
     emit({
       kind: "err",
@@ -66,6 +77,14 @@ export async function submitTask(route, payload, { label, emit, count, onPhase, 
     return null;
   }
   if (onAnswer) onAnswer({ threw: false, status, body: d });
+  if (!journalled && isUnclearAnswer(d)) {
+    // PixAI may have made it: the plain "may have started" sentence, never friendlyGenErr's
+    // guess, and the same send is held so the next tap cannot pay twice. (A journalled
+    // render is unchanged: its caller reads the answer through onAnswer and its journal.)
+    holds.hold(key);
+    emit({ kind: "err", text: d.held ? (d.error || HELD_SEND_MSG) : UNCLEAR_SEND_MSG });
+    return null;
+  }
   if (d.error || !d.task_id) {
     emit({ kind: "err", text: friendlyGenErr(d.error || "Submit failed.") });
     return null;

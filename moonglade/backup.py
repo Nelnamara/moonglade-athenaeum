@@ -145,6 +145,33 @@ class LocalRefusal(PixAIError):
     F4). Still a PixAIError, so every existing catch site is unchanged."""
 
 
+class PixAIAuthError(PixAIError):
+    """PixAI answered 401 on the GraphQL road (or a write that names it): the credential was
+    refused before anything ran. Typed so a spend guard reads it by type, never by its
+    message's "401 " prefix (DESIGN_3.22 2.6). Still a PixAIError with the same message."""
+
+
+def graphql_error(errors, data=None):
+    """The exception the GraphQL transport raises for an answer carrying `errors`: a PixAIError
+    whose message is "GraphQL error: <errors>" (500 characters), with the whole list on
+    `graphql_errors` and the answer's `data` on `graphql_data`. `errors` may be a list of
+    error dicts, or text -- a JSON list, else one error of that message -- for a caller (or a
+    test) that only has words. The spend classifier reads the two attributes, never the
+    message."""
+    if isinstance(errors, str):
+        try:
+            parsed = json.loads(errors)
+        except ValueError:
+            parsed = None
+        errors = parsed if isinstance(parsed, list) else [{"message": errors}]
+    elif not isinstance(errors, list):
+        errors = [{"message": str(errors)}]
+    err = PixAIError("GraphQL error: " + json.dumps(errors)[:500])
+    err.graphql_errors = errors
+    err.graphql_data = data
+    return err
+
+
 class PixAIRestError(PixAIError):
     """A /v2 REST route answered non-2xx. Still a PixAIError with the same message as before
     (every existing catch site is unchanged); it also carries the HTTP `status` and PixAI's
@@ -2249,8 +2276,8 @@ def delete_task(session, task_id):
         raise PixAIError(_ssl_help())
     except PixAIRestError as e:
         if e.status == 401:
-            raise PixAIError("401 Unauthorized -- PixAI refused the API key; task {} was not "
-                             "deleted.".format(tid))
+            raise PixAIAuthError("401 Unauthorized -- PixAI refused the API key; task {} was "
+                                 "not deleted.".format(tid))
         if e.status == 403:
             raise PixAIError("PixAI says task {} is not yours to delete (403); nothing was "
                              "deleted.".format(tid))
@@ -6587,13 +6614,15 @@ def chat_editing_scenes(session):
     return d.get("chatEditingScenes") or []
 
 
-def submit_scene(session, scene_id, media_ids, preset="random", custom=None, selector_values=None):
+def submit_scene(session, scene_id, media_ids, preset="random", custom=None, selector_values=None,
+                 on_send=None):
     """Submit a chat-editing scene task (createChatEditingSceneTask) -> task id. The generate
     half of the Bridge AI-Tools tier. SPENDS, so it goes through gql_mutate (SINGLE attempt, no
     retry -- a re-POST after a lost response pays twice) and MUST run on the mirror JWT; the
     caller passes _check_read_only first at the route choke, exactly like /api/enhance ->
     submit_generation. `preset` is a preset key, "random", or "custom" (with `custom` text);
-    `selector_values` is [{id, value}] for the scene's selectors (e.g. aspect-ratio)."""
+    `selector_values` is [{id, value}] for the scene's selectors (e.g. aspect-ratio).
+    `on_send(input)` is called immediately before the mutation (observation only)."""
     _check_read_only("submit chat-editing scene")
     inp = {"sceneId": str(scene_id),
            "mediaIds": [str(m) for m in (media_ids or []) if m],
@@ -6603,8 +6632,14 @@ def submit_scene(session, scene_id, media_ids, preset="random", custom=None, sel
     if selector_values:
         inp["selectorValues"] = [{"id": str(s["id"]), "value": s["value"]}
                                  for s in selector_values if s.get("id")]
+    _observe_send(on_send, inp)
     d = gql_mutate(session, _SCENE_SUBMIT_M, {"input": inp})
-    return ((d or {}).get("createChatEditingSceneTask") or {}).get("id")
+    tid = ((d or {}).get("createChatEditingSceneTask") or {}).get("id")
+    if not tid:
+        # An answer with no task id is not a success and not a refusal: the task may exist
+        # (3.21.2). Raised AFTER the send, so every caller reads it "may have started".
+        raise PixAIError("scene: no task id returned: " + json.dumps(d)[:200])
+    return str(tid)
 
 
 def _gen_video_parameters(args):
@@ -7215,7 +7250,12 @@ def run_generate(args):
         _check_read_only("submit a generation (spends credits)")
         print("Submitting generation task...")
         _apply_kaisuuken(session, params, args)
-        task_id = submit_generation(session, params)
+        # 3.21.2 (L1): an answer that cannot show whether the task was made says so in plain
+        # words and exits non-zero -- never a raw transport error that reads like "nothing
+        # happened, try again". `reached` is submit_generation's own mark just before the send.
+        reached = spend_watch()
+        task_id = _cli_send_once(lambda: submit_generation(session, params),
+                                 reached=lambda: reached.v)
         print("  task id:", task_id)
 
         _poll_task_status(session, task_id, getattr(args, "poll_timeout", 300),
@@ -8800,6 +8840,7 @@ def submit_generation(session, params, *, on_send=None, exact=False):
     listed, members_only = _profile_listing(session, params)
 
     def _send(p):
+        _mark_spend_reached()                                # 3.21.2: this thread's spend mark
         if on_send is not None:
             try:
                 on_send(copy.deepcopy(p))
@@ -8819,7 +8860,9 @@ def submit_generation(session, params, *, on_send=None, exact=False):
             # anything else -- a partial success (the mutation's data came back beside the
             # errors, review N2), a timeout -- is passed on as it came, because it does not
             # prove that and must read may_have_started, never refused.
-            if definite_refusal(e) and str(e).startswith("GraphQL error"):
+            # Keyed on the type and the transport's structured `errors` (classify_outcome's
+            # rule), never on the message text (DESIGN_3.22 2.6, L2).
+            if definite_refusal(e) and getattr(e, "graphql_errors", None):
                 refused = PixAIError(_UNLIMITED_REFUSED + ": " + _graphql_reason(e))
                 refused.graphql_data = getattr(e, "graphql_data", None)
                 refused.refused = True       # a definite refusal, for a run's job state
@@ -9001,21 +9044,67 @@ def price_fixer(session, body):
         return None
 
 
-def submit_fixer(session, media_id, boxes):
+# THE SPEND MARK (3.21.2, L1). A caller that must tell "never reached the send" from "sent,
+# answer unclear" -- a web single send, a CLI runner -- takes a fresh mark for its thread with
+# spend_watch(); each create marks it immediately before its one spend request
+# (_mark_spend_reached: submit_generation's send, submit_fixer, submit_scene). Thread-local,
+# because a request's send runs on the request's own thread; observation only, it changes
+# nothing that is sent.
+_SPEND_WATCH = threading.local()
+
+
+class _SpendMark:
+    __slots__ = ("v",)
+
+    def __init__(self):
+        self.v = False
+
+
+def spend_watch():
+    """A fresh spend mark for this thread: `.v` turns True once a create in this thread
+    reaches its spend request. Replaces any earlier mark of the thread."""
+    mark = _SpendMark()
+    _SPEND_WATCH.mark = mark
+    return mark
+
+
+def _mark_spend_reached():
+    mark = getattr(_SPEND_WATCH, "mark", None)
+    if mark is not None:
+        mark.v = True
+
+
+def _observe_send(on_send, payload):
+    """Mark this thread's spend as reached, and tell an `on_send` observer what is about to go
+    out (a deep copy). Observation only: an exception inside the observer is swallowed, so a
+    recorder can never block or alter a spend."""
+    _mark_spend_reached()
+    if on_send is None:
+        return
+    try:
+        on_send(copy.deepcopy(payload))
+    except Exception:                                        # noqa: BLE001
+        pass
+
+
+def submit_fixer(session, media_id, boxes, on_send=None):
     """Submit a hand/face fixer task via POST /v2/task/fixer -> task id (poll it like any
     generation). `boxes` = [{x, y, width, height, tag}] in ORIGINAL-image pixel coords, tag
     'hand' | 'face' (<=20), all ONE kind. Builds a mask from the boxes and repairs those
     regions. Raises.
 
     READ_ONLY first, then build_fixer_body -- so a body with no usable box, or with two kinds
-    PixAI would refuse, is refused here before any network call. Never sends cusPrompts."""
+    PixAI would refuse, is refused here before any network call. Never sends cusPrompts.
+    `on_send(body)` is called immediately before the one POST (observation only)."""
     _check_read_only("submit a hand/face fix (spends credits)")
     body = build_fixer_body(media_id, boxes)
     # The fixer IS a credit-spending create, so it rides the mirror JWT session when the
     # toggle is on (review F1: the choke belongs at "a create", not only at gql_mutate sites).
     # Create-only -- the caller polls/collects on its own API-key session (F6); pass-through
     # when the mirror is off; refuses before spend if the mirror is on but unavailable (F5).
-    data = _rest_post(_mirror._session_for_create(session), "/task/fixer", body) or {}
+    create_session = _mirror._session_for_create(session)
+    _observe_send(on_send, body)
+    data = _rest_post(create_session, "/task/fixer", body) or {}
     tid = data.get("id")
     if not tid:
         raise PixAIError("fixer: no task id returned: " + json.dumps(data)[:200])
@@ -9886,7 +9975,11 @@ def submit(session, req, *, no_card=None, before_send=None, on_send=None, exact=
         # this cannot do without is the two inputs that body is built from.
         if not req.media_id or not req.boxes:
             raise PixAIError(req.note or "nothing to submit")
-        return {"task_id": submit_fixer(session, req.media_id, req.boxes)}
+        # `on_send` (a run's) is told just before the one POST, as on the generation road, so
+        # a caller knows whether the spend was reached (3.21.2, L1). Observation only; passed
+        # only when asked for, so a default Fix calls submit_fixer exactly as before.
+        return {"task_id": submit_fixer(session, req.media_id, req.boxes,
+                                        **({"on_send": on_send} if on_send is not None else {}))}
     if req.parameters is None:
         raise PixAIError(req.note or "nothing to submit")
     if req.unlimited:
@@ -10233,10 +10326,7 @@ def run_generate_video(args):
         # (expensive) video and a second charge -- see gql_mutate's docstring.
         # _session_for_create: the CREATE rides the mirror JWT when the toggle is on
         # (else pass-through); download below stays on the API-key `session` (F6).
-        created = gql_mutate(_mirror._session_for_create(session), _GEN_MUTATION, {"parameters": params})
-        task_id = (created.get("createGenerationTask") or {}).get("id")
-        if not task_id:
-            raise PixAIError("no task id returned: " + json.dumps(created)[:300])
+        task_id = _cli_create_once(_mirror._session_for_create(session), params)
         print("  task id:", task_id)
         _bump_card_use(params)
         _poll_task_status(session, task_id, getattr(args, "poll_timeout", 600),
@@ -10387,10 +10477,7 @@ def run_reference_video(args):
         _apply_kaisuuken(session, params, args)   # free-card check on the API-key session
         # gql_mutate, never gql_adhoc -- a re-POST here is a second charge.
         # _session_for_create: create rides the mirror JWT when on; download stays API-key (F6).
-        created = gql_mutate(_mirror._session_for_create(session), _GEN_MUTATION, {"parameters": params})
-        task_id = (created.get("createGenerationTask") or {}).get("id")
-        if not task_id:
-            raise PixAIError("no task id returned: " + json.dumps(created)[:300])
+        task_id = _cli_create_once(_mirror._session_for_create(session), params)
         print("  task id:", task_id)
         _bump_card_use(params)
         _poll_task_status(session, task_id, getattr(args, "poll_timeout", 600), interval=5,
@@ -10485,10 +10572,7 @@ def run_edit_image(args):
         _apply_kaisuuken(session, params, args)   # free-card check on the API-key session
         # gql_mutate, never gql_adhoc -- a re-POST here is a second charge.
         # _session_for_create: create rides the mirror JWT when on; download stays API-key (F6).
-        created = gql_mutate(_mirror._session_for_create(session), _GEN_MUTATION, {"parameters": params})
-        task_id = (created.get("createGenerationTask") or {}).get("id")
-        if not task_id:
-            raise PixAIError("no task id returned: " + json.dumps(created)[:300])
+        task_id = _cli_create_once(_mirror._session_for_create(session), params)
         print("  task id:", task_id)
         _bump_card_use(params)
         _poll_task_status(session, task_id, getattr(args, "poll_timeout", 300),
@@ -11318,29 +11402,135 @@ def training_price_tier(version_id, tier="price", config=None):
     return v if isinstance(v, int) else None
 
 
-def definite_refusal(exc):
-    """True when PixAI answered and REFUSED (so nothing was created or charged): a 4xx from a
-    REST route, a GraphQL error body, or a 401 -- or nothing was sent at all (LocalRefusal: a
-    READ_ONLY or validation refusal before the network call). False for anything that may
-    have reached PixAI and succeeded -- a timeout, a dropped connection, a 5xx, an unreadable
-    answer -- which a spend guard must treat as "may have started".
+# PixAI's own "rejected" list: the 20 codes its site's create flow (useHeldTaskPrice `ye`)
+# treats as "no task was made" (DESIGN_3.22 1.3). Every other code it may answer is, to the
+# site as to this app, an UNKNOWN outcome.
+PIXAI_REJECTED_CODES = frozenset({
+    "FORBIDDEN", "BAD_REQUEST", "INVALID_INPUT", "MODEL_DEPRECATED", "TOO_MANY_REQUESTS",
+    "INVALID_PARAMETERS_COMPATIBILITY", "NO_PERMISSION_FOR_GENERATION", "REQUIRE_T_2_MEMBERSHIP",
+    "INSUFFICIENT_BALANCE", "WAITING_NUM_EXCEEDED", "WATERMARK_NOT_AVAILABLE",
+    "NSFW_PROMPTS_DETECTED", "NSFW_PROMPTS_DETECTED_ADULT_NOT_SET", "NO_PERMISSION_FOR_PREVIEW",
+    "NO_PERMISSION_FOR_EARLY_ACCESS", "KAISUUKEN_NOT_AVAILABLE", "KAISUUKEN_NOT_ALLOWED",
+    "RECIPE_UNAVAILABLE", "RECIPE_INCOMPATIBLE", "REQUIRE_MEMBERSHIP",
+})
+# The codes a spend reads as "refused, nothing made" (DESIGN_3.22 2.6): PixAI's list above, and
+# three the create route answers before any task exists -- the credential is checked before the
+# handler runs (UNAUTHORIZED), the schema before it (VALIDATION_ERROR), and the site's own form
+# checks the lane entitlement before it submits (INFINITE_MODE_NOT_ELIGIBLE). Promoting another
+# code needs evidence and a design note: "unknown" costs a held button, never money.
+DEFINITE_CODES = PIXAI_REJECTED_CODES | {"UNAUTHORIZED", "VALIDATION_ERROR",
+                                         "INFINITE_MODE_NOT_ELIGIBLE"}
+# `codes=ANY_PIXAI_CODE`: any code in PixAI's oRPC error body is a refusal -- for a non-spend
+# write whose route answers its own codes before it acts and whose caller reads the outcome
+# back (the inbox: mark read, reply, delete a reply, claim a gift). A spend never uses it.
+ANY_PIXAI_CODE = None
+# A REST timeout (408) or a closed-request (499) answer is never a refusal, whatever its body
+# says: PixAI, or an edge in front of it, may have accepted the request before it said so.
+_UNKNOWN_OUTCOME_STATUSES = frozenset({408, 499})
 
-    A GraphQL error body is a refusal only when its `data` resolved nothing: an answer whose
-    mutation root field came back non-null alongside `errors` is a PARTIAL SUCCESS -- the run
-    exists and may be charged -- so it is not definite (waves 2+3 review, F2)."""
+
+def classify_outcome(exc, codes=DEFINITE_CODES):
+    """What a failed send's exception proves: "local" (refused HERE, nothing sent), "refused"
+    (PixAI answered no, so nothing was created or charged) or "unknown" (it may exist and may be
+    charged: a spend guard reads it as "may have started").
+
+    It reads the exception's TYPE and structured fields only, never its message text
+    (DESIGN_3.22 2.6; the 3.21.2 fix L2):
+      - LocalRefusal: local.
+      - PixAIRestError: refused only when the status is a 4xx other than 408 and 499 AND the
+        body is PixAI's oRPC error (a JSON object with a string `code`) whose code is in
+        `codes`. A bare 4xx (an edge's page, no PixAI body), a 3xx, a 5xx and any other code:
+        unknown. `codes=None` accepts any PixAI code -- for a route whose own codes are all
+        answered before it acts and whose outcome the caller reads back (the inbox's).
+      - PixAIAuthError (the GraphQL road's 401): refused.
+      - a GraphQL error (the transport hangs the `errors` list on it as `graphql_errors`):
+        refused only when its `data` resolved nothing. A root field that came back non-null
+        beside `errors` is a PARTIAL SUCCESS -- the task exists and may be charged (waves 2+3
+        review, F2) -- so it is unknown.
+      - anything else (a timeout, a dropped connection, a non-JSON or id-less answer): unknown."""
     if isinstance(exc, LocalRefusal):
-        return True
+        return "local"
     if isinstance(exc, PixAIRestError):
-        return exc.status is not None and 400 <= int(exc.status) < 500
+        try:
+            status = int(exc.status)
+        except (TypeError, ValueError):
+            return "unknown"
+        if not 400 <= status < 500 or status in _UNKNOWN_OUTCOME_STATUSES:
+            return "unknown"
+        body = exc.body
+        code = body.get("code") if isinstance(body, dict) else None
+        if not isinstance(code, str) or not code:
+            return "unknown"
+        return "refused" if (codes is None or code in codes) else "unknown"
+    if isinstance(exc, PixAIAuthError):
+        return "refused"
     if isinstance(exc, PixAIError):
-        msg = str(exc)
-        if msg.startswith("GraphQL error"):
+        errors = getattr(exc, "graphql_errors", None)
+        if isinstance(errors, list) and errors:
             partial = getattr(exc, "graphql_data", None)
             if isinstance(partial, dict) and any(v is not None for v in partial.values()):
-                return False
-            return True
-        return msg.startswith("401 ")
-    return False
+                return "unknown"
+            return "refused"
+    return "unknown"
+
+
+def definite_refusal(exc, codes=DEFINITE_CODES):
+    """True when nothing was created or charged: refused here before the network call
+    (LocalRefusal: READ_ONLY, the request's own validation) or refused by PixAI in a way that
+    proves no task exists. False for anything that may have reached PixAI and succeeded,
+    which a spend guard must treat as "may have started". The rule is classify_outcome's."""
+    return classify_outcome(exc, codes) in ("local", "refused")
+
+
+def send_outcome(exc, reached):
+    """A single send's state after `exc`: "not_sent" when the one spend request was never
+    reached (`reached` False: everything before it is local or a read), else "refused" when
+    the answer proves nothing was made (definite_refusal, or a refusal this app re-raised with
+    `refused = True` after that same check), else "may_have_started"."""
+    if not reached:
+        return "not_sent"
+    if getattr(exc, "refused", False) is True or definite_refusal(exc):
+        return "refused"
+    return "may_have_started"
+
+
+# What a command-line single send prints when its answer cannot show whether a task was made
+# (DESIGN_3.22 2.12). No catch-up runs for a CLI user, so it never promises one.
+CLI_UNCLEAR = ("PixAI may have started this (task not confirmed). Check pixai.art or run "
+               "--sync before running this again.")
+
+
+class SendOutcomeUnclear(Exception):
+    """A command-line single send that reached PixAI and got no answer that proves either
+    way: the task may exist and may be charged. The message is CLI_UNCLEAR and the cause is
+    chained. Deliberately NOT a PixAIError (DESIGN_3.22 2.2), so no guard that reads "a plain
+    PixAIError was raised before the send" can ever mistake it for nothing-sent; main() exits
+    non-zero on it."""
+
+
+def _cli_send_once(send, reached=lambda: True):
+    """Run a CLI runner's ONE send. A refusal comes back as it came (PixAI's words); an
+    unknown outcome after the send was reached raises SendOutcomeUnclear. Never re-sends."""
+    try:
+        return send()
+    except Exception as e:                                   # noqa: BLE001 -- re-raised below
+        if send_outcome(e, reached()) != "may_have_started":
+            raise
+        detail = "{}: {}".format(type(e).__name__, str(e)[:200]).strip()
+        raise SendOutcomeUnclear(CLI_UNCLEAR + "\n  PixAI's answer: " + detail) from e
+
+
+def _cli_create_once(create_session, params):
+    """The video, reference-video and edit runners' ONE createGenerationTask, through
+    gql_mutate (single attempt, never a redirect). Returns the task id. An answer with no id
+    is as unclear as a lost one, so it is raised inside the send and reads unclear too."""
+    def _send():
+        created = gql_mutate(create_session, _GEN_MUTATION, {"parameters": params})
+        task_id = (created.get("createGenerationTask") or {}).get("id")
+        if not task_id:
+            raise PixAIError("no task id returned: " + json.dumps(created)[:300])
+        return task_id
+    return _cli_send_once(_send)
 
 
 _TRAIN_ERROR_WORDS = {
@@ -16183,7 +16373,7 @@ def main():
                              progress_cb=((lambda d, t, _pct: _prog(d, t)) if _prog else None))
         except Exception as e:                           # noqa: BLE001 -- additive, never fatal
             vlog("thumbnail backfill after update skipped: {}".format(e))
-    except PixAIError as e:
+    except (PixAIError, SendOutcomeUnclear) as e:
         sys.exit(str(e))
 
 

@@ -139,7 +139,7 @@ def test_the_eta_is_pixais_own_formula():
 
 def test_a_refusal_and_an_unclear_failure_are_told_apart():
     assert core.definite_refusal(core.PixAIRestError("x", 403, {"code": "INSUFFICIENT_BALANCE"}))
-    assert core.definite_refusal(core.PixAIError('GraphQL error: [{"message": "no"}]'))
+    assert core.definite_refusal(core.graphql_error('[{"message": "no"}]'))
     assert not core.definite_refusal(core.PixAIRestError("x", 502, {}))
     assert not core.definite_refusal(requests.ReadTimeout("slow"))
     assert not core.definite_refusal(requests.ConnectionError("dropped"))
@@ -687,7 +687,7 @@ def test_a_definite_basic_refusal_leaves_the_start_free_to_try_again(tmp_path, m
                                                                      pixai):
     post = _basic_client(tmp_path, monkeypatch, pixai)
     _loras(pixai, [])
-    pixai.fail("createTrainingTask", core.PixAIError('GraphQL error: [{"message": "nope"}]'))
+    pixai.fail("createTrainingTask", core.graphql_error('[{"message": "nope"}]'))
     body = dict(_BASIC, dataset_task_id="", confirm=True, accept_credit_cost=100000)
     assert post("/api/train/submit", body).status_code == 502
     pixai.on("createTrainingTask", {"createTrainingTask": {"id": "trn2"}})
@@ -873,3 +873,41 @@ def test_a_fractional_acknowledgement_is_never_the_quote(tmp_path, pixai, accept
     r = post("/api/train/advanced/700/caption", {"confirm": True, "accept_credit_cost": accepted})
     assert (r.status_code == 200) is goes
     assert len(pixai.calls_for("/training-task/700/caption")) == (1 if goes else 0)
+
+
+# ---- 3.21.2, L2: a 408 / 499 / bare 4xx on a paid training call is NOT a refusal -----------
+
+_L2_UNKNOWN = [core.PixAIRestError("REST POST -> 408", 408, {"code": "INSUFFICIENT_BALANCE"}),
+               core.PixAIRestError("REST POST -> 499", 499, {"code": "BAD_REQUEST"}),
+               core.PixAIRestError("REST POST -> 403", 403, None),
+               core.PixAIRestError("REST POST -> 404", 404, {"code": "NOT_FOUND"})]
+
+
+@pytest.mark.parametrize("exc", _L2_UNKNOWN, ids=["408", "499", "bare-403", "unlisted-code"])
+@pytest.mark.parametrize("what", ["submit", "caption"])
+def test_a_408_499_or_bare_4xx_on_a_paid_advanced_call_keeps_the_guard(tmp_path, pixai, what, exc):
+    """L2 scenario: PixAI accepted Start, an edge answered 408. The answer says it may have
+    started, and the second confirm sends nothing."""
+    url, path, amount = _PAID[what]
+    _, post = _app(tmp_path)
+    _fake_for(what, pixai)
+    pixai.fail(path, exc)
+    body = {"confirm": True, "accept_credit_cost": amount}
+    r = post(url, body)
+    assert r.status_code == 502 and r.get_json()["maybe_started"] is True
+    _fake_for(what, pixai)
+    r = post(url, body)
+    assert r.status_code == 409 and r.get_json()["maybe_started"] is True
+    assert len(pixai.calls_for(path)) == 1
+
+
+@pytest.mark.parametrize("exc", _L2_UNKNOWN, ids=["408", "499", "bare-403", "unlisted-code"])
+def test_a_408_499_or_bare_4xx_on_a_training_retry_keeps_the_guard(tmp_path, pixai, exc):
+    _, post = _app(tmp_path)
+    _retry_fake(pixai)
+    url = "/api/train/runs/800/retry"
+    pixai.fail("/training-task/800/retry", exc)
+    r = post(url, {"confirm": True, "accept_credit_cost": 100000})
+    assert r.status_code == 502 and r.get_json()["maybe_started"] is True
+    assert post(url, {"confirm": True, "accept_credit_cost": 100000}).status_code == 409
+    assert len(pixai.calls_for("/training-task/800/retry")) == 1

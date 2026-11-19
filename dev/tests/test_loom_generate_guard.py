@@ -224,7 +224,7 @@ def test_a_lost_answer_after_the_send_is_unclear_and_keeps_the_shot_blocked(rig)
 
 def test_a_definite_refusal_is_refused_and_frees_the_shot(rig):
     def _refuse(params):
-        raise core.PixAIError("GraphQL error: INSUFFICIENT_BALANCE")
+        raise core.graphql_error("INSUFFICIENT_BALANCE")
     rig["behaviour"] = _refuse
     r = rig["cli"].post("/api/loom/generate", json=_body(submit_id="s1")).get_json()
     assert r["state"] == "refused" and not r.get("unclear")
@@ -241,7 +241,7 @@ def test_the_invalid_media_id_fallback_is_journalled(rig):
     def _refuse_once(params):
         calls.append(1)
         if len(calls) == 1:
-            raise core.PixAIError("GraphQL error: invalid_media_id")
+            raise core.graphql_error("invalid_media_id")
         return "task-after-fallback"
     rig["behaviour"] = _refuse_once
     r = rig["cli"].post("/api/loom/generate", json=_body(submit_id="sF")).get_json()
@@ -259,7 +259,7 @@ def test_the_invalid_media_id_fallback_is_journalled(rig):
     assert entry.get("state") == "submitted"
     # A refusal that is NOT an invalid media id is never retried.
     rig["submits"].clear()
-    rig["behaviour"] = lambda params: (_ for _ in ()).throw(core.PixAIError("GraphQL error: INSUFFICIENT_BALANCE"))
+    rig["behaviour"] = lambda params: (_ for _ in ()).throw(core.graphql_error("INSUFFICIENT_BALANCE"))
     r2 = rig["cli"].post("/api/loom/generate", json=_body(submit_id="sG", card="c2")).get_json()
     assert r2["state"] == "refused" and len(rig["submits"]) == 1
 
@@ -270,7 +270,7 @@ def test_a_partial_success_naming_invalid_media_id_is_never_submitted_again(rig)
     so it uploaded the frames and submitted a second paid task, and the first task id was
     never journalled. A partial success is not a refusal: one submit, recorded as unclear."""
     def _partial(params):
-        err = core.PixAIError('GraphQL error: [{"message": "invalid_media_id"}]')
+        err = core.graphql_error('[{"message": "invalid_media_id"}]')
         err.graphql_data = {"createGenerationTask": {"id": "task-partial"}}
         raise err
     rig["behaviour"] = _partial
@@ -289,7 +289,7 @@ def test_a_fallback_that_fails_before_its_send_is_not_sent(rig, monkeypatch):
     fallback fails before its own mutation. The first attempt's on_send used to leave "sent"
     set, so the shot was journalled may_have_started and held for 6 h over a render that was
     never created."""
-    rig["behaviour"] = lambda params: (_ for _ in ()).throw(core.PixAIError("GraphQL error: invalid_media_id"))
+    rig["behaviour"] = lambda params: (_ for _ in ()).throw(core.graphql_error("invalid_media_id"))
     real_build = core.build_request
     calls = []
 

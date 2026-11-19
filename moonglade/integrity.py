@@ -302,11 +302,20 @@ def _index(out, g):
     return by_rel, by_mid, thumbs
 
 
+def _thumbless(path):
+    """True for a picture the thumbnailer cannot draw (an SVG, or a type this Pillow does not
+    open): it has no thumbnail by design, so none is checked for, reported or rebuilt (3.21.2,
+    L3)."""
+    from moonglade import gallery as g                     # lazy: the thumbnailer's own rule
+    return not g.thumbnail_renders(path)
+
+
 def _row_check(r, index, deep, gallery_dirname):
     """One catalog row against the index: (problem, path, size, best). `problem` is None
     for a sound row; `best` is the file the row was judged on (its largest copy), or None
     when there is none. The one decision both the full pass and a re-check of a few rows
-    make, so the two can never disagree about what "broken" means."""
+    make, so the two can never disagree about what "broken" means. A picture the thumbnailer
+    cannot draw (an SVG) is never asked for a thumbnail."""
     by_rel, by_mid, thumbs = index
     mid = str(r.get("media_id") or "")
     fn = str(r.get("filename") or "").replace("\\", "/")
@@ -327,6 +336,8 @@ def _row_check(r, index, deep, gallery_dirname):
             problem = P_ZERO
         elif deep and structural_problem(best.path):
             problem = P_SUSPECT
+        elif not is_video and _thumbless(best.path):
+            pass                                        # no thumbnail by design (L3)
         elif mid not in thumbs:
             problem = P_NO_POSTER if is_video else P_NO_THUMB
             path, size = "{}/thumbs/{}.jpg".format(gallery_dirname, mid), ""
@@ -650,6 +661,11 @@ def broken_list(out_dir, db_path, avg_bytes=None):
         r = catalog.get(mid)
         if r is None:
             continue                                  # gone from the catalog since the check
+        if problem in (P_NO_THUMB, P_ZERO_THUMB) and str(r.get("is_video") or "") != "1" \
+                and _thumbless(r.get("filename")):
+            # A report written before 3.21.2 listed every SVG as "no thumbnail"; it has none
+            # by design and is never offered a rebuild (L3).
+            continue
         archive = g.is_archive_only(r)
         mark = (marks.get(mid) or {}).get("mark", "")
         refetch = problem in REFETCH_PROBLEMS
@@ -724,7 +740,10 @@ def broken_list(out_dir, db_path, avg_bytes=None):
 STAGING_DIRNAME = "refetch-staging"        # under gallery/, which every library walk prunes
 
 _FORMAT_OF_EXT = {".png": "png", ".jpg": "jpeg", ".jpeg": "jpeg", ".webp": "webp",
-                  ".gif": "gif", ".mp4": "mp4", ".m4v": "mp4", ".mov": "mp4"}
+                  ".gif": "gif", ".svg": "svg", ".mp4": "mp4", ".m4v": "mp4", ".mov": "mp4"}
+
+# How far into a file its SVG head may sit (an XML declaration, a comment or a DOCTYPE first).
+_SVG_HEAD = 1024
 
 # The plain words a refused or failed row shows (peach, never ruby).
 WORDS = {
@@ -755,13 +774,31 @@ def _result(mid, action, ok=True, refused="", error="", note="", nbytes=0):
             "note": note, "bytes": nbytes}
 
 
+def _is_svg_head(head):
+    """True when `head` (a file's first bytes) opens an SVG document: after an optional BOM
+    and whitespace it starts with `<svg`, or with `<?xml` / a comment / a DOCTYPE and has an
+    `<svg` element within the first _SVG_HEAD bytes (3.21.2, L3). An HTML error page does
+    not pass."""
+    h = head[:_SVG_HEAD]
+    if h.startswith(b"\xef\xbb\xbf"):
+        h = h[3:]
+    h = h.lstrip()
+    low = h.lower()
+    if low.startswith(b"<svg"):
+        return True
+    return low.startswith((b"<?xml", b"<!--", b"<!doctype svg")) and b"<svg" in low
+
+
 def _format_of(path):
     """The media format a file's own first bytes say it is, or None."""
     try:
         with open(path, "rb") as f:
-            head = f.read(16)
+            head = f.read(_SVG_HEAD)
     except OSError:
         return None
+    if _is_svg_head(head):
+        return "svg"
+    head = head[:16]
     if head.startswith(b"\x89PNG\r\n\x1a\n"):
         return "png"
     if head.startswith(b"\xff\xd8"):
@@ -866,6 +903,8 @@ def _pixel_size_ok(path, row):
     the catalog, or no Pillow, there is nothing to compare and the other checks stand."""
     if str(row.get("is_video") or "") == "1":
         return True
+    if _format_of(path) == "svg":
+        return True                     # a vector picture has no pixel size to compare (L3)
     try:
         w, h = int(str(row.get("width") or "0")), int(str(row.get("height") or "0"))
     except ValueError:
@@ -1018,7 +1057,7 @@ def redownload_one(out_dir, db_path, media_id, session_factory=None, index=None,
         if str(row.get("is_video") or "") == "1":
             if not thumb.exists() or thumb.stat().st_size == 0:
                 g.make_video_thumbnail(target, thumb)
-        else:
+        elif not _thumbless(target):                   # an SVG has none to make (L3)
             g.make_thumbnail(target, thumb)
     return _result(mid, "redownload", nbytes=nbytes)
 

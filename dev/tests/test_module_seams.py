@@ -264,6 +264,7 @@ SOURCE_READERS = {
     "tests/test_training_advanced.py": ("moonglade.backup",),
     "tests/test_training_parity.py": ("moonglade.backup",),
     "tests/test_tsubaki3_image_gate.py": ("moonglade.backup", "moonglade.gallery"),
+    "tests/test_unclear_single_sends.py": ("moonglade.backup",),
     "tests/test_updater.py": ("moonglade.gallery",),
     "tests/test_video_tsubaki.py": ("moonglade.backup",),
     "tests/test_watch.py": ("moonglade.gallery",),
@@ -818,6 +819,11 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_security_review_fixes.py', 'moonglade.series'),
     ('tests/test_security_review_fixes.py', 'moonglade.telemetry'),
     ('tests/test_security_review_fixes.py', 'moonglade.updater'),
+    # 3.21.2 (L1): test_unclear_single_sends reads the CLI runners' and main()'s own source
+    # (run_generate*, run_reference_video, run_edit_image, main), which stayed in backup;
+    # nothing it reads moved to pixai_client or mirror.
+    ('tests/test_unclear_single_sends.py', 'moonglade.pixai_client'),
+    ('tests/test_unclear_single_sends.py', 'moonglade.mirror'),
 }
 
 

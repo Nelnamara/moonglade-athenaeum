@@ -4083,6 +4083,35 @@ def compute_dhash(img_path, hash_size=_dupes.DHASH_SIZE):
     return "{:0{width}x}".format(bits, width=hash_size * hash_size // 4)
 
 
+# A picture the thumbnailer cannot draw (3.21.2, L3). An SVG is a vector document, never
+# opened by Pillow and never rasterised here (3.21.1 keeps it a plain file, served only as an
+# image or a download), so it has no thumbnail by design: a missing one is not a fault, and
+# nothing may offer to "rebuild" it. The same holds for any picture type this Pillow cannot open.
+_THUMBLESS_EXTS = frozenset({".svg"})
+
+
+def thumbnail_renders(path):
+    """True when make_thumbnail can draw a thumbnail for the picture at `path` (judged by its
+    extension, so a missing file is judged the same). False for an SVG, and for a picture type
+    this Pillow does not open. Without Pillow at all nothing renders, but the raster types
+    still count as thumbnail-bearing, so a library check keeps reporting their thumbnails."""
+    global _PIL_EXTS
+    ext = Path(str(path or "")).suffix.lower()
+    if ext in _THUMBLESS_EXTS:
+        return False
+    if Image is None or not ext:
+        return True
+    if _PIL_EXTS is None:
+        try:
+            _PIL_EXTS = frozenset(k.lower() for k in Image.registered_extensions())
+        except Exception:                                    # noqa: BLE001 -- fail to today's
+            return True
+    return ext in _PIL_EXTS
+
+
+_PIL_EXTS = None                                  # Pillow's openable extensions, read once
+
+
 def make_thumbnail(img_path, thumb_path):
     """Render one gallery thumbnail. ATOMIC: Pillow writes a same-directory temp file and
     the finished JPEG is os.replace()d into position -- the idiom download's own `.part`
@@ -4864,6 +4893,9 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
         thumb_path = thumb_dir / "{}.jpg".format(row["media_id"])
         if thumb_path.exists() and (is_vid or not force):
             done += 1
+            continue
+        if not is_vid and not thumbnail_renders(row.get("filename")):
+            done += 1            # an SVG has no thumbnail by design: skipped, not a failure (L3)
             continue
         work.append((row["media_id"], thumb_path, row.get("filename"), is_vid))
 
@@ -16686,6 +16718,95 @@ def create_app(out_dir: Path):
                 raise core.LocalRefusal(_QUOTED_FREE_GONE)
         return {"before_send": _before_send}
 
+    # THE SINGLE SENDS' REPEAT HOLD (3.21.2, DESIGN_3.22 "Live in master today" L1 and 2.12).
+    # Every single send -- /api/generate, /api/edit, /api/enhance, /api/scene, /api/fix and the
+    # gallery's own Video tab on /api/loom/generate -- claims a record for (signed-in user, kind,
+    # the request as sent) BEFORE anything goes out, and an identical send while it stands is
+    # refused before any network call: a double tap, a second tab, a stale bundle or a client
+    # retry after a lost answer must not pay twice. The record is KEPT when the send succeeded
+    # (SEND_REPEAT_S, Fix's double-tap window since #93) or its outcome is unknown -- a
+    # timeout, a dropped connection, a 5xx, a 408/499, a bare 4xx, an answer with no task id
+    # (SEND_UNCLEAR_S, the design's 60 s): the retry it invites is exactly a second spend. It is
+    # DROPPED only when the send is known to have cost nothing: never reached (refused here, or
+    # by a read before it), or refused by PixAI in a way that proves no task exists
+    # (core.send_outcome). The Loom's journalled render keeps its own journal and is not held
+    # here; a run (/api/generate/run) has its own run id and states.
+    SEND_REPEAT_S = 10.0
+    SEND_UNCLEAR_S = 60.0
+    _UNCLEAR_SEND = ("PixAI may have started this. It was not sent again; check the Activity "
+                     "tray (or pixai.art) before sending it again.")
+    _UNCLEAR_HELD = ("The last one may still be starting, so this was not sent. Check the "
+                     "Activity tray (or pixai.art) before sending it again.")
+    _REPEAT_HELD = ("The same request was asked for a few seconds ago; wait a moment before "
+                    "sending it again.")
+    _send_recent = {}                    # key -> (until, state): "sending" | "sent" | "unclear"
+    _send_recent_lock = threading.Lock()
+
+    def _send_key(kind, body):
+        """(user, kind, the request as sent, canonical JSON). Never raises."""
+        try:
+            blob = json.dumps(body, sort_keys=True, default=str)
+        except Exception:                                    # noqa: BLE001
+            blob = repr(body)
+        return (str(session.get("user") or ""), str(kind), blob)
+
+    def _send_claim(key, repeat_msg=None, claim=True):
+        """The refusal (a JSON response) for a send that matches a standing record, or None
+        -- with the record now claimed as "sending" when `claim` (it holds for SEND_UNCLEAR_S
+        if this request never settles it). A route checks with claim=False before its first
+        network call, and claims (atomically, so two racing requests cannot both pass)
+        immediately before the send itself. Local, no network."""
+        now = time.monotonic()
+        with _send_recent_lock:
+            for k in [k for k, (until, _s) in _send_recent.items() if now >= until]:
+                del _send_recent[k]
+            held = _send_recent.get(key)
+            if held is None:
+                if claim:
+                    _send_recent[key] = (now + SEND_UNCLEAR_S, "sending")
+                return None
+        if held[1] == "unclear":
+            return jsonify({"error": _UNCLEAR_HELD, "state": "may_have_started",
+                            "unclear": True, "held": True}), 409
+        return jsonify({"error": repeat_msg or _REPEAT_HELD, "held": True}), 409
+
+    def _send_settle(key, state):
+        """Settle a claimed record: "sent" keeps it SEND_REPEAT_S, "may_have_started" keeps
+        it SEND_UNCLEAR_S, "not_sent" / "refused" (nothing was made) drop it."""
+        if key is None:
+            return
+        now = time.monotonic()
+        with _send_recent_lock:
+            if state == "sent":
+                _send_recent[key] = (now + SEND_REPEAT_S, "sent")
+            elif state == "may_have_started":
+                _send_recent[key] = (now + SEND_UNCLEAR_S, "unclear")
+            else:
+                _send_recent.pop(key, None)
+
+    def _Reached():
+        """This request thread's spend mark (core.spend_watch): `.v` turns True once the one
+        spend request is reached. Observation only; nothing extra is passed to the send."""
+        from moonglade import backup as core
+        return core.spend_watch()
+
+    def _send_failed(where, exc, reached, params, key):
+        """A failed single send's answer. An unknown outcome is said plainly and held
+        (SEND_UNCLEAR_S); anything else carries `state` (not_sent | refused), the record is
+        dropped, and the caller's own refusal shape is returned as before. (response, msg,
+        state): response is None unless the outcome is unknown."""
+        from moonglade import backup as core
+        msg = _log_gen_failure(where, exc, params)[:300]
+        try:
+            state = core.send_outcome(exc, bool(reached))
+        except Exception:                                    # noqa: BLE001 -- never "refused"
+            state = "may_have_started" if reached else "not_sent"
+        _send_settle(key, state)
+        if state == "may_have_started":
+            return (jsonify({"error": _UNCLEAR_SEND, "detail": msg, "state": state,
+                             "unclear": True}), 200), msg, state
+        return None, msg, state
+
     @app.route("/api/price", methods=["POST"])
     @tier(LOGIN)
     def api_price():
@@ -16745,11 +16866,19 @@ def create_app(out_dir: Path):
         goes out through core.submit, which is where READ_ONLY and the free card are
         decided for every create route at once. What is left here is what only a route
         knows: the entitlement read, the LoRA cap, telemetry, and the clamp receipt."""
+        held_key = None
+        reached = _Reached()
         try:
-            core, session = _gen_session()
             body = request.get_json(silent=True) or {}
             expect_free = _pop_expect_free(body)
             loom_target = _pop_loom_target(body)
+            # 3.21.2 (L1): an identical send whose last one is still standing is refused
+            # here, before the session is made or anything is read.
+            send_key = _send_key("image", body)
+            held = _send_claim(send_key, claim=False)
+            if held:
+                return held
+            core, session = _gen_session()
             # Session M (BUILD-w5-m review F2): this route is a SINGLE send. More than one
             # generation goes through the confirm (/api/generate/plan -> /run), so a count
             # other than 1 is refused here -- never clamped -- whoever sent it (a stale
@@ -16805,8 +16934,13 @@ def create_app(out_dir: Path):
                                          "remove {} to continue.".format(
                                              _cap, "" if _cap == 1 else "s",
                                              len(req.lora_version_ids) - _cap)}), 400
+            held = _send_claim(send_key)
+            if held:
+                return held
+            held_key = send_key
             task_id = core.submit(session, req,
                                   **_quoted_free_hooks(core, req, expect_free))["task_id"]
+            _send_settle(held_key, "sent")
             _record_loom_send(loom_target, task_id, req.parameters, "image")
             if req.unlimited:
                 # The lane mark on the job, written by the server rather than trusted from the
@@ -16833,15 +16967,20 @@ def create_app(out_dir: Path):
                 out["adjusted"] = req.adjusted
             return jsonify(out)
         except Exception as e:
-            msg = _log_gen_failure("/api/generate", e, locals().get("params"))[:300]
+            unclear, msg, state = _send_failed("/api/generate", e, reached.v,
+                                               locals().get("params"), held_key)
+            if unclear:
+                return unclear
             # Lane w2-recipes: PixAI's RECIPE_UNAVAILABLE / RECIPE_INCOMPATIBLE, structured
             # (which recipes, why, in plain words) so the dock can mark the chip. Nothing
-            # was created; the raw text is in the log above.
+            # was created; the raw text is in the log above. Only ever read once the outcome
+            # is known to be a refusal (3.21.2: the words never decide the outcome).
             from moonglade import recipes as _recipes
             refusal = _recipes.refusal_from(e)
             if refusal:
-                return jsonify({"error": refusal["copy"], "recipe_error": refusal}), 200
-            return jsonify({"error": msg}), 200
+                return jsonify({"error": refusal["copy"], "recipe_error": refusal,
+                                "state": state}), 200
+            return jsonify({"error": msg, "state": state}), 200
 
     # ---- Session M: runs -- every send of more than one generation -----------------------
     # The design, its guard order and the adversarial review it answers:
@@ -17495,16 +17634,22 @@ def create_app(out_dir: Path):
 
         Same road as the badge: core.build_request builds the `chat` shape /api/price
         quoted, core.submit is the one READ_ONLY + free-card choke."""
+        held_key = None
+        reached = _Reached()
         try:
             user = str(session.get("user") or "")
+            p = request.get_json(silent=True) or {}
+            expect_free = _pop_expect_free(p)
+            loom_target = _pop_loom_target(p)
+            send_key = _send_key("edit", p)
+            held = _send_claim(send_key, claim=False)        # 3.21.2 (L1): before any network
+            if held:
+                return held
             # gsession, not `core, session = _gen_session()` -- see api_price's identical
             # comment: session is Flask's, reassigning it here would make every reference
             # to the bare name `session` in this function a local (UnboundLocalError on
             # the read above), not a read of Flask's session.
             core, gsession = _gen_session()
-            p = request.get_json(silent=True) or {}
-            expect_free = _pop_expect_free(p)
-            loom_target = _pop_loom_target(p)
             req = core.build_request(p, mode="edit", user=user,
                                      resolve=_submit_resolver(core, gsession))
             params = req.parameters          # bound for _log_gen_failure's locals().get()
@@ -17512,15 +17657,21 @@ def create_app(out_dir: Path):
                 return jsonify({"error": "pick an image to edit (and a valid preset if set)"}), 400
             if not (p.get("preset") or "").strip() and not (p.get("instruction") or "").strip():
                 return jsonify({"error": "describe the edit"}), 400
+            held = _send_claim(send_key)
+            if held:
+                return held
+            held_key = send_key
             task_id = core.submit(gsession, req,
                                   **_quoted_free_hooks(core, req, expect_free))["task_id"]
+            _send_settle(held_key, "sent")
             _record_loom_send(loom_target, task_id, req.parameters, "edit")
             # (edits is counted from the catalog's edit rows since 2026-10-02.)
             _telemetry.telem_set_add("tools", "edit", out_dir=out_dir)
             return jsonify({"task_id": task_id})
         except Exception as e:
-            return jsonify({"error": _log_gen_failure(
-                "/api/edit", e, locals().get("params"))[:300]}), 200
+            unclear, msg, state = _send_failed("/api/edit", e, reached.v,
+                                               locals().get("params"), held_key)
+            return unclear or (jsonify({"error": msg, "state": state}), 200)
 
     # PixAI's official colour palettes change rarely (26 on 2026-09-26); one read an hour is
     # plenty, and a failed read is not cached so the next open tries again.
@@ -17651,10 +17802,16 @@ def create_app(out_dir: Path):
         if not _mirror.mirror_enabled() or _mirror.make_mirror_session() is None:
             return jsonify({"error": "Mirror to PixAI must be armed to run AI presets — "
                                      "nothing was submitted, no credits spent"}), 409
+        held_key = None
+        reached = _Reached()
         try:
-            core, session = _gen_session()
             p = request.get_json(silent=True) or {}
             expect_free = _pop_expect_free(p)
+            send_key = _send_key("enhance", p)
+            held = _send_claim(send_key, claim=False)        # 3.21.2 (L1): before any network
+            if held:
+                return held
+            core, session = _gen_session()
             # Same road as every other create: build_request resolves the source image,
             # translates the Change-Emotion control and calls build_panelplugin_parameters;
             # core.submit is the READ_ONLY + free-card choke. A panelplugin task can never
@@ -17671,8 +17828,13 @@ def create_app(out_dir: Path):
             # again instead of offering "free" for an hour (2026-11-18).
             _enh_price_cache["presets"] = None
             _enh_price_cache["gen"] += 1
+            held = _send_claim(send_key)
+            if held:
+                return held
+            held_key = send_key
             task_id = core.submit(session, req,
                                   **_quoted_free_hooks(core, req, expect_free))["task_id"]
+            _send_settle(held_key, "sent")
             # [BLOCKER] Telemetry is DEFERRED, not fired here: submit_generation returns the id at
             # createGenerationTask ACCEPTANCE (before start/completion), and a panelplugin job can
             # be accepted then reaped. Record the identity ACTUALLY submitted (workflowName when a
@@ -17696,8 +17858,9 @@ def create_app(out_dir: Path):
             # enhance_workflows).
             return jsonify({"task_id": task_id})
         except Exception as e:
-            return jsonify({"error": _log_gen_failure(
-                "/api/enhance", e, locals().get("params"))[:300]}), 200
+            unclear, msg, state = _send_failed("/api/enhance", e, reached.v,
+                                               locals().get("params"), held_key)
+            return unclear or (jsonify({"error": msg, "state": state}), 200)
 
     @app.route("/api/enhance/emotions")
     @tier(LOGIN)
@@ -17767,9 +17930,15 @@ def create_app(out_dir: Path):
         if not _mirror.mirror_enabled() or _mirror.make_mirror_session() is None:
             return jsonify({"error": "Mirror to PixAI must be armed to run AI Tools — "
                                      "nothing was submitted, no credits spent"}), 409
+        held_key = None
+        reached = _Reached()
         try:
-            core, session = _gen_session()
             p = request.get_json(silent=True) or {}
+            send_key = _send_key("scene", p)
+            held = _send_claim(send_key, claim=False)        # 3.21.2 (L1): before any network
+            if held:
+                return held
+            core, session = _gen_session()
             scene_id = str(p.get("scene_id") or p.get("sceneId") or "").strip()
             media = [_input_media_id(core, session, str(m).strip())
                      for m in (p.get("media_ids") or p.get("mediaIds") or []) if str(m).strip()]
@@ -17778,10 +17947,19 @@ def create_app(out_dir: Path):
                 return jsonify({"error": "pick an AI tool"}), 400
             if not media:
                 return jsonify({"error": "pick a source image"}), 400
+            held = _send_claim(send_key)
+            if held:
+                return held
+            held_key = send_key
+            # submit_scene raises when PixAI's answer carries no task id (3.21.2): that is
+            # "may have started", never a success with a null id.
             task_id = core.submit_scene(
                 _mirror.make_mirror_session(), scene_id, media,
                 preset=str(p.get("preset") or "random"), custom=p.get("custom"),
                 selector_values=(p.get("selector_values") or p.get("selectorValues") or []))
+            if not task_id:
+                raise core.PixAIError("scene: no task id returned")
+            _send_settle(held_key, "sent")
             # Doorwarden telemetry is DEFERRED to terminal success (see _fire_scene_telemetry),
             # mirroring the enhance path: record the submitted scene id keyed by task id. The
             # scene id is stored only to be counted (scenes_used = len) -- it never leaves.
@@ -17793,10 +17971,12 @@ def create_app(out_dir: Path):
             # records the diagnosis -- the /api/enhance sibling passes locals().get("params")
             # the same way. submit_scene has no single builder-params dict at this site, so name
             # the shape explicitly (scene, preset, source count).
-            return jsonify({"error": _log_gen_failure(
-                "/api/scene", e, {"scene_id": locals().get("scene_id"),
-                                  "preset": (p.get("preset") if "p" in locals() else None),
-                                  "media_ct": len(locals().get("media") or [])})[:300]}), 200
+            unclear, msg, state = _send_failed(
+                "/api/scene", e, reached.v,
+                {"scene_id": locals().get("scene_id"),
+                 "preset": (p.get("preset") if "p" in locals() else None),
+                 "media_ct": len(locals().get("media") or [])}, held_key)
+            return unclear or (jsonify({"error": msg, "state": state}), 200)
 
     # One Fix at a time (#93 review F4). Every Fix spends, and the clients' own gates (one in
     # flight per shot) cannot see a second tab, a stale bundle or a hand-rolled POST. So an
@@ -17808,51 +17988,32 @@ def create_app(out_dir: Path):
     # to have cost nothing -- refused before anything was sent (the mirror refusing, a body
     # the builder refuses) or refused by PixAI with a 4xx (insufficient balance and the like:
     # nothing created) -- so a fixed-up retry goes straight through (#93 review 2, F2).
-    _FIX_REPEAT_WINDOW = 10.0
+    # Since 3.21.2 this is the single sends' repeat hold (_send_claim, above) keyed on the
+    # cleaned fixer body: SEND_REPEAT_S after an accepted Fix, SEND_UNCLEAR_S after an unknown
+    # outcome, dropped only when the Fix is known to have cost nothing (core.send_outcome: never
+    # reached, or a definite refusal -- the classifier's rule, so a 408, a 499 or a bare 4xx
+    # keeps it, L2).
     _FIX_REPEAT_MSG = ("The same Fix was asked for a few seconds ago; wait a moment before "
                        "sending it again.")
-    _fix_recent = {}
-    _fix_recent_lock = threading.Lock()
 
     def _fix_repeat_refusal(core, p):
-        """(refusal, key): the refusal text for a repeat of a recent identical Fix (key None),
-        or (None, key) with this Fix now recorded under `key` -- which the caller drops with
-        _fix_forget when the submit turns out to have cost nothing. A body build_fixer_body
-        refuses is never recorded (None, None): it cannot spend, and its own refusal is the
-        answer the caller should see."""
+        """(refusal, key): the refusal (a JSON response) for a repeat of a recent identical
+        Fix (key None), or (None, key) with this Fix now claimed under `key` -- which the
+        route settles once the submit's outcome is known. A body build_fixer_body refuses is
+        never recorded (None, None): it cannot spend, and its own refusal is the answer the
+        caller should see."""
         try:
             body = core.build_fixer_body(str(p.get("source") or "").strip(), p.get("boxes"))
         except Exception:                  # noqa: BLE001 -- the build refuses it properly below
             return None, None
-        key = (str(session.get("user") or ""), json.dumps(body, sort_keys=True))
-        now = time.monotonic()
-        with _fix_recent_lock:
-            for k in [k for k, t in _fix_recent.items() if now - t >= _FIX_REPEAT_WINDOW]:
-                del _fix_recent[k]
-            if key in _fix_recent:
-                return _FIX_REPEAT_MSG, None
-            _fix_recent[key] = now
+        key = _send_key("fix", body)
+        held = _send_claim(key, repeat_msg=_FIX_REPEAT_MSG)
+        if held:
+            return held, None
         return None, key
 
     def _fix_forget(key):
-        if key is not None:
-            with _fix_recent_lock:
-                _fix_recent.pop(key, None)
-
-    def _fix_failure_cost_nothing(core, exc):
-        """True only when a failed Fix submit is KNOWN to have charged nothing. PixAI's own
-        4xx refusal (408 aside: a timeout is an unknown outcome) created no task; a plain
-        PixAIError other than "no task id returned" is one of this app's refusals, raised
-        before the POST (the mirror unavailable, READ_ONLY, a body the builder refuses).
-        A transport error, a 5xx, a missing task id or anything else: unknown -- keep."""
-        if isinstance(exc, core.PixAIRestError):
-            status = getattr(exc, "status", None) or 0
-            return 400 <= int(status) < 500 and int(status) != 408
-        if isinstance(exc, core.requests.RequestException):
-            return False
-        if isinstance(exc, core.PixAIError):
-            return not str(exc).startswith("fixer: no task id returned")
-        return False
+        _send_settle(key, "not_sent")
 
     @app.route("/api/fix", methods=["POST"])
     @tier(LOGIN)
@@ -17870,9 +18031,11 @@ def create_app(out_dir: Path):
         server refuses them; a Fix is one kind).
 
         One Fix at a time: an identical submit (same user, picture and boxes) inside
-        _FIX_REPEAT_WINDOW seconds of the last one is refused before any network call -- a
+        SEND_REPEAT_S seconds of the last one is refused before any network call -- a
         double tap, or a client retry after a lost response, must not pay twice -- unless
-        that last one is known to have cost nothing (see _fix_failure_cost_nothing)."""
+        that last one is known to have cost nothing (core.send_outcome)."""
+        fix_key = None
+        reached = _Reached()
         try:
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
@@ -17882,7 +18045,7 @@ def create_app(out_dir: Path):
             core._check_read_only(core._SUBMIT_ACTIONS["fix"])
             repeat, fix_key = _fix_repeat_refusal(core, p)
             if repeat:
-                return jsonify({"error": repeat}), 409
+                return repeat
             req = core.build_request(p, mode="fix",
                                      resolve=_submit_resolver(core, session))
             if not req.media_id:
@@ -17899,6 +18062,7 @@ def create_app(out_dir: Path):
             # "which boxes did we actually ask about" is half the diagnosis.
             fix_params = {"mediaId": req.media_id, "boxes": req.boxes}
             task_id = core.submit(session, req)["task_id"]
+            _send_settle(fix_key, "sent")
             _record_loom_send(loom_target, task_id, req.parameters, "fix")
             _telemetry.telem_set_add("tools", "fix", out_dir=out_dir)   # Full Toolbox
             return jsonify({"task_id": task_id})
@@ -17908,14 +18072,12 @@ def create_app(out_dir: Path):
             # down. This route was the last holdout after _log_gen_failure was added for the
             # 2026-07-26 undiagnosable decline: it returned the redacted text to the browser,
             # friendlyGenErr() replaced it with a guess, and the real error was recorded
-            # nowhere at all.
-            try:
-                if _fix_failure_cost_nothing(core, e):
-                    _fix_forget(locals().get("fix_key"))
-            except Exception:                  # noqa: BLE001 -- never mask the real failure
-                pass
-            return jsonify({"error": _log_gen_failure(
-                "/api/fix", e, locals().get("fix_params"))[:300]}), 200
+            # nowhere at all. _send_failed logs it, settles the repeat record by the
+            # classifier (kept unless the Fix is known to have cost nothing) and answers an
+            # unknown outcome as "may have started" (3.21.2, L1/L2).
+            unclear, msg, state = _send_failed("/api/fix", e, reached.v,
+                                               locals().get("fix_params"), fix_key)
+            return unclear or (jsonify({"error": msg, "state": state}), 200)
 
     # --- The Loom (Seedance storyboard) -------------------------------------
     # Storage is a small key->value store the Loom's window.storage shim reads via
@@ -19801,6 +19963,14 @@ __DESIGN_TOKENS__
             _core._check_read_only(_core._SUBMIT_ACTION_DEFAULT)
         except _core.PixAIError as e:
             return jsonify({"error": str(e)[:300]}), 200
+        # 3.21.2 (L1): the gallery's own Video tab (no Loom keys) is a single send, held like
+        # the others. A journalled Loom render keeps its journal's own states and is not held
+        # here.
+        video_key = None if journalled else _send_key("video", p)
+        if video_key is not None:
+            held = _send_claim(video_key, claim=False)
+            if held:
+                return held
 
         # Pictures the road cannot send (review F16). resolve_img below turns anything that is
         # not a catalog id or a data: thumbnail into "", and the render then went out WITHOUT
@@ -19878,6 +20048,10 @@ __DESIGN_TOKENS__
         # said FREE (2026-11-18): before, the guard rode only a journalled Loom render.
         hooks = ({"before_send": _before_send, "on_send": _on_send} if journalled
                  else {"before_send": _before_send} if expect_free else {})
+        # The Video tab's spend mark (3.21.2, L1): never reached (nothing sent) told apart from
+        # reached with an unclear answer (may have started). Observation only.
+        video_mark = _Reached()
+        held_key = None
 
         def _journal(**fields):
             if journalled:
@@ -19963,6 +20137,11 @@ __DESIGN_TOKENS__
 
             req = _request_for(image_ids)
             params = req.parameters      # bound for _log_gen_failure's locals().get()
+            if video_key is not None:
+                held = _send_claim(video_key)
+                if held:
+                    return held
+                held_key = video_key
             try:
                 attempt["sent"] = False
                 task_id = core.submit(session_, req, **hooks)["task_id"]
@@ -20016,6 +20195,7 @@ __DESIGN_TOKENS__
                 # then journalled not_sent, not may_have_started (which held the shot for 6 h
                 # over a render that was never created).
                 attempt["sent"] = False
+                video_mark.v = False          # the refused first try made nothing (L1)
                 _logging_ = __import__("logging")
                 _logging_.getLogger(__name__).info(
                     "passthrough refused (%s); uploading frames and retrying", err[:80])
@@ -20045,6 +20225,7 @@ __DESIGN_TOKENS__
                     _telemetry.telem_bump("storyboards", out_dir=out_dir)
             except Exception:
                 pass
+            _send_settle(held_key, "sent")
             _journal(state="submitted", task_id=str(task_id))
             if send_board:
                 # THE SEND RECORD: the one source of the board's "spent" figure. A free card
@@ -20055,9 +20236,13 @@ __DESIGN_TOKENS__
                                 cost=0 if (req.parameters or {}).get("kaisuukenId") else None)
             return jsonify({"task_id": task_id, "uploaded": len(image_ids)})
         except Exception as e:
-            msg = _log_gen_failure("/api/loom/generate", e, locals().get("params"))[:300]
             if not journalled:
-                return jsonify({"error": msg}), 200
+                # The Video tab: the single sends' rule (3.21.2, L1) -- an unknown outcome is
+                # said plainly and held; anything else carries its state, as before.
+                unclear, msg, state = _send_failed("/api/loom/generate", e, video_mark.v,
+                                                   locals().get("params"), held_key)
+                return unclear or (jsonify({"error": msg, "state": state}), 200)
+            msg = _log_gen_failure("/api/loom/generate", e, locals().get("params"))[:300]
             if not attempt["sent"]:
                 state = "not_sent"
             elif getattr(e, "refused", False) or _core.definite_refusal(e):

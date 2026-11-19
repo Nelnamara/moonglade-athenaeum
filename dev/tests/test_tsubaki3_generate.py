@@ -283,7 +283,7 @@ def test_a_listed_profile_pixai_refuses_is_never_resubmitted_on_the_default(rest
 
     def fake(s, q, v=None):
         sent.append(dict(v["parameters"]))
-        raise core.PixAIError('GraphQL error: [{"message": "inferenceProfile ultra requires membership"}]')
+        raise core.graphql_error('[{"message": "inferenceProfile ultra requires membership"}]')
     monkeypatch.setattr(core, "gql_mutate", fake)
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     params = {"prompts": "p", "modelId": T3, "width": 1024, "height": 1024, "batchSize": 1,
@@ -298,7 +298,7 @@ def test_a_members_only_profile_stands_the_turbo_fallback_down(rest, monkeypatch
 
     def fake(s, q, v=None):
         sent.append(dict(v["parameters"]))
-        raise core.PixAIError('GraphQL error: [{"message": "REQUIRE_MEMBERSHIP"}]')
+        raise core.graphql_error('[{"message": "REQUIRE_MEMBERSHIP"}]')
     monkeypatch.setattr(core, "gql_mutate", fake)
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     params = {"prompts": "p", "modelId": T3, "width": 1024, "height": 1024, "batchSize": 1,
@@ -313,7 +313,7 @@ def test_a_members_only_profile_stands_the_turbo_fallback_down(rest, monkeypatch
     def fake2(s, q, v=None):
         calls.append(dict(v["parameters"]))
         if v["parameters"].get("priority") == core.PRIORITY_TURBO:
-            raise core.PixAIError('GraphQL error: [{"message": "REQUIRE_MEMBERSHIP"}]')
+            raise core.graphql_error('[{"message": "REQUIRE_MEMBERSHIP"}]')
         return {"createGenerationTask": {"id": "T1"}}
     monkeypatch.setattr(core, "gql_mutate", fake2)
     monkeypatch.setattr(core, "_turbo_refused", {"seen": False})
@@ -334,7 +334,7 @@ def test_a_partial_success_is_never_resubmitted(rest, monkeypatch, message, prof
 
     def fake(s, q, v=None):
         sent.append(dict(v["parameters"]))
-        e = core.PixAIError('GraphQL error: [{"message": "%s"}]' % message)
+        e = core.graphql_error('[{"message": "%s"}]' % message)
         e.graphql_data = {"createGenerationTask": {"id": "T-made"}}
         raise e
     monkeypatch.setattr(core, "gql_mutate", fake)

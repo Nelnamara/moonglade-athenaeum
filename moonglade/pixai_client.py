@@ -180,7 +180,8 @@ class PixAIClient:
         `query` as the backstop) never follows a redirect (#92 review F1): it is sent with
         `allow_redirects=False`, and a 3xx raises before its body is read, with nothing
         re-sent. A query document keeps requests' default."""
-        from moonglade.backup import API_URL, _is_redirect_status, PixAIError, _ssl_help
+        from moonglade.backup import (API_URL, _is_redirect_status, PixAIError, PixAIAuthError,
+                                      _ssl_help, graphql_error)
         body = {"query": document, "variables": variables or {}}
         follow_redirects = not _is_mutation_document(document)
         send = {} if follow_redirects else {"allow_redirects": False}
@@ -198,7 +199,7 @@ class PixAIClient:
                 raise PixAIError("HTTP {} -- PixAI redirected this request; nothing was "
                                  "re-sent.".format(r.status_code))
             if r.status_code == 401:
-                raise PixAIError("401 Unauthorized -- API key missing/expired.")
+                raise PixAIAuthError("401 Unauthorized -- API key missing/expired.")
             if r.status_code == 429 or r.status_code >= 500:
                 if attempt == retries:
                     r.raise_for_status()
@@ -209,16 +210,16 @@ class PixAIClient:
                 raise PixAIError("HTTP {} non-JSON response:\n{}".format(
                     r.status_code, r.text[:400]))
             if data.get("errors"):
-                err = PixAIError("GraphQL error: " + json.dumps(data["errors"])[:500])
-                # The WHOLE list rides on the error: the message keeps 500 characters, and a
-                # structured refusal (a recipe's RECIPE_* with its ids and reason) can be
-                # longer. Reading it changes nothing about what was sent or retried.
-                err.graphql_errors = data["errors"]
-                # A GraphQL answer may carry `errors` AND `data` at once: a partial success,
-                # where the root field DID resolve (a run created and charged) and something
-                # beneath it failed. The data rides on the error so a spend guard can tell
-                # that apart from a refusal (definite_refusal; waves 2+3 review, F2).
-                err.graphql_data = data.get("data")
+                # The WHOLE list rides on the error (`graphql_errors`): the message keeps 500
+                # characters, and a structured refusal (a recipe's RECIPE_* with its ids and
+                # reason) can be longer. Reading it changes nothing about what was sent or
+                # retried. A GraphQL answer may carry `errors` AND `data` at once: a partial
+                # success, where the root field DID resolve (a run created and charged) and
+                # something beneath it failed. The data rides on the error (`graphql_data`) so
+                # a spend guard can tell that apart from a refusal (classify_outcome; waves 2+3
+                # review, F2). A non-list `errors` is carried as a one-item list.
+                errs = data["errors"]
+                err = graphql_error(errs if isinstance(errs, list) else [errs], data.get("data"))
                 raise err
             return data.get("data") or {}
         raise RuntimeError("unreachable")
