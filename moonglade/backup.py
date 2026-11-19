@@ -2331,6 +2331,10 @@ def plan_image_delete(session, task_id, media_id):
     return _image_delete_plan(task_detail_gql(session, str(task_id or "").strip()), media_id)
 
 
+NO_CONFIRMED_PLAN = ("This delete did not say which delete you agreed to, so nothing was "
+                     "deleted. Open the delete dialog again and confirm from there.")
+
+
 def delete_image_routed(session, task_id, media_id, confirmed_plan=None):
     """Delete ONE image from PixAI through whichever mutation PixAI accepts for it.
 
@@ -2344,9 +2348,12 @@ def delete_image_routed(session, task_id, media_id, confirmed_plan=None):
          too, but checking here means a read-only install makes NO network call at all for
          a delete, rather than quietly reading and then refusing.
       2. Read and route (`plan_image_delete`). A refusal returns here with nothing sent.
-      3. `confirmed_plan`, when given, is the plan the user was shown. If the fresh route
+      3. `confirmed_plan` is the plan the user was shown, and it is REQUIRED: a delete
+         with no plan is refused before the read, with nothing sent. If the fresh route
          disagrees, the task changed underneath the dialog and this refuses rather than
-         doing something the user did not agree to.
+         doing something the user did not agree to. (Until 2026-11-19 a missing plan
+         skipped that comparison, so a confirm without one deleted whatever the fresh
+         read said, a whole generation included.)
       4. Fire exactly one branch. No loop wraps either call: a destructive mutation
          re-sent after a lost response can fire again against a task that has already
          changed (dev/tests/test_delete_routing.py pins this structurally, and
@@ -2354,10 +2361,14 @@ def delete_image_routed(session, task_id, media_id, confirmed_plan=None):
     """
     _check_read_only("delete an image from your PixAI account")
     task_id, media_id = str(task_id or "").strip(), str(media_id or "").strip()
+    confirmed_plan = str(confirmed_plan or "").strip()
+    if not confirmed_plan:
+        return ImageDeletePlan(
+            "refuse", NO_CONFIRMED_PLAN, 0, [], "", [])
     plan = plan_image_delete(session, task_id, media_id)
     if plan.plan == "refuse":
         return plan
-    if confirmed_plan and str(confirmed_plan) != plan.plan:
+    if confirmed_plan != plan.plan:
         return ImageDeletePlan(
             "refuse",
             "What this delete would do changed while the dialog was open, so nothing was "

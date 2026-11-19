@@ -9287,6 +9287,10 @@ def create_app(out_dir: Path):
             # control that DOES apply to it.
             return jsonify({"error": "This image was imported from your computer \u2014 PixAI "
                                      "has no copy to delete. Use Delete to remove it here."}), 200
+        if not preview and not str(body.get("plan") or "").strip():
+            # A confirm carries the plan it confirms. Without one there is nothing to hold
+            # the fresh read against, so it is refused here, before any call to PixAI.
+            return jsonify({"error": core.NO_CONFIRMED_PLAN, "plan": "refuse"}), 400
         try:
             # _make_session takes a REQUIRED positional; every other call site in this
             # file passes None. Omitting it raised TypeError on every click, which the
