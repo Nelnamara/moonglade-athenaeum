@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { adjustedText, friendlyGenErr } from "./genCore.js";
 import { quotedSendBody } from "./priceProbeCore.js";
-import { HELD_SEND_MSG, UNCLEAR_SEND_MSG, isUnclearAnswer, sendHolds, sendKey } from "./sendHold.js";
+import { HELD_SEND_MSG, isUnclearAnswer, sendHolds, sendKey, unclearText } from "./sendHold.js";
 
 /* ONE submit path for every spend route the pilot touches: /api/generate, /api/edit,
    /api/fix, /api/enhance, /api/scene, /api/loom/generate. The classic has runTask; this is
@@ -82,7 +82,7 @@ export async function submitTask(route, payload, { label, emit, count, onPhase, 
     // guess, and the same send is held so the next tap cannot pay twice. (A journalled
     // render is unchanged: its caller reads the answer through onAnswer and its journal.)
     holds.hold(key);
-    emit({ kind: "err", text: d.held ? (d.error || HELD_SEND_MSG) : UNCLEAR_SEND_MSG });
+    emit({ kind: "err", text: unclearText(d) });
     return null;
   }
   if (d.error || !d.task_id) {

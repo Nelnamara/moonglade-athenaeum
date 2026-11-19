@@ -92,7 +92,8 @@ UNKNOWN = {
     "non-json-200": lambda: _Resp(200, "<html>hello</html>"),
     "no-id": lambda: _Resp(200, {"data": {"createGenerationTask": None}}),
 }
-REFUSED = lambda: _Resp(200, {"errors": [{"message": "INSUFFICIENT_BALANCE"}], "data": None})
+REFUSED = lambda: _Resp(200, {"errors": [{"message": "Not enough credits", "extensions": {
+    "code": "FORBIDDEN", "exception": {"name": "INSUFFICIENT_BALANCE"}}}], "data": None})
 
 
 class _Req:
@@ -292,7 +293,7 @@ def test_cli_send_once_says_may_have_started_for_an_unknown_outcome():
 
 
 def test_cli_send_once_passes_a_refusal_and_an_unreached_failure_through():
-    refusal = core.graphql_error([{"message": "INSUFFICIENT_BALANCE"}])
+    refusal = core.graphql_error("not enough credits", code="INSUFFICIENT_BALANCE")
     with pytest.raises(core.PixAIError) as ei:
         core._cli_send_once(lambda: (_ for _ in ()).throw(refusal))
     assert ei.value is refusal

@@ -123,7 +123,7 @@ def test_an_empty_svg_is_replaced_and_an_html_page_never_is(tmp_path):
 
 @pytest.mark.parametrize("head,ok", [
     (SVG, True),
-    (b'\xef\xbb\xbf  <svg xmlns="http://www.w3.org/2000/svg"/>', True),
+    (b'\xef\xbb\xbf  <svg xmlns="http://www.w3.org/2000/svg"></svg>', True),
     (b"<!-- made by a tool -->\n<svg></svg>", True),
     (b'<?xml version="1.0"?><note>not a picture</note>', False),
     (b"<!DOCTYPE html><html></html>", False),

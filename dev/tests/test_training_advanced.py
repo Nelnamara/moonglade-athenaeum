@@ -139,7 +139,7 @@ def test_the_eta_is_pixais_own_formula():
 
 def test_a_refusal_and_an_unclear_failure_are_told_apart():
     assert core.definite_refusal(core.PixAIRestError("x", 403, {"code": "INSUFFICIENT_BALANCE"}))
-    assert core.definite_refusal(core.graphql_error('[{"message": "no"}]'))
+    assert core.definite_refusal(core.graphql_error('[{"message": "no"}]', code="FORBIDDEN"))
     assert not core.definite_refusal(core.PixAIRestError("x", 502, {}))
     assert not core.definite_refusal(requests.ReadTimeout("slow"))
     assert not core.definite_refusal(requests.ConnectionError("dropped"))
@@ -687,7 +687,7 @@ def test_a_definite_basic_refusal_leaves_the_start_free_to_try_again(tmp_path, m
                                                                      pixai):
     post = _basic_client(tmp_path, monkeypatch, pixai)
     _loras(pixai, [])
-    pixai.fail("createTrainingTask", core.graphql_error('[{"message": "nope"}]'))
+    pixai.fail("createTrainingTask", core.graphql_error('[{"message": "nope"}]', code="FORBIDDEN"))
     body = dict(_BASIC, dataset_task_id="", confirm=True, accept_credit_cost=100000)
     assert post("/api/train/submit", body).status_code == 502
     pixai.on("createTrainingTask", {"createTrainingTask": {"id": "trn2"}})
@@ -802,7 +802,7 @@ def test_a_graphql_answer_with_data_and_errors_is_not_a_definite_refusal():
     assert partial.graphql_data == {"createTrainingTask": {"id": "trn9"}}
     assert not core.definite_refusal(partial)
     for data in ({"createTrainingTask": None}, None):
-        refused = _graphql_error({"data": data, "errors": [{"message": "nope"}]})
+        refused = _graphql_error({"data": data, "errors": [{"message": "nope", "extensions": {"code": "FORBIDDEN"}}]})
         assert core.definite_refusal(refused)
 
 
@@ -880,7 +880,7 @@ def test_a_fractional_acknowledgement_is_never_the_quote(tmp_path, pixai, accept
 _L2_UNKNOWN = [core.PixAIRestError("REST POST -> 408", 408, {"code": "INSUFFICIENT_BALANCE"}),
                core.PixAIRestError("REST POST -> 499", 499, {"code": "BAD_REQUEST"}),
                core.PixAIRestError("REST POST -> 403", 403, None),
-               core.PixAIRestError("REST POST -> 404", 404, {"code": "NOT_FOUND"})]
+               core.PixAIRestError("REST POST -> 404", 404, {"code": "FILE_NOT_FOUND"})]
 
 
 @pytest.mark.parametrize("exc", _L2_UNKNOWN, ids=["408", "499", "bare-403", "unlisted-code"])
@@ -911,3 +911,47 @@ def test_a_408_499_or_bare_4xx_on_a_training_retry_keeps_the_guard(tmp_path, pix
     assert r.status_code == 502 and r.get_json()["maybe_started"] is True
     assert post(url, {"confirm": True, "accept_credit_cost": 100000}).status_code == 409
     assert len(pixai.calls_for("/training-task/800/retry")) == 1
+
+
+# ---- 3.21.2 review: the training routes' own refusals are refusals (DESIGN_3.22 2.6) --------
+
+@pytest.mark.parametrize("code,status", [("CONFLICT", 409), ("NOT_FOUND", 404),
+                                         ("TRAINING_DATASET_TOO_SMALL", 400),
+                                         ("TRAINING_IMAGE_REJECTED", 400), ("FORBIDDEN", 403)])
+@pytest.mark.parametrize("what", ["submit", "caption"])
+def test_a_training_routes_own_refusal_leaves_start_and_describe_free(tmp_path, pixai, what,
+                                                                       code, status):
+    """A code the training routes declare (trainingTask-DTATiVlJ.js) refuses against the task's
+    state: no run exists, so the paid guard is not armed and the next confirm goes."""
+    url, path, amount = _PAID[what]
+    _, post = _app(tmp_path)
+    _fake_for(what, pixai)
+    pixai.fail(path, core.PixAIRestError("x", status, {"code": code}))
+    body = {"confirm": True, "accept_credit_cost": amount}
+    r = post(url, body)
+    assert not r.get_json().get("maybe_started"), r.get_json()
+    _fake_for(what, pixai)
+    assert post(url, body).status_code == 200
+    assert len(pixai.calls_for(path)) == 2
+
+
+@pytest.mark.parametrize("code,status", [("CONFLICT", 409), ("NOT_FOUND", 404),
+                                         ("TRAINING_DATASET_TOO_SMALL", 400)])
+def test_a_training_routes_own_refusal_leaves_retry_free(tmp_path, pixai, code, status):
+    _, post = _app(tmp_path)
+    _retry_fake(pixai)
+    url = "/api/train/runs/800/retry"
+    pixai.fail("/training-task/800/retry", core.PixAIRestError("x", status, {"code": code}))
+    r = post(url, {"confirm": True, "accept_credit_cost": 100000})
+    assert not r.get_json().get("maybe_started"), r.get_json()
+    assert TrainGuard(paths.records_path(tmp_path, "train_guard.json")).retry_state("800") is None
+
+
+def test_the_training_table_is_the_harvested_one_and_never_the_create_table():
+    assert core.TRAINING_CODES - core.PIXAI_REJECTED_CODES == {
+        "UNAUTHORIZED", "NOT_FOUND", "CONFLICT", "TRAINING_IMAGE_REJECTED",
+        "TRAINING_DATASET_TOO_SMALL", "MODEL_PUBLISH_CONFLICT", "LORA_REBATE_REQUIRES_PUBLIC"}
+    for code in ("CONFLICT", "NOT_FOUND", "TRAINING_DATASET_TOO_SMALL"):
+        exc = core.PixAIRestError("x", 409, {"code": code})
+        assert core.definite_refusal(exc, codes=core.TRAINING_CODES)
+        assert not core.definite_refusal(exc), "a training code read with the create table"

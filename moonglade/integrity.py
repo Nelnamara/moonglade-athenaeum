@@ -140,12 +140,16 @@ def structural_problem(path):
     try:
         size = os.path.getsize(path)
         with open(path, "rb") as f:
-            head = f.read(16)
+            head = f.read(_SVG_HEAD)
             n = min(size, _TAIL)
             f.seek(size - n)
             tail = f.read(n)
     except OSError:
         return None
+    if _is_svg_head(head):
+        # An SVG is whole only when its document is closed: `</svg>` at the end, trailing
+        # whitespace allowed (3.21.2 review). A cut-short download ends mid-element.
+        return None if tail.rstrip().lower().endswith(b"</svg>") else "truncated"
     if head.startswith(b"\x89PNG\r\n\x1a\n"):
         return None if b"IEND\xaeB`\x82" in tail else "truncated"
     if head.startswith(b"\xff\xd8"):

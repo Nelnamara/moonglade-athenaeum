@@ -69,7 +69,8 @@ def test_any_code_is_only_for_the_inbox_and_still_excludes_408_499_and_bare():
 def test_local_auth_and_graphql_are_read_by_type():
     assert core.classify_outcome(core.LocalRefusal("READ_ONLY")) == "local"
     assert core.classify_outcome(core.PixAIAuthError("401 Unauthorized")) == "refused"
-    assert core.classify_outcome(core.graphql_error([{"message": "no"}])) == "refused"
+    assert core.classify_outcome(core.graphql_error("no", code="INSUFFICIENT_BALANCE")) == "refused"
+    assert core.classify_outcome(core.graphql_error([{"message": "no"}])) == "unknown"   # no code
     partial = core.graphql_error([{"message": "late"}], {"createGenerationTask": {"id": "1"}})
     assert core.classify_outcome(partial) == "unknown"
     for exc in (requests.ReadTimeout("x"), requests.ConnectionError("x"),
@@ -109,9 +110,9 @@ def test_the_real_transport_raises_the_typed_errors():
     with pytest.raises(core.PixAIAuthError):
         pc.PixAIClient(_S(_R(401, {}))).mutate("mutation { x }", {})
     with pytest.raises(core.PixAIError) as ei:
-        pc.PixAIClient(_S(_R(200, {"errors": [{"message": "no"}], "data": None}))).mutate(
+        pc.PixAIClient(_S(_R(200, {"errors": [{"message": "no", "extensions": {"code": "FORBIDDEN"}}], "data": None}))).mutate(
             "mutation { x }", {})
-    assert ei.value.graphql_errors == [{"message": "no"}]
+    assert ei.value.graphql_errors == [{"message": "no", "extensions": {"code": "FORBIDDEN"}}]
     assert core.definite_refusal(ei.value)
     with pytest.raises(core.PixAIRestError) as ei:
         pc.PixAIClient(_S(_R(408, {"code": "BAD_REQUEST"}))).rest_post("/x", {})
@@ -143,7 +144,7 @@ def test_the_lane_branch_reads_the_graphql_attributes_not_the_prefix(monkeypatch
     with pytest.raises(core.PixAIError) as ei:
         core.submit_generation(object(), dict(lane))
     assert ei.value is fake_text and not getattr(ei.value, "refused", False)
-    real = core.graphql_error([{"message": "no"}])
+    real = core.graphql_error("no", code="INFINITE_MODE_NOT_ELIGIBLE")
     monkeypatch.setattr(core, "gql_mutate", lambda *a, **k: (_ for _ in ()).throw(real))
     with pytest.raises(core.PixAIError) as ei:
         core.submit_generation(object(), dict(lane))

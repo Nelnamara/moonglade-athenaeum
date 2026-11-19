@@ -493,7 +493,7 @@ def test_gallery_catalog_ref_passes_through_then_uploads_on_invalid_media_id(tmp
     def _submit(session, params):
         calls.append(params.get("i2vPro", {}).get("mediaId"))
         if len(calls) == 1:
-            raise core.graphql_error("invalid_media_id")
+            raise core.graphql_error("invalid_media_id", code="BAD_REQUEST")
         submitted.update(params)
         return "task-1"
     monkeypatch.setattr(core, "submit_generation", _submit)
@@ -930,7 +930,7 @@ def test_r2v_invalid_reference_image_media_id_falls_back_to_upload(tmp_path, mon
     def _submit(session, params):
         calls.append(list(params.get("referenceVideo", {}).get("referenceImageMediaIds") or []))
         if len(calls) == 1:
-            raise core.graphql_error("invalid_reference_image_media_id")
+            raise core.graphql_error("invalid_reference_image_media_id", code="BAD_REQUEST")
         submitted.update(params)
         return "task-r2v"
     monkeypatch.setattr(core, "submit_generation", _submit)
@@ -965,7 +965,7 @@ def test_r2v_fallback_keeps_first_pass_uploads_for_mixed_shots(tmp_path, monkeyp
     def _submit(session, params):
         calls.append(list(params.get("referenceVideo", {}).get("referenceImageMediaIds") or []))
         if len(calls) == 1:
-            raise core.graphql_error("invalid_reference_image_media_id")
+            raise core.graphql_error("invalid_reference_image_media_id", code="BAD_REQUEST")
         submitted.update(params)
         return "task-mixed"
     monkeypatch.setattr(core, "submit_generation", _submit)
@@ -993,7 +993,7 @@ def test_loom_generate_both_submits_rejected_is_exactly_two_posts_then_error(tmp
     monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
     def _submit(session, params):
         calls.append(1)
-        raise core.graphql_error("invalid_reference_image_media_id")
+        raise core.graphql_error("invalid_reference_image_media_id", code="BAD_REQUEST")
     monkeypatch.setattr(core, "submit_generation", _submit)
     cli = login_test_client(create_app(tmp_path))
     r = cli.post("/api/loom/generate", json={"mode": "R2V", "prompt": "x", "images": [mid], "duration": 5})

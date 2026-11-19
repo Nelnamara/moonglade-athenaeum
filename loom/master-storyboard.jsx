@@ -161,7 +161,7 @@ import useActivity from "../gallery/src/notify/useActivity.js";
 import { requestPrice } from "../gallery/src/gen/priceRequest.js";
 import { quotedSendBody } from "../gallery/src/gen/priceProbeCore.js";
 // 3.21.2 (L1): the unclear-send words and hold, shared with the gallery's submitTask.
-import { HELD_SEND_MSG, UNCLEAR_SEND_MSG, isUnclearAnswer, sendHolds, sendKey } from "../gallery/src/gen/sendHold.js";
+import { HELD_SEND_MSG, UNCLEAR_SEND_MSG, isUnclearAnswer, sendHolds, sendKey, unclearText } from "../gallery/src/gen/sendHold.js";
 // Review S2 (Session M): the Image tab's ×2-4 and a prompt using the template syntax go through
 // the run road (/api/generate/plan -> the confirm -> /run), as the Generate dock's do --
 // /api/generate is a single send. The road's pieces are loom-run.js's; the transport is the
@@ -9770,7 +9770,7 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
       const d = await r.json();
       if (isUnclearAnswer(d)) {
         sendHolds.hold(holdKey);
-        setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: d.held ? (d.error || HELD_SEND_MSG) : UNCLEAR_SEND_MSG } }));
+        setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: unclearText(d) } }));
         return;
       }
       if (d.error || !d.task_id) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
@@ -9836,7 +9836,7 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
       const d = await r.json();
       if (isUnclearAnswer(d)) {
         sendHolds.hold(holdKey);
-        setState((s) => ({ ...s, [cardId]: { phase: "error", msg: d.held ? (d.error || HELD_SEND_MSG) : UNCLEAR_SEND_MSG } }));
+        setState((s) => ({ ...s, [cardId]: { phase: "error", msg: unclearText(d) } }));
         return;
       }
       if (d.error || !d.task_id) { setState((s) => ({ ...s, [cardId]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
