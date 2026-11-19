@@ -13,6 +13,7 @@ import { markWhatsNewSeen } from "./help/whatsNew.js";
 import { syncBlurClass } from "./lib/blurPref.js";
 import { syncPairing } from "./lib/fonts.js";
 import { rememberLibrary, libraryPlace } from "./lib/loomCrossing.js";
+import { installTips } from "./lib/tips.js";
 import "./styles.css";
 
 /* THE BLUR SWITCH, applied before anything can render (owner ruling 2026-09-04; see
@@ -35,6 +36,9 @@ syncBlurClass(document.documentElement);
    the five-pairing set is explicitly provisional) lands on the table's stacks rather than
    its own stale copy. See lib/fonts.js. */
 syncPairing(document.documentElement);
+
+/* Instant tips: the long-press half of every [data-tip] (lib/tips.js), installed once. */
+installTips(document);
 
 const boot = window.MG_BOOT || {};
 // boot.authenticated is only ever false on /login's non-bootstrap render (see

@@ -106,3 +106,6 @@ html.mg-noblur .mgai-scrim {
 .mgai-foot b { color: var(--text); }
 .mgai-foot > span { color: var(--subtext); }
 .mgai-tally { color: var(--overlay0); }
+
+/* the Tier 1 badge sits inside an overflow:hidden card, so its instant tip (styles.css) stays narrow enough to fit it */
+.mgai-tierbadge[data-tip]::after { max-width: 150px; font-weight: 500; }
