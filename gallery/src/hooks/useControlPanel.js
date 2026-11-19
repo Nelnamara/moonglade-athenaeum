@@ -154,6 +154,12 @@ export default function useControlPanel() {
   // to survive a reload, it only needs to survive within one open Panel session, exactly
   // like the design's own state does.
   const [dedupDone, setDedupDone] = useState(0);
+  /* FIND (One Tidy place, 2026-11-19): Tidy's one Find button is Audit and Preview together --
+     the same two read-only jobs, the second started only when the first finished clean. The
+     ref says "Preview follows this Audit"; anything other than a clean done clears it. Each
+     stage still advances dedupDone on its own, so the gate in front of Quarantine is exactly
+     the one it always was. */
+  const findChainRef = useRef(false);
 
   const [taskId, setTaskIdRaw] = useState("");
   const [taskState, setTaskState] = useState(null); // 'running' | 'done' | {error}
@@ -362,8 +368,20 @@ export default function useControlPanel() {
         const idx = DEDUP_STAGES.findIndex((s) => s.key === finishedKey);
         if (idx !== -1) setDedupDone((prev) => Math.max(prev, idx + 1));
       }
+      // Find's second half: Preview follows an Audit that finished clean, and nothing else.
+      const chainPreview = findChainRef.current && finishedKey === "audit" && d.status === "done";
+      findChainRef.current = false;
+      if (chainPreview) {
+        // The Audit just set dedupDone to at least 1, so Preview is in order; startJob skips
+        // runAction's gate only because this closure's dedupDone is the pre-Audit value.
+        startJob("dedup-dry");
+        fetchSummary();
+        fetchPanelHistory();
+        return;
+      }
       fetchSummary();
     }
+    findChainRef.current = false;
     // A maintenance job that just finished moved the library under every OTHER surface's
     // cached answer -- the Health walk and the achievement roster most of all (a sync
     // collects new art, which is what earns things). Purge those two READ caches so the
@@ -391,6 +409,22 @@ export default function useControlPanel() {
       setConfirmArm(key);
       return;
     }
+    return startJob(key, extra);
+  };
+
+  /* Find: Audit, then Preview once the Audit finishes clean (findChainRef above). Both are
+     read-only; the chain adds no way past any gate. */
+  const runFind = async () => {
+    if (running || !actionSpec("audit")) return;
+    findChainRef.current = true;
+    await runAction("audit");
+    if (!runningKeyRef.current) findChainRef.current = false;   // the start was refused
+  };
+
+  // The start itself, once runAction's gates have passed (and Find's chained Preview).
+  const startJob = async (key, extra) => {
+    const spec = actionSpec(key);
+    if (!spec) return;
     setConfirmArm(null);
     setJobError("");
     setJobResult(null);
@@ -805,7 +839,7 @@ export default function useControlPanel() {
     panelHistory, schedule, saveSchedule, saveLivingJob, runLiving,
     fetchSummary, fetchAchievements, actionSpec,
     running, progress, log, jobError, jobResult, setJobResult, confirmArm, runAction, stopJob,
-    dedupDone, organizeRes,
+    dedupDone, organizeRes, runFind,
     testPullN, setTestPullN,
     taskId, setTaskId, taskState, importTask,
     power, powerConfirm, powerPhase, powerErr, clickPower, closePower,

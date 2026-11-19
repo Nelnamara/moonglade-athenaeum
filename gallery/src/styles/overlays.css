@@ -18,7 +18,7 @@
    Relations, guarded by dev/tests/test_z_ladder.py — change one number, keep the ORDER:
      .lbx 400 < .mgv-scrim/.mgv-host 410/411 < .mgai-scrim 412 < .mgss 414/415
      < .rcp-scrim/.rcp-host (and the phone's .rcp-m) 416/417 < the collections manager .mgcu-scrim/.mgcu-mgr 418/419
-     < .upscale-panel 420 < .mgcp-sub 422/423 < .mgct-sub 424/425 < the curation undo toast .mgcu-toast 427
+     < .upscale-panel 420 < .mgcp-sub (and .mgv-over, an mgv overlay on the Panel) 422/423 < .mgct-sub 424/425 < the curation undo toast .mgcu-toast 427
      < Health's Fix all confirm .mgbf-scrim/.mgbf-host 428/429 (broken-files.css) < .mgcp-pwr 430/431
      < .mgl-scrim/.mgl-menu 432/433 < .mgclaim 440/441
      < the first-run guide's .mgguide-block/-ring 442/443 and its cards 444 (help.css)
@@ -116,6 +116,11 @@ html.mg-noblur .mgv-scrim {
 }
 .mgv-host { position: fixed; inset: 0; z-index: 411; display: grid; place-items: center;
   pointer-events: none; }
+/* An mgv overlay opened FROM the Control Panel (Duplicate Review from the Tidy tab) takes the
+   Panel's own sub-layer rung, the one its Trash and Accounts sub-overlays use (.mgcp-sub
+   422/423): at 410/411 it would tie the Panel and its scrim would paint under the Panel. */
+.mgv-scrim.mgv-over { z-index: 422; }
+.mgv-host.mgv-over { z-index: 423; }
 .mgv-slab { pointer-events: auto; box-sizing: border-box;
   width: min(980px, calc(100vw - 48px)); max-height: 90vh; max-height: 90dvh; overflow-y: auto;
   border-radius: 18px; border: 1px solid var(--surface1);

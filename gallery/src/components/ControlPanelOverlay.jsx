@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import "../styles/overlays.css";
 import "../styles/control-panel.css";
-import useControlPanel, { DEDUP_STAGES } from "../hooks/useControlPanel.js";
+import useControlPanel from "../hooks/useControlPanel.js";
 import { apiGet, apiPost, apiUpload } from "../api.js";
 import GalleryPicker from "./GalleryPicker.jsx";
 import RolesSection from "./BrandRoles.jsx";
@@ -14,6 +14,9 @@ import { isBlurOff, setBlurOff, applyBlurClass } from "../lib/blurPref.js";
 import { autoSync, lastRanAt } from "../lib/livingRow.js";
 import { PAIRINGS, DEFAULT_PAIRING_ID, pairingById, readPairing, setPairing } from "../lib/fonts.js";
 import JobResultBox from "./JobResultBox.jsx";
+import { ActionChip, JobRunning } from "./JobConsole.jsx";
+import TidyTab from "./TidyTab.jsx";
+import DuplicateReviewOverlay from "./DuplicateReviewOverlay.jsx";
 import Icon from "../icons/Icons.jsx";
 import UpdatePhases, { UpdateRefusal, UPDATE_WHAT } from "./UpdatePhases.jsx";
 import { takeOpenIntent, subscribeOpenIntent } from "../notify/bannerStore.js";
@@ -22,10 +25,8 @@ import useBrandingBeat from "../hooks/useBrandingBeat.js";
 import HelpButton from "../help/HelpButton.jsx";
 import GuideHost from "../help/GuideHost.jsx";
 import { openAbout } from "../help/helpStore.js";
+import { isBrokenFilesModalUp } from "../lib/brokenFilesNav.js";
 import { versionFromStamp } from "../notify/updateStore.js";
-import { useSwrGet } from "../hooks/swrCache.js";
-import { openBrokenFiles } from "../lib/brokenFilesNav.js";
-import { reviewLabel } from "../lib/brokenFilesCore.js";
 import { trashOnlyCopyNote } from "../lib/onlyCopy.js";
 import { mirrorBookmarklet } from "../lib/mirrorBookmarklet.js";
 
@@ -338,7 +339,9 @@ export function BlurToggleTile({ className = "mgcp-tile mgcp-tile4" }) {
   );
 }
 
-export default function ControlPanelOverlay({ onClose, boot, account, tabRequest }) {
+/* `onLibraryChanged` (App's afterMutation) runs when Duplicate Review, opened from the Tidy tab,
+   moves or restores a file; `onOpenDetails` is Tidy's Broken files "Open details". */
+export default function ControlPanelOverlay({ onClose, boot, account, tabRequest, onLibraryChanged, onOpenDetails }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   // Opened ON a tab when the shell asks for one (App.jsx's `mg-open-control-panel` claim --
   // the key-turn moment's button asks for Branding); otherwise Maintenance, as always.
@@ -349,7 +352,9 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
   // A requested tab is HELD until the panel's own achievements read answers (see the gate
   // below): the roster it paints from first can be a cache from before the earn.
   const [tabHeld, setTabHeld] = useState(() => !!(tabRequest && tabRequest.tab));
-  const [subOverlay, setSubOverlay] = useState(null); // 'users' | 'trash' | 'account'
+  const [subOverlay, setSubOverlay] = useState(null); // 'users' | 'trash' | 'account' | 'duprev'
+  // Tidy re-reads its counts when Duplicate Review, opened over it, moved or restored a file.
+  const [reviewChanged, setReviewChanged] = useState(0);
 
   // Control Panel.dc.html:240-243 -- the library-folder picker. The design's own
   // <input type="file" webkitdirectory> can't actually supply what /api/library-path
@@ -401,7 +406,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
     panelHistory, schedule, saveSchedule, saveLivingJob, runLiving,
     fetchSummary, fetchAchievements, actionSpec,
     running, progress, log, jobError, jobResult, setJobResult, confirmArm, runAction, stopJob,
-    dedupDone, organizeRes,
+    dedupDone, organizeRes, runFind,
     testPullN, setTestPullN,
     taskId, setTaskId, taskState, importTask,
     power, powerConfirm, powerPhase, powerErr, clickPower, closePower,
@@ -427,10 +432,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
   for (const j of panelHistory) {
     if (j.action && !lastByAction[j.action]) lastByAction[j.action] = j;
   }
-  // Session W (W1a): the "Verify library integrity" row says what the last check found and opens
-  // Health's Broken files list at All ("12 broken · Review ▸"). A file read on the server.
-  const { data: brokenDoc } = useSwrGet("/api/integrity/broken");
-  const brokenReview = reviewLabel(brokenDoc);
+  // "Verify library integrity" and the Broken files list live in the Tidy tab (TidyTab.jsx).
 
   // The tab never READS "brand" while locked -- and since the panel can now be opened ON
   // it (a requested tab, above), "locked" has to mean what the panel's OWN achievements read
@@ -461,6 +463,8 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
     const onKey = (e) => {
       if (e.key !== "Escape") return;
       if (power) return; // let the power modal's own logic decide
+      // Tidy's Fix all confirm closes itself first (its own capture listener), not the Panel.
+      if (isBrokenFilesModalUp()) return;
       // The update modal is a TOP layer too. Escape closes it and stops there -- falling
       // through would have shut the whole Panel out from under it. Mid-apply it is inert:
       // the update is running whatever this key does, and closing the one surface that
@@ -679,6 +683,10 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
               <div className="mgcp-tabs">
                 <button type="button" className={"mgv-x-off"} style={tabStyle(tab === "maint")}
                   onClick={() => setTab("maint")}>{panelTabLabel("maint")}</button>
+                {/* One Tidy place (owner pick 2026-11-19, round 2 option B): Maintenance,
+                    Tidy, ✦ Branding. */}
+                <button type="button" style={tabStyle(tab === "tidy")}
+                  onClick={() => setTab("tidy")}>{panelTabLabel("tidy")}</button>
                 {brandingUnlocked && (
                   <button type="button" className={beat.tabArriving ? "mgcp-tab-arrive" : undefined}
                     style={beat.tabVisible ? tabStyle(tab === "brand") : { ...tabStyle(false), visibility: "hidden" }}
@@ -810,7 +818,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                               );
                             })}
                             <div className="mgcp-footnote">
-                              <span>Nothing destructive is ever automatic — organize, dedup and restore stay below, by hand.</span>
+                              <span>Nothing destructive is ever automatic — organize and dedup stay in Tidy, by hand.</span>
                             </div>
                           </div>
                         )}
@@ -848,33 +856,13 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
 
                           <div>
                             <div className="mgcp-grp">Tend — care for the files</div>
+                            {/* One Tidy place (owner pick 2026-11-19, option B): Organize, the
+                                Dedup chain and the two file checks moved to the Tidy tab. One
+                                line here says where they went. */}
                             <div className="mgcp-tendrow">
-                              <div className="mgcp-tendlbl">Organize into month folders</div>
-                              <div className="mgcp-chips">
-                                <ActionChip spec={actionSpec("organize-dry")} armed={confirmArm === "organize-dry"} onRun={() => runAction("organize-dry")} />
-                                <span className="mgcp-arr">→</span>
-                                {/* Control Panel.dc.html:117 -- {{ organizeRes }}, real
-                                    output parsed from cmd_organize()'s own dry-run line
-                                    (useControlPanel.js), not a fabricated preview count. */}
-                                <span className="mgcp-res">{organizeRes || "—"}</span>
-                                <span className="mgcp-arr">→</span>
-                                <ActionChip spec={actionSpec("organize")} dgr armed={confirmArm === "organize"} onRun={() => runAction("organize")} />
-                                <ActionChip spec={actionSpec("undo-organize")} dgr label="Undo" armed={confirmArm === "undo-organize"} onRun={() => runAction("undo-organize")} />
-                              </div>
-                            </div>
-                            <div className="mgcp-tendrow">
-                              <div className="mgcp-tendlbl">Dedup</div>
-                              <div className="mgcp-chips">
-                                {DEDUP_STAGES.map((st, i) => (
-                                  <React.Fragment key={st.key}>
-                                    <ActionChip spec={actionSpec(st.key)} label={st.label} locked={!!st.locked}
-                                      armed={confirmArm === st.key} onRun={() => runAction(st.key)}
-                                      disabled={i > dedupDone}
-                                      title={i > dedupDone ? "Run the earlier stages first" : undefined} />
-                                    {i < DEDUP_STAGES.length - 1 && <span className="mgcp-arr">→</span>}
-                                  </React.Fragment>
-                                ))}
-                              </div>
+                              <button type="button" className="mgcp-tidylink" onClick={() => setTab("tidy")}>
+                                Organize and Dedup moved to Tidy <span aria-hidden="true">›</span>
+                              </button>
                             </div>
                             <div className="mgcp-tendrow">
                               <div className="mgcp-tendlbl">Thumbnails &amp; Similar index</div>
@@ -889,9 +877,9 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
 
                           <div>
                             <div className="mgcp-grp">Check — read-only</div>
+                            {/* "Verify _duplicates/" and "Verify library integrity" live in
+                                the Tidy tab now, beside the files they check. */}
                             {[["stats", "Catalog stats"], ["inventory", "Inventory count"],
-                              ["verify-dupes", "Verify _duplicates/"],
-                              ["verify-library", "Verify library integrity"],
                               ["sync-artworks", "Sync published-artwork metadata"],
                               ["sync-videos", "Sync i2v videos"]].map(([key, label]) => (
                               actionSpec(key) ? (
@@ -904,10 +892,6 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                                   <span className={"mgcp-checklast" + (lastByAction[key] && ledgerResult(lastByAction[key]).good ? " ok" : "")}>
                                     {lastByAction[key] ? fmtWhen(lastByAction[key].ts) : "—"}
                                   </span>
-                                  {key === "verify-library" && brokenReview ? (
-                                    <button type="button" className="mgcp-review"
-                                      onClick={() => openBrokenFiles("all")}>{brokenReview}</button>
-                                  ) : null}
                                   <button type="button" className="mgcp-run" onClick={() => runAction(key)}>run ▸</button>
                                 </div>
                               ) : null
@@ -1021,37 +1005,8 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                         )}
                       </>
                     ) : (
-                      <div className="mgcp-running">
-                        <div className="mgcp-runhead">
-                          <span className="mgcp-runspin" />
-                          <b className="mgcp-runname">{running.label}</b>
-                          <button type="button" className="mgcp-chip dgr" style={{ marginLeft: "auto" }}
-                            onClick={stopJob}>■ Stop this job</button>
-                        </div>
-                        <div className="mgcp-runbar">
-                          <i className={progress?.pct == null ? "indeterminate" : ""}
-                            style={progress?.pct != null ? { width: progress.pct + "%" } : undefined} />
-                        </div>
-                        <div className="mgcp-runlog">
-                          {log.slice(-6).map((ln, i) => (
-                            <div key={i} className={ln.indexOf("✓") === 0 ? "ok" : ""}>{ln}</div>
-                          ))}
-                        </div>
-                        {/* Control Panel.dc.html:205-210's lockedMinis -- real other-action
-                            labels from summary.actions (the same list actionSpec() already
-                            reads), not the design's fixed 3-example array. */}
-                        <div className="mgcp-lockedrow">
-                          {(summary.actions || []).filter((a) => a.action !== running.action)
-                            .slice(0, 3).map((a) => (
-                              <span className="mgcp-lockchip" key={a.action}>{a.label}</span>
-                            ))}
-                          {(summary.actions || []).length - 1 > 3 && (
-                            <span className="mgcp-lockchip">
-                              +{(summary.actions || []).length - 1 - 3} more · one job at a time
-                            </span>
-                          )}
-                        </div>
-                      </div>
+                      <JobRunning running={running} progress={progress} log={log}
+                        actions={summary.actions} onStop={stopJob} />
                     )}
                     {jobError && <div className="mgcp-runerr">{jobError}</div>}
                   </div>
@@ -1156,6 +1111,15 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                 </>
               )}
 
+              {tab === "tidy" && (
+                <TidyTab isLocal={isLocal} actionSpec={actionSpec} runAction={runAction}
+                  runFind={runFind} confirmArm={confirmArm} dedupDone={dedupDone}
+                  organizeRes={organizeRes} running={running} progress={progress} log={log}
+                  jobResult={jobResult} setJobResult={setJobResult} jobError={jobError}
+                  stopJob={stopJob} actions={summary.actions} changed={reviewChanged}
+                  onOpenReview={() => setSubOverlay("duprev")} onOpenDetails={onOpenDetails} />
+              )}
+
               {tab === "brand" && brandingUnlocked && (
                 <BrandingTab summary={summary} onSaved={fetchSummary} isLocal={isLocal}
                   skins={skins} activeSkin={activeSkin} onPickSkin={pickSkin} achievements={achievements} />
@@ -1173,6 +1137,13 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
       )}
       {subOverlay === "account" && (
         <AccountSubOverlay onClose={() => setSubOverlay(null)} />
+      )}
+      {/* Tidy's Review: the one Duplicate Review, on the Panel's sub-layer rung. Its keep /
+          move-to-_duplicates/ / Undo rules are its own, unchanged (useDuplicateReview.js). */}
+      {subOverlay === "duprev" && (
+        <DuplicateReviewOverlay stacked backLabel="Tidy" boot={boot}
+          onClose={() => setSubOverlay(null)}
+          onResolved={() => { setReviewChanged((n) => n + 1); if (onLibraryChanged) onLibraryChanged(); }} />
       )}
       {power && (
         <PowerModal mode={power} phase={powerPhase} error={powerErr} onClose={closePower} />
@@ -1220,17 +1191,9 @@ function tabStyle(on) {
   };
 }
 
-/* `locked` (a dedup stage that changes files) draws the lock icon after the words. */
-export function ActionChip({ spec, dgr, label, armed, onRun, disabled, title, locked }) {
-  if (!spec) return null;
-  const text = armed ? "Confirm — " + (label || spec.label) : (label || spec.label);
-  return (
-    <button type="button" className={"mgcp-chip" + (dgr || spec.destructive ? " dgr" : "")}
-      onClick={onRun} disabled={disabled} title={title}>
-      {text}{locked ? <> <Icon name="lock" /></> : null}
-    </button>
-  );
-}
+/* ActionChip and the running job's view live in JobConsole.jsx, shared with the Tidy tab;
+   ActionChip stays exported from here for ControlMobile.jsx. */
+export { ActionChip };
 
 const SKIN_SW = {
   moonglade: ["#0c0a1c", "#b692e6", "#4fc99a", "#d4af37"],

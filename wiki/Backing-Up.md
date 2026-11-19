@@ -280,6 +280,11 @@ python -m moonglade --verify-dupes          # confirm quarantine is safe to dele
 `--verify-dupes` is read-only — unless you add `--restore-orphans`, which moves any
 quarantined file whose keeper no longer exists back into `images/`.
 
+In the gallery, all of this is the Control Panel's **Tidy** tab: **Find** (the audit and the
+dry-run plan), **Review** (Duplicate Review), then **Move all to _duplicates/**, **Check
+_duplicates/** and **Delete outright** — see
+[Control Panel → Tidy](Control-Panel#tidy--duplicates-stray-files-and-broken-files).
+
 Two modifiers: `--dedup-delete` (with `--dedup --apply`) deletes the redundant copies outright instead of moving them to `_duplicates/`. It keeps the copy that opens as a picture (the larger one when both do), and deletes another copy only when it is the same picture or is damaged; any other copy stays where it is and is listed. `--no-content` (with `--audit`/`--dedup`) skips the slower content-hash pass and does only the fast same-`media_id` location dedup.
 
 ## Curation backup

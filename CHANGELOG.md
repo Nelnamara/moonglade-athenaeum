@@ -37,6 +37,9 @@ git tags. Full prose notes for tagged versions live on
 - **The Sync line in the Control Panel says the same as its Runs itself row.** It used to read "auto off · every 6 hours" from the standing order while Sync was running by itself. (2026-11-19)
 - **Maintenance jobs are gone from the Activity tracker.** It lists what you set going; jobs that run by themselves and the Panel's maintenance jobs are in the Ledger. (2026-11-19)
 - **The published-artwork sweep runs every 6 hours, not every 15 minutes, and Sync every 12 hours, not 6.** Publishing and starting the app still run the sweep at once. A cadence you set yourself is kept. (2026-11-19)
+- **One Tidy place: a Tidy tab in the Control Panel.** Duplicates, stray files and broken files sit in one tab beside Maintenance, one column each with its count and its buttons. They used to live in three places: Health's Duplicate Review and Broken files list, the Panel's Dedup chain beside Organize, and Verify library integrity under Check. (2026-11-19)
+- **One road for duplicates.** Find runs the audit and the preview together, Review opens Duplicate Review over the Panel, then Move all to _duplicates/, Check _duplicates/ and Delete outright, each still greyed out until the step before it has finished, still asking before anything moves, and still only on the PC running Moonglade. (2026-11-19)
+- **Health keeps its numbers and opens Tidy.** The Duplicates, Reclaimable and Missing files tiles open the Tidy tab, and a peach problem tile opens Tidy's Broken files list at its kind; the list no longer sits in Health on the desktop. The phone is unchanged for now. (2026-11-19)
 
 ### Fixed
 - **Another web page can no longer make Moonglade act.** A save, delete, spend or stop is refused unless it comes from one of Moonglade's own pages; a page from another site, or from another program's page on another port of this PC, is turned away before anything happens. (2026-11-19)
