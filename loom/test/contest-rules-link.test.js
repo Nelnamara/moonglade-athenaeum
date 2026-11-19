@@ -45,3 +45,26 @@ test("the ceiling notice names the limit and the board's size, or just the limit
   assert.equal(ceilingNotice({ truncated: true, limit: 1000 }, fmt),
     "The oldest contests on PixAI's board are not shown: this app reads only the newest 1,000.");
 });
+/* The "Rules doc" link is PixAI's desc_url, drawn whole as an href on both detail screens.
+   It passes the brief renderer's http/https-only rule (markdownLite's safeHref): any other
+   scheme draws no link at all, and neither screen may hand desc_url to an href unchecked. */
+import { safeHref } from "../../gallery/src/lib/markdownLite.js";
+import { readFileSync } from "node:fs";
+
+test("the rules-doc link is http/https only", () => {
+  assert.equal(safeHref("https://pixai.art/event/x"), "https://pixai.art/event/x");
+  assert.equal(safeHref("  http://a.example/r "), "http://a.example/r");
+  for (const bad of ["javascript:alert(1)", "JAVASCRIPT:alert(1)", " javascript:x",
+                     "data:text/html,<b>", "vbscript:x", "//evil.example", "/local", "",
+                     null, undefined, 5, {}]) {
+    assert.equal(safeHref(bad), null, String(bad));
+  }
+});
+
+test("both detail screens draw desc_url only through safeHref", () => {
+  for (const f of ["ContestDetail.jsx", "ContestDetailMobile.jsx"]) {
+    const src = readFileSync(new URL("../../gallery/src/components/" + f, import.meta.url), "utf8");
+    assert.ok(!/href=\{contest\.desc_url\}/.test(src), f + " hands desc_url to an href unchecked");
+    assert.ok(/href=\{safeHref\(contest\.desc_url\)\}/.test(src), f + " lost its rules-doc link");
+  }
+});

@@ -11,7 +11,7 @@ import useScrollLock from "../hooks/useScrollLock.js";
 import AccountSubOverlay from "./AccountSubOverlay.jsx";
 import BonjourCard from "./BonjourCard.jsx";
 import { isBlurOff, setBlurOff, applyBlurClass } from "../lib/blurPref.js";
-import { lastRanAt } from "../lib/livingRow.js";
+import { autoSync, lastRanAt } from "../lib/livingRow.js";
 import { PAIRINGS, DEFAULT_PAIRING_ID, pairingById, readPairing, setPairing } from "../lib/fonts.js";
 import JobResultBox from "./JobResultBox.jsx";
 import Icon from "../icons/Icons.jsx";
@@ -123,7 +123,9 @@ function fmtNextRun(row) {
 }
 /* What the cadence selector offers, per job. The staleness backstop gets NO selector: sixty
    days is the owner's floor under a job that has no incremental form, not a dial. */
-const SWEEP_CADENCES = [[300, "5 min"], [900, "15 min"], [1800, "30 min"], [3600, "1 hour"]];
+const SWEEP_CADENCES = [[300, "5 min"], [900, "15 min"], [1800, "30 min"], [3600, "1 hour"],
+                        [3 * 3600, "3 hours"], [6 * 3600, "6 hours"], [12 * 3600, "12 hours"],
+                        [86400, "1 day"]];
 const JOB_CADENCES = [[3600, "1 hour"], [3 * 3600, "3 hours"], [6 * 3600, "6 hours"],
                       [12 * 3600, "12 hours"], [86400, "1 day"], [7 * 86400, "1 week"]];
 
@@ -815,10 +817,16 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                               ) : (
                                 <>last run <b>—</b><br /></>
                               )}
-                              {schedule && (
-                                <>auto <b className={schedule.enabled ? "ok" : ""}>{schedule.enabled ? "on" : "off"}</b>
-                                  {" — every "}<b>{schedule.interval_hours || 6} hours</b> · safe jobs only</>
-                              )}
+                              {/* ONE TRUTH (2026-11-18): this line used to read the legacy
+                                  standing order alone ("auto off · every 6 hours") while the
+                                  Runs-itself row above said Sync was on. autoSync() asks the
+                                  same question the scheduler does: who runs Sync, how often. */}
+                              {schedule && (() => {
+                                const a = autoSync(schedule);
+                                return a.on
+                                  ? <>auto <b className="ok">on</b>{" — every "}<b>{a.every}</b>{a.by ? " · " + a.by : ""}</>
+                                  : <>auto <b>off</b>{" — Sync runs only when you press it"}</>;
+                              })()}
                             </div>
                           </div>
 

@@ -30,3 +30,33 @@ export function lastRanAt(last, row) {
   if (Number.isFinite(stamped) && stamped > 0) return stamped;
   return null;
 }
+
+/* THE SYNC META LINE'S "auto" (2026-11-18). Two schedulers can run Sync: the legacy standing
+   order (schedule.enabled / action / interval_hours, the Ledger's row) and the living
+   library's own Sync row (schedule.jobs, the Runs-itself list). The line under "Sync now"
+   read the first alone, so it said "auto off" while the Runs-itself row said Sync was on --
+   and the living row WAS running it. This answers the way the server's tick decides: when
+   the standing order is on and names Sync it runs it (the Sync row is marked deferred to it),
+   otherwise the Sync row does when it is on.
+
+   `schedule` is /api/panel/schedule's answer. Returns {on, every, by}: `every` is the
+   cadence in the Runs-itself rows' own words, `by` names the standing order when it is the
+   one running it. */
+export function fmtCadence(s) {
+  const n = Number(s);
+  if (!Number.isFinite(n) || n <= 0) return "—";
+  if (n < 3600) return Math.round(n / 60) + " min";
+  if (n < 86400) { const h = Math.round(n / 3600); return h + (h === 1 ? " hour" : " hours"); }
+  const d = Math.round(n / 86400); return d + (d === 1 ? " day" : " days");
+}
+
+export function autoSync(schedule) {
+  const s = schedule || {};
+  const cat = (s.catalog || []).find((c) => c.action === "sync") || {};
+  if (cat.deferred || (s.enabled && s.action === "sync")) {
+    return { on: true, every: fmtCadence((Number(s.interval_hours) || 6) * 3600), by: "the standing order" };
+  }
+  const row = (s.jobs || []).find((j) => j.action === "sync");
+  if (row && row.enabled) return { on: true, every: fmtCadence(row.interval_s), by: "" };
+  return { on: false, every: "", by: "" };
+}

@@ -10,6 +10,8 @@ itself sets lives here instead, one key each (DECISIONS 2026-10-07; SPEC_3.20_RE
   bonjour          {"enabled": bool, "name": str}: LAN discovery.
   mirror_to_pixai  the Control Panel's "Mirror to PixAI website" switch.
   launch_args      the server's launch switches that outlive one start (LAUNCH_FLAGS).
+  allowed_hosts    extra names the server answers to (moonglade.hostcheck): a router's
+                   `pc.lan`, a reverse proxy's name. Hand-edited; absent means none.
   branding         {"mark": id, "animation": {anim, anim_speed, anim_scale, glow_color,
                    glow_angle}, "slots": {slot: asset id}, "worn_banner": {slot: {...}}}.
 
@@ -44,7 +46,8 @@ BONJOUR = "bonjour"
 MIRROR_TO_PIXAI = "mirror_to_pixai"
 LAUNCH_ARGS = "launch_args"
 BRANDING = "branding"
-KEYS = (LIBRARY_DIR, HOST, PORT, BONJOUR, MIRROR_TO_PIXAI, LAUNCH_ARGS, BRANDING)
+ALLOWED_HOSTS = "allowed_hosts"
+KEYS = (LIBRARY_DIR, HOST, PORT, BONJOUR, MIRROR_TO_PIXAI, LAUNCH_ARGS, BRANDING, ALLOWED_HOSTS)
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 5000
@@ -284,6 +287,15 @@ def launch_args(doc=None):
     if not isinstance(v, list):
         return []
     return [str(a) for a in v if str(a) in LAUNCH_FLAGS]
+
+
+def allowed_hosts(doc=None):
+    """The extra host names stored in allowed_hosts (moonglade.hostcheck), each a plain
+    string; anything else in the list is ignored."""
+    v = (read() if doc is None else doc).get(ALLOWED_HOSTS)
+    if not isinstance(v, list):
+        return []
+    return [str(a).strip() for a in v if isinstance(a, str) and a.strip()]
 
 
 def mirror_to_pixai():

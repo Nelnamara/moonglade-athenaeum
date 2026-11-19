@@ -241,9 +241,9 @@ export default function ControlMobile({ account, brandRequest }) {
   }
 
   const isLocal = summary.panel_is_local;
-  // "About Moonglade · v3.14": the running version as the guide prints it (x.y for a .0).
-  const aboutVer = versionFromStamp((window.MG_BOOT && window.MG_BOOT.build_stamp) || "")
-    .replace(/^(v?\d+\.\d+)\.0$/, "$1");
+  // "About Moonglade · v3.21.0": the running version in full, the same string the desktop
+  // Panel's About row prints (one version format everywhere, 2026-11-18).
+  const aboutVer = versionFromStamp((window.MG_BOOT && window.MG_BOOT.build_stamp) || "");
   const credits = account && account.credits != null ? Number(account.credits).toLocaleString() : "—";
 
   const mirrorLine = !watch

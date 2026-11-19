@@ -370,10 +370,16 @@ def test_the_deleted_reconcile_reads_through_the_document(pixai, tmp_path):
         {"media_id": "a", "task_id": "LIVE1", "filename": "a.png", "created_at": old},
         {"media_id": "b", "task_id": "GONE", "filename": "b.png", "created_at": old},
         {"media_id": "c", "task_id": "LIVE2", "filename": "c.png", "created_at": old}])
-    h = _history(pixai, [[_node("LIVE1")], [_node("LIVE2")]])
+    h = _history(pixai, [[_node("LIVE1"), _node("FAILED", status="failed", mediaId=None)],
+                         [_node("LIVE2"), _node("NEW")]])
     res = core.run_reconcile_deleted(SimpleNamespace(out=str(tmp_path), token=None,
                                                      page_size=250))
-    assert res == {"live": 2, "flagged": 1, "cleared": 0}
+    # the walk also counts what the Backed up pill needs (feed_counts): one failed task with no
+    # picture, one finished task not here yet
+    assert res == {"live": 4, "flagged": 1, "cleared": 0, "no_picture": 1, "in_progress": 0,
+                   "missing": 1}
+    stamp = core.read_reconcile_stamp(tmp_path)
+    assert (stamp["no_picture"], stamp["missing"], stamp["live"]) == (1, 1, 4)
     assert {r["media_id"]: r["deleted_remote"] for r in load_catalog(db)} == {
         "a": "", "b": "1", "c": ""}
     assert [v.get("before") for v in h.variables] == [None, "c1"]

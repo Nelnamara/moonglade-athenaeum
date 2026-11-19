@@ -101,6 +101,11 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   started* and is never re-sent, a training run that may have started can't be started again
   for a while, and a Loom render that the page lost touch with stays held until you check
   Activity yourself.
+- **Answer a web page that borrowed your PC's address.** A page on another site can point a
+  name of its own at your PC (DNS rebinding) and try to talk to Moonglade from inside your
+  browser — on a fresh install with no account yet, that could have reached the first-account
+  form. Moonglade answers only to its own names and addresses and refuses every other name
+  before anything runs ([The Gallery](Gallery#which-names-it-answers-to)).
 - **Be reached by anyone who hasn't signed in.** As of **v2.0.0** the gallery is default-deny:
   every route except the login page itself requires an account, and that applies on the
   machine running the server exactly as it does over the network. Nothing is browsable

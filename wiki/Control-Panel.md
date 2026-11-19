@@ -72,8 +72,10 @@ The buttons are in three groups: **Sync — the daily pull**, **Tend — care fo
 pull with full metadata, re-resolve unlabeled model names, fill rows still missing
 prompts/seeds/models, build missing thumbnails, and flag rows deleted on PixAI. This is
 the button you'll use most. See [Backing Up](Backing-Up). Under it, a line shows when it last
-ran and how that went, and the standing order's state — *auto on — every 6 hours · safe jobs
-only*.
+ran and how that went, and whether Sync runs by itself — *auto on — every 12 hours* — the same
+answer its **Runs itself** row gives. When the Ledger's standing order is on and names Sync, the
+line says *· the standing order*, because then that is what runs it; *auto off* means Sync runs
+only when you press it.
 
 ### Tend — care for the files
 
@@ -164,12 +166,14 @@ jobs the app performs on its own, and each row says the same four things: what t
 beside it, because a job that runs itself should still be one you can start by hand.
 
 Everything in it is on by default. Flip a row **off** to stop it; change its **every** to
-change its cadence.
+change its cadence. (Before 3.21.2 the sweep ran every 15 minutes and Sync every 6 hours. A row
+still at one of those old defaults moves to the new one by itself; a cadence you picked in the
+Panel stays as you set it.)
 
 | Job | How often | What it does |
 |---|---|---|
-| **Published-artwork sweep** | every 15 minutes | Re-reads PixAI's list of your published works and refreshes their titles, tags, likes, comments and visibility. It never reads view counts. |
-| **Sync now** | every 6 hours | The one-shot refresh (`--sync`), then a perceptual-hash backfill straight after it. |
+| **Published-artwork sweep** | every 6 hours | Re-reads PixAI's list of your published works and refreshes their titles, tags, likes, comments and visibility. It never reads view counts. Publishing a piece, and starting the app, still run it straight away. |
+| **Sync now** | every 12 hours | The one-shot refresh (`--sync`), then a perceptual-hash backfill straight after it. The live mirror keeps new work coming in between. |
 | **View counts** | weekly | Reads how many views each published work has. Asking adds one view to each, so this is the only job that touches those numbers — see below. |
 | **Sync i2v videos** | daily | Backs up your image-to-video generations. |
 | **Reconcile deleted** | weekly | Flags catalog rows whose task is gone from PixAI. |
@@ -206,7 +210,7 @@ Asking PixAI how many views a work has **adds one to that number** — PixAI's b
 Moonglade's, and there is no way to look without it counting. So the view read is not part
 of anything that runs unattended:
 
-- The **fifteen-minute sweep** never reads a view count at all.
+- The **published-artwork sweep** never reads a view count at all.
 - **View counts** is its own weekly row, on by default. Turn it off and your view numbers are
   never touched by the app again; press its **Run now** and it reads them once, that minute.
 - A **scheduled** run of **Sync published-artwork metadata** — from this list, or from the
@@ -411,6 +415,13 @@ whatever screen you are on — *"Moonglade v3.7.3 is ready"*, with **Update** an
 and the row opens **About** when you click it. **Not now** folds the strip into a small
 *v3.7.3 ready* pill.
 
+**Your catalog is copied before every update.** Before anything is pulled, the update saves
+`catalog.db` as `catalog-before-update-<date>-<time>.db` beside it in your library folder, and
+keeps the last three. It is a proper copy of the live database, safe to take while the app is
+using it. If that copy cannot be made, the update stops there and nothing changes. To go back
+to one, stop Moonglade, put your `catalog.db` aside and rename the copy to `catalog.db`. The
+update window shows it as its first step, *Back up the catalog*.
+
 **It never installs anything by itself.** The check tells you a release exists and stops
 there; the update is pulled, applied and restarted only when you press **Update now** in
 the update window and confirm it. There is no silent update and no automatic one — see
@@ -521,9 +532,13 @@ interrupted one left off.)
 
 Every panel job also writes to the shared activity log, so the paper trail survives a page
 reload: open the **Activity** control in the header (it sits at the right end of the row by default, and the panel has a switch to move it to the left end; it is also in The Loom) to see
-runs from the panel, the CLI, and your generations in one newest-first list. It keeps the
-50 most recent, ages finished entries out after a day, and lets you dismiss a finished or
-failed row.
+what you set going — your generations, imports, deletes, claims, an update, a Health fix run
+and a Sync (or other job that pulls art in) you pressed — in one newest-first list. Jobs that
+run by themselves (everything in **Runs itself**) and the Panel's maintenance jobs (Duplicate
+audit, Catalog stats, the Similar index, hashes, Organize …) are not listed there; they are in
+the **Ledger**. A maintenance job you pressed still says how it ended in the corner. Activity
+keeps the 50 most recent, ages finished entries out after a day, and lets you dismiss a
+finished or failed row.
 
 A generation's row says which phase it is in rather than just spinning. **Queued** means
 PixAI has accepted the job and no worker has picked it up yet — nothing is rendering — and

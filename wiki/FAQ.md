@@ -146,15 +146,16 @@ new release about once an hour, and when one turns up a strip appears across the
 in the app you are. **Update** opens the update window; or **open the Control Panel** (it re-checks on the spot) and the About row
 at the bottom of its sidebar carries a gold dot: *"About Moonglade · ● 3.7.3 available"*. Click it and **About**
 opens leading with *"v3.7.3 is out"* and **View the update ›**; that opens the confirm, which
-tells you what will happen — the update is pulled atomically, dependencies install
+tells you what will happen — your catalog is copied first (a dated file beside
+`catalog.db`, the last three kept), the update is pulled atomically, dependencies install
 only if they changed, the server restarts, and the tab reloads itself.
 Nothing is applied until you press **Update now**; there is no silent update, ever. The app
 notices releases by itself; it never installs one by itself.
 
-Press it and that same window turns into the progress of the update — **pull**, then
-**applying files**, then **restart** — ticking each one off as it really finishes, with how
+Press it and that same window turns into the progress of the update — **back up the
+catalog**, then **pull**, then **applying files**, then **restart** — ticking each one off as it really finishes, with how
 long it took. The restart is the one step nobody can watch (the server is away), so it
-shows what your machine's last restart took. When the third tick lands the window closes
+shows what your machine's last restart took. When the last tick lands the window closes
 itself and the version at the foot of the sidebar is the new one. If the update is refused
 or fails, the refusal appears in the same window in place of the progress bar rather than
 as a message you might miss.

@@ -495,7 +495,9 @@ a draft only reads it.
 **Runs** lists your training runs, newest first, with filters for All, Drafts, Done and
 Failed. Each row shows the run's status — a draft and the step it stopped at, Queued,
 Training with PixAI's percentage (and a moon that fills as it goes), Done or Failed (PixAI's
-reason on hover) — and one thing you can do with it:
+reason on hover) — and one thing you can do with it. **When a run finishes or fails, the corner
+notice says so once**, wherever you are in the app (and in The Loom), as long as the app is
+open — *Training finished*, or the run's name and *training failed* with PixAI's reason:
 
 - **Continue** opens an Advanced draft at the step it stopped at.
 - **View** opens a queued or training run's progress.
@@ -946,7 +948,12 @@ its full page: PixAI's own **brief** (what they're actually asking for), the **p
 breakdown** tier by tier — how much each rank pays, how many people place there, and what
 that adds up to — and the **requirements**: the tag an entry must carry, whether the contest
 restricts you to particular models, LoRAs or recipes (each with a link), a link to its rules document if it published
-one, and how the winners get decided. Below that sit both dates, a preview of the entries,
+one (only an ordinary `http`/`https` link is made clickable), and how the winners get decided.
+**On the contest cards** (desktop and phone), a contest that requires a model or LoRA has a small
+line saying whether you have used it — *Required LoRA: used ✓*, *not used yet*, or *1 of 2
+used*. "Used" means a picture in this library was made with it, any version. A model the app
+could not look up says *couldn't check*, and a recipe says *not recorded here*, because recipes
+are not recorded per picture; neither is ever shown as "not used". Below that sit both dates, a preview of the entries,
 and the winners once results land. Each winner shows the **tier** it won — PixAI pays by tier
 (a tier can hold many winners), so the list never numbers its places — and what that tier paid. If PixAI's contest board ever
 grows past what the app reads, the list says so.

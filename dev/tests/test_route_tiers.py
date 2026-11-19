@@ -165,6 +165,7 @@ TIER_SNAPSHOT = [
     "/api/contest/mine [GET] LOGIN",
     "/api/contest/sync [POST] LOGIN",
     "/api/contests [GET] LOGIN",
+    "/api/contests/qualify [GET] LOGIN",
     "/api/curate [POST] LOGIN",
     "/api/curate/restore [POST] LOGIN",
     "/api/delete-image [POST] LOCALHOST",

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import Icon from "../icons/Icons.jsx";
 import { apiGet } from "../api.js";
 import { fmt, countdown, dayOf, tsOf } from "../hooks/useContests.js";
-import { parseMarkdownLite } from "../lib/markdownLite.js";
+import { parseMarkdownLite, safeHref } from "../lib/markdownLite.js";
 import { ruleLine } from "../lib/contestRules.js";
 import "../styles/myart-contests.css";
 
@@ -293,8 +293,8 @@ export default function ContestDetail({ contest, mineRow, onBack, onClose, onEnt
             <div className="mgct-req">
               <span className="mgct-reqk">Rules doc</span>
               <span className="mgct-reqv">
-                {contest.desc_url ? (
-                  <a className="mgct-viewall" href={contest.desc_url}
+                {safeHref(contest.desc_url) ? (
+                  <a className="mgct-viewall" href={safeHref(contest.desc_url)}
                     target="_blank" rel="noopener noreferrer">read the rules ↗</a>
                 ) : (
                   <span className="mgct-none">none published for this contest</span>

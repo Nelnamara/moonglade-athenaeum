@@ -31,6 +31,19 @@ git tags. Full prose notes for tagged versions live on
 - **Undo organize no longer forgets the files it could not move back.** It used to clear its list even when a file was open in another program, so those moves could never be undone, and after an organize with Convert it looked for each file under its old name and skipped it. A move it can't undo now stays on the list for the next Undo, it never moves a file over another one already at the old place, and converted files are found under their new name. (2026-11-19)
 - **The command line refuses V3.2 video after 23 Nov on every road.** A raw `--params-json` on `--generate-video`, `--reference-video` or `--edit-image` skipped the retirement check and could still send a V3.2 video. It is now refused before anything is sent, preview included. (2026-11-19)
 - **Delete from PixAI only does the delete you agreed to.** A delete request that arrived without saying which delete its dialog showed skipped the "this changed while the dialog was open" check, and could take a whole generation. It is now refused with nothing sent. The gallery's own Delete always says, so it works as before. (2026-11-19)
+- **Moonglade answers only to its own names.** A web page that pointed its own name at your PC could reach the server from your browser, and on a fresh install create the first account. Any name that isn't this PC's address, its name, its `.local` name, its Bonjour name or one you list in `allowed_hosts` is now refused. (2026-11-19)
+- **A contest's Rules doc link is only made for an ordinary web address.** (2026-11-19)
+- **Backed up can reach 100%.** It counted generations that failed or were cancelled on PixAI, which never made a picture, as missing, and counted ones you deleted on PixAI as here. (2026-11-19)
+
+### Changed
+- **Your catalog is copied before every update.** Before the update pulls anything it saves `catalog.db` as a dated `catalog-before-update-…db` beside it and keeps the last three; if the copy can't be made, nothing changes. The update window shows it as its first step. (2026-11-19)
+- **Every version reads in full.** The phone's About row said "v3.21" where the desktop said "v3.21.0"; both, and the guide's what's-new note, now print the whole version. (2026-11-19)
+- **Contest cards say whether you've used what a contest requires.** A contest that needs a model or LoRA shows "Required LoRA: used ✓", "not used yet" or "1 of 2 used" on its card, on the desktop and the phone. A recipe says it isn't recorded here, and one the app couldn't look up says so; neither is ever shown as not used. (2026-11-19)
+- **A LoRA training run says when it finishes or fails.** The normal corner notice appears once, wherever you are in the app. (2026-11-19)
+- **Hover or tap Backed up to see what's missing.** It says how many generations are still to fetch (Sync now fetches them) and how many failed or were cancelled on PixAI and never made a picture, which nothing can back up. (2026-11-19)
+- **The Sync line in the Control Panel says the same as its Runs itself row.** It used to read "auto off · every 6 hours" from the standing order while Sync was running by itself. (2026-11-19)
+- **Maintenance jobs are gone from the Activity tracker.** It lists what you set going; jobs that run by themselves and the Panel's maintenance jobs are in the Ledger. (2026-11-19)
+- **The published-artwork sweep runs every 6 hours, not every 15 minutes, and Sync every 12 hours, not 6.** Publishing and starting the app still run the sweep at once. A cadence you set yourself is kept. (2026-11-19)
 
 ## [3.21.1] - 2026-11-19 — The Right Key
 

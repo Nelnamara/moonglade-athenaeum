@@ -184,7 +184,7 @@ their own, with no listing re-walk.
 
 That split is how the app schedules it. The Control Panel's **View counts** row is a weekly
 `--views-only` run, on by default; every *unattended* run of the metadata refresh passes
-`--no-views`; and the fifteen-minute published-artwork sweep never reads a view count at
+`--no-views`; and the published-artwork sweep never reads a view count at
 all. Clicking **Sync published-artwork metadata** yourself still reads them, because that is
 you asking. With `READ_ONLY` set in `config.json` the view read is skipped everywhere — it
 changes a number on your PixAI account, so it sits behind the same switch as publishing and

@@ -1,6 +1,7 @@
 import React from "react";
 import * as toastStore from "./toastStore.js";
 import * as jobs from "./jobs.js";
+import { startTrainWatch } from "./trainWatch.js";
 import * as jobsStore from "./jobsStore.js";
 import * as ach from "./ach.js";
 import { claimReceipt } from "./updateStore.js";
@@ -75,6 +76,8 @@ export function installNotify() {
   }
 
   jobsStore.start();
+  // A LoRA training run says when it finishes or fails, once (notify/trainWatch.js).
+  startTrainWatch();
   ach.check();
   /* THE UPDATE'S RECEIPT (2026-09-05). An apply ends in a reload, and what comes back
      looks exactly like what went away -- so the boot that follows one pays out the note
