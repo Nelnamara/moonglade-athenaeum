@@ -4,7 +4,7 @@ This folder holds the Loom's **source and its Node toolchain**. The Loom itself 
 standalone page any more: it is a surface of the web app, served at **`/loom`** by
 `moonglade/gallery.py`, and its React source is **`master-storyboard.jsx`**.
 
-**The user-facing manual is [`docs/LOOM.md`](../docs/LOOM.md)** — features, shortcuts, the
+**The user-facing manual is [`wiki/The-Loom.md`](../wiki/The-Loom.md)** — features, shortcuts, the
 storyboard model. This file only covers what lives in `loom/`.
 
 | Path | What it is |
