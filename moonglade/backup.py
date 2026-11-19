@@ -66,6 +66,10 @@ from moonglade import telemetry as _telemetry
 from moonglade.gallery import (CATALOG_FIELDS, init_db, migrate, load_catalog,
                             query_catalog, catalog_csv_text,
                             save_catalog, _db_is_empty, rows_for_media_ids,
+                            # A save of rows built from an earlier read: re-reads the
+                            # current rows in the write transaction so an edit made
+                            # meanwhile is never undone (2026-11-19).
+                            save_catalog_over_snapshot,
                             # The row-level artwork write (see run_sync_artworks): one
                             # narrow UPDATE of the eleven PixAI-owned columns, keyed by
                             # media_id -- imported the same way its whole-table siblings
@@ -1439,7 +1443,10 @@ def _same_pixels(a, b):
             if ia.size != ib.size:
                 return False
             ra, rb = ia.convert("RGBA"), ib.convert("RGBA")
-            return ImageChops.difference(ra, rb).getbbox() is None
+            # Every band's extremes, not getbbox(): on an RGBA image getbbox() looks at
+            # the alpha band only (Pillow 10+), so any two opaque pictures "matched" and a
+            # different picture under the same id passed as a metadata-only copy.
+            return all(hi == 0 for _lo, hi in ImageChops.difference(ra, rb).getextrema())
     except Exception:
         return None
 
@@ -2325,6 +2332,10 @@ def plan_image_delete(session, task_id, media_id):
     return _image_delete_plan(task_detail_gql(session, str(task_id or "").strip()), media_id)
 
 
+NO_CONFIRMED_PLAN = ("This delete did not say which delete you agreed to, so nothing was "
+                     "deleted. Open the delete dialog again and confirm from there.")
+
+
 def delete_image_routed(session, task_id, media_id, confirmed_plan=None):
     """Delete ONE image from PixAI through whichever mutation PixAI accepts for it.
 
@@ -2338,9 +2349,12 @@ def delete_image_routed(session, task_id, media_id, confirmed_plan=None):
          too, but checking here means a read-only install makes NO network call at all for
          a delete, rather than quietly reading and then refusing.
       2. Read and route (`plan_image_delete`). A refusal returns here with nothing sent.
-      3. `confirmed_plan`, when given, is the plan the user was shown. If the fresh route
+      3. `confirmed_plan` is the plan the user was shown, and it is REQUIRED: a delete
+         with no plan is refused before the read, with nothing sent. If the fresh route
          disagrees, the task changed underneath the dialog and this refuses rather than
-         doing something the user did not agree to.
+         doing something the user did not agree to. (Until 2026-11-19 a missing plan
+         skipped that comparison, so a confirm without one deleted whatever the fresh
+         read said, a whole generation included.)
       4. Fire exactly one branch. No loop wraps either call: a destructive mutation
          re-sent after a lost response can fire again against a task that has already
          changed (dev/tests/test_delete_routing.py pins this structurally, and
@@ -2348,10 +2362,14 @@ def delete_image_routed(session, task_id, media_id, confirmed_plan=None):
     """
     _check_read_only("delete an image from your PixAI account")
     task_id, media_id = str(task_id or "").strip(), str(media_id or "").strip()
+    confirmed_plan = str(confirmed_plan or "").strip()
+    if not confirmed_plan:
+        return ImageDeletePlan(
+            "refuse", NO_CONFIRMED_PLAN, 0, [], "", [])
     plan = plan_image_delete(session, task_id, media_id)
     if plan.plan == "refuse":
         return plan
-    if confirmed_plan and str(confirmed_plan) != plan.plan:
+    if confirmed_plan != plan.plan:
         return ImageDeletePlan(
             "refuse",
             "What this delete would do changed while the dialog was open, so nothing was "
@@ -4124,8 +4142,13 @@ def carry_local_fields(row, known):
         wiped exactly the fields listed above; a finished generation polled twice was
         enough to do it. Four of the seven builders still had no carry at all until the
         helper gave them one.
-      * run_download's page saves and its backfill pass, which build their rows from
-        the feed rather than through build_catalog_row and so still apply it directly.
+      * run_download's page saves, which build their rows from the feed rather than
+        through build_catalog_row; `save_catalog_over_snapshot` applies the same rule.
+
+    `known` is a snapshot, so it goes stale while a writer works: every writer that
+    carries saves through `save_catalog_over_snapshot`, which merges over the rows as they
+    are at write time and never writes back a row deleted meanwhile (2026-11-19: a Sync
+    undid ratings, collections and deletes made in the gallery while it ran).
     """
     base = dict(known.get(row.get("media_id", ""), {}))
     for k, v in row.items():
@@ -5017,7 +5040,7 @@ def run_sync_videos(args):
             elif item == "missing":
                 missing += 1
     if new_rows:
-        save_catalog(db_path, new_rows)   # the carry already happened in build_catalog_row
+        save_catalog_over_snapshot(db_path, new_rows, known)   # carried in build_catalog_row; merged over the rows as they are NOW
     print("Videos saved/present: {}{}.".format(
         ok, " | {} had no resolvable file url".format(missing) if missing else ""))
     return {"i2v_tasks": len(i2v_nodes), "videos": ok}
@@ -5227,7 +5250,7 @@ def run_import_local(args):
         vlog("imported {} ({})".format(rel, "video" if is_vid else "image"))
 
     if rows:
-        save_catalog(db_path, rows)
+        save_catalog_over_snapshot(db_path, rows, known)
     print("Imported {} new local file(s){}; {} already cataloged.".format(
         made, " (copied into the backup)" if external else "", skipped))
     # Anything imported before content-addressing came in still carries its original
@@ -5847,6 +5870,17 @@ def _params_video_models(params):
             if isinstance(blk, dict) and blk.get("model"):
                 out.append(blk["model"])
     return out
+
+
+def check_params_retired(params, now=None):
+    """Refuse a `parameters` object that names a retired video engine, whoever built it.
+
+    The builders check the engine they are handed, but a raw `--params-json` never passes
+    through a builder, and the three CLI create roads (--generate-video, --reference-video,
+    --edit-image) send their mutation directly rather than through submit_generation. Each
+    calls this as soon as it has its parameters, before any network call (2026-11-19)."""
+    for _vm in _params_video_models(params):
+        check_video_model_retired(_vm, now)
 
 
 def video_model_id(name):
@@ -7305,7 +7339,7 @@ def run_generate(args):
         saved.append(str(path))
 
     if rows:
-        save_catalog(db_path, rows)
+        save_catalog_over_snapshot(db_path, rows, known)
 
     videos = []
     if vouts:
@@ -7490,7 +7524,7 @@ def _download_video_task(session, result, task_id, out, args, params):
         rows.append(full)
         saved.append(str(path))
     if rows:
-        save_catalog(db_path, rows)
+        save_catalog_over_snapshot(db_path, rows, known)
     return saved
 
 
@@ -7646,7 +7680,7 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
         make_thumbnail(path, thumb_dir / "{}.jpg".format(mid))
         saved.append(str(path))
     if rows:
-        save_catalog(db_path, rows)
+        save_catalog_over_snapshot(db_path, rows, known)
     return saved
 
 
@@ -8729,8 +8763,7 @@ def submit_generation(session, params, *, on_send=None, exact=False):
     for, and the Turbo fallback would also flip the process-wide _turbo_refused. It goes out
     once; PixAI's refusal comes back in plain words. It never carries a card."""
     _check_read_only("submit a generation (spends credits)")
-    for _vm in _params_video_models(params):
-        check_video_model_retired(_vm)       # before any network call: no spend, no round-trip
+    check_params_retired(params)             # before any network call: no spend, no round-trip
     lane = is_lane_request(params)
     if lane and params.get("kaisuukenId"):
         raise PixAIError(_UNLIMITED_NO_CARD)
@@ -10155,6 +10188,8 @@ def run_generate_video(args):
     if not existing_task and not (getattr(args, "image", "") or "").strip():
         raise PixAIError("--generate-video needs --image <media_id> (a catalog image to animate).")
     params = _gen_video_parameters(args)
+    if not existing_task:
+        check_params_retired(params)      # a raw --params-json skips the builder's check
 
     if not existing_task and not getattr(args, "confirm", False):
         i2v = params.get("i2vPro") or {}
@@ -10262,6 +10297,8 @@ def run_reference_video(args):
     if not existing_task and not (imgs or vids or auds) and not override:
         raise PixAIError("--reference-video needs at least one --ref-image/--ref-video/"
                          "--ref-audio (a media_id or local file), or --task-id to recover.")
+    if not existing_task and override:
+        check_params_retired(json.loads(override))   # sent as given: no builder checks it
 
     is_private = (getattr(args, "vchannel", "private") == "private")
     vmodel = (getattr(args, "video_model", "") or "v4.0.1")
@@ -10391,6 +10428,8 @@ def run_edit_image(args):
     if not existing_task and not srcs and not override:
         raise PixAIError("--edit-image needs --edit-src <media_id|file> (repeatable), "
                          "or --task-id to recover an existing edit.")
+    if not existing_task and override:
+        check_params_retired(json.loads(override))   # sent as given: no builder checks it
 
     # PREVIEW: no upload, no submit, no credits. Local files shown as placeholders.
     if not existing_task and not getattr(args, "confirm", False):
@@ -10504,7 +10543,7 @@ def run_edit_image(args):
         saved.append(str(path))
 
     if rows:
-        save_catalog(db_path, rows)
+        save_catalog_over_snapshot(db_path, rows, known)
     print("Edited + cataloged {} image(s):".format(len(saved)))
     for s in saved:
         print("  " + s)
@@ -10548,6 +10587,8 @@ def run_fix_models(args):
     db_path = _ensure_db(out)
     session = _make_session(getattr(args, "token", None))
     rows = load_catalog(db_path)
+    # As loaded: the save at the end merges over the rows as they are THEN (a Sync step).
+    snapshot = {r["media_id"]: dict(r) for r in rows if r.get("media_id")}
 
     to_resolve = {}   # version_id -> rows needing it
     for r in rows:
@@ -10604,7 +10645,7 @@ def run_fix_models(args):
                 print("  could not resolve model {} (left as-is)".format(vid))
 
     if fixed or relabeled:
-        save_catalog(db_path, rows)
+        save_catalog_over_snapshot(db_path, rows, snapshot, blank_keeps=False)
     print("\nFixed {} row(s) across {} model(s); {} id(s) unresolved{}{}.".format(
         fixed, len(to_resolve) - unresolved - len(lookup_failed), unresolved,
         " (relabeled {} rows to '{}')".format(relabeled, removed_label) if relabeled else "",
@@ -14208,6 +14249,8 @@ def run_backfill_full_meta(args):
     session = _make_session(getattr(args, "token", None))
 
     rows = load_catalog(db_path)
+    # As loaded, so a checkpoint save keeps a rating or collection set while this runs.
+    snapshot = {r["media_id"]: dict(r) for r in rows if r.get("media_id")}
     with_loras = getattr(args, "with_loras", False)
     with_credit = getattr(args, "with_credit", False)
     with_surface = getattr(args, "with_surface", False)
@@ -14366,7 +14409,7 @@ def run_backfill_full_meta(args):
 
     def _checkpoint():
         if pending:
-            save_catalog(db_path, pending)
+            save_catalog_over_snapshot(db_path, pending, snapshot, blank_keeps=False)
             pending.clear()
 
     for tid, fm in _parallel_map(task_ids, _fetch_task, workers, _prog, delay=args.delay,
@@ -14914,7 +14957,7 @@ def run_download(args, progress=None):
                             _tick()
 
                 if page_rows:
-                    save_catalog(db_path, [carry_local_fields(r, known) for r in page_rows])
+                    save_catalog_over_snapshot(db_path, page_rows, known)
                 seen += len(edges)
                 if args.max and seen >= args.max:
                     print("Reached --max limit.")
@@ -15038,11 +15081,12 @@ def run_download(args, progress=None):
                         _check_time_capsule(meta.get("created_at"), out)
                         time.sleep(args.delay)
 
-            # Upsert this page's rows so progress is durable even on interrupt.
-            # _carry() re-merges each row over its existing catalog row so a
-            # re-pull never blanks local curation (collections/rating/tags/...).
+            # Upsert this page's rows so progress is durable even on interrupt. Each row
+            # is merged over the row the catalog holds NOW, not over `known` (read when
+            # the run started): a re-pull never blanks local curation, and a rating,
+            # collection or delete made in the gallery during the run is not undone.
             if page_rows:
-                save_catalog(db_path, [carry_local_fields(r, known) for r in page_rows])
+                save_catalog_over_snapshot(db_path, page_rows, known)
 
             # Count TASKS, not pages -- exactly as the parallel branch above does. Counting
             # one per page made every single-worker run (which is what --collect-only always

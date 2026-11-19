@@ -26,6 +26,8 @@ may key on it.
 import pathlib
 import sys
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from moonglade import backup as core  # noqa: E402
@@ -277,7 +279,7 @@ def test_a_read_that_fails_plans_a_refusal_and_sends_nothing(monkeypatch):
     monkeypatch.setattr(core, "task_detail_gql", lambda *a, **k: None)
     monkeypatch.setattr(core, "READ_ONLY", False)
     dbl = _Double(None)
-    plan = core.delete_image_routed(dbl, "TASK-BATCH", "m0")
+    plan = core.delete_image_routed(dbl, "TASK-BATCH", "m0", confirmed_plan="per-image")
     assert plan.plan == "refuse"
     assert "nothing was deleted" in plan.reason.lower()
     assert dbl.sent() == 0, "it deleted something after a failed read"
@@ -286,7 +288,7 @@ def test_a_read_that_fails_plans_a_refusal_and_sends_nothing(monkeypatch):
 def test_the_per_image_branch_sends_delete_batch_media(monkeypatch):
     monkeypatch.setattr(core, "READ_ONLY", False)
     dbl = _Double(_batch_task(False, False, False))
-    plan = core.delete_image_routed(dbl, "TASK-BATCH", "m1")
+    plan = core.delete_image_routed(dbl, "TASK-BATCH", "m1", confirmed_plan="per-image")
     assert plan.plan == "per-image"
     assert len(dbl.mutations) == 1 and not dbl.rest_posts
     doc, variables = dbl.mutations[0]
@@ -299,7 +301,7 @@ def test_the_whole_task_branch_sends_the_task_delete(monkeypatch):
     deleteBatchMedia here and PixAI answered 403."""
     monkeypatch.setattr(core, "READ_ONLY", False)
     dbl = _Double(_lone_task())
-    plan = core.delete_image_routed(dbl, "TASK-LONE", "solo1")
+    plan = core.delete_image_routed(dbl, "TASK-LONE", "solo1", confirmed_plan="whole-task")
     assert plan.plan == "whole-task"
     assert not dbl.mutations, "the per-image mutation fired anyway"
     assert dbl.rest_posts == [("/task/TASK-LONE/delete", {})]
@@ -323,3 +325,16 @@ def test_a_matching_confirmed_plan_goes_through(monkeypatch):
     plan = core.delete_image_routed(dbl, "TASK-BATCH", "m0", confirmed_plan="per-image")
     assert plan.plan == "per-image"
     assert len(dbl.mutations) == 1
+
+
+@pytest.mark.parametrize("plan", [None, "", "   "], ids=["none", "empty", "blank"])
+def test_a_confirm_without_its_plan_is_refused_before_the_read(monkeypatch, plan):
+    """A missing plan used to skip the "plan changed" comparison, so a confirm sent without
+    one deleted whatever the fresh read said -- a whole generation included. It is refused
+    before anything is read or sent (red team, 2026-11-19)."""
+    monkeypatch.setattr(core, "READ_ONLY", False)
+    dbl = _Double(_lone_task())
+    got = core.delete_image_routed(dbl, "TASK-LONE", "solo1", confirmed_plan=plan)
+    assert got.plan == "refuse"
+    assert got.reason == core.NO_CONFIRMED_PLAN
+    assert dbl.reads == [] and dbl.sent() == 0, "it read or deleted without a confirmed plan"

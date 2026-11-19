@@ -224,7 +224,7 @@ def test_backfill_checkpoints_incrementally_not_only_at_the_end(monkeypatch, tmp
     """A big backfill (a 36k-image catalog is tens of thousands of task detail reads) must
     persist AS IT GOES, so a Ctrl-C or dropped connection partway keeps its progress instead of
     writing nothing. With the checkpoint interval forced to 1, each fetched task flushes its own
-    save -- provable by counting save_catalog calls (a single end-save would be exactly one)."""
+    save -- provable by counting its save calls (a single end-save would be exactly one)."""
     db = tmp_path / "catalog.db"
     rows = []
     for i in range(3):
@@ -245,13 +245,13 @@ def test_backfill_checkpoints_incrementally_not_only_at_the_end(monkeypatch, tmp
     monkeypatch.setattr(core, "_BACKFILL_CHECKPOINT_TASKS", 1)     # flush after every task
 
     saves = {"n": 0}
-    real_save = core.save_catalog
+    real_save = core.save_catalog_over_snapshot
 
-    def counting_save(dbp, rws):
+    def counting_save(dbp, rws, *a, **k):
         saves["n"] += 1
-        return real_save(dbp, rws)
+        return real_save(dbp, rws, *a, **k)
 
-    monkeypatch.setattr(core, "save_catalog", counting_save)
+    monkeypatch.setattr(core, "save_catalog_over_snapshot", counting_save)
 
     args = types.SimpleNamespace(out=str(tmp_path), token=None, workers=1, delay=0.0,
                                  progress=None, with_loras=False, with_credit=False,
