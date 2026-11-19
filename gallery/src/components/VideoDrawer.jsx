@@ -7,7 +7,7 @@ import { createPortal } from "react-dom";
 import Icon from "../icons/Icons.jsx";
 import CostBadge from "./CostBadge.jsx";
 import {
-  MODELS, MODEL_VMODES, MODEL_MAXDUR, MODE_LBL, MODE_PH, CHANNEL_CAP, CAMERA_OPTS, AUDIO_LANGS,
+  MODELS, pickerModels, MODEL_VMODES, MODEL_MAXDUR, MODE_LBL, MODE_PH, CHANNEL_CAP, CAMERA_OPTS, AUDIO_LANGS,
   DEFAULT_MODEL, MODEL_CARD, SHOT_LABEL, modelCaps, modelMeta, bankView,
   durationAllowed, modelTakes, refCap,
   friendlyGenErr, refItem, primaryBank, setPrimaryBank, buildPayload, hasAnyRef,
@@ -936,7 +936,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
             <div className="mgd-engcur">{chosenModel ? chosenModel.label : s.model}</div>
           </div>
           <div className="mgd-enggrid" role="radiogroup" aria-label="Video engine">
-            {MODELS.map((m) => {
+            {pickerModels().map((m) => {
               const sel = m.value === s.model;
               const modes = (MODEL_VMODES[m.value] || ["i2v", "flf", "r2v"]).map((x) => SHOT_LABEL[x]).join(" / ");
               return (

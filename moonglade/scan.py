@@ -12,7 +12,7 @@ from pathlib import Path
 
 from moonglade import paths as _paths
 
-_IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
+_IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif", ".svg"})
 
 
 # ---------------------------------------------------------------------------

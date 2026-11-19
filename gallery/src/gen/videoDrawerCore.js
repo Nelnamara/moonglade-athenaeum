@@ -28,6 +28,33 @@ export const MODELS = [
 // The engine the drawer opens on. The DC marks it with an emerald 'default' chip (DC 1846 V4.0
 // Lite caps end with ['default','hot']); modelCaps() appends that chip to THIS engine's real caps.
 export const DEFAULT_MODEL = "v4.0.1";
+
+// PixAI retires V3.2 video on 2026-11-23 03:00 UTC (their announcement, 10 Nov 2026). Mirror of
+// moonglade.backup.VIDEO_MODEL_RETIRED (a parity test holds the two together). MODELS keeps the
+// retired engine so old V3.2 videos keep their "V3.2" label; the PICKER and every recipe that
+// names a retired engine go through the helpers below. `now` (ms or Date) is an injectable clock.
+export const VIDEO_MODEL_RETIRED = { "v3.2": "2026-11-23T03:00:00Z" };
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+// Test seam: pin "now" for every retirement check that is not handed its own instant. It lives on
+// globalThis so a bundled copy of this module (the mounted tests build one) reads the same pin.
+const videoClock = () => (typeof globalThis.__mgVideoNow === "function" ? globalThis.__mgVideoNow() : Date.now());
+export function setVideoClock(fn) { globalThis.__mgVideoNow = typeof fn === "function" ? fn : null; }
+export function modelRetired(v, now) {
+  const when = VIDEO_MODEL_RETIRED[String(v == null ? "" : v).trim()];
+  if (!when) return false;
+  const t = now == null ? videoClock() : +now;
+  return t >= Date.parse(when);
+}
+// The engines the picker offers: MODELS minus any retired at `now`.
+export function pickerModels(now) { return MODELS.filter((m) => !modelRetired(m.value, now)); }
+// The one-line note when a retired engine falls to the default.
+export function retiredNote(v) {
+  const m = MODELS.find((x) => x.value === v);
+  const d = MODELS.find((x) => x.value === DEFAULT_MODEL);
+  const when = new Date(VIDEO_MODEL_RETIRED[v]);
+  return (m ? m.label : v) + " was retired by PixAI on " + when.getUTCDate() + " " + MONTHS[when.getUTCMonth()]
+    + "; using " + (d ? d.label : DEFAULT_MODEL) + " instead.";
+}
 // Free-card eligibility per engine (real roster: the two 'no card' engines). Absent => cards
 // apply. Static capability knowledge for the ENGINE card's meta line (DC 2900 videoModelMeta) --
 // the PRICE, and whether a card actually covers THIS clip, stays CostBadge's truth.
@@ -299,7 +326,8 @@ export function gatedShot(mode, duration, model) {
 // it (V3.2 from Multi-Reference lands on First & Last, not First Frame). Spend-safe either way:
 // applyMode only ever re-shapes the i2v/flf `slots` bank the user filled; the r2v banks are
 // never carried into it.
-export function applyModelGating(s, userDriven) {
+export function applyModelGating(s, userDriven, now) {
+  if (modelRetired(s.model, now)) s.model = DEFAULT_MODEL;   // safety net: a retired engine is never priced or sent
   const g = gatedShot(s.mode, s.duration, s.model);
   if (g.mode !== s.mode) {
     const from = s.mode, to = g.mode;
@@ -374,7 +402,10 @@ export function applyPrefill(s, o) {
   // pick never rides into it (spend review N7). The same shot keeps its own.
   s.ratio = VIDEO_RATIOS.indexOf(o.ratio) >= 0 ? o.ratio : (o.same_shot ? s.ratio : "adaptive");
   if (o.mode && MODE_LBL[String(o.mode).toLowerCase()]) applyMode(s, String(o.mode).toLowerCase());
-  if (o.video_model != null) s.model = o.video_model;
+  if (o.video_model != null) {
+    s.model = o.video_model;
+    if (modelRetired(s.model, o.now)) { const gone = s.model; s.model = DEFAULT_MODEL; s.modeNote = retiredNote(gone); }
+  }
   if (o.duration != null) s.duration = snapDuration(o.duration);
   if (o.quality != null) s.quality = o.quality;
   if (o.is_private != null) s.channel = o.is_private ? "enhanced" : "normal";

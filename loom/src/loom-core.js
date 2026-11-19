@@ -30,7 +30,7 @@ import { spendMidsOf, selectedTakeView } from "./loom-takes-core.js";
 // already holds this module through VideoDrawer.jsx. priceKey is the drawer's price identity,
 // re-exported there from priceProbeCore.js.
 import {
-  MODELS, DEFAULT_MODEL, MODEL_VMODES, SHOT_LABEL, refCap, gatedShot, priceKey,
+  MODELS, DEFAULT_MODEL, modelRetired, MODEL_VMODES, SHOT_LABEL, refCap, gatedShot, priceKey,
 } from "../../gallery/src/gen/videoDrawerCore.js";
 
 // ---------- continuity / connection-method metadata ----------
@@ -166,7 +166,7 @@ export const newCardShape = (id, extra = {}) => ({
 // list reads as DEFAULT_MODEL, so nothing downstream ever prices or sends an unknown string.
 const engineId = (v) => {
   const s = String(v == null ? "" : v).trim();
-  return MODELS.some((m) => m.value === s) ? s : DEFAULT_MODEL;
+  return MODELS.some((m) => m.value === s) && !modelRetired(s) ? s : DEFAULT_MODEL;
 };
 /** The engine a card renders on: its videoModel when that is a real engine, else the default. */
 export const engineOf = (c) => engineId(c && c.videoModel);

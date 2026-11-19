@@ -12,6 +12,7 @@
 
 import {
   MODELS, MODEL_MAXDUR, RATIO_MODELS, VIDEO_RATIOS, snapDuration, modelTakes,
+  DEFAULT_MODEL, modelRetired, retiredNote,
 } from "./videoDrawerCore.js";
 
 // Numeric top-level `modelId` -> engine NAME. Mirror of moonglade_backup.VIDEO_MODELS (the
@@ -71,16 +72,17 @@ function fieldsNote(prefill, engine, notes) {
    null / {error} when the task couldn't be read -- in which case the recipe comes from the
    catalog row alone, disclosed. Only keys actually recovered are set on `prefill`, so
    applyPrefill leaves every un-recovered field at the drawer's default. */
-export function videoRemixFromRow(row, taskParams) {
+export function videoRemixFromRow(row, taskParams, now) {
   row = row || {};
   const notes = [];
   const prefill = {};
 
   // ---- CATALOG-ONLY: the task record is unreadable (network, delisted, chat) --------------
   if (!taskParams || taskParams.error) {
-    const engine = resolveEngine(row.video_model || row.model_id);
+    let engine = resolveEngine(row.video_model || row.model_id);
     if (engine) {
-      if (!MODEL_VALUES.has(engine)) notes.push("engine no longer in the roster");
+      if (modelRetired(engine, now)) { notes.push(retiredNote(engine)); engine = DEFAULT_MODEL; }
+      else if (!MODEL_VALUES.has(engine)) notes.push("engine no longer in the roster");
       prefill.video_model = engine;
     }
     prefill.mode = "i2v";                       // shot mode is not a catalog column (§2.2)
@@ -98,9 +100,10 @@ export function videoRemixFromRow(row, taskParams) {
 
   // ---- FULL: the task read is authoritative ----------------------------------------------
   const tp = taskParams;
-  const engine = resolveEngine(tp.video_model || row.video_model || row.model_id);
+  let engine = resolveEngine(tp.video_model || row.video_model || row.model_id);
   if (engine) {
-    if (!MODEL_VALUES.has(engine)) notes.push("engine no longer in the roster");
+    if (modelRetired(engine, now)) { notes.push(retiredNote(engine)); engine = DEFAULT_MODEL; }
+    else if (!MODEL_VALUES.has(engine)) notes.push("engine no longer in the roster");
     prefill.video_model = engine;
   }
   prefill.mode = tp.kind || "i2v";

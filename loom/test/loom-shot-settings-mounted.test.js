@@ -1,3 +1,4 @@
+import "./fixtures/pin-video-clock.js";
 import { test, describe, after } from "node:test";
 import assert from "node:assert/strict";
 // FIRST: mount.mjs installs the fake DOM before anything loads react-dom (its gotcha 1).

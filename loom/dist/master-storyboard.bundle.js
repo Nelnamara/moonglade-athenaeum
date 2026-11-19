@@ -901,6 +901,24 @@ var LoomBundle = (() => {
     { value: "v2.7", label: "V2.7 (High Dynamics)", caps: ["camera moves", "dynamic", "no card"] }
   ];
   var DEFAULT_MODEL = "v4.0.1";
+  var VIDEO_MODEL_RETIRED = { "v3.2": "2026-11-23T03:00:00Z" };
+  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  var videoClock = () => typeof globalThis.__mgVideoNow === "function" ? globalThis.__mgVideoNow() : Date.now();
+  function modelRetired(v, now2) {
+    const when = VIDEO_MODEL_RETIRED[String(v == null ? "" : v).trim()];
+    if (!when) return false;
+    const t = now2 == null ? videoClock() : +now2;
+    return t >= Date.parse(when);
+  }
+  function pickerModels(now2) {
+    return MODELS.filter((m) => !modelRetired(m.value, now2));
+  }
+  function retiredNote(v) {
+    const m = MODELS.find((x) => x.value === v);
+    const d = MODELS.find((x) => x.value === DEFAULT_MODEL);
+    const when = new Date(VIDEO_MODEL_RETIRED[v]);
+    return (m ? m.label : v) + " was retired by PixAI on " + when.getUTCDate() + " " + MONTHS[when.getUTCMonth()] + "; using " + (d ? d.label : DEFAULT_MODEL) + " instead.";
+  }
   var MODEL_CARD = { "v3.0.1": false, "v2.7": false, "tbkv1.0": null, "tbkv1.0.1": null };
   function cardClaim(v) {
     const c = MODEL_CARD[v];
@@ -1053,7 +1071,8 @@ var LoomBundle = (() => {
     if (!durationAllowed(model, d)) d = snapDuration(d, model);
     return { mode: m, duration: d };
   }
-  function applyModelGating(s, userDriven) {
+  function applyModelGating(s, userDriven, now2) {
+    if (modelRetired(s.model, now2)) s.model = DEFAULT_MODEL;
     const g = gatedShot(s.mode, s.duration, s.model);
     if (g.mode !== s.mode) {
       const from = s.mode, to = g.mode;
@@ -1089,7 +1108,14 @@ var LoomBundle = (() => {
     s.modeNote = "";
     s.ratio = VIDEO_RATIOS.indexOf(o.ratio) >= 0 ? o.ratio : o.same_shot ? s.ratio : "adaptive";
     if (o.mode && MODE_LBL[String(o.mode).toLowerCase()]) applyMode(s, String(o.mode).toLowerCase());
-    if (o.video_model != null) s.model = o.video_model;
+    if (o.video_model != null) {
+      s.model = o.video_model;
+      if (modelRetired(s.model, o.now)) {
+        const gone = s.model;
+        s.model = DEFAULT_MODEL;
+        s.modeNote = retiredNote(gone);
+      }
+    }
     if (o.duration != null) s.duration = snapDuration(o.duration);
     if (o.quality != null) s.quality = o.quality;
     if (o.is_private != null) s.channel = o.is_private ? "enhanced" : "normal";
@@ -1251,7 +1277,7 @@ var LoomBundle = (() => {
   });
   var engineId = (v) => {
     const s = String(v == null ? "" : v).trim();
-    return MODELS.some((m) => m.value === s) ? s : DEFAULT_MODEL;
+    return MODELS.some((m) => m.value === s) && !modelRetired(s) ? s : DEFAULT_MODEL;
   };
   var engineOf = (c) => engineId(c && c.videoModel);
   var engineLabel = (v) => {
@@ -2463,11 +2489,11 @@ ${"=".repeat(48)}
     const skipped = all - segs.length;
     return "cut length " + len.toFixed(1) + " s" + (skipped > 0 ? " \xB7 " + skipped + " unrendered skipped" : "");
   };
-  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  var MONTHS2 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   var savedDay = (iso) => {
     if (!iso) return "";
     const d = new Date(String(iso));
-    return Number.isNaN(d.getTime()) ? "" : MONTHS[d.getMonth()] + " " + d.getDate();
+    return Number.isNaN(d.getTime()) ? "" : MONTHS2[d.getMonth()] + " " + d.getDate();
   };
   var andList = (xs) => xs.length < 2 ? xs.join("") : xs.slice(0, -1).join(", ") + " and " + xs[xs.length - 1];
   var unreadableBedsNote = (u) => {
@@ -7511,7 +7537,7 @@ ${"=".repeat(48)}
       st.current.camera = e.target.value;
       rerender();
       reprice();
-    } }, CAMERA_OPTS.map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: v, value: v }, l))))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "60ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-enghd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "Engine"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-engcur" }, chosenModel ? chosenModel.label : s.model)), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-enggrid", role: "radiogroup", "aria-label": "Video engine" }, MODELS.map((m) => {
+    } }, CAMERA_OPTS.map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: v, value: v }, l))))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "60ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-enghd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "Engine"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-engcur" }, chosenModel ? chosenModel.label : s.model)), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-enggrid", role: "radiogroup", "aria-label": "Video engine" }, pickerModels().map((m) => {
       const sel = m.value === s.model;
       const modes = (MODEL_VMODES[m.value] || ["i2v", "flf", "r2v"]).map((x) => SHOT_LABEL[x]).join(" / ");
       return /* @__PURE__ */ react_global_shim_default.createElement(
@@ -7964,6 +7990,21 @@ ${"=".repeat(48)}
     return true;
   }
 
+  // ../gallery/src/notify/doneNotice.js
+  var PANEL_ADDS_ART = /* @__PURE__ */ new Set(["sync", "resync-full", "test-pull", "sync-videos"]);
+  var ADDING_TYPES = /* @__PURE__ */ new Set(["generate", "import"]);
+  function addsToGallery(j) {
+    j = j || {};
+    if (ADDING_TYPES.has(j.type)) return true;
+    return j.type === "panel" && PANEL_ADDS_ART.has(j.action);
+  }
+  function doneNotice(j) {
+    j = j || {};
+    if (j.type === "delete") return { title: j.label || "Generation", msg: "Gone from PixAI." };
+    const title = (j.label || "Generation") + " \u2014 done";
+    return { title, msg: addsToGallery(j) ? "Added to your gallery." : "" };
+  }
+
   // ../gallery/src/notify/jobsStore.js
   var LSK = "mg_jobs_open";
   var jobs = [];
@@ -8034,11 +8075,11 @@ ${"=".repeat(48)}
       if (seeded && !TERMINAL[prev] && TERMINAL[st]) {
         if (st === "done") {
           const mid = (j.media_ids || [])[0] || "";
-          const isDelete = j.type === "delete";
+          const dn = doneNotice(j);
           show({
             kind: "ok",
-            title: (j.label || "Generation") + (isDelete ? "" : " \u2014 done"),
-            msg: isDelete ? "Gone from PixAI." : "Added to your gallery.",
+            title: dn.title,
+            msg: dn.msg,
             thumb: mid ? "/thumbs/" + encodeURIComponent(mid) + ".jpg" : null
           });
         } else if (st === "done_with_errors") {
@@ -11071,7 +11112,7 @@ ${"=".repeat(48)}
           tour: "Runs itself: the jobs the app does on its own, how often, and Run now."
         },
         { id: "sync", at: ".mgcp-syncbtn", tour: "Sync now pulls new work and fills in what's missing." },
-        { id: "version", at: ".mgcp-ver", tour: "The version stamp. Click it for About and what changed." },
+        { id: "version", at: ".mgcp-ver", tour: "The About row. Click it for the version and what changed." },
         { id: "ledger", at: ".mgcp-seg", note: "Ledger lists every run the console has recorded." },
         { id: "server", at: ".mgcp-srvrow", note: "Restart or stop the server from here." },
         { id: "lan", at: ".mgcp-bonjour", note: "Let phones on your Wi-Fi find the gallery." }
@@ -12763,7 +12804,7 @@ ${"=".repeat(48)}
     if (s < 86400) return Math.floor(s / 3600) + "h ago";
     return Math.floor(s / 86400) + "d ago";
   }
-  var MONTHS2 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  var MONTHS3 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   function pad2(n) {
     return (n < 10 ? "0" : "") + n;
   }
@@ -12771,7 +12812,7 @@ ${"=".repeat(48)}
     if (!ts) return "\u2014";
     const d = new Date(ts * 1e3);
     const h = d.getHours(), ap = h >= 12 ? "PM" : "AM", h12 = h % 12 || 12;
-    return MONTHS2[d.getMonth()] + " " + d.getDate() + ", " + h12 + ":" + pad2(d.getMinutes()) + " " + ap;
+    return MONTHS3[d.getMonth()] + " " + d.getDate() + ", " + h12 + ":" + pad2(d.getMinutes()) + " " + ap;
   }
   function fmtDuration(s) {
     s = Math.max(0, Math.floor(s || 0));

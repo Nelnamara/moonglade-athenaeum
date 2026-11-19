@@ -1322,3 +1322,13 @@ def ach_event(cli, event, nonce=None):
                     json={"event": event, "nonce": nonce if nonce is not None
                           else ach_nonce(cli)})
 
+
+
+@pytest.fixture(autouse=True)
+def _video_retirement_clock_pinned(monkeypatch):
+    """V3.2 video retires on 2026-11-23 03:00 UTC (backup.VIDEO_MODEL_RETIRED). A test that uses V3.2
+    as an ordinary engine must mean the same thing on any date, so the clock reads a day before the
+    cut; the retirement tests inject their own instant on either side."""
+    import datetime
+    monkeypatch.setattr(core, "_video_clock", lambda: datetime.datetime(
+        2026, 11, 18, 12, 0, tzinfo=datetime.timezone.utc))

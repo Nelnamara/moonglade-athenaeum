@@ -186,6 +186,8 @@ def sync(items, progress=None, batch: int = 400) -> int:
         m = str(m)
         if m in have or m in seen or not Path(p).exists():
             continue
+        if Path(p).suffix.lower() == ".svg":
+            continue                      # a vector file is kept and catalogued, never embedded
         seen.add(m)
         new.append({"media_id": m, "img": str(p)})
     total = len(new)
