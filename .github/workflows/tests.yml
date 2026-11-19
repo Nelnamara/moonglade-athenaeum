@@ -121,9 +121,18 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-          cache-dependency-path: loom/package-lock.json
+          cache-dependency-path: |
+            loom/package-lock.json
+            gallery/package-lock.json
 
       - name: Install dependencies
+        run: npm ci
+
+      # Some node tests import gallery/src modules that import React (send-hold.test.js loads
+      # gen/submitTask.js); on a fresh runner those resolve only with gallery's own packages.
+      # Locally ci_local already requires gallery/node_modules, which is why this passed there.
+      - name: Install the gallery's dependencies (for node tests that import gallery/src)
+        working-directory: gallery
         run: npm ci
 
       - name: Build the esbuild bundle
