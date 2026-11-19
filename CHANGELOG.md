@@ -17,11 +17,14 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Changed
+- **V3.2 leaves the video pickers when PixAI retires it on 23 Nov.** From 03:00 UTC that day it is no longer offered, a remix or saved setting that names it uses the default engine and says so, and a V3.2 submit is refused before anything is sent. Old V3.2 videos in your library keep their "V3.2" label. (2026-11-18)
 - **About is a clear row at the foot of the Control Panel's left column, like the phone's.** It reads "About Moonglade · 3.21.1 ›" in place of the tiny version text, and when a release is out it shows the gold dot and "3.21.1 available". The library folder stays under it. (2026-11-18)
 - **Dedup results now say what they found in one sentence.** Audit, Preview, Quarantine, Verify and Delete each end with a plain line such as "14 duplicate files would move to _duplicates/ (25.6 MB). Nothing moved yet.", and the file list is folded under "Show the 14 files". The phone's Control tab does the same. The command line prints the same line, starting "Result:". (2026-11-18)
 - **The Panel's Audit now runs the full check,** so it finds the same copies Preview does. It used to stop at the quick same-id check and report none while Preview found byte-identical copies. (2026-11-18)
 
 ### Fixed
+- **An SVG result from Edit is saved as .svg.** It used to be saved as a .png that no program could open. The file is kept and catalogued; it has no thumbnail yet and is left out of Similar. (2026-11-18)
+- **The corner notice after a Control Panel job no longer says "Added to your gallery."** Duplicate audit, Catalog stats, Organize preview and the other maintenance jobs now say just "done"; generations, imports and syncs that collect art keep the old line. (2026-11-18)
 - **Mirror to PixAI connects again.** PixAI changed how it keeps you signed in, so Moonglade can no longer pick up your PixAI sign-in from this computer's browser. The Mirror tile now offers a **Connect from PixAI** link instead: drag it to your bookmarks bar, then click it on any pixai.art tab while you are signed in. It only accepts a sign-in for the same PixAI account as your API key, and only from this computer or your home network. (2026-11-18)
 - **The Mirror keeps its sign-in renewed again.** It used to wait until the last three days of PixAI's week-long sign-in, so a few days with the app closed could let it lapse. It now renews once the sign-in is a day old, so it survives the app being closed for up to about six days. (2026-11-18)
 - **The Contests window fits its cards again.** A contest with a long title made the community cards wider than the window, so it scrolled sideways. (2026-11-18)

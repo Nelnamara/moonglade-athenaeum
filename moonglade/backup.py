@@ -1663,6 +1663,8 @@ def ext_from_ct(ct):
         return ".jpg"
     if "webp" in ct:
         return ".webp"
+    if "svg" in ct:
+        return ".svg"
     if "gif" in ct:
         return ".gif"
     if "avif" in ct:
@@ -5796,6 +5798,56 @@ VIDEO_MODELS = {
 }
 
 
+# PixAI retires V3.2 video on 2026-11-23 03:00 UTC (their announcement, 10 Nov 2026). From that
+# instant this app stops offering it and refuses a submit that names it, before any network call.
+# The front end keeps a mirror of this table (gallery/src/gen/videoDrawerCore.js
+# VIDEO_MODEL_RETIRED) because its engine list is static JS; a parity test holds the two together.
+# VIDEO_MODELS keeps the entry so old V3.2 videos in the library keep their "V3.2" label.
+VIDEO_MODEL_RETIRED = {"v3.2": "2026-11-23T03:00:00Z"}
+
+
+def _video_clock():
+    """Now, in UTC. A seam so a test can stand either side of the retirement instant."""
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def video_model_retired(model, now=None):
+    """True from the instant PixAI retires this video engine (VIDEO_MODEL_RETIRED)."""
+    when = VIDEO_MODEL_RETIRED.get(str(model or "").strip())
+    if not when:
+        return False
+    cut = datetime.datetime.strptime(when, "%Y-%m-%dT%H:%M:%SZ").replace(
+        tzinfo=datetime.timezone.utc)
+    now = now or _video_clock()
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=datetime.timezone.utc)
+    return now >= cut
+
+
+def check_video_model_retired(model, now=None):
+    """Refuse a retired engine in plain words (PixAIError, raised before any network call, so
+    nothing is created or charged)."""
+    if video_model_retired(model, now):
+        name = str(model).strip()
+        label = (VIDEO_MODELS.get(name) or {}).get("label") or name
+        when = datetime.datetime.strptime(VIDEO_MODEL_RETIRED[name], "%Y-%m-%dT%H:%M:%SZ")
+        raise PixAIError("{} was retired by PixAI on {} {} -- pick another video engine "
+                         "(nothing was created or charged).".format(
+                             label, when.day, when.strftime("%b")))
+
+
+def _params_video_models(params):
+    """The video engine names a createGenerationTask `parameters` carries (i2vPro.model /
+    referenceVideo.model); empty for anything that is not a video submit."""
+    out = []
+    if isinstance(params, dict):
+        for key in ("i2vPro", "referenceVideo"):
+            blk = params.get(key)
+            if isinstance(blk, dict) and blk.get("model"):
+                out.append(blk["model"])
+    return out
+
+
 def video_model_id(name):
     """Numeric top-level `modelId` for a video `.model` name ('' if unknown). A submit MUST
     include this or PixAI can't resolve the model and no free card can match."""
@@ -5921,6 +5973,7 @@ def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
     # let the server pick" is ~3x the money. Every caller today passes a real
     # value; this guard is for the next caller, and it fails LOUDLY at build time
     # (previews run this builder long before any --confirm can spend).
+    check_video_model_retired(model)
     if mode not in ("basic", "professional"):
         raise ValueError("i2vPro.mode must be 'basic' or 'professional', got %r -- "
                          "omitting it triples the price (issue #6)" % (mode,))
@@ -6006,6 +6059,7 @@ def build_reference_video_parameters(prompt, image_media_ids=(), *, video_media_
     all-or-nothing (see input_video_durations()); this only sends what it is given, as
     positive floats. PixAI floors each entry and bills the output seconds PLUS the input
     seconds; an empty list is priced as a flat 15 s of input in total."""
+    check_video_model_retired(model)
     _check_video_ref_caps(model, video_media_ids)
     rv = {
         "mode": mode,
@@ -8674,6 +8728,8 @@ def submit_generation(session, params, *, on_send=None, exact=False):
     for, and the Turbo fallback would also flip the process-wide _turbo_refused. It goes out
     once; PixAI's refusal comes back in plain words. It never carries a card."""
     _check_read_only("submit a generation (spends credits)")
+    for _vm in _params_video_models(params):
+        check_video_model_retired(_vm)       # before any network call: no spend, no round-trip
     lane = is_lane_request(params)
     if lane and params.get("kaisuukenId"):
         raise PixAIError(_UNLIMITED_NO_CARD)

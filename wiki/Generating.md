@@ -620,7 +620,7 @@ that snaps the same way, to the nearest length the chosen model takes.
 | V4.0 Lite Preview (`v4.0.1`, default) | 15s | Yes (V4.0 cards) | First Frame · First+Last · Multi-Reference |
 | Tsubaki Video (`tbkv1.0.1`) | 15s (5 / 10 / 15 only) | Not established — the cost badge checks each clip | First Frame · First+Last · Multi-Reference |
 | Tsubaki Video Flash (`tbkv1.0`) | 15s (5 / 10 / 15 only) | Not established — the cost badge checks each clip | First Frame · First+Last · Multi-Reference |
-| V3.2 (`v3.2`) | 10s | Yes (V4.0 cards) | First Frame · First+Last |
+| V3.2 (`v3.2`) — retired by PixAI on 23 Nov 2026 at 03:00 UTC; not offered after that, and a recipe naming it uses V4.0 Lite Preview | 10s | Yes (V4.0 cards) | First Frame · First+Last |
 | V3.0 Lite (`v3.0.2`) | 10s | Yes (V4.0 cards) | First Frame · First+Last |
 | V3.0 (High Consistency) (`v3.0`) | 10s | Yes (V4.0 cards) | First Frame · First+Last |
 | V3.0 Flash (`v3.0.1`) | 10s | **No — never covered** | First Frame only |
