@@ -631,10 +631,24 @@ def catalog(db_path):
             ids = _loom_seen["ids"] = loom_render_ids(_loom_root)
         return 1 if str(mid or "") in ids else 0
     con.create_function("mg_loom_render", 1, _is_loom_render)
+    con.create_function("mg_lora_weight", 4, _lora_weight_match, deterministic=True)
     try:
         yield con
     finally:
         con.close()
+
+
+def catalog_csv_text(rows):
+    """The catalog CSV text for `rows` (every CATALOG_FIELDS column, header first). The ONE
+    writer behind the gallery's Export view and the command line's --export-csv, so the two
+    files can never disagree about their columns."""
+    import io
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=CATALOG_FIELDS)
+    writer.writeheader()
+    for r in rows:
+        writer.writerow({f: r.get(f, "") for f in CATALOG_FIELDS})
+    return buf.getvalue()
 
 
 def load_catalog(db_path):
@@ -894,6 +908,12 @@ _SEARCH_TOKEN_RE = re.compile(r'[^\s"]*"[^"]*"[^\s"]*|\S+')
 _SEARCH_KEY_RE   = re.compile(r"[A-Za-z_]+")
 _SEARCH_NUM_RE   = re.compile(r"^(>=|<=|>|<)?(-?\d+(?:\.\d+)?)$")
 _SEARCH_DATE_RE  = re.compile(r"^(>=|<=|>|<)?(\d{4}(?:-\d{2}(?:-\d{2})?)?)$")
+# Dates beyond a single prefix: a quarter (2026Q3) and an inclusive range (A..B, either end
+# open), each end a year / month / day / quarter.
+_SEARCH_DATE_PART_RE = re.compile(r"^(\d{4})(?:-(\d{2})(?:-(\d{2}))?|[Qq]([1-4]))?$")
+# lora:Name>0.7 -- a LoRA name (blank or * = any LoRA) then a weight comparison.
+_SEARCH_LORA_WEIGHT_RE = re.compile(r"^(.*?)(>=|<=|>|<|=)\s*(-?\d+(?:\.\d+)?)$")
+_LORA_ENTRY_RE = re.compile(r"\s*(.*?):(-?\d+(?:\.\d+)?)(?=,\s|$)")
 _SEARCH_TRUTHY = frozenset({"1", "true", "yes", "on"})
 _SEARCH_FALSY  = frozenset({"0", "false", "no", "off"})
 
@@ -1390,6 +1410,111 @@ def loom_bed_audio_graph(bed_idx, db, cut_len, bed_dur=None, windows=(), cut_lab
     ])
 
 
+def _date_part_bounds(part):
+    """One date spec (2026 / 2026-07 / 2026-07-04 / 2026Q3) -> (start, end_exclusive) as ISO
+    prefixes that compare correctly against created_at strings, or None if it is not a real
+    date. The end is the START of the next period, so `created_at >= start AND created_at <
+    end` covers the whole period whatever the timestamp's length."""
+    m = _SEARCH_DATE_PART_RE.match(part)
+    if not m:
+        return None
+    y, mo, d, q = m.group(1), m.group(2), m.group(3), m.group(4)
+    yi = int(y)
+    if yi < 1:
+        return None
+    if q:
+        sm = (int(q) - 1) * 3 + 1
+        em, ey = sm + 3, yi
+        if em > 12:
+            em, ey = 1, yi + 1
+        return ("%s-%02d" % (y, sm), "%04d-%02d" % (ey, em))
+    if mo is None:
+        return (y, "%04d" % (yi + 1))
+    mi = int(mo)
+    if not 1 <= mi <= 12:
+        return None
+    if d is None:
+        return ("%s-%s" % (y, mo), "%04d-%02d" % (yi + (mi == 12), 1 if mi == 12 else mi + 1))
+    import datetime as _dt
+    try:
+        day = _dt.date(yi, mi, int(d))
+    except ValueError:
+        return None
+    return (day.isoformat(), (day + _dt.timedelta(days=1)).isoformat())
+
+
+def _date_clause(value):
+    """created: beyond a plain prefix -- a quarter (2026Q3), an inclusive range
+    (2026-08..2026-10, 2026-09-15.., ..2026Q2), or a comparison against a quarter. None when
+    the value is not one of those (the caller's prefix compare handles the rest)."""
+    if ".." in value:
+        lo, _, hi = value.partition("..")
+        if not lo and not hi:
+            return None
+        parts, sql = [], []
+        if lo:
+            b = _date_part_bounds(lo)
+            if not b:
+                return None
+            sql.append("created_at >= ?")
+            parts.append(b[0])
+        if hi:
+            b = _date_part_bounds(hi)
+            if not b:
+                return None
+            sql.append("created_at < ?")
+            parts.append(b[1])
+        return ("(" + " AND ".join(sql) + ")", parts)
+    m = re.match(r"^(>=|<=|>|<)?(\d{4}[Qq][1-4])$", value)
+    if not m:
+        return None
+    b = _date_part_bounds(m.group(2))
+    op = m.group(1) or "="
+    if op == "=":
+        return ("(created_at >= ? AND created_at < ?)", [b[0], b[1]])
+    if op == ">=":
+        return ("created_at >= ?", [b[0]])
+    if op == ">":
+        return ("created_at >= ?", [b[1]])
+    if op == "<":
+        return ("created_at < ?", [b[0]])
+    return ("created_at < ?", [b[1]])        # <=
+
+
+def _lora_name_regex(name):
+    name = name.strip()
+    if name in ("", "*"):
+        return None
+    return re.compile(re.escape(name).replace(r"\*", ".*").replace(r"\?", "."), re.I)
+
+
+def _lora_weight_match(loras, name_pat, op, num):
+    """SQL function body: does any LoRA in the 'Name:0.7, Other:1' list match the name (a
+    substring, * and ? wildcards, blank/* = any) AND have a weight satisfying `op num`?"""
+    try:
+        rx = re.compile(name_pat, re.I) if name_pat else None
+        num = float(num)
+    except (re.error, TypeError, ValueError):
+        return 0
+    for nm, w in _LORA_ENTRY_RE.findall(str(loras or "")):
+        if rx is not None and not rx.search(nm):
+            continue
+        w = float(w)
+        if ((op == ">" and w > num) or (op == ">=" and w >= num) or (op == "<" and w < num)
+                or (op == "<=" and w <= num) or (op == "=" and abs(w - num) < 1e-9)):
+            return 1
+    return 0
+
+
+def _lora_weight_clause(value):
+    m = _SEARCH_LORA_WEIGHT_RE.match(value)
+    if not m:
+        return None
+    rx = _lora_name_regex(_unquote(m.group(1).strip()))
+    return ("mg_lora_weight(loras, ?, ?, ?) = 1",
+            [rx.pattern if rx else "", m.group(2), float(m.group(3))])
+
+
 def _operator_clause(key, value):
     """Compile one key:value search token into (sql_clause, params), or None when
     the token isn't a valid operator and should be searched as plain prompt text
@@ -1412,6 +1537,10 @@ def _operator_clause(key, value):
     if kind == "note":
         return ("EXISTS (SELECT 1 FROM personal_meta pm WHERE pm.media_id = catalog.media_id "
                 "AND LOWER(pm.note) LIKE ? ESCAPE '\\')", [_like_pattern(value)])
+    if kind == "text" and col == "loras":
+        hit = _lora_weight_clause(value)
+        if hit:
+            return hit
     if kind == "text":
         return ("LOWER(COALESCE({},'')) LIKE ? ESCAPE '\\'".format(col),
                 [_like_pattern(value)])
@@ -1442,6 +1571,9 @@ def _operator_clause(key, value):
             return ("COALESCE({},'') != '1'".format(col), [])
         return None
     if kind == "date":
+        hit = _date_clause(value)
+        if hit:
+            return hit
         m = _SEARCH_DATE_RE.match(value)
         if not m:
             return None
@@ -8726,12 +8858,7 @@ def create_app(out_dir: Path):
                                     sort=request.args.get("sort", "newest"), **filters)
         else:
             rows = load_catalog(db_path)
-        buf = io.StringIO()
-        writer = csv.DictWriter(buf, fieldnames=CATALOG_FIELDS)
-        writer.writeheader()
-        for r in rows:
-            writer.writerow({f: r.get(f, "") for f in CATALOG_FIELDS})
-        mem = io.BytesIO(buf.getvalue().encode("utf-8"))
+        mem = io.BytesIO(catalog_csv_text(rows).encode("utf-8"))
         mem.seek(0)
         return send_file(mem, mimetype="text/csv", as_attachment=True,
                          download_name="moonglade-catalog-{}.csv".format(

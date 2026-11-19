@@ -178,6 +178,13 @@ rather than touching it.
 the new code (Stop/Restart, or relaunch `Moonglade Launcher.pyw`) and hard-refresh the browser —
 see [Troubleshooting](Troubleshooting).
 
+**What do Mirror to PixAI, Armed, Tier 1, Vigil, Folio, The Loom and AI Tools mean?**
+One line each in the [Glossary](Glossary). Short version: the **Mirror** signs in to pixai.art as you, so
+what you make here also lands in your PixAI web library and PixAI's one-click **AI Tools** work
+(**Armed** is that switch on; **Tier 1** marks a tool PixAI keeps behind its first membership tier);
+**The Loom** plans a video shot by shot; the **Folio** is the shelf of badges and points you earn by
+using the app; the **Vigil** counts the days in a row you made something.
+
 **Something broke after a PixAI change.**
 See [Troubleshooting](Troubleshooting): update to the latest release first, or open an
 issue if it's still broken.

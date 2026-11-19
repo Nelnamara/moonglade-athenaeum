@@ -64,6 +64,7 @@ from moonglade import paths as _paths
 from moonglade import pixai_client as _pixai_client
 from moonglade import telemetry as _telemetry
 from moonglade.gallery import (CATALOG_FIELDS, init_db, migrate, load_catalog,
+                            query_catalog, catalog_csv_text,
                             save_catalog, _db_is_empty, rows_for_media_ids,
                             # The row-level artwork write (see run_sync_artworks): one
                             # narrow UPDATE of the eleven PixAI-owned columns, keyed by
@@ -13844,6 +13845,55 @@ def run_sync_similar(args):
               "{} skipped).".format(n, before, after, ps.sync.last_errors))
 
 
+def _one_line(text, width):
+    t = " ".join(str(text or "").split())
+    return t if len(t) <= width else t[:width - 1].rstrip() + "\u2026"
+
+
+def run_search(args):
+    """--search / --export-csv: the gallery's own search, from the command line. Reads
+    catalog.db only -- no network, nothing written except the CSV a caller names. The query
+    goes through the SAME parser the search box uses (moonglade.gallery.query_catalog)."""
+    try:     # a prompt with characters the console cannot show must not stop the listing
+        sys.stdout.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
+    out = Path(args.out)
+    db_path = _ensure_db(out)
+    q = (getattr(args, "search", None) or "").strip()
+    if q:
+        rows, _ = query_catalog(db_path, q=q, page=1, page_size=None, sort="newest")
+    else:
+        rows = load_catalog(db_path)
+    csv_path = getattr(args, "export_csv", "")
+    if csv_path:
+        # newline="" so the file's line endings are the CSV writer's own, as the download's are
+        with open(csv_path, "w", encoding="utf-8", newline="") as fh:
+            fh.write(catalog_csv_text(rows))
+        print("Wrote {} row(s) to {}".format(len(rows), csv_path))
+        if not q:
+            return
+    limit = int(getattr(args, "limit", 50) or 0)
+    shown = rows[:limit] if limit > 0 else rows
+    if getattr(args, "search_json", False):
+        print(json.dumps([{"media_id": r.get("media_id", ""), "created_at": r.get("created_at", ""),
+                           "model": r.get("model_name", ""), "rating": r.get("rating", ""),
+                           "prompt": r.get("prompt_full") or r.get("prompt_preview") or ""}
+                          for r in shown], ensure_ascii=False, indent=2))
+        return
+    for r in shown:
+        print("{}  {}  {}  {}  {}".format(
+            r.get("media_id", ""), str(r.get("created_at", ""))[:10],
+            _one_line(r.get("model_name", ""), 24) or "-",
+            ("%s*" % r["rating"]) if r.get("rating") else "-",
+            _one_line(r.get("prompt_full") or r.get("prompt_preview"), 70)))
+    if len(shown) < len(rows):
+        print("... {} of {} match(es) shown; --limit 0 for all, --export-csv PATH for a file".format(
+            len(shown), len(rows)))
+    else:
+        print("{} match(es)".format(len(rows)))
+
+
 def run_catalog_stats(args):
     """Summarize the existing catalog (no network needed)."""
     out = Path(args.out)
@@ -15182,12 +15232,22 @@ def main():
     ap = argparse.ArgumentParser(prog="python -m moonglade",
                                  description="Back up your own PixAI gallery.")
     ap.add_argument("--version", action="version", version="%(prog)s " + __version__)
-    ap.add_argument("--rebuild-thumbs", action="store_true",
+    # --help is grouped by what a command is for. The grouping is presentation only: every flag
+    # keeps its name, its default and its meaning.
+    g_backup = ap.add_argument_group("Backup", "pull your PixAI history down and keep it current")
+    g_library = ap.add_argument_group("Library", "work on the local library and its catalog")
+    g_create = ap.add_argument_group("Create", "make a picture, a video or an edit (a preview "
+                                     "until --confirm); the generation options live here too")
+    g_account = ap.add_argument_group("Account", "read-only looks at your PixAI account, "
+                                      "rewards, and the gallery's web logins")
+    g_maint = ap.add_argument_group("Maintenance", "repair and refill what the catalog holds")
+    g_search = ap.add_argument_group("Search", "search the local catalog (no network)")
+    g_maint.add_argument("--rebuild-thumbs", action="store_true",
                     help="regenerate EVERY image thumbnail at the current size/quality "
                          "settings (fixes quality drift across eras), extract posters for "
                          "poster-less videos via ffmpeg, and sweep orphaned thumbs. "
                          "Overwrites in place -- the gallery never goes blank.")
-    ap.add_argument("--sync", action="store_true",
+    g_backup.add_argument("--sync", action="store_true",
                     help="One-shot sync, in five steps: incremental pull WITH full metadata "
                          "(equivalent to --update --full-meta), fill any catalog rows still "
                          "missing prompts/seeds/models, re-resolve any unlabeled model names, "
@@ -15207,73 +15267,73 @@ def main():
     ap.add_argument("--out", default=None,
                     help="library folder for this run (default: the library folder set in "
                          "the Control Panel, or pixai_backup beside the app)")
-    ap.add_argument("--page-size", type=int, default=250,
+    g_backup.add_argument("--page-size", type=int, default=250,
                     help="tasks per API page (default 250; fewer round-trips. Keep it at 2,000 or below)")
-    ap.add_argument("--workers", type=int, default=4,
+    g_backup.add_argument("--workers", type=int, default=4,
                     help="parallel download workers (default 4). 1 = serial/polite. "
                          "Higher saturates bandwidth on bulk first-time pulls; ignored for "
                          "--collect-only.")
-    ap.add_argument("--max", type=int, default=0,
+    g_backup.add_argument("--max", type=int, default=0,
                     help="stop after N tasks (0=all); with --backfill-phash, caps the number "
                          "of rows that run processes instead")
-    ap.add_argument("--update", action="store_true",
+    g_backup.add_argument("--update", action="store_true",
                     help="incremental follow-up run: stop paging once a run of pages is "
                          "already fully on disk (newest-first, so older items are already "
                          "downloaded). Much faster than re-walking the whole history. The "
                          "early stop waits until one pass has reached the end of your "
                          "history, so an interrupted first backup resumes to the end.")
-    ap.add_argument("--update-grace", type=int, default=2,
+    g_backup.add_argument("--update-grace", type=int, default=2,
                     help="with --update, number of consecutive all-on-disk pages before "
                          "stopping (default 2; raise if your history has gaps). Ignored "
                          "until this library's walk has reached the end of history once.")
-    ap.add_argument("--accurate-count", action="store_true",
+    g_backup.add_argument("--accurate-count", action="store_true",
                     help="walk the whole API to count library size for the progress bar "
                          "(slow). Default uses the catalog size as a fast estimate.")
     # default is the _DefaultDelay sentinel, not a bare 0.4, so run_download can tell a typed
     # `--delay 0.4` from an untouched default. See _DefaultDelay for why a comparison cannot.
-    ap.add_argument("--delay", type=float, default=DEFAULT_DELAY,
+    g_backup.add_argument("--delay", type=float, default=DEFAULT_DELAY,
                     help="seconds to wait between API requests (default: 0.4). Passing it "
                          "EXPLICITLY also paces the parallel download stage, at one image "
                          "per --delay across the whole pool; left at its default, downloads "
                          "run at full --workers speed as they always have")
-    ap.add_argument("--probe", action="store_true",
+    g_backup.add_argument("--probe", action="store_true",
                     help="show first page + auto-detect the full-res variant, then exit")
-    ap.add_argument("--count", action="store_true",
+    g_backup.add_argument("--count", action="store_true",
                     help="tally total tasks + images via the API (no downloads), then exit")
-    ap.add_argument("--count-page-size", type=int, default=COUNT_PAGE_SIZE,
+    g_backup.add_argument("--count-page-size", type=int, default=COUNT_PAGE_SIZE,
                     help="page size used by --count (bigger = fewer requests; default "
                          "2000, because PixAI fails a 5000-row page now and then)")
-    ap.add_argument("--catalog-stats", action="store_true",
+    g_library.add_argument("--catalog-stats", action="store_true",
                     help="summarize the existing catalog.db (counts only), then exit")
-    ap.add_argument("--collect-only", action="store_true",
+    g_backup.add_argument("--collect-only", action="store_true",
                     help="scan and catalog images without downloading files")
-    ap.add_argument("--name-length", type=int, default=60,
+    g_backup.add_argument("--name-length", type=int, default=60,
                     help="max characters of the prompt used in filenames (default 60)")
-    ap.add_argument("--name-sep", default="_", choices=["_", "-"],
+    g_backup.add_argument("--name-sep", default="_", choices=["_", "-"],
                     help="word separator in filenames (default _)")
-    ap.add_argument("--convert", default=None, choices=["png", "jpeg", "jpg"],
+    g_backup.add_argument("--convert", default=None, choices=["png", "jpeg", "jpg"],
                     help="convert each downloaded webp to png or jpeg (needs Pillow). "
                          "Replaces the .webp unless --keep-webp is set.")
-    ap.add_argument("--jpeg-quality", type=int, default=92,
+    g_backup.add_argument("--jpeg-quality", type=int, default=92,
                     help="JPEG quality 1-100 when --convert jpeg (default 92)")
-    ap.add_argument("--jpeg-bg", default="white", choices=["white", "black"],
+    g_backup.add_argument("--jpeg-bg", default="white", choices=["white", "black"],
                     help="background to flatten transparency onto for JPEG")
-    ap.add_argument("--keep-webp", action="store_true",
+    g_backup.add_argument("--keep-webp", action="store_true",
                     help="keep the original .webp after converting")
-    ap.add_argument("--convert-existing", action="store_true",
+    g_backup.add_argument("--convert-existing", action="store_true",
                     help="convert all already-downloaded .webp files to --convert format "
                          "(default png). No token needed. Supports --dry-run and --keep-webp.")
-    ap.add_argument("--organize", action="store_true",
+    g_library.add_argument("--organize", action="store_true",
                     help="normalize the WHOLE backup into YYYY-MM/ month folders with "
                          "descriptive filenames (no batch subfolders); writes a reversible "
                          "move-manifest. Idempotent + dry-runnable. Then exit")
-    ap.add_argument("--undo-organize", action="store_true",
+    g_library.add_argument("--undo-organize", action="store_true",
                     help="revert the last --organize run using organize_manifest.csv "
                          "(move files back to their old paths), then exit")
-    ap.add_argument("--embed-metadata", action="store_true",
+    g_library.add_argument("--embed-metadata", action="store_true",
                     help="with --organize, embed prompt/IDs/date into PNG/JPEG files "
                          "(off by default; useful when pulling images into other apps)")
-    ap.add_argument("--dry-run", action="store_true",
+    g_library.add_argument("--dry-run", action="store_true",
                     help="with --organize / --undo-organize, show the "
                          "plan without moving anything")
     # ON BY DEFAULT since 2026-07-25. This is a backup tool whose point is the catalog, and
@@ -15283,172 +15343,171 @@ def main():
     # entries, all downloaded" over rows that could not say which model made them.) --sync
     # has always implied it; now every pull does, and the flag stays accepted so existing
     # scripts, docs and the Panel's whitelisted argv keep working unchanged.
-    ap.add_argument("--full-meta", dest="full_meta", action="store_true", default=True,
+    g_backup.add_argument("--full-meta", dest="full_meta", action="store_true", default=True,
                     help="(now the DEFAULT) fetch full prompt, seed, steps, sampler, CFG and "
                          "model name for each task via a second API call. One extra call per "
                          "unique task -- a batch's images share one call. Kept as an explicit "
                          "flag so existing commands and scripts still work.")
-    ap.add_argument("--no-full-meta", dest="full_meta", action="store_false",
+    g_backup.add_argument("--no-full-meta", dest="full_meta", action="store_false",
                     help="skip the per-task metadata call: faster pull, but the catalog rows "
                          "it creates carry no prompt, seed or model until a later "
                          "--backfill-full-meta fills them in. On a first backup of a large "
                          "history this is the quicker route -- the pull's metadata fetch is "
                          "serial, while --backfill-full-meta --workers N is parallel.")
-    ap.add_argument("--backfill-meta", action="store_true",
+    g_maint.add_argument("--backfill-meta", action="store_true",
                     help="fill in missing url/width/height in catalog.db via resolve_media "
                          "for rows that lack them, then exit")
-    ap.add_argument("--backfill-full-meta", action="store_true",
+    g_maint.add_argument("--backfill-full-meta", action="store_true",
                     help="fill in prompt_full/seed/model/etc in catalog.db via getTaskById "
                          "for rows that lack them; also backfills url/width/height as a bonus, then exit")
-    ap.add_argument("--with-loras", action="store_true",
+    g_backup.add_argument("--with-loras", action="store_true",
                     help="with --backfill-full-meta, ALSO re-fetch rows that have full meta but "
                          "no LoRA data yet (populates the loras column for older images; long run)")
-    ap.add_argument("--with-credit", action="store_true",
+    g_backup.add_argument("--with-credit", action="store_true",
                     help="with --backfill-full-meta, ALSO re-fetch rows that have full meta but "
                          "no recorded credit cost yet (recovers the paid_credit column for older "
                          "generations from the task record; long run)")
-    ap.add_argument("--with-surface", action="store_true",
+    g_backup.add_argument("--with-surface", action="store_true",
                     help="with --backfill-full-meta, ALSO re-fetch rows that have full meta but "
                          "none of the issue-#18 surface columns yet (inference profile, quality "
                          "tag, render time, backend, moderation, retry count...); the only way a "
                          "pre-#18 generation gains them. Long run on a big historical catalog.")
-    ap.add_argument("--backfill-lineage", action="store_true",
+    g_maint.add_argument("--backfill-lineage", action="store_true",
                     help="fill in source_media_id/derive_kind (which image an edit/upscale/"
                          "video was made FROM) for rows that predate lineage tracking, via "
                          "getTaskById; powers Image Details' LINEAGE panel. Idempotent -- a "
                          "confirmed original is remembered and never re-fetched. Then exit.")
-    ap.add_argument("--backfill-phash", action="store_true",
+    g_maint.add_argument("--backfill-phash", action="store_true",
                     help="compute a perceptual difference-hash (dHash) for every image catalog "
                          "row that lacks one, powering the near-duplicate ('upscaled or "
                          "recompressed copy') tier of GET /api/duplicates. Local Pillow work, no "
                          "network call -- --workers parallelizes it, --max caps how many rows "
                          "this run processes. Videos are skipped. Then exit.")
-    ap.add_argument("--sync-artworks", action="store_true",
+    g_backup.add_argument("--sync-artworks", action="store_true",
                     help="fetch your published-artwork metadata (title, NSFW flag, likes, "
                          "comments, views, aes score, tags) and merge it "
                          "onto matching catalog rows by media_id, then exit")
-    ap.add_argument("--with-videos", action="store_true",
+    g_backup.add_argument("--with-videos", action="store_true",
                     help="with --sync-artworks, also download animated-artwork video files "
                          "(videoMediaId) into a videos/ folder")
-    ap.add_argument("--no-views", action="store_true",
+    g_backup.add_argument("--no-views", action="store_true",
                     help="with --sync-artworks, skip the view-count sweep. Reading a view "
                          "count registers a view on PixAI's side (one per work, per sweep), "
                          "so this is the opt-out for a run where you want the metadata "
                          "refreshed without touching your own view numbers")
-    ap.add_argument("--views-only", dest="views_only", action="store_true",
+    g_backup.add_argument("--views-only", dest="views_only", action="store_true",
                     help="with --sync-artworks, read ONLY the view counts and skip the "
                          "artwork listing. The counts join your catalog by artwork id, so "
                          "they do not need the listing walked again. This is what the "
                          "Control Panel's weekly \"View counts\" job runs")
-    ap.add_argument("--sync-videos", action="store_true",
+    g_backup.add_argument("--sync-videos", action="store_true",
                     help="back up your image-to-video generations: find i2v tasks, download "
                          "each mp4 into videos/, and catalog them (is_video), then exit. This is "
                          "the video-side complement of --sync, which skips video tasks: run it to "
                          "capture videos made on the PixAI website (app-made videos are already "
                          "caught when generated). Full-history scan, so it's a separate pass.")
-    ap.add_argument("--faststart-videos", dest="faststart_videos", action="store_true",
+    g_backup.add_argument("--faststart-videos", dest="faststart_videos", action="store_true",
                     help="losslessly move every video's moov atom to the front (ffmpeg "
                          "-c copy +faststart) so iOS/Safari can play them over HTTP, then exit")
-    ap.add_argument("--account", action="store_true",
+    g_account.add_argument("--account", action="store_true",
                     help="show a read-only account dashboard (credit balance, membership, "
                          "subscription) and exit. Never moves money")
-    ap.add_argument("--cards", action="store_true",
+    g_account.add_argument("--cards", action="store_true",
                     help="show your free-generation cards (kaisuuken) + their ids, then exit. "
                          "Read-only; pass an id to a run with --kaisuuken-id")
-    ap.add_argument("--mirror-check", action="store_true",
+    g_account.add_argument("--mirror-check", action="store_true",
                     help="check the 'Mirror to PixAI website' session: renew the saved "
                          "sign-in once and report days-left, then exit. Never reads a browser "
                          "(connect with the Connect from PixAI bookmark), never prints the "
                          "token; spends nothing")
-    ap.add_argument("--card-history", action="store_true",
+    g_account.add_argument("--card-history", action="store_true",
                     help="show recent benefit-card usage (redemptions + refunds), then exit. "
                          "Read-only. Pass --card-history-all for the full lifetime card-type "
                          "catalog instead of a recent list")
-    ap.add_argument("--card-history-all", action="store_true",
+    g_account.add_argument("--card-history-all", action="store_true",
                     help="with --card-history, page all the way back and print every card "
                          "TYPE ever used (several requests; read-only)")
-    ap.add_argument("--card-history-count", type=int, default=0, metavar="N",
+    g_account.add_argument("--card-history-count", type=int, default=0, metavar="N",
                     help="with --card-history, how many recent records to show (default 20)")
-    ap.add_argument("--coupons", action="store_true",
+    g_account.add_argument("--coupons", action="store_true",
                     help="show your currently-held Credit Boost coupons, then exit. "
                          "Read-only -- a reward type separate from benefit cards. Pass "
                          "--coupons-history for the redeemed + expired view instead")
-    ap.add_argument("--coupons-history", action="store_true",
+    g_account.add_argument("--coupons-history", action="store_true",
                     help="with --coupons, show the past (redeemed + expired) view instead "
                          "of what you currently hold")
-    ap.add_argument("--credit-log", action="store_true",
+    g_account.add_argument("--credit-log", action="store_true",
                     help="show your full credit transaction ledger (purchases, claims, "
                          "gifts, generation spend, refunds), then exit. Read-only")
-    ap.add_argument("--credit-log-count", type=int, default=0, metavar="N",
+    g_account.add_argument("--credit-log-count", type=int, default=0, metavar="N",
                     help="with --credit-log, how many recent entries to show (default 30)")
-    ap.add_argument("--credit-log-before", default="", metavar="CURSOR",
+    g_account.add_argument("--credit-log-before", default="", metavar="CURSOR",
                     help="with --credit-log, page further into the past using a cursor "
                          "printed by a previous --credit-log run")
-    ap.add_argument("--contests", action="store_true",
+    g_account.add_argument("--contests", action="store_true",
                     help="list PixAI contests currently running (community + official), then "
                          "exit. Read-only. Add --all-contests to include ended ones")
-    ap.add_argument("--all-contests", action="store_true",
+    g_account.add_argument("--all-contests", action="store_true",
                     help="with --contests, include ended contests too")
-    ap.add_argument("--watch", action="store_true",
+    g_backup.add_argument("--watch", action="store_true",
                     help="live-monitor your PixAI events over the push WebSocket (read-only; "
                          "gentler than polling). Prints task/notification events as they arrive")
-    ap.add_argument("--watch-seconds", type=int, default=0, metavar="N",
+    g_backup.add_argument("--watch-seconds", type=int, default=0, metavar="N",
                     help="with --watch, auto-stop after N seconds (default: run until Ctrl-C)")
-    ap.add_argument("--watch-backup", action="store_true",
+    g_backup.add_argument("--watch-backup", action="store_true",
                     help="with --watch, mirror each generation into --out the instant it "
                          "reaches 'completed' (event-driven backup; no polling). Read-only")
-    ap.add_argument("--claims", action="store_true",
+    g_account.add_argument("--claims", action="store_true",
                     help="list your claimable rewards (daily credits, agent stamina), then "
                          "exit. Read-only")
-    ap.add_argument("--claim", default="", metavar="ID|all",
+    g_account.add_argument("--claim", default="", metavar="ID|all",
                     help="claim a ready reward by id (or 'all') -- requires --confirm. "
                          "Grants free credits/stamina to your own account")
-    ap.add_argument("--reconcile-deleted", action="store_true",
+    g_maint.add_argument("--reconcile-deleted", action="store_true",
                     help="flag catalog rows whose PixAI task is gone from your live feed "
                          "(deleted on the website) so the gallery can surface them for a "
                          "local prune, then exit")
-    ap.add_argument("--import-local", nargs="?", const="", default=None, metavar="DIR",
+    g_backup.add_argument("--import-local", nargs="?", const="", default=None, metavar="DIR",
                     help="catalog non-PixAI media (source='local') so it shows in the gallery. "
                          "No DIR = scan the backup folder for files you dropped in; a DIR "
                          "outside the backup is copied in. Then exit")
     # --- Generation (createGenerationTask) -------------------------------------
-    gen = ap.add_argument_group("generation (--generate)")
-    gen.add_argument("--generate", action="store_true",
+    g_create.add_argument("--generate", action="store_true",
                      help="create images via PixAI and catalog them (source='api'). "
                           "Preview-only unless --confirm (spends credits)")
-    gen.add_argument("--prompt", default="", help="positive prompt for --generate")
-    gen.add_argument("--negative", default="", help="negative prompt for --generate")
-    gen.add_argument("--model", default="", help="modelId for --generate (default: Tsubaki.2)")
-    gen.add_argument("--width", type=int, default=512,
+    g_create.add_argument("--prompt", default="", help="positive prompt for --generate")
+    g_create.add_argument("--negative", default="", help="negative prompt for --generate")
+    g_create.add_argument("--model", default="", help="modelId for --generate (default: Tsubaki.2)")
+    g_create.add_argument("--width", type=int, default=512,
                      help="image width in pixels (default 512; rounded down to a multiple of 8 "
                           "and moved onto the model's own size grid if it does not fit -- the "
                           "preview names any change)")
-    gen.add_argument("--height", type=int, default=512,
+    g_create.add_argument("--height", type=int, default=512,
                      help="image height in pixels (default 512; rounded and moved onto the "
                           "model's size grid the same way as --width)")
-    gen.add_argument("--steps", type=int, default=25,
+    g_create.add_argument("--steps", type=int, default=25,
                      help="sampling steps (default 25; not sent to a model that publishes its "
                           "own quality profiles, which set their own)")
-    gen.add_argument("--cfg", type=float, default=7.0,
+    g_create.add_argument("--cfg", type=float, default=7.0,
                      help="CFG scale (default 7; not sent to a model that publishes its own "
                           "quality profiles, which set their own)")
-    gen.add_argument("--batch-size", dest="count", type=int, default=1,
+    g_create.add_argument("--batch-size", dest="count", type=int, default=1,
                      help="number of images per --generate run (batch size)")
-    gen.add_argument("--seed", type=int, default=None,
+    g_create.add_argument("--seed", type=int, default=None,
                      help="seed for a repeatable picture (default: random -- none is sent)")
-    gen.add_argument("--priority", type=int, default=PRIORITY_TURBO,
+    g_create.add_argument("--priority", type=int, default=PRIORITY_TURBO,
                      choices=list(PRIORITY_CHOICES),
                      help="speed channel: 0 = standard, no extra cost; 500 = turbo, "
                           "~7.6x faster and free but MEMBERS ONLY (default -- falls back "
                           "to 0 on its own if the account isn't a member); 1000 = high, "
                           "~10x faster and costs EXTRA credits; 1500 = extra high")
-    gen.add_argument("--high-priority", dest="priority", action="store_const",
+    g_create.add_argument("--high-priority", dest="priority", action="store_const",
                      const=PRIORITY_HIGH,
                      help="shortcut for --priority 1000 (faster, costs extra credits)")
-    gen.add_argument("--low-priority", dest="priority", action="store_const",
+    g_create.add_argument("--low-priority", dest="priority", action="store_const",
                      const=PRIORITY_LOW,
                      help="shortcut for --priority 0 (standard speed, never members-only)")
-    gen.add_argument("--mode", default="auto",
+    g_create.add_argument("--mode", default="auto",
                      choices=["auto", "lite", "standard", "pro", "ultra"],
                      help="quality mode (inferenceProfile). auto (default) lets PixAI pick the "
                           "model's default -- always VALID (price depends on the model's own "
@@ -15457,11 +15516,11 @@ def main():
                           "is refused before anything is sent; if the list cannot be read and "
                           "PixAI rejects the mode, it is dropped and the run goes once on the "
                           "model's default")
-    gen.add_argument("--no-prompt-helper", dest="prompt_helper", action="store_false",
+    g_create.add_argument("--no-prompt-helper", dest="prompt_helper", action="store_false",
                      help="disable PixAI's prompt-helper (use your prompt more literally; "
                           "helps when auto-enhancement mangles a carefully-built prompt)")
-    gen.set_defaults(prompt_helper=True)
-    gen.add_argument("--lora", action="append", metavar="VERSIONID:WEIGHT",
+    g_create.set_defaults(prompt_helper=True)
+    g_create.add_argument("--lora", action="append", metavar="VERSIONID:WEIGHT",
                      help="add a LoRA by its version id and weight, e.g. "
                           "--lora 1686550608832816741:0.7 (repeatable). Find version ids "
                           "with --list-models")
@@ -15469,95 +15528,95 @@ def main():
     # with PixAI's own dialog label quoted in the help -- their two radio buttons read
     # "Upscale" (= the `enlarge` param) and "Hires" (= the `upscale` param), so naming the
     # flags after the labels instead would have made --upscale mean enlarge.
-    gen.add_argument("--enlarge", type=float, default=None, metavar="RATIO",
+    g_create.add_argument("--enlarge", type=float, default=None, metavar="RATIO",
                      help="enlarge the finished image with an upscaler network (PixAI's "
                           "'Upscale' method), in 0.1 steps from 1.1. Clamped to the largest "
                           "ratio the output-size ceiling allows for this --width/--height. "
                           "Mutually exclusive with --upscale")
-    gen.add_argument("--enlarge-model", dest="enlarge_model", default="",
+    g_create.add_argument("--enlarge-model", dest="enlarge_model", default="",
                      choices=list(ENLARGE_MODELS),
                      help="which upscaler network --enlarge runs (default: {})".format(
                          DEFAULT_ENLARGE_MODEL))
-    gen.add_argument("--upscale", type=float, default=None, metavar="RATIO",
+    g_create.add_argument("--upscale", type=float, default=None, metavar="RATIO",
                      help="re-diffuse the image at a larger size (PixAI's 'Hires' method), "
                           "in 0.1 steps from 1.1. Sharper than --enlarge and roughly 3x the "
                           "credits; allows a smaller maximum ratio. Mutually exclusive with "
                           "--enlarge")
-    gen.add_argument("--upscale-denoise", dest="upscale_denoising_strength", type=float,
+    g_create.add_argument("--upscale-denoise", dest="upscale_denoising_strength", type=float,
                      default=None, metavar="STRENGTH",
                      help="--upscale denoising strength, 0.01-0.99 (default {}; PixAI's own "
                           "hint is 0.4-0.6 -- higher redraws more)".format(
                               DEFAULT_UPSCALE_DENOISING_STRENGTH))
-    gen.add_argument("--upscale-denoise-steps", dest="upscale_denoising_steps", type=int,
+    g_create.add_argument("--upscale-denoise-steps", dest="upscale_denoising_steps", type=int,
                      default=None, metavar="N",
                      help="--upscale denoising steps, 1-50 (default {})".format(
                          DEFAULT_UPSCALE_DENOISING_STEPS))
-    gen.add_argument("--face-fix", dest="face_fix", action="store_true",
+    g_create.add_argument("--face-fix", dest="face_fix", action="store_true",
                      help="run PixAI's face restorer over the result (enableADetailer -- "
                           "the generator's 'Face Fix' booster)")
-    gen.add_argument("--quality-tag", dest="quality_tag", nargs="?",
+    g_create.add_argument("--quality-tag", dest="quality_tag", nargs="?",
                      const=DEFAULT_QUALITY_TAG, default="", metavar="PREFIX",
                      help="prepend a quality booster to the prompt (the generator's "
                           "'Quality Tag'). Bare flag uses '{}'".format(DEFAULT_QUALITY_TAG))
-    gen.add_argument("--task-id", default="",
+    g_create.add_argument("--task-id", default="",
                      help="with --generate, fetch + catalog an ALREADY-created task by id "
                           "(no new credits). Recovers a stranded generation that --update "
                           "can't see, since generated tasks don't enter the listing feed")
-    gen.add_argument("--params-json", default="", help="raw parameters object (overrides the above)")
-    gen.add_argument("--poll-timeout", type=int, default=300,
+    g_create.add_argument("--params-json", default="", help="raw parameters object (overrides the above)")
+    g_create.add_argument("--poll-timeout", type=int, default=300,
                      help="seconds to wait for a submitted task to finish before giving up (default 300)")
-    gen.add_argument("--confirm", action="store_true",
+    g_create.add_argument("--confirm", action="store_true",
                      help="REQUIRED for --generate, --generate-video, --reference-video and "
                           "--edit-image to actually submit (spends credits), and for --claim "
                           "(grants free credits/stamina to your own account)")
     # --- image-to-video generation (shares --prompt/--negative/--model/--confirm/--task-id) ---
-    gen.add_argument("--generate-video", dest="generate_video", action="store_true",
+    g_create.add_argument("--generate-video", dest="generate_video", action="store_true",
                      help="create an image-to-video clip via PixAI from a source image "
                           "(--image). Preview-only unless --confirm. Video is EXPENSIVE "
                           "(~27,500 credits for a 5s V4.0 clip)")
-    gen.add_argument("--image", default="", help="source image media_id to animate (first frame)")
-    gen.add_argument("--tail", default="", help="optional last-frame image media_id "
+    g_create.add_argument("--image", default="", help="source image media_id to animate (first frame)")
+    g_create.add_argument("--tail", default="", help="optional last-frame image media_id "
                      "(first/last-frame interpolation)")
-    gen.add_argument("--duration", type=int, default=5,
+    g_create.add_argument("--duration", type=int, default=5,
                      help="video length in seconds: 5, 6, 10 or 15 (default 5). Snapped to the "
                           "nearest length the chosen --video-model takes: 15 is V4.0 and Tsubaki "
                           "only (other engines stop at 10), and the Tsubaki engines have no 6")
-    gen.add_argument("--video-model", dest="video_model", default="",
+    g_create.add_argument("--video-model", dest="video_model", default="",
                      help="video model (default v4.0.1); overrides --model for --generate-video")
-    gen.add_argument("--video-mode", dest="vmode", default="professional",
+    g_create.add_argument("--video-mode", dest="vmode", default="professional",
                      choices=["basic", "professional"], help="video quality tier")
-    gen.add_argument("--audio", action="store_true", help="generate audio with the video")
-    gen.add_argument("--audio-language", dest="audio_language", default="english",
+    g_create.add_argument("--audio", action="store_true", help="generate audio with the video")
+    g_create.add_argument("--audio-language", dest="audio_language", default="english",
                      help="spoken language for --audio video sound (default english; no effect without --audio)")
-    gen.add_argument("--video-prompt-helper", dest="video_prompt_helper", action="store_true",
+    g_create.add_argument("--video-prompt-helper", dest="video_prompt_helper", action="store_true",
                      help="enable PixAI's prompt-helper for video (off by default)")
-    gen.add_argument("--camera-movement", dest="camera_movement", default="",
+    g_create.add_argument("--camera-movement", dest="camera_movement", default="",
                      choices=list(VIDEO_CAMERA_MOVES),
                      help="camera move (v2.7-style): horizontal/pan/roll/tilt/vertical-pan/zoom "
                           "(default unset = omit; camera direction can also go in the prompt)")
-    gen.add_argument("--video-channel", dest="vchannel", default="private",
+    g_create.add_argument("--video-channel", dest="vchannel", default="private",
                      choices=list(VIDEO_CHANNELS),
                      help="video channel: private = the site's 'Private' channel (works "
                           "can't be published) | normal")
-    gen.add_argument("--dump-params", action="store_true",
+    g_create.add_argument("--dump-params", action="store_true",
                      help="with --generate/--generate-video/--edit-image (esp. --task-id "
                           "recovery), print the task's full submit parameters -- bank any "
                           "param shape (multiRef, referenceVideo, ...) with no browser capture")
     # --- reference video (multi-image/video/audio reference) ---
-    gen.add_argument("--reference-video", dest="reference_video", action="store_true",
+    g_create.add_argument("--reference-video", dest="reference_video", action="store_true",
                      help="create a multi-reference video (referenceVideo): pass refs with "
                           "--ref-image/--ref-video/--ref-audio and cite them in --prompt as "
                           "@image1/@video1/@audio1. Preview-only unless --confirm")
-    gen.add_argument("--ref-image", dest="ref_image", action="append", metavar="MEDIA_ID|FILE",
+    g_create.add_argument("--ref-image", dest="ref_image", action="append", metavar="MEDIA_ID|FILE",
                      help="reference image (media_id or local file, auto-uploaded). Repeatable: "
                           "@image1=first, @image2=second, ...")
-    gen.add_argument("--ref-video", dest="ref_video", action="append", metavar="MEDIA_ID|FILE",
+    g_create.add_argument("--ref-video", dest="ref_video", action="append", metavar="MEDIA_ID|FILE",
                      help="reference video (repeatable; cite as @video1, @video2, ...)")
-    gen.add_argument("--ref-audio", dest="ref_audio", action="append", metavar="MEDIA_ID",
+    g_create.add_argument("--ref-audio", dest="ref_audio", action="append", metavar="MEDIA_ID",
                      help="reference audio, as a media_id only -- a local audio file cannot be "
                           "uploaded (put it in a video and pass that with --ref-video). "
                           "Repeatable; cite as @audio1, ...")
-    gen.add_argument("--video-ratio", dest="video_ratio", default="",
+    g_create.add_argument("--video-ratio", dest="video_ratio", default="",
                      choices=[""] + list(VIDEO_RATIOS), metavar="RATIO",
                      help="--reference-video output aspect ratio, Tsubaki video engines only "
                           "(tbkv1.0 / tbkv1.0.1): one of " + ", ".join(VIDEO_RATIOS)
@@ -15566,108 +15625,122 @@ def main():
     # former neighbourhood above for both measurements. Art filters run in the browser now
     # (static/mg-art-filters.js, the gallery's Edit > Enhance tab): free, offline, no submit.
     # --- instruct editing + media upload (the "Edit this image" surface) ---
-    gen.add_argument("--edit-image", dest="edit_image", action="store_true",
+    g_create.add_argument("--edit-image", dest="edit_image", action="store_true",
                      help="instruct-edit an image via PixAI: describe the change in --prompt "
                           "and pass source(s) with --edit-src (a catalog media_id OR a local "
                           "file, uploaded automatically). Preview-only unless --confirm")
-    gen.add_argument("--edit-src", dest="edit_src", action="append", metavar="MEDIA_ID|FILE",
+    g_create.add_argument("--edit-src", dest="edit_src", action="append", metavar="MEDIA_ID|FILE",
                      help="source image for --edit-image: a media_id or a local image file "
                           "(local files upload automatically). Repeatable for multi-image reference")
-    gen.add_argument("--edit-model", dest="edit_model", default="",
+    g_create.add_argument("--edit-model", dest="edit_model", default="",
                      help="edit model id (default PixAI Edit Pro {})".format(EDIT_PRO_MODEL_ID))
-    gen.add_argument("--edit-resolution", dest="edit_resolution", default="1K",
+    g_create.add_argument("--edit-resolution", dest="edit_resolution", default="1K",
                      help="edit output resolution (default 1K; e.g. 1K/2K)")
-    gen.add_argument("--edit-aspect", dest="edit_aspect", default="",
+    g_create.add_argument("--edit-aspect", dest="edit_aspect", default="",
                      help="edit output aspect ratio (default: the edit model's own -- Edit Pro "
                           "3:5; Reference Pro 'auto', which sends no aspect ratio and leaves "
                           "the frame to PixAI)")
-    gen.add_argument("--edit-quality", dest="edit_quality", default="medium",
+    g_create.add_argument("--edit-quality", dest="edit_quality", default="medium",
                      help="edit quality tier (default medium)")
-    gen.add_argument("--upload", dest="upload_file", default="", metavar="FILE",
+    g_create.add_argument("--upload", dest="upload_file", default="", metavar="FILE",
                      help="upload a local image to PixAI, print its media_id, then exit "
                           "(the reusable primitive behind --edit-src file support). Free")
-    gen.add_argument("--suggest-prompt", dest="suggest_prompt", default="", metavar="MEDIA|FILE",
+    g_create.add_argument("--suggest-prompt", dest="suggest_prompt", default="", metavar="MEDIA|FILE",
                      help="reverse a prompt out of an image ('Image to prompt'): print PixAI's "
                           "suggested tags + description for a catalog media_id or local file. Free")
-    gen.add_argument("--kaisuuken-id", dest="kaisuuken_id", default="", metavar="ID",
+    g_create.add_argument("--kaisuuken-id", dest="kaisuuken_id", default="", metavar="ID",
                      help="force a specific free card (kaisuuken) id on this generate/edit/"
                           "video run. Normally not needed -- a matching card is auto-applied "
                           "on --confirm (like the website)")
-    gen.add_argument("--no-card", dest="no_card", action="store_true",
+    g_create.add_argument("--no-card", dest="no_card", action="store_true",
                      help="do NOT auto-apply a free card; pay credits even if a card matches")
-    gen.add_argument("--list-models", nargs="?", const="", default=None, metavar="KEYWORD",
+    g_create.add_argument("--list-models", nargs="?", const="", default=None, metavar="KEYWORD",
                      help="search PixAI generation models by keyword and print their "
                           "generatable version ids (use as --model), then exit")
-    ap.add_argument("--fix-model-names", action="store_true",
+    g_maint.add_argument("--fix-model-names", action="store_true",
                     help="re-resolve readable model names for catalog rows whose model_name "
                          "is blank or a raw numeric id (one API call per distinct model), then exit")
-    ap.add_argument("--relabel-removed", action="store_true",
+    g_maint.add_argument("--relabel-removed", action="store_true",
                     help="with --fix-model-names, relabel ids that no longer resolve (deleted "
                          "models) to 'Unknown or removed model' instead of leaving the raw number")
-    ap.add_argument("--audit", action="store_true",
+    g_library.add_argument("--audit", action="store_true",
                     help="read-only duplicate audit of the whole backup folder; writes "
                          "audit_report.csv and prints a summary, then exit. Independent of catalog.db.")
-    ap.add_argument("--verify-library", dest="verify_library", action="store_true",
+    g_library.add_argument("--verify-library", dest="verify_library", action="store_true",
                     help="read-only integrity pass over every catalogued file: missing, zero-byte, "
                          "missing or empty thumbnails, uncataloged files. Writes "
                          "integrity_report.csv/.json to the library's _moonglade/records folder and prints a summary, "
                          "then exit. Changes nothing else.")
-    ap.add_argument("--verify-deep", dest="verify_deep", action="store_true",
+    g_library.add_argument("--verify-deep", dest="verify_deep", action="store_true",
                     help="with --verify-library, also check each file's end structurally "
                          "(PNG/JPEG/WebP/GIF end markers, MP4 moov); a torn file is reported as "
                          "suspect. Reads two small ranges per file, decodes nothing.")
-    ap.add_argument("--dedup", action="store_true",
+    g_library.add_argument("--dedup", action="store_true",
                     help="act on the audit: move redundant copies to _duplicates/ (keeping the "
                          "most-organized copy), then reconcile catalog.db. Dry-run unless --apply.")
-    ap.add_argument("--apply", action="store_true",
+    g_library.add_argument("--apply", action="store_true",
                     help="with --dedup, actually perform the moves/deletes (default is dry-run); "
                          "with --import-curation, actually write the curation")
-    ap.add_argument("--export-curation", dest="export_curation", nargs="?", const="",
+    g_library.add_argument("--export-curation", dest="export_curation", nargs="?", const="",
                     default=None, metavar="FILE",
                     help="write your curation (ratings, collections and their order, smart "
                          "collections, tags, keeper/reject marks, notes) to a JSON file keyed by "
                          "media id, then exit. Default file: curation_<stamp>.json in the library")
-    ap.add_argument("--import-curation", dest="import_curation", default="", metavar="FILE",
+    g_library.add_argument("--import-curation", dest="import_curation", default="", metavar="FILE",
                     help="read a curation file back into this catalog. Dry run unless --apply; "
                          "fill-only (keeps any rating, mark or note already there) unless "
                          "--curation-overwrite. Saves the current state first.")
-    ap.add_argument("--curation-overwrite", dest="curation_overwrite", action="store_true",
+    g_library.add_argument("--curation-overwrite", dest="curation_overwrite", action="store_true",
                     help="with --import-curation, the file wins for the pictures it lists: "
                          "rating, mark, note, tags, collections and manual orders")
-    ap.add_argument("--dedup-delete", action="store_true",
+    g_library.add_argument("--dedup-delete", action="store_true",
                     help="with --dedup --apply, delete redundant copies instead of quarantining them")
-    ap.add_argument("--no-content", action="store_true",
+    g_library.add_argument("--no-content", action="store_true",
                     help="with --audit/--dedup, skip content hashing (Class B); only do the fast "
                          "same-media_id location dedup (Class A)")
-    ap.add_argument("--verify-dupes", action="store_true",
+    g_library.add_argument("--verify-dupes", action="store_true",
                     help="final-pass safety check on _duplicates/: confirm every quarantined file "
                          "is byte-identical to a surviving keeper before you delete. Flags orphans "
                          "and same-id-different-bytes mismatches. Read-only unless --restore-orphans.")
-    ap.add_argument("--restore-orphans", action="store_true",
+    g_library.add_argument("--restore-orphans", action="store_true",
                     help="with --verify-dupes, move any orphaned quarantined files (no surviving "
                          "keeper) back to images/")
-    ap.add_argument("--rebuild-similar", action="store_true",
+    g_library.add_argument("--rebuild-similar", action="store_true",
                     help="drop + re-embed the visual-similarity ('Similar') index from scratch off "
                          "the on-disk backup. Cures a corrupted/duplicate index; builds ONE clean "
                          "named index. ~decode-bound, no network. Needs torch/pixeltable. "
                          "Heavy: don't run it beside GPU- or RAM-heavy programs.")
-    ap.add_argument("--sync-similar", action="store_true",
+    g_library.add_argument("--sync-similar", action="store_true",
                     help="TOP UP the 'Similar' index: embed only images it doesn't already have. "
                          "The incremental counterpart to --rebuild-similar and the one you "
                          "normally want -- it cannot lose existing rows, and after an interrupted "
                          "build it resumes instead of starting over. Needs torch/pixeltable. "
                          "Heavy: don't run it beside GPU- or RAM-heavy programs.")
-    webauth = ap.add_argument_group("web gallery login accounts (session-based auth)")
-    webauth.add_argument("--add-web-user", action="store_true",
+    g_account.add_argument("--add-web-user", action="store_true",
                     help="add or update a gallery web-login account: interactively prompts "
                          "for a username and password (getpass -- never echoed/printed), "
                          "hashes the password, and saves it to config.json's AUTH_USERS. "
                          "Deliberately CLI-only -- no account-creation form is ever reachable "
                          "over the network")
-    webauth.add_argument("--remove-web-user", default="", metavar="USERNAME",
+    g_account.add_argument("--remove-web-user", default="", metavar="USERNAME",
                     help="remove a gallery web-login account by username")
-    webauth.add_argument("--list-web-users", action="store_true",
+    g_account.add_argument("--list-web-users", action="store_true",
                     help="list gallery web-login usernames (never password hashes), then exit")
+    
+    g_search.add_argument("--search", default=None, metavar="QUERY",
+                    help="search the local catalog with the same query language as the gallery's "
+                         "search box (words, key:value operators like model: lora:Name>0.7 "
+                         "created:2026Q3 rating:>=4, -negation, quotes) and print one line per "
+                         "match: media id, date, model, rating, start of the prompt. Read-only, "
+                         "no network")
+    g_search.add_argument("--limit", type=int, default=50, metavar="N",
+                    help="with --search: print at most N matches (default 50; 0 = all)")
+    g_search.add_argument("--json", dest="search_json", action="store_true",
+                    help="with --search: print the matches as a JSON list instead of lines")
+    g_search.add_argument("--export-csv", dest="export_csv", default="", metavar="PATH",
+                    help="write the --search matches (every match, ignoring --limit) to PATH as "
+                         "a CSV with the same columns as the gallery's Export view; without "
+                         "--search it exports the whole catalog")
     args = ap.parse_args()
     # B2: before anything reads a setting, the install half of the move runs and the library
     # is resolved: --out for this one run, else settings.json's, else the default. The command
@@ -15722,6 +15795,9 @@ def main():
         pass
 
     try:
+        if getattr(args, "search", None) is not None or getattr(args, "export_csv", ""):
+            run_search(args)
+            return
         if args.catalog_stats:
             run_catalog_stats(args)
             return

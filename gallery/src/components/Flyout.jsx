@@ -162,6 +162,13 @@ export default function Flyout({ boot, current, queryText = "", onApply, onClose
           <code>ar:3:2</code> <span>a ratio, within 3%</span> · <code>ar:&gt;2</code>{" "}
           <span>wider than 2:1</span> · <code>type:loom</code> <span>image, video or loom</span>
         </div>
+        {/* Numbers and ranges, and where the bulk rating lives. */}
+        <div>
+          <code>lora:detail&gt;0.7</code> · <code>lora:*&gt;=0.5</code> <span>a LoRA&apos;s weight</span> ·{" "}
+          <code>created:2026-08..2026-10</code> · <code>created:2026Q3</code> ·{" "}
+          <code>created:&gt;=2026-09-15</code> <span>a date range</span> ·{" "}
+          <span>tick pictures, then press 1–5 (0 clears) to rate them all at once</span>
+        </div>
       </div>
       <div className="flygrid">
         <div className="flyrow"><label>Sort</label>

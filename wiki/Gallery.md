@@ -271,10 +271,16 @@ rating:>=3 aes:>6                three-plus stars AND aesthetic score above 6
 width:>1000 height:>1000         big renders only (likes: steps: cfg: duration: work too)
 created:2026-07                  July 2026; created:2026 for the year, created:2026-07-04 for a day
 created:<2026                    strictly before 2026 (>, >=, <= also work)
+created:2026Q3                   a quarter (Q1 to Q4); >=, >, <, <= work on a quarter too
+created:2026-08..2026-10         an inclusive range, each end a year, month, day or quarter
+created:2026-09-15..  ..2026Q2   a range open at one end
+created:>=2026-09-15             from a day on (a day, a month or a year, with >, >=, <, <=)
 video:1 nsfw:0                   videos, SFW only (published: too; 1/0, true/false, yes/no)
 collection:"Elf Portraits"       exact collection name, same as the dropdown
 source:api                       online / api / local / deleted, same as the dropdown
 tag:elf lora:detail sampler:euler title:grove batch:B1 filename:mp4
+lora:detail>0.7  lora:*>=0.5     a LoRA's weight: >, >=, <, <=, = (a name, or * for any LoRA)
+lora:"Moon Style"<1              quote a name that has spaces
 task:900000001  media:100000003  exact ids (a bare long number still works as before)
 keeper  reject                   your own mark on a picture (see Collections & curation)
 tag:pose-study                   your own tag; tag: also still reads PixAI's published tags
@@ -287,6 +293,15 @@ ar:3:2  ar:9:16  ar:1.91:1       a shape, within 3% of that ratio
 ar:>2  ar:<0.5                   wider than 2:1 / narrower than 1:2 (width divided by height)
 type:image  type:video  type:loom   which kind: the Loom's own renders are their own kind
 ```
+
+**Numbers and ranges.** `lora:detail` alone is a substring of the LoRA list, as it always was. Put a
+comparison after the name and it reads the weight instead: `lora:detail>0.7` finds a picture whose Detail
+LoRA ran above 0.7 (the name and the weight come from the same LoRA, so two LoRAs cannot trade parts),
+and `lora:*>=0.5` means any LoRA at 0.5 or more.
+
+**Rating many at once.** Tick the pictures you want, then press **1–5** to rate them all (**0** clears);
+the bar that appears over a selection has the same five stars, plus tag, keeper, reject and
+add-to-collection. See [Collections & curation](Collections#rating-keys).
 
 `tag:` reads two stores: PixAI's published art tags (a substring, as it always did) and your own
 personal tags (a whole tag). `art_tags:` keeps the PixAI-only reading. Your marks, tags and notes
@@ -324,6 +339,23 @@ that one image, so your library holds the only copy anywhere. Its detail page sa
 under **More details**. **Videos play
 right in the lightbox** (and on the detail page), so you can browse a mixed grid of
 images and videos with the arrow keys without leaving the overlay.
+
+### Searching from the command line
+
+The same search, without opening the gallery. It reads your local catalog only and never touches the
+network:
+
+```bash
+python -m moonglade --search "elf lora:detail>0.7 created:2026Q3"   # one line per match
+python -m moonglade --search "model:tsubaki" --limit 200            # default is 50; 0 shows all
+python -m moonglade --search "rating:>=4" --json                    # the matches as JSON
+python -m moonglade --search "rating:>=4" --export-csv picks.csv    # every match, as a CSV
+```
+
+Each line is the media id, the date, the model, the rating and the start of the prompt. `--export-csv`
+writes the same columns as the gallery's **Export view**; on its own it exports the whole catalog.
+`python -m moonglade --help` groups the commands under Backup, Library, Create, Account, Maintenance
+and Search.
 
 ### Session stacks
 

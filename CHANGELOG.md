@@ -19,6 +19,12 @@ git tags. Full prose notes for tagged versions live on
 ### For developers
 - **The picture list a client reads now carries each picture's star rating**, so a viewer such as the Apple TV client in development can show and change stars without a second request. `dev/tools/tv_fixtures.py` captures that list and four other read-only answers from a library into a folder, for a client's tests. (2026-10-26)
 
+### Added
+- **Search understands numbers and date ranges.** `lora:detail>0.7` and `lora:*>=0.5` compare a LoRA's weight (`>`, `>=`, `<`, `<=`, `=`); `created:2026Q3` is a quarter, `created:2026-08..2026-10` an inclusive range (either end can be left open), and `created:>=2026-09-15` starts from a day. The Advanced search help and the Gallery wiki page list them, and both now say that ticked pictures are rated all at once with 1–5. (2026-11-19)
+- **The command line can search, list and export.** `python -m moonglade --search "<query>"` takes the same query language as the gallery's search box and prints one line per match (media id, date, model, rating, start of the prompt); `--limit N` and `--json` shape the output, and `--export-csv PATH` writes the matches with the same columns as the gallery's Export view. It reads the catalog only and never touches the network. `--help` is now grouped under Backup, Library, Create, Account, Maintenance and Search; no flag changed. (2026-11-19)
+- **One-line explanations for the app's own words.** Hovering Mirror to PixAI, its Armed · tier live line, Tier 1, The Loom and the Folio button says what each is; the Glossary and FAQ carry the same words. (2026-11-19)
+- **The README and Setup page open with "Start here".** First line: you need a PixAI membership for the API key; then download, double-click the installer, paste the key, open the gallery. (2026-11-19)
+
 ## [3.21.1] - 2026-11-19 — The Right Key
 
 ### Changed

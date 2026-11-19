@@ -80,6 +80,7 @@ export default function AiToolsModal({ open, onClose, onPick }) {
           <div className="mgai-tiers">
             {TIERS.map(([id, lbl]) => (
               <button key={id} type="button" className={"mgai-tier" + (tier === id ? " on" : "")}
+                title={id === "tier1" ? "Tools PixAI keeps behind its first membership tier" : id === "free" ? "Tools open to every account" : "Every tool"}
                 onClick={() => setTier(id)}>{lbl}</button>
             ))}
           </div>
@@ -123,7 +124,7 @@ export default function AiToolsModal({ open, onClose, onPick }) {
                       if (s.thumb && el.dataset.fell !== "1") { el.dataset.fell = "1"; el.src = s.thumb; return; }
                       el.style.display = "none";
                     }} />
-                  {s.tier ? <span className="mgai-tierbadge">Tier 1</span> : null}
+                  {s.tier ? <span className="mgai-tierbadge" title="PixAI keeps this tool behind its first membership tier">Tier 1</span> : null}
                   {/* the control chip is pinned top-right OVER the art, hue-law coloured --
                       it says how much work the tool needs before you open it */}
                   <span className="mgai-chip" style={{ color: m.color, borderColor: m.color }}>{m.label}</span>
