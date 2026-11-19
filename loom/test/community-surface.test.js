@@ -266,20 +266,21 @@ describe("My Art draws the numbers it was already fetching", () => {
     });
 
     test(name + ": every published card gets its view count and bar, not a top twelve", () => {
-      assert.match(shell, /it\.public && it\.views != null/);
-      assert.match(shell, /\{fmt\(it\.views\)\} views/);
-      assert.match(shell, /className="mgma-barwrap"/);
-      assert.match(shell, /className="mgma-bar"/);
+      // Since the All time / 30 days switch (look pick round 2, topic 6 A) every view figure
+      // reads through spanViews(it, span): lifetime or the window, same rules.
+      assert.match(shell, /it\.public && spanViews\(it, span\) != null/);
+      assert.match(shell, /\{fmt\(spanViews\(it, span\)\)\} views/);
+      assert.match(shell, /className="mgma-barwrap"|className="myam-barwrap"/);
       assert.match(shell, /gridMaxViews/);
       // The bar's own rule, from the design it comes from: this work's share of the best
       // one on screen, floored at 2% so a real number is never an invisible sliver.
-      assert.match(shell, /Math\.max\(2, \(it\.views \/ gridMaxViews\) \* 100\)/);
+      assert.match(shell, /Math\.max\(2, \(spanViews\(it, span\) \/ gridMaxViews\) \* 100\)/);
     });
 
     test(name + ": a never-swept work is not painted as a zero", () => {
       // null means --sync-artworks has not read this yet. Drawing it as 0 with an empty
       // bar would be the app asserting something it does not know.
-      assert.match(shell, /views == null \? -1/);
+      assert.match(shell, /bv == null \? -1/);
     });
 
     test(name + ": the library can be sorted by views", () => {

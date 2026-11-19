@@ -68,10 +68,15 @@
   .glm-nav .glm-navicon { font-size: 18px; line-height: 1; }
   .glm-nav .glm-navlabel, .glm-nav .glm-navdot { display: none; }
 
-  /* ---- the hero folds to one bar. 172 px of banner is half a 390 px screen; the brand, the counts,
-     the Saver chip, the credits and the five icon buttons keep every control and go on one row. ---- */
-  .glm-hero { height: auto; min-height: 46px; display: flex; align-items: center; gap: 10px;
-    padding: env(safe-area-inset-top) 11px 0 11px; --glm-safetop: 0px; }
+  /* ---- the hero folds to one bar. The upright header is two rows on the Gallery (one on Create and
+     Control); sideways its rows dissolve (display: contents) and the brand, the counts, the Saver chip,
+     the claim, the credits and the three round buttons keep every control and go on one row. It never
+     slides away here: one slim bar is already out of the way. ---- */
+  .glm-hero { height: auto; min-height: 46px; display: flex; flex-direction: row; align-items: center; gap: 10px;
+    padding: env(safe-area-inset-top) 11px 0 11px; }
+  .glm-hero.away { margin-top: 0; }
+  .glm-hero.away + .glm-body { margin-top: 0; }
+  .glm-hero-row, .glm-hero-end { display: contents; }
   .glm-hero-brand, .glm-hero-stats, .glm-hero-credits, button.glm-hero-claim, .glm-hero-icons {
     position: relative; inset: auto; }
   .glm-hero-brand { order: 1; flex: 1 1 auto; max-width: none; min-width: 0; align-items: center; }
@@ -91,9 +96,11 @@
   /* ---- the gallery: 4 stacked columns (page: 6 px gaps, 12 px in) ---- */
   .glm-grid.glm-grid-rows { gap: 6px; padding: 12px 12px 12px 12px; align-items: start; }
   .glm-grid-rows .glm-tile { border-radius: 7px; }
-  /* The search bar stops being sticky: on a 390 px screen the hero and a pinned bar would hold a third of
-     the height for good. It scrolls away with the list (a pull or ↑ Newest brings it back). */
-  .glm-bar { position: static; padding-left: 12px; padding-right: 12px; }
+  /* The search bar and the media chips stop being sticky: on a 390 px screen the hero and a pinned bar would
+     hold a third of the height for good. They scroll away with the list (a pull or ↑ Newest brings them
+     back). Upright the two ride together in .glm-bars (look pick B, 2026-11-19). */
+  .glm-bars { position: static; }
+  .glm-bar { padding-left: 12px; padding-right: 12px; }
   .glm-bar2 { padding-left: 12px; padding-right: 12px; }
   .glm-pager { padding-bottom: 12px; }
 

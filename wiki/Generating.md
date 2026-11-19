@@ -263,8 +263,9 @@ PixAI accepted.
 - **Presets ▾** saves the composer as a named preset: the same things as ↺ Last, **except the
   seed**, up to thirty. Picking one fills everything in and says nothing was sent; if its model
   is no longer available the rest is still filled and the note says so. ✕ deletes one. Presets
-  hold the Image tab only. On the phone, ↺ Last and Presets are two chips above the prompt and
-  presets open as a sheet.
+  hold the Image tab only. On the phone, ↺ Last and Presets are two chips in one row with { } and
+  Lists under the prompt (the Create tab's **Prompt** section), and presets open as a sheet. The
+  phone's quick picks are in its **Model** section.
 - **Quick picks** are the Models and LoRAs rows above the prompt: your last three sends' models
   and LoRAs plus the ones you mark **★ Quick-pick** (in the **▾** menu on a card in the model
   and LoRA pickers; a small ★ on the card shows it is one), six to a row, then **+ more** into the picker. A model chip switches the model the same way

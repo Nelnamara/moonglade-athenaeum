@@ -500,7 +500,7 @@ describe("the button: the Control Panel, on its Branding tab", () => {
     assert.match(app, /tabRequest=\{panelTab\}/);
     const mob = read("components/AppMobile.jsx");
     assert.match(mob, /window\.addEventListener\(OPEN_PANEL_EVENT, onRequest\);/);
-    assert.match(mob, /<ControlMobile account=\{account\} brandRequest=\{brandRequest\} \/>/);
+    assert.match(mob, /<ControlMobile account=\{account\} brandRequest=\{brandRequest\}\s/);
     const cp = read("components/ControlPanelOverlay.jsx");
     assert.match(cp, /fetchAchievements\(\)\.then\(\(\) => \{ if \(live\) setTabHeld\(false\); \}\);/);
     assert.match(cp, /if \(tab === "brand" && !brandingUnlocked && !tabHeld && achievementsFresh\) setTab\("maint"\);/,

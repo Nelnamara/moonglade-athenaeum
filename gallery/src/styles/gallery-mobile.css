@@ -52,27 +52,36 @@
 .glm-stage, .idm-root, .lbm-root, .fm-root, .csm-root, .cmb-entry {
   height: calc(100dvh - var(--mg-updbanner-h, 0px)); }
 
-/* ---- hero (persistent chrome above every tab, DC lines 45-62) ----
-   THE TOP EDGE IS GUARDED TOO (phone audit, 2026-09-06). This file has read
-   env(safe-area-inset-bottom) since it was written -- the tab bar's gutter, the sheets'
-   footer -- and never the top one, because until the served shell asked for
-   `viewport-fit=cover` (moonglade_gallery.py's APP_PAGE) every inset resolved to 0 and
-   there was nothing to read. With cover in place the notch is real, and the row this hero
-   puts closest to it is its four icon buttons at top:12px -- straight under the sensor
-   housing on a notched phone. The hero grows by exactly what the inset asks for beyond
-   that 12px and the two top-anchored rows ride down with it; the brand block and the
-   credits chip are anchored to the BOTTOM and never move. With no inset --- a desktop
-   window, the harness, any phone without one --- every one of these resolves to the number
-   that was already here: 0px of growth, 12px and 57px unchanged. */
-.glm-hero { position: relative; flex: none; overflow: hidden;
-  --glm-safetop: max(0px, calc(env(safe-area-inset-top) - 12px));
-  height: calc(172px + var(--glm-safetop)); }
+/* ---- hero: TODAY'S HEADER, MADE SMALLER (owner's look pick, 2026-11-19, topic 3 option B;
+   pixel source: moonglade-internal design/board/LOOK_BOARD_2026-11-19_round2.html) ----
+   Owner: "The phone layout is utter shit and I hate it. Fix it". The 172 px banner with five round
+   buttons and four absolutely-placed corners is gone. The header is now TWO ROWS IN THE FLOW on the
+   Gallery (.glm-hero-full) -- the 40 px mark with the name and its line, three round buttons (Folio,
+   Loom, Menu); then the counts in mono on the left and the claim and credits pills on the right --
+   and ONE row on Create and Control (.glm-hero-compact): the 28 px mark, the name, the credits.
+   On the Gallery it slides away as the list scrolls (AppMobile.jsx adds .away; the search bar and
+   the media chips are sticky inside the body, so they ride up and stay).
+   THE TOP EDGE IS STILL GUARDED (phone audit, 2026-09-06): the served shell asks for
+   viewport-fit=cover, so the notch is real. The header's own top padding is the inset when there is
+   one (never less than 10 px), so its first row sits below the sensor housing; with no inset -- a
+   desktop window, the harness, a phone without one -- it is the plain 10 px. When the header has
+   slid away the body keeps that inset as a margin of its own, so the sticky search bar parks below
+   the notch, never under it. */
+.glm-hero { position: relative; flex: none; overflow: hidden; z-index: 1;
+  display: flex; flex-direction: column; gap: 9px;
+  padding: max(10px, env(safe-area-inset-top)) 12px 10px;
+  transition: margin-top .26s ease; }
+.glm-hero.glm-hero-compact { padding-bottom: 8px; }
+.glm-hero.away { margin-top: calc(-1 * var(--glm-hero-h, 0px)); }
+.glm-hero.away + .glm-body { margin-top: env(safe-area-inset-top, 0px); }
 .glm-hero-bg { position: absolute; inset: 0;
   background: radial-gradient(120% 140% at 18% 0%, color-mix(in oklab, var(--accent) 26%, #0b0820) 0%, #0b0820 62%, #070512 100%); }
 .glm-hero-scrim { position: absolute; inset: 0; pointer-events: none;
   background: linear-gradient(to top, var(--base) 6%, transparent 64%); }
-.glm-hero-icons { position: absolute; right: 11px; top: max(12px, env(safe-area-inset-top));
-  z-index: 3; display: flex; gap: 8px; }
+.glm-hero-row { position: relative; z-index: 2; display: flex; align-items: center;
+  justify-content: space-between; gap: 9px; min-width: 0; }
+.glm-hero-end { display: flex; align-items: center; gap: 6px; flex: none; }
+.glm-hero-icons { display: flex; gap: 6px; flex: none; }
 .glm-iconbtn { width: 31px; height: 31px; border-radius: 50%; display: grid; place-items: center;
   font-size: 13px; cursor: pointer; border: 1px solid rgba(255,255,255,.4);
   /* the sheen rests at 30% and sweeps on hover / focus only (unslop pick 6B); no ambient loop */
@@ -113,44 +122,46 @@
     color-mix(in oklab, var(--lavender) 55%, #050308) 100%);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.65), inset 0 -2px 3px rgba(5,3,8,.5),
     0 6px 16px -2px rgba(0,0,0,.55); }
-.glm-hero-stats { position: absolute; right: 11px; top: calc(57px + var(--glm-safetop, 0px));
-  z-index: 2; display: flex; gap: 10px;
-  font-size: 9.5px; color: var(--subtext); text-shadow: 0 1px 6px rgba(0,0,0,.9); }
-.glm-hero-brand { position: absolute; left: 12px; bottom: 9px; z-index: 2;
-  display: flex; align-items: flex-end; gap: 8px; max-width: calc(100% - 90px); }
-/* The marks ruling's hero jump (96/58) applied proportionally -- the sweep is "everywhere,
-   not spot-fix", so the phone's brand mark grows with the desktop one. Stated as the ratio
-   itself now rather than the 50px it works out to (marks ruling 2026-08-31, "All scales
-   from Hero"): 50/96 of --mark-hero, so a change to the hero reaches the phone too. */
-.glm-hero-mark { flex: none; width: calc(var(--mark-hero) * 50 / 96);
-  height: calc(var(--mark-hero) * 50 / 96); border-radius: 12px; overflow: hidden;
+/* the counts: one mono line under the brand, as the board draws them ("38,114 img · 466 vid · 1 coll") */
+.glm-hero-stats { display: flex; gap: 8px; align-items: center; min-width: 0; overflow: hidden;
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; color: var(--overlay0);
+  white-space: nowrap; text-shadow: 0 1px 6px rgba(0,0,0,.9); }
+.glm-hero-stats b { color: var(--subtext); font-weight: 500; }
+.glm-hero-stats > span:not(.glm-saverchip) + span::before { content: "·"; margin-right: 8px; color: var(--overlay0); }
+.glm-hero-brand { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 auto; }
+/* The marks ruling's hero jump applied proportionally, stated as the ratio (marks ruling 2026-08-31,
+   "All scales from Hero"): 40/96 of --mark-hero on the Gallery's header -- the board's 40 px, down
+   from the old banner's 50 -- and 28/96 on the small header Create and Control wear. */
+.glm-hero-mark { flex: none; width: calc(var(--mark-hero) * 40 / 96);
+  height: calc(var(--mark-hero) * 40 / 96); border-radius: 10px; overflow: hidden;
   display: grid; place-items: center; font-size: 15px; color: var(--lavender);
   background: color-mix(in srgb, var(--lavender) 22%, rgba(8,6,16,.6));
   border: 1px solid color-mix(in srgb, var(--lavender) 42%, transparent); }
+.glm-hero-compact .glm-hero-mark { width: calc(var(--mark-hero) * 28 / 96);
+  height: calc(var(--mark-hero) * 28 / 96); border-radius: 7px; font-size: 12px; }
 .glm-hero-mark img { width: 100%; height: 100%; object-fit: cover; }
-.glm-hero-brandtext { min-width: 0; max-width: 195px; }
+.glm-hero-brandtext { min-width: 0; }
 .glm-hero-name { font-family: var(--font-hero); font-size: 15px; font-weight: 600;
-  line-height: 1.05; text-shadow: 0 2px 9px rgba(0,0,0,.8);
+  line-height: 1.1; text-shadow: 0 2px 9px rgba(0,0,0,.8);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.glm-hero-flavour { font-size: 9px; font-style: italic; color: var(--subtext); cursor: pointer;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+.glm-hero-compact .glm-hero-name { font-size: 14.5px; }
+.glm-hero-flavour { font-family: var(--font-hero); font-size: 11px; font-style: italic; color: var(--overlay0);
+  cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   transition: opacity .5s ease; opacity: 1; animation: glmRise .5s ease both; }
 .glm-hero-flavour.fading { opacity: 0; }
-.glm-hero-credits { position: absolute; right: 11px; bottom: 11px; z-index: 2; text-decoration: none;
-  font-size: 10.5px; padding: 3px 9px; border-radius: 12px; cursor: pointer; color: var(--gold);
-  font-variant-numeric: tabular-nums;
+.glm-hero-credits { flex: none; text-decoration: none; display: inline-flex; align-items: center;
+  font-size: 11.5px; padding: 3px 10px; border-radius: 999px; cursor: pointer; color: var(--gold);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
   background: var(--matte-fill);
   border: 1px solid color-mix(in srgb, var(--gold) 40%, transparent);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.14); }
 
-/* claim pill -- classic's #acct-claim ported, mobile placement. Stacks above
-   the credits pill rather than beside it (hero real estate is tight); same
-   "always there, quiet" role claim-modal.css's ClaimModal is additive to. */
-button.glm-hero-claim { position: absolute; right: 11px; bottom: 40px; z-index: 2;
-  display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 600;
-  padding: 4px 10px; border-radius: 12px; cursor: pointer; font-family: inherit;
-  border: 1px solid var(--emerald); background: rgba(79,201,154,.16); color: var(--emerald);
-  white-space: nowrap; }
+/* claim pill -- classic's #acct-claim ported; on the header's second row beside the credits, as the
+   board draws it. Same "always there, quiet" role claim-modal.css's ClaimModal is additive to. */
+button.glm-hero-claim { flex: none; display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11.5px; font-weight: 600; padding: 3px 10px; border-radius: 999px; cursor: pointer;
+  font-family: inherit; border: 1px solid var(--emerald); background: rgba(79,201,154,.16);
+  color: var(--emerald); white-space: nowrap; }
 button.glm-hero-claim:disabled { opacity: .7; }
 button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; height: 13px;
   vertical-align: -2px; background: url(/branding/rewards/claim.png) center/contain no-repeat; }
@@ -191,8 +202,13 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
 .glm-metal.glm-chip, .glm-metal.cm-chip { border-radius: 999px; }
 
 /* ---- Gallery tab toolbar (DC barStyle/bar2Style/mediaPills, lines 66-88 & 912-929) ---- */
-.glm-bar { display: flex; align-items: center; gap: 6px; padding: 8px 11px; flex-wrap: wrap;
-  border-bottom: 1px solid var(--surface1); position: sticky; top: 0; z-index: 5; background: var(--base); }
+/* The search bar and the media chips are ONE sticky block (look pick B, 2026-11-19): the header above
+   slides away as the list scrolls and these two stay at the top of it. They were a sticky search bar
+   over a chip row that scrolled off, so a filter meant scrolling back up. */
+.glm-bars { position: sticky; top: 0; z-index: 5; background: var(--base);
+  border-bottom: 1px solid var(--surface1); }
+.glm-bar { display: flex; align-items: center; gap: 6px; padding: 8px 11px 2px; flex-wrap: wrap;
+  position: relative; background: var(--base); }
 .glm-search { flex: 1; position: relative; min-width: 0; display: flex; align-items: center; }
 .glm-search-icon { position: absolute; left: 9px; color: var(--overlay0); font-size: 11px; cursor: pointer; }
 .glm-search input { width: 100%; box-sizing: border-box; border-radius: var(--radius-control); padding: 7px 62px 7px 28px;
@@ -402,21 +418,36 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
 .glm-loom-note { font-size: 11.5px; line-height: 1.55; color: var(--overlay0); margin: 0 0 11px; }
 .glm-loom-note b { color: var(--text); }
 
-/* ---- Menu sheet (DC menuItems, lines 324-329 & 899-907) ----
-   The 6 non-Log-Out destinations (My Art / Publish / Train / Import / Contests /
-   Health) are each their OWN separate mobile design file or a Control-tab-owned
-   surface, not part of this Gallery-tab increment (Moonglade Mobile.dc.html's
-   own `screenIs*` cases for these live in the Control/Menu part of the design,
-   explicitly out of scope per this increment's brief). They render `soon`-dimmed
-   with a disclosing tooltip, same convention NavSpine.jsx already uses for its
-   own not-yet-ported destinations — not a dead tap, an honest one. Log Out is
-   real (NavSpine.jsx's own POST /api/logout + cache-purge, ported verbatim). */
+/* ---- Menu sheet: A GRID OF CARDS (look pick B, 2026-11-19: "the menu becomes a grid of cards
+   like Control's 'At a glance'"). Two to a row, each the name over one quiet line, on the same
+   mantle-and-hairline card the Control tab's stat cards wear; Log Out is the one plain row under
+   the grid. `.glm-menu-item` stays on every card and on Log Out, so "a Menu entry" still means
+   one thing to everything that looks for one. ---- */
+.glm-menu-title { display: flex; align-items: center; gap: 8px; width: 100%; }
 .glm-menu-list { display: flex; flex-direction: column; }
+.glm-menu-list.glm-menu-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .glm-menu-item { display: flex; align-items: center; gap: 4px; padding: 12px 6px;
   border-bottom: 1px dashed var(--surface1); font-size: 13px; cursor: pointer;
   background: none; border-left: none; border-right: none; border-top: none; color: var(--text);
   text-align: left; font-family: inherit; width: 100%; }
 .glm-menu-icon { display: inline-block; width: 22px; flex: none; }
+.glm-menu-item.glm-menu-card { flex-direction: column; align-items: flex-start; justify-content: center;
+  gap: 4px; min-height: 58px; padding: 10px 12px; box-sizing: border-box; min-width: 0;
+  border: 1px solid var(--surface1); border-radius: 12px; background: var(--mantle); }
+.glm-menu-item.glm-menu-card:hover, .glm-menu-item.glm-menu-card:focus-visible {
+  border-color: color-mix(in srgb, var(--lavender) 55%, var(--surface1)); }
+.glm-menu-card-h { display: flex; align-items: center; gap: 2px; font-size: 12.5px; font-weight: 600;
+  color: var(--text); min-width: 0; max-width: 100%; }
+.glm-menu-card .glm-menu-icon { width: 22px; display: inline-flex; align-items: center; }
+.glm-menu-card-s { font-size: 11px; line-height: 1.35; color: var(--subtext); min-width: 0; max-width: 100%;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* the inbox's own meta line keeps its mono and its peach, without its row's push to the right */
+.glm-menu-card-s.ib-mrow-meta { margin-left: 0; font-size: 10.5px; }
+.glm-menu-card-dot { width: 7px; height: 7px; border-radius: 50%; margin-left: 6px; flex: none;
+  background: var(--accent, var(--lavender)); }
+.glm-menu-item.glm-menu-logout { justify-content: space-between; margin-top: 6px; padding: 13px 4px;
+  border-bottom: 1px dashed var(--surface1); }
+.glm-menu-chev { color: var(--overlay0); }
 
 /* ---- full-screen push chrome (MobileScreen.jsx) -- the shared "screen"
    primitive, alongside .glm-sheet's shared "sheet" primitive above. Absolutely

@@ -34,7 +34,8 @@ import CreateMobile, { MODES } from "./CreateMobile.jsx";
 import VideoMode from "./VideoMode.jsx";
 import ControlMobile from "./ControlMobile.jsx";
 import TabBarMobile from "./TabBarMobile.jsx";
-import GoalChips from "./GoalChips.jsx";
+import GoalChips, { VigilChip } from "./GoalChips.jsx";
+import useGoalChips from "../hooks/useGoalChips.js";
 import MobileSheet from "./MobileSheet.jsx";
 import MobileScreen from "./MobileScreen.jsx";
 import PickerHost from "./PickerHost.jsx";
@@ -63,9 +64,9 @@ import { registerBrokenFilesOpener } from "../lib/brokenFilesNav.js";
 import { readFolioHash, setFolioRow } from "../folio/folioFocus.js";
 import { OPEN_PANEL_EVENT, takeCarriedPanelTab } from "../notify/panelRequest.js";
 import { installStarfallTrigger } from "../moments/starfallTrigger.js";
-import HelpButton from "../help/HelpButton.jsx";
+import "../styles/help.css";
 import GuideHost from "../help/GuideHost.jsx";
-import { OPEN_SURFACE_EVENT } from "../help/helpStore.js";
+import { OPEN_SURFACE_EVENT, openHelp } from "../help/helpStore.js";
 import "../styles/gallery-mobile.css";
 import "../styles/create-mobile.css";
 /* Last, on purpose: the landscape rules re-flow rules from every sheet above, and at equal specificity
@@ -377,20 +378,24 @@ import { InboxEmblem, GiftEmblem } from "../inbox/PanelEmblem.jsx";
    for the full real-data-vs-design-mock disclosure (real thumbnails in the
    card well, Share via the Web Share API instead of window.print()). */
 
-const MENU_ITEMS = [
-  { icon: <Icon name="chart" />, label: "My Art", screen: "myart" },
-  // Session N2: the collections screen. The books mark, not the page's ❖ -- the Glyph Ledger
-  // (2026-09-05) gave that character to the Folio's skin flag alone.
-  { icon: <Icon name="collection" />, label: "Collections", screen: "collections" },
-  // ☁ since the 2026-09-05 post-audit rulings: Publish wears the cloud on every OTHER
-  // surface that offers it (the desktop record, the Lightbox, this phone's own picture
-  // screen, the grid's right-click menu) and this row alone said ✎ -- the app's mark for
-  // Edit, which is a different verb one row away from this one.
-  { icon: <Icon name="publish" />, label: "Publish", screen: "publish" },
-  { icon: <Icon name="flask" />, label: "Train a LoRA", screen: "train" },
-  { icon: <Icon name="upload" />, label: "Import", screen: "import" },
-  { icon: <Icon name="medal" />, label: "Contests", screen: "contests" },
-  { icon: <Icon name="pulse" />, label: "Health", screen: "health" },
+/* THE MENU IS A GRID OF CARDS (owner's look pick, 2026-11-19, topic 3 option B: "the menu
+   becomes a grid of cards like Control's 'At a glance'"). Each card is a title and one quiet
+   line under it, two to a row, in the mock's order; Inbox and Gift box sit in that order too
+   (the mock moved them off the top, where RYPc had them) and keep their own pictures and lines.
+   Health is not a card any more: it is the Control tab's Health section. Activity, which had
+   its own round button in the old header, is a card here now that the header keeps three. The
+   mock's AI Tools card is not built: the phone has no scene generator for it to open yet.
+   Contests wears no trophy anywhere: the trophy only ever means the Folio. */
+const MENU_CARDS = [
+  { label: "My Art", screen: "myart", sub: () => "your published work" },
+  { label: "Collections", screen: "collections",
+    sub: (st) => { const n = Number(st.collections || 0); return n.toLocaleString() + (n === 1 ? " collection" : " collections"); } },
+  { label: "Publish", screen: "publish", sub: () => "to your profile" },
+  { label: "Contests", screen: "contests", sub: () => "browse and enter" },
+  { label: "Train a LoRA", screen: "train", sub: () => "from your pictures" },
+];
+const MENU_CARDS_AFTER = [
+  { label: "Import", screen: "import", sub: () => "files into the library" },
 ];
 
 // Per-screen header title -- text matches the design spec exactly (Health's
@@ -398,6 +403,11 @@ const MENU_ITEMS = [
 // the pushed screen's title legitimately differ, same as the design mock).
 // My Art/Import/Contests/Health/Publish/Train (2026-08-07) all render their own real
 // component below -- every Menu destination is now live, matching desktop.
+// The gallery header's slide (see THE GALLERY'S HEADER SLIDES AWAY below): it goes once the list
+// is this far down, and comes back after this much travel back up.
+const HERO_AWAY_AT = 48;
+const HERO_BACK_RUN = 36;
+
 const SCREEN_TITLES = {
   myart: "My Art",
   collections: "Collections",
@@ -405,11 +415,16 @@ const SCREEN_TITLES = {
   train: "Train a LoRA",
   import: "Import",
   contests: "Contests",
-  health: "Collection Health",
 };
 
 export default function AppMobile({ boot }) {
   const [tab, setTab] = useState("gallery");
+  /* EACH TAB SPLIT INTO SECTIONS (look pick B, 2026-11-19). Create's sections (Prompt, Model,
+     Frame, Recipes, More) and Control's (Jobs, Health, This phone) are held HERE, beside the
+     tab itself, so a section survives a tab switch the same way Create's draft and mode do
+     (both tabs unmount when another one is showing). */
+  const [createSection, setCreateSection] = useState("prompt");
+  const [ctlSection, setCtlSection] = useState("jobs");
   /* WHAT "UPDATE" MEANS ON THE PHONE (owner ruling 2026-09-07, "phone gets update"). The
      standing update strip is portaled to document.body from the notify root and knows
      nothing about tabs; this is this shell's own answer to its button. Control is where the
@@ -421,7 +436,14 @@ export default function AppMobile({ boot }) {
   useEffect(() => registerFolioOpener(() => setFolioOpen(true)), []);
   /* Collection Health's Broken files (Session W, W6a): the Control tab's "Review" and a fix run's
      Activity row push Health; it opens its Broken files screen itself (lib/brokenFilesNav.js). */
-  useEffect(() => registerBrokenFilesOpener(() => { openSheet(null); openScreenKey("health"); }), []);
+  /* Since the 2026-11-19 layout (look pick B) Health is the Control tab's Health section, not a
+     Menu screen: the door lands there, and Health opens its Broken files screen itself. */
+  useEffect(() => registerBrokenFilesOpener(() => {
+    openSheet(null);
+    closeScreenRaw();
+    setCtlSection("health");
+    setTab("control");
+  }), []);
   /* "#folio" / "#folio=<id>": the Loom's pinned-goal chip has no Folio of its own, so it crosses
      here with the request in the address (folio/folioFocus.js). Opened once, then stripped. */
   useEffect(() => {
@@ -528,6 +550,8 @@ export default function AppMobile({ boot }) {
   /* U6c + U7b: the one-time Home Screen nudge -- its strip rides the Gallery tab; the iOS bubble at
      Safari's Share button is drawn here, over everything, and the first-run guide stands aside for it. */
   const { landscape: sideways } = usePhoneLandscape();
+  const sidewaysRef = useRef(sideways);
+  sidewaysRef.current = sideways;
   const nudge = useInstallNudge({ landscape: sideways });
   const lib = useLibrary({ initialPage: loomReturn ? readPage(window.location.search) : 1 });
   lib.setPageSize(continuous ? continuousPageSize(saver.active, saver.info) : 0);
@@ -709,18 +733,114 @@ export default function AppMobile({ boot }) {
     tabRef.current = tab;
     const el = bodyRef.current;
     if (!el || el.querySelector(".glm-screen")) return;
-    el.scrollTop = tabScrollRef.current[tab] || 0;
-  }, [tab]);
+    const y = tabScrollRef.current[tab] || 0;
+    // the gallery's header comes back already slid away when its place is further down
+    setHeroAway(tab === "gallery" && !sidewaysRef.current && y > HERO_AWAY_AT);
+    heroScroll.current = { y, up: 0 };
+    el.scrollTop = y;
+  }, [tab]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* THE GALLERY'S HEADER SLIDES AWAY AS YOU SCROLL (look pick B, 2026-11-19: "the header slides
+     away as you scroll, search and chips stay"). Down past HERO_AWAY_AT and it goes; a short pull
+     back up (HERO_BACK_RUN of upward travel) or the top of the list brings it back. The search
+     bar and the media chips are sticky inside the body (GalleryMobile's .glm-bars), so they ride
+     up with it and stay. Only the Gallery tab does this -- Create and Control already wear the
+     small header -- and never sideways, where the header is one slim bar.
+       Two things this must not do. It must not flap: hiding the header makes the body taller by
+     the header's height, which lowers the most the list can scroll by the same amount; if that
+     dropped below where the reader is, the browser would pull scrollTop up by itself and it would
+     read as the owner pulling back up. So the header only goes when the list runs at least its
+     height past the reader -- then nothing is ever clamped and every upward move is his. And it
+     must not fight a pushed screen, which parks this scroller at 0 while it is up: those events
+     are skipped exactly as the tab memory above skips them. */
+  const [heroAway, setHeroAway] = useState(false);
+  const heroAwayRef = useRef(false);
+  heroAwayRef.current = heroAway;
+  const heroRef = useRef(null);
+  const heroScroll = useRef({ y: 0, up: 0 });
   useEffect(() => {
     const el = bodyRef.current;
     if (!el) return undefined;
     const onScroll = () => {
       if (el.querySelector(".glm-screen")) return;
       tabScrollRef.current[tabRef.current] = el.scrollTop;
+      const hs = heroScroll.current;
+      const y = el.scrollTop;
+      const dy = y - hs.y;
+      hs.y = y;
+      if (tabRef.current !== "gallery" || sidewaysRef.current) return;
+      hs.up = dy < 0 ? hs.up - dy : 0;
+      const away = heroAwayRef.current;
+      const heroH = heroRef.current ? heroRef.current.offsetHeight : 0;
+      let next = away;
+      if (y <= 4) next = false;
+      else if (!away && dy > 0 && y > HERO_AWAY_AT && el.scrollHeight - el.clientHeight - y >= heroH) next = true;
+      else if (away && hs.up >= HERO_BACK_RUN) next = false;
+      if (next !== away) {
+        hs.up = 0;
+        heroAwayRef.current = next;
+        setHeroAway(next);
+      }
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
+  /* THE CORNER TOASTS SIT BELOW THE TOP CHROME, never on it (2026-11-19, with look pick B). The
+     notify toasts are a fixed stack at top 64 px, made for the desktop's banner; on the phone's
+     new short header that line ran through the controls under it -- Create's Image · Edit · Video
+     and its section chips, Control's Jobs · Health · This phone -- and a sticky toast (the update
+     receipt) held them covered until its x was found. So the phone sets the stack's top itself
+     (notify.css reads --mg-phone-toast-top; the desktop never sets it and keeps its 64 px): 8 px
+     under the lowest of the marked top controls (`data-phone-top`: the header, the gallery's
+     sticky search and chips and the strips under them -- the Home Screen nudge, a smart
+     collection's -- Create's mode and section rows, Control's sections and Sync now) that is on
+     screen in the upper half of it. Rects are the viewport's, so the safe area and the update
+     strip are already in them. Measured on every scroll of the tab, a resize, and any change of
+     tab, section or header. */
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    let raf = 0;
+    const measure = () => {
+      raf = 0;
+      let floor = 0;
+      const half = window.innerHeight / 2;
+      for (const el of document.querySelectorAll(".glm-stage [data-phone-top]")) {
+        const r = el.getBoundingClientRect();
+        if (r.height > 0 && r.bottom > 0 && r.top < half) floor = Math.max(floor, r.bottom);
+      }
+      root.style.setProperty("--mg-phone-toast-top", Math.round(floor + 8) + "px");
+    };
+    const soon = () => { if (!raf) raf = requestAnimationFrame(measure); };
+    measure();
+    const el = bodyRef.current;
+    if (el) el.addEventListener("scroll", soon, { passive: true });
+    window.addEventListener("resize", soon);
+    // the header's slide is a transition: measure again once it has landed
+    const late = setTimeout(soon, 320);
+    // and when a tab's own top row arrives late (Control draws its sections once its summary
+    // read answers), or a section swaps what is under the header
+    const mo = typeof MutationObserver !== "undefined" && el ? new MutationObserver(soon) : null;
+    if (mo) mo.observe(el, { childList: true, subtree: true });
+    return () => {
+      if (mo) mo.disconnect();
+      cancelAnimationFrame(raf);
+      clearTimeout(late);
+      if (el) el.removeEventListener("scroll", soon);
+      window.removeEventListener("resize", soon);
+    };
+  }, [tab, createSection, ctlSection, cmode, heroAway, sideways]);
+  useEffect(() => () => document.documentElement.style.removeProperty("--mg-phone-toast-top"), []);
+  // turned sideways, the header is one slim bar and never slides
+  useEffect(() => { if (sideways) setHeroAway(false); }, [sideways]);
+  // the slide's distance is the header's own height, measured
+  const [heroH, setHeroH] = useState(0);
+  useLayoutEffect(() => {
+    const h = heroRef.current;
+    if (!h || typeof ResizeObserver === "undefined") { if (h) setHeroH(h.offsetHeight); return undefined; }
+    const ro = new ResizeObserver(() => setHeroH(h.offsetHeight));
+    ro.observe(h);
+    return () => ro.disconnect();
+  }, [tab]);
 
   /* THE SAME PROMISE, ACROSS THE CROSSING -- the phone's two halves (red team #9).
 
@@ -1346,56 +1466,80 @@ export default function AppMobile({ boot }) {
 
   return (
     <div className="glm-stage">
-      <header className="glm-hero">
+      {/* THE HEADER, TODAY'S MADE SMALLER (look pick B, 2026-11-19; pixel source: the look board
+          LOOK_BOARD_2026-11-19_round2.html, topic 3, option B). On the Gallery it keeps the mark,
+          the title and its line, the counts, the claim and the credits, with three round buttons
+          -- the Folio, the Loom and the Menu -- where there were five, and it slides away as the
+          list scrolls (see THE GALLERY'S HEADER SLIDES AWAY above). Activity and the guide moved
+          into the Menu. On Create and Control it is one small row: the mark, the name and the
+          credits (and the Saver chip while it acts), so their sections start near the top. */}
+      <header ref={heroRef} data-phone-top=""
+        className={"glm-hero " + (tab === "gallery" ? "glm-hero-full" : "glm-hero-compact") + (heroAway ? " away" : "")}
+        style={heroH ? { "--glm-hero-h": heroH + "px" } : undefined}>
         <div className="glm-hero-bg" aria-hidden="true" />
         <div className="glm-hero-scrim" aria-hidden="true" />
-        <div className="glm-hero-icons">
-          <button type="button" className="glm-iconbtn glm-iconbtn-gold" title="Folio of Honors"
-            onClick={openFolio}><Icon name="folio" /></button>
-          <button type="button" className="glm-iconbtn glm-iconbtn-teal" title="The Loom — video storyboard"
-            onClick={() => openSheet("loom")}>▮</button>
-          <button type="button" className="glm-iconbtn glm-iconbtn-lav" title="Activity"
-            style={{ position: "relative" }} onClick={() => openSheet("activity")}>
-            ◉
-            {jobsRunning ? <span className="glm-iconbtn-badge" aria-hidden="true" /> : null}
-          </button>
-          {/* The guide's "?" (Session I decision 2): Help on the page for the tab in view. */}
-          <HelpButton plain className="glm-iconbtn glm-iconbtn-lav glm-help"
-            surface={tab === "create" ? "dock" : tab === "control" ? "panel" : "gallery"} />
-          <button type="button" className="glm-iconbtn glm-iconbtn-lav" title="More"
-            style={{ position: "relative" }} onClick={() => openSheet("menu")}>
-            <Icon name="menu" title="More" />
-            {/* RYPc: the Menu door carries the inbox's unread badge (lavender count). */}
-            <MenuBadge st={inboxSt} />
-          </button>
-        </div>
-        <div className="glm-hero-stats">
-          {saver.active ? <span className="glm-saverchip" title="Data saver is on">{"\u25D0"} Saver</span> : null}
-          <span><b>{Number(stats.images || 0).toLocaleString()}</b> img</span>
-          <span><b>{Number(stats.videos || 0).toLocaleString()}</b> vid</span>
-          <span><b>{Number(stats.collections || 0).toLocaleString()}</b> coll</span>
-        </div>
-        <div className="glm-hero-brand">
-          <div className="glm-hero-mark">
-            {boot.mark_url ? <img src={boot.mark_url} alt="" /> : "✦"}
-          </div>
-          <div className="glm-hero-brandtext">
-            <div className="glm-hero-name">Moonglade Athenaeum</div>
-            <div className={"glm-hero-flavour" + (fl.fading ? " fading" : "")}
-              onClick={fl.reveal} title="Click for version info">
-              {fl.text}
+        <div className="glm-hero-row">
+          <div className="glm-hero-brand">
+            <div className="glm-hero-mark">
+              {boot.mark_url ? <img src={boot.mark_url} alt="" /> : "✦"}
+            </div>
+            <div className="glm-hero-brandtext">
+              <div className="glm-hero-name">Moonglade Athenaeum</div>
+              {tab === "gallery" ? (
+                <div className={"glm-hero-flavour" + (fl.fading ? " fading" : "")}
+                  onClick={fl.reveal} title="Click for version info">
+                  {fl.text}
+                </div>
+              ) : null}
             </div>
           </div>
+          {tab === "gallery" ? (
+            <div className="glm-hero-icons">
+              <button type="button" className="glm-iconbtn glm-iconbtn-gold" title="Folio of Honors"
+                onClick={openFolio}><Icon name="folio" /></button>
+              <button type="button" className="glm-iconbtn glm-iconbtn-teal" title={"The Loom — video storyboard"}
+                onClick={() => openSheet("loom")}>{"▮"}</button>
+              <button type="button" className="glm-iconbtn glm-iconbtn-lav" title="More"
+                style={{ position: "relative" }} onClick={() => openSheet("menu")}>
+                <Icon name="menu" title="More" />
+                {/* RYPc: the Menu door carries the inbox's unread badge (lavender count). Activity
+                    lives in the Menu now, so a running job shows as the dot on this door whenever
+                    there is no unread count on it. */}
+                <MenuBadge st={inboxSt} />
+                {jobsRunning && !(inboxSt && inboxSt.count) ? <span className="glm-iconbtn-badge" aria-hidden="true" /> : null}
+              </button>
+            </div>
+          ) : (
+            <div className="glm-hero-end">
+              {saver.active ? <span className="glm-saverchip" title="Data saver is on">{"◐"} Saver</span> : null}
+              <a className="glm-hero-credits" href="https://pixai.art/en/membership/credit-packs"
+                target="_blank" rel="noopener noreferrer">
+                {"✦"} {credits}
+              </a>
+            </div>
+          )}
         </div>
-        <a className="glm-hero-credits" href="https://pixai.art/en/membership/credit-packs"
-          target="_blank" rel="noopener noreferrer">
-          ✦ {credits}
-        </a>
-        {account && Number(account.claim_credits) > 0 ? (
-          <button type="button" className="glm-hero-claim" onClick={claimModal.claim}
-            disabled={claimModal.claiming}>
-            <i className="glm-claimribbon" aria-hidden="true" /> {claimModal.claiming ? "claiming…" : "+" + Number(account.claim_credits).toLocaleString() + " claim"}
-          </button>
+        {tab === "gallery" ? (
+          <div className="glm-hero-row glm-hero-row2">
+            <div className="glm-hero-stats">
+              {saver.active ? <span className="glm-saverchip" title="Data saver is on">{"◐"} Saver</span> : null}
+              <span><b>{Number(stats.images || 0).toLocaleString()}</b> img</span>
+              <span><b>{Number(stats.videos || 0).toLocaleString()}</b> vid</span>
+              <span><b>{Number(stats.collections || 0).toLocaleString()}</b> coll</span>
+            </div>
+            <div className="glm-hero-end">
+              {account && Number(account.claim_credits) > 0 ? (
+                <button type="button" className="glm-hero-claim" onClick={claimModal.claim}
+                  disabled={claimModal.claiming}>
+                  <i className="glm-claimribbon" aria-hidden="true" /> {claimModal.claiming ? "claiming…" : "+" + Number(account.claim_credits).toLocaleString() + " claim"}
+                </button>
+              ) : null}
+              <a className="glm-hero-credits" href="https://pixai.art/en/membership/credit-packs"
+                target="_blank" rel="noopener noreferrer">
+                {"✦"} {credits}
+              </a>
+            </div>
+          </div>
         ) : null}
       </header>
 
@@ -1431,10 +1575,27 @@ export default function AppMobile({ boot }) {
         )}
         {tab === "create" && (
           <CreateMobile account={account} costRef={costRef} editCostRef={editCostRef}
-            cmode={cmode} setCmode={setCmode} edit={edit} {...gen} />
+            cmode={cmode} setCmode={setCmode} edit={edit} {...gen}
+            section={createSection} setSection={setCreateSection} />
         )}
         {tab === "control" && (
-          <ControlMobile account={account} brandRequest={brandRequest} />
+          <ControlMobile account={account} brandRequest={brandRequest}
+            section={ctlSection} setSection={setCtlSection}
+            csrf={boot.csrf || ""} onDuplicatesResolved={afterDuplicatesResolved}
+            health={
+              /* Collection Health, as the Control tab's Health section (look pick B: "Health
+                 holds the counts and storage"). The same screen body the Menu used to push. */
+              <HealthMobile
+                onModelFilter={(m) => filterFromHealth({ model: m })}
+                onTagFilter={(t) => filterFromHealth({ tag: t })}
+                onLoraFilter={(l) => filterFromHealth({ lora: l })}
+                onStoragePick={(f) => filterFromHealth({ ...ADV_DEFAULTS, ...storageFilterPatch(f) })}
+                onOpenImport={() => openScreenKey("import")}
+                boot={boot}
+                onDuplicatesResolved={afterDuplicatesResolved}
+                onOpenDetails={openDetails}
+              />
+            } />
         )}
 
         {/* VideoMode, lifted here (see header comment) so it survives a
@@ -1482,18 +1643,6 @@ export default function AppMobile({ boot }) {
                   onClick={(e) => { e.stopPropagation(); setOrderFor(c.name); }}>{"⇅ Order"}</button>
               )} />
           ))}
-          {screen === "health" && (
-            <HealthMobile
-              onModelFilter={(m) => filterFromHealth({ model: m })}
-              onTagFilter={(t) => filterFromHealth({ tag: t })}
-              onLoraFilter={(l) => filterFromHealth({ lora: l })}
-              onStoragePick={(f) => filterFromHealth({ ...ADV_DEFAULTS, ...storageFilterPatch(f) })}
-              onOpenImport={() => openScreenKey("import")}
-              boot={boot}
-              onDuplicatesResolved={afterDuplicatesResolved}
-              onOpenDetails={openDetails}
-            />
-          )}
           {screen === "import" && <ImportMobile collections={collections} onImported={afterImported} />}
           {screen === "contests" && (
             <ContestsMobile onEnter={(c) => openContestEntry(c, "")}
@@ -1678,25 +1827,67 @@ export default function AppMobile({ boot }) {
         </div>
       </MobileSheet>
 
-      <MobileSheet open={sheet === "menu"} closing={closing} onClose={closeSheet} title="Menu">
-        <div className="glm-menu-list">
-          {/* RYPc: Inbox and Gift box are the Menu's first two rows when a PixAI account is
-              linked; each opens its own full-height sheet. */}
+      <MobileSheet open={sheet === "menu"} closing={closing} onClose={closeSheet}
+        title={
+          <span className="glm-menu-title">
+            <span>Menu</span>
+            <span style={{ flex: 1 }} />
+            {sheet === "menu" ? <MenuVigil /> : null}
+          </span>
+        }>
+        {/* The grid of cards (look pick B; see MENU_CARDS above for what moved and why), then
+            Log Out as the one plain row under it. */}
+        <div className="glm-menu-list glm-menu-grid">
+          {MENU_CARDS.map((mi) => (
+            <MenuCard key={mi.label} label={mi.label} sub={mi.sub(stats)}
+              onClick={() => openScreen(mi.screen)} />
+          ))}
+          {/* RYPc: Inbox and Gift box when a PixAI account is linked; each opens its own
+              full-height sheet, and each card keeps its picture and its line. */}
           {account && !account.error && account.credits != null ? (
-            <MenuInboxRows st={inboxSt} account={account}
+            <MenuInboxRows cards st={inboxSt} account={account}
               onInbox={() => openSheet("inbox")} onGifts={() => openSheet("gifts")} />
           ) : null}
-          {MENU_ITEMS.map((mi) => (
-            <button key={mi.label} type="button" className="glm-menu-item"
-              onClick={() => openScreen(mi.screen)}>
-              <span className="glm-menu-icon" aria-hidden="true">{mi.icon}</span>{mi.label}
-            </button>
+          {MENU_CARDS_AFTER.map((mi) => (
+            <MenuCard key={mi.label} label={mi.label} sub={mi.sub(stats)}
+              onClick={() => openScreen(mi.screen)} />
           ))}
-          <button type="button" className="glm-menu-item" onClick={logOut}>
-            <span className="glm-menu-icon" aria-hidden="true">⏻</span>Log Out
-          </button>
+          {/* Activity: the generations and syncs this app is following (it was the header's
+              round button until the header went to three). */}
+          <MenuCard label="Activity" title="Activity" dot={jobsRunning > 0}
+            sub={jobsRunning ? jobsRunning + " running"
+              : jobsState.jobs.length ? jobsState.jobs.length + " recent" : "generations and syncs"}
+            onClick={() => openSheet("activity")} />
+          {/* The guide (it was the header's "?"): Help on the Gallery's page, where the Menu opens
+              from. Create's and Control's pages are in the guide's own contents. */}
+          <MenuCard label="Guide" title={"Guide — how this screen works"} sub="how it works"
+            onClick={() => { openSheet(null); openHelp({ surface: "gallery" }); }} />
         </div>
+        <button type="button" className="glm-menu-item glm-menu-logout" onClick={logOut}>
+          <span>Log Out</span><span className="glm-menu-chev" aria-hidden="true">{"›"}</span>
+        </button>
       </MobileSheet>
     </div>
   );
+}
+
+/* One card of the Menu's grid: the name, then one quiet line. `.glm-menu-item` stays on it so a
+   card is still "a Menu entry" to everything that looks for one. */
+function MenuCard({ label, sub, title, dot, onClick }) {
+  return (
+    <button type="button" className="glm-menu-item glm-menu-card" title={title || undefined} onClick={onClick}>
+      <span className="glm-menu-card-h">
+        {label}{dot ? <span className="glm-menu-card-dot" aria-hidden="true" /> : null}
+      </span>
+      <span className="glm-menu-card-s">{sub}</span>
+    </button>
+  );
+}
+
+/* The Vigil on the Menu's title row (the board draws it there), only while the account has it
+   switched on -- the same chip the row above the tab bar draws. Mounted only while the Menu is
+   open. */
+function MenuVigil() {
+  const g = useGoalChips();
+  return g.vigil && !g.hidden ? <VigilChip vigil={g.vigil} /> : null;
 }

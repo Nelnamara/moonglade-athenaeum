@@ -152,8 +152,9 @@ test("B2: ◈ is the mark on every door -- tile hover, right-click row, lightbox
 
 // ---------------------------------------------------------------- D. Publish's metal
 
-test("D: the Lightbox's Publish chip carries the app's metal class (Lightbox.dc.html:357 btn(..., true))", () => {
-  assert.match(lightbox, /className="lbx-chip lbx-chip-metal" title="Publish this image to PixAI"/);
+test("D: the Lightbox's metal chip is Download since the 2026-11-19 viewer-bar pick (round 2, topic 2 B); Publish is plain", () => {
+  assert.match(lightbox, /className="lbx-chip lbx-chip-metal lbx-download"/);
+  assert.match(lightbox, /className="lbx-chip" title="Publish this image to PixAI"/);
   // the class is the existing shared recipe, not a fresh duplicate
   const lbxCss = src("styles/lightbox.css");
   assert.match(lbxCss, /\.lbx-chip-metal, \.lbx-chip-metal:hover \{/);

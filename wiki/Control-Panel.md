@@ -356,10 +356,16 @@ it just stay sharp. It applies the moment you click it, including to the Panel y
 it in, and it is remembered for next time on this device only. Turning it back **On**
 restores the same blur — nothing else about how popups look or open changes either way.
 
-The same switch is on the phone's **Control** screen.
+The same switch is on the phone's **Control** screen, in its **This phone** section.
 
-**Library paging** (phone). The first setting on the phone's **Control** screen, right under **At a
-glance**: **Pages** (the default — **‹ Prev · Next ›**, a page at a time) or **Continuous** (the library
+**On a phone** the Control tab is in three sections. **Jobs** opens first: **↻ Sync now** and
+**Tidy** (the duplicates, the same review Health opens) side by side, when Sync last ran, then the
+job console — each scheduled job with how often it runs and whether it is on, Sync once, read
+the way the desktop Panel reads it — and under it the Pipelines and the Ledger (with the standing order), Recover a task by ID, the Live Mirror with Restart and Stop, and Accounts.
+**Health** has At a glance and [Collection Health](Health), Trash and the two downloads. **This
+phone** has Library paging, Data saver and About, then the blur switch, Branding and the skins.
+
+**Library paging** (phone). The first row of the phone's **Control → This phone** section: **Pages** (the default — **‹ Prev · Next ›**, a page at a time) or **Continuous** (the library
 loads as you scroll). It is the same choice the gallery's long-press sheet makes (see [Gallery](Gallery)),
 kept in the phone's browser like the blur. Tapping either one here also clears the small dot under the
 gallery's ▦ ▭ keys, the same as the long-press does.
@@ -524,8 +530,8 @@ changes of the release you are running, and a short *Under the hood* line for th
 it and **‹ This version** to come back. Along the bottom, **Guide** opens the
 [in-app guide](Home#help-inside-the-app), **Report an issue ↗** opens the project's issue
 page and **Releases ↗** its release notes. Up to date, the stamp shows the build (for
-example `v3.15.0 · 1a2b3c4`) and opens the same card. On a phone it is **Control → About
-Moonglade**, under the update row, and the guide's last page is About too.
+example `v3.15.0 · 1a2b3c4`) and opens the same card. On a phone it is **Control → This phone →
+About Moonglade**, and the guide's last page is About too.
 
 **An update that worked says so when the app comes back.** Pressing **Update now** ends in
 the page reloading into the new version, and a small note appears in the corner on the way

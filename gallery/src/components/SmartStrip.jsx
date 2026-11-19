@@ -21,7 +21,7 @@ import "../styles/curation.css";
 export default function SmartStrip({ name, query, editing, draft, canSave, onRefresh, onEdit, onSaveOver, onSaveNew, onSaveDraft, onCancel }) {
   if (editing) {
     return (
-      <div className="mgcu-strip" role="status">
+      <div className="mgcu-strip" role="status" data-phone-top="">
         <span className="mgcu-strip-name"><Icon name="collection" /> Editing {"“"}{editing}{"”"}</span>
         <span className="mgcu-strip-q">Change the search, then save it over the collection.</span>
         <button type="button" className="mgcu-btn primary" disabled={!canSave} onClick={onSaveOver}>Save over {"“"}{editing}{"”"}</button>
@@ -32,7 +32,7 @@ export default function SmartStrip({ name, query, editing, draft, canSave, onRef
   }
   if (name) {
     return (
-      <div className="mgcu-strip">
+      <div className="mgcu-strip" data-phone-top="">
         <span className="mgcu-strip-name"><Icon name="collection" /> {name} {"⟳"}</span>
         <code className="mgcu-strip-q">{smartQueryLine(query)}</code>
         <button type="button" className="mgcu-btn" title="Run the saved query again" onClick={onRefresh}>{"⟳"} Refresh</button>
@@ -41,7 +41,7 @@ export default function SmartStrip({ name, query, editing, draft, canSave, onRef
     );
   }
   return (
-    <div className="mgcu-strip">
+    <div className="mgcu-strip" data-phone-top="">
       <code className="mgcu-strip-q"><Icon name="search" /> {draft}</code>
       <button type="button" className="mgcu-btn primary" title="Save this search as a live collection: it stores the search, never a list of pictures"
         onClick={onSaveDraft}>Save as smart collection {"⟳"}</button>

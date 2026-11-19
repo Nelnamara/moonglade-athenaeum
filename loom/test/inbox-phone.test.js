@@ -33,7 +33,8 @@ describe("the Menu door and its rows", () => {
   test("the Menu door carries the inbox's badge: unread plus pending gifts", () => {
     const door = app.indexOf('title="More"');
     const badge = app.indexOf("<MenuBadge st={inboxSt} />");
-    assert.ok(door > 0 && badge > door && badge - door < 400, "the badge sits inside the Menu button");
+    // (the door's own comment grew with the 2026-11-19 layout: Activity's dot rides it too)
+    assert.ok(door > 0 && badge > door && badge - door < 600, "the badge sits inside the Menu button");
     assert.match(fnBody(sheets, "MenuBadge"), /badgeText\(st\.count\)/);
   });
 
@@ -44,17 +45,21 @@ describe("the Menu door and its rows", () => {
 
   test("the Inbox row draws the mailbox at the Gift box row's 18 px, in place of ✉", () => {
     const rows = fnBody(sheets, "MenuInboxRows");
-    assert.match(rows, /<span className="glm-menu-icon" aria-hidden="true"><InboxIcon small \/><\/span>Inbox/);
-    assert.match(rows, /<span className="glm-menu-icon" aria-hidden="true"><span className="ib-giftic small" \/><\/span>Gift box/);
+    // both forms: the row, and the card the 2026-11-19 Menu grid draws (look pick B)
+    assert.equal(rows.match(/<span className="glm-menu-icon" aria-hidden="true"><InboxIcon small \/><\/span>Inbox/g).length, 2);
+    assert.equal(rows.match(/<span className="glm-menu-icon" aria-hidden="true"><span className="ib-giftic small" \/><\/span>Gift box/g).length, 2);
     assert.ok(!/✉/.test(rows));
   });
 
-  test("Inbox and Gift box are the Menu's first two rows, with a linked account", () => {
+  test("Inbox and Gift box are two cards of the Menu's grid, in the board's place, with a linked account", () => {
+    /* RYPc put them first; the 2026-11-19 layout (look pick B, the owner's pick from the look board)
+       draws the Menu as a grid of cards with Inbox and Gift box after Train a LoRA and before Import. */
     const menu = app.indexOf('<MobileSheet open={sheet === "menu"}');
-    const rows = app.indexOf("<MenuInboxRows ", menu);
-    const items = app.indexOf("MENU_ITEMS.map", menu);
-    assert.ok(menu > 0 && rows > menu && items > rows, "the two rows come before every other Menu row");
-    assert.match(app, /\{account && !account\.error && account\.credits != null \? \(\n\s*<MenuInboxRows/);
+    const first = app.indexOf("MENU_CARDS.map", menu);
+    const rows = app.indexOf("<MenuInboxRows cards ", menu);
+    const after = app.indexOf("MENU_CARDS_AFTER.map", menu);
+    assert.ok(menu > 0 && first > menu && rows > first && after > rows, "My Art .. Train a LoRA, then Inbox and Gift box, then Import");
+    assert.match(app, /\{account && !account\.error && account\.credits != null \? \(\n\s*<MenuInboxRows cards/);
     assert.match(sheets, />Inbox\n/);
     assert.match(sheets, /Gift box\n/);
   });

@@ -2080,7 +2080,10 @@ def test_phone_similar_door_opens_results_and_the_token_puts_the_library_back(
     stub_code_module(monkeypatch, "similar",
                      _fake_similar_module([("101", 0.91), ("102", 0.88), ("103", 0.77)]))
 
-    page = logged_in_page(**PHONE)
+    # 390 wide and 700 tall, a smaller phone than PHONE's 844: since the 2026-11-19 layout (look
+    # pick B) the header is ~90 px instead of 172, and on the module's six rows a 390x844 library
+    # now has no scroll range at all -- this test needs a real non-zero offset to round-trip.
+    page = logged_in_page(width=PHONE["width"], height=700)
     _visit(page, "/")
     page.wait_for_selector(".glm-grid .glm-tile")
     _dismiss_any_achievement_toast(page)
@@ -2851,7 +2854,15 @@ def _board_with_a_long_brief():
 
 
 def _open_contests_from_the_control_tab(page, board):
-    """The owner's own route in: stand on Control, then the menu -> Contests.
+    """The Contests screen over a painted Control tab.
+
+    Until 2026-11-19 this was the owner's own route in: stand on Control, then the menu ->
+    Contests. Since the phone layout of that day (look pick B) the Menu's door is on the Gallery's
+    header only -- Control wears the one-row header with no round buttons -- so the route is the
+    one that still puts this screen over that tab: the menu -> Contests from the Gallery, then
+    Control on the tab bar. A pushed screen is mounted in `.glm-body` above whichever tab is
+    showing and stays up across a tab switch (AppMobile.jsx), so the screen ends up exactly where
+    the old route put it: over the Control panel, with the panel's whole range underneath.
 
     "Stand on Control" means on the Control tab as the owner sees it: its panel painted. The
     tab's frame (`.glm-tab`) is on the page from the first frame, but ControlMobile.jsx draws
@@ -2871,16 +2882,16 @@ def _open_contests_from_the_control_tab(page, board):
     page.goto("/", wait_until="domcontentloaded")
     page.wait_for_selector(".glm-body", timeout=10_000)
     _freeze_motion(page)
-    page.click('.glm-navitem:has-text("Control")')
-    page.wait_for_selector(".glm-tab", timeout=10_000)
-    # The panel itself, not its placeholder: `.ctm-statgrid` exists only once the summary has
-    # landed. A wider budget than the context's, as _login's: a slow server read is not what
-    # this test is about, and a summary that never lands still fails here, loudly.
-    page.wait_for_selector(".glm-tab .ctm-statgrid", timeout=30_000)
-    _settle(page)
     page.click('button[title="More"]')
     page.click('.glm-menu-item:has-text("Contests")')
     page.wait_for_selector(".cmb-hero", timeout=10_000)
+    page.click('.glm-navitem:has-text("Control")')
+    page.wait_for_selector(".glm-tab", timeout=10_000)
+    # The panel itself, not its placeholder: `.ctm-joblist` (the Jobs section's job console)
+    # exists only once the summary has landed. A wider budget than the context's, as _login's: a
+    # slow server read is not what this test is about, and a summary that never lands still
+    # fails here, loudly.
+    page.wait_for_selector(".glm-tab .ctm-joblist", timeout=30_000)
     _settle(page)
 
 
@@ -2962,8 +2973,9 @@ def test_the_phone_contest_detail_scrolls_itself_and_never_the_control_tab_under
     failed "this test cannot see the defect it exists for"; under 16 busy loops it did so
     in 10 of 10 runs, with the summary landing 0.6-1.9 s after the read (0 of 10 on a quiet
     machine). The page always got there; the test measured early. The open now waits for the
-    panel's "At a glance" grid (`.ctm-statgrid`), so the precondition is read on the tab as the
-    owner sees it, and it still fails, with its own message, on a tab that has no range."""
+    panel itself (since the 2026-11-19 layout, the Jobs section's job console, `.ctm-joblist`), so
+    the precondition is read on the tab as the owner sees it, and it still fails, with its own
+    message, on a tab that has no range."""
     page = logged_in_page(**MOBILE)
     _open_contests_from_the_control_tab(page, _board_with_a_long_brief())
     page.click(".cmb-hero")
@@ -4389,7 +4401,10 @@ def test_the_phone_activity_thumbnail_really_opens_the_picture(logged_in_page):
     _dismiss_any_achievement_toast(page)
     _settle(page)
 
-    page.click('button[title="Activity"]')
+    # Activity is a card in the Menu since the 2026-11-19 layout (look pick B: the header keeps
+    # three round buttons -- Folio, Loom, Menu)
+    page.click('button[title="More"]')
+    page.click('.glm-menu-card[title="Activity"]')
     page.wait_for_selector(".glm-sheet .at-row")
     thumb = page.locator(".glm-sheet .at-row .at-thumb")
     assert thumb.count() == 1, (
@@ -4569,15 +4584,17 @@ def test_the_pager_lands_each_page_at_its_top(
         assert _body_top(page) == 400, (
             "the library scroller would not take a test offset -- nothing below measures "
             "anything")
-        # ...and from there the pill row really is scrolled away, which is the complaint.
+        # ...and from there the first rows of pictures really are scrolled away, which is the
+        # complaint. (Since the 2026-11-19 layout, look pick B, the search field and the media
+        # pills are sticky and never leave; what goes is the header above them, and the pictures.)
         away = page.evaluate("""() => {
             const body = document.querySelector('.glm-body').getBoundingClientRect();
-            const pills = document.querySelector('.glm-bar2').getBoundingClientRect();
-            return pills.bottom <= body.top;
+            const first = document.querySelector('.glm-grid .glm-tile').getBoundingClientRect();
+            return first.bottom <= body.top + 120;
         }""")
-        assert away, (
-            "the media pills are still on screen at 400px down, so 'the pill row scrolled "
-            "away' is not the state this test starts from")
+        assert away and page.locator(".glm-hero.away").count() == 1, (
+            "the first row of pictures is still on screen at 400px down, so 'the page's top "
+            "scrolled away' is not the state this test starts from")
 
         page.click('.glm-pager button:has-text("Next")')
         _phone_on_page(page, 2)
@@ -4587,6 +4604,7 @@ def test_the_pager_lands_each_page_at_its_top(
         assert landed == 0, (
             "page 2 opened {:.0f}px down -- the reader lands mid-page on a page they have "
             "not read".format(landed))
+        page.wait_for_selector(".glm-hero:not(.away)")   # at the top of a page the header is back
         geo = page.evaluate("""() => {
             const body = document.querySelector('.glm-body').getBoundingClientRect();
             const bar = document.querySelector('.glm-bar').getBoundingClientRect();
@@ -4759,7 +4777,10 @@ def test_each_tab_keeps_its_own_scroll(
 
         # Control is the tab deep enough to hold a place of its own (see the docstring).
         page.click('.glm-navitem:has-text("Control")')
-        page.wait_for_selector(".ctm-statcard", timeout=10_000)
+        page.wait_for_selector(".ctm-sections .cm-segbtn.on", timeout=10_000)
+        # the panel as painted: the job console has read the schedule. Set before that, the offset
+        # is moved by the browser's scroll anchoring when the console's rows arrive above it.
+        page.wait_for_selector(".ctm-joblist .ctm-jobrow", timeout=10_000)
         _settle(page)
         arrived = page.evaluate(_BODY_SCROLL_JS)
         assert arrived["top"] == 0, (
@@ -4781,7 +4802,7 @@ def test_each_tab_keeps_its_own_scroll(
 
         # ...and Control kept its own, separately.
         page.click('.glm-navitem:has-text("Control")')
-        page.wait_for_selector(".ctm-statcard")
+        page.wait_for_selector(".ctm-sections .cm-segbtn.on")
         _settle(page)
         assert _body_top(page) == 300, (
             "Control came back at {:.0f} instead of the 300 it was left at"
@@ -4793,6 +4814,14 @@ def test_each_tab_keeps_its_own_scroll(
         page.click('.glm-navitem:has-text("Gallery")')
         page.wait_for_selector(".glm-grid .glm-tile")
         _settle(page)
+        # 500 down, the Gallery's header has slid away (look pick B, 2026-11-19), and the Menu's
+        # door with it: a short pull back up brings it back, as a thumb would. That pull is the
+        # library's place from here on.
+        page.evaluate("() => { const b = document.querySelector('.glm-body'); b.scrollTop = b.scrollTop - 40; }")
+        page.wait_for_selector(".glm-hero:not(.away)")
+        _settle(page)
+        place = _body_top(page)
+        assert place == 460, place
         page.click('button[title="More"]')
         page.click('.glm-menu-item:has-text("My Art")')
         page.wait_for_selector(".glm-screen")
@@ -4805,7 +4834,7 @@ def test_each_tab_keeps_its_own_scroll(
         page.click(".glm-screen-back")
         page.wait_for_selector(".glm-screen", state="detached")
         _settle(page)
-        assert _body_top(page) == 500, (
+        assert _body_top(page) == place, (
             "a tab round trip UNDER an open screen overwrote the library's place with the "
             "parked 0: it came back at {:.0f}".format(_body_top(page)))
     finally:
@@ -5440,6 +5469,7 @@ def test_phone_lora_sheet_pages_past_its_first_24_and_confirm_closes_it(logged_i
     _visit(page, "/")
     _settle(page)
     page.click("button:has-text('Create')")
+    _cm_section(page, "Model")   # the LoRA row is in the Model section (look pick B, 2026-11-19)
     page.wait_for_selector(".cm-addlora")
     page.click(".cm-addlora")
     page.wait_for_selector(".mfly.open .mg-card")
@@ -5506,6 +5536,7 @@ def _sheet_geometry(page):
 
 def _open_phone_lora_sheet(page):
     page.click("button:has-text('Create')")
+    _cm_section(page, "Model")   # the LoRA row is in the Model section (look pick B, 2026-11-19)
     page.wait_for_selector(".cm-addlora")
     page.click(".cm-addlora")
     page.wait_for_selector(".mfly.open .mg-card")
@@ -7064,6 +7095,36 @@ def test_the_dock_opens_one_confirm_for_a_run_and_cancel_sends_nothing(logged_in
     assert [u for u in posts if u.endswith("/api/generate/plan")], "the confirm is the server's quote"
 
 
+def _dismiss_corner_toasts(page):
+    """Put away every corner notice (#mg-toasts) with its own x, as a thumb would. On the phone the
+    stack sits just under the top chrome (2026-11-19), so a notice the run itself raised (the update
+    receipt, which stays until dismissed, or an earn) can lie over the first row of a section."""
+    for _ in range(6):
+        x = page.locator("#mg-toasts .mg-toast:not(.out) .mt-x")
+        if not x.count():
+            return
+        x.first.click()
+        page.wait_for_timeout(400)
+
+
+def _cm_section(page, name):
+    """Show one of the phone Create tab's sections (Prompt, Model, Frame, Recipes, More -- look
+    pick B, 2026-11-19) by its chip, the way a thumb does."""
+    page.wait_for_selector(".cm-secchips")
+    page.click(".cm-secchip:has-text('%s')" % name)
+    page.wait_for_selector(".cm-secchip.on:has-text('%s')" % name)
+    _settle(page)
+
+
+def _ctm_section(page, label):
+    """Show one of the phone Control tab's sections (Jobs, Health, This phone -- look pick B,
+    2026-11-19) by its segment, the way a thumb does."""
+    page.wait_for_selector(".ctm-sections")
+    page.click(".ctm-sections .cm-segbtn:has-text('%s')" % label)
+    page.wait_for_selector(".ctm-sections .cm-segbtn.on:has-text('%s')" % label)
+    _settle(page)
+
+
 def test_the_phone_create_tab_confirms_a_batch_before_it_sends(logged_in_page, monkeypatch):
     """Phone 390x844: a plain batch x2 on the Create tab opens the same confirm (one task of 2
     images at the server's price), on screen and tappable; Cancel sends nothing."""
@@ -7073,12 +7134,16 @@ def test_the_phone_create_tab_confirms_a_batch_before_it_sends(logged_in_page, m
     _visit(page, "/")
     _settle(page)
     page.click("button:has-text('Create')")
-    page.wait_for_selector(".cm-modelrow")
+    # Create is in sections since the 2026-11-19 layout (look pick B): the model row is in Model,
+    # the prompt in Prompt and the Advanced door in More; Generate is in the pinned bar on all three
+    _cm_section(page, "Model")
     page.click(".cm-modelrow")
     page.wait_for_selector(".mfly.open .mg-card")
     page.locator(".mfly.open .mg-card").first.click()
     page.wait_for_function("() => !document.querySelector('.mfly.open')", timeout=5000)
+    _cm_section(page, "Prompt")
     page.fill("textarea.cm-ta", "1girl, moonlit glade")
+    _cm_section(page, "More")
     page.click(".cm-advrow")
     page.wait_for_selector(".glm-screen .cm-chip")
     page.locator(".glm-screen .cm-chiprow").filter(has_text="4").locator("button:has-text('2')").last.click()
@@ -7226,10 +7291,11 @@ def test_the_dock_keeps_a_default_negative_last_presets_and_quick_picks_on_the_a
 
 def test_the_phone_create_tab_has_last_presets_quick_picks_and_no_matrix_setup(
         logged_in_page, render_server, monkeypatch):
-    """Phone 390x844. ↺ Last and Presets are two chips above the prompt; the quick picks are ONE
-    scrolling row of 36 px chips; Presets opens a sheet on screen; the { } key inserts a variable
+    """Phone 390x844. ↺ Last and Presets are two chips in one row with { } and Lists under the
+    prompt (the Prompt section, look pick B, 2026-11-19); the quick picks are ONE scrolling row of
+    36 px chips (the Model section); Presets opens a sheet on screen; the { } key inserts a variable
     and Lists opens the lists sheet; a template prompt shows the tint and Random's row WITHOUT a
-    Matrix switch; Create -> Advanced carries the default negative row."""
+    Matrix switch; Create -> More -> Advanced carries the default negative row."""
     _fake_unlimited_pixai(monkeypatch)
     _seed_power_account(render_server.root, extra_models=5)
     try:
@@ -7241,22 +7307,28 @@ def test_the_phone_create_tab_has_last_presets_quick_picks_and_no_matrix_setup(
         _settle(page)
         page.click("button:has-text('Create')")
         page.wait_for_selector(".pm-chips")
-        page.wait_for_selector(".pm-quick .pm-chip")
         _settle(page)
         assert _power_writes(prefs_posts) == []
+        tools = page.evaluate("""() => {
+            const row = document.querySelector('.cm-prompttools');
+            const ta = document.querySelector('textarea.cm-ta').getBoundingClientRect().bottom;
+            const tops = [...row.querySelectorAll('.pm-chip, .pm-key')].map(x => Math.round(x.getBoundingClientRect().top));
+            return {under: row.getBoundingClientRect().top >= ta, oneRow: new Set(tops).size === 1,
+                    labels: [...row.querySelectorAll('.pm-chip, .pm-key')].map(x => x.innerText)};
+        }""")
+        assert tools["under"] and tools["oneRow"], tools
+        assert [x.replace("↺ ", "") for x in tools["labels"]] == ["Last", "Presets", "{ }", "Lists"], tools
+        _cm_section(page, "Model")
+        page.wait_for_selector(".pm-quick .pm-chip")
         chips = page.evaluate("""() => {
             const q = document.querySelector('.pm-quick');
             const c = [...q.querySelectorAll('.pm-chip')];
-            const top = document.querySelector('.pm-chips').getBoundingClientRect().bottom;
-            const ta = document.querySelector('textarea.cm-ta').getBoundingClientRect().top;
             return {h: c.map(x => Math.round(x.getBoundingClientRect().height)),
-                    ox: getComputedStyle(q).overflowX, sw: q.scrollWidth, cw: q.clientWidth,
-                    above: top <= ta, n: c.length,
-                    labels: [...document.querySelectorAll('.pm-chips .pm-chip')].map(x => x.innerText)};
+                    ox: getComputedStyle(q).overflowX, sw: q.scrollWidth, cw: q.clientWidth, n: c.length};
         }""")
         assert set(chips["h"]) == {36}, chips
         assert chips["ox"] == "auto" and chips["sw"] > chips["cw"], "one row that scrolls sideways: %r" % chips
-        assert chips["above"] and [x.replace("↺ ", "") for x in chips["labels"]] == ["Last", "Presets"], chips
+        _cm_section(page, "Prompt")
         page.click(".pm-chip:has-text('Presets')")
         page.wait_for_selector(".glm-sheet .mgpow-panel")
         _settle(page)
@@ -7269,8 +7341,10 @@ def test_the_phone_create_tab_has_last_presets_quick_picks_and_no_matrix_setup(
         page.click(".glm-scrim")
         page.wait_for_selector(".glm-sheet", state="detached")
 
+        _cm_section(page, "Model")
         page.click(".pm-quick .pm-chip:has-text('Tsubaki.3')")
         page.wait_for_function("() => document.querySelector('.cm-modelname') && document.querySelector('.cm-modelname').innerText.includes('Tsubaki.3')")
+        _cm_section(page, "Prompt")
         page.fill("textarea.cm-ta", "1girl")
         page.click(".pm-key")
         assert page.input_value("textarea.cm-ta") == "1girl{a|b}", "the { } key inserts a variable at the caret"
@@ -7285,6 +7359,8 @@ def test_the_phone_create_tab_has_last_presets_quick_picks_and_no_matrix_setup(
         page.click(".glm-scrim")
         page.wait_for_selector(".glm-sheet", state="detached")
 
+        _cm_section(page, "More")
+        _dismiss_corner_toasts(page)   # the Advanced row is the More section's first row
         page.click(".cm-advrow")
         page.wait_for_selector(".glm-screen .cm-subhead")
         default = page.locator(".glm-screen .pm-tools .mgpow-default")
@@ -7993,6 +8069,7 @@ def test_data_saver_auto_follows_the_connection_and_says_so_where_it_cannot_tell
         assert (page.locator(".glm-saverchip").count() == 1) is expect_on
         assert [k for k in page.evaluate("window.__qWrites") if k == "mg_phone_saver"] == []
         page.click(".glm-navitem >> nth=2")
+        _ctm_section(page, "This phone")   # Data saver is in This phone (look pick B, 2026-11-19)
         page.wait_for_selector(".ctm-saver")
         assert sub in page.locator(".ctm-saver-title span").inner_text()
         assert page.locator(".ctm-saver-modes button.on").inner_text() == "Auto on metered"
@@ -8008,6 +8085,7 @@ def test_the_control_row_sets_the_saver_mode_and_a_tap_is_the_only_write(
     try:
         _q_open(page)
         page.click(".glm-navitem >> nth=2")
+        _ctm_section(page, "This phone")   # Data saver is in This phone (look pick B, 2026-11-19)
         page.wait_for_selector(".ctm-saver")
         page.locator(".ctm-saver").scroll_into_view_if_needed()
         # (tapping the tab bar LEAVES the gallery, which is when the marker is written; Control itself
@@ -8144,7 +8222,13 @@ def test_pull_to_refresh_on_my_art_re_reads_the_list_and_calls_no_sync(
         first = len(items)
         assert first >= 1
         _settle(page)
-        release = _q_touch_drag(page, 195, 300, 450)
+        # The pull starts where it always has on the screen itself -- 78 px into the My Art body,
+        # which was y 300 under the 172 px banner -- and runs the same 150 px. Since the 2026-11-19
+        # layout (look pick B) the header is ~90 px, so the same spot is higher on the glass; a
+        # fixed y 300 now lands ~157 px into the body, on a different part of the screen, and that
+        # pull did not arm. The gesture under test is the same one, started where it was.
+        y0 = round(page.evaluate("() => document.querySelector('.glm-screen-body').getBoundingClientRect().top")) + 78
+        release = _q_touch_drag(page, 195, y0, y0 + 150)
         _settle(page)
         assert page.evaluate(_Q_PULL_STATE_JS)["label"] == "release to refresh"
         release()
@@ -9147,6 +9231,7 @@ def test_the_phone_layout_keys_long_press_opens_layout_and_paging_and_a_tap_stil
 
         # Control's row mirrors the same value, and sets it
         page.click(".glm-navitem:has-text('Control')")
+        _ctm_section(page, "This phone")   # Library paging is in This phone (look pick B, 2026-11-19)
         page.wait_for_selector(".ctm-paging")
         assert page.locator(".ctm-paging button[aria-checked=true]").inner_text() == "Continuous"
         page.click(".ctm-paging button:has-text('Pages')")
@@ -9934,8 +10019,12 @@ def _rf_phone(logged_in_page, init=None, **routes):
     return page, posts
 
 
+# The Menu's Inbox and Gift box entries, found by their names: since the 2026-11-19 layout (look
+# pick B) they are two cards of the Menu's grid, in the board's order, no longer its first two rows.
 _RF_ROW_ICON_JS = """() => {
-  const rows = [...document.querySelectorAll('.glm-menu-list .glm-menu-item')];
+  const all = [...document.querySelectorAll('.glm-menu-list .glm-menu-item')];
+  const named = (n) => all.find((b) => (b.querySelector('.glm-menu-card-h') || b).textContent.trim().endsWith(n));
+  const rows = [named('Inbox'), named('Gift box')];
   const box = (el) => { if (!el) return null; const b = el.getBoundingClientRect();
     return {w: Math.round(b.width), h: Math.round(b.height), bg: getComputedStyle(el).backgroundImage}; };
   return {inbox: box(rows[0].querySelector('.ib-inboxic')), gift: box(rows[1].querySelector('.ib-giftic')),
@@ -9945,8 +10034,9 @@ _RF_ROW_ICON_JS = """() => {
 
 
 def test_the_phone_inbox_sheet_has_no_gifts_and_the_gift_box_sheet_holds_them(logged_in_page):
-    """Owner's walk, ruling 1, on the phone. The Menu's first two rows stay Inbox and Gift box and the ☰
-    badge stays unread plus pending gifts; the Inbox row counts the unread. The Inbox sheet has no Gifts
+    """Owner's walk, ruling 1, on the phone. The Menu keeps its Inbox and Gift box entries (two cards of
+    its grid since the 2026-11-19 layout, look pick B) and the ☰ badge stays unread plus pending gifts;
+    the Inbox card counts the unread. The Inbox sheet has no Gifts
     tab and no gift rows; gifts live only in the Gift box sheet, beside the events and the expiring
     cards."""
     page, posts = _rf_phone(logged_in_page)
@@ -9955,8 +10045,8 @@ def test_the_phone_inbox_sheet_has_no_gifts_and_the_gift_box_sheet_holds_them(lo
     page.wait_for_selector(".glm-menu-list .glm-menu-item")
     _settle(page)
     page.wait_for_selector(".glm-menu-item .ib-inboxic.small[style*='background-image']")
-    rows = page.evaluate("() => [...document.querySelectorAll('.glm-menu-list .glm-menu-item')].slice(0, 2)"
-                         ".map((b) => b.textContent)")
+    rows = page.evaluate("() => ['Inbox', 'Gift box'].map((n) => [...document.querySelectorAll('.glm-menu-list .glm-menu-card')]"
+                         ".find((b) => b.querySelector('.glm-menu-card-h').textContent.trim().endsWith(n))).map((b) => b.textContent)")
     assert rows[0].startswith("Inbox") and rows[0].endswith("5 new ›"), rows
     assert rows[1].startswith("Gift box"), rows
     ic = page.evaluate(_RF_ROW_ICON_JS)
@@ -10051,16 +10141,18 @@ _RF_CONTROL_ORDER_JS = """() => {
   const idx = (sel) => secs.findIndex((s) => s.querySelector(sel));
   const paging = document.querySelector('.ctm-paging').getBoundingClientRect();
   const saver = document.querySelector('.ctm-saver').getBoundingClientRect();
-  return {about: idx('.mghelp-aboutrow'), glance: idx('.ctm-statgrid'), paging: idx('.ctm-paging'),
-          saver: idx('.ctm-saver'), mirror: idx('.ctm-mirror'), skins: idx('.mgcp-skinsrow'), n: secs.length,
-          pagingBottom: paging.bottom, saverTop: saver.top, vh: window.innerHeight};
+  const nav = document.querySelector('.glm-nav').getBoundingClientRect();
+  return {about: idx('.mghelp-aboutrow'), paging: idx('.ctm-paging'),
+          saver: idx('.ctm-saver'), skins: idx('.mgcp-skinsrow'), n: secs.length,
+          pagingBottom: paging.bottom, saverTop: saver.top, vh: window.innerHeight, navTop: nav.top};
 }"""
 
 
 def test_the_phone_control_screen_leads_its_settings_with_library_paging_and_data_saver(
         phone_u_server, render_browser, monkeypatch):
-    """Owner's walk, ruling 3. On the phone's Control screen, Library paging is the first settings row,
-    right under About and At a glance, with Data saver beside it: the two per-device phone choices
+    """Owner's walk, ruling 3, in the 2026-11-19 layout (look pick B: "This phone holds Library paging,
+    Data saver and About"). On the phone's Control screen, Library paging is the first row of the This
+    phone section, with Data saver beside it and About after them: the two per-device phone choices
     together, on the first screen without scrolling. The long-press hint dot under ▦ / ▭ now goes once
     the paging choice is found by either road -- a tap on Control's row counts as much as the long-press
     sheet -- and opening Control writes nothing."""
@@ -10069,15 +10161,15 @@ def test_the_phone_control_screen_leads_its_settings_with_library_paging_and_dat
         _q_open(page)
         assert page.locator(".glm-layout .glm-layout-dot").count() == 1, "the dot shows until found"
         page.click(".glm-navitem:has-text('Control')")
+        _ctm_section(page, "This phone")
         page.wait_for_selector(".ctm-paging")
         _settle(page)
         o = page.evaluate(_RF_CONTROL_ORDER_JS)
-        assert o["about"] >= 0 and o["glance"] == o["about"] + 1, o
-        assert o["paging"] == o["glance"] + 1, ("Library paging is the first settings row", o)
+        assert o["paging"] == 0, ("Library paging is This phone's first row", o)
         assert o["saver"] == o["paging"] + 1, ("Data saver sits beside it", o)
-        assert o["paging"] < o["mirror"], ("above the Live Mirror and everything after it", o)
+        assert o["about"] == o["saver"] + 1, ("About after them", o)
         assert o["skins"] < 0 or o["paging"] < o["skins"], o
-        assert o["pagingBottom"] <= o["vh"], ("on the first screen, no scrolling", o)
+        assert o["pagingBottom"] <= o["navTop"], ("on the first screen, no scrolling", o)
         writes = page.evaluate("window.__qWrites")
         assert not [k for k in writes if k.startswith("mg_phone_paging")], ("opening Control writes nothing", writes)
 
@@ -11556,6 +11648,7 @@ def test_the_phone_create_tab_says_the_price_inside_generate(logged_in_page, mon
     _visit(page, "/")
     _settle(page)
     page.click("button:has-text('Create')")
+    _cm_section(page, "Model")   # the phone layout (round 2, pick B) keeps the model row in Model
     page.wait_for_selector(".cm-modelrow")
     page.wait_for_function("() => { const s = document.querySelector('.cm-generate .mgspend-s');"
                            " return !!s && s.textContent === 'pick a model first'; }")
@@ -11566,6 +11659,7 @@ def test_the_phone_create_tab_says_the_price_inside_generate(logged_in_page, mon
     page.locator(".mfly.open .mg-card").first.click()
     page.wait_for_function("() => !document.querySelector('.mfly.open')", timeout=5000)
     page.wait_for_function("() => document.querySelector('.cm-generate').dataset.priced === '1'")
+    _cm_section(page, "Prompt")   # the prompt box lives in the Prompt section
     page.fill("textarea.cm-ta", "1girl, moonlit glade")
     page.wait_for_function("() => !document.querySelector('.cm-generate').disabled")
     page.locator(".cm-generate").scroll_into_view_if_needed()
@@ -11960,3 +12054,357 @@ def test_health_tiles_open_tidy_and_the_broken_files_list_lives_there(logged_in_
     page.wait_for_selector(".mgbf-confirm", state="detached")
     assert page.locator('[aria-label="Control Panel"]').count() == 1, (
         "Escape on the Fix all confirm closed the Panel under it")
+# ---------------------------------------------------------------------------------------------
+# THE PHONE LAYOUT, LOOK PICK B (owner, 2026-11-19: "The phone layout is utter shit and I hate it.
+# Fix it"). Pixel source: moonglade-internal design/board/LOOK_BOARD_2026-11-19_round2.html, topic
+# 3, option B -- today's header made smaller, each tab split into sections, the Menu a grid of cards.
+# Four guards, one per screen the board draws, each measured at 390x844 as a person drives it.
+# MG_PHONE_SHOTS=<folder> also saves each screen there as a PNG for a by-eye comparison with the
+# board (nothing is saved without it).
+
+def _pb_shot(page, name):
+    folder = os.environ.get("MG_PHONE_SHOTS")
+    if folder:
+        os.makedirs(folder, exist_ok=True)
+        page.screenshot(path=os.path.join(folder, name + ".png"))
+
+
+_PB_GEO_JS = """(sel) => { const el = document.querySelector(sel); if (!el) return null;
+    const r = el.getBoundingClientRect(); const cs = getComputedStyle(el);
+    return {t: r.top, b: r.bottom, l: r.left, r: r.right, h: r.height, w: r.width,
+            shown: cs.display !== 'none' && cs.visibility !== 'hidden' && r.height > 0}; }"""
+
+
+def _pb_geo(page, sel):
+    return page.evaluate(_PB_GEO_JS, sel)
+
+
+def _pb_phone(server, render_browser, monkeypatch):
+    monkeypatch.setattr(core, "_config_path", lambda: server.config_path)
+    ctx = render_browser.new_context(
+        viewport={"width": PHONE["width"], "height": PHONE["height"]},
+        device_scale_factor=1, base_url=server.base_url)
+    ctx.set_default_timeout(10_000)
+    page = ctx.new_page()
+    _rf_routes(page, account=_rf_account(social=True))
+    _login(page)
+    _visit(page, "/")
+    page.wait_for_selector(".glm-grid .glm-tile")
+    _dismiss_any_achievement_toast(page)
+    # the account has a claim waiting (the board draws its pill), so the claim card opens itself
+    # once; "Not now" puts it away and leaves the pill
+    try:
+        page.click(".mgclaim-x", timeout=3000)
+        page.wait_for_selector(".mgclaim-card", state="detached")
+    except _PlaywrightTimeout:
+        pass
+    _settle(page)
+    return ctx, page
+
+
+def test_the_phone_header_is_two_short_rows_with_three_buttons_and_slides_away_on_the_gallery(
+        paged_library_server, render_browser, monkeypatch):
+    """Look pick B, the Gallery. The header keeps the mark, the title, the counts, the claim and the
+    credits on two short rows with three round buttons (Folio, Loom, Menu); scrolled down, it slides
+    away and the search bar and the media chips stay at the top of the list; a pull back up brings
+    it back. Create and Control wear the one-row header: mark, name, credits, no round buttons."""
+    ctx, page = _pb_phone(paged_library_server, render_browser, monkeypatch)
+    try:
+        page.wait_for_selector(".glm-hero-claim")
+        _settle(page)
+        _pb_shot(page, "phone_gallery_home")
+        hero = _pb_geo(page, ".glm-hero")
+        assert hero["t"] == 0 and hero["h"] < 110, ("today's header, made smaller", hero)
+        assert page.evaluate("() => [...document.querySelectorAll('.glm-hero .glm-iconbtn')]"
+                             ".map((b) => b.title)") == [
+            "Folio of Honors", "The Loom — video storyboard", "More"], "three round buttons"
+        rows = page.evaluate("""() => [...document.querySelectorAll('.glm-hero > .glm-hero-row')].map((r) => ({
+            t: Math.round(r.getBoundingClientRect().top), text: r.innerText}))""")
+        assert len(rows) == 2 and rows[0]["t"] < rows[1]["t"], rows
+        assert "Moonglade Athenaeum" in rows[0]["text"], rows
+        assert " img" in rows[1]["text"] and "claim" in rows[1]["text"] and "46,200" in rows[1]["text"], rows
+        mark = _pb_geo(page, ".glm-hero-mark")
+        assert round(mark["w"]) == 40 and round(mark["h"]) == 40, mark
+
+        # scrolled down: the header has slid off, the search bar and the chips are at the top
+        page.evaluate("() => { document.querySelector('.glm-body').scrollTop = 600; }")
+        _settle(page)
+        page.wait_for_selector(".glm-hero.away")
+        _settle(page)
+        hero, body = _pb_geo(page, ".glm-hero"), _pb_geo(page, ".glm-body")
+        bars, pills = _pb_geo(page, ".glm-bars"), _pb_geo(page, ".glm-bar2")
+        assert hero["b"] <= 0.5 and body["t"] <= 0.5, ("the header slid away", hero, body)
+        assert abs(bars["t"] - body["t"]) < 1 and pills["t"] >= body["t"] and pills["b"] < 140, (
+            "the search bar and the media chips stay", bars, pills)
+        assert _body_top(page) >= 500, "the slide did not move the reader back up"
+        _pb_shot(page, "phone_gallery_scrolled")
+        # a pull back up brings it back
+        page.evaluate("() => { const b = document.querySelector('.glm-body'); b.scrollTop = b.scrollTop - 80; }")
+        page.wait_for_selector(".glm-hero:not(.away)")
+        _settle(page)
+        assert _pb_geo(page, ".glm-hero")["t"] == 0
+
+        # Create and Control: the one-row header
+        for tab, ready in (("Create", ".cm-secchips"), ("Control", ".ctm-sections")):
+            page.click(".glm-navitem:has-text('%s')" % tab)
+            page.wait_for_selector(ready)
+            _settle(page)
+            hero = _pb_geo(page, ".glm-hero.glm-hero-compact")
+            assert hero and hero["h"] < 56, (tab, hero)
+            assert page.locator(".glm-hero .glm-iconbtn").count() == 0, tab
+            assert page.locator(".glm-hero .glm-hero-credits").inner_text().strip() == "✦ 46,200", tab
+            assert round(_pb_geo(page, ".glm-hero-mark")["w"]) == 28, tab
+        # back on the Gallery, scrolled where it was left, the header comes back slid away
+        page.click(".glm-navitem:has-text('Gallery')")
+        page.wait_for_selector(".glm-hero.glm-hero-full")
+        _settle(page)
+        assert _body_top(page) > 400 and page.locator(".glm-hero.away").count() == 1
+    finally:
+        ctx.close()
+
+
+def test_the_phone_create_tab_is_five_sections_with_the_price_and_generate_on_the_first_screen(
+        paged_library_server, render_browser, monkeypatch):
+    """Look pick B, Create. Under Image | Edit | Video a row of section chips (Prompt, Model, Frame,
+    Recipes, More) shows one section at a time; the Prompt section is the prompt, its tools and one
+    line about the rest; the price and Generate are one bar above the tab bar on every section, on
+    the first screen; the section survives a trip to another tab."""
+    ctx, page = _pb_phone(paged_library_server, render_browser, monkeypatch)
+    try:
+        page.click(".glm-navitem:has-text('Create')")
+        page.wait_for_selector(".cm-secchips")
+        _settle(page)
+        _pb_shot(page, "phone_create")
+        assert page.locator(".cm-secchip").all_inner_texts() == ["Prompt", "Model", "Frame", "Recipes", "More"]
+        assert page.locator(".cm-secchip.on").inner_text() == "Prompt"
+        nav = _pb_geo(page, ".glm-nav")
+        ta = _pb_geo(page, "textarea.cm-ta")
+        assert ta["shown"] and ta["h"] >= 140, ("the prompt box is the Prompt section", ta)
+        assert not _pb_geo(page, ".cm-modelrow")["shown"], "the model row waits in Model"
+        summary = page.locator(".cm-secsummary").inner_text()
+        assert summary.startswith("Model · ") and "×" in summary, summary
+
+        def spend_on_screen(where):
+            bar, btn = _pb_geo(page, ".cm-spend"), _pb_geo(page, ".cm-spend .cm-generate")
+            assert bar["shown"] and bar["b"] <= nav["t"] + 0.5 and bar["t"] > 300, (where, bar, nav)
+            assert btn["r"] <= PHONE["width"] and btn["h"] >= 36, (where, btn)
+            assert page.locator(".cm-spend .cost-badge").count() == 1, where
+        spend_on_screen("Prompt")
+
+        for name, sel in (("Model", ".cm-modelrow"), ("Frame", ".cm-sizeline"), ("Recipes", ".cm-section[data-section=recipes]"),
+                          ("More", ".cm-advrow")):
+            page.click(".cm-secchip:has-text('%s')" % name)
+            _settle(page)
+            assert _pb_geo(page, sel)["shown"], name
+            assert not _pb_geo(page, "textarea.cm-ta")["shown"], name
+            spend_on_screen(name)
+            if name == "Model":
+                _pb_shot(page, "phone_create_model")
+
+        # the section is held across a tab switch
+        page.click(".cm-secchip:has-text('Model')")
+        page.click(".glm-navitem:has-text('Gallery')")
+        page.wait_for_selector(".glm-grid .glm-tile")
+        page.click(".glm-navitem:has-text('Create')")
+        page.wait_for_selector(".cm-secchips")
+        assert page.locator(".cm-secchip.on").inner_text() == "Model"
+        # Edit carries its price and its button in the same bar. The corner toasts (#mg-toasts, top
+        # 64 px, right) sit over the top of a sectioned tab now that its header is one short row;
+        # this run raises some (the update receipt among them, which stays until dismissed), so
+        # each is put away with its own ×, as a thumb would, before the tap.
+        _dismiss_any_achievement_toast(page)
+        _dismiss_corner_toasts(page)
+        page.click(".cm-tab .cm-segbtn:has-text('Edit')")
+        _settle(page)
+        # The two-line spend button (look pick round 2, topic 1 B): the action, then the price line.
+        assert page.locator(".cm-spend .cm-generate .mgspend-a").inner_text().strip() == "✦ Edit"
+        assert page.locator(".cm-secchips").count() == 0
+    finally:
+        ctx.close()
+
+
+def test_the_phone_control_tab_is_jobs_health_and_this_phone_with_sync_now_on_the_first_screen(
+        paged_library_server, render_browser, monkeypatch):
+    """Look pick B, Control. Jobs | Health | This phone; Jobs opens first with Sync now and Tidy
+    side by side on the first screen, the last run under them and the job console as a list;
+    Health holds the counts and Collection Health; This phone holds Library paging, Data saver and
+    About, in that order. Tidy opens the duplicates and the Back gesture closes it."""
+    ctx, page = _pb_phone(paged_library_server, render_browser, monkeypatch)
+    try:
+        page.click(".glm-navitem:has-text('Control')")
+        page.wait_for_selector(".ctm-sections")
+        _settle(page)
+        _pb_shot(page, "phone_control")
+        assert page.locator(".ctm-sections .cm-segbtn").all_inner_texts() == ["Jobs", "Health", "This phone"]
+        assert page.locator(".ctm-sections .cm-segbtn.on").inner_text() == "Jobs"
+        nav = _pb_geo(page, ".glm-nav")
+        sync, tidy = _pb_geo(page, ".ctm-syncnow"), _pb_geo(page, ".ctm-tidy")
+        assert sync["b"] <= nav["t"] and sync["t"] < 220, ("Sync now on the first screen", sync)
+        assert abs(sync["t"] - tidy["t"]) < 12 and tidy["l"] > sync["r"], ("Tidy beside it", sync, tidy)
+        assert page.locator(".ctm-syncnow").inner_text().strip() == "↻ Sync now"
+        assert page.locator(".ctm-lastrun").count() == 1
+        assert page.locator(".mgcp-sidehead:has-text('The job console')").count() == 1
+        # Sync is ONE row in the job console, read the way the scheduler decides who runs it
+        # (lib/livingRow.js autoSync, the desktop Panel's own one-truth fix); the standing order's
+        # own row is the Ledger's, as on the desktop
+        page.wait_for_selector(".ctm-jobrow")
+        names = page.locator(".ctm-joblist .ctm-jobrow .ctm-jobname").all_inner_texts()
+        assert len([n for n in names if "Sync" in n and "i2v" not in n]) == 1, names
+        assert page.locator(".ctm-joblist .ctm-jobrow[data-action=sync]").count() == 1, names
+        assert page.locator(".ctm-joblist:has-text('workers')").count() == 0, "the standing order is the Ledger's"
+        page.click(".ctm-jobseg .cm-segbtn:has-text('Ledger')")
+        page.wait_for_selector(".ctm-ledger .ctm-standing:has-text('Standing order')")
+        page.click(".ctm-jobseg .cm-segbtn:has-text('Pipelines')")
+        assert page.locator(".ctm-paging").count() == 0 and page.locator(".ctm-statgrid").count() == 0
+
+        page.click(".ctm-tidy")
+        page.wait_for_selector(".glm-screen[aria-label='Duplicates']")
+        page.go_back()
+        page.wait_for_selector(".glm-screen", state="detached")
+        assert page.locator(".ctm-sections").count() == 1, "Back closed Tidy and stayed in the app"
+
+        page.click(".ctm-sections .cm-segbtn:has-text('Health')")
+        page.wait_for_selector(".ctm-health .mgh-rows")
+        _settle(page)
+        _pb_shot(page, "phone_control_health")
+        assert page.locator(".mgcp-sidehead:has-text('At a glance')").count() == 1
+        assert page.locator(".ctm-syncnow").count() == 0
+
+        page.click(".ctm-sections .cm-segbtn:has-text('This phone')")
+        page.wait_for_selector(".ctm-paging")
+        _settle(page)
+        _pb_shot(page, "phone_control_this_phone")
+        order = page.evaluate("""() => { const secs = [...document.querySelectorAll('.cm-pad > .ctm-sec')];
+            const at = (sel) => secs.findIndex((s) => s.querySelector(sel));
+            return {paging: at('.ctm-paging'), saver: at('.ctm-saver'), about: at('.mghelp-aboutrow')}; }""")
+        assert 0 <= order["paging"] and order["saver"] == order["paging"] + 1 and order["about"] == order["saver"] + 1, order
+        assert _pb_geo(page, ".ctm-paging")["b"] <= nav["t"], "paging on the first screen"
+    finally:
+        ctx.close()
+
+
+def test_the_phone_menu_is_a_grid_of_cards_in_the_boards_order(logged_in_page):
+    """Look pick B, the Menu: a grid of cards two to a row, each a name and one line, in the board's
+    order, with Activity (the old header's round button) and the guide among them; Health is not a
+    card (it is Control's Health section); Log Out is the plain row under the grid. Activity opens
+    its sheet. The Gift box card draws the pack's rewards/gift.png at 18 px, as its row did; the
+    harness's branding root holds no pack, so the pack's file (MOONGLADE_PACK_ART) or a stand-in
+    PNG answers that address here."""
+    from io import BytesIO
+
+    from PIL import Image
+    page = logged_in_page(width=390, height=844, is_mobile=True, has_touch=True)
+    _rf_routes(page)
+    pack = os.environ.get("MOONGLADE_PACK_ART", "").strip()
+    pngs = {}
+    for name in ("gift", "claim"):
+        path = os.path.join(pack, "rewards", name + ".png") if pack else ""
+        if path and os.path.isfile(path):
+            with open(path, "rb") as fh:
+                pngs[name] = fh.read()
+        else:
+            buf = BytesIO()
+            Image.new("RGBA", (64, 64), (230, 170, 80, 255)).save(buf, "PNG")
+            pngs[name] = buf.getvalue()
+    asked = []
+
+    def _answer(name):
+        def handler(route):
+            asked.append(name)
+            route.fulfill(status=200, content_type="image/png", body=pngs[name])
+        return handler
+    for name in ("gift", "claim"):
+        page.route("**/branding/rewards/%s.png" % name, _answer(name))
+    _visit(page, "/")
+    page.wait_for_selector(".glm-grid .glm-tile")
+    page.wait_for_selector(".glm-iconbtn[title=More] .ib-menubadge")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+    page.click(".glm-iconbtn[title=More]")
+    page.wait_for_selector(".glm-menu-grid .glm-menu-card")
+    page.wait_for_function("() => performance.getEntriesByType('resource').some((e) => e.name.includes('/branding/rewards/gift.png'))")
+    page.wait_for_selector(".glm-menu-item .ib-inboxic.small[style*='background-image']")
+    _settle(page)
+    gift = page.evaluate("""() => { const c = [...document.querySelectorAll('.glm-menu-card')].find((b) =>
+        b.querySelector('.glm-menu-card-h').textContent.trim().endsWith('Gift box'));
+        const ic = c.querySelector('.ib-giftic.small'); const r = ic.getBoundingClientRect();
+        return {w: Math.round(r.width), h: Math.round(r.height), bg: getComputedStyle(ic).backgroundImage}; }""")
+    assert gift["w"] == 18 and gift["h"] == 18 and "/branding/rewards/gift.png" in gift["bg"], gift
+    assert "gift" in asked, "the card asked the branding route for the Gift box picture"
+    _pb_shot(page, "phone_menu")
+    cards = page.evaluate("""() => [...document.querySelectorAll('.glm-menu-grid > .glm-menu-card')].map((c) => {
+        const r = c.getBoundingClientRect();
+        return {h: c.querySelector('.glm-menu-card-h').innerText.trim(), s: c.querySelector('.glm-menu-card-s').innerText.trim(),
+                l: Math.round(r.left), t: Math.round(r.top), w: Math.round(r.width)}; })""")
+    assert [c["h"] for c in cards] == [
+        "My Art", "Collections", "Publish", "Contests", "Train a LoRA", "Inbox", "Gift box",
+        "Import", "Activity", "Guide"], cards
+    assert all(c["s"] for c in cards), ("every card has its line", cards)
+    assert len({c["l"] for c in cards}) == 2 and cards[0]["t"] == cards[1]["t"], ("two to a row", cards)
+    assert all(c["l"] >= 0 and c["l"] + c["w"] <= PHONE["width"] for c in cards), cards
+    assert next(c for c in cards if c["h"] == "Inbox")["s"] == "5 new ›"
+    assert page.locator(".glm-menu-item:has-text('Health')").count() == 0
+    logout = _pb_geo(page, ".glm-menu-logout")
+    assert logout["t"] > max(c["t"] for c in cards), "Log Out under the grid"
+
+    page.click(".glm-menu-card:has-text('Activity')")
+    page.wait_for_selector(".glm-sheet .at-empty, .glm-sheet .glm-activity-list")
+
+
+_PB_TOAST_JS = """() => {
+  const toasts = [...document.querySelectorAll('#mg-toasts .mg-toast')];
+  const half = innerHeight / 2;
+  const chrome = [...document.querySelectorAll('.glm-stage [data-phone-top]')].map((el) => el.getBoundingClientRect())
+    .filter((r) => r.height > 0 && r.bottom > 0 && r.top < half);
+  const floor = Math.max(0, ...chrome.map((r) => r.bottom));
+  // every control in the top chrome is still the topmost thing at its own centre
+  const covered = [...document.querySelectorAll('.glm-stage [data-phone-top] button, .glm-stage [data-phone-top] input')]
+    .filter((b) => { const r = b.getBoundingClientRect(); return r.width > 0 && r.bottom > 0 && r.top < half && r.left < innerWidth && r.right > 0; })
+    .filter((b) => { const r = b.getBoundingClientRect(); const x = Math.min(innerWidth - 1, Math.max(0, r.left + r.width / 2));
+      const at = document.elementFromPoint(x, r.top + r.height / 2); return !(at && (at === b || b.contains(at))); })
+    .map((b) => (b.textContent || b.title || b.placeholder || b.className).trim().slice(0, 30));
+  return {floor, tops: toasts.map((t) => t.getBoundingClientRect().top), n: toasts.length, covered};
+}"""
+
+
+def test_the_phone_toasts_sit_under_the_top_chrome_and_cover_none_of_its_controls(
+        paged_library_server, render_browser, monkeypatch):
+    """The corner toasts on the phone (2026-11-19, with look pick B). The stack used to sit at a fixed
+    64 px, made for the desktop's banner; under the phone's new short header that line ran through
+    Create's Image · Edit · Video and section chips and Control's sections, and a sticky toast held
+    them covered. On every tab -- and on the Gallery with its header slid away -- a sticky toast now
+    sits under the lowest top control on screen, and every one of those controls is still the thing
+    a tap lands on. The desktop keeps its 64 px (the variable is the phone shell's alone)."""
+    ctx, page = _pb_phone(paged_library_server, render_browser, monkeypatch)
+    try:
+        page.evaluate("() => window.Toast.show({title: 'Harness note', msg: 'stays until dismissed', sticky: true})")
+        page.wait_for_selector("#mg-toasts .mg-toast")
+        for tab, ready in (("Gallery", ".glm-bars"), ("Create", ".cm-secchips"), ("Control", ".ctm-sections")):
+            page.click(".glm-navitem:has-text('%s')" % tab)
+            page.wait_for_selector(ready)
+            if tab == "Control":
+                # the console as it is once read, with Sync now and Tidy (top controls too) above it
+                page.wait_for_selector(".ctm-jobrow")
+                assert page.locator(".ctm-syncrow[data-phone-top]").count() == 1
+            _settle(page)
+            t = page.evaluate(_PB_TOAST_JS)
+            assert t["n"] >= 1 and t["floor"] > 60, (tab, t)
+            assert all(top >= t["floor"] for top in t["tops"]), (tab, "a toast sits on the top chrome", t)
+            assert t["covered"] == [], (tab, "a top control is under a toast", t)
+            if tab == "Create":
+                _pb_shot(page, "phone_create_toast")
+            if tab == "Control":
+                _pb_shot(page, "phone_control_toast")
+        # the Gallery, scrolled: the header has gone, the toast follows the sticky search and chips up
+        page.click(".glm-navitem:has-text('Gallery')")
+        page.wait_for_selector(".glm-bars")
+        page.evaluate("() => { document.querySelector('.glm-body').scrollTop = 600; }")
+        page.wait_for_selector(".glm-hero.away")
+        _settle(page)
+        page.wait_for_function("""() => { const t = document.querySelector('#mg-toasts .mg-toast');
+            const b = document.querySelector('.glm-bars').getBoundingClientRect();
+            return t && Math.abs(t.getBoundingClientRect().top - (b.bottom + 8)) < 2; }""")
+        t = page.evaluate(_PB_TOAST_JS)
+        assert t["covered"] == [] and all(top >= t["floor"] for top in t["tops"]), t
+    finally:
+        ctx.close()

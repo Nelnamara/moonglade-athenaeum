@@ -300,10 +300,13 @@ test("10. the two new icons carry their per-surface sizes, measured not guessed"
   assert.match(iconCss, /button\.mgcp-chip \.mgico \{/);
 });
 
-test("11. the phone menu's Publish row wears the publish icon, the mark Publish wears everywhere else", () => {
-  // unslop pick 2B: Publish wears the `publish` line icon on the phone menu and on every desktop surface.
-  assert.match(appMobile, /\{ icon: <Icon name="publish" \/>, label: "Publish", screen: "publish" \}/);
+test("11. the phone menu's Publish card is named Publish and wears no other verb's mark; Publish wears its icon everywhere else", () => {
+  // unslop pick 2B: Publish wears the `publish` line icon on every surface that draws one. Since the
+  // 2026-11-19 phone layout (look pick B) the phone Menu is a grid of cards that draw a name and a
+  // line and no glyph, so the card carries no icon -- and never Edit's ✎, nor a trophy on Contests.
+  assert.match(appMobile, /\{ label: "Publish", screen: "publish", sub: \(\) => "to your profile" \}/);
   assert.doesNotMatch(appMobile, /icon: "✎"/);
+  assert.doesNotMatch(appMobile, /<Icon name="medal" \/>/);
   // the surfaces it is now agreeing with
   assert.match(app, /img\("publish", <Icon name="publish" \/>, "Publish"/);
   assert.match(details, /<Icon name="publish" \/> Publish<\/button>/);

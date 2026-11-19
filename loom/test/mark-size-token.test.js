@@ -97,8 +97,12 @@ describe("the marks' other three sites scale from the hero", () => {
   const CASES = [
     ["login.css", login, ".lgn-mark", "height", 88],
     ["login-mobile.css", loginM, ".lgnm-mark", "height", 66],
-    ["gallery-mobile.css", galleryM, ".glm-hero-mark", "width", 50],
-    ["gallery-mobile.css", galleryM, ".glm-hero-mark", "height", 50],
+    // the phone header made smaller (look pick B, 2026-11-19): the board's 40 px on the Gallery,
+    // 28 px on the one-row header Create and Control wear -- still ratios of the hero token
+    ["gallery-mobile.css", galleryM, ".glm-hero-mark", "width", 40],
+    ["gallery-mobile.css", galleryM, ".glm-hero-mark", "height", 40],
+    ["gallery-mobile.css", galleryM, ".glm-hero-compact .glm-hero-mark", "width", 28],
+    ["gallery-mobile.css", galleryM, ".glm-hero-compact .glm-hero-mark", "height", 28],
   ];
   for (const [where, css, sel, prop, px] of CASES) {
     test(`${where} ${sel} ${prop} still resolves to ${px}px`, () => {

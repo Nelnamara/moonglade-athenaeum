@@ -18,7 +18,7 @@ The **Health** overlay is your analytics dashboard over `catalog.db`:
 > no PixAI task behind them, so they can never carry a model.
 
 Reach it from **Health** in the row of destinations under the gallery's banner (on a phone,
-**Menu → Health**).
+**Control → Health**).
 
 ## Storage used
 
@@ -36,8 +36,8 @@ cutting the same pictures. Sizes are the bytes each picture's file takes on disk
 
 **Click a segment (or its name under the bar) and the gallery opens filtered to it** — the type,
 the model or the collection, starting over from the whole library. **Other** is "everything not
-named", so it doesn't open anything. On a phone the same bars are on the Health screen (Menu →
-Health) and a tap does the same.
+named", so it doesn't open anything. On a phone the same bars are in the Control tab's Health
+section (Control → Health) and a tap does the same.
 
 The bars count pictures that are in your catalog *and* on disk. A file that is in the folder but
 not in the catalog counts under **Uncataloged** below, and a catalog row whose file is gone counts
@@ -204,7 +204,7 @@ couldn't be re-downloaded.") with **Show**, and the counts measure again.
 
 #### On a phone
 
-In **Menu → Health** the **Zero-byte files**, **Missing thumbs** and **Missing files** tiles
+In **Control → Health** the **Zero-byte files**, **Missing thumbs** and **Missing files** tiles
 turn peach the same way, and a **Broken files** row under the tiles (with "12 · 1 lost ›") opens the list as its own
 screen; tapping a peach tile opens it at that kind. The chips scroll sideways, and tapping a row
 opens a sheet with what applies to it: **Re-download** or **Rebuild**, **Open details**, and

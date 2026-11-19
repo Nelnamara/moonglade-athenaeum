@@ -110,6 +110,8 @@ describe("ONE ledger, one entry per open layer, and a Back closes the topmost", 
     for (const [what, file, re] of [
       ["Control's Branding", control, /useLayerHistory\(brandOpen, closeBrand\);/],
       ["Control's Update", control, /useLayerHistory\(updScreen, closeUpdScreen\);/],
+      // look pick B (2026-11-19): Tidy, beside Sync now, pushes the Duplicates screen
+      ["Control's Tidy", control, /useLayerHistory\(tidyOpen, closeTidy\);/],
       ["the composer's Advanced", create, /useLayerHistory\(advOpen, closeAdv\);/],
       ["Health's Duplicates", health, /useLayerHistory\(dupOpen, closeDup\);/],
       // Session W (W6a): Health's Broken files screen, a drill-in beside Duplicates
@@ -125,7 +127,7 @@ describe("ONE ledger, one entry per open layer, and a Back closes the topmost", 
     assert.match(mobile, /SHEETS ARE NOT LAYERS, and stay tap-out-only/);
     /* No sheet state is on the ledger, asserted as a CLOSED list rather than by hunting
        for the word: every registration in the whole phone shell, read out of the source,
-       has to be one of the twelve layers above. A sheet quietly joining -- `sheet === "menu"`,
+       has to be one of the thirteen layers above. A sheet quietly joining -- `sheet === "menu"`,
        GalleryMobile's own useSheet, anything -- fails here by not being on it. */
     const registered = [];
     for (const f of [mobile, control, create, health, src("components/GalleryMobile.jsx"),
@@ -146,6 +148,7 @@ describe("ONE ledger, one entry per open layer, and a Back closes the topmost", 
       "folioOpen, closeFolio",
       "lbIndex != null, closeLightbox",
       "simOn, clearSimilar",
+      "tidyOpen, closeTidy",           // Control's Tidy, beside Sync now (look pick B, 2026-11-19)
       "updScreen, closeUpdScreen",
     ]);
     assert.doesNotMatch(src("components/GalleryMobile.jsx"), /useLayerHistory/);
@@ -226,7 +229,8 @@ describe("each tab keeps its own scroll", () => {
 
   test("the RESTORE is a layout effect keyed on the tab", () => {
     assert.match(memo, /useLayoutEffect\(\(\) => \{\n\s+tabRef\.current = tab;/);
-    assert.match(memo, /el\.scrollTop = tabScrollRef\.current\[tab\] \|\| 0;/);
+    assert.match(memo, /const y = tabScrollRef\.current\[tab\] \|\| 0;/);
+    assert.match(memo, /el\.scrollTop = y;/);
     assert.match(memo, /\}, \[tab\]\);/);
   });
 
@@ -272,10 +276,13 @@ describe("viewport-fit=cover, so every safe-area inset in this app means somethi
   });
 
   test("the phone's top chrome now reads the top inset, as its own file already reads the bottom one", () => {
-    assert.match(glmCss, /--glm-safetop: max\(0px, calc\(env\(safe-area-inset-top\) - 12px\)\);/);
-    assert.match(glmCss, /height: calc\(172px \+ var\(--glm-safetop\)\);/);
-    assert.match(glmCss, /\.glm-hero-icons \{[^}]*top: max\(12px, env\(safe-area-inset-top\)\);/);
-    assert.match(glmCss, /\.glm-hero-stats \{[^}]*top: calc\(57px \+ var\(--glm-safetop, 0px\)\);/);
+    /* Since the 2026-11-19 layout (look pick B) the header is rows in the flow, not a 172 px banner
+       with corners placed absolutely: its own top padding is the inset (never under 10 px), and
+       when it has slid away the body below keeps the inset, so the sticky search bar never parks
+       under the notch. */
+    assert.match(glmCss, /\.glm-hero \{[^}]*padding: max\(10px, env\(safe-area-inset-top\)\) 12px 10px;/);
+    assert.match(glmCss, /\.glm-hero\.away \+ \.glm-body \{ margin-top: env\(safe-area-inset-top, 0px\); \}/);
+    assert.doesNotMatch(glmCss, /height: calc\(172px/);
     // the bottom edges this file has always guarded, still guarded
     assert.match(glmCss, /padding: 4px 0 max\(14px, env\(safe-area-inset-bottom\)\);/);
   });

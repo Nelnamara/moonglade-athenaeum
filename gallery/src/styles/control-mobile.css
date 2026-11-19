@@ -94,3 +94,27 @@
 @media (prefers-reduced-motion: reduce) {
   .ctm-mirror .mgcp-mirrordot { animation: none; }
 }
+
+/* ---- THE TAB IN THREE SECTIONS (look pick B, 2026-11-19; pixel source: the look board's topic 3,
+   option B, Control screen) -- Jobs | Health | This phone on the shared segmented control, then the
+   Jobs section's first screen: Sync now and Tidy side by side, the last run under them, and the job
+   console as a plain list, each job's name on the left and its cadence on the right. ---- */
+.ctm-sections { margin-bottom: 14px; }
+.ctm-sections .cm-segbtn { padding: 8px 4px; font-size: 12px; }
+.ctm-jobsec { margin-bottom: 18px; }
+.ctm-syncrow { display: flex; gap: 8px; align-items: stretch; }
+.mgcp-syncbtn.ctm-syncnow { flex: 1 1 auto; width: auto; align-items: center; justify-content: center;
+  padding: 10px 14px; text-align: center; }
+.mgcp-syncbtn.ctm-syncnow b { font-size: 13.5px; }
+.mgcp-syncbtn.ctm-syncnow:disabled { opacity: .5; cursor: not-allowed; }
+button.mgcp-chip.ctm-tidy { flex: none; justify-content: center; padding: 8px 16px; font-size: 13px; }
+.ctm-lastrun { margin-top: 7px; font-size: 10.5px; line-height: 1.45; color: var(--overlay0); }
+.ctm-joblist { display: flex; flex-direction: column; }
+.ctm-jobrow { display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  padding: 8px 2px; border-bottom: 1px dashed var(--surface1); font-size: 12px; color: var(--text); }
+.ctm-jobname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctm-jobwhen { flex: none; max-width: 58%; text-align: right; font-family: ui-monospace, Menlo, monospace;
+  font-size: 10px; line-height: 1.5; color: var(--overlay0); }
+.ctm-jobwhen b { font-weight: 500; color: var(--subtext); }
+.ctm-jobwhen b.ok { color: var(--emerald); }
+.ctm-health > .mgcp-sidehead { margin-bottom: 10px; }
