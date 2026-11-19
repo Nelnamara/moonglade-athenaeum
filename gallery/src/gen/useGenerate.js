@@ -434,7 +434,7 @@ export default function useGenerate({ costRef, isMember }) {
     // ONE shared submit path for every spend route -- see gen/submitTask.js for
     // the contract it enforces (no retry, body-keyed errors, adjusted on the
     // line, cb(phase, data) tracking).
-    const taskId = await submitTask("/api/generate", buildPayload(s), { label: "Generated", emit });
+    const taskId = await submitTask("/api/generate", buildPayload(s), { label: "Generated", emit, quote: priceAnswer });
     if (taskId) noteSent(s);
     busyRef.current = false;                   // the classic unlocks on ANSWER
     setBusy(false);

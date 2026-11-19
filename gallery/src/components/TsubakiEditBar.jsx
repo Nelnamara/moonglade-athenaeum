@@ -119,6 +119,7 @@ const TsubakiEditBar = forwardRef(function TsubakiEditBar({ item, member, phone,
     let last = null;
     const tid = await submitTask("/api/generate", buildPayload(state), {
       label: "Tsubaki edit",
+      quote: probe.response,
       emit: (patch) => { last = patch; setLine({ kind: patch.kind || "run", text: patch.text }); },
     });
     busyRef.current = false;

@@ -15766,6 +15766,34 @@ def create_app(out_dir: Path):
             pass
         return msg
 
+    # THE SINGLE SENDS' HALF OF THE LOOM'S F13 GUARD (2026-11-18). A gallery send whose cost
+    # badge said FREE carries `expect_free`. The card is matched again at send time
+    # (_apply_kaisuuken), and if the card the quote found is gone by then -- used elsewhere,
+    # expired, now short -- sending would charge a price nobody was shown, with only a server
+    # console line to say so. So that case is refused before anything goes out, in words the
+    # drawer shows. A send whose badge showed a PRICE carries nothing and goes out exactly as
+    # before (issue #15: a card that covers only part still spends, the full price stated).
+    _QUOTED_FREE_GONE = ("The free card this was priced with is gone (used elsewhere or "
+                         "expired), so sending it would spend credits. Nothing was sent. "
+                         "Check the price again before you send.")
+
+    def _pop_expect_free(body):
+        """The client's 'my badge said FREE' flag, popped so it never reaches build_request,
+        the single-send record or PixAI."""
+        return bool(body.pop("expect_free", False)) if isinstance(body, dict) else False
+
+    def _quoted_free_hooks(core, req, expect_free):
+        """core.submit's before_send for a send quoted FREE: runs after the card step, before
+        the one mutation, and refuses when no card was attached. An Unlimited Mode request is
+        free by the entitlement, never by a card, so it is never held to this."""
+        if not expect_free or req.unlimited:
+            return {}
+
+        def _before_send(params):
+            if not params.get("kaisuukenId"):
+                raise core.LocalRefusal(_QUOTED_FREE_GONE)
+        return {"before_send": _before_send}
+
     @app.route("/api/price", methods=["POST"])
     @tier(LOGIN)
     def api_price():
@@ -15820,6 +15848,7 @@ def create_app(out_dir: Path):
         try:
             core, session = _gen_session()
             body = request.get_json(silent=True) or {}
+            expect_free = _pop_expect_free(body)
             # Session M (BUILD-w5-m review F2): this route is a SINGLE send. More than one
             # generation goes through the confirm (/api/generate/plan -> /run), so a count
             # other than 1 is refused here -- never clamped -- whoever sent it (a stale
@@ -15875,7 +15904,8 @@ def create_app(out_dir: Path):
                                          "remove {} to continue.".format(
                                              _cap, "" if _cap == 1 else "s",
                                              len(req.lora_version_ids) - _cap)}), 400
-            task_id = core.submit(session, req)["task_id"]
+            task_id = core.submit(session, req,
+                                  **_quoted_free_hooks(core, req, expect_free))["task_id"]
             if req.unlimited:
                 # The lane mark on the job, written by the server rather than trusted from the
                 # client's own registration, so the one-at-a-time rule above can read it.
@@ -16559,6 +16589,7 @@ def create_app(out_dir: Path):
             # the read above), not a read of Flask's session.
             core, gsession = _gen_session()
             p = request.get_json(silent=True) or {}
+            expect_free = _pop_expect_free(p)
             req = core.build_request(p, mode="edit", user=user,
                                      resolve=_submit_resolver(core, gsession))
             params = req.parameters          # bound for _log_gen_failure's locals().get()
@@ -16566,7 +16597,8 @@ def create_app(out_dir: Path):
                 return jsonify({"error": "pick an image to edit (and a valid preset if set)"}), 400
             if not (p.get("preset") or "").strip() and not (p.get("instruction") or "").strip():
                 return jsonify({"error": "describe the edit"}), 400
-            task_id = core.submit(gsession, req)["task_id"]
+            task_id = core.submit(gsession, req,
+                                  **_quoted_free_hooks(core, req, expect_free))["task_id"]
             # (edits is counted from the catalog's edit rows since 2026-10-02.)
             _telemetry.telem_set_add("tools", "edit", out_dir=out_dir)
             return jsonify({"task_id": task_id})
@@ -16699,6 +16731,7 @@ def create_app(out_dir: Path):
         try:
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
+            expect_free = _pop_expect_free(p)
             # Same road as every other create: build_request resolves the source image,
             # translates the Change-Emotion control and calls build_panelplugin_parameters;
             # core.submit is the READ_ONLY + free-card choke. A panelplugin task can never
@@ -16710,7 +16743,8 @@ def create_app(out_dir: Path):
             params = req.parameters          # bound for _log_gen_failure's locals().get()
             if params is None:
                 return jsonify({"error": req.note}), 400
-            task_id = core.submit(session, req)["task_id"]
+            task_id = core.submit(session, req,
+                                  **_quoted_free_hooks(core, req, expect_free))["task_id"]
             # [BLOCKER] Telemetry is DEFERRED, not fired here: submit_generation returns the id at
             # createGenerationTask ACCEPTANCE (before start/completion), and a panelplugin job can
             # be accepted then reaped. Record the identity ACTUALLY submitted (workflowName when a
@@ -18853,9 +18887,13 @@ __DESIGN_TOKENS__
             if expect_free and not params.get("kaisuukenId"):
                 raise _core.LocalRefusal(
                     "The free card this render was priced with was used elsewhere, so it would "
-                    "spend credits. Nothing was sent. Press Render again to see the new price.")
+                    "spend credits. Nothing was sent. Press Render again to see the new price."
+                    if journalled else _QUOTED_FREE_GONE)
 
-        hooks = {"before_send": _before_send, "on_send": _on_send} if journalled else {}
+        # The gallery's own Video tab (no Loom keys) is held to the same rule when its badge
+        # said FREE (2026-11-18): before, the guard rode only a journalled Loom render.
+        hooks = ({"before_send": _before_send, "on_send": _on_send} if journalled
+                 else {"before_send": _before_send} if expect_free else {})
 
         def _journal(**fields):
             if journalled:

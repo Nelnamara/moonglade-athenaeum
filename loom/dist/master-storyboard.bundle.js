@@ -885,6 +885,11 @@ var LoomBundle = (() => {
   }
   var PRICE_DEBOUNCE_MS = 250;
   var PRICE_FETCH_TIMEOUT_MS = 25e3;
+  function quotedSendBody(payload, quote) {
+    const q = quote || null;
+    if (!q || q.free !== true || q.unlimited || q.error) return payload;
+    return { ...payload, expect_free: true };
+  }
 
   // ../gallery/src/gen/videoDrawerCore.js
   var MODELS = [
@@ -6649,13 +6654,13 @@ ${"=".repeat(48)}
   }
 
   // ../gallery/src/gen/submitTask.js
-  async function submitTask(route, payload, { label, emit: emit7, count, onPhase, onAnswer }) {
+  async function submitTask(route, payload, { label, emit: emit7, count, onPhase, onAnswer, quote }) {
     let d, status = 0;
     try {
       const r = await fetch(route, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(quotedSendBody(payload, quote))
       });
       status = r.status;
       d = await r.json();
@@ -7223,7 +7228,7 @@ ${"=".repeat(48)}
         submit_id: submitId,
         ...target.draft ? {} : { loom_target: { board_id: target.board_id, card_id: target.card_id } },
         ...expectFree ? { expect_free: true } : {}
-      } : p;
+      } : expectFree ? { ...p, expect_free: true } : p;
       let answer = null;
       const startedAt = Date.now();
       let taskId = null;

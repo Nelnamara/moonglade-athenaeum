@@ -92,13 +92,13 @@ export default function useEditGenerate({ costRef }) {
     busyRef.current = true;
     setBusy(true);
     const emit = openLine("Submitting…");
-    await submitTask("/api/edit", buildEditPayload(s), { label: "Edited", emit });
+    await submitTask("/api/edit", buildEditPayload(s), { label: "Edited", emit, quote: probe.response });
     busyRef.current = false;
     setBusy(false);
     // The submit DEBITED credits or a card; the payload is byte-identical, so only
     // a FORCED re-price gets past the short-circuit.
     refreshPrice({ force: true });
-  }, [s, openLine, priceOk, refreshPrice]);
+  }, [s, openLine, priceOk, refreshPrice, probe.response]);
 
   return { s, set, busy, results, chooseModel, addRef, dropRef, run, refreshPrice, gate,
            canSubmit: priceOk };

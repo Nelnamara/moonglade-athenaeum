@@ -1830,14 +1830,17 @@ describe("<VideoDrawer> in the Loom: target at the click, beforeSend before the 
     assert.deepEqual(sent.body, priced.body);
     for (const k of ["submit_id", "loom_target", "expect_free"]) assert.equal(k in sent.body, false, k);
   });
-  test("the gallery's Video tab sends no Loom key even on a free quote", async (t) => {
-    // A free quote is the one case where a stray expect_free on the gallery's request would show.
+  test("the gallery's Video tab on a free quote sends expect_free and no Loom key", async (t) => {
+    // 2026-11-18: the gallery's own Video tab is held to the Loom's F13 rule -- a send its badge
+    // quoted FREE says so, and the server refuses rather than charge if the card is gone. It is
+    // still not a Loom render: no submit_id, no loom_target.
     const g = await mountDrawer(t, { loomCtx: false, routes: { "/api/price": () => FREE } });
     await g.ready();
     await g.go();
     const [priced] = fetches("/api/price").slice(-1);
     const [sent] = fetches("/api/loom/generate");
-    assert.deepEqual(sent.body, priced.body);
+    assert.deepEqual(sent.body, { ...priced.body, expect_free: true });
+    for (const k of ["submit_id", "loom_target"]) assert.equal(k in sent.body, false, k);
   });
   test("in the Loom, what is sent is what the host's ask confirmed; a no sends nothing and leaves no line", async (t) => {
     const routes = {};

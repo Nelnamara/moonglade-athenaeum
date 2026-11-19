@@ -113,7 +113,7 @@ export default function EnhanceTab({ source, armed, onOpenFilters }) {
       ? { source, workflow_name: priced.workflow_name }
       : { source, workflow_id: priced.workflow_id };
     if (sel === "emotion" && emotionKey) body.emotion = emotionKey;
-    await submitTask("/api/enhance", body, { label: priced.label, emit });
+    await submitTask("/api/enhance", body, { label: priced.label, emit, quote: { free: !!priced.free_card } });
     busyRef.current = false; setBusy(false);
   };
 
