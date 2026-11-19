@@ -70,11 +70,16 @@ export async function sendImgRun(body, label, deps, opts = {}) {
     if (plan.read_only) return { ok: false, error: "READ_ONLY is on in config.json, so nothing can be sent." };
     const multi = Number(plan.count) > 1;
     // Every send of more than one generation confirms (NOTES 2); a single one asks unless a
-    // free card covers it, as the Loom's confirmSpend always has.
-    if ((multi || Number(plan.total) > 0) && !deps.confirm(runConfirmText(plan, label))) return { ok: false };
+    // free card covers it, as the Loom's confirmSpend always has. FREE is a total of exactly
+    // 0: a total the plan could not read (null) asks, never waves the send through. A single
+    // send that went without an ask because it was free carries expect_free, so the server
+    // refuses it rather than charge if the card is gone by then (2026-11-18).
+    const freeSingle = !multi && plan.total === 0;
+    if (!freeSingle && !deps.confirm(runConfirmText(plan, label))) return { ok: false };
     if (opts.onSending) opts.onSending();
     const runId = opts.runId || newRunId();
-    const ans = await deps.run({ ...rb, csrf, run_id: runId, ...(multi ? { ack: ackOf(plan) } : {}) });
+    const ans = await deps.run({ ...rb, csrf, run_id: runId, ...(multi ? { ack: ackOf(plan) } : {}),
+      ...(freeSingle ? { expect_free: true } : {}) });
     if (!ans || ans.lost) return { ok: false, error: LOST_POST_WORDS };
     const d = ans.data || {};
     const jobs = Array.isArray(d.jobs) ? d.jobs : [];

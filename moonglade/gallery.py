@@ -15953,7 +15953,15 @@ def create_app(out_dir: Path):
                 # becomes the badge's own note, not a 500 and not a number.
                 return jsonify({"cost": None, "free": False,
                                 "note": _redact_host_paths(str(e))[:140]})
-            return jsonify(core.price(gsession, req))
+            # The card check reads under the identity the send will create on (the Mirror's
+            # sign-in when it is on), so the badge and the send's card step agree (2026-11-18).
+            # A Mirror that cannot be reached falls back to the API key: that send is refused
+            # before anything goes out anyway, for the Mirror, not for a card.
+            try:
+                card_session = _card_session(core, gsession)
+            except Exception:                              # noqa: BLE001
+                card_session = gsession
+            return jsonify(core.price(gsession, req, card_session=card_session))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "cost": None, "free": False}), 200
 
@@ -16433,6 +16441,9 @@ def create_app(out_dir: Path):
             return jsonify({"error": "Expected a JSON object."}), 400
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 403
+        # A single send through this road (a template prompt) carries what its badge showed,
+        # as /api/generate does (2026-11-18): popped here, before anything reads the body.
+        expect_free = _pop_expect_free(body)
         from moonglade import backup as core
         try:
             core._check_read_only(core._SUBMIT_ACTION_DEFAULT)
@@ -16477,12 +16488,12 @@ def create_app(out_dir: Path):
                 return jsonify({"error": "That run id is taken — nothing was sent."}), 200
             _run_inflight.update(run_id=run_id, account=user, done=0, total=0)
         try:
-            return _run_send(core, store, run_id, body, user)
+            return _run_send(core, store, run_id, body, user, expect_free=expect_free)
         finally:
             with _run_lock:
                 _run_inflight.clear()
 
-    def _run_send(core, store, run_id, body, user):
+    def _run_send(core, store, run_id, body, user, expect_free=False):
         from moonglade import runs
         try:
             # Step 5, local: expand and count before any network call.
@@ -16577,6 +16588,10 @@ def create_app(out_dir: Path):
                               request=_strip_request(request_))
 
         budget = {"each": each, "total": planned["total"]} if multi else None
+        if not multi and expect_free and built and not built[0]["req"].unlimited:
+            # A single send its badge called FREE: a confirmed total of 0, so the job is refused
+            # before its create if the card step attaches no card -- in a single send's words.
+            budget = {"each": 1, "total": 0, "note": _QUOTED_FREE_GONE}
         res = core.send_run(gsession, [{"cell": b["cell"], "req": b["req"],
                                         "no_card": b["no_card"]} for b in built],
                             hooks=_Hooks(), budget=budget)
@@ -16806,7 +16821,9 @@ def create_app(out_dir: Path):
                     params = core.build_panelplugin_parameters(
                         "1", row["workflow_id"], workflow_name=row["workflow_name"])
                     row["price"] = core.price_task(s, params)
-                    row["free_card"] = bool(core.match_kaisuuken(s, params))
+                    # card_covers, the one coverage verdict the send reads too (2026-11-18): a
+                    # card that matched but does not cover the job is not "free".
+                    row["free_card"] = core.card_covers(core.match_kaisuuken(s, params))
                 except Exception:
                     row["price"] = None
             return row
@@ -16867,6 +16884,10 @@ def create_app(out_dir: Path):
             params = req.parameters          # bound for _log_gen_failure's locals().get()
             if params is None:
                 return jsonify({"error": req.note}), 400
+            # A send uses a card, and a refusal means the cached "free" was wrong: either way
+            # the presets' cached verdicts are dropped, so the tab's next read asks PixAI
+            # again instead of offering "free" for an hour (2026-11-18).
+            _enh_price_cache["presets"] = None
             task_id = core.submit(session, req,
                                   **_quoted_free_hooks(core, req, expect_free))["task_id"]
             # [BLOCKER] Telemetry is DEFERRED, not fired here: submit_generation returns the id at

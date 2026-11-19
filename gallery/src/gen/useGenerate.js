@@ -17,6 +17,7 @@ import { accountCsrf, accountPrefs } from "../hooks/useAccountPrefs.js";
 import { insertTriggerWords, removeTriggerWords } from "./loraTriggers.js";
 import { submitTask, useResultLines } from "./submitTask.js";
 import usePriceProbe from "./usePriceProbe.js";
+import { quotedSendBody } from "./priceProbeCore.js";
 import { publishDockPrice, publishDockRequest } from "../recipes/recipesStore.js";
 import {
   LISTS_KEY, forcesNoCard, listsFromPrefs, newRoll, parse, planJobs, runSeedOf, sendRoute,
@@ -427,7 +428,8 @@ export default function useGenerate({ costRef, isMember }) {
     // quote); one generation whose prompt uses the syntax goes to the run route, which
     // expands it and records its template. A plain single send is today's, unchanged.
     if (route === "confirm") { runs.openConfirm(runBody()); return; }
-    if (route === "run") { sentRef.current = s; runs.sendSingle(runBody()); return; }
+    // A single send through the run road carries its badge's verdict too (2026-11-18).
+    if (route === "run") { sentRef.current = s; runs.sendSingle(quotedSendBody(runBody(), priceAnswer)); return; }
     busyRef.current = true;
     setBusy(true);
     const emit = openLine("Submitting…");

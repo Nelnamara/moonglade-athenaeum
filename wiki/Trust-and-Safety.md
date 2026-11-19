@@ -29,7 +29,11 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   The guarantee is honesty, not refusal: a paid clip is never shown as free. The other way round
   is refused: if the card a free price was shown for has been used elsewhere or has expired by
   the time you send, nothing is sent and the app says the card is gone, so a send shown as free
-  is never charged. Details and the
+  is never charged. That holds for every send that shows a price first: the Generate dock (a
+  `{a|b}` prompt and a confirmed run included), Edit, Upscale, AI presets, the Video tab, and
+  the Loom's renders and its Image, Edit and Reference tabs. A training run's confirm prices it
+  again and asks before it charges. The price and the send check your cards under the same
+  sign-in. Details and the
   exact preview wording are in [Generating → Free cards and videos](Generating#free-cards-and-videos).
 - **Delete from your PixAI account** — irreversible on PixAI's side. Gated behind typing
   `DELETE` in the gallery's confirm dialog, and it works only from the machine running the

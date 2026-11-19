@@ -159,6 +159,7 @@ import useActivity from "../gallery/src/notify/useActivity.js";
 // The one price transport, shared with the gallery's own cost lines (gen/usePriceProbe.js
 // rides the same function). Imported the same way as VideoDrawer/CostBadge above.
 import { requestPrice } from "../gallery/src/gen/priceRequest.js";
+import { quotedSendBody } from "../gallery/src/gen/priceProbeCore.js";
 // Review S2 (Session M): the Image tab's ×2-4 and a prompt using the template syntax go through
 // the run road (/api/generate/plan -> the confirm -> /run), as the Generate dock's do --
 // /api/generate is a single send. The road's pieces are loom-run.js's; the transport is the
@@ -8853,11 +8854,15 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
   // before spending, never waves it through. Returns true to proceed. (The parameter was
   // named priceBody until 2026-08-23, when priceBody became this file's one price call site
   // -- a param of that name would shadow the function this line has to call.)
+  // 2026-11-18: a yes is `{ quote }` -- the answer the owner was shown -- and every caller sends
+  // through quotedSendBody(body, quote), so a send that went ahead with NO ask because it was
+  // FREE carries expect_free, and the server refuses it rather than charge if the card is gone
+  // by then (the Loom's F13 rule, now on the Image, Edit and Reference tabs too). A no is false.
   const confirmSpend = async (quoteBody, label) => {
     // ONE shot, right here, right before the confirm -- deliberately NOT the cost-to-finish
     // pill's warm cache: this is the number at the moment of spending.
     const pr = await priceBody(quoteBody);
-    if (pr && pr.free) return true;                                    // a free card covers it: no spend, no prompt
+    if (pr && pr.free) return { quote: pr };                           // a free card covers it: no spend, no prompt
     if (pr && !pr.free && pr.cost != null) {
       // `free` is the server's card_covers(): false for BOTH "no card matched" and "a card
       // matched but you hold fewer tickets than it costs" (issue #15). The second case
@@ -8867,9 +8872,10 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
       const line = priceIsShort(pr)
         ? shortSpendLine(pr, "this")
         : `No free card covers it — it will spend ~${pr.cost.toLocaleString()} credits.`;
-      return window.confirm(`${label}\n\n${line}\n\nGenerate anyway?`);
+      return window.confirm(`${label}\n\n${line}\n\nGenerate anyway?`) ? { quote: pr } : false;
     }
-    return window.confirm(`${label}\n\nCouldn't verify the cost or free-card coverage — it may spend credits.\n\nGenerate anyway?`);
+    return window.confirm(`${label}\n\nCouldn't verify the cost or free-card coverage — it may spend credits.\n\nGenerate anyway?`)
+      ? { quote: null } : false;
   };
   // GUARDRAIL: never spend credits silently. ONE video shot's ask, asked of the payload that
   // will be sent: generateShot's (the card's Render, the phone's Generate) and the Video tab's
@@ -9745,11 +9751,12 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     const asked = buildImgGenBody(imgModel, imgLoras, imgAdv, prompt);
     if (imgSendRoute(asked) === "run") return genImageRun(entry, asked);
     const body = buildImgGenBody(imgModel, imgLoras, imgAdv, prompt);
-    if (!(await confirmSpend(body, `Generate a reference image for ${c.title || "this shot"}?`))) return;
+    const ok = await confirmSpend(body, `Generate a reference image for ${c.title || "this shot"}?`);
+    if (!ok) return;
     setGenImgState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting…" } }));
     try {
       const r = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body) });
+        body: JSON.stringify(quotedSendBody(body, ok.quote)) });
       const d = await r.json();
       if (d.error || !d.task_id) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
       // Register this submission in the shared Job Tracker (notify/jobs.js -> /api/jobs)
@@ -9796,12 +9803,14 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
   // separate, much shorter Job Tracker row text each caller supplies -- two different strings
   // for two different surfaces, so neither has to be bent to fit the other.
   const runGen = async (setState, cardId, endpoint, body, quoteBody, label, jobLabel) => {
-    if (quoteBody && !(await confirmSpend(quoteBody, label))) return;
+    const ok = quoteBody ? await confirmSpend(quoteBody, label) : { quote: null };
+    if (!ok) return;
     setState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting…" } }));
     // Same unbounded-loop fix as pollImg -- see pollTaskWithCeiling's comment.
     const poll = (tid) => pollTaskWithCeiling(tid, setState, cardId);
     try {
-      const r = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const r = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(quotedSendBody(body, ok.quote)) });
       const d = await r.json();
       if (d.error || !d.task_id) { setState((s) => ({ ...s, [cardId]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
       // Same register-ONLY call, same reasoning, as genImage above -- this helper is the whole

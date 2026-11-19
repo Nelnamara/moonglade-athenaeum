@@ -9697,7 +9697,7 @@ def _shape_creativity(params, level, rs, version_id, adjusted):
     params["promptHelper"] = {"creativity": used, "forcePromptHelperDetectionSide": "server"}
 
 
-def price(session, req):
+def price(session, req, *, card_session=None):
     """The live cost + free-card verdict for a request. READ-ONLY -- it creates nothing
     and spends nothing, and the object it prices is the very `req.parameters` a submit
     would send, which is the whole point of this road.
@@ -9717,8 +9717,12 @@ def price(session, req):
     anything -- a clamp, or the per-model gate's snap/strip/conversion -- so the drawer's and
     the Loom's badges can say so BEFORE a spend. Absent when nothing was changed, the same
     rule /api/generate's response follows (a key on every answer is a key clients ignore).
-    The object priced and card-matched here is req.parameters, already gated at build."""
-    out = _price_answer(session, req)
+    The object priced and card-matched here is req.parameters, already gated at build.
+
+    `card_session` (2026-11-18) is the identity the free-card check reads under -- the one the
+    send will create on (_apply_kaisuuken checks there, through _session_for_create), so the
+    quote and the send cannot disagree about a card. Defaults to `session`, as before."""
+    out = _price_answer(session, req, card_session=card_session)
     if req.adjusted:
         out["adjusted"] = list(req.adjusted)
     # The breakdown notes ride a PAID quote only: on a card-covered one "+X" would read as a
@@ -9760,7 +9764,7 @@ def _price_breakdown(session, params, cost):
     return out
 
 
-def _price_answer(session, req):
+def _price_answer(session, req, card_session=None):
     """price()'s verdict, minus the receipt (see price)."""
     if req.parameters is None:
         return {"cost": None, "free": False, "note": req.note}
@@ -9797,7 +9801,8 @@ def _price_answer(session, req):
         verdict = _recipes.price_verdict(session, req.parameters, cost)
         if verdict is not None:
             return verdict
-    best = None if req.no_card else match_kaisuuken(session, req.parameters, enrich=True)
+    best = None if req.no_card else match_kaisuuken(card_session or session, req.parameters,
+                                                    enrich=True)
     covered = card_covers(best)
     out = {"cost": cost, "free": covered,
            "cards": (best or {}).get("total"),
@@ -9944,7 +9949,7 @@ def send_run(session, jobs, *, hooks, budget=None, gap_s=None, sleep=None):
             if budget is None or params.get("kaisuukenId"):
                 return
             if state["charged"] + int(budget["each"]) > int(budget["total"]):
-                raise LocalRefusal(_run_budget_note(state["sent"]))
+                raise LocalRefusal(budget.get("note") or _run_budget_note(state["sent"]))
 
         try:
             task_id = submit(session, job["req"], no_card=job.get("no_card"),

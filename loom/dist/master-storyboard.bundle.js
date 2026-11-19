@@ -13371,10 +13371,17 @@ ${"=".repeat(48)}
       if (!plan || plan.error) return { ok: false, error: plan && plan.error || "Couldn't price this \u2014 nothing was sent." };
       if (plan.read_only) return { ok: false, error: "READ_ONLY is on in config.json, so nothing can be sent." };
       const multi = Number(plan.count) > 1;
-      if ((multi || Number(plan.total) > 0) && !deps.confirm(runConfirmText(plan, label))) return { ok: false };
+      const freeSingle = !multi && plan.total === 0;
+      if (!freeSingle && !deps.confirm(runConfirmText(plan, label))) return { ok: false };
       if (opts.onSending) opts.onSending();
       const runId = opts.runId || newRunId();
-      const ans = await deps.run({ ...rb, csrf, run_id: runId, ...multi ? { ack: ackOf(plan) } : {} });
+      const ans = await deps.run({
+        ...rb,
+        csrf,
+        run_id: runId,
+        ...multi ? { ack: ackOf(plan) } : {},
+        ...freeSingle ? { expect_free: true } : {}
+      });
       if (!ans || ans.lost) return { ok: false, error: LOST_POST_WORDS };
       const d = ans.data || {};
       const jobs2 = Array.isArray(d.jobs) ? d.jobs : [];
@@ -20949,20 +20956,20 @@ Your currently-open board is left untouched.`)) return;
     const priceShot = (entry) => priceBody(shotPayload2(entry));
     const confirmSpend = async (quoteBody, label) => {
       const pr = await priceBody(quoteBody);
-      if (pr && pr.free) return true;
+      if (pr && pr.free) return { quote: pr };
       if (pr && !pr.free && pr.cost != null) {
         const line = priceIsShort(pr) ? shortSpendLine(pr, "this") : `No free card covers it \u2014 it will spend ~${pr.cost.toLocaleString()} credits.`;
         return window.confirm(`${label}
 
 ${line}
 
-Generate anyway?`);
+Generate anyway?`) ? { quote: pr } : false;
       }
       return window.confirm(`${label}
 
 Couldn't verify the cost or free-card coverage \u2014 it may spend credits.
 
-Generate anyway?`);
+Generate anyway?`) ? { quote: null } : false;
     };
     const askShotSpend = async (p) => {
       const pr = await priceBody(p);
@@ -21658,13 +21665,14 @@ Generate anyway?`)) return { go: false };
       const asked2 = buildImgGenBody(imgModel, imgLoras, imgAdv, prompt);
       if (imgSendRoute(asked2) === "run") return genImageRun(entry, asked2);
       const body = buildImgGenBody(imgModel, imgLoras, imgAdv, prompt);
-      if (!await confirmSpend(body, `Generate a reference image for ${c.title || "this shot"}?`)) return;
+      const ok = await confirmSpend(body, `Generate a reference image for ${c.title || "this shot"}?`);
+      if (!ok) return;
       setGenImgState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting\u2026" } }));
       try {
         const r = await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body)
+          body: JSON.stringify(quotedSendBody(body, ok.quote))
         });
         const d = await r.json();
         if (d.error || !d.task_id) {
@@ -21690,11 +21698,16 @@ Generate anyway?`)) return { go: false };
       setGenImgState((s) => ({ ...s, [sid]: { ...s[sid], routed: target } }));
     };
     const runGen = async (setState, cardId, endpoint, body, quoteBody, label, jobLabel) => {
-      if (quoteBody && !await confirmSpend(quoteBody, label)) return;
+      const ok = quoteBody ? await confirmSpend(quoteBody, label) : { quote: null };
+      if (!ok) return;
       setState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting\u2026" } }));
       const poll2 = (tid) => pollTaskWithCeiling(tid, setState, cardId);
       try {
-        const r = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const r = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(quotedSendBody(body, ok.quote))
+        });
         const d = await r.json();
         if (d.error || !d.task_id) {
           setState((s) => ({ ...s, [cardId]: { phase: "error", msg: d.error ? friendlyGenErr2(d.error) : "submit failed" } }));
