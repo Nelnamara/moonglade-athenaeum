@@ -48,18 +48,48 @@ describe("the tab", () => {
 });
 
 describe("one duplicates flow, no gate loosened", () => {
-  test("Move all, Check and Delete keep the chain's order gate and its confirm", () => {
+  test("Move all and Delete library copies keep the chain's order gate and its confirm", () => {
     const t = code("components/TidyTab.jsx");
     assert.match(t, /const early = i > dedupDone;/);
     assert.match(t, /disabled=\{busy \|\| early\}/);
     assert.match(t, /armed=\{confirmArm === key\} onRun=\{\(\) => runAction\(key\)\}/);
-    for (const k of ["dedup-apply", "verify-dupes", "dedup-delete"]) {
+    for (const k of ["dedup-apply", "dedup-delete"]) {
       assert.match(t, new RegExp('step\\("' + k + '"'), k + " goes through the gated step()");
     }
-    // the hook's own refusal stands behind the greyed button, unchanged
+    assert.match(t, /step\("dedup-delete", "Delete library copies outright"/,
+      "the step that deletes LIBRARY copies says so");
+    // the hook's own refusal stands behind the greyed button; only the read-only Check is exempt
     const h = code("hooks/useControlPanel.js");
-    assert.match(h, /if \(dedupIdx !== -1 && dedupIdx > dedupDone\) return;/);
+    assert.match(h, /if \(dedupIdx !== -1 && dedupIdx > dedupDone && key !== "verify-dupes"\) return;/);
     assert.match(h, /if \(spec\.destructive && confirmArm !== key\) \{\s*setConfirmArm\(key\);\s*return;/);
+    // ...and a Check run out of order moves the chain on not one step
+    assert.match(h, /setDedupDone\(\(prev\) => \(idx <= prev \? Math\.max\(prev, idx \+ 1\) : prev\)\)/);
+  });
+
+  test("Empty _duplicates/ opens only straight after an all-clear Check, and confirms first", () => {
+    const h = code("hooks/useControlPanel.js");
+    assert.match(h, /if \(finishedKey === "verify-dupes" && d\.status === "done"\) setEmptyReady\(verifiedAllClear\(dedup\)\);/);
+    assert.match(h, /if \(key === "empty-dupes" && !emptyReady\) return;/);
+    assert.match(h, /setEmptyReady\(null\);\s+\/\/ any job at all/);
+    const t = code("components/TidyTab.jsx");
+    assert.match(t, /spec=\{actionSpec\("empty-dupes"\)\} locked disabled=\{busy \|\| !emptyReady\}/);
+    assert.match(t, /to the Recycle Bin"/);
+  });
+
+  test("the all-clear reads only Check's own all-clear sentence", async () => {
+    const { verifiedAllClear } = await import(pathToFileURL(path.join(SRC, "lib", "dedupResult.js")).href);
+    const s = (sentence) => verifiedAllClear({ sentence });
+    assert.deepEqual(s("All 14 files in _duplicates/ (25.6 MB) have a copy kept in the library. Safe to delete."),
+      { count: "14", size: "25.6 MB" });
+    assert.deepEqual(s("All 1 file in _duplicates/ (4.0 B) has a copy kept in the library. Safe to delete."),
+      { count: "1", size: "4.0 B" });
+    for (const no of [
+      "Not safe to delete yet: 1 of 3 files in _duplicates/ need a look. Review the flagged items above.",
+      "_duplicates/ is empty, so there is nothing to check.",
+      "_duplicates/ changed while it was being checked. Check it again before emptying it.",
+      "All 2 files in _duplicates/ have a copy kept in the library. Safe to delete.",
+    ]) assert.equal(s(no), null, no);
+    assert.equal(verifiedAllClear(null), null);
   });
 
   test("destructive buttons come only from summary.actions (a LAN session gets none)", () => {

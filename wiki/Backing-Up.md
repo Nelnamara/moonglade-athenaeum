@@ -275,14 +275,26 @@ python -m moonglade --audit                 # report -> _moonglade/records/audit
 python -m moonglade --dedup                 # dry-run plan
 python -m moonglade --dedup --apply         # quarantine redundant copies
 python -m moonglade --verify-dupes          # confirm quarantine is safe to delete
+python -m moonglade --empty-duplicates      # preview: what would go to the Recycle Bin
+python -m moonglade --empty-duplicates --apply   # send _duplicates/ to the Recycle Bin
 ```
+
+`--empty-duplicates` empties `_duplicates/` only after a `--verify-dupes` that found every
+quarantined file safe (a byte- or pixel-identical copy still in the library, nothing that
+differs, no orphan), and only while `_duplicates/` holds exactly what that check passed: a file
+added, removed or changed since stops it, and you check again. With `--apply` it checks once
+more on the spot, then sends those files (and their Duplicate Review undo notes) to the
+**Recycle Bin**, removes the folders left empty and reconciles the catalog. It never deletes a
+file outright: without the `send2trash` package it refuses and changes nothing, and with
+`READ_ONLY` set it refuses too.
 
 `--verify-dupes` is read-only — unless you add `--restore-orphans`, which moves any
 quarantined file whose keeper no longer exists back into `images/`.
 
 In the gallery, all of this is the Control Panel's **Tidy** tab: **Find** (the audit and the
 dry-run plan), **Review** (Duplicate Review), then **Move all to _duplicates/**, **Check
-_duplicates/** and **Delete outright** — see
+_duplicates/** and **Empty _duplicates/**, with **Delete library copies outright**
+(`--dedup-delete`) kept apart — see
 [Control Panel → Tidy](Control-Panel#tidy--duplicates-stray-files-and-broken-files).
 
 Two modifiers: `--dedup-delete` (with `--dedup --apply`) deletes the redundant copies outright instead of moving them to `_duplicates/`. It keeps the copy that opens as a picture (the larger one when both do), and deletes another copy only when it is the same picture or is damaged; any other copy stays where it is and is listed. `--no-content` (with `--audit`/`--dedup`) skips the slower content-hash pass and does only the fast same-`media_id` location dedup.

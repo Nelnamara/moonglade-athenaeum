@@ -161,19 +161,32 @@ with **Reclaimable** under it.
 - **Review** — opens **Duplicate Review** on top of the Panel (← **Tidy** brings you back). It
   shows each group side by side; you keep one copy in each group and the rest move to
   `_duplicates/`, with **Undo** on each group. See [Health → Duplicates review](Health#duplicates-review).
-- **then** — the chain's last three steps, in order. Each stays greyed out until the one before
-  it has finished in this Panel session (hover it to see what comes first), so you can't reach
-  the end by accident:
-  - **Move all to _duplicates/** (marked with a lock; after **Find**) moves every redundant copy
-    the preview listed aside to `_duplicates/`, keeping the copy that opens as an image, then the
-    larger, then the most-organized one. It checks the moved files afterwards on its own.
-  - **Check _duplicates/** (read-only) confirms every quarantined file is byte-identical (or
-    pixel-identical) to a copy still in the library, and flags orphans, before you empty the
-    folder yourself.
-  - **Delete outright** (also locked; only after a clean **Check**) re-runs the dedup and
-    deletes redundant copies in the library directly — no `_duplicates/` safety net, no undo. It
-    never deletes a copy that is not the same picture as the one kept. It does **not** empty
-    `_duplicates/`; that folder is yours to delete once **Check** says it is safe.
+- **then** — the rest of the road:
+  - **Move all to _duplicates/** (marked with a lock; greyed out until **Find** has run in this
+    Panel session) moves every redundant copy the preview listed aside to `_duplicates/`, keeping
+    the copy that opens as an image, then the larger, then the most-organized one. It checks the
+    moved files afterwards on its own.
+  - **Check _duplicates/** (read-only, any time) confirms every quarantined file is
+    byte-identical (or pixel-identical) to a copy still in the library, and flags anything that
+    differs and any orphan (a file with no copy kept). Its sentence says how many files and how
+    much space, for example *"All 14 files in _duplicates/ (25.6 MB) have a copy kept in the
+    library. Safe to delete."*
+  - **Empty _duplicates/** (locked) is the last step. It opens only straight after a **Check**
+    that found every file safe — any other job, or a move in Duplicate Review, closes it again
+    until the next **Check**. The first click turns it into **Confirm — send 14 files (25.6 MB)
+    to the Recycle Bin**; the second sends exactly the files that **Check** passed (and their
+    Duplicate Review undo notes) to the **Recycle Bin**, removes the folders left empty and
+    reconciles the catalog. Before it moves anything it makes sure `_duplicates/` is still
+    exactly what **Check** saw — a file added, removed or changed since stops it — and checks
+    every file again on the spot. Like the other steps that change files it runs only on the PC
+    running Moonglade, and `READ_ONLY` refuses it. Nothing is deleted outright: if the
+    `send2trash` package is missing (the launcher installs it with the rest), it refuses and
+    changes nothing. Its run lands in the **Ledger**.
+- **or, with no _duplicates/ safety net** — **Delete library copies outright** (locked) re-runs
+  the dedup and deletes redundant copies **in the library** directly, instead of moving them —
+  no `_duplicates/`, no Recycle Bin, no undo. It never deletes a copy that is not the same
+  picture as the one kept. It keeps the old chain's gate: greyed out until **Find**, **Move all**
+  and **Check** have run, in that order, in this Panel session.
 
 ### Stray files
 

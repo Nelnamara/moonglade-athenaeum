@@ -11254,7 +11254,7 @@ _TIDY_PREVIEW_OUT = ("\nDedup plan: 1 redundant files to quarantine to _duplicat
                      "Result: 1 duplicate file would move to _duplicates/ (1.0 KB). Nothing moved yet.\n")
 
 
-def _fake_cli_jobs(monkeypatch):
+def _fake_cli_jobs(monkeypatch, verify_out="ok\n"):
     """subprocess.Popen stubbed the way the Panel test above stubs it: no maintenance job really
     runs against the module's shared library. Returns the argv list of every start."""
     import io as _io
@@ -11267,6 +11267,8 @@ def _fake_cli_jobs(monkeypatch):
             started.append([str(a) for a in argv])
             if "--audit" in argv:
                 text = _TIDY_AUDIT_OUT
+            elif "--verify-dupes" in argv:
+                text = verify_out
             elif "--dedup" in argv and "--apply" not in argv:
                 text = _TIDY_PREVIEW_OUT
             else:
@@ -11350,8 +11352,8 @@ def test_tidy_runs_one_duplicates_flow_and_keeps_every_gate(logged_in_page, monk
     _open_tidy(page)
 
     assert _chip_state(page, "Move all to _duplicates/") == "disabled"
-    assert _chip_state(page, "Check _duplicates/") == "disabled"
-    assert _chip_state(page, "Delete outright") == "disabled"
+    assert _chip_state(page, "Check _duplicates/") == "enabled"
+    assert _chip_state(page, "Delete library copies outright") == "disabled"
 
     page.click('.mgcp-tidy button.mgcp-chip:has-text("Find")')
     page.wait_for_function(
@@ -11368,12 +11370,57 @@ def test_tidy_runs_one_duplicates_flow_and_keeps_every_gate(logged_in_page, monk
     assert "2025-01/harness_dup.png" in page.inner_text(".mgcp-tidy .mgcp-runfiles")
 
     assert _chip_state(page, "Move all to _duplicates/") == "enabled"
-    assert _chip_state(page, "Check _duplicates/") == "disabled"
-    assert _chip_state(page, "Delete outright") == "disabled"
+    assert _chip_state(page, "Check _duplicates/") == "enabled"
+    assert _chip_state(page, "Delete library copies outright") == "disabled"
     n = len(started)
     page.click('.mgcp-tidy button.mgcp-chip:has-text("Move all to _duplicates/")')
     page.wait_for_selector('.mgcp-tidy button.mgcp-chip:has-text("Confirm — Move all to _duplicates/")')
     assert len(started) == n, "the first click on a step that moves files must only arm it"
+
+
+_TIDY_VERIFY_SAFE = ("Verifying quarantine ...\n\nQuarantined files checked : 2\n"
+                     "Result: All 2 files in _duplicates/ (1.0 KB) have a copy kept in the library. Safe to delete.\n")
+_TIDY_VERIFY_UNSAFE = ("Verifying quarantine ...\n\nResult: Not safe to delete yet: 1 of 2 files in "
+                       "_duplicates/ need a look. Review the flagged items above.\n")
+
+
+@pytest.mark.parametrize("safe", [True, False])
+def test_tidy_empty_duplicates_opens_only_after_an_all_clear_check(logged_in_page, monkeypatch, safe):
+    """Empty _duplicates/ is greyed until a Check _duplicates/ finishes saying every file is safe.
+    Then its first click only arms it, naming the count and the size; the second starts the job
+    with --empty-duplicates --apply; and the job's start closes it again. A Check that found a
+    problem leaves it greyed (the mutation half: the same flow, one sentence different)."""
+    started = _fake_cli_jobs(monkeypatch, _TIDY_VERIFY_SAFE if safe else _TIDY_VERIFY_UNSAFE)
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    _settle(page)
+    _open_tidy(page)
+    assert _chip_state(page, "Empty _duplicates/") == "disabled"
+
+    page.click('.mgcp-tidy button.mgcp-chip:has-text("Check _duplicates/")')
+    page.wait_for_function(
+        "() => /_duplicates\\//.test(document.querySelector('.mgcp-tidy .mgcp-runresult')?.innerText || '')",
+        timeout=20_000)
+    assert any("--verify-dupes" in a for a in started), started
+    if not safe:
+        assert _chip_state(page, "Empty _duplicates/") == "disabled"
+        assert _chip_state(page, "Delete library copies outright") == "disabled", (
+            "a Check run out of order must not unlock the chain's later step")
+        return
+    assert _chip_state(page, "Empty _duplicates/") == "enabled"
+    assert _chip_state(page, "Delete library copies outright") == "disabled", (
+        "a Check run out of order must not unlock the chain's later step")
+    n = len(started)
+    page.click('.mgcp-tidy button.mgcp-chip:has-text("Empty _duplicates/")')
+    armed = '.mgcp-tidy button.mgcp-chip:has-text("Confirm — send 2 files (1.0 KB) to the Recycle Bin")'
+    page.wait_for_selector(armed)
+    assert len(started) == n, "the first click must only arm it"
+    page.click(armed)
+    # the stand-in job prints "ok" and no Result line, so its box reads "✓ Finished"
+    page.wait_for_selector('.mgcp-tidy .mgcp-runresult:has-text("Finished")', timeout=20_000)
+    empties = [a for a in started if "--empty-duplicates" in a]
+    assert len(empties) == 1 and "--apply" in empties[0], started
+    assert _chip_state(page, "Empty _duplicates/") == "disabled", "a job ran since the Check"
 
 
 def test_tidy_review_opens_duplicate_review_on_top_of_the_panel(logged_in_page):

@@ -406,7 +406,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
     panelHistory, schedule, saveSchedule, saveLivingJob, runLiving,
     fetchSummary, fetchAchievements, actionSpec,
     running, progress, log, jobError, jobResult, setJobResult, confirmArm, runAction, stopJob,
-    dedupDone, organizeRes, runFind,
+    dedupDone, organizeRes, runFind, emptyReady, clearEmptyReady,
     testPullN, setTestPullN,
     taskId, setTaskId, taskState, importTask,
     power, powerConfirm, powerPhase, powerErr, clickPower, closePower,
@@ -1117,6 +1117,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                   organizeRes={organizeRes} running={running} progress={progress} log={log}
                   jobResult={jobResult} setJobResult={setJobResult} jobError={jobError}
                   stopJob={stopJob} actions={summary.actions} changed={reviewChanged}
+                  emptyReady={emptyReady} clearEmptyReady={clearEmptyReady}
                   onOpenReview={() => setSubOverlay("duprev")} onOpenDetails={onOpenDetails} />
               )}
 

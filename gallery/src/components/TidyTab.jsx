@@ -18,14 +18,18 @@ import { onRunEnd } from "../lib/brokenFixRun.js";
    folders", and "Verify library integrity" under Check. They are one tab now, one column per
    job, each with its count and its buttons, exactly as the board draws it.
 
-   NOTHING NEW RUNS HERE, AND NOTHING DESTRUCTIVE GOT EASIER. Every button is a job or a
-   route the app already had:
+   NOTHING DESTRUCTIVE GOT EASIER. Every button but one is a job or a route the app already
+   had:
      Duplicates  Find = Audit then Preview (both read-only, useControlPanel's runFind);
                  Review = the one Duplicate Review (keep one in each group, move the rest to
                  _duplicates/, Undo per group), opened over the Panel;
-                 then the chain's last three steps, gated exactly as before (DEDUP_STAGES /
-                 dedupDone): Move all to _duplicates/ only after Find, Check _duplicates/
-                 only after that, Delete outright only after a clean Check.
+                 then Move all to _duplicates/ (only after Find), Check _duplicates/ (read-only,
+                 any time), and the road's last step, Empty _duplicates/ (2026-11-19, the one
+                 new job): only straight after a Check that found every file safe, its confirm
+                 naming the count and size, to the Recycle Bin -- and the CLI command behind
+                 it re-checks everything itself (moonglade/organize.py, cmd_empty_duplicates).
+                 Apart from the road, Delete library copies outright keeps the chain's own gate
+                 (DEDUP_STAGES / dedupDone: Find, Move all and Check, in order).
      Stray files Organize's Preview, Move and Undo.
      Broken      Fix all (the Broken files list's own one confirm) and Check (the integrity
                  pass, read-only); the list itself sits under the columns.
@@ -42,8 +46,11 @@ const stageIndex = (key) => DEDUP_STAGES.findIndex((s) => s.key === key);
 export default function TidyTab({
   isLocal, actionSpec, runAction, runFind, confirmArm, dedupDone, organizeRes,
   running, progress, log, jobResult, setJobResult, jobError, stopJob, actions,
-  changed = 0, onOpenReview, onOpenDetails,
+  changed = 0, onOpenReview, onOpenDetails, emptyReady = null, clearEmptyReady,
 }) {
+  // Duplicate Review moved or restored something: the last Check no longer describes
+  // _duplicates/, so Empty closes until the next one.
+  useEffect(() => { if (changed && clearEmptyReady) clearEmptyReady(); }, [changed]);   // eslint-disable-line react-hooks/exhaustive-deps
   // Re-read the counts after anything here changed the library.
   const [rev, setRev] = useState(0);
   const wasRunning = useRef(!!running);
@@ -124,8 +131,29 @@ export default function TidyTab({
             <div className="mgcp-tidythenlbl">then</div>
             <div className="mgcp-chips">
               {step("dedup-apply", "Move all to _duplicates/", { locked: true, early: "Run Find first" })}
-              {step("verify-dupes", "Check _duplicates/", { early: "Move them to _duplicates/ first" })}
-              {step("dedup-delete", "Delete outright", { locked: true, early: "Check _duplicates/ first" })}
+              <ActionChip spec={actionSpec("verify-dupes")} label="Check _duplicates/" disabled={busy}
+                title="Is every file in _duplicates/ the same as a copy kept in the library? Read-only."
+                armed={confirmArm === "verify-dupes"} onRun={() => runAction("verify-dupes")} />
+              {/* The road's last step. Open only straight after a Check that found every file
+                  safe; the confirm says how many files and how much. */}
+              <ActionChip spec={actionSpec("empty-dupes")} locked disabled={busy || !emptyReady}
+                label={confirmArm === "empty-dupes" && emptyReady
+                  ? "send " + emptyReady.count + " file" + (emptyReady.count === "1" ? "" : "s")
+                    + " (" + emptyReady.size + ") to the Recycle Bin"
+                  : "Empty _duplicates/"}
+                title={emptyReady
+                  ? "Send the " + emptyReady.count + " checked files (" + emptyReady.size + ") to the Recycle Bin"
+                  : "Run Check _duplicates/ first: it must find every file safe"}
+                armed={confirmArm === "empty-dupes"} onRun={() => runAction("empty-dupes")} />
+            </div>
+          </div>
+          {/* Not part of the road: it deletes duplicate copies IN THE LIBRARY, never _duplicates/,
+              with no safety net -- so it keeps the chain's own gate (Find, Move all, Check). */}
+          <div className="mgcp-tidythen">
+            <div className="mgcp-tidythenlbl">or, with no _duplicates/ safety net</div>
+            <div className="mgcp-chips">
+              {step("dedup-delete", "Delete library copies outright", { locked: true,
+                early: "Run Find, Move all and Check first" })}
             </div>
           </div>
         </section>

@@ -27,3 +27,14 @@ export function parseDedupResult(lines) {
   const m = sentence.match(/\d[\d,]*/);
   return { sentence, files, count: m ? m[0] : String(files.length) };
 }
+
+// Check _duplicates/'s all-clear (moonglade/organize.py, cmd_verify_dupes): "All 14 files in
+// _duplicates/ (25.6 MB) have a copy kept in the library. Safe to delete." -> {count, size},
+// anything else -> null. The Tidy tab's Empty _duplicates/ opens only on this, and its confirm
+// names the count and the size it carries. Keep the pattern in step with that sentence.
+const ALL_CLEAR = /^All ([\d,]+) files? in _duplicates\/ \(([^)]+)\) ha(?:s|ve) a copy kept in the library\. Safe to delete\.$/;
+
+export function verifiedAllClear(dedup) {
+  const m = dedup && typeof dedup.sentence === "string" ? ALL_CLEAR.exec(dedup.sentence) : null;
+  return m ? { count: m[1], size: m[2] } : null;
+}

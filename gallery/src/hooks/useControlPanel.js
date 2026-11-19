@@ -5,7 +5,7 @@ import { note as noteUpdate, subscribe as subscribeUpdate,
 import { invalidate, peek, put } from "./swrCache.js";
 import { noticeAchievements } from "../notify/ach.js";
 import { DETAIL_PREFIX } from "../apiRoutes.js";
-import { parseDedupResult } from "../lib/dedupResult.js";
+import { parseDedupResult, verifiedAllClear } from "../lib/dedupResult.js";
 import { clearPowerNote, notePower, powerToResume, readPowerNote } from "../lib/powerResume.js";
 
 /* Control Panel's own fetch/poll/action/power data layer, mechanically lifted out of
@@ -72,6 +72,9 @@ export const DEDUP_STAGES = [
   { key: "verify-dupes", label: "Verify" },
   { key: "dedup-delete", label: "Delete", locked: true },
 ];
+// The jobs whose result box leads with one sentence and folds its files: the chain, plus the
+// Tidy tab's Empty _duplicates/ (which is NOT a chain stage -- a fresh all-clear Check gates it).
+const DEDUP_RESULT_KEYS = DEDUP_STAGES.map((s) => s.key).concat(["empty-dupes"]);
 
 // Applies a skin app-wide, not just inside whichever component called this -- classic's
 // pickSkin() and the notify module's applySkin (gallery/src/notify/ach.js) both write the SAME pair
@@ -160,6 +163,11 @@ export default function useControlPanel() {
      stage still advances dedupDone on its own, so the gate in front of Quarantine is exactly
      the one it always was. */
   const findChainRef = useRef(false);
+  /* EMPTY _duplicates/ (2026-11-19): {count, size} from the LAST finished job, when that job
+     was a Check _duplicates/ whose one sentence said every file is safe -- and null the moment
+     any job starts or Duplicate Review moves something. It only greys the button: the CLI
+     command holds the real gate (the check's own list, a second check on the spot). */
+  const [emptyReady, setEmptyReady] = useState(null);
 
   const [taskId, setTaskIdRaw] = useState("");
   const [taskState, setTaskState] = useState(null); // 'running' | 'done' | {error}
@@ -349,7 +357,8 @@ export default function useControlPanel() {
       // rather than folding it into an identical-looking "done".
       const tail = lines.slice(-6).filter(Boolean);
       // A Dedup stage leads with its one sentence and folds its file lines (lib/dedupResult.js).
-      const dedup = DEDUP_STAGES.some((s) => s.key === finishedKey) ? parseDedupResult(lines) : null;
+      const dedup = DEDUP_RESULT_KEYS.includes(finishedKey) ? parseDedupResult(lines) : null;
+      if (finishedKey === "verify-dupes" && d.status === "done") setEmptyReady(verifiedAllClear(dedup));
       setJobResult({
         ok: d.status !== "done_with_errors",
         warnCount: d.warn_count || 0,
@@ -366,7 +375,9 @@ export default function useControlPanel() {
       // unlocks the next (possibly destructive) one on a false pretense.
       if (d.status === "done") {
         const idx = DEDUP_STAGES.findIndex((s) => s.key === finishedKey);
-        if (idx !== -1) setDedupDone((prev) => Math.max(prev, idx + 1));
+        // Only a stage run IN ORDER moves the chain on: Check _duplicates/ may run on its own
+        // (it is read-only), but that must never unlock the stage after it.
+        if (idx !== -1) setDedupDone((prev) => (idx <= prev ? Math.max(prev, idx + 1) : prev));
       }
       // Find's second half: Preview follows an Audit that finished clean, and nothing else.
       const chainPreview = findChainRef.current && finishedKey === "audit" && d.status === "done";
@@ -404,7 +415,11 @@ export default function useControlPanel() {
     // stage clicked out of order is refused here regardless of how it got
     // clicked.
     const dedupIdx = DEDUP_STAGES.findIndex((s) => s.key === key);
-    if (dedupIdx !== -1 && dedupIdx > dedupDone) return;
+    // Check _duplicates/ is read-only and may run any time (the Tidy tab's Empty step needs a
+    // fresh one); running it out of order advances nothing (tick, above).
+    if (dedupIdx !== -1 && dedupIdx > dedupDone && key !== "verify-dupes") return;
+    // Empty _duplicates/: only straight after a Check that found every file safe.
+    if (key === "empty-dupes" && !emptyReady) return;
     if (spec.destructive && confirmArm !== key) {
       setConfirmArm(key);
       return;
@@ -425,6 +440,7 @@ export default function useControlPanel() {
   const startJob = async (key, extra) => {
     const spec = actionSpec(key);
     if (!spec) return;
+    setEmptyReady(null);          // any job at all can change what the last Check saw
     setConfirmArm(null);
     setJobError("");
     setJobResult(null);
@@ -839,7 +855,7 @@ export default function useControlPanel() {
     panelHistory, schedule, saveSchedule, saveLivingJob, runLiving,
     fetchSummary, fetchAchievements, actionSpec,
     running, progress, log, jobError, jobResult, setJobResult, confirmArm, runAction, stopJob,
-    dedupDone, organizeRes, runFind,
+    dedupDone, organizeRes, runFind, emptyReady, clearEmptyReady: () => setEmptyReady(null),
     testPullN, setTestPullN,
     taskId, setTaskId, taskState, importTask,
     power, powerConfirm, powerPhase, powerErr, clickPower, closePower,

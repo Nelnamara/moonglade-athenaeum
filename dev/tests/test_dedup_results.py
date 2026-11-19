@@ -101,7 +101,7 @@ def test_verify_sentence_safe(tmp_path, capsys):
     (tmp_path / "2023-10" / "111.webp").write_bytes(b"SAME")
     (tmp_path / "_duplicates" / "images" / "p_t1_111.webp").write_bytes(b"SAME")
     organize_mod.cmd_verify_dupes(_args(), tmp_path)
-    assert _last(capsys) == P + "All 1 file in _duplicates/ has a copy kept in the library. Safe to delete."
+    assert _last(capsys) == P + "All 1 file in _duplicates/ (4.0 B) has a copy kept in the library. Safe to delete."
 
 
 def test_verify_sentence_not_safe(tmp_path, capsys):
