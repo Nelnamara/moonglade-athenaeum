@@ -11104,3 +11104,117 @@ def test_the_desktop_contests_card_grid_fits_the_window(logged_in_page):
     for right in geo["cards"]:
         assert right <= geo["right"] + 1, (
             "a contest card's right edge {} is past the window's {}".format(right, geo["right"]))
+
+
+# ---------------------------------------------------------------------------
+# The app's own pages under their Content-Security-Policy (app security review 2026-11-19,
+# finding 4), and the front door's origin check (finding 2) seen from a real browser.
+# ---------------------------------------------------------------------------
+
+# Every policy violation the page reports, collected before any page script runs.
+_CSP_WATCH_JS = """
+window.__mgCsp = [];
+document.addEventListener('securitypolicyviolation', function (e) {
+  window.__mgCsp.push(e.violatedDirective + ' ' + (e.blockedURI || 'inline'));
+});
+"""
+
+
+def _csp_clean(page, console):
+    seen = page.evaluate("() => window.__mgCsp || []")
+    refused = [m for m in console if "Content Security Policy" in m or "Refused to" in m]
+    assert not seen and not refused, (seen, refused)
+
+
+def _watch(page):
+    console = []
+    page.on("console", lambda m: console.append(m.text) if m.type == "error" else None)
+    page.add_init_script(_CSP_WATCH_JS)
+    return console
+
+
+def test_the_sign_in_page_runs_under_its_policy(render_server, render_browser):
+    ctx = render_browser.new_context(viewport=DESKTOP, base_url=render_server.base_url)
+    try:
+        page = ctx.new_page()
+        console = _watch(page)
+        r = page.goto("/login", wait_until="networkidle")
+        assert "nonce-" in r.headers["content-security-policy"]
+        page.wait_for_selector("input[name=username]")      # the bundle mounted
+        _csp_clean(page, console)
+    finally:
+        ctx.close()
+
+
+@pytest.mark.parametrize("viewport", [DESKTOP, PHONE])
+def test_the_app_and_the_loom_run_under_their_policy_and_their_writes_pass(
+        logged_in_page, viewport):
+    page = logged_in_page(**viewport)
+    console = _watch(page)
+    page.goto("/", wait_until="networkidle")
+    assert page.evaluate("() => document.getElementById('root').children.length") > 0
+    assert page.evaluate("() => typeof window.MG_UPSCALE") == "object"   # nonced boot data ran
+    # A real same-origin write from the app's page passes the front door (Origin and
+    # Sec-Fetch-Site are the browser's own).
+    status = page.evaluate("""() => fetch('/api/view-presets', {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({csrf: window.MG_BOOT.csrf, name: 'csp-probe', query: '?q=1'})})
+        .then(r => r.status)""")
+    assert status == 200
+    _csp_clean(page, console)
+    page.goto("/loom", wait_until="networkidle")
+    page.wait_for_selector(".lv-overlay, #root > *")
+    saved = page.evaluate("""() => window.storage.set('csp-probe', '{}').then(r => !!r.ok)""")
+    assert saved is True
+    _csp_clean(page, console)
+
+
+def test_the_connect_page_runs_under_its_policy_and_reaches_its_route(logged_in_page):
+    page = logged_in_page()
+    console = _watch(page)
+    page.goto("/mirror/connect", wait_until="networkidle")
+    # its inline script ran: with no opener it says so
+    assert page.inner_text("#mc-status") == "Not connected."
+    d = page.evaluate("""() => fetch('/api/mirror/connect-token', {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({csrf: window.MG_MIRROR_CONNECT.csrf, token: 'not.a.token'})})
+        .then(r => r.json().then(j => [r.status, j]))""")
+    assert d[0] == 200 and d[1]["ok"] is False and "a PixAI sign-in" in d[1]["error"]
+    _csp_clean(page, console)
+
+
+def test_a_page_on_another_port_is_refused_by_the_front_door(logged_in_page, render_server):
+    """The review's scenario in a real browser: a page served from ANOTHER port of this PC
+    (here a second tiny server) posts to this one with the signed-in cookie riding along --
+    same-site, so the Lax cookie is sent. The front door refuses it."""
+    import http.server
+    page = logged_in_page()
+    target = render_server.base_url.rstrip("/")
+    html = ("<!doctype html><script>window.__r = fetch('%s/api/server/stop', {method: 'POST',"
+            " credentials: 'include', mode: 'no-cors'}).then(() => 'sent');</script>" % target)
+
+    class _H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = html.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+    other = http.server.HTTPServer(("127.0.0.1", 0), _H)
+    threading.Thread(target=other.serve_forever, daemon=True).start()
+    seen = []
+    page.on("response", lambda r: seen.append(r.status) if "/api/server/stop" in r.url else None)
+    try:
+        page.goto("http://127.0.0.1:%d/" % other.server_address[1], wait_until="networkidle")
+        page.evaluate("() => window.__r")
+        page.wait_for_timeout(200)
+    finally:
+        other.shutdown()
+        other.server_close()
+    assert seen == [403], seen
+    # ...and this server is still up and still has the session
+    assert page.goto(target + "/api/ping").status == 200

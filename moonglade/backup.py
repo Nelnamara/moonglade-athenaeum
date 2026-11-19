@@ -62,6 +62,7 @@ from moonglade import mirror as _mirror
 from moonglade import organize as _organize
 from moonglade import paths as _paths
 from moonglade import pixai_client as _pixai_client
+from moonglade import secure_files as _secure_files
 from moonglade import telemetry as _telemetry
 from moonglade.gallery import (CATALOG_FIELDS, init_db, migrate, load_catalog,
                             query_catalog, catalog_csv_text,
@@ -333,13 +334,15 @@ def _save_config(cfg):
     data = json.dumps(cfg, indent=2)          # serialize BEFORE touching disk
     tmp = path.with_name(path.name + ".tmp-{}".format(os.getpid()))
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(data)
-            f.flush()
-            os.fsync(f.fileno())
+        # Secrets at rest (app security review 2026-11-19, finding 5): the API key, the
+        # session signing key and the account hashes are this user's alone. The temp file is
+        # made owner-only while still EMPTY, before the secrets are written into it, so no copy
+        # of them ever sits readable; the result is restricted again after the replace.
+        _secure_files.write_private(tmp, data)
         for attempt in range(5):
             try:
                 os.replace(tmp, path)
+                _secure_files.restrict_to_owner(path)
                 return
             except PermissionError:
                 # Windows only: an AV scanner or indexer can transiently hold the

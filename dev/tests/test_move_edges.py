@@ -774,7 +774,7 @@ def test_a_port_that_cannot_be_opened_is_said_with_the_way_out(monkeypatch, caps
 
 
 def test_the_server_says_a_port_it_cannot_bind_instead_of_a_traceback(r, monkeypatch, capsys):
-    import werkzeug.serving
+    from moonglade import tls as moonglade_tls
     from moonglade import gallery as g
     write_config(r)
     settings.set_values(library_dir=str(r.lib), launch_args=["--skip-thumbs"], port=5224)
@@ -783,7 +783,7 @@ def test_the_server_says_a_port_it_cannot_bind_instead_of_a_traceback(r, monkeyp
     def cannot(*a, **k):
         raise OSError(10013, "An attempt was made to access a socket in a way forbidden")
     monkeypatch.setattr(g, "port_owner", lambda host, port: "")
-    monkeypatch.setattr(werkzeug.serving, "make_server", cannot)
+    monkeypatch.setattr(moonglade_tls, "make_server", cannot)       # main()'s server factory
     monkeypatch.setenv("MOONGLADE_SUPERVISED", "1")
     monkeypatch.setattr(sys, "argv", ["x"])
     assert g.main() == 2

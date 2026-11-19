@@ -757,12 +757,14 @@ def test_loom_serves_the_same_page_with_or_without_a_board_address(tmp_path):
     feat beacon's per-render nonce (window.MG_ACH_NONCE), which is a fresh random value on
     every render BY DESIGN -- it is what let /api/ach-event go back to LOGIN. It is blanked
     on both sides here rather than dropping the comparison, so everything else in the shell
-    is still compared whole and a real branch on ?board= would still fail this.
+    is still compared whole and a real branch on ?board= would still fail this. The second,
+    since 2026-11-19, is the same kind: the inline scripts' per-response CSP nonce.
     """
     import re as _re
     from tests.conftest import login_client
     cli = login_client(tmp_path)
-    same = lambda r: _re.sub(rb'MG_ACH_NONCE = "[^"]*"', b'MG_ACH_NONCE = ""', r.get_data())
+    same = lambda r: _re.sub(rb'nonce="[^"]*"', b'nonce=""', _re.sub(
+        rb'MG_ACH_NONCE = "[^"]*"', b'MG_ACH_NONCE = ""', r.get_data()))
     plain = cli.get("/loom")
     withboard = cli.get("/loom?board=k3f9q2z")
     junk = cli.get("/loom?board=%2Fetc%2Fpasswd&cast=..%2F")

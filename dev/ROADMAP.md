@@ -217,7 +217,11 @@ A visible change gets a design or workshop step first.
   device" half shipped in 3.16.0.
 - **Apple TV client** — a native tvOS viewer in its own repo (Nelnamara/moonglade-tv); scope and plan
   in moonglade-internal/scopes (SCOPE_2026-10-26_apple-tv-client.md, PLAN_2026-10-26_apple-tv.md). The
-  server half of pairing waits on the app security review with Session V.
+  server half of pairing waits on the app security review with Session V. Since the review's fixes
+  (2026-11-19) the server answers every LAN client over HTTPS only, under its own certificate
+  authority: the TV client must browse `_https._tcp` (not `_http._tcp`) and pin the server's CA
+  fingerprint (the LAN card shows it; the leaf is re-issued when the address changes) before
+  pairing (S1).
 - **The phone layouts** wait on the mobile-surface audit's defect list; the Chrome-on-iPhone column
   jump after a turn needs a measurement on the device itself.
 - **Windows Explorer's Network folder** *(scoped 2026-10-02)*. Moonglade shows up for phones through

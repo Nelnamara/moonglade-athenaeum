@@ -349,6 +349,17 @@ minute, so a PixAI outage never turns into a flood of retries.
 > *other* direction. Live Mirror pulls what you make on PixAI *into* your local library;
 > Mirror to PixAI files what you make *in Moonglade* out to your PixAI web library.
 
+## LAN discovery
+
+The card that says how other devices reach Moonglade: whether it is broadcasting its name on your
+network, the address to open (with **Copy** and **QR**), and, on the server machine, **Reach**
+(**This PC** or **LAN**), the port and the broadcast name. With **Reach** on **LAN**, the address
+other devices use is `https://`. The card links **this PC's certificate**: install it once on a
+phone, tablet or Mac and that device stops warning about Moonglade's certificate. The card also
+shows that certificate's **SHA-256 fingerprint** to check before you install it (see [The
+Gallery → Using HTTPS](Gallery#using-https)). Read the fingerprint here on the PC, not on the
+device you are checking. If the card says the network traffic is not encrypted, the line after it says why.
+
 ## Mirror to PixAI
 
 *(Maintenance tab.)* Off by default. When it's on, each new generation you make in Moonglade
@@ -369,13 +380,21 @@ It works by riding your own PixAI sign-in from the website:
    the window when you're done.
 3. Flip the toggle to **on**. It refuses to turn on until a session is connected, and tells
    you so. The switch only works from the server machine itself; the bookmark works from any
-   device on your home network. From another device the sign-in travels encrypted only when
-   that device reaches Moonglade at its `https://` address; Moonglade serves plain `http://`
-   unless you turn on its `--https` switch (see [The Gallery → Using HTTPS](Gallery#using-https)).
+   device on your home network. From another device it works only at Moonglade's `https://`
+   address, so the sign-in is always encrypted on its way across the network: make the bookmark
+   from the `https://` address (the LAN discovery card shows it), and a bookmark made from an old
+   `http://` address is refused with a sentence saying so (see [The Gallery → Using
+   HTTPS](Gallery#using-https)). On the PC itself, `http://localhost` is fine.
 4. From then on it renews itself while the app is running. PixAI's session lasts a week from
    each renewal, and Moonglade renews it about once a day, so it survives the app being closed
    for up to about six days. You only need the bookmark again if you sign out of PixAI, or if
    the app was closed long enough for the session to lapse.
+
+**Disconnect** (on the tile, on the server machine, while a sign-in is stored) makes Moonglade
+forget the PixAI sign-in: it deletes the stored copy, stops renewing it and turns the switch off.
+That ends Moonglade's hold on it, not PixAI's: to end the sign-in itself, sign that session out on
+pixai.art's own sessions page (your profile's settings). Use both if you think the sign-in was
+copied.
 
 The ring on the tile shows how much of the current session is left, out of its own week. It
 stays green through the normal renewal; it turns peach only if a renewal actually failed (it
@@ -491,6 +510,9 @@ The **Accounts** tile in the Maintenance tab lists your gallery login accounts; 
   to enter your current password to prove it's you. Changing it signs out every other device
   on your account and keeps the one you're using — the way to sign out everywhere if a device
   is lost (**Log Out** signs out only the device you press it on).
+- **sign out all devices** — beside your own name (**(you)**). Signs your account out on every
+  device at once, the one you're using included, without changing your password; you land on
+  the sign-in page. Works from anywhere.
 - **reset password…** — appears next to each *other* account, and only when you're using the
   browser **on the server machine itself**. It sets a new password without needing the old
   one, which is what makes it a recovery path rather than a convenience.

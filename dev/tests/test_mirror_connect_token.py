@@ -257,14 +257,40 @@ def test_home_network_addresses(addr, home):
     ("203.0.113.5", False), ("::ffff:8.8.8.8", False), ("2001:db8::1", False),
 ])
 def test_the_route_takes_a_sign_in_only_from_the_home_network(tmp_path, armed, addr, ok):
+    """Over HTTPS (another device's only road since 2026-11-19, below), the address decides."""
     cli = login_client(tmp_path)
     tok = _in(7)
-    r = cli.post(ROUTE, json=with_csrf(cli, {"token": tok}), environ_base={"REMOTE_ADDR": addr})
+    r = cli.post(ROUTE, json=with_csrf(cli, {"token": tok}),
+                 environ_base={"REMOTE_ADDR": addr, "wsgi.url_scheme": "https"},
+                 base_url="https://localhost")
     if ok:
         assert r.get_json()["ok"] is True
     else:
         assert r.status_code == 403 and "home network" in r.get_json()["error"]
         assert mirror_mod.load_mirror_state() == {} and armed.looked == []
+
+
+@pytest.mark.parametrize("addr", ["192.168.1.20", "10.0.0.68", "::ffff:192.168.1.20",
+                                  "fd12:3456::1"])
+def test_another_device_over_plain_http_is_refused_before_anything(tmp_path, armed, addr):
+    """App security review 2026-11-19, finding 1: a sign-in posted over plain http:// from
+    another device crosses the network in clear, so it is refused -- before the body is read,
+    the account looked up or anything stored -- with a sentence naming the https:// address."""
+    cli = login_client(tmp_path)
+    r = cli.post(ROUTE, json=with_csrf(cli, {"token": _in(7)}),
+                 environ_base={"REMOTE_ADDR": addr})
+    assert r.status_code == 403
+    err = r.get_json()["error"]
+    assert "https://" in err and "encrypted" in err
+    assert mirror_mod.load_mirror_state() == {} and armed.looked == []
+
+
+def test_this_pc_may_connect_over_plain_http(tmp_path, armed):
+    """The loopback never leaves the PC: plain HTTP from 127.0.0.1 still connects."""
+    cli = login_client(tmp_path)
+    r = cli.post(ROUTE, json=with_csrf(cli, {"token": _in(7)}),
+                 environ_base={"REMOTE_ADDR": "127.0.0.1"})
+    assert r.get_json()["ok"] is True
 
 
 # ---- the page the bookmark opens -------------------------------------------------------

@@ -16,16 +16,34 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
-### For developers
-- **The picture list a client reads now carries each picture's star rating**, so a viewer such as the Apple TV client in development can show and change stars without a second request. `dev/tools/tv_fixtures.py` captures that list and four other read-only answers from a library into a folder, for a client's tests. (2026-10-26)
-
 ### Added
+- **Sign out all devices**, beside your name in Control Panel → Accounts. It signs your account out everywhere, this device included, without changing your password. (2026-11-19)
+- **Disconnect on the Mirror tile.** On this PC, it makes Moonglade forget the stored PixAI sign-in, stop renewing it and turn the Mirror off. (2026-11-19)
 - **Search understands numbers and date ranges.** `lora:detail>0.7` and `lora:*>=0.5` compare a LoRA's weight (`>`, `>=`, `<`, `<=`, `=`); `created:2026Q3` is a quarter, `created:2026-08..2026-10` an inclusive range (either end can be left open), and `created:>=2026-09-15` starts from a day. The Advanced search help and the Gallery wiki page list them, and both now say that ticked pictures are rated all at once with 1–5. (2026-11-19)
 - **The command line can search, list and export.** `python -m moonglade --search "<query>"` takes the same query language as the gallery's search box and prints one line per match (media id, date, model, rating, start of the prompt); `--limit N` and `--json` shape the output, and `--export-csv PATH` writes the matches with the same columns as the gallery's Export view. It reads the catalog only and never touches the network. `--help` is now grouped under Backup, Library, Create, Account, Maintenance and Search; no flag changed. (2026-11-19)
 - **One-line explanations for the app's own words.** Hovering Mirror to PixAI, its Armed · tier live line, Tier 1, The Loom and the Folio button says what each is; the Glossary and FAQ carry the same words. (2026-11-19)
 - **The README and Setup page open with "Start here".** First line: you need a PixAI membership for the API key; then download, double-click the installer, paste the key, open the gallery. (2026-11-19)
 
+### Changed
+- **Your other devices reach Moonglade over HTTPS.** Once Moonglade is on your home network, a phone, tablet or Mac opens it at an `https://` address, so your password, your session and the Mirror's PixAI sign-in cross the network encrypted; an old `http://` address takes them there. This PC keeps `http://localhost`. Moonglade makes its own certificate once and keeps it; install it once on a device, from the link on the Control Panel's LAN discovery card, and that device stops warning. The card shows its fingerprint to check first. If the certificate can't be made, Moonglade starts anyway on plain `http://` and says why. `--https` now also puts this PC on HTTPS, and no longer makes a new certificate at every start. (2026-11-19)
+- **Connect from PixAI from another device works only at the `https://` address.** Over plain `http://` it is refused with a sentence saying where to go, so a PixAI sign-in never crosses your network unencrypted. (2026-11-19)
+- **Log Out really ends that session.** A copy of the signed-out cookie stops working too, and a sign-in now lasts at most 30 days however often it is used. Each device signs in once more after this update. (2026-11-19)
+- **One-click Update installs the release it announced.** It moves to exactly that release, never to whatever has been added to master since, and still only by a fast-forward from where your install is. (2026-11-19)
+- **Your catalog is copied before every update.** Before the update pulls anything it saves `catalog.db` as a dated `catalog-before-update-…db` beside it and keeps the last three; if the copy can't be made, nothing changes. The update window shows it as its first step. (2026-11-19)
+- **Every version reads in full.** The phone's About row said "v3.21" where the desktop said "v3.21.0"; both, and the guide's what's-new note, now print the whole version. (2026-11-19)
+- **Contest cards say whether you've used what a contest requires.** A contest that needs a model or LoRA shows "Required LoRA: used ✓", "not used yet" or "1 of 2 used" on its card, on the desktop and the phone. A recipe says it isn't recorded here, and one the app couldn't look up says so; neither is ever shown as not used. (2026-11-19)
+- **A LoRA training run says when it finishes or fails.** The normal corner notice appears once, wherever you are in the app. (2026-11-19)
+- **Hover or tap Backed up to see what's missing.** It says how many generations are still to fetch (Sync now fetches them) and how many failed or were cancelled on PixAI and never made a picture, which nothing can back up. (2026-11-19)
+- **The Sync line in the Control Panel says the same as its Runs itself row.** It used to read "auto off · every 6 hours" from the standing order while Sync was running by itself. (2026-11-19)
+- **Maintenance jobs are gone from the Activity tracker.** It lists what you set going; jobs that run by themselves and the Panel's maintenance jobs are in the Ledger. (2026-11-19)
+- **The published-artwork sweep runs every 6 hours, not every 15 minutes, and Sync every 12 hours, not 6.** Publishing and starting the app still run the sweep at once. A cadence you set yourself is kept. (2026-11-19)
+
 ### Fixed
+- **Another web page can no longer make Moonglade act.** A save, delete, spend or stop is refused unless it comes from one of Moonglade's own pages; a page from another site, or from another program's page on another port of this PC, is turned away before anything happens. (2026-11-19)
+- **Moonglade's own pages refuse to be framed and run only their own scripts,** so one slip in showing someone else's PixAI text can't run code as you. (2026-11-19)
+- **The files that hold your secrets are readable by your Windows account only:** `config.json`, the Mirror's stored sign-in and the certificate's key. (2026-11-19)
+- **Uploads, imports and zips have size limits, sized for a whole library.** A zip that unpacks past 50 GB, holds a single file over 8 GB or holds too many files is refused with a plain sentence that points to the command-line import, and nothing in it is imported. (2026-11-19)
+- **`--https` works again.** With the package that fixes HTTPS errors behind antivirus and company networks installed, as it is on most installs, it stopped the server as it started. (2026-11-19)
 - **A Sync no longer undoes what you do while it runs.** A rating, collection or prompt correction made in the gallery during a Sync used to go back to how it was when the Sync started, and a picture you removed came back; a picture you deleted on PixAI could lose its "deleted on PixAI" mark too. Each save now keeps what changed in the meantime, and a removed picture stays removed. (2026-11-19)
 - **Dedup's Delete never keeps a damaged copy and deletes the whole one.** When the same picture sat in two folders, Dedup kept whichever folder ranked first, even when that copy was a broken half-download, and Delete then removed the good one for good. It now keeps the copy that opens (the larger one when both do), and deletes the other only when it is the same picture or is damaged; anything else stays and is listed. Verify also stopped calling two different pictures under one name "safe to delete". (2026-11-19)
 - **Undo organize no longer forgets the files it could not move back.** It used to clear its list even when a file was open in another program, so those moves could never be undone, and after an organize with Convert it looked for each file under its old name and skipped it. A move it can't undo now stays on the list for the next Undo, it never moves a file over another one already at the old place, and converted files are found under their new name. (2026-11-19)
@@ -35,15 +53,8 @@ git tags. Full prose notes for tagged versions live on
 - **A contest's Rules doc link is only made for an ordinary web address.** (2026-11-19)
 - **Backed up can reach 100%.** It counted generations that failed or were cancelled on PixAI, which never made a picture, as missing, and counted ones you deleted on PixAI as here. (2026-11-19)
 
-### Changed
-- **Your catalog is copied before every update.** Before the update pulls anything it saves `catalog.db` as a dated `catalog-before-update-…db` beside it and keeps the last three; if the copy can't be made, nothing changes. The update window shows it as its first step. (2026-11-19)
-- **Every version reads in full.** The phone's About row said "v3.21" where the desktop said "v3.21.0"; both, and the guide's what's-new note, now print the whole version. (2026-11-19)
-- **Contest cards say whether you've used what a contest requires.** A contest that needs a model or LoRA shows "Required LoRA: used ✓", "not used yet" or "1 of 2 used" on its card, on the desktop and the phone. A recipe says it isn't recorded here, and one the app couldn't look up says so; neither is ever shown as not used. (2026-11-19)
-- **A LoRA training run says when it finishes or fails.** The normal corner notice appears once, wherever you are in the app. (2026-11-19)
-- **Hover or tap Backed up to see what's missing.** It says how many generations are still to fetch (Sync now fetches them) and how many failed or were cancelled on PixAI and never made a picture, which nothing can back up. (2026-11-19)
-- **The Sync line in the Control Panel says the same as its Runs itself row.** It used to read "auto off · every 6 hours" from the standing order while Sync was running by itself. (2026-11-19)
-- **Maintenance jobs are gone from the Activity tracker.** It lists what you set going; jobs that run by themselves and the Panel's maintenance jobs are in the Ledger. (2026-11-19)
-- **The published-artwork sweep runs every 6 hours, not every 15 minutes, and Sync every 12 hours, not 6.** Publishing and starting the app still run the sweep at once. A cadence you set yourself is kept. (2026-11-19)
+### For developers
+- **The picture list a client reads now carries each picture's star rating**, so a viewer such as the Apple TV client in development can show and change stars without a second request. `dev/tools/tv_fixtures.py` captures that list and four other read-only answers from a library into a folder, for a client's tests. (2026-10-26)
 
 ## [3.21.1] - 2026-11-19 — The Right Key
 
