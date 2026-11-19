@@ -390,7 +390,7 @@ function f20Violations(m, sinks, pinned) {
   for (const s of sinks) {
     for (const site of sitesOf(m, s)) {
       if (site.inEffect) bad.push(s + " is referenced inside a useEffect/useLayoutEffect callback (line " + site.line + ": " + site.key + ") -- an effect runs on its own, never on a click");
-      if (site.prop && site.prop !== "onClick" && !(site.key.startsWith("pass ") && pinned.includes(site.tag))) {
+      if (site.prop && site.prop !== "onClick" && !(site.prop === "onPress" && site.tag === "SpendButton") && !(site.key.startsWith("pass ") && pinned.includes(site.tag))) {
         bad.push(s + " is handed to the JSX prop `" + site.prop + "` on <" + site.tag + "> (line " + site.line + ") -- only an onClick, or a bare pass-down to a pinned component (" + pinned.join(", ") + "), may carry a render entry point");
       }
       if (site.key.startsWith("propname ")) bad.push(s + " names a JSX prop with some other value (line " + site.line + ": " + site.key + ")");
@@ -578,7 +578,7 @@ const tabSink = (name, desktopGo, phoneGo) => [
   "def " + name, "ref useGenerationPipeline", "ref App",
   PASS("App", "LoomMobile", name), PASS("App", "LoomV2", name),
   "param LoomV2", "param LoomMobile",
-  "prop LoomV2 onClick=" + desktopGo, "prop LoomMobile onClick=" + phoneGo,
+  "prop LoomV2 onPress=" + desktopGo, "prop LoomMobile onPress=" + phoneGo,
 ];
 const ALLOW = {
   generateShot: [
@@ -594,11 +594,11 @@ const ALLOW = {
     "def batchGenerate", "ref useGenerationPipeline", "ref App", PASS("App", "LoomV2", "batchGenerate"),
     "param LoomV2", "prop LoomV2 onClick=<button.lv-genall>",
   ],
-  genSubmit: ["def genSubmit", "prop LoomMobile onClick=<button.lm-genbtn>"],
-  genImage: tabSink("genImage", "<button.lv-go>", "<button.lm-genbtn>"),
-  genEdit: tabSink("genEdit", "<button.lv-go>", "<button.lm-genbtn>"),
-  genRef: tabSink("genRef", "<button.lv-go>", "<button.lm-genbtn>"),
-  genFix: tabSink("genFix", "<button.lv-go>", "<button.lm-genbtn>"),
+  genSubmit: ["def genSubmit", "prop LoomMobile onPress=<SpendButton.lm-genbtn>"],
+  genImage: tabSink("genImage", "<SpendButton.lv-go>", "<SpendButton.lm-genbtn>"),
+  genEdit: tabSink("genEdit", "<SpendButton.lv-go>", "<SpendButton.lm-genbtn>"),
+  genRef: tabSink("genRef", "<SpendButton.lv-go>", "<SpendButton.lm-genbtn>"),
+  genFix: tabSink("genFix", "<SpendButton.lv-go>", "<SpendButton.lm-genbtn>"),
   runGen: ["def runGen", "call genEdit", "call genRef", "call genFix"],
   confirmSpend: ["def confirmSpend", "call genImage", "call runGen"],
   genImageRun: ["def genImageRun", "call genImage"],
@@ -610,7 +610,7 @@ const ALLOW = {
   submitTask: [],
 };
 const DRAWER_ALLOW = {
-  doGenerate: ["def doGenerate", "prop VideoDrawer onClick=<button.mgd-go>", "prop VideoDrawer onClick=<button.mgdock-gen>"],
+  doGenerate: ["def doGenerate", "prop VideoDrawer onPress=<SpendButton.mgdock-gen>"],
   submitTask: ["import", "call doGenerate"],
 };
 const PINNED_CHILDREN = ["LoomV2", "LoomMobile"];
@@ -647,6 +647,29 @@ describe("F20: every render entry point is referenced only from its allowed call
         assert.ok(siteKeys(M, name).includes("param " + s.tag),
           name + " is handed to <" + s.tag + "> but <" + s.tag + "> does not receive it as a parameter -- the pass-down and the pin disagree");
       }
+    }
+  });
+});
+
+/* The send buttons became <SpendButton> (look pick round 2, topic 1 B, 2026-11-19): the Go
+   handler rides its `onPress`, which the allowlist above reads as the onClick it was. That is only
+   true while SpendButton itself calls onPress from its own <button>'s onClick and nowhere else --
+   never from an effect, a timer or the armed confirm's wait running out. Pinned here. */
+describe("SpendButton calls its onPress only from its own click", () => {
+  const SB = read("../gallery/src/components/SpendButton.jsx").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
+  test("onPress is called in exactly one place, inside press()", () => {
+    const calls = [...SB.matchAll(/onPress\(/g)];
+    assert.equal(calls.length, 1, "one call of onPress");
+    const pressAt = SB.indexOf("const press = (e) => {");
+    assert.ok(pressAt >= 0, "press() is the click handler");
+    const body = SB.slice(pressAt, SB.indexOf("\n  };", pressAt));
+    assert.match(body, /if \(onPress\) onPress\(e\);/);
+  });
+  test("press() is wired only to the <button>'s onClick, and no effect names it", () => {
+    assert.deepEqual([...SB.matchAll(/\bpress\b(?!Action)/g)].length, 2, "defined once, used once");
+    assert.match(SB, /<button type="button"[^>]*onClick=\{press\}/);
+    for (const m of SB.matchAll(/useEffect\(\(\) => \{?[\s\S]*?\}, \[[^\]]*\]\);/g)) {
+      assert.doesNotMatch(m[0], /onPress|press\(/, "an effect must never press");
     }
   });
 });

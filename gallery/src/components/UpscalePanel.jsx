@@ -5,6 +5,7 @@ import { apiGet } from "../api.js";
 import usePriceProbe from "../gen/usePriceProbe.js";
 import { submitTask } from "../gen/submitTask.js";
 import CostBadge from "./CostBadge.jsx";
+import SpendButton from "./SpendButton.jsx";
 import { idleReason } from "./upscaleIdle.js";
 import "../styles/upscale-panel.css";
 
@@ -94,6 +95,7 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
   const [busy, setBusy] = useState(false);
 
   const costRef = useRef(null);
+  const [quote, setQuote] = useState(null);       // the badge's verdict, for the price in Upscale
   const openSeq = useRef(0);
   const closeTimer = useRef(0);
   const busyRef = useRef(false);
@@ -448,11 +450,12 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
             ref={costRef}
             hint="Choose a ratio to see the cost."
             cardLabel="a card"
+            onButton onCost={setQuote}
           />
 
-          <button type="button" className="mgu-go" disabled={!canGo || busy} onClick={doSubmit}>
-            {busy ? "Submitting…" : "Upscale"}
-          </button>
+          {/* the price rides inside the button (look pick round 2, topic 1 B) */}
+          <SpendButton className="mgu-go" offClass="" quote={quote}
+            disabled={!canGo} busy={busy} busyLabel="Submitting…" label="Upscale" onPress={doSubmit} />
           {msg && <div className={"mgu-note" + (msg.bad ? " bad" : "")}>{msg.text}</div>}
         </div>
       </div>

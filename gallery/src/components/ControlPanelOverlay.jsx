@@ -28,6 +28,7 @@ import { openBrokenFiles } from "../lib/brokenFilesNav.js";
 import { reviewLabel } from "../lib/brokenFilesCore.js";
 import { trashOnlyCopyNote } from "../lib/onlyCopy.js";
 import { mirrorBookmarklet } from "../lib/mirrorBookmarklet.js";
+import SpendAskRow from "./SpendAskRow.jsx";
 
 /* A status line that is an error carries a flag, not a glyph: errLine(text) makes one, and
    <MsgLine> draws the warning icon where it renders. Plain strings stay plain lines. */
@@ -1097,6 +1098,8 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                       <div className="mgcp-tilesmall">
                         {credits} credits{cards != null ? " · " + cards + " free cards on hand" : ""}
                       </div>
+                      {/* look pick round 2, topic 1: the one-time ask's amount, off until set */}
+                      <SpendAskRow />
                       <button type="button" className="mgcp-smallchip">Open…</button>
                     </div>
 

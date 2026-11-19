@@ -20,6 +20,7 @@ import { pickContextImage } from "../gen/contextPick.js";
 import { apiGet, apiPost } from "../api.js";
 import ModelFlyout from "./ModelFlyout.jsx";
 import CostBadge from "./CostBadge.jsx";
+import SpendButton from "./SpendButton.jsx";
 import { UnlimitedRow, UnlimitedStrip } from "./UnlimitedMode.jsx";
 import { PaletteRow } from "./ColorPalette.jsx";
 import VideoDrawer from "./VideoDrawer.jsx";
@@ -238,6 +239,8 @@ function GenerateDrawer({ open, onClose, account, request }) {
   const prefillSeq = useRef(0);
   const [prefillBusy, setPrefillBusy] = useState(false);
   const costRef = useRef(null);
+  // The Image badge's last verdict, for the price inside ✦ Generate (SpendButton).
+  const [imgQuote, setImgQuote] = useState(null);
   const drawerRef = useRef(null);
   const g = useGenerate({ costRef, isMember: account ? account.is_member : null });
   const { s, set } = g;
@@ -1562,23 +1565,26 @@ function GenerateDrawer({ open, onClose, account, request }) {
                     a Matrix sends one per cell -- the line shows their total, the same total
                     the confirm quotes, with "each" beneath. */}
                 <CostBadge ref={costRef} stack count={s.varMode === "matrix" ? 1 : s.count}
-                  sends={quoteSends(g.run.plan)} balance={balance}
+                  sends={quoteSends(g.run.plan)} balance={balance} onButton
                   laneHeld={ctxOn && unlimitedOffered(m)}
-                  hint="Pick a model to see the cost." />
+                  hint="Pick a model to see the cost." onCost={setImgQuote} />
                 {/* Gated on the price probe's verdict IN ADDITION to goGate/busy/prefill: the
                     quote on the badge must have been priced off the payload this click submits
                     (gen/priceProbeCore.js). generate() refuses the same way, for the keyboard
-                    Enter that fires against a stale render. */}
-                <button type="button" className={"mgdock-gen" + (gate || g.busy || prefillBusy || g.power.restoring || !g.canSubmit ? " off" : "")}
+                    Enter that fires against a stale render. The price rides inside the button
+                    (look pick round 2, topic 1 B); a send of more than one already asks
+                    through the Run confirm, so only a single send takes the one-time ask. */}
+                <SpendButton className="mgdock-gen" quote={imgQuote} sends={quoteSends(g.run.plan)}
+                  idle="pick a model first"
                   disabled={!!gate || g.busy || prefillBusy || g.power.restoring || !g.canSubmit}
+                  ask={g.run.route !== "confirm"}
                   title={prefillBusy || g.power.restoring ? "Restoring the recipe…"
                     : gate ? (s.unlimited || g.run.templateGate ? gate : "Pick a model and write a prompt first")
                       : s.unlimited ? "Submit in Unlimited Mode"
                         : g.run.images > 1 ? "Send " + g.run.images + " — a confirm shows the total first"
                           : "Submit — this spends credits or a card"}
-                  onClick={() => { if (g.run.route !== "confirm") setReuseFrom(null); g.generate(loraCap); }}>
-                  <span>&#10022; Generate{g.run.images > 1 ? " " + g.run.images : ""}</span>
-                </button>
+                  label={<>&#10022; Generate{g.run.images > 1 ? " " + g.run.images : ""}</>}
+                  onPress={() => { if (g.run.route !== "confirm") setReuseFrom(null); g.generate(loraCap); }} />
               </>
             )}
             <div ref={setVideoGoEl} className="mgdock-slot" style={{ display: tab === "video" ? "contents" : "none" }} />
@@ -1586,7 +1592,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
             {tab === "edit" && sub === "enhance" && (
               /* Enhance's actions live in the slabs (EnhanceTab): the preset "✦ Enhance <cost>"
                  button and "Open the Darkroom ▸". The footer just carries the balance. */
-              <CostBadge stack balance={balance} hint="Pick a preset above, or open the Darkroom for the free filters." />
+              <CostBadge stack onButton balance={balance} hint="Pick a preset above, or open the Darkroom for the free filters." />
             )}
           </div>
         </div>

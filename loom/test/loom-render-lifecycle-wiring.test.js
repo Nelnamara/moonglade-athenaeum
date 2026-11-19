@@ -4,11 +4,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import React from "react";
 import { loadModule, renderElement, query, one, LOOM_MOCKS } from "../test-support/render.mjs";
 import { newCardShape, flat, shotPayload as buildShotPayload, priceFingerprint, shotSendProblem } from "../src/loom-core.js";
 import { patchCardByIdWith } from "../src/loom-mutations.js";
 import { attachTake, splicePatch, tookOf, cutPointOf, SENDING_RECHECK_MS } from "../src/loom-takes-core.js";
+import { quoteFromPrice, spendView } from "../../gallery/src/gen/spendButtonCore.js";
 
 /* THE RENDER LIFECYCLE, AS WIRED (Session P, Stage A1 -- BUILD-w5-p §1.2, §3.3-§3.5 and review
    F1, F3-F8, F12-F17). The pure reducers are unit-tested in loom-takes-core.test.js,
@@ -155,7 +157,7 @@ globalThis.history = { replaceState() {} };
 // master-storyboard.jsx exactly as it ships, plus one line exporting what it already declares.
 const LOOM_SRC = "loom/master-storyboard.jsx";
 const UNDER_TEST = "\nexport const __lifecycleUnderTest = { useProjectStore, useGenerationPipeline, useShotMutations,"
-  + " useTakeActions, VideoDrawer, CostBadge, SendWayOut };\n";
+  + " useTakeActions, VideoDrawer, CostBadge, SpendButton, SendWayOut };\n";
 const LOOM_MOD = await loadModule(LOOM_SRC, { mocks: { ...LOOM_MOCKS, [LOOM_SRC]: SRC + UNDER_TEST } });
 const LOOM = { ...LOOM_MOD.__lifecycleUnderTest, App: LOOM_MOD.default };
 // The drawer portals its ref preview into document.body; nothing else here touches a document.
@@ -1699,11 +1701,23 @@ async function mountDrawer(t, { loomCtx = true, routes = {}, host } = {}) {
   const node = new EventTarget();
   const events = [];
   for (const name of DRAWER_EVENTS) node.addEventListener(name, (e) => events.push({ name, detail: e.detail }));
-  const badge = { clear() {}, setChecking() {}, setPrice() {} };
+  // The badge's handle, and (since look pick round 2, topic 1 B) its onCost push: the price now
+  // rides inside Go (<SpendButton>), which is live only on a settled price -- so the stub tells
+  // the drawer what a real badge would, through the badge's own verdict rule (quoteFromPrice).
+  let onCost = null;
+  const push = (q) => { if (onCost) onCost(q); };
+  const badge = {
+    clear(hint) { push({ state: "idle", text: hint || "" }); },
+    setChecking() { push({ state: "checking" }); },
+    setPrice(d) { push(quoteFromPrice(d)); },
+  };
   const handle = { current: null };
   const h = mountHook(() => LOOM.VideoDrawer.render({ loomCtx }, handle), { commit: (tree) => walkTree(tree, (el) => {
     if (el.type === "div" && typeof el.ref === "function" && /\bgen-drawer\b/.test(el.props.className || "")) el.ref(node);
-    else if (el.type === LOOM.CostBadge && el.ref && typeof el.ref === "object" && !el.ref.current) el.ref.current = badge;
+    else if (el.type === LOOM.CostBadge) {
+      onCost = el.props.onCost || null;
+      if (el.ref && typeof el.ref === "object" && !el.ref.current) el.ref.current = badge;
+    }
   }) });
   t.after(() => h.unmount());
   await settle(h);
@@ -1719,14 +1733,15 @@ async function mountDrawer(t, { loomCtx = true, routes = {}, host } = {}) {
     async ready(mid = "123456") { api.setRefs([{ media_id: mid, thumb: "/t.jpg" }]); await this.priced(); },
     goButton() {
       let b = null;
-      walkTree(h.current, (el) => { if (el.type === "button" && /\bmgd-go\b/.test(el.props.className || "")) b = el; });
+      walkTree(h.current, (el) => { if (el.type === LOOM.SpendButton && /\bmgd-go\b/.test(el.props.className || "")) b = el; });
       return b;
     },
-    /** The real click on Go: the button's own handler, from the latest render. */
+    /** The real press on Go: the button's own handler, from the latest render -- live only on
+        the host's gates AND a settled price (SpendButton's rule, spendView). */
     go() {
       const b = this.goButton();
-      assert.ok(b && !b.props.disabled, "Go is live");
-      return b.props.onClick();
+      assert.ok(b && !b.props.disabled && !b.props.busy && spendView(b.props.quote, b.props).priced, "Go is live");
+      return b.props.onPress();
     },
     lines() {
       const out = [];
@@ -1825,8 +1840,11 @@ describe("<VideoDrawer> in the Loom: target at the click, beforeSend before the 
     const g = await mountDrawer(t, { loomCtx: false });
     await g.ready();
     await g.go();
-    const [priced] = fetches("/api/price").slice(-1);
+    // the probe's own quote: the model cards (look pick round 2, topic 4 C) price the other
+    // engines and lengths through the same route, so it is the one priced off what was sent
     const [sent] = fetches("/api/loom/generate");
+    const priced = fetches("/api/price").find((p) => isDeepStrictEqual(p.body, sent.body));
+    assert.ok(priced, "Go sent exactly a payload the probe priced");
     assert.deepEqual(sent.body, priced.body);
     for (const k of ["submit_id", "loom_target", "expect_free"]) assert.equal(k in sent.body, false, k);
   });
@@ -1837,9 +1855,10 @@ describe("<VideoDrawer> in the Loom: target at the click, beforeSend before the 
     const g = await mountDrawer(t, { loomCtx: false, routes: { "/api/price": () => FREE } });
     await g.ready();
     await g.go();
-    const [priced] = fetches("/api/price").slice(-1);
     const [sent] = fetches("/api/loom/generate");
-    assert.deepEqual(sent.body, { ...priced.body, expect_free: true });
+    const { expect_free: flag, ...asSent } = sent.body;
+    assert.equal(flag, true);
+    assert.ok(fetches("/api/price").some((p) => isDeepStrictEqual(p.body, asSent)), "Go sent exactly a payload the probe priced");
     for (const k of ["submit_id", "loom_target"]) assert.equal(k in sent.body, false, k);
   });
   test("in the Loom, what is sent is what the host's ask confirmed; a no sends nothing and leaves no line", async (t) => {

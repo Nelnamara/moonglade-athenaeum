@@ -10,6 +10,7 @@ import usePriceProbe from "../gen/usePriceProbe.js";
 import { apiGet, apiPost } from "../api.js";
 import { askPicker } from "./PickerHost.jsx";
 import CostBadge from "./CostBadge.jsx";
+import SpendButton from "./SpendButton.jsx";
 
 /* The Edit tab: Edit Pro / Reference Pro against /api/edit, with the toolbox
    preset bank. @image1 is the image being edited; extra references number from
@@ -42,6 +43,7 @@ export default function EditTab({ visible, s, setS, onDroppedNote, dock }) {
   const [busy, setBusy] = useState(false);
   const [lines, openLine] = useResultLines();
   const costRef = useRef(null);
+  const [quote, setQuote] = useState(null);       // the badge's verdict, for the price in ✦ Edit
   const busyRef = useRef(false);
   const caps = editCaps(s.model);
   const gate = editGate(s);
@@ -164,19 +166,18 @@ export default function EditTab({ visible, s, setS, onDroppedNote, dock }) {
       onChange={(e) => set({ instruction: e.target.value })} />
   );
   const costLine = (
-    <CostBadge ref={costRef} hint="Pick an image to edit to see the cost."
+    <CostBadge ref={costRef} hint="Pick an image to edit to see the cost." onButton onCost={setQuote}
       stack={inDock || undefined} balance={inDock ? dock.balance : undefined} />
   );
   // The submit control is gated on the price probe's verdict IN ADDITION to editGate:
   // the quote on the badge must have been priced off the payload this click submits.
+  // The price rides inside the button (look pick round 2, topic 1 B).
   const goOff = !!gate || busy || !probe.canSubmit;
-  const goButton = inDock ? (
-    <button type="button" className={"mgdock-gen" + (goOff ? " off" : "")}
-      disabled={goOff} title={gate || "Submit — this spends credits or a card"}
-      onClick={run}><span>&#10022; Edit</span></button>
-  ) : (
-    <button className="gen" disabled={goOff} title={gate || "Submit the edit"}
-      onClick={run}>&#10022; Edit</button>
+  const goButton = (
+    <SpendButton className={inDock ? "mgdock-gen" : "gen"} offClass={inDock ? "off" : ""}
+      quote={quote} idle="pick an image first" disabled={goOff}
+      title={gate || (inDock ? "Submit — this spends credits or a card" : "Submit the edit")}
+      label={<>&#10022; Edit</>} onPress={run} />
   );
   // Composer top row (DC 1557-1562: pip · summary): the edit model as the pip -- with the
   // picture being edited as its thumb -- and refs · resolution · aspect as the summary.

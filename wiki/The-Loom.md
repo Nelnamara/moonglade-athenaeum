@@ -295,10 +295,12 @@ can't be sent to PixAI yet**, and rendering it is refused before anything is pri
 
 **It's free when a V4.0 video card covers it** — cards auto-apply, same as everywhere else
 in the suite; otherwise the credit price applies. A video card is a book of **tickets**, and
-a shot costs one per 5 seconds (5s = 1, 10s = 2, 15s = 3): the drawer's cost line reads
-"uses N of H cards", and if you hold fewer than the shot needs, no card is used, the shot
-costs the full credit price, and it says so before you press Generate — which, matching the
-website, still spends if you do. See [Generating → Free cards and videos](Generating#free-cards-and-videos).
+a shot costs one per 5 seconds (5s = 1, 10s = 2, 15s = 3): the **Generate video** button's
+second line reads "Free · uses N cards", and if you hold fewer than the shot needs, no card is
+used, the shot costs the full credit price, and it says so before you press Generate — which,
+matching the website, still spends if you do. Every send button in the Loom carries its price
+that way and stays dim until it has one; the Video tab's model cards show each engine's price
+for the shot's picture at 5, 10 and 15 seconds. See [Generating → Free cards and videos](Generating#free-cards-and-videos).
 
 Other controls in the top bar:
 
