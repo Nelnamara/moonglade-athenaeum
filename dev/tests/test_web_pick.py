@@ -1729,7 +1729,9 @@ def test_toasts_anchored_top_right(tmp_path):
     assert "mg-notify.js" not in html            # the vanilla script tag is gone from the shell
     notify_css = (Path(__file__).resolve().parents[2] / "gallery" / "src" / "styles" / "notify.css").read_text(encoding="utf-8")
     # top-right, clear of the header; since #73 the right edge also clears a sideways phone's island
-    anchor = "#mg-toasts{position:fixed;right:calc(16px + var(--mg-safe-r,0px));top:64px"
+    # (2026-11-19: the top is 64px unless the phone layout sets --mg-phone-toast-top, which puts
+    # notices under the phone's top controls -- look pick round 2, topic 3 B)
+    anchor = "#mg-toasts{position:fixed;right:calc(16px + var(--mg-safe-r,0px));top:var(--mg-phone-toast-top,64px)"
     assert anchor in notify_css
     app_css = (Path(__file__).resolve().parents[2] / "gallery" / "dist" / "app.css").read_text(encoding="utf-8")
     assert anchor in app_css      # the built bundle truly ships it
