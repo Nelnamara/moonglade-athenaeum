@@ -1376,8 +1376,8 @@ def test_the_backup_runs_before_the_pull_and_its_name_is_reported(monkeypatch):
         order.append(args[0])
         return 0, "OLD" if args[:1] == ["rev-parse"] else ""
     monkeypatch.setattr(updater_mod, "_git", _git)
-    assert updater_mod.run_update(lambda: None, pip_fn=lambda: (0, ""),
-                                  backup_fn=lambda: order.append("backup") or "c.db") is True
+    assert _run_update(lambda: None, pip_fn=lambda: (0, ""),
+                       backup_fn=lambda: order.append("backup") or "c.db") is True
     assert order.index("backup") < order.index("pull")
     assert updater_mod.update_state()["backup"] == "c.db"
 
@@ -1389,9 +1389,9 @@ def test_a_failed_backup_stops_the_update_before_anything_changes(monkeypatch):
 
     def _boom():
         raise OSError("disk full")
-    assert updater_mod.run_update(lambda: seen.append("restart"), pip_fn=lambda: (0, ""),
-                                  log_fn=lambda st, err="": logged.append((st, err)),
-                                  backup_fn=_boom) is False
+    assert _run_update(lambda: seen.append("restart"), pip_fn=lambda: (0, ""),
+                       log_fn=lambda st, err="": logged.append((st, err)),
+                       backup_fn=_boom) is False
     assert not any(a[:1] == ["pull"] for a in seen if isinstance(a, list))
     assert "restart" not in seen
     st = updater_mod.update_state()

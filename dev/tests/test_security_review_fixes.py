@@ -211,7 +211,10 @@ def test_the_authority_is_made_once_and_signs_the_server_certificate(tmp_path, m
     nc = ca.extensions.get_extension_for_class(x509.NameConstraints)
     assert nc.critical
     permitted = {getattr(n.value, "compressed", n.value) for n in nc.value.permitted_subtrees}
-    assert {"localhost", "local", "mypc", "192.168.0.0/16"} <= {str(p) for p in permitted}
+    assert {"localhost", "local", "192.168.0.0/16"} <= {str(p) for p in permitted}
+    # A letters-only PC name could be a public top-level domain, so the authority never
+    # permits it (test_tls_ca_names.py); the leaf still carries the .local name.
+    assert "mypc" not in {str(p) for p in permitted}
     names = leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
     assert "mypc.local" in names.get_values_for_type(x509.DNSName)
     life = leaf.not_valid_after_utc - leaf.not_valid_before_utc
