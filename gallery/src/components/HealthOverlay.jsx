@@ -3,9 +3,8 @@ import Icon from "../icons/Icons.jsx";
 import useHealth, { fmt } from "../hooks/useHealth.js";
 import useBrokenFiles from "../hooks/useBrokenFiles.js";
 import StorageBars from "./StorageBars.jsx";
-import BrokenFiles from "./BrokenFiles.jsx";
 import { tileChip } from "../lib/brokenFilesCore.js";
-import { subscribeBrokenFilesIntent, takeBrokenFilesIntent } from "../lib/brokenFilesNav.js";
+import { openBrokenFiles } from "../lib/brokenFilesNav.js";
 import { onRunEnd } from "../lib/brokenFixRun.js";
 import "../styles/overlays.css";
 import useScrollLock from "../hooks/useScrollLock.js";
@@ -21,8 +20,8 @@ import useScrollLock from "../hooks/useScrollLock.js";
      · a Top-model count  → filter the gallery to that model
      · a tag chip         → filter to that tag
      · a LoRA chip        → filter to that LoRA
-     · Duplicates/Reclaimable → opens the Duplicate Review overlay
-       (DuplicateReviewOverlay.jsx, live 2026-08-02; onOpenDuplicates below)
+     · Duplicates/Reclaimable/Missing files → open the Control Panel's Tidy tab
+       (onOpenTidy below; One Tidy place, 2026-11-19 -- Duplicate Review opens from there)
 
    DATA LAYER (2026-08-03): the fetch + stats/monthMax/modelMax/tier/buckets
    derivations that used to live inline here were mechanically lifted into
@@ -67,7 +66,7 @@ function donutData(models) {
   return { data, total, gradient: "conic-gradient(" + stops.join(", ") + ")" };
 }
 
-export default function HealthOverlay({ onClose, onModelFilter, onTagFilter, onLoraFilter, onOpenDuplicates, onStoragePick, onOpenDetails }) {
+export default function HealthOverlay({ onClose, onModelFilter, onTagFilter, onLoraFilter, onOpenTidy, onStoragePick }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   // A Broken files fix run changed the library under this panel: the tiles re-measure when it ends.
   const [runsEnded, setRunsEnded] = React.useState(0);
@@ -76,24 +75,14 @@ export default function HealthOverlay({ onClose, onModelFilter, onTagFilter, onL
   const [monthView, setMonthView] = React.useState("trend");   // DC default
   const [modelView, setModelView] = React.useState("bars");    // DC default
 
-  /* Session W (W1a): the Broken files section, under the tiles and above the storage bars, only
-     while the last integrity check found broken rows. A problem tile opens it at its chip; the
-     Control Panel's "Review ▸" and a fix run's Activity row open it at All (lib/brokenFilesNav.js:
-     on mount, or live when Health is already up). */
+  /* ONE TIDY PLACE (owner pick 2026-11-19, round 2 option B): Health keeps its numbers, and
+     the ones that need tidying open the Control Panel's Tidy tab instead of a second tool here.
+     A problem tile with rows on the Broken files list wears peach and opens Tidy's list at its
+     chip (lib/brokenFilesNav.js -- App.jsx's opener brings the Panel up on Tidy); Duplicates,
+     Reclaimable and Missing files open Tidy. The Broken files list itself lives in Tidy. */
   const bf = useBrokenFiles();
-  const [bfChip, setBfChip] = React.useState("all");
-  const bfRef = React.useRef(null);
-  const [bfGo, setBfGo] = React.useState(() => takeBrokenFilesIntent());
-  React.useEffect(() => subscribeBrokenFilesIntent(() => setBfGo(takeBrokenFilesIntent())), []);
   const bfShown = !!(bf.doc && bf.doc.counts && bf.doc.counts.all > 0);
-  const openBroken = (chip) => setBfGo(chip || "all");
-  React.useEffect(() => {
-    if (!bfGo || !bfShown || !h) return;
-    setBfChip(bf.doc.counts[bfGo] > 0 ? bfGo : "all");
-    const el = bfRef.current;
-    if (el && el.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "start" });
-    setBfGo(null);
-  }, [bfGo, bfShown, h]);
+  const openBroken = (chip) => openBrokenFiles(chip || "all");
 
   return (
     <>
@@ -127,12 +116,12 @@ export default function HealthOverlay({ onClose, onModelFilter, onTagFilter, onL
                         onClick={() => openBroken(chip)}>
                         {st.value}
                       </button>
-                    ) : st.dup ? (
+                    ) : st.dup || (st.label === "Missing files" && h.missing > 0) ? (
                       <button type="button" className="mgh-stat-value dup"
                         style={{ display: "block", width: "100%", border: "none", background: "none",
                           padding: 0, font: "inherit", textAlign: "left" }}
-                        title="Open Duplicate Review"
-                        onClick={() => onOpenDuplicates && onOpenDuplicates()}>
+                        title="Open Tidy in the Control Panel"
+                        onClick={() => onOpenTidy && onOpenTidy()}>
                         {st.value}
                       </button>
                     ) : (
@@ -144,11 +133,6 @@ export default function HealthOverlay({ onClose, onModelFilter, onTagFilter, onL
                   );
                 })}
               </div>
-
-              {bfShown ? (
-                <BrokenFiles bf={bf} chip={bfChip} setChip={setBfChip} sectionRef={bfRef}
-                  onOpenDetails={onOpenDetails} />
-              ) : null}
 
               {/* N6: Storage used, as three stacked bars. A segment closes this and opens the
                   gallery filtered to it (App's onStoragePick). */}

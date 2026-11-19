@@ -10417,6 +10417,9 @@ ${"=".repeat(48)}
   // ../gallery/src/lib/panelTabs.js
   var PANEL_TABS = [
     { id: "maint", label: "Maintenance" },
+    // One Tidy place (owner pick 2026-11-19, round 2 option B): duplicates, stray files and
+    // broken files in one tab, beside Maintenance and Branding.
+    { id: "tidy", label: "Tidy" },
     { id: "brand", label: "\u2726 Branding", gated: true }
   ];
 

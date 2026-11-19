@@ -137,7 +137,10 @@ function similarityTier(g) {
   return "tier-blue";
 }
 
-export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
+/* Opened from the Control Panel's Tidy tab (One Tidy place, 2026-11-19), it sits ON the Panel:
+   `stacked` lifts it to the Panel's own sub-layer rung (overlays.css, .mgv-over) and the back
+   link says where it goes back to. */
+export default function DuplicateReviewOverlay({ onClose, onResolved, boot, stacked = false, backLabel = "Library" }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const csrf = (boot && boot.csrf) || "";
   const {
@@ -173,11 +176,11 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
 
   return (
     <>
-      <div className="mgv-scrim" onClick={onClose} />
-      <div className="mgv-host">
+      <div className={"mgv-scrim" + (stacked ? " mgv-over" : "")} onClick={onClose} />
+      <div className={"mgv-host" + (stacked ? " mgv-over" : "")}>
         <div className="mgv-slab mgdr-slab" role="dialog" aria-label="Duplicate Review">
           <div className="mgdr-headrow">
-            <div className="mgdr-back" onClick={onClose} title="Back to the library">← Library</div>
+            <div className="mgdr-back" onClick={onClose} title={"Back to " + (backLabel === "Library" ? "the library" : backLabel)}>← {backLabel}</div>
             <div className="mgdr-headdiv" aria-hidden="true" />
             <div className="mgdr-headlabel">⧉ Duplicate Review</div>
             <div className="mgdr-headspacer" />

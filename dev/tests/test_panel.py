@@ -926,6 +926,9 @@ def test_new_parity_actions_spawn_the_right_whitelisted_argv(tmp_path, monkeypat
         # whitelisted argv must carry both flags.
         ("undo-organize",   ["--undo-organize"],                      True),
         ("restore-orphans", ["--verify-dupes", "--restore-orphans"],  True),
+        # The Tidy tab's Empty _duplicates/ (2026-11-19): to the Recycle Bin, every other
+        # gate held by the CLI command itself (dev/tests/test_empty_duplicates.py).
+        ("empty-dupes",     ["--empty-duplicates", "--apply"],        True),
     ]
     import time
     for action, expected, destructive in cases:

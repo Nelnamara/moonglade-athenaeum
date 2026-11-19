@@ -6606,6 +6606,14 @@ def create_app(out_dir: Path):
         "dedup-delete":  {"args": ["--dedup", "--apply", "--dedup-delete"],
                           "label": "Dedup — DELETE dupes outright (no _duplicates/ safety net)",
                           "destructive": True},
+        # The Tidy tab's last duplicates step (2026-11-19): the files in _duplicates/ to the
+        # Recycle Bin. moonglade/organize.py's cmd_empty_duplicates holds every gate itself --
+        # only after an all-clear --verify-dupes, only if _duplicates/ is exactly what that
+        # check passed, checked again on the spot, READ_ONLY refuses, no send2trash refuses --
+        # so this key adds only the Panel's own confirm + localhost-only, like its siblings.
+        "empty-dupes":   {"args": ["--empty-duplicates", "--apply"],
+                          "label": "Empty _duplicates/ to the Recycle Bin (after a clean Verify)",
+                          "destructive": True},
         # The write-enabled twin of verify-dupes above (--restore-orphans does nothing on
         # its own -- it only takes effect alongside --verify-dupes). Its own key rather
         # than a checkbox on verify-dupes, same reason as audit-full. Recovery, not loss --

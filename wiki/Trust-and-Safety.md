@@ -273,7 +273,9 @@ opted *out* of with `--dry-run` — its safety net is that moves are reversible
 (`organize_manifest.csv` + `--undo-organize`), not that it waits for permission first. This
 flag is specifically about your PixAI *account*, not your local files. The one local exception
 is the gallery's **Duplicate Review**: with `READ_ONLY` set, moving a duplicate aside and
-undoing that move are both refused, since they are the browser's way to run a dedup.
+undoing that move are both refused, since they are the browser's way to run a dedup. So is
+**Empty _duplicates/** (the Control Panel's Tidy tab, and `--empty-duplicates --apply`): with
+`READ_ONLY` set it refuses, and it never deletes outright — the files go to the Recycle Bin.
 
 ## Found a real gap in any of this?
 

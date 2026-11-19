@@ -11,9 +11,10 @@ import {
 } from "../lib/brokenFilesCore.js";
 import "../styles/broken-files.css";
 
-/* Health's Broken files section, desktop (Session W; Archive Integrity Handoff §1, §2, §5).
+/* The Broken files section, desktop (Session W; Archive Integrity Handoff §1, §2, §5).
 
-   It sits under Health's tiles and above the storage bars, and only when the last integrity
+   Since One Tidy place (owner pick 2026-11-19) it sits in the Control Panel's Tidy tab, under
+   its three columns (it used to sit under Health's tiles), and only when the last integrity
    check found broken rows. Chips: All · Zero-byte · Thumbnail · Suspect · Lost, each with its
    count, zero-count chips hidden. A row is 46 px: the thumbnail (or a dashed "?"), the short id
    in mono over "problem · path" (cut in the middle; the whole path in the title), the size, the
@@ -23,7 +24,7 @@ import "../styles/broken-files.css";
    Open details · Keep as is. It never offers a re-download -- and the server's runner refuses
    one by itself, whatever this screen sends.
 
-   Data and actions: hooks/useBrokenFiles.js (`bf`, owned by HealthOverlay so its tiles can read
+   Data and actions: hooks/useBrokenFiles.js (`bf`, owned by TidyTab so its Broken column reads
    the same counts). Nothing here deletes anything. */
 
 function copyText(text) {
@@ -124,7 +125,10 @@ export function FixConfirm({ plan, metered, onCancel, onGo }) {
   const c = confirmLines(plan, metered);
   useEffect(() => {
     setBrokenFilesModalUp(true);
-    const onKey = (e) => { if (e.key === "Escape") onCancel(); };
+    // Escape closes THIS and goes no further. Opened from the Control Panel's Tidy tab, the
+    // Panel's own Escape listener (bubble phase) would otherwise run after the confirm had
+    // already unmounted -- isBrokenFilesModalUp() reads false by then -- and close the Panel too.
+    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); onCancel(); } };
     window.addEventListener("keydown", onKey, true);
     return () => { setBrokenFilesModalUp(false); window.removeEventListener("keydown", onKey, true); };
   }, [onCancel]);
@@ -145,9 +149,13 @@ export function FixConfirm({ plan, metered, onCancel, onGo }) {
   );
 }
 
-export default function BrokenFiles({ bf, chip, setChip, onOpenDetails, sectionRef }) {
+/* `asking`/`setAsking` are optional: the Control Panel's Tidy tab passes them so its Broken
+   column's "Fix all" opens this same confirm (the one confirm, never a second). */
+export default function BrokenFiles({ bf, chip, setChip, onOpenDetails, sectionRef, asking: askingProp, setAsking: setAskingProp }) {
   const [menu, setMenu] = useState(null);
-  const [asking, setAsking] = useState(false);
+  const [askingOwn, setAskingOwn] = useState(false);
+  const asking = setAskingProp ? !!askingProp : askingOwn;
+  const setAsking = setAskingProp || setAskingOwn;
   const saver = useDataSaver();
   const metered = !!(saver.active && saver.info && saver.info.metered);
   const doc = bf.doc;

@@ -85,10 +85,17 @@ function slabs() {
 
 /** The class on the element a child component returns -- its slab in the pane. */
 function rootClassOf(name) {
-  const at = jsxRaw.indexOf("function " + name + "(");
-  assert.ok(at >= 0, name + " is mounted in .mgcp-main but not defined in ControlPanelOverlay.jsx; "
-    + "this guard cannot see what it renders. Teach it where to look.");
-  const body = jsxRaw.slice(at);
+  // Defined in ControlPanelOverlay.jsx, or the default export of its own file beside it
+  // (the Tidy tab, TidyTab.jsx, 2026-11-19).
+  let src = jsxRaw;
+  let at = src.indexOf("function " + name + "(");
+  if (at < 0) {
+    try { src = read("gallery/src/components/" + name + ".jsx"); } catch { src = ""; }
+    at = src.indexOf("export default function " + name + "(");
+  }
+  assert.ok(at >= 0, name + " is mounted in .mgcp-main but not defined in ControlPanelOverlay.jsx "
+    + "or its own components/" + name + ".jsx; this guard cannot see what it renders. Teach it where to look.");
+  const body = src.slice(at);
   const ret = body.search(/\n\s*return \(/);
   assert.ok(ret >= 0, name + " has no `return (` this guard can read");
   const m = body.slice(ret).match(/className="([^"{]+)"/);

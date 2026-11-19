@@ -20,7 +20,7 @@ moonglade/                the app's code (since 3.20), one package:
   contest_wins.py         what counts as a verified contest win and when it is checked
   integrity.py            the read-only library integrity check (--verify-library) behind
                           Health's Zero-byte / Missing thumbs / Last verified tiles, and
-                          Health's Broken files list: its local marks and its targeted
+                          the Broken files list (Control Panel → Tidy): its local marks and its targeted
                           re-download / thumbnail-rebuild run
   curation_io.py          the curation sidecar: --export-curation / --import-curation and the
                           Control Panel's Download curation (JSON)

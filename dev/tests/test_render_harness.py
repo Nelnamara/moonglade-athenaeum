@@ -11697,3 +11697,266 @@ def test_the_phone_video_mode_shows_the_model_cards_inside_the_screen(logged_in_
     assert not g["disabled"] and g["sub"] == "Free · uses 1 card", g
     _two_lines_inside(g)
     page.locator(".cm-videohost .mgd-mcards").scroll_into_view_if_needed()
+# One Tidy place (owner pick 2026-11-19, round 2 option B)
+# ---------------------------------------------------------------------------
+# Duplicates, stray files and broken files used to live in three places (Health's Duplicate
+# Review and Broken files list, the Panel's five-step Dedup chain beside Organize, and
+# "Verify library integrity" under Check). They are one Control Panel tab now, one column per
+# job, as the look board's topic 5 option B draws them. These drive the real tab: its layout,
+# the one duplicates flow with its gates intact, Duplicate Review stacked ON the Panel, and
+# every door from Health landing on it.
+
+# One recoverable zero-byte row: enough for Health's tile to turn into a door and for Tidy's
+# Broken column and list to have something to show. The shape is broken_list()'s own.
+_TIDY_BROKEN_DOC = {
+    "verified_at": "2026-11-19T08:00:00", "deep": True,
+    "rows": [{"media_id": "100", "problem": "zero-byte", "kind": "zero",
+              "path": "harness_0.png", "size": 0, "state": "recoverable",
+              "action": "redownload", "archive_only": False, "mark": "", "thumb": False,
+              "is_video": False, "created_at": "2025-01-01T00:00:00", "gone_as_of": None}],
+    "counts": {"all": 1, "zero": 1, "thumb": 0, "suspect": 0, "missing": 0, "lost": 0},
+    "broken": 1, "lost": 0,
+    "fix": {"redownload": ["100"], "rebuild": [], "lost": 0, "redownload_bytes": 4096},
+    "read_only": False,
+    "run": {"running": False},
+}
+
+_TIDY_AUDIT_OUT = ("Auditing harness (content hashing: on)...\n\n"
+                   "Copies that could be removed:\n  2025-01/harness_dup.png\n\n"
+                   "Result: Found 1 duplicate file (1.0 KB you could free). Nothing changed.\n")
+_TIDY_PREVIEW_OUT = ("\nDedup plan: 1 redundant files to quarantine to _duplicates/ (1.0 KB)\n"
+                     "  2025-01/harness_dup.png\n\n"
+                     "Dry run -- nothing changed. Re-run with --apply to perform it.\n\n"
+                     "Result: 1 duplicate file would move to _duplicates/ (1.0 KB). Nothing moved yet.\n")
+
+
+def _fake_cli_jobs(monkeypatch, verify_out="ok\n"):
+    """subprocess.Popen stubbed the way the Panel test above stubs it: no maintenance job really
+    runs against the module's shared library. Returns the argv list of every start."""
+    import io as _io
+    import subprocess as _subprocess
+    import time as _time
+    started = []
+
+    class _FakeProc:
+        def __init__(self, argv):
+            started.append([str(a) for a in argv])
+            if "--audit" in argv:
+                text = _TIDY_AUDIT_OUT
+            elif "--verify-dupes" in argv:
+                text = verify_out
+            elif "--dedup" in argv and "--apply" not in argv:
+                text = _TIDY_PREVIEW_OUT
+            else:
+                text = "ok\n"
+            self.stdout = _io.StringIO(text)
+
+        def wait(self):
+            _time.sleep(0.3)
+            return 0
+    monkeypatch.setattr(_subprocess, "Popen", lambda argv, *a, **k: _FakeProc(argv))
+    return started
+
+
+def _open_tidy(page):
+    _open_panel(page)
+    page.wait_for_function(
+        "() => /The library/.test(document.querySelector('[aria-label=\"Control Panel\"]')?.innerText || '')",
+        timeout=20_000)
+    page.click('.mgcp-tabs button:has-text("Tidy")')
+    page.wait_for_selector(".mgcp-tidycols")
+    _settle(page)
+
+
+def _chip_state(page, text):
+    return page.evaluate("""(t) => {
+      const b = [...document.querySelectorAll('.mgcp-tidy button.mgcp-chip')]
+        .find((x) => x.textContent.trim().replace(/\\s+/g, ' ').startsWith(t));
+      return b ? (b.disabled ? 'disabled' : 'enabled') : 'absent';
+    }""", text)
+
+
+def test_the_tidy_tab_lays_out_its_three_columns_and_maintenance_points_to_it(logged_in_page):
+    """The board's option B: a Tidy tab between Maintenance and ✦ Branding, three columns side
+    by side, top-aligned -- Duplicates, Stray files, Broken. Maintenance keeps no Organize row
+    and no Dedup chain, only a line pointing at Tidy."""
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    _settle(page)
+    _open_tidy(page)
+
+    tabs = page.locator(".mgcp-tabs button").all_inner_texts()
+    assert [t.strip() for t in tabs][:2] == ["Maintenance", "Tidy"], tabs
+
+    read_cols = """() => [...document.querySelectorAll('.mgcp-tidycol')].map((c) => {
+      const r = c.getBoundingClientRect();
+      return {label: c.querySelector('.mgcp-mkick').textContent, top: Math.round(r.top),
+              left: Math.round(r.left), width: Math.round(r.width)};
+    })"""
+    cols = page.evaluate(read_cols)
+    assert [c["label"] for c in cols] == ["Duplicates", "Stray files", "Broken"], cols
+    assert len({c["top"] for c in cols}) == 1, "the three columns are one top-aligned row: %r" % cols
+    assert cols[0]["left"] < cols[1]["left"] < cols[2]["left"], cols
+    assert all(c["width"] > 150 for c in cols), cols
+    # Proves itself: with the grid gone the columns stack, and the three tops differ.
+    page.add_style_tag(content=".mgcp-tidycols { display: block !important; }")
+    _settle(page)
+    assert len({c["top"] for c in page.evaluate(read_cols)}) == 3
+    page.evaluate("() => document.head.lastElementChild.remove()")
+
+    for text in ("Find", "Review", "Preview", "Undo", "Check"):
+        assert _chip_state(page, text) != "absent", text
+
+    page.click('.mgcp-tabs button:has-text("Maintenance")')
+    page.wait_for_selector("button.mgcp-tidylink")
+    maint = page.inner_text(".mgcp-grid")
+    assert "Organize into month folders" not in maint and "Quarantine" not in maint, maint
+    assert "Verify library integrity" not in maint and "Verify _duplicates/" not in maint, maint
+    page.click("button.mgcp-tidylink")
+    page.wait_for_selector(".mgcp-tidycols")
+
+
+def test_tidy_runs_one_duplicates_flow_and_keeps_every_gate(logged_in_page, monkeypatch):
+    """Find is Audit then Preview (two read-only jobs, the second only after the first finished
+    clean). Until it has run, Move all / Check / Delete stay greyed; after it, Move all opens but
+    still arms first and starts nothing on the first click, and Check and Delete stay greyed --
+    the chain's own order. The result box leads with Preview's sentence and folds its files."""
+    started = _fake_cli_jobs(monkeypatch)
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    _settle(page)
+    _open_tidy(page)
+
+    assert _chip_state(page, "Move all to _duplicates/") == "disabled"
+    assert _chip_state(page, "Check _duplicates/") == "enabled"
+    assert _chip_state(page, "Delete library copies outright") == "disabled"
+
+    page.click('.mgcp-tidy button.mgcp-chip:has-text("Find")')
+    page.wait_for_function(
+        "() => /would move to _duplicates\\//.test("
+        "document.querySelector('.mgcp-tidy .mgcp-runresult')?.innerText || '')",
+        timeout=20_000)
+    finds = [a for a in started if "--audit" in a or "--dedup" in a]
+    assert len(finds) == 2, started
+    assert "--audit" in finds[0] and "--dedup" in finds[1] and "--apply" not in finds[1], finds
+    box = page.inner_text(".mgcp-tidy .mgcp-runresult")
+    assert "1 duplicate file would move to _duplicates/ (1.0 KB). Nothing moved yet." in box, box
+    page.click(".mgcp-tidy .mgcp-runfold")
+    page.wait_for_selector(".mgcp-tidy .mgcp-runfiles")
+    assert "2025-01/harness_dup.png" in page.inner_text(".mgcp-tidy .mgcp-runfiles")
+
+    assert _chip_state(page, "Move all to _duplicates/") == "enabled"
+    assert _chip_state(page, "Check _duplicates/") == "enabled"
+    assert _chip_state(page, "Delete library copies outright") == "disabled"
+    n = len(started)
+    page.click('.mgcp-tidy button.mgcp-chip:has-text("Move all to _duplicates/")')
+    page.wait_for_selector('.mgcp-tidy button.mgcp-chip:has-text("Confirm — Move all to _duplicates/")')
+    assert len(started) == n, "the first click on a step that moves files must only arm it"
+
+
+_TIDY_VERIFY_SAFE = ("Verifying quarantine ...\n\nQuarantined files checked : 2\n"
+                     "Result: All 2 files in _duplicates/ (1.0 KB) have a copy kept in the library. Safe to delete.\n")
+_TIDY_VERIFY_UNSAFE = ("Verifying quarantine ...\n\nResult: Not safe to delete yet: 1 of 2 files in "
+                       "_duplicates/ need a look. Review the flagged items above.\n")
+
+
+@pytest.mark.parametrize("safe", [True, False])
+def test_tidy_empty_duplicates_opens_only_after_an_all_clear_check(logged_in_page, monkeypatch, safe):
+    """Empty _duplicates/ is greyed until a Check _duplicates/ finishes saying every file is safe.
+    Then its first click only arms it, naming the count and the size; the second starts the job
+    with --empty-duplicates --apply; and the job's start closes it again. A Check that found a
+    problem leaves it greyed (the mutation half: the same flow, one sentence different)."""
+    started = _fake_cli_jobs(monkeypatch, _TIDY_VERIFY_SAFE if safe else _TIDY_VERIFY_UNSAFE)
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    _settle(page)
+    _open_tidy(page)
+    assert _chip_state(page, "Empty _duplicates/") == "disabled"
+
+    page.click('.mgcp-tidy button.mgcp-chip:has-text("Check _duplicates/")')
+    page.wait_for_function(
+        "() => /_duplicates\\//.test(document.querySelector('.mgcp-tidy .mgcp-runresult')?.innerText || '')",
+        timeout=20_000)
+    assert any("--verify-dupes" in a for a in started), started
+    if not safe:
+        assert _chip_state(page, "Empty _duplicates/") == "disabled"
+        assert _chip_state(page, "Delete library copies outright") == "disabled", (
+            "a Check run out of order must not unlock the chain's later step")
+        return
+    assert _chip_state(page, "Empty _duplicates/") == "enabled"
+    assert _chip_state(page, "Delete library copies outright") == "disabled", (
+        "a Check run out of order must not unlock the chain's later step")
+    n = len(started)
+    page.click('.mgcp-tidy button.mgcp-chip:has-text("Empty _duplicates/")')
+    armed = '.mgcp-tidy button.mgcp-chip:has-text("Confirm — send 2 files (1.0 KB) to the Recycle Bin")'
+    page.wait_for_selector(armed)
+    assert len(started) == n, "the first click must only arm it"
+    page.click(armed)
+    # the stand-in job prints "ok" and no Result line, so its box reads "✓ Finished"
+    page.wait_for_selector('.mgcp-tidy .mgcp-runresult:has-text("Finished")', timeout=20_000)
+    empties = [a for a in started if "--empty-duplicates" in a]
+    assert len(empties) == 1 and "--apply" in empties[0], started
+    assert _chip_state(page, "Empty _duplicates/") == "disabled", "a job ran since the Check"
+
+
+def test_tidy_review_opens_duplicate_review_on_top_of_the_panel(logged_in_page):
+    """Review is the one Duplicate Review, stacked ON the Panel (the .mgv-over rung): the slab's
+    own centre is the topmost element, its back link says Tidy, and Escape closes it first while
+    the Panel stays."""
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    _settle(page)
+    _open_tidy(page)
+    page.click('.mgcp-tidy button.mgcp-chip:has-text("Review")')
+    page.wait_for_selector('[aria-label="Duplicate Review"]')
+    _settle(page)
+    assert "← Tidy" in page.inner_text('[aria-label="Duplicate Review"] .mgdr-back')
+    top = page.evaluate("""() => {
+      const s = document.querySelector('[aria-label="Duplicate Review"]');
+      const r = s.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + 30);
+      return !!(hit && s.contains(hit));
+    }""")
+    assert top, "Duplicate Review painted under the Control Panel"
+    page.keyboard.press("Escape")
+    page.wait_for_selector('[aria-label="Duplicate Review"]', state="detached")
+    assert page.locator('[aria-label="Control Panel"]').count() == 1, "Escape closed the Panel too"
+    assert page.locator(".mgcp-tidycols").count() == 1
+
+
+def test_health_tiles_open_tidy_and_the_broken_files_list_lives_there(logged_in_page):
+    """Health keeps its numbers. Its Duplicates tile opens the Panel on Tidy; a problem tile with
+    rows on the Broken files list opens Tidy's list at its chip. Health draws no second copy of
+    the list. Tidy's Fix all opens the list's one confirm, and Escape closes that confirm only."""
+    page = logged_in_page(**DESKTOP)
+    page.route("**/api/integrity/broken", lambda route: route.fulfill(
+        status=200, content_type="application/json", body=json.dumps(_TIDY_BROKEN_DOC)))
+    _visit(page, "/")
+    _settle(page)
+    _dismiss_any_achievement_toast(page)
+
+    page.click('nav[aria-label="Destinations"] button:has-text("Health")')
+    page.wait_for_selector('[aria-label="Collection Health"] .mgh-stats')
+    assert page.locator('[aria-label="Collection Health"] .mgbf').count() == 0, (
+        "Health still draws the Broken files list")
+    page.click('.mgh-stat:has(.mgh-stat-label:text-is("Duplicates")) button')
+    page.wait_for_selector(".mgcp-tidycols")
+    assert page.locator('[aria-label="Collection Health"]').count() == 0
+
+    page.keyboard.press("Escape")
+    page.wait_for_selector('[aria-label="Control Panel"]', state="detached")
+    page.click('nav[aria-label="Destinations"] button:has-text("Health")')
+    flag = '.mgh-stat:has(.mgh-stat-label:text-is("Zero-byte files")) button.flag'
+    page.wait_for_selector(flag)
+    page.click(flag)
+    page.wait_for_selector(".mgcp-tidy .mgbf")
+    page.wait_for_selector('.mgcp-tidy .mgbf-chip[aria-selected="true"]:has-text("Zero-byte")')
+    broken = page.locator('.mgcp-tidycol[aria-label="Broken files"]').inner_text()
+    assert "1 recoverable" in broken, broken
+
+    page.click('.mgcp-tidycol[aria-label="Broken files"] button.mgcp-chip:has-text("Fix all")')
+    page.wait_for_selector(".mgbf-confirm")
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".mgbf-confirm", state="detached")
+    assert page.locator('[aria-label="Control Panel"]').count() == 1, (
+        "Escape on the Fix all confirm closed the Panel under it")
