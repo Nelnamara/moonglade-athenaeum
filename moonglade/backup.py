@@ -5860,6 +5860,17 @@ def _params_video_models(params):
     return out
 
 
+def check_params_retired(params, now=None):
+    """Refuse a `parameters` object that names a retired video engine, whoever built it.
+
+    The builders check the engine they are handed, but a raw `--params-json` never passes
+    through a builder, and the three CLI create roads (--generate-video, --reference-video,
+    --edit-image) send their mutation directly rather than through submit_generation. Each
+    calls this as soon as it has its parameters, before any network call (2026-11-19)."""
+    for _vm in _params_video_models(params):
+        check_video_model_retired(_vm, now)
+
+
 def video_model_id(name):
     """Numeric top-level `modelId` for a video `.model` name ('' if unknown). A submit MUST
     include this or PixAI can't resolve the model and no free card can match."""
@@ -8740,8 +8751,7 @@ def submit_generation(session, params, *, on_send=None, exact=False):
     for, and the Turbo fallback would also flip the process-wide _turbo_refused. It goes out
     once; PixAI's refusal comes back in plain words. It never carries a card."""
     _check_read_only("submit a generation (spends credits)")
-    for _vm in _params_video_models(params):
-        check_video_model_retired(_vm)       # before any network call: no spend, no round-trip
+    check_params_retired(params)             # before any network call: no spend, no round-trip
     lane = is_lane_request(params)
     if lane and params.get("kaisuukenId"):
         raise PixAIError(_UNLIMITED_NO_CARD)
@@ -10166,6 +10176,8 @@ def run_generate_video(args):
     if not existing_task and not (getattr(args, "image", "") or "").strip():
         raise PixAIError("--generate-video needs --image <media_id> (a catalog image to animate).")
     params = _gen_video_parameters(args)
+    if not existing_task:
+        check_params_retired(params)      # a raw --params-json skips the builder's check
 
     if not existing_task and not getattr(args, "confirm", False):
         i2v = params.get("i2vPro") or {}
@@ -10273,6 +10285,8 @@ def run_reference_video(args):
     if not existing_task and not (imgs or vids or auds) and not override:
         raise PixAIError("--reference-video needs at least one --ref-image/--ref-video/"
                          "--ref-audio (a media_id or local file), or --task-id to recover.")
+    if not existing_task and override:
+        check_params_retired(json.loads(override))   # sent as given: no builder checks it
 
     is_private = (getattr(args, "vchannel", "private") == "private")
     vmodel = (getattr(args, "video_model", "") or "v4.0.1")
@@ -10402,6 +10416,8 @@ def run_edit_image(args):
     if not existing_task and not srcs and not override:
         raise PixAIError("--edit-image needs --edit-src <media_id|file> (repeatable), "
                          "or --task-id to recover an existing edit.")
+    if not existing_task and override:
+        check_params_retired(json.loads(override))   # sent as given: no builder checks it
 
     # PREVIEW: no upload, no submit, no credits. Local files shown as placeholders.
     if not existing_task and not getattr(args, "confirm", False):
