@@ -87,7 +87,7 @@ the server's own disk.
 - **Organize into month folders** — **Organize — preview (dry run)** shows the plan without
   moving anything, and what it found appears beside it. **Organize into month folders** then
   normalizes the backup into `YYYY-MM/` folders with readable filenames, writing an undo
-  manifest. **Undo** replays that manifest backwards, then deletes it. There's no second
+  manifest. **Undo** replays that manifest backwards, then deletes it, keeping any move it could not undo for the next Undo. There's no second
   manifest to undo the undo.
 - **Dedup** — a chain of five steps: **Audit → Preview → Quarantine → Verify → Delete**.
   Each step is greyed out until the one before it has finished (hover it: *Run the earlier

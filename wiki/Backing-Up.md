@@ -266,7 +266,7 @@ Organizing never breaks the gallery — file lookup is by `media_id`, so images 
 live in any subfolder. (This is also why [Collections](Collections) survive
 Organize.)
 
-`--undo-organize` reverts the last `--organize` run.
+`--undo-organize` reverts the last `--organize` run. A file it cannot move back (one open in another program, or one whose old place already holds another file) stays in the manifest, so running it again finishes the job.
 
 ## Duplicate audit & dedup
 

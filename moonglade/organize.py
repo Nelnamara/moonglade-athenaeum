@@ -571,6 +571,13 @@ def reconcile_catalog_with_disk(out_dir, db_path):
 ORGANIZE_MANIFEST = "organize_manifest.csv"
 
 
+def _record_move(mw, mf, out, old, new, ts):
+    """One manifest row, flushed at once so an interrupted run still leaves it undoable."""
+    mw.writerow([str(old.relative_to(out)).replace("\\", "/"),
+                 str(new.relative_to(out)).replace("\\", "/"), ts])
+    mf.flush()
+
+
 def cmd_organize(args, out, img_dir, db_path):
     """Normalize PixAI images into YYYY-MM/ month folders with descriptive,
     readable filenames (prompt_taskid_mediaid) -- one flat scheme, NO batch
@@ -655,6 +662,7 @@ def cmd_organize(args, out, img_dir, db_path):
     _prog = getattr(args, "progress", None)
 
     for n, (src, dst, mid, row) in enumerate(plan):
+        moved_now = False                  # did THIS file move in this run (manifest row)?
         dst.parent.mkdir(parents=True, exist_ok=True)
         if dst.exists() and dst.resolve() != src.resolve():
             # Target already holds this media. Byte-identical -> drop the redundant
@@ -671,18 +679,31 @@ def cmd_organize(args, out, img_dir, db_path):
         else:
             try:
                 src.replace(dst)
-                mw.writerow([str(src.relative_to(out)).replace("\\", "/"),
-                             str(dst.relative_to(out)).replace("\\", "/"), ts])
-                mf.flush()
                 moved += 1
+                moved_now = True
                 final = dst
                 catalog_updates[mid] = final.name
             except OSError as e:
                 print("  move failed {} ({})".format(src.name, e))
                 continue
+            if not args.convert:
+                _record_move(mw, mf, out, src, dst, ts)
         if args.convert:
-            final, note = convert_image(final, args.convert, args.jpeg_quality,
-                                        args.jpeg_bg, keep_original=args.keep_webp)
+            try:
+                final, note = convert_image(final, args.convert, args.jpeg_quality,
+                                            args.jpeg_bg, keep_original=args.keep_webp)
+            except BaseException:
+                if moved_now:
+                    _record_move(mw, mf, out, src, dst, ts)   # the move still stands
+                raise
+            if moved_now:
+                # Record where the file really ended up. A conversion that replaces the
+                # file renames it, and the manifest used to keep the pre-conversion name,
+                # so Undo found nothing there and the move could never be undone.
+                if dst.exists() or not final.exists():
+                    _record_move(mw, mf, out, src, dst, ts)   # original kept or not converted
+                else:
+                    _record_move(mw, mf, out, src.with_suffix(final.suffix), final, ts)
             if note == "pillow-missing":
                 raise PixAIError("--convert needs Pillow:  pip install pillow")
             if note == "ok":
@@ -769,7 +790,8 @@ def cmd_organize(args, out, img_dir, db_path):
 def cmd_undo_organize(args, out):
     """Reverse the moves recorded in organize_manifest.csv (newest run first):
     each new_path is moved back to its old_path. Safe (skips already-reverted),
-    then clears the manifest. Lets a re-normalize be undone if you don't like it."""
+    then clears the manifest of what it applied (a move it could not undo stays for the
+    next run). Lets a re-normalize be undone if you don't like it."""
     from moonglade.backup import _ensure_db
     db_path = _ensure_db(out)
     manifest_path = _paths.decisions_path(out, ORGANIZE_MANIFEST)
@@ -785,6 +807,7 @@ def cmd_undo_organize(args, out):
         print("\nDry run -- nothing moved.")
         return
     reverted = miss = 0
+    failed = []                            # rows Undo could not apply: kept for the next Undo
     for r in reversed(rows):               # undo newest first
         new_p, old_p = out / r["new_path"], out / r["old_path"]
         if old_p.exists() and not new_p.exists():
@@ -792,14 +815,33 @@ def cmd_undo_organize(args, out):
         if not new_p.exists():
             miss += 1
             continue
+        if old_p.exists():
+            # Something already sits at the old place. Moving over it would destroy it.
+            print("  not moved back {} (a file is already at {})".format(
+                r["new_path"], r["old_path"]))
+            failed.append(r)
+            continue
         old_p.parent.mkdir(parents=True, exist_ok=True)
         try:
             new_p.replace(old_p)
             reverted += 1
         except OSError as e:
             print("  revert failed {} ({})".format(new_p, e))
+            failed.append(r)
     # The gallery resolves files by media id (find_files_for_media_id matches both
     # naming layouts), so restored files still resolve without rewriting the
-    # catalog. Clear the manifest now that it's been applied.
+    # catalog. The manifest is cleared only of what was applied: a move that could not be
+    # undone stays in it, so the next Undo tries it again. Before 2026-11-19 the whole
+    # manifest was deleted even when reverts failed, and those moves could never be undone.
+    if failed:
+        failed.reverse()                   # back to the order they were made in
+        with open(manifest_path, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["old_path", "new_path", "ts"])
+            for r in failed:
+                w.writerow([r["old_path"], r["new_path"], r.get("ts", "")])
+        print("Reverted {} file(s); {} already gone; {} could not be moved back and stay in "
+              "the manifest -- run --undo-organize again.".format(reverted, miss, len(failed)))
+        return
     manifest_path.unlink()
     print("Reverted {} file(s); {} already gone. Manifest cleared.".format(reverted, miss))
