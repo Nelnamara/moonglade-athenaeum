@@ -5,6 +5,7 @@ import { apiGet } from "../api.js";
 import MarkAnimated from "./MarkAnimated.jsx";
 import HelpButton from "../help/HelpButton.jsx";
 import Icon from "../icons/Icons.jsx";
+import { show as toastShow } from "../notify/toastStore.js";
 
 /* The banner (DC "Frontend Gallery" §1): one region owning hero/slim state.
    Hero: art + right-aligned brand block on top, a bottom band with the library
@@ -23,9 +24,18 @@ import Icon from "../icons/Icons.jsx";
    Stats are LIVE: boot.stats paints first, then GET /api/stats (adds
    coverage_pct) refreshes on mount and after every generation lands. */
 
-function StatPill({ value, label, emerald }) {
+function StatPill({ value, label, emerald, note }) {
+  /* `note` (the Backed up pill, 2026-11-18): the server's plain line saying what is missing
+     and what fixes it (moonglade.gallery.backup_coverage). Hover shows it; a tap or click
+     says it in the app's normal corner notice, which is how a phone or a touch screen with
+     no hover reads it. Same pill, same look. */
+  const tell = note ? () => toastShow({ kind: "", title: value + " " + label, msg: note }) : undefined;
   return (
-    <div className={"mgx-statpill" + (emerald ? " emerald" : "")}>
+    <div className={"mgx-statpill" + (emerald ? " emerald" : "")}
+      title={note || undefined}
+      {...(note ? { role: "button", tabIndex: 0, onClick: tell,
+                    onKeyDown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); tell(); } } }
+              : {})}>
       <span className="mgx-statval">{value}</span>
       <span className="mgx-statlab">{label}</span>
     </div>
@@ -141,7 +151,7 @@ export default function Banner({
             <StatPill value={fmt(s.images)} label="Images" />
             {s.videos ? <StatPill value={fmt(s.videos)} label="Videos" /> : null}
             {s.coverage_pct != null ? (
-              <StatPill value={s.coverage_pct + "%"} label="Backed up" emerald />
+              <StatPill value={s.coverage_pct + "%"} label="Backed up" emerald note={s.coverage_note} />
             ) : null}
           </div>
           <div className="mgx-actrow">

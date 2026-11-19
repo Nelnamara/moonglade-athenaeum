@@ -55,6 +55,11 @@ the right with your account (inbox, gift box, credits, **?**). On an upright 11-
 row is one line when it is quiet (an iPad mini is narrower and takes two); a pinned goal, a claim waiting or a job running sends the end of it to one more
 line, with your account still at the right. Along the banner:
 
+- **Backed up** — the share of your PixAI generations that are in this library. Hover it, or
+  tap it, and a line says what is missing and what fixes it: generations still to fetch (**Sync
+  now** fetches them), and how many failed or were cancelled on PixAI — those never made a
+  picture, so nothing can back them up, and they are not counted. Generations you deleted on
+  PixAI are kept here and not counted either. It reaches 100% only when nothing is missing.
 - **?** — opens the [guide](Home#help-inside-the-app) on this page (the **?** key does the same from
   anywhere outside a text field). The first time you open the gallery, a **Welcome to the stacks**
   card offers a short tour.
@@ -202,6 +207,17 @@ forget you're not on `localhost`, so if a button you expect is not there, check 
 bar first. Open the gallery from the serving machine's own `localhost` address and the
 restriction lifts. (Earlier builds showed a **LAN session** chip naming what was hidden;
 the current shell does not.)
+
+### Which names it answers to
+
+**Moonglade answers only to its own names.** It serves a page asked for by an address
+(`localhost`, `127.0.0.1`, the PC's network address such as `http://192.168.1.20:5000`), by
+this PC's name (bare or with `.local`) or by the Bonjour name it advertises. Any other name gets
+*Misdirected request* (421) before anything else happens: that is what stops a web page on some
+other site pointing its own name at your PC and talking to Moonglade from inside your browser.
+If you reach it through a name of your own — a router's `pc.lan`, a reverse proxy — add that
+name to an `allowed_hosts` list in `local\settings.json` (for example
+`"allowed_hosts": ["pc.lan"]`); it takes effect on the next page you open.
 
 ## Help, About and the first-run guide
 

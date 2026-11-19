@@ -4,6 +4,7 @@ import { apiGet } from "../api.js";
 import { fmt, countdown, dayOf, tsOf } from "../hooks/useContests.js";
 import { Markdown } from "./ContestDetail.jsx";
 import { ruleLine } from "../lib/contestRules.js";
+import { safeHref } from "../lib/markdownLite.js";
 import "../styles/contest-mobile.css";
 
 /* THE DETAIL, ON THE PHONE — pixel source `Contest Mobile Handoff.dc.html` frame D2
@@ -185,8 +186,8 @@ export default function ContestDetailMobile({ contest, mineRow, onBack, onEnter 
                 })
               )}
               <span className="k">Rules doc</span>
-              {contest.desc_url ? (
-                <a href={contest.desc_url} target="_blank" rel="noopener noreferrer">read the rules ↗</a>
+              {safeHref(contest.desc_url) ? (
+                <a href={safeHref(contest.desc_url)} target="_blank" rel="noopener noreferrer">read the rules ↗</a>
               ) : (
                 <span>none published for this contest</span>
               )}

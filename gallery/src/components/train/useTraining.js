@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, apiPost, apiUpload } from "../../api.js";
+import { noteTrainRuns } from "../../notify/trainWatch.js";
 import {
   CAPTION_MAX, GOALS, LONG_TRIGGER_ARCHS, MAX_IMAGES, MIN_IMAGES, acceptCostField, advancedGates,
   archTabs, basicFooterCost, countedItems, defaultBase, imageProblem, markRejected,
@@ -92,6 +93,8 @@ export function useTrainRuns({ light = false, enabled = true } = {}) {
         return;
       }
       setState({ runs: d.runs || [], running: d.running || [], errors: d.errors || [], loaded: true });
+      // the finish notice watches what this list shows (notify/trainWatch.js)
+      noteTrainRuns(d);
     });
   }, [light]);
   useEffect(() => { if (enabled) refresh(); }, [enabled, refresh]);

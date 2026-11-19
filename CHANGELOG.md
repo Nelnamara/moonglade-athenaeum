@@ -17,6 +17,14 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Changed
+- **Your catalog is copied before every update.** Before the update pulls anything it saves `catalog.db` as a dated `catalog-before-update-…db` beside it and keeps the last three; if the copy can't be made, nothing changes. The update window shows it as its first step. (2026-11-19)
+- **Every version reads in full.** The phone's About row said "v3.21" where the desktop said "v3.21.0"; both, and the guide's what's-new note, now print the whole version. (2026-11-19)
+- **Contest cards say whether you've used what a contest requires.** A contest that needs a model or LoRA shows "Required LoRA: used ✓", "not used yet" or "1 of 2 used" on its card, on the desktop and the phone. A recipe says it isn't recorded here, and one the app couldn't look up says so; neither is ever shown as not used. (2026-11-19)
+- **A LoRA training run says when it finishes or fails.** The normal corner notice appears once, wherever you are in the app. (2026-11-19)
+- **Hover or tap Backed up to see what's missing.** It says how many generations are still to fetch (Sync now fetches them) and how many failed or were cancelled on PixAI and never made a picture, which nothing can back up. (2026-11-19)
+- **The Sync line in the Control Panel says the same as its Runs itself row.** It used to read "auto off · every 6 hours" from the standing order while Sync was running by itself. (2026-11-19)
+- **Maintenance jobs are gone from the Activity tracker.** It lists what you set going; jobs that run by themselves and the Panel's maintenance jobs are in the Ledger. (2026-11-19)
+- **The published-artwork sweep runs every 6 hours, not every 15 minutes, and Sync every 12 hours, not 6.** Publishing and starting the app still run the sweep at once. A cadence you set yourself is kept. (2026-11-19)
 - **Mirror connects only through Connect from PixAI.** The old way, which picked up whatever PixAI sign-in a browser on this computer held without checking it was your API key's account, is gone, and `--mirror-check` now only renews the sign-in you already connected. (2026-11-18)
 - **The help pages tell one story about HTTPS.** Moonglade serves plain `http://` unless you turn on its `--https` switch; The Gallery page now says how, and Trust & Safety, the FAQ, the Control Panel page and the Control Panel's network card all say the same: your password, your session and the Mirror's sign-in are encrypted across your network only at an `https://` address. (2026-11-18)
 - **V3.2 leaves the video pickers when PixAI retires it on 23 Nov.** From 03:00 UTC that day it is no longer offered, a remix or saved setting that names it uses the default engine and says so, and a V3.2 submit is refused before anything is sent. Old V3.2 videos in your library keep their "V3.2" label. (2026-11-18)
@@ -25,6 +33,9 @@ git tags. Full prose notes for tagged versions live on
 - **The Panel's Audit now runs the full check,** so it finds the same copies Preview does. It used to stop at the quick same-id check and report none while Preview found byte-identical copies. (2026-11-18)
 
 ### Fixed
+- **Moonglade answers only to its own names.** A web page that pointed its own name at your PC could reach the server from your browser, and on a fresh install create the first account. Any name that isn't this PC's address, its name, its `.local` name, its Bonjour name or one you list in `allowed_hosts` is now refused. (2026-11-19)
+- **A contest's Rules doc link is only made for an ordinary web address.** (2026-11-19)
+- **Backed up can reach 100%.** It counted generations that failed or were cancelled on PixAI, which never made a picture, as missing, and counted ones you deleted on PixAI as here. (2026-11-19)
 - **An SVG in your library opens as a download, never as a page.** Opening one at its own address could run code inside it as Moonglade. Pictures and videos still show as before, and every file the gallery hands out now tells the browser not to run it. (2026-11-18)
 - **The branding folder only serves pictures.** A web page or SVG dropped into it is no longer handed to anyone who asks. The art pack's moment clips and sounds still play. (2026-11-18)
 - **The Loom's "spent" figure counts only renders sent from that board.** It used to add up whatever clip each shot showed, so a linked, imported or example clip could be counted as spending; on one board an example card left over from testing showed as "+1 unk". The Loom now keeps a record of each render a board sends, and of each picture its Image, Edit, Reference and Fix tabs make, with what PixAI charged for it (0 when a free card covered it), and the figure adds up only that record. A re-render counts its own charge, and "unk" now means a render that was sent but whose charge isn't known yet. Older boards are filled in once, from the renders they kept a task for. (2026-11-18)

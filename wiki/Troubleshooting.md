@@ -226,6 +226,8 @@ Each of those is fixable, and `git pull` by hand stays available regardless.
 The modal keeps git's or pip's own words, which is usually the whole diagnosis. Two shapes
 are worth knowing:
 
+- **The catalog backup failed.** Nothing changed — the update copies `catalog.db` first and
+  goes no further without that copy. The message says why (usually a full disk).
 - **The pull failed.** Nothing changed — the update pulls fast-forward-only, so it either
   applies cleanly or refuses.
 - **The dependency install failed.** The update **rolls itself back** to the version you were

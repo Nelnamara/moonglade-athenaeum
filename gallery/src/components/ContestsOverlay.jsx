@@ -57,7 +57,7 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
   const ct = useContests({ mine: true });
   const { d, err, contests, official, community, featured, restOfficial,
           dateRange, daysLeft, mine, mineRows, mineErr, entriesFor, enteredCount,
-          syncing, reloadMine } = ct;
+          syncing, reloadMine, qualifyFor } = ct;
   const [tab, setTab] = useState("contests");     // "contests" | "mine"
   const [detail, setDetail] = useState(null);     // the contest whose detail is open
   const [picking, setPicking] = useState(null);   // the contest we are picking art for
@@ -186,6 +186,9 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
                               <span className="mgct-entered"><Icon name="entered" />Entered ×{enteredCount(featured)}</span>
                             )}
                             <span className="mgct-dates dim">{dateWithLeft(featured)}</span>
+                            {qualifyFor(featured) ? (
+                              <span className="mgct-dates dim">{qualifyFor(featured)}</span>
+                            ) : null}
                           </div>
                         </div>
                       </div>
@@ -217,6 +220,7 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
                             )}
                           </div>
                           <div className="mgct-dates">{dateWithLeft(c)}</div>
+                          {qualifyFor(c) ? <div className="mgct-dates">{qualifyFor(c)}</div> : null}
                         </div>
                       </button>
                       {shortlistBtn(c)}
@@ -244,6 +248,7 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
                             )}
                           </div>
                           <div className="mgct-dates">{dateWithLeft(c)}</div>
+                          {qualifyFor(c) ? <div className="mgct-dates">{qualifyFor(c)}</div> : null}
                         </div>
                       </button>
                       {shortlistBtn(c)}

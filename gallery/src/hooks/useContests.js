@@ -3,6 +3,7 @@ import { apiGet, apiPost } from "../api.js";
 import { localDay } from "../gen/dates.js";
 import { syncOnOpen, NO_TOKEN, REFUSED, WATCH } from "./contestSyncFlow.js";
 import { peek, put, useSwrGet } from "./swrCache.js";
+import { qualifyLine } from "../lib/contestRules.js";
 
 /* useContests -- ContestsOverlay.jsx's fetch/state/derivation, mechanically
    lifted out (2026-08-03), same precedent as useMyArt.js/useHealth.js/
@@ -122,6 +123,25 @@ export default function useContests(opts) {
     if (days === 0) return "ends today";
     return days + (days === 1 ? " day left" : " days left");
   };
+
+  /* ---- "have you used what it requires" (2026-11-18) ------------------------------
+     The card surfaces (they are the ones asking for `mine`) also read
+     /api/contests/qualify once per mount: per contest, how many of its required models /
+     LoRAs this library's pictures were made with. Its own read, after the board, so a slow
+     version lookup never holds the cards back; until it lands a card simply has no line. */
+  const [qual, setQual] = useState(() => (wantMine ? peek("/api/contests/qualify") : null));
+  useEffect(() => {
+    if (!wantMine) return undefined;
+    let dead = false;
+    apiGet("/api/contests/qualify").then((q) => {
+      if (dead || !q || q.error) return;
+      put("/api/contests/qualify", q);
+      setQual(q);
+    });
+    return () => { dead = true; };
+  }, [wantMine]);
+  const qualifyFor = (row) =>
+    (row && qual && qual.contests ? qualifyLine(qual.contests[String(row.id)]) : null);
 
   /* ---- the entries half (opt-in) ---------------------------------------------
      /api/contest/mine is telemetry-derived and instant; the sync POST is the
@@ -262,5 +282,5 @@ export default function useContests(opts) {
   return { d, err, contests, official, community, featured, restOfficial, openContest,
            dateRange, daysLeft,
            mine, mineErr, mineRows, mineBy, entriesFor, enteredCount, totalEntries,
-           syncing, reloadMine };
+           syncing, reloadMine, qualifyFor };
 }

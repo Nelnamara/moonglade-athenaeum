@@ -2,14 +2,14 @@ import { accountPrefs } from "../hooks/useAccountPrefs.js";
 import { show as toastShow } from "../notify/toastStore.js";
 import { retireReceiptToast } from "../notify/updateStore.js";
 import { celebrationsIdle } from "../notify/ach.js";
-import { toastSummary, whatsNewPlan } from "./helpCore.js";
+import { fullVersion, toastSummary, whatsNewPlan } from "./helpCore.js";
 import { loadAbout } from "./helpData.js";
 import { openAbout, openWhatsNew } from "./helpStore.js";
 
 /* THE FIRST SIGN-IN AFTER AN UPDATE (Session I decision 3b/3c).
 
    Once per version per account (`seen.whatsnew` = the running version as the guide prints
-   it: x.y, or x.y.z for a patch), the toast "Updated to x.y · <the release's title> ·
+   it: the full x.y.z; an older stored x.y counts as x.y.0), the toast "Updated to x.y · <the release's title> ·
    What's new" joins the Activity layer -- AFTER any achievement toasts from the same
    sign-in, never before (it waits for notify/ach.js's celebration layer to go quiet). Its
    "What's new" opens the one-time sheet for a minor or major release and About for a
@@ -64,7 +64,7 @@ export function startWhatsNew(boot) {
     }
     whenCelebrationsSettle(() => {
       // Re-read at show time: another tab of the same account may have shown it already.
-      if (store.get(SEEN_KEY, undefined) === about.display_version) return;
+      if (fullVersion(store.get(SEEN_KEY, undefined)) === fullVersion(about.display_version)) return;
       store.set(SEEN_KEY, about.display_version);
       retireReceiptToast();
       toastShow({

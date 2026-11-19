@@ -13636,11 +13636,55 @@ def run_credit_log(args):
 RECONCILE_STAMP = "reconcile_stamp.json"
 
 
-def _stamp_reconcile(out, flagged, cleared):
+# The task statuses that end with no picture at all: nothing to back up, ever.
+_NO_PICTURE_STATUSES = frozenset({"failed", "cancelled", "canceled", "rejected", "error"})
+
+
+def feed_counts(nodes, have_task_ids):
+    """What a full walk of the live feed says about backing it up (the header's Backed up pill,
+    moonglade.gallery.backup_coverage). `nodes` are the feed's task summaries, `have_task_ids`
+    the catalog's task ids. Returns {live, no_picture, in_progress, missing}:
+      no_picture   a failed or cancelled generation -- PixAI made no picture, so there is
+                   nothing to fetch and nothing will ever fix it; the pill does not count it
+      in_progress  still queued or running (counted once it finishes)
+      missing      finished with a picture, and not in the catalog: what Sync now fetches."""
+    have = set(have_task_ids or ())
+    live = no_picture = in_progress = missing = 0
+    for node in nodes or ():
+        tid = str(node.get("id") or "")
+        if not tid:
+            continue
+        live += 1
+        st = str(node.get("status") or "").strip().lower()
+        if st in _NO_PICTURE_STATUSES:
+            no_picture += 1
+        elif st and st != "completed":
+            in_progress += 1
+        elif not media_ids_for(node):
+            no_picture += 1                  # finished, but PixAI lists no picture for it
+        elif tid not in have:
+            missing += 1
+    return {"live": live, "no_picture": no_picture, "in_progress": in_progress,
+            "missing": missing}
+
+
+def read_reconcile_stamp(out):
+    """reconcile_stamp.json as a dict, or {} when there is none or it will not read."""
+    try:
+        doc = json.loads(_paths.records_path(out, RECONCILE_STAMP).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return doc if isinstance(doc, dict) else {}
+
+
+def _stamp_reconcile(out, flagged, cleared, counts=None):
     """Write reconcile_stamp.json among the library's records, atomically. Advisory, like the
-    reconcile itself: a disk that refuses it costs the date on a LOST line, nothing more."""
+    reconcile itself: a disk that refuses it costs the date on a LOST line, nothing more.
+    `counts` (feed_counts) rides along for the Backed up pill."""
     doc = {"reconciled_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
            "flagged": flagged, "cleared": cleared}
+    for k, v in (counts or {}).items():
+        doc[k] = int(v)
     dest = _paths.records_path(out, RECONCILE_STAMP)
     tmp = dest.with_name(dest.name + ".tmp")
     try:
@@ -13668,6 +13712,7 @@ def run_reconcile_deleted(args):
     # mark tasks that still exist on PixAI as deleted, and the gallery offers those for a
     # bulk local Delete.
     live, before, page, complete = set(), None, 0, False
+    nodes = []                         # every summary, for feed_counts (the Backed up pill)
     while True:
         conn = find_connection(gql(session, page_variables(
             getattr(args, "page_size", 250) or 250,
@@ -13680,9 +13725,11 @@ def run_reconcile_deleted(args):
             complete = not pi.get("hasPreviousPage")
             break
         for e in edges:
-            tid = (e.get("node") or {}).get("id")
+            node = e.get("node") or {}
+            tid = node.get("id")
             if tid:
                 live.add(str(tid))
+                nodes.append(node)
         page += 1
         vlog("reconcile: page {}, {} live tasks so far".format(page, len(live)))
         if not pi.get("hasPreviousPage"):
@@ -13711,11 +13758,12 @@ def run_reconcile_deleted(args):
         else:
             r["deleted_remote"] = "1" if gone else ""
     save_catalog(db_path, rows)
-    _stamp_reconcile(out, flagged, cleared)
+    counts = feed_counts(nodes, {(r.get("task_id") or "").strip() for r in rows})
+    _stamp_reconcile(out, flagged, cleared, counts)
     print("Flagged {:,} row(s) as deleted-on-PixAI; cleared {:,} stale flag(s).".format(
         flagged, cleared))
     print("Review in the gallery: Source -> 'Deleted on PixAI', then bulk Delete (local).")
-    return {"live": len(live), "flagged": flagged, "cleared": cleared}
+    return dict(counts, live=len(live), flagged=flagged, cleared=cleared)
 
 
 class DiskCounts(tuple):

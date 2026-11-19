@@ -47,6 +47,11 @@ from moonglade import series as _series
 # walks these functions' source to keep it that way.
 
 ARTWORKS_SWEEP_S = 900.0        # owner call 3: "15 Works, I was going to say 20. Go with 15"
+                                # -- the sweep's own recent-guard; the TICK's cadence is the
+                                # row's interval_s, which defaults to ARTWORKS_SWEEP_DEFAULT_S
+ARTWORKS_SWEEP_DEFAULT_S = 6 * 3600.0   # 2026-11-18, owner: "Some of these items run too god
+                                        # damned often" -- the sweep was every 15 minutes; the
+                                        # publish kick and the boot kick still run it at once
 ARTWORKS_YOUNG_DAYS = 90        # owner call 4: works this young ride EVERY sweep
 ARTWORKS_DEEP_S = 172800.0      # owner call 4: older works refresh at most once per 48h
 ARTWORKS_GRACE = 2              # consecutive spent pages before stopping -- run_download's
@@ -413,11 +418,11 @@ STALE_BACKSTOP_S = 60 * 86400.0     # owner call 5: a full-cost job runs by itse
                                     # not a calendar slot.
 LIVING_JOBS = (
     # action              interval        on by default   what it is
-    {"action": "artworks-sweep", "interval_s": ARTWORKS_SWEEP_S, "enabled": True,
+    {"action": "artworks-sweep", "interval_s": ARTWORKS_SWEEP_DEFAULT_S, "enabled": True,
      "label": "Published-artwork sweep",
      "note": "reads back what PixAI says you have published — short-circuits after two "
              "known pages, so it usually costs one or two"},
-    {"action": "sync", "interval_s": 6 * 3600.0, "enabled": True, "then": "backfill-phash",
+    {"action": "sync", "interval_s": 12 * 3600.0, "enabled": True, "then": "backfill-phash",
      "label": "Sync now", "note": "pull new + fill metadata, then backfill perceptual hashes"},
     # THE VIEW READ ON ITS OWN TIMER (owner's call, 2026-09-06). It is the one part of the
     # published-artwork refresh that COSTS something: asking PixAI how many views a work
@@ -457,6 +462,13 @@ LIVING_STALE_JOBS = (
      "label": "Rebuild ALL thumbnails", "note": "only if it has not run in 60 days"},
 )
 LIVING_ALL = LIVING_JOBS + LIVING_STALE_JOBS
+# THE DEFAULTS THAT RAN TOO OFTEN (owner, 2026-11-18: "Some of these items run too god damned
+# often"). A saved row still at one of these OLD defaults -- never set by hand -- moves to the
+# new default the next time the schedule is read; a cadence the owner picked in the Panel
+# carries `chosen` and is never touched, whatever its value.
+#   artworks-sweep   15 min -> 6 hours  (publishing still kicks it at once)
+#   sync             6 hours -> 12 hours (the live mirror keeps new work coming in between)
+LIVING_RETIRED_DEFAULTS = {"artworks-sweep": (900.0,), "sync": (6 * 3600.0,)}
 LIVING_BY_ACTION = {j["action"]: j for j in LIVING_ALL}
 LIVING_STALE_ACTIONS = frozenset(j["action"] for j in LIVING_STALE_JOBS)
 # THE ONE THING AN IN-PROCESS LOCK CANNOT COVER: a SUBPROCESS. Every Panel action runs as
@@ -539,20 +551,31 @@ def living_merge(saved):
     out = []
     for spec in LIVING_ALL:
         row = by_action.get(spec["action"]) or {}
+        chosen = row.get("chosen") is True
+        stored = row.get("interval_s")
+        try:
+            if (not chosen and stored is not None
+                    and float(stored) in LIVING_RETIRED_DEFAULTS.get(spec["action"], ())):
+                stored = None                     # an old default, never picked: the new one
+        except (TypeError, ValueError):
+            pass
         interval = living_clamp_interval(
             spec["action"],
-            row.get("interval_s") if row.get("interval_s") is not None else spec["interval_s"],
+            stored if stored is not None else spec["interval_s"],
             default=spec["interval_s"])
         try:
             last = None if row.get("last_run") in (None, "") else float(row["last_run"])
         except (TypeError, ValueError):
             last = None
-        out.append({
+        merged = {
             "action": spec["action"],
             "enabled": bool(row["enabled"]) if "enabled" in row else bool(spec["enabled"]),
             "interval_s": interval,
             "last_run": last,
-        })
+        }
+        if chosen:
+            merged["chosen"] = True
+        out.append(merged)
     return out
 
 

@@ -461,7 +461,9 @@ def test_stats_coverage_matches_the_account_badge_computation(tmp_path, monkeypa
     cli = login_client(tmp_path)
     d = cli.get("/api/stats").get_json()
     assert d["server_tasks"] == 3 and d["local_tasks"] == 2
-    assert d["coverage_pct"] == round(2 / 3 * 100, 1)
+    # rounded DOWN since 2026-11-18, so 100% means nothing is missing (backup_coverage)
+    assert d["coverage_pct"] == 66.6
+    assert "1 is not here yet: Sync now fetches it." in d["coverage_note"]
 
 
 def test_stats_coverage_never_exceeds_100(tmp_path, monkeypatch, pixai):
@@ -472,3 +474,69 @@ def test_stats_coverage_never_exceeds_100(tmp_path, monkeypatch, pixai):
                         lambda session: {"tasks": {"totalCount": 1}})
     cli = login_client(tmp_path)
     assert cli.get("/api/stats").get_json()["coverage_pct"] == 100.0
+
+
+# ---- what "99.4% Backed up" means (owner, 2026-11-18) ------------------------------------
+# "I have asked this question myself and you once told me to just run sync again. I gave up
+# caring." The pill counted failed/cancelled tasks (no picture, unfetchable) in the bottom and
+# deleted-on-PixAI tasks in the top. moonglade.gallery.backup_coverage, backup.feed_counts.
+
+def _cov_catalog(tmp_path, rows):
+    save_catalog(tmp_path / "catalog.db", [
+        {f: "" for f in CATALOG_FIELDS} | {"status": "completed", "filename": "x_%s.png" % i,
+                                            "created_at": "2025-01-01T00:00:00"} | r
+        for i, r in enumerate(rows)])
+
+
+def _stamp(tmp_path, **counts):
+    import json as _json
+    from moonglade import paths as _p
+    dest = _p.records_path(tmp_path, core.RECONCILE_STAMP)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(_json.dumps(dict({"reconciled_at": "2026-11-18T00:00:00Z", "flagged": 0,
+                                      "cleared": 0}, **counts)), encoding="utf-8")
+
+
+def test_failed_and_deleted_tasks_no_longer_skew_the_pill(tmp_path):
+    from moonglade.gallery import backup_coverage
+    rows = [{"task_id": "T%d" % i, "media_id": "m%d" % i} for i in range(97)]
+    rows += [{"task_id": "D%d" % i, "media_id": "d%d" % i, "deleted_remote": "1"} for i in range(2)]
+    _cov_catalog(tmp_path, rows)
+    # PixAI counts 100 live tasks: the 97 here and 3 that failed (no picture), not the 2 deleted
+    _stamp(tmp_path, live=100, no_picture=3, in_progress=0, missing=0)
+    cov = backup_coverage(tmp_path / "catalog.db", tmp_path, 100)
+    assert cov["pct"] == 100.0 and cov["local"] == 97 and cov["deleted"] == 2
+    assert "3 more failed or were cancelled" in cov["note"] and "nothing can fix that" in cov["note"]
+    assert "2 you deleted on PixAI are kept here and not counted." in cov["note"]
+    assert "Sync now" not in cov["note"]
+    # the old formula on the same library read 99/100 = 99.0%
+    assert core.feed_counts is not None
+
+
+def test_a_real_gap_says_sync_fixes_it_and_never_rounds_up_to_100(tmp_path):
+    from moonglade.gallery import backup_coverage
+    _cov_catalog(tmp_path, [{"task_id": "T%d" % i, "media_id": "m%d" % i} for i in range(1999)])
+    _stamp(tmp_path, live=2003, no_picture=3, in_progress=0, missing=1)
+    cov = backup_coverage(tmp_path / "catalog.db", tmp_path, 2003)
+    assert cov["pct"] == 99.9                         # 1999/2000 = 99.95, rounded DOWN
+    assert "1 is not here yet: Sync now fetches it." in cov["note"]
+
+
+def test_before_any_full_walk_the_note_says_so(tmp_path):
+    from moonglade.gallery import backup_coverage
+    _cov_catalog(tmp_path, [{"task_id": "T1", "media_id": "m1"}])
+    cov = backup_coverage(tmp_path / "catalog.db", tmp_path, 2)
+    assert cov["pct"] == 50.0 and "until the next Sync" in cov["note"]
+    assert backup_coverage(tmp_path / "catalog.db", tmp_path, None)["pct"] is None
+
+
+def test_feed_counts_sorts_the_feed():
+    nodes = [{"id": "a", "status": "completed", "mediaId": "1"},
+             {"id": "b", "status": "completed", "mediaId": "2"},
+             {"id": "c", "status": "failed", "mediaId": None},
+             {"id": "d", "status": "cancelled"},
+             {"id": "e", "status": "running"},
+             {"id": "f", "status": "completed", "batchMediaIds": []},
+             {"id": ""}]
+    assert core.feed_counts(nodes, {"a"}) == {"live": 6, "no_picture": 3, "in_progress": 1,
+                                              "missing": 1}

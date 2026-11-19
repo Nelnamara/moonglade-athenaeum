@@ -49,7 +49,7 @@ UPDATE_FETCH_TIMEOUT = 60        # the apply route's pre-check fetch: it happens
                                  # default -- a stalled network must not hold the browser
 _VERSION_TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 _update_cache = {"at": 0.0, "payload": None, "ttl": UPDATE_CHECK_TTL}
-_update_state = {"phase": "idle", "error": "", "at": 0.0}
+_update_state = {"phase": "idle", "error": "", "at": 0.0, "backup": ""}
 _update_lock = threading.Lock()
 
 
@@ -275,6 +275,73 @@ def _set_update_state(phase, error=""):
         _update_state.update(phase=phase, error=error, at=time.time())
 
 
+# ---------------------------------------------------------------------------
+# The catalog backup before every update (owner, 2026-11-18: "We used to do this when the
+# catalog was a csv...."). An update can carry a schema step that runs at the next start, and
+# the catalog is the one file in the library that cannot be fetched again from PixAI (ratings,
+# collections, notes). So before the pull, a dated copy is made beside it and the last few are
+# kept. The copy goes through SQLite's online backup API, never a file copy: the server (and a
+# Panel job) may be writing the database at that moment, and a byte copy of a live database
+# with its -wal beside it can be a torn file that opens as corrupt.
+# ---------------------------------------------------------------------------
+CATALOG_BACKUP_KEEP = 3
+CATALOG_BACKUP_PREFIX = "catalog-before-update-"
+_CATALOG_BACKUP_RE = re.compile(r"^catalog-before-update-\d{4}-\d{2}-\d{2}-\d{6}\.db$")
+
+
+def catalog_backups(db_path):
+    """This library's update backups, oldest first (only files with our exact name shape)."""
+    from pathlib import Path
+    folder = Path(db_path).parent
+    try:
+        names = sorted(n.name for n in folder.iterdir()
+                       if n.is_file() and _CATALOG_BACKUP_RE.match(n.name))
+    except OSError:
+        return []
+    return [folder / n for n in names]
+
+
+def backup_catalog(db_path, keep=CATALOG_BACKUP_KEEP, now=None):
+    """Copy the catalog at `db_path` to `catalog-before-update-YYYY-MM-DD-HHMMSS.db` beside it
+    through SQLite's backup API, then delete all but the newest `keep` such copies. Returns the
+    new file's name, or "" when there is no catalog yet (nothing to keep). Raises on a failed
+    copy, and the half-written temp is removed -- the update must not go ahead on a backup
+    that did not happen."""
+    import os
+    import sqlite3
+    from pathlib import Path
+    db = Path(db_path)
+    if not db.is_file():
+        return ""
+    stamp = time.strftime("%Y-%m-%d-%H%M%S",
+                          time.localtime(now if now is not None else time.time()))
+    final = db.with_name(CATALOG_BACKUP_PREFIX + stamp + ".db")
+    tmp = final.with_name(final.name + ".partial")
+    try:
+        src = sqlite3.connect(str(db))
+        try:
+            dst = sqlite3.connect(str(tmp))
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
+        finally:
+            src.close()
+        os.replace(str(tmp), str(final))
+    except BaseException:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+    for old in catalog_backups(db)[:-max(1, int(keep))]:
+        try:
+            old.unlink()
+        except OSError:
+            pass                                 # an old copy we cannot delete is only clutter
+    return final.name
+
+
 def _requirements_changed(old_head, new_head):
     """Did requirements.txt move between these two commits? The pip step is skipped
     otherwise -- a dependency install is slow, and running one on every code update
@@ -354,7 +421,7 @@ def untracked_in_the_way(untracked, incoming):
     return hits
 
 
-def run_update(restart_fn, pip_fn=None, log_fn=None):
+def run_update(restart_fn, pip_fn=None, log_fn=None, backup_fn=None):
     """Pull, install deps if they moved, then restart. Runs on its own thread, OFF the
     panel-job slot, so the restart it asks for is not refused by the job it is itself.
 
@@ -373,6 +440,10 @@ def run_update(restart_fn, pip_fn=None, log_fn=None):
     against the new HEAD, skipped pip entirely and declared success on a broken install.
     The rollback is what makes retry mean retry.
 
+    FIRST, before anything is pulled, `backup_fn` copies the catalog (backup_catalog). A
+    backup that fails stops the update with nothing changed: the copy is the reason it is
+    safe to go on.
+
     Both outcomes are also written to the activity log (jobs.jsonl), which is the only
     part of this that survives the restart the success path is about to trigger."""
     def _record(status, error=""):
@@ -383,6 +454,18 @@ def run_update(restart_fn, pip_fn=None, log_fn=None):
         except Exception:                        # noqa: BLE001 -- logging never breaks the job
             pass
 
+    if backup_fn is not None:
+        _set_update_state("backup")
+        try:
+            name = backup_fn() or ""
+        except Exception as e:                   # noqa: BLE001
+            msg = ("couldn't back up the catalog before updating, so nothing was changed: "
+                   "%s: %s" % (type(e).__name__, str(e)[:300]))
+            _set_update_state("failed", msg)
+            _record("failed", msg)
+            return False
+        with _update_lock:
+            _update_state["backup"] = name
     rc, head_out = _git(["rev-parse", "HEAD"])
     old_head = head_out.strip() if rc == 0 else ""
     _set_update_state("pulling")

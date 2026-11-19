@@ -19,10 +19,12 @@ import { show as toastShow } from "./toastStore.js";
 import { note as noteUpdate } from "./updateStore.js";
 import { noteServerNotice } from "./serverNotice.js";
 import { doneNotice } from "./doneNotice.js";
+import { trackerRows } from "./trackerRows.js";
 
 const LSK = "mg_jobs_open";
 
 let jobs = [];
+let allRunning = 0;         // every running row, listed or not -- the poll cadence's busy
 let open = false;
 let started = false;
 let timer = null;
@@ -179,7 +181,10 @@ export function refresh() {
       // R4b): the live mirror counts PixAI's newNotification and this payload carries it.
       // Handed to whoever listens (inbox/inboxStore.js, in the gallery's shells only).
       if (d && !d.error && d.inbox) pollListeners.forEach((fn) => { try { fn(d.inbox); } catch { /* its own */ } });
-      jobs = rows;
+      // The LIST leaves out maintenance (notify/trackerRows.js); the transition rules above
+      // read every row, and the poll cadence below counts every running one.
+      allRunning = rows.filter((j) => (j.status || "running") === "running").length;
+      jobs = trackerRows(rows);
       emit();
     })
     .catch(() => {});
@@ -187,7 +192,7 @@ export function refresh() {
 
 function schedule() {
   if (timer) clearTimeout(timer);
-  const busy = runningCount() > 0;
+  const busy = allRunning > 0;
   timer = setTimeout(() => {
     if (document.hidden) { schedule(); return; }
     refresh().then(schedule);

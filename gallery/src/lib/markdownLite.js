@@ -44,6 +44,13 @@ const INLINE = /\[([^\]\n]*)\]\(([^()\s]+)\)|\*\*([^*\n]+?)\*\*|\*([^*\n]+?)\*/g
 // what the brief said and nothing is hidden behind a label.
 const SAFE_HREF = /^https?:\/\//i;
 
+/* The same rule for a link PixAI hands over whole (a contest's "Rules doc", desc_url):
+   the url itself when it is http/https, else null -- and a null draws no link at all. */
+export function safeHref(url) {
+  const s = typeof url === "string" ? url.trim() : "";
+  return SAFE_HREF.test(s) ? s : null;
+}
+
 function inlineSpans(line) {
   const out = [];
   const push = (s) => {

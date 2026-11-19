@@ -398,14 +398,19 @@ def test_a_clean_tree_never_pays_for_the_fetch(tmp_path, monkeypatch):
 def test_apply_starts_the_update_when_every_gate_passes(tmp_path, monkeypatch):
     _apply_ready(monkeypatch)
     cli = _client(tmp_path)                 # built BEFORE the Thread patch: create_app
-    started = {"n": 0}                      # starts threads of its own
+    started = {"n": 0, "kwargs": None}      # starts threads of its own
     monkeypatch.setattr(g.threading, "Thread",
-                        lambda target=None, args=(), kwargs=None, daemon=None: type(
-                            "T", (), {"start": lambda self_: started.update(n=started["n"] + 1)})())
+                        lambda target=None, args=(), kwargs=None, daemon=None: (
+                            started.update(kwargs=kwargs), type(
+                                "T", (), {"start": lambda self_: started.update(
+                                    n=started["n"] + 1)})())[1])
     r = _apply(cli)
     assert r.status_code == 200 and r.get_json()["ok"] is True
     assert started["n"] == 1
-    assert updater_mod.update_state()["phase"] == "pulling"
+    # the first step is the catalog backup, and the thread is handed the one for THIS library
+    assert updater_mod.update_state()["phase"] == "backup"
+    name = started["kwargs"]["backup_fn"]()
+    assert (tmp_path / name).is_file() and name.startswith("catalog-before-update-")
     # single-flight: a second click while one runs is refused, not queued
     r2 = _apply(cli)
     assert r2.status_code == 409 and "already running" in r2.get_json()["error"]
@@ -1150,3 +1155,84 @@ def test_a_tick_that_finds_a_release_does_not_touch_the_updater(monkeypatch):
     assert updater_mod.run_update_tick("3.0.0", now=T0)["behind"] is True
     assert updater_mod.update_notice()["latest"] == "v9.9.9"
     assert updater_mod.update_state()["phase"] == "idle"        # nothing ever started
+
+
+# ---- the catalog backup before every update ------------------------------------------------
+# (owner, 2026-11-18: "We used to do this when the catalog was a csv....")
+
+def _wal_db_with_uncheckpointed_rows(path):
+    """A live catalog the way the server holds one: WAL mode, rows committed but still only in
+    the -wal file, and the writer's connection still open. A byte copy of catalog.db alone
+    would miss every one of those rows; SQLite's backup API reads them."""
+    import sqlite3
+    con = sqlite3.connect(str(path))
+    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA wal_autocheckpoint=0")
+    con.execute("CREATE TABLE t (x)")
+    con.executemany("INSERT INTO t VALUES (?)", [(i,) for i in range(50)])
+    con.commit()
+    return con
+
+
+def test_backup_catalog_copies_a_live_db_through_the_backup_api(tmp_path):
+    import sqlite3
+    db = tmp_path / "catalog.db"
+    writer = _wal_db_with_uncheckpointed_rows(db)
+    try:
+        name = updater_mod.backup_catalog(db, now=1763560000)
+    finally:
+        writer.close()
+    assert name.startswith("catalog-before-update-") and name.endswith(".db")
+    copy = sqlite3.connect(str(tmp_path / name))
+    try:
+        assert copy.execute("SELECT COUNT(*) FROM t").fetchone()[0] == 50
+    finally:
+        copy.close()
+    assert not list(tmp_path.glob("*.partial"))
+
+
+def test_backup_catalog_keeps_the_last_few_and_only_touches_its_own(tmp_path):
+    import sqlite3
+    db = tmp_path / "catalog.db"
+    sqlite3.connect(str(db)).close()
+    mine = tmp_path / "catalog-before-update-notes.db"     # not our name shape: left alone
+    mine.write_text("x")
+    names = [updater_mod.backup_catalog(db, now=1763560000 + i * 60) for i in range(5)]
+    left = [p.name for p in updater_mod.catalog_backups(db)]
+    assert left == names[-updater_mod.CATALOG_BACKUP_KEEP:]
+    assert mine.exists() and db.exists()
+
+
+def test_backup_catalog_with_no_catalog_is_nothing_to_keep(tmp_path):
+    assert updater_mod.backup_catalog(tmp_path / "catalog.db") == ""
+
+
+def test_the_backup_runs_before_the_pull_and_its_name_is_reported(monkeypatch):
+    _idle_state(monkeypatch)
+    order = []
+
+    def _git(args, **k):
+        order.append(args[0])
+        return 0, "OLD" if args[:1] == ["rev-parse"] else ""
+    monkeypatch.setattr(updater_mod, "_git", _git)
+    assert updater_mod.run_update(lambda: None, pip_fn=lambda: (0, ""),
+                                  backup_fn=lambda: order.append("backup") or "c.db") is True
+    assert order.index("backup") < order.index("pull")
+    assert updater_mod.update_state()["backup"] == "c.db"
+
+
+def test_a_failed_backup_stops_the_update_before_anything_changes(monkeypatch):
+    _idle_state(monkeypatch)
+    seen, logged = [], []
+    monkeypatch.setattr(updater_mod, "_git", lambda args, **k: (seen.append(args), (0, ""))[1])
+
+    def _boom():
+        raise OSError("disk full")
+    assert updater_mod.run_update(lambda: seen.append("restart"), pip_fn=lambda: (0, ""),
+                                  log_fn=lambda st, err="": logged.append((st, err)),
+                                  backup_fn=_boom) is False
+    assert not any(a[:1] == ["pull"] for a in seen if isinstance(a, list))
+    assert "restart" not in seen
+    st = updater_mod.update_state()
+    assert st["phase"] == "failed" and "back up the catalog" in st["error"]
+    assert "disk full" in st["error"] and logged and logged[0][0] == "failed"

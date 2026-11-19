@@ -513,9 +513,12 @@ export default function useControlPanel() {
     // announcement mid-apply must not rewrite what the pull was for.
     const t = updTargetRef.current || update;
     return ([
+    // The catalog is copied beside itself before anything is pulled (owner, 2026-11-18).
+    { key: "backup", label: "Back up the catalog", doneLabel: "Backed up the catalog",
+      state: "now", secs: null, note: "" },
     { key: "pull", label: "Pull " + ((t && t.latest) || "the release") + " from the mirror",
       doneLabel: "Pulled " + ((t && t.latest) || "the release") + " from the mirror",
-      state: "now", secs: null, note: "" },
+      state: "wait", secs: null, note: "" },
     { key: "apply", label: "Applying files", doneLabel: "Applied files",
       state: "wait", secs: null, note: "" },
     { key: "restart", label: "Restart", doneLabel: "Restarted", state: "wait", secs: null,
@@ -616,6 +619,7 @@ export default function useControlPanel() {
     // why the happy path used to strand on "updating…".
     let sawWork = false;
     let sawDeps = false;
+    let sawPull = false;
     const handover = () => {
       clearInterval(updPollRef.current);
       updPollRef.current = null;
@@ -662,7 +666,12 @@ export default function useControlPanel() {
           } else if (st.phase === "idle") {
             if (sawWork) handover();
           } else {
-            sawWork = true;                                // pulling | deps
+            sawWork = true;                                // backup | pulling | deps
+            // `pulling` is the server saying the catalog copy is made: phase one closes.
+            if (st.phase === "pulling" && !sawPull) {
+              sawPull = true;
+              advanceSteps("pull", { sawDeps });
+            }
             // `deps` is the server saying the pull is finished and dependencies are
             // installing -- the real boundary between phase one and phase two. Without a
             // requirements change it never arrives at all, and the list says so rather

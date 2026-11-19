@@ -383,8 +383,8 @@ export function visiblePages(pages, brandingUnlocked) {
 
 /* What the first sign-in after an update does (decision 3). `seen` is the account's
    `seen.whatsnew` (undefined when it has never been written); `display` is the running
-   version as the guide prints it (x.y, or x.y.z for a patch -- the server's
-   display_version); `kind` is major | minor | patch; `hasLibrary` says the account has
+   version as the guide prints it (the full x.y.z -- the server's display_version; an
+   older x.y in `seen` is the same version as x.y.0); `kind` is major | minor | patch; `hasLibrary` says the account has
    pictures, which is what separates an account that has been using the app from one that
    has only just been made.
 
@@ -393,9 +393,15 @@ export function visiblePages(pages, brandingUnlocked) {
                                             the version is noted so the NEXT one is news
      {show: true, mark: true, opens}        the toast, once; `opens` is "sheet" for a minor
                                             or major release, "about" for a patch */
+/* "3.21" (what a .0 release was stored as before 2026-11-18) and "3.21.0" are one version. */
+export function fullVersion(v) {
+  const s = typeof v === "string" ? v.trim() : "";
+  return /^\d+\.\d+$/.test(s) ? s + ".0" : s;
+}
+
 export function whatsNewPlan({ seen, display, kind, hasLibrary }) {
   if (!display) return { show: false, mark: false };
-  if (seen === display) return { show: false, mark: false };
+  if (fullVersion(seen) === fullVersion(display)) return { show: false, mark: false };
   if (seen === undefined || seen === null || seen === "") {
     if (!hasLibrary) return { show: false, mark: true };
   }

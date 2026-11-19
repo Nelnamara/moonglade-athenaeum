@@ -96,8 +96,10 @@ def test_the_shipped_list_is_the_scopes_own_list():
     Named here so a job silently disappearing (or a cadence silently drifting off the
     owner's own answers) fails by name rather than by nobody noticing."""
     by_action = {j["action"]: j for j in living_mod.LIVING_ALL}
-    assert by_action["artworks-sweep"]["interval_s"] == 900          # call 3: 15 minutes
-    assert by_action["sync"]["interval_s"] == 6 * 3600
+    # 2026-11-18, owner: "Some of these items run too god damned often": 15 min -> 6 hours,
+    # and Sync 6 -> 12 hours (test_retired_defaults_move_only_when_never_chosen)
+    assert by_action["artworks-sweep"]["interval_s"] == 6 * 3600
+    assert by_action["sync"]["interval_s"] == 12 * 3600
     assert by_action["sync"]["then"] == "backfill-phash"             # "after each Sync"
     assert by_action["sync-videos"]["interval_s"] == 24 * 3600       # nightly
     assert by_action["reconcile-deleted"]["interval_s"] == 7 * DAY   # weekly
@@ -109,8 +111,8 @@ def test_the_shipped_list_is_the_scopes_own_list():
 
 
 @pytest.mark.parametrize("action,interval", [
-    ("artworks-sweep", 900.0),
-    ("sync", 6 * 3600.0),
+    ("artworks-sweep", 6 * 3600.0),
+    ("sync", 12 * 3600.0),
     ("sync-videos", 24 * 3600.0),
     ("reconcile-deleted", 7 * DAY),
     ("sync-similar", 24 * 3600.0),
@@ -1584,3 +1586,27 @@ def test_the_built_bundle_carries_the_runs_itself_surface():
     dist = (SRC / "gallery/dist/app.js").read_text(encoding="utf-8", errors="replace")
     assert "Runs itself" in dist
     assert "/api/panel/sweep" in dist
+
+
+def test_retired_defaults_move_only_when_never_chosen():
+    """2026-11-18, owner: "Some of these items run too god damned often." A saved row still at
+    an OLD default (15-minute sweep, 6-hour Sync) moves to the new default; a cadence the owner
+    picked in the Panel (`chosen`) stays, even when it equals the old default."""
+    merged = {r["action"]: r for r in living_mod.living_merge([
+        {"action": "artworks-sweep", "enabled": True, "interval_s": 900.0, "last_run": 5.0},
+        {"action": "sync", "enabled": True, "interval_s": 21600.0}])}
+    assert merged["artworks-sweep"]["interval_s"] == 6 * 3600
+    assert merged["artworks-sweep"]["last_run"] == 5.0
+    assert merged["sync"]["interval_s"] == 12 * 3600
+    kept = {r["action"]: r for r in living_mod.living_merge([
+        {"action": "artworks-sweep", "interval_s": 900.0, "chosen": True},
+        {"action": "sync", "interval_s": 1800.0}])}
+    assert kept["artworks-sweep"]["interval_s"] == 900 and kept["artworks-sweep"]["chosen"] is True
+    assert kept["sync"]["interval_s"] == 1800, "a non-default value is the owner's, chosen or not"
+
+
+def test_a_panel_pick_is_marked_chosen_and_survives(tmp_path):
+    cli = _client(tmp_path)
+    cli.post("/api/panel/schedule", json={"jobs": [{"action": "artworks-sweep", "interval_s": 900}]})
+    by = {r["action"]: r for r in cli.get("/api/panel/schedule").get_json()["jobs"]}
+    assert by["artworks-sweep"]["interval_s"] == 900 and by["artworks-sweep"]["chosen"] is True

@@ -18,9 +18,12 @@ import assert from "node:assert/strict";
    stalls or finishes with errors is a LINE in the Activity window rather than a corner
    notice, exactly like one that succeeds.
 
-   And the row still arrives. Suppressing the toast must not suppress the JOB: the tracking
-   window is the whole reason the toast can go, so every case below also asserts the row
-   reached the store's own state, which is what <ActivityPanel> renders.
+   WHERE THE ROW GOES NOW (owner, 2026-11-18: "I want maint. jobs removed from the
+   tracker."). A scheduled row is no longer LISTED in the Activity window either: it lives in
+   the Control Panel's Ledger (notify/trackerRows.js, loom/test/tracker-rows.test.js). The
+   store still READS it -- its transition memory is what keeps it quiet -- so every case below
+   also asserts it stayed out of the store's listed state, which is what <ActivityPanel>
+   renders.
 
    DRIVEN, not read: refresh() is exported and everything under it is pure, so a fake fetch
    and a real toastStore are the only stand-ins needed. jobsStore is a deliberate module
@@ -82,9 +85,8 @@ describe("a job the library started by itself never toasts", () => {
       await poll([row({ status, scheduled: true, error: "something went wrong" })]);
       assert.deepEqual(fired(), [],
         `a scheduled job ending "${status}" must not toast -- the Activity window has it`);
-      // ...and it is genuinely IN the Activity window, which is the whole trade.
-      assert.equal(store.getState().jobs.length, 1);
-      assert.equal(store.getState().jobs[0].status, status);
+      // ...and it is not listed in the Activity window: the Ledger has it (2026-11-18).
+      assert.equal(store.getState().jobs.length, 0);
     });
 
     test(`an owner-started job that ends "${status}" still toasts`, async () => {
@@ -102,7 +104,7 @@ describe("a job the library started by itself never toasts", () => {
     await poll([row({ status: "running", scheduled: true })]);
     await poll([row({ status: "done", scheduled: true })]);
     assert.deepEqual(fired(), []);
-    assert.equal(store.getState().jobs[0].status, "done");
+    assert.equal(store.getState().jobs.length, 0, "a scheduled row is the Ledger's, not the tracker's");
   });
 
   test("the same job without the flag toasts on that same transition", async () => {
@@ -134,6 +136,7 @@ describe("a job the library started by itself never toasts", () => {
     ]);
     assert.equal(fired().length, 1);
     assert.match(fired()[0].title, /Rebuild ALL thumbnails/);
-    assert.equal(store.getState().jobs.length, 3, "all three still reach the tracker");
+    assert.equal(store.getState().jobs.length, 1, "only the owner's job is listed in the tracker");
+    assert.equal(store.getState().jobs[0].job_id, "c");
   });
 });

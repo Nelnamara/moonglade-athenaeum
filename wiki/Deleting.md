@@ -145,14 +145,14 @@ moments — worth knowing which:
   is never revisited, so on a catalog you have already filled in this pass records nothing,
   and the date comes from a delete instead. **This is the one that can happen while you are
   not watching.** Filling rows still missing their metadata is a step of `--sync`, and
-  **Sync now** is one of the jobs in **Runs itself** — every six hours, on by default — so an
+  **Sync now** is one of the jobs in **Runs itself** — every twelve hours, on by default — so an
   automatic sync reaches this the same way a hand-run one does. It is still gated the same
   way: only rows missing that detail are re-fetched, so on a catalog you have already filled
   in an automatic sync records nothing here either.
 
 `--reconcile-deleted` does *not* record it: that one works on whole generations that have
 left your feed, and never looks at the individual images inside one. Neither does the
-fifteen-minute published-artwork sweep, nor the weekly **View counts** job, nor anything
+published-artwork sweep, nor the weekly **View counts** job, nor anything
 else in **Runs itself** that is not fetching generation metadata: the jobs that can reach
 this marker unattended are the ones that re-read a generation from PixAI — **Sync now** and
 the sixty-day **Full re-walk** — and they reach it only on rows they were re-fetching anyway.

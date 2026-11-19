@@ -51,6 +51,7 @@ from moonglade import paths as _paths
 from moonglade import pixai_client as _pixai_client
 from moonglade import scan as _scan
 from moonglade import series as _series
+from moonglade import hostcheck as _hostcheck
 from moonglade import settings as _settings
 from moonglade import telemetry as _telemetry
 from moonglade import updater as _updater
@@ -3229,6 +3230,66 @@ def distinct_task_count(db_path):
             return 0
 
 
+def backup_coverage(db_path, out_dir, server_tasks):
+    """The header's Backed up pill: {pct, note, local, server, no_picture, missing, deleted}.
+
+    WHAT IT USED TO COUNT, and why it never reached 100% (owner, 2026-11-18: "I have asked this
+    question myself and you once told me to just run sync again. I gave up caring."): every
+    distinct task in the catalog over PixAI's `me.tasks.totalCount`. Two things were wrong at
+    once. The bottom counted every task PixAI lists, failed and cancelled ones too -- and
+    those never made a picture, so no sync can ever fetch them. And the top counted tasks
+    already deleted on PixAI (deleted_remote), which PixAI no longer counts, so they hid part
+    of that gap. Now the top is the tasks here that PixAI still has, the bottom leaves out the
+    ones with no picture (counted by the last full walk of the feed -- the deleted-on-PixAI
+    check every Sync ends with -- and kept in reconcile_stamp.json), and the note says in plain
+    words what is left and what fixes it. Rounded DOWN, so 100% means nothing is missing.
+    `server_tasks` None (PixAI unreachable) -> pct None, as before."""
+    import math
+    with catalog(db_path) as con:
+        try:
+            local = int(con.execute(
+                "SELECT COUNT(DISTINCT task_id) FROM catalog WHERE COALESCE(task_id,'') != '' "
+                "AND COALESCE(deleted_remote,'') != '1'").fetchone()[0] or 0)
+            deleted = int(con.execute(
+                "SELECT COUNT(DISTINCT task_id) FROM catalog WHERE COALESCE(task_id,'') != '' "
+                "AND COALESCE(deleted_remote,'') = '1'").fetchone()[0] or 0)
+        except sqlite3.Error:
+            local = deleted = 0
+    from moonglade import backup as _core_cov
+    stamp = _core_cov.read_reconcile_stamp(out_dir)
+    walked = "no_picture" in stamp
+    try:
+        no_picture = max(0, int(stamp.get("no_picture") or 0))
+        missing = max(0, int(stamp.get("missing") or 0))
+    except (TypeError, ValueError):
+        no_picture, missing, walked = 0, 0, False
+    out = {"pct": None, "note": "", "local": local, "server": server_tasks,
+           "no_picture": no_picture, "missing": missing, "deleted": deleted}
+    if not server_tasks:
+        return out
+    bottom = max(1, int(server_tasks) - no_picture)
+    out["pct"] = min(100.0, math.floor(local / bottom * 1000) / 10)
+    fmt = "{:,}".format
+    words = ["{} of the {} picture-making generations PixAI has for you are here.".format(
+        fmt(min(local, bottom)), fmt(bottom))]
+    if walked and no_picture:
+        words.append("{} more failed or were cancelled on PixAI and never made a picture, "
+                     "so there is nothing to back up and nothing can fix that; they are not "
+                     "counted.".format(fmt(no_picture)))
+    short = max(0, bottom - local)
+    if short:
+        words.append("{} {} not here yet: Sync now fetches {}.".format(
+            fmt(short), "is" if short == 1 else "are", "it" if short == 1 else "them"))
+    if deleted:
+        words.append("{} you deleted on PixAI {} kept here and not counted.".format(
+            fmt(deleted), "is" if deleted == 1 else "are"))
+    if not walked:
+        words.append("Failed and cancelled generations are counted until the next Sync "
+                     "checks your whole PixAI history.")
+    out["note"] = " ".join(words)
+    return out
+
+
 def rows_for_media_ids(db_path, ids):
     """Fetch catalog rows for a specific list of media_ids, preserving the given order.
     Used by the contact-sheet print view. Chunked to stay under SQLite's variable cap."""
@@ -6237,7 +6298,7 @@ def create_app(out_dir: Path):
         _schedule_server_exit directly rather than going through the route, because it
         already re-checks the very gates that route applies."""
         phase = _updater.update_state()["phase"]
-        return phase if phase in ("pulling", "deps", "restarting") else ""
+        return phase if phase in ("backup", "pulling", "deps", "restarting") else ""
 
     def _update_busy_refusal():
         return jsonify({"error": "an update is in progress (%s) — wait for it to finish; "
@@ -7854,6 +7915,31 @@ def create_app(out_dir: Path):
     _JSON_GATE_PREFIXES = ("/api/",)
 
     @app.before_request
+    def _refuse_unknown_host():
+        """The DNS-rebinding guard (moonglade/hostcheck.py): a request whose Host header names
+        something that is not this machine is refused with 421 before ANY route runs -- the
+        public tier included, because the first-account form on /login is exactly what a
+        rebinding page would reach. Registered before _enforce_front_door so it runs first.
+        IP literals, localhost, this PC's hostname (bare and .local), the advertised Bonjour
+        name and settings.json's allowed_hosts all pass; see hostcheck for why that is safe."""
+        header = request.environ.get("HTTP_HOST", "")
+        try:
+            extra = list(_settings.allowed_hosts())
+            from moonglade.bonjour import hostname_label as _bonjour_label
+            extra.append(_bonjour_label(_settings.server()["bonjour_name"]) + ".local")
+            adv = _SERVER_CONTROL.get("bonjour")
+            if adv is not None and getattr(adv, "hostname", None):
+                extra.append(adv.hostname)
+        except Exception:                    # noqa: BLE001 -- a settings hiccup narrows, never widens
+            extra = []
+        if _hostcheck.allowed(header, extra):
+            return None
+        if request.path.startswith(_JSON_GATE_PREFIXES):
+            return jsonify({"error": _hostcheck.REFUSED_WORDS}), _hostcheck.REFUSED_STATUS
+        return (_hostcheck.REFUSED_WORDS, _hostcheck.REFUSED_STATUS,
+                {"Content-Type": "text/plain; charset=utf-8"})
+
+    @app.before_request
     def _enforce_front_door():
         """THE gate: every request is refused unless its route's own @tier
         declaration lets it through.
@@ -8454,7 +8540,8 @@ def create_app(out_dir: Path):
     @tier(LOGIN)
     def api_update_status():
         """The phase the apply is in, for the modal to poll:
-        idle | pulling | deps | restarting | failed (with the tool's verbatim error).
+        idle | backup | pulling | deps | restarting | failed (with the tool's verbatim error).
+        `backup` names the catalog copy made before the pull, once it exists.
 
         The error is redacted on the way OUT, not on the way in: git and pip name real
         paths, and this payload is readable by any logged-in device on the LAN. The
@@ -8578,7 +8665,7 @@ def create_app(out_dir: Path):
         with _updater._update_lock:
             if _updater._update_state["phase"] not in ("idle", "failed"):
                 return jsonify({"error": "an update is already running", "kind": "busy"}), 409
-            _updater._update_state.update(phase="pulling", error="", at=time.time())
+            _updater._update_state.update(phase="backup", error="", at=time.time(), backup="")
 
         def _restart():
             # The SAME gates the restart route applies, re-checked at the moment it
@@ -8610,8 +8697,10 @@ def create_app(out_dir: Path):
                      error=(_redact_host_paths(error)[:600] or None))
 
         threading.Thread(target=_updater.run_update, args=(_restart,),
-                         kwargs={"log_fn": _log_update}, daemon=True).start()
-        return jsonify({"ok": True, "phase": "pulling"})
+                         kwargs={"log_fn": _log_update,
+                                 "backup_fn": lambda: _updater.backup_catalog(db_path)},
+                         daemon=True).start()
+        return jsonify({"ok": True, "phase": "backup"})
 
     @app.route("/api/bonjour/status")
     @tier(LOGIN)
@@ -9017,6 +9106,9 @@ def create_app(out_dir: Path):
                             row["interval_s"] = _living.living_clamp_interval(
                                 row["action"], patch["interval_s"],
                                 default=row.get("interval_s"))
+                            # the owner's own pick: a later default change never moves it
+                            # (living_merge, LIVING_RETIRED_DEFAULTS)
+                            row["chosen"] = True
                 if not _standing_runnable(s.get("action")):
                     # ADVANCED IS REFUSED HERE TOO, not only at the tick. The tick has
                     # always skipped an advanced action -- a full re-walk on a six-hour
@@ -12038,9 +12130,8 @@ def create_app(out_dir: Path):
                 server_tasks = int((me.get("tasks") or {}).get("totalCount"))
             except (TypeError, ValueError):
                 server_tasks = None
-            local_tasks = distinct_task_count(db_path)
-            coverage = (round(min(100.0, local_tasks / server_tasks * 100), 1)
-                        if server_tasks else None)
+            cov = backup_coverage(db_path, out_dir, server_tasks)
+            local_tasks, coverage = cov["local"], cov["pct"]
             # Paid/free credit split for the rail sub-line (Account-detail design, drift
             # §37). A SUPPLEMENTARY read in its own guard: it must never break the core
             # account response (credits/cards/coverage) if the split call fails -- a failure
@@ -12056,7 +12147,7 @@ def create_app(out_dir: Path):
                             "sub": {"end": (sub.get("endAt") or "")[:10],
                                     "cancel": bool(sub.get("cancelAtPeriodEnd"))},
                             "server_tasks": server_tasks, "local_tasks": local_tasks,
-                            "coverage_pct": coverage,
+                            "coverage_pct": coverage, "coverage_note": cov["note"],
                             "followers": me.get("followerCount"),
                             "following": me.get("followingCount"),
                             "lora_cap": lora_cap,
@@ -12138,19 +12229,17 @@ def create_app(out_dir: Path):
         shows counts but hides its coverage badge. The catalog counts never depend
         on the network."""
         counts = catalog_counts(db_path)
-        local_tasks = distinct_task_count(db_path)
         try:
             core, gsession = _gen_session()
             me = core.account_info(gsession)
             server_tasks = int((me.get("tasks") or {}).get("totalCount"))
         except Exception:                                    # noqa: BLE001
             server_tasks = None
-        coverage = (round(min(100.0, local_tasks / server_tasks * 100), 1)
-                    if server_tasks else None)
+        cov = backup_coverage(db_path, out_dir, server_tasks)
         return jsonify({"images": counts["images"], "videos": counts["videos"],
                         "collections": counts["collections"],
-                        "local_tasks": local_tasks, "server_tasks": server_tasks,
-                        "coverage_pct": coverage})
+                        "local_tasks": cov["local"], "server_tasks": server_tasks,
+                        "coverage_pct": cov["pct"], "coverage_note": cov["note"]})
 
     @app.route("/api/setup/save-key", methods=["POST"])
     @tier(LOCALHOST)
@@ -12436,6 +12525,22 @@ def create_app(out_dir: Path):
                         "official": sum(1 for c in contests if c["type"] == "official"),
                         "community": sum(1 for c in contests if c["type"] != "official"),
                         "board": board})
+
+    @app.route("/api/contests/qualify")
+    @tier(LOGIN)
+    def api_contests_qualify():
+        """For the contest cards' "you've used ..." line (2026-11-18): per running contest with
+        rules, each rule's {kind, need, used, unknown} -- how many of the models/LoRAs it
+        requires are ones this library's pictures were made with (moonglade/contest_qualify.py
+        says exactly what "used" can and cannot mean). Read-only; the model-version reads it
+        needs are capped, paced and kept a day. Soft-fails to {} like /api/contests."""
+        from moonglade import contest_qualify as _cq
+        try:
+            core, session = _gen_session()
+            rows = [c for c in _contest_sync.contest_board(core, session) if c.get("active")]
+            return jsonify({"contests": _cq.board_qualify(core, session, rows, db_path)})
+        except Exception as e:                           # noqa: BLE001
+            return jsonify({"error": _redact_host_paths(str(e))[:200], "contests": {}}), 200
 
     @app.route("/api/contest/<slug>/artworks")
     @tier(LOGIN)
