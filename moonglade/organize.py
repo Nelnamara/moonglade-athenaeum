@@ -39,6 +39,23 @@ _BUCKET_PRIORITY = {"batches": 0, "month": 1, "images": 2, "other": 3}
 _bucket_of = bucket_of
 
 
+def _opens_as_image(path):
+    """True when the file decodes as a whole image, False when it does not (truncated,
+    corrupt, not an image at all), None when Pillow is missing and nobody can tell.
+    A full decode (load()), the strictest check Pillow offers, so a file that opens here
+    is one the gallery can show."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    try:
+        with Image.open(path) as im:
+            im.load()
+        return True
+    except Exception:          # noqa: BLE001 -- any failure to decode means "damaged"
+        return False
+
+
 def _scan_media_files(out_dir):
     """One walk of the tree. Yields (path, rel, bucket, media_id) for every image
     file outside gallery/, _duplicates/, and _deleted/. The audit's view (and, via
@@ -106,14 +123,21 @@ def audit_collection(out_dir, content=True, progress=None):
                                           len(str(it[1]))))
 
     # ---- Class A: same media_id across >1 distinct bucket -------------------
+    # These copies share a NAME, not necessarily bytes, so the folder alone cannot pick the
+    # keeper: a truncated download in a month folder used to outrank the whole image in
+    # images/, and --dedup-delete then deleted the whole one (red team, 2026-11-19). A copy
+    # that opens as an image beats one that does not, then the larger copy, then the folder.
     class_a = []
     for mid, items in by_mid.items():
         buckets = {b for (_, _, b, _) in items}
         if len(items) > 1 and len(buckets) > 1:
-            keeper = _keeper(items, lambda it: it[2])
+            opens = {it[0]: _opens_as_image(it[0]) for it in items}
+            keeper = min(items, key=lambda it: (opens[it[0]] is False, -it[3],
+                                                _BUCKET_PRIORITY.get(it[2], 9),
+                                                len(str(it[1]))))
             losers = [it for it in items if it[0] != keeper[0]]
             class_a.append({"media_id": mid, "files": items,
-                            "keeper": keeper, "losers": losers})
+                            "keeper": keeper, "losers": losers, "opens": opens})
 
     # ---- Class B: identical bytes, different media_id -----------------------
     class_b = []
@@ -234,10 +258,40 @@ def cmd_audit(args, out):
     return rep
 
 
+def _delete_unsafe(loser, keeper, opens):
+    """Why a same-media_id copy must NOT be deleted in favour of `keeper`, or '' when it may.
+
+    Quarantine is undoable and is checked afterwards by verify_quarantine; Delete is neither,
+    so it is checked here, before anything is unlinked. A loser may go when it is the same
+    bytes as the keeper, when the keeper opens as an image and the loser does not (a damaged
+    copy beside a whole one), or when both open and show the same pixels. Anything else --
+    a keeper that does not open, two different pictures under one id, no way to tell --
+    keeps the file."""
+    from moonglade.backup import _same_bytes, _same_pixels
+    if _same_bytes(loser, keeper):
+        return ""
+    k_ok, l_ok = opens.get(keeper), opens.get(loser)
+    if k_ok is True and l_ok is False:
+        return ""
+    if k_ok is not True:
+        return "the copy that would be kept does not open as an image"
+    if _same_pixels(loser, keeper) is True:
+        return ""
+    return "not the same picture as the copy kept"
+
+
+def _held_note(held):
+    if not held:
+        return ""
+    return " Kept {:,} cop{} that {} not the same as the one kept.".format(
+        len(held), "y" if len(held) == 1 else "ies", "is" if len(held) == 1 else "are")
+
+
 def cmd_dedup(args, out, db_path):
     """Act on the audit: move redundant copies to _duplicates/ (default) or delete
-    them (--dedup-delete). Keeps the most-organized copy. Dry-run by default.
-    Reconciles catalog.db with what's left on disk afterward."""
+    them (--dedup-delete). Keeps the copy that opens as an image, then the larger, then
+    the most-organized; a Delete removes only a copy proven redundant (_delete_unsafe).
+    Dry-run by default. Reconciles catalog.db with what's left on disk afterward."""
     from moonglade.backup import _ensure_db, PixAIError
     # Dedup is filesystem-truth: it does not need a catalog to run. Reconcile is
     # a bonus, applied only if a catalog exists.
@@ -252,8 +306,15 @@ def cmd_dedup(args, out, db_path):
 
     rep = audit_collection(out, content=content, progress=getattr(args, "progress", None))
     losers = []  # (rel_path, abs_path, what it is a copy of -- the Great Sweep's key)
+    held = []    # (rel_path, why) -- a Delete that would not be safe; the file stays
+    reclaim = rep["totals"]["reclaimable_bytes"]
     for g in rep["class_a"]:
         for (p, rel, b, sz) in g["losers"]:
+            why = _delete_unsafe(p, g["keeper"][0], g.get("opens", {})) if delete else ""
+            if why:
+                held.append((rel, why))
+                reclaim -= sz
+                continue
             losers.append((rel, p, "dup-media:%s" % g["media_id"]))
     for g in rep["class_b"]:
         for (p, rel, b, sz, mid) in g["losers"]:
@@ -261,7 +322,15 @@ def cmd_dedup(args, out, db_path):
 
     action = "DELETE" if delete else "quarantine to _duplicates/"
     print("\nDedup plan: {:,} redundant files to {} ({})".format(
-        len(losers), action, _fmt_bytes(rep["totals"]["reclaimable_bytes"])))
+        len(losers), action, _fmt_bytes(reclaim)))
+    if held:
+        print("Kept, not deleted ({:,}): a copy that is not the same picture as the one kept "
+              "is never deleted. Run --dedup (quarantine) and --verify-dupes to look at them."
+              .format(len(held)))
+        for rel, why in held[:8]:
+            print("  {} ({})".format(rel, why))
+        if len(held) > 8:
+            print("  ... and {:,} more".format(len(held) - 8))
     for rel, _, _ in losers[:8]:
         print("  {}".format(rel))
     if len(losers) > 8:
@@ -269,11 +338,13 @@ def cmd_dedup(args, out, db_path):
 
     if not apply:
         print("\nDry run -- nothing changed. Re-run with --apply to perform it.")
-        if not losers:
+        if not losers and held:
+            _result("Nothing would be deleted.{} Nothing deleted yet.".format(_held_note(held)))
+        elif not losers:
             _result("No duplicates found. Nothing changed.")
         elif delete:
-            _result("{} would be deleted ({}). Nothing deleted yet.".format(
-                _files(len(losers)), _fmt_bytes(rep["totals"]["reclaimable_bytes"])))
+            _result("{} would be deleted ({}).{} Nothing deleted yet.".format(
+                _files(len(losers)), _fmt_bytes(reclaim), _held_note(held)))
         else:
             _result("{} would move to _duplicates/ ({}). Nothing moved yet.".format(
                 _files(len(losers)), _fmt_bytes(rep["totals"]["reclaimable_bytes"])))
@@ -338,12 +409,15 @@ def cmd_dedup(args, out, db_path):
         else:
             print("All quarantined files confirmed redundant -- _duplicates/ is safe "
                   "to delete to reclaim the space.")
-    if not losers:
+    if not losers and held:
+        _result("Nothing deleted.{}".format(_held_note(held)))
+    elif not losers:
         _result("No duplicates found. Nothing changed.")
     elif delete:
-        _result("Deleted {:,} duplicate file{}.{}".format(
+        _result("Deleted {:,} duplicate file{}.{}{}".format(
             removed, "" if removed == 1 else "s",
-            " {:,} could not be deleted.".format(failed) if failed else ""))
+            " {:,} could not be deleted.".format(failed) if failed else "",
+            _held_note(held)))
     else:
         _result("Moved {:,} file{} to _duplicates/.{}".format(
             moved, "" if moved == 1 else "s",

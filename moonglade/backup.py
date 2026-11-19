@@ -1442,7 +1442,10 @@ def _same_pixels(a, b):
             if ia.size != ib.size:
                 return False
             ra, rb = ia.convert("RGBA"), ib.convert("RGBA")
-            return ImageChops.difference(ra, rb).getbbox() is None
+            # Every band's extremes, not getbbox(): on an RGBA image getbbox() looks at
+            # the alpha band only (Pillow 10+), so any two opaque pictures "matched" and a
+            # different picture under the same id passed as a metadata-only copy.
+            return all(hi == 0 for _lo, hi in ImageChops.difference(ra, rb).getextrema())
     except Exception:
         return None
 
