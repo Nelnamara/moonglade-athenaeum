@@ -931,8 +931,8 @@ def test_run_generate_still_self_heals_after_delegating_to_submit_generation(mon
         params = v["parameters"]
         calls.append(dict(params))
         if "inferenceProfile" in params:
-            raise core.PixAIError(
-                'GraphQL error: [{"message": "unknown inferenceProfile \\"ultra\\" '
+            raise core.graphql_error(
+                '[{"message": "unknown inferenceProfile \\"ultra\\" '
                 'for model type \\"SDXL_MODEL\\""}]')
         return {"createGenerationTask": {"id": "T1"}}
 
@@ -1004,8 +1004,8 @@ def test_submit_generation_retries_on_inferenceprofile_rejection(monkeypatch):
     def fake_gql(s, q, v=None, retries=None):
         calls.append(dict(v["parameters"]))
         if "inferenceProfile" in v["parameters"]:
-            raise core.PixAIError(
-                'GraphQL error: [{"message": "unknown inferenceProfile \\"ultra\\" '
+            raise core.graphql_error(
+                '[{"message": "unknown inferenceProfile \\"ultra\\" '
                 'for model type \\"SDXL_MODEL\\""}]')
         return {"createGenerationTask": {"id": "T10"}}
 
@@ -1025,7 +1025,7 @@ def test_submit_generation_does_not_retry_unrelated_errors(monkeypatch):
     import pytest
 
     def fake_gql(s, q, v=None, retries=None):
-        raise core.PixAIError("GraphQL error: something else entirely")
+        raise core.graphql_error("something else entirely")
 
     monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", fake_gql)
     with pytest.raises(core.PixAIError, match="something else entirely"):
@@ -1041,7 +1041,7 @@ def test_submit_generation_no_retry_when_param_absent(monkeypatch):
 
     def fake_gql(s, q, v=None, retries=None):
         calls.append(1)
-        raise core.PixAIError("GraphQL error: inferenceProfile is unsupported here")
+        raise core.graphql_error("inferenceProfile is unsupported here")
 
     monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", fake_gql)
     with pytest.raises(core.PixAIError):

@@ -160,6 +160,8 @@ import useActivity from "../gallery/src/notify/useActivity.js";
 // rides the same function). Imported the same way as VideoDrawer/CostBadge above.
 import { requestPrice } from "../gallery/src/gen/priceRequest.js";
 import { quotedSendBody } from "../gallery/src/gen/priceProbeCore.js";
+// 3.21.2 (L1): the unclear-send words and hold, shared with the gallery's submitTask.
+import { HELD_SEND_MSG, UNCLEAR_SEND_MSG, isUnclearAnswer, sendHolds, sendKey } from "../gallery/src/gen/sendHold.js";
 // Review S2 (Session M): the Image tab's ×2-4 and a prompt using the template syntax go through
 // the run road (/api/generate/plan -> the confirm -> /run), as the Generate dock's do --
 // /api/generate is a single send. The road's pieces are loom-run.js's; the transport is the
@@ -9754,6 +9756,10 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     // Review S2: more than one image, or a template prompt, takes the run road (genImageRun).
     const asked = buildImgGenBody(imgModel, imgLoras, imgAdv, prompt);
     if (imgSendRoute(asked) === "run") return genImageRun(entry, asked);
+    // 3.21.2 (L1): the same send, after an unclear answer, is held -- asked nothing, sent
+    // nothing. Keyed on `asked`, built from the same inputs as `body` below.
+    const holdKey = sendKey("loom-image", asked);
+    if (sendHolds.held(holdKey)) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: HELD_SEND_MSG } })); return; }
     const body = buildImgGenBody(imgModel, imgLoras, imgAdv, prompt);
     const ok = await confirmSpend(body, `Generate a reference image for ${c.title || "this shot"}?`);
     if (!ok) return;
@@ -9762,6 +9768,11 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
       const r = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...quotedSendBody(body, ok.quote), ...loomTargetOf(c.id) }) });
       const d = await r.json();
+      if (isUnclearAnswer(d)) {
+        sendHolds.hold(holdKey);
+        setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: d.held ? (d.error || HELD_SEND_MSG) : UNCLEAR_SEND_MSG } }));
+        return;
+      }
       if (d.error || !d.task_id) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
       // Register this submission in the shared Job Tracker (notify/jobs.js -> /api/jobs)
       // the moment the server accepts it. This path -- and genEdit/genRef, via runGen below --
@@ -9787,7 +9798,11 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
       if (window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, "Image · " + entry.code + " · " + (c.title || "untitled"));
       setGenImgState((s) => ({ ...s, [c.id]: { phase: "running", msg: "Generating…" } }));
       pollImg(c.id, d.task_id);
-    } catch { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } })); }
+    } catch {
+      // No readable answer: the server may have sent it, so the same send is held (L1).
+      sendHolds.hold(holdKey);
+      setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: UNCLEAR_SEND_MSG } }));
+    }
   };
   // sourceId defaults to entry.c.id (unchanged behavior: routing a bound shot's own
   // result into itself). Draft-mode calls pass "__draft__" explicitly, since the mid
@@ -9809,6 +9824,9 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
   const runGen = async (setState, cardId, endpoint, body, quoteBody, label, jobLabel) => {
     const ok = quoteBody ? await confirmSpend(quoteBody, label) : { quote: null };
     if (!ok) return;
+    // 3.21.2 (L1): the same send, after an unclear answer, is held -- nothing is sent.
+    const holdKey = sendKey("loom-tab " + endpoint, body);
+    if (sendHolds.held(holdKey)) { setState((s) => ({ ...s, [cardId]: { phase: "error", msg: HELD_SEND_MSG } })); return; }
     setState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting…" } }));
     // Same unbounded-loop fix as pollImg -- see pollTaskWithCeiling's comment.
     const poll = (tid) => pollTaskWithCeiling(tid, setState, cardId);
@@ -9816,13 +9834,22 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
       const r = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...quotedSendBody(body, ok.quote), ...loomTargetOf(cardId) }) });
       const d = await r.json();
+      if (isUnclearAnswer(d)) {
+        sendHolds.hold(holdKey);
+        setState((s) => ({ ...s, [cardId]: { phase: "error", msg: d.held ? (d.error || HELD_SEND_MSG) : UNCLEAR_SEND_MSG } }));
+        return;
+      }
       if (d.error || !d.task_id) { setState((s) => ({ ...s, [cardId]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
       // Same register-ONLY call, same reasoning, as genImage above -- this helper is the whole
       // Edit + Reference submit path, and it had the identical never-registered gap.
       if (window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, jobLabel);
       setState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Generating…" } }));
       poll(d.task_id);
-    } catch { setState((s) => ({ ...s, [cardId]: { phase: "error", msg: "network error" } })); }
+    } catch {
+      // No readable answer: the server may have sent it, so the same send is held (L1).
+      sendHolds.hold(holdKey);
+      setState((s) => ({ ...s, [cardId]: { phase: "error", msg: UNCLEAR_SEND_MSG } }));
+    }
   };
   const routeGen = (state, setState, entry, target, sourceId) => {
     const c = entry.c; const sid = sourceId || c.id; const gs = state[sid]; if (!gs || !gs.mid) return;
@@ -9873,6 +9900,7 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
   // caller -- this function never touches DISPLAY-pixel coordinates or a DOM element, matching
   // every other real submit function in this hook (genEdit/genRef take already-resolved
   // ids/text, never DOM refs).
+  const FIX_HOLD_ROUTE = "loom-tab /api/fix";   // runGen's hold key for a Fix (3.21.2, L1)
   const fixInFlight = useRef(new Set());   // shot ids with a Fix between its first tap and its settled submit
   const genFix = async (entry, scaledBoxes) => {
     const c = entry.c;
@@ -9892,6 +9920,11 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     // screen from the first tap. Both are held until the confirm is declined or the submit
     // has settled (runGen sets "submitting" -> "running" itself, which keeps the button shut).
     if (fixInFlight.current.has(c.id)) return;
+    // 3.21.2 (L1): a Fix held after an unclear answer is not priced or asked again.
+    if (sendHolds.held(sendKey(FIX_HOLD_ROUTE, { source: src, boxes: scaledBoxes }))) {
+      setGenFixState((s) => ({ ...s, [c.id]: { phase: "error", msg: HELD_SEND_MSG } }));
+      return;
+    }
     fixInFlight.current.add(c.id);
     const prior = genFixState[c.id];
     const restore = () => setGenFixState((s) => {

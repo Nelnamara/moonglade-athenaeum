@@ -474,17 +474,21 @@ def _failing_then_ok(monkeypatch, exc):
     return posts
 
 
-def _rest_refusal(status):
-    return core.PixAIRestError("REST POST /task/fixer -> %d: refused" % status, status=status, body=None)
+def _rest_refusal(status, code=None):
+    return core.PixAIRestError("REST POST /task/fixer -> %d: refused" % status, status=status,
+                               body={"code": code} if code else None)
 
 
-@pytest.mark.parametrize("status", [400, 402, 403, 422, 429])
-def test_a_retry_after_pixais_4xx_refusal_goes_straight_through(status, tmp_path, monkeypatch):
-    """PixAI refused the first submit (insufficient balance and the like): nothing was created
-    or charged, so the repeat record is dropped and an immediate retry is not refused."""
+@pytest.mark.parametrize("status,code", [(400, "BAD_REQUEST"), (402, "INSUFFICIENT_BALANCE"),
+                                         (403, "INSUFFICIENT_BALANCE"), (422, "INVALID_INPUT"),
+                                         (429, "TOO_MANY_REQUESTS")])
+def test_a_retry_after_pixais_4xx_refusal_goes_straight_through(status, code, tmp_path, monkeypatch):
+    """PixAI refused the first submit with one of its definite codes (insufficient balance and
+    the like): nothing was created or charged, so the repeat record is dropped and an
+    immediate retry is not refused. (Since 3.21.2 a 4xx without PixAI's code is unknown.)"""
     cli, _ = _price_client(tmp_path, monkeypatch)
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
-    posts = _failing_then_ok(monkeypatch, _rest_refusal(status))
+    posts = _failing_then_ok(monkeypatch, _rest_refusal(status, code))
     payload = {"source": "700", "boxes": [FACE]}
     first = cli.post("/api/fix", json=payload).get_json()
     assert "task_id" not in first and first["error"]
@@ -513,26 +517,39 @@ def test_a_retry_after_a_refusal_before_any_send_goes_straight_through(tmp_path,
 
 @pytest.mark.parametrize("exc", [requests.ReadTimeout("read timed out"),
                                  requests.ConnectionError("connection reset"),
-                                 "5xx", "408", "no-id"])
+                                 "5xx", "408", "499", "bare-403", "unlisted-code", "no-id"])
 def test_a_retry_after_an_unknown_outcome_is_still_refused(exc, tmp_path, monkeypatch):
-    """A timeout, a dropped connection, a 5xx or 408 after the send, or a 2xx with no task id:
-    PixAI may have created -- and charged -- the Fix, so the immediate retry is refused."""
+    """A timeout, a dropped connection, a 5xx, a 408 or 499 (even with PixAI's code), a 4xx
+    with no PixAI body or with a code outside PixAI's rejected list, or a 2xx with no task id:
+    PixAI may have created -- and charged -- the Fix. The answer says so (3.21.2, L1) and the
+    retry is held for the unclear window (L2: the classifier's rule, not a status test)."""
+    from moonglade import gallery as g
     cli, _ = _price_client(tmp_path, monkeypatch)
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
-    if exc == "5xx":
-        exc = _rest_refusal(502)
-    elif exc == "408":
-        exc = _rest_refusal(408)
+    clock = [5000.0]
+    monkeypatch.setattr(g.time, "monotonic", lambda: clock[0])
+    exc = {"5xx": _rest_refusal(502), "408": _rest_refusal(408, "INSUFFICIENT_BALANCE"),
+           "499": _rest_refusal(499, "BAD_REQUEST"), "bare-403": _rest_refusal(403),
+           "unlisted-code": _rest_refusal(404, "FILE_NOT_FOUND")}.get(exc, exc) \
+        if isinstance(exc, str) else exc
     if exc == "no-id":
         posts = []
         monkeypatch.setattr(core, "_rest_post", lambda s, path, body, **k: posts.append(path) or {})
     else:
         posts = _failing_then_ok(monkeypatch, exc)
     payload = {"source": "700", "boxes": [FACE]}
-    assert "task_id" not in cli.post("/api/fix", json=payload).get_json()
+    first = cli.post("/api/fix", json=payload).get_json()
+    assert "task_id" not in first
+    assert first["unclear"] is True and first["state"] == "may_have_started"
+    assert "may have started" in first["error"]
+    clock[0] += 30                                # past the success window, inside the unclear one
     again = cli.post("/api/fix", json=payload)
-    assert again.status_code == 409 and "a few seconds ago" in again.get_json()["error"]
+    assert again.status_code == 409 and again.get_json()["unclear"] is True
+    assert "may still be starting" in again.get_json()["error"]
     assert posts == ["/task/fixer"], "the retry sent nothing"
+    clock[0] += 31                                # the unclear window has passed
+    cli.post("/api/fix", json=payload)
+    assert posts == ["/task/fixer"] * 2, "after the window the same Fix may go again"
 
 
 def test_read_only_refuses_the_fix_route_before_its_upload(tmp_path, monkeypatch):

@@ -1217,7 +1217,7 @@ def test_a_refused_lane_request_is_never_resubmitted_as_anything_else(refusal, m
 
     def _refuse(s, q, v=None):
         sent.append(dict(v["parameters"]))
-        raise core.PixAIError(refusal)
+        raise core.graphql_error(refusal[len("GraphQL error: "):])   # as the transport raises it
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     monkeypatch.setattr(core, "_gate_params_for_model", lambda s, p: p)
     monkeypatch.setattr(core, "gql_mutate", _refuse)
@@ -1407,6 +1407,10 @@ def test_api_generate_runs_one_lane_task_at_a_time_off_its_own_job_log(monkeypat
     assert sent[0]["lane"] == "infinite" and calls == []
     job = next(j for j in jobs_mod.read_jobs(tmp_path) if j["job_id"] == "4242")
     assert job["lane"] == "infinite" and job["status"] == "running"
+    # past the single sends' double-tap window (3.21.2), so the lane rule is what answers
+    from moonglade import gallery as g
+    later = g.time.monotonic() + 11
+    monkeypatch.setattr(g.time, "monotonic", lambda: later)
     r = cli.post("/api/generate", json=dict(LANE_OK, unlimited=True))
     assert r.get_json() == {"error": core.UNLIMITED_BUSY} and len(sent) == 1
 

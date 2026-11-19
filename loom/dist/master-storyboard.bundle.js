@@ -6629,8 +6629,61 @@ ${"=".repeat(48)}
     };
   }
 
+  // ../gallery/src/gen/sendHold.js
+  var SEND_HOLD_MS = 6e4;
+  var UNCLEAR_SEND_MSG = "PixAI may have started this. It was not sent again; check the Activity tray (or pixai.art) before sending it again.";
+  var HELD_SEND_MSG = "The last one may still be starting, so this was not sent. Check the Activity tray (or pixai.art) before sending it again.";
+  function isUnclearAnswer(d) {
+    return !!d && (d.unclear === true || d.state === "may_have_started");
+  }
+  function sendKey(route, body) {
+    const norm = (v) => {
+      if (Array.isArray(v)) return v.map(norm);
+      if (v && typeof v === "object") {
+        const out = {};
+        for (const k of Object.keys(v).sort()) out[k] = norm(v[k]);
+        return out;
+      }
+      return v;
+    };
+    let blob;
+    try {
+      blob = JSON.stringify(norm(body));
+    } catch {
+      blob = String(body);
+    }
+    return String(route) + " " + blob;
+  }
+  function makeSendHolds(now2 = () => Date.now(), ms = SEND_HOLD_MS) {
+    const until = /* @__PURE__ */ new Map();
+    return {
+      hold(key) {
+        until.set(key, now2() + ms);
+      },
+      held(key) {
+        const t = until.get(key);
+        if (t == null) return false;
+        if (now2() >= t) {
+          until.delete(key);
+          return false;
+        }
+        return true;
+      },
+      release(key) {
+        until.delete(key);
+      }
+    };
+  }
+  var sendHolds = makeSendHolds();
+
   // ../gallery/src/gen/submitTask.js
-  async function submitTask(route, payload, { label, emit: emit7, count, onPhase, onAnswer, quote }) {
+  async function submitTask(route, payload, { label, emit: emit7, count, onPhase, onAnswer, quote, holds = sendHolds }) {
+    const journalled = !!(payload && payload.submit_id);
+    const key = journalled ? null : sendKey(route, payload);
+    if (key && holds.held(key)) {
+      emit7({ kind: "err", text: HELD_SEND_MSG });
+      return null;
+    }
     let d, status = 0;
     try {
       const r = await fetch(route, {
@@ -6641,6 +6694,7 @@ ${"=".repeat(48)}
       status = r.status;
       d = await r.json();
     } catch {
+      if (key) holds.hold(key);
       if (onAnswer) onAnswer({ threw: true });
       emit7({
         kind: "err",
@@ -6649,6 +6703,11 @@ ${"=".repeat(48)}
       return null;
     }
     if (onAnswer) onAnswer({ threw: false, status, body: d });
+    if (!journalled && isUnclearAnswer(d)) {
+      holds.hold(key);
+      emit7({ kind: "err", text: d.held ? d.error || HELD_SEND_MSG : UNCLEAR_SEND_MSG });
+      return null;
+    }
     if (d.error || !d.task_id) {
       emit7({ kind: "err", text: friendlyGenErr3(d.error || "Submit failed.") });
       return null;
@@ -21786,6 +21845,11 @@ Generate anyway?`)) return { go: false };
       }
       const asked2 = buildImgGenBody(imgModel, imgLoras, imgAdv, prompt);
       if (imgSendRoute(asked2) === "run") return genImageRun(entry, asked2);
+      const holdKey = sendKey("loom-image", asked2);
+      if (sendHolds.held(holdKey)) {
+        setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: HELD_SEND_MSG } }));
+        return;
+      }
       const body = buildImgGenBody(imgModel, imgLoras, imgAdv, prompt);
       const ok = await confirmSpend(body, `Generate a reference image for ${c.title || "this shot"}?`);
       if (!ok) return;
@@ -21797,6 +21861,11 @@ Generate anyway?`)) return { go: false };
           body: JSON.stringify({ ...quotedSendBody(body, ok.quote), ...loomTargetOf(c.id) })
         });
         const d = await r.json();
+        if (isUnclearAnswer(d)) {
+          sendHolds.hold(holdKey);
+          setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: d.held ? d.error || HELD_SEND_MSG : UNCLEAR_SEND_MSG } }));
+          return;
+        }
         if (d.error || !d.task_id) {
           setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: d.error ? friendlyGenErr2(d.error) : "submit failed" } }));
           return;
@@ -21805,7 +21874,8 @@ Generate anyway?`)) return { go: false };
         setGenImgState((s) => ({ ...s, [c.id]: { phase: "running", msg: "Generating\u2026" } }));
         pollImg(c.id, d.task_id);
       } catch {
-        setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } }));
+        sendHolds.hold(holdKey);
+        setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: UNCLEAR_SEND_MSG } }));
       }
     };
     const routeImg = (entry, target, sourceId) => {
@@ -21822,6 +21892,11 @@ Generate anyway?`)) return { go: false };
     const runGen = async (setState, cardId, endpoint, body, quoteBody, label, jobLabel) => {
       const ok = quoteBody ? await confirmSpend(quoteBody, label) : { quote: null };
       if (!ok) return;
+      const holdKey = sendKey("loom-tab " + endpoint, body);
+      if (sendHolds.held(holdKey)) {
+        setState((s) => ({ ...s, [cardId]: { phase: "error", msg: HELD_SEND_MSG } }));
+        return;
+      }
       setState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting\u2026" } }));
       const poll2 = (tid) => pollTaskWithCeiling(tid, setState, cardId);
       try {
@@ -21831,6 +21906,11 @@ Generate anyway?`)) return { go: false };
           body: JSON.stringify({ ...quotedSendBody(body, ok.quote), ...loomTargetOf(cardId) })
         });
         const d = await r.json();
+        if (isUnclearAnswer(d)) {
+          sendHolds.hold(holdKey);
+          setState((s) => ({ ...s, [cardId]: { phase: "error", msg: d.held ? d.error || HELD_SEND_MSG : UNCLEAR_SEND_MSG } }));
+          return;
+        }
         if (d.error || !d.task_id) {
           setState((s) => ({ ...s, [cardId]: { phase: "error", msg: d.error ? friendlyGenErr2(d.error) : "submit failed" } }));
           return;
@@ -21839,7 +21919,8 @@ Generate anyway?`)) return { go: false };
         setState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Generating\u2026" } }));
         poll2(d.task_id);
       } catch {
-        setState((s) => ({ ...s, [cardId]: { phase: "error", msg: "network error" } }));
+        sendHolds.hold(holdKey);
+        setState((s) => ({ ...s, [cardId]: { phase: "error", msg: UNCLEAR_SEND_MSG } }));
       }
     };
     const routeGen = (state2, setState, entry, target, sourceId) => {
@@ -21901,6 +21982,7 @@ Generate anyway?`)) return { go: false };
         "Reference \xD7" + refs.length + " \xB7 " + entry.code + " \xB7 " + (c.title || "untitled")
       );
     };
+    const FIX_HOLD_ROUTE = "loom-tab /api/fix";
     const fixInFlight = useRef2(/* @__PURE__ */ new Set());
     const genFix = async (entry, scaledBoxes) => {
       const c = entry.c;
@@ -21914,6 +21996,10 @@ Generate anyway?`)) return { go: false };
         return;
       }
       if (fixInFlight.current.has(c.id)) return;
+      if (sendHolds.held(sendKey(FIX_HOLD_ROUTE, { source: src, boxes: scaledBoxes }))) {
+        setGenFixState((s) => ({ ...s, [c.id]: { phase: "error", msg: HELD_SEND_MSG } }));
+        return;
+      }
       fixInFlight.current.add(c.id);
       const prior = genFixState[c.id];
       const restore = () => setGenFixState((s) => {
