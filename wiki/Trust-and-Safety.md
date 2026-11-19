@@ -113,9 +113,11 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   `https://`, so your password and that cookie cross the network encrypted, and the cookie is
   marked so a browser never sends it over plain `http://`; only the server machine's own
   `http://localhost`, which never leaves it, stays plain
-  ([The Gallery → Using HTTPS](Gallery#using-https)). The first visit from each device shows a
-  one-time certificate warning: check the certificate's fingerprint against the one the
-  Control Panel's **LAN discovery** card shows before you go on. A sign-in lasts at most 30
+  ([The Gallery → Using HTTPS](Gallery#using-https)). A device's browser warns about the
+  certificate until you install this PC's certificate on it once; check its fingerprint against
+  the one the Control Panel's **LAN discovery** card shows before you install it or go on. That
+  certificate can only vouch for this PC's own names and home-network addresses, never for a
+  website. A sign-in lasts at most 30
   days, however often it is used. **Log Out** signs out the device you pressed it on and
   nothing else — your other devices stay signed in — and it ends that session on the server
   too, so a copy of its cookie stops working with it. If a device is lost, or you think a

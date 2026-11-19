@@ -370,9 +370,8 @@ def save_mirror_state(state):
     # temp per write + atomic replace makes concurrent saves last-writer-wins, never corrupt.
     tmp = p.with_name(p.name + ".tmp-{}-{}".format(os.getpid(), secrets.token_hex(6)))
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(record, f, indent=2)
-        _secure.restrict_to_owner(tmp)                 # secrets at rest (review 2026-11-19, #5)
+        # Secrets at rest (review 2026-11-19, #5): owner-only while empty, then written.
+        _secure.write_private(tmp, json.dumps(record, indent=2))
         os.replace(tmp, p)
         _secure.restrict_to_owner(p)
         return True

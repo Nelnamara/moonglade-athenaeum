@@ -1122,24 +1122,35 @@ LOOM_BED_MIMES = {"mp3": "audio/mpeg", "wav": "audio/wav", "m4a": "audio/mp4", "
 # REQUEST_MAX_BYTES is the app-wide default (Flask's MAX_CONTENT_LENGTH): JSON bodies, the
 # branding uploads, everything that names no larger cap. The few routes that take big files
 # raise it for themselves before their form is read. A refusal is a 413 with a plain sentence.
+# The import limits are sized for a whole library (a zip of years of pictures, a long video):
+# they stop a runaway or hostile upload from filling the drive, not a real library. Past them,
+# the command-line import (IMPORT_CLI_HINT) reads a folder in place with no upload at all.
+_GB = 1024 ** 3
 REQUEST_MAX_BYTES = 64 * 1024 * 1024
-UPLOAD_MAX_BYTES = 512 * 1024 * 1024            # /api/upload: one file handed to PixAI
-IMPORT_REQUEST_MAX_BYTES = 2 * 1024 * 1024 * 1024   # /api/import-local: one batch (the page
-                                                # sends batches of at most 256 MB; a lone
-                                                # bigger video travels alone)
-LOOM_BUNDLE_REQUEST_MAX_BYTES = 2 * 1024 * 1024 * 1024   # /api/loom/import-bundle
-# What one zip may unpack to (Import's zips and Loom bundles): its member count, and the bytes
-# actually written -- counted as they are written, never taken from the zip's own headers.
-ZIP_MAX_MEMBERS = 10000
-ZIP_MAX_TOTAL_BYTES = 8 * 1024 * 1024 * 1024
+UPLOAD_MAX_BYTES = 8 * _GB                      # /api/upload: one file handed to PixAI
+IMPORT_REQUEST_MAX_BYTES = 50 * _GB             # /api/import-local: one request (the page sends
+                                                # batches of at most 256 MB; a lone bigger
+                                                # file -- a library zip, a long video -- alone)
+LOOM_BUNDLE_REQUEST_MAX_BYTES = 50 * _GB        # /api/loom/import-bundle
+# What a zip may unpack to (Import's zips and Loom bundles): its member count, any one member,
+# and the bytes of the whole -- all counted as they are written, never taken from the zip's own
+# headers, which a zip bomb lies in.
+ZIP_MAX_MEMBERS = 200000
+ZIP_MAX_MEMBER_BYTES = 8 * _GB
+ZIP_MAX_TOTAL_BYTES = 50 * _GB
+IMPORT_CLI_HINT = ("For something this big, import it from the command line on this PC instead: "
+                   "python -m moonglade --import-local \"<folder>\" (unzip it first).")
 ZIP_TOO_MANY_MEMBERS = ("That zip holds more than {:,} files, so nothing in it was imported. "
-                        "Split it into smaller zips.".format(ZIP_MAX_MEMBERS))
-ZIP_TOO_BIG = ("That zip unpacks to more than {} GB, so nothing in it was imported. Split it "
-               "into smaller zips.".format(ZIP_MAX_TOTAL_BYTES // (1024 ** 3)))
+                        .format(ZIP_MAX_MEMBERS) + IMPORT_CLI_HINT)
+ZIP_MEMBER_TOO_BIG = ("A file in that zip unpacks to more than {} GB, so nothing in it was "
+                      "imported. ".format(ZIP_MAX_MEMBER_BYTES // _GB) + IMPORT_CLI_HINT)
+ZIP_TOO_BIG = ("That zip unpacks to more than {} GB, so nothing in it was imported. "
+               .format(ZIP_MAX_TOTAL_BYTES // _GB) + IMPORT_CLI_HINT)
 
 
 class ZipTooBig(ValueError):
-    """A zip over ZIP_MAX_MEMBERS or ZIP_MAX_TOTAL_BYTES; str() is the plain sentence."""
+    """A zip over ZIP_MAX_MEMBERS, ZIP_MAX_MEMBER_BYTES or ZIP_MAX_TOTAL_BYTES; str() is the
+    plain sentence."""
 
 
 def _too_large_sentence(limit):
@@ -1151,7 +1162,7 @@ def _too_large_sentence(limit):
     else:
         size = "the limit"
     return ("That is more than Moonglade takes in one go ({}), so nothing was sent. Send "
-            "fewer or smaller files at a time.".format(size))
+            "fewer or smaller files at a time. ".format(size) + IMPORT_CLI_HINT)
 
 
 # ---------------------------------------------------------------------------
@@ -1234,14 +1245,15 @@ def harden_file_response(resp, filename=None):
 # Babel-standalone retirement). Styles may be inline: React writes style attributes and the
 # pages carry their design tokens in a <style>, and a style cannot run anything. Pictures and
 # video may come from https: (PixAI's own covers), data: and blob: (QR codes, import previews).
-# Nothing may frame a page, and no page may submit a form or open a plugin elsewhere.
+# Only Moonglade's own pages may frame one (the same-origin phone-layout check frames the app),
+# and no page may submit a form or open a plugin elsewhere.
 CSP_NONCE_MARK = "__CSP_NONCE__"
 CSP_PAGE_POLICY = ("default-src 'self'; script-src 'self'{nonce}; "
                    "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; "
                    "media-src 'self' data: blob: https:; font-src 'self' data:; "
                    "connect-src 'self'; worker-src 'self'; manifest-src 'self'; "
                    "object-src 'none'; base-uri 'none'; form-action 'self'; "
-                   "frame-ancestors 'none'")
+                   "frame-ancestors 'self'")
 
 
 def page_csp(nonce=None):
@@ -8173,14 +8185,14 @@ def create_app(out_dir: Path):
 
     @app.after_request
     def _protective_headers(resp):
-        """Finding 4: every response says nosniff, may not be framed, and sends no Referer
+        """Finding 4: every response says nosniff, may be framed only by this origin, and sends no Referer
         off this origin; every HTML page carries the Content-Security-Policy its inline
         scripts were written for (CSP_PAGE_POLICY, with this request's nonce). A response
         that set its own policy keeps it (served files carry `sandbox`, harden_file_response),
         and so does one that set its own Referrer-Policy (the connect page's no-referrer)."""
         h = resp.headers
         h.setdefault("X-Content-Type-Options", "nosniff")
-        h.setdefault("X-Frame-Options", "DENY")
+        h.setdefault("X-Frame-Options", "SAMEORIGIN")
         h.setdefault("Referrer-Policy", "same-origin")
         if "Content-Security-Policy" not in h and (resp.mimetype or "") == "text/html":
             h["Content-Security-Policy"] = page_csp(getattr(_flask_g, "mg_csp_nonce", None))
@@ -8926,6 +8938,25 @@ def create_app(out_dir: Path):
             "tls_fingerprint": str(app.config.get("MG_TLS_FINGERPRINT") or ""),
             "tls_problem": str(app.config.get("MG_TLS_PROBLEM") or ""),
         })
+
+    @app.route("/moonglade-ca.crt")
+    @tier(PUBLIC)
+    def moonglade_ca_certificate():
+        """This PC's certificate authority (moonglade.tls), for a phone, tablet or Mac to
+        install once so its browser stops warning. PUBLIC: a certificate is public by nature --
+        the server hands the same one to every client in every handshake -- and a device
+        fetches it before it signs in. The person checks its SHA-256 fingerprint against the
+        LAN card on the PC before trusting it. 404 when this start has no HTTPS."""
+        from moonglade import tls as _tls_mod
+        p = _tls_mod.ca_cert_path()
+        if not app.config.get("MG_TLS_FINGERPRINT") or not p.is_file():
+            return app.response_class("This Moonglade isn't serving HTTPS, so it has no "
+                                      "certificate to install.", status=404,
+                                      mimetype="text/plain")
+        resp = send_file(str(p), mimetype="application/x-x509-ca-cert", as_attachment=True,
+                         download_name="Moonglade-this-PC.crt", max_age=0)
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        return resp
 
     @app.route("/api/bonjour/settings", methods=["POST"])
     @tier(LOGIN, POST=LOCALHOST)
@@ -15787,8 +15818,12 @@ def create_app(out_dir: Path):
                     continue                          # zip-slip -> skip
                 _os.makedirs(_os.path.dirname(target), exist_ok=True)
                 with z.open(m) as src, open(target, "wb") as dst:
+                    member = 0
                     for chunk in iter(lambda: src.read(1024 * 1024), b""):
                         written += len(chunk)
+                        member += len(chunk)
+                        if member > ZIP_MAX_MEMBER_BYTES:
+                            raise ZipTooBig(ZIP_MEMBER_TOO_BIG)
                         if written > max_total:
                             raise ZipTooBig(ZIP_TOO_BIG)
                         dst.write(chunk)
@@ -22084,6 +22119,38 @@ def port_owner(host, port, timeout=0.4):
         return "other"
 
 
+def prepare_tls(host, https_everywhere, bonjour_name, hostname=None, lan_ip=None):
+    """HTTPS for this start (moonglade.tls): (mode, ssl context or None, the authority's SHA-256
+    fingerprint, the plain sentence when there is no HTTPS). A bind other devices can reach, or
+    --https, gets the certificate; anything at all that goes wrong making or loading it -- a
+    PC name the certificate format cannot carry, a missing package, an unwritable folder --
+    means plain HTTP and one line saying why, never a server that does not start."""
+    import logging as _log_mod
+    from moonglade import bonjour as moonglade_bonjour
+    from moonglade import tls as _tls
+    if not (https_everywhere or moonglade_bonjour.is_lan_bind(host)):
+        return _tls.TLS_OFF, None, "", ""
+    try:
+        if hostname is None:
+            import socket as _socket
+            hostname = _socket.gethostname()
+        ip = moonglade_bonjour.lan_ip() if lan_ip is None else lan_ip
+        cert_p, key_p = _tls.ensure_certificate(
+            dns_names=[hostname, hostname + ".local",
+                       moonglade_bonjour.hostname_label(bonjour_name) + ".local"],
+            ip_addresses=[ip or ""])
+        ctx = _tls.server_context(cert_p, key_p)
+        return (_tls.TLS_ALL if https_everywhere else _tls.TLS_LAN), ctx, _tls.fingerprint(), ""
+    except Exception as e:                              # noqa: BLE001 -- HTTPS never stops a start
+        problem = (str(e) if isinstance(e, _tls.TLSUnavailable) else
+                   "Moonglade couldn't set up HTTPS ({}: {}).".format(type(e).__name__,
+                                                                     str(e)[:200]))
+        print("{}\nServing plain HTTP: another device's traffic is not encrypted, and "
+              "Connect from PixAI works only on this PC.".format(problem))
+        _log_mod.getLogger(__name__).warning("HTTPS off for this start: %s", problem)
+        return _tls.TLS_OFF, None, "", problem
+
+
 def main():
     # prog: the usage line names the command as it is typed (3.20).
     ap = argparse.ArgumentParser(prog="python -m moonglade.gallery",
@@ -22209,23 +22276,8 @@ def main():
     # with a certificate that can't be saved) it serves plain HTTP and says so.
     from moonglade import bonjour as moonglade_bonjour
     from moonglade import tls as _tls
-    tls_mode, tls_ctx, tls_fp, tls_problem = _tls.TLS_OFF, None, "", ""
-    want_tls_everywhere = bool(getattr(args, "https", False))
-    if want_tls_everywhere or moonglade_bonjour.is_lan_bind(args.host):
-        try:
-            import socket as _socket
-            _here = _socket.gethostname()
-            cert_p, key_p = _tls.ensure_certificate(
-                dns_names=[_here, _here + ".local",
-                           moonglade_bonjour.hostname_label(_srv["bonjour_name"]) + ".local"],
-                ip_addresses=[moonglade_bonjour.lan_ip() or ""])
-            tls_ctx = _tls.server_context(cert_p, key_p)
-            tls_mode = _tls.TLS_ALL if want_tls_everywhere else _tls.TLS_LAN
-            tls_fp = _tls.fingerprint(cert_p)
-        except _tls.TLSUnavailable as e:
-            tls_problem = str(e)
-            print("{}\nServing plain HTTP: another device's traffic is not encrypted, and "
-                  "Connect from PixAI works only on this PC.".format(tls_problem))
+    tls_mode, tls_ctx, tls_fp, tls_problem = prepare_tls(
+        args.host, bool(getattr(args, "https", False)), _srv["bonjour_name"])
     # The scheme this PC's own address uses, and the one other devices use.
     scheme = "https" if tls_mode == _tls.TLS_ALL else "http"
     lan_scheme = "https" if tls_mode != _tls.TLS_OFF else "http"

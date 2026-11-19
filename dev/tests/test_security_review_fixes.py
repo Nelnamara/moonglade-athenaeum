@@ -54,7 +54,7 @@ def test_every_page_carries_the_policy_its_inline_scripts_were_written_for(tmp_p
     nonce = m.group(1)
     for word in ("'unsafe-inline'", "'unsafe-eval'"):
         assert word not in csp.split("script-src", 1)[1].split(";", 1)[0], csp
-    for part in ("object-src 'none'", "base-uri 'none'", "frame-ancestors 'none'"):
+    for part in ("object-src 'none'", "base-uri 'none'", "frame-ancestors 'self'"):
         assert part in csp
     html = r.get_data(as_text=True)
     assert g.CSP_NONCE_MARK not in html, "a page went out with its nonce mark unfilled"
@@ -67,7 +67,7 @@ def test_every_page_carries_the_policy_its_inline_scripts_were_written_for(tmp_p
     # no inline event handler anywhere: the policy would refuse it, and it would be dead
     assert not re.search(r"<[a-z][^>]*\son[a-z]+\s*=", html, flags=re.I), path
     assert r.headers["X-Content-Type-Options"] == "nosniff"
-    assert r.headers["X-Frame-Options"] == "DENY"
+    assert r.headers["X-Frame-Options"] == "SAMEORIGIN"
 
 
 def test_the_nonce_is_fresh_on_every_response(tmp_path):
@@ -92,7 +92,7 @@ def test_json_and_redirects_carry_the_two_headers_too_and_files_keep_their_sandb
     cli = login_client(tmp_path)
     for r in (cli.get("/api/ping"), create_app(tmp_path).test_client().get("/")):
         assert r.headers["X-Content-Type-Options"] == "nosniff"
-        assert r.headers["X-Frame-Options"] == "DENY"
+        assert r.headers["X-Frame-Options"] == "SAMEORIGIN"
         assert r.headers["Referrer-Policy"] == "same-origin"
     assert "Content-Security-Policy" not in cli.get("/api/ping").headers
     # the connect page keeps its own stricter Referrer-Policy
@@ -177,8 +177,18 @@ def test_the_lan_card_shows_the_fingerprint_as_text_in_the_existing_card():
 # Finding 1: the certificate and the one-port server
 # ---------------------------------------------------------------------------
 
-def test_the_certificate_is_made_once_and_reused(tmp_path, monkeypatch):
+def _x509():
     pytest.importorskip("cryptography", reason="making the certificate needs cryptography")
+    from cryptography import x509
+    return x509
+
+
+def _certs(path):
+    return _x509().load_pem_x509_certificates(path.read_bytes())
+
+
+def test_the_authority_is_made_once_and_signs_the_server_certificate(tmp_path, monkeypatch):
+    x509 = _x509()
     from moonglade import tls
     restricted = []
     monkeypatch.setattr(secure_files, "restrict_to_owner",
@@ -187,31 +197,170 @@ def test_the_certificate_is_made_once_and_reused(tmp_path, monkeypatch):
                                        ip_addresses=["192.168.1.5"])
     assert cert == tmp_path / moonglade_paths.TLS_CERT_NAME
     assert key == tmp_path / moonglade_paths.TLS_KEY_NAME
-    fp = tls.fingerprint(cert)
-    assert re.fullmatch(r"([0-9A-F]{2}:){31}[0-9A-F]{2}", fp), fp
-    assert moonglade_paths.TLS_KEY_NAME in restricted, "the private key was not limited"
-    first = cert.read_bytes()
-    tls.ensure_certificate(dns_names=["another-name"], ip_addresses=["10.0.0.9"])
-    assert cert.read_bytes() == first and tls.fingerprint(cert) == fp, (
-        "a restart made a new certificate: every device would warn again")
-    from cryptography import x509
-    c = x509.load_pem_x509_certificate(first)
-    life = c.not_valid_after_utc - c.not_valid_before_utc
-    assert life.days <= tls.CERT_LIFETIME_DAYS + 1
-    names = c.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    ca_p = tmp_path / moonglade_paths.TLS_CA_CERT_NAME
+    for secret in (moonglade_paths.TLS_KEY_NAME, moonglade_paths.TLS_CA_KEY_NAME):
+        assert secret in restricted, secret + " was not limited to this user"
+    fp = tls.fingerprint()
+    assert re.fullmatch(r"([0-9A-F]{2}:){31}[0-9A-F]{2}", fp) and fp == tls.fingerprint(ca_p)
+    leaf, chain_ca = _certs(cert)
+    ca = _certs(ca_p)[0]
+    assert chain_ca == ca, "the server sends its authority after its certificate"
+    leaf.verify_directly_issued_by(ca)
+    bc = ca.extensions.get_extension_for_class(x509.BasicConstraints)
+    assert bc.critical and bc.value.ca and bc.value.path_length == 0
+    nc = ca.extensions.get_extension_for_class(x509.NameConstraints)
+    assert nc.critical
+    permitted = {getattr(n.value, "compressed", n.value) for n in nc.value.permitted_subtrees}
+    assert {"localhost", "local", "mypc", "192.168.0.0/16"} <= {str(p) for p in permitted}
+    names = leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
     assert "mypc.local" in names.get_values_for_type(x509.DNSName)
+    life = leaf.not_valid_after_utc - leaf.not_valid_before_utc
+    assert life.days <= tls.CERT_LIFETIME_DAYS + 1
+    # a restart reuses both; a new home address re-issues the server certificate only
+    first = cert.read_bytes()
+    tls.ensure_certificate(dns_names=["mypc", "mypc.local"], ip_addresses=["192.168.1.5"])
+    assert cert.read_bytes() == first
+    tls.ensure_certificate(dns_names=["mypc", "mypc.local"], ip_addresses=["192.168.1.77"])
+    assert cert.read_bytes() != first and tls.fingerprint() == fp, (
+        "a new address must not move the authority a device installed")
+
+
+def test_the_authority_cannot_vouch_for_a_website(tmp_path):
+    """Its Name Constraints, checked by a real path validator: a certificate it signs for a
+    public name is rejected, the PC's own is accepted."""
+    x509 = _x509()
+    import datetime
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.verification import PolicyBuilder, Store, VerificationError
+    from moonglade import tls
+    cert_p, _ = tls.ensure_certificate(dns_names=["mypc", "mypc.local"])
+    ca = _certs(tmp_path / moonglade_paths.TLS_CA_CERT_NAME)[0]
+    ca_key = serialization.load_pem_private_key(
+        (tmp_path / moonglade_paths.TLS_CA_KEY_NAME).read_bytes(), None)
+    when = datetime.datetime.now(datetime.timezone.utc)
+    verifier = lambda name: PolicyBuilder().store(Store([ca])).time(when) \
+        .build_server_verifier(x509.DNSName(name))
+    verifier("mypc.local").verify(_certs(cert_p)[0], [])
+    k = ec.generate_private_key(ec.SECP256R1())
+    forged = (x509.CertificateBuilder()
+              .subject_name(x509.Name([])).issuer_name(ca.subject).public_key(k.public_key())
+              .serial_number(1).not_valid_before(when - datetime.timedelta(days=1))
+              .not_valid_after(when + datetime.timedelta(days=30))
+              .add_extension(x509.SubjectAlternativeName([x509.DNSName("pixai.art")]), False)
+              .add_extension(x509.BasicConstraints(ca=False, path_length=None), True)
+              .add_extension(x509.ExtendedKeyUsage([x509.oid.ExtendedKeyUsageOID.SERVER_AUTH]),
+                             False)
+              .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(
+                  ca_key.public_key()), False)
+              .sign(ca_key, hashes.SHA256()))
+    with pytest.raises(VerificationError):
+        verifier("pixai.art").verify(forged, [])
+
+
+def test_a_non_ascii_pc_name_still_gets_https(tmp_path):
+    """Review must-fix: DESKTOP-JOSÉ crashed a LAN start (the certificate format cannot carry
+    the É). The name is left out of the certificate and the server starts on HTTPS."""
+    _x509()
+    from moonglade import tls
+    mode, ctx, fp, problem = g.prepare_tls("0.0.0.0", False, "Moonglade",
+                                           hostname="DESKTOP-JOSÉ", lan_ip="192.168.1.5")
+    assert (mode, problem) == (tls.TLS_LAN, "") and ctx is not None and fp
+    assert tls.certificate_dns_names(["DESKTOP-JOSÉ", "desktop-josé.local", "Mypc",
+                                      "-bad", "ok.local", "ok.local"]) == ["mypc", "ok.local"]
+
+
+def test_any_certificate_failure_means_plain_http_never_a_crash(tmp_path, monkeypatch,
+                                                                capsys):
+    _x509()
+    from moonglade import tls
+
+    def _boom(*a, **k):
+        raise ValueError("something the builder did not expect")
+    monkeypatch.setattr(tls, "_ensure", _boom)
+    mode, ctx, fp, problem = g.prepare_tls("0.0.0.0", False, "Moonglade", hostname="pc",
+                                           lan_ip="192.168.1.5")
+    assert (mode, ctx, fp) == (tls.TLS_OFF, None, "")
+    assert "couldn't make its HTTPS certificate" in problem
+    assert "Serving plain HTTP" in capsys.readouterr().out
+    monkeypatch.setattr(tls, "server_context", _boom)
+    monkeypatch.undo()
+    monkeypatch.setattr(tls, "server_context", _boom)
+    assert g.prepare_tls("0.0.0.0", False, "Moonglade", hostname="pc",
+                         lan_ip="192.168.1.5")[0] == tls.TLS_OFF
+    assert g.prepare_tls("127.0.0.1", False, "Moonglade")[0] == tls.TLS_OFF   # no LAN, no TLS
+
+
+def test_a_key_that_does_not_match_its_certificate_is_healed(tmp_path):
+    """Review: a stop between writing the key and the certificate left a pair that never
+    matched again. The next start sees it and makes a matching pair."""
+    _x509()
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from moonglade import tls
+    cert_p, key_p = tls.ensure_certificate()
+    other = ec.generate_private_key(ec.SECP256R1())
+    key_p.write_bytes(other.private_bytes(serialization.Encoding.PEM,
+                                          serialization.PrivateFormat.PKCS8,
+                                          serialization.NoEncryption()))
+    tls.ensure_certificate()
+    leaf = _certs(cert_p)[0]
+    key = serialization.load_pem_private_key(key_p.read_bytes(), None)
+    assert tls.pair_matches(leaf, key)
+    tls.server_context(cert_p, key_p)                  # and ssl accepts the pair
+    # the authority's own pair heals the same way
+    ca_key_p = tmp_path / moonglade_paths.TLS_CA_KEY_NAME
+    ca_key_p.write_bytes(key_p.read_bytes())
+    tls.ensure_certificate()
+    ca = _certs(tmp_path / moonglade_paths.TLS_CA_CERT_NAME)[0]
+    assert tls.pair_matches(ca, serialization.load_pem_private_key(ca_key_p.read_bytes(), None))
+    _certs(cert_p)[0].verify_directly_issued_by(ca)
+
+
+def test_an_older_self_signed_certificate_is_migrated_once(tmp_path):
+    """An install that ran this branch's first build kept a self-signed server certificate and
+    no authority. The next start makes the authority and re-issues the server certificate
+    under it; the start after that changes nothing."""
+    x509 = _x509()
+    import datetime
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from moonglade import tls
+    k = ec.generate_private_key(ec.SECP256R1())
+    now = datetime.datetime.now(datetime.timezone.utc)
+    name = x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, "Moonglade Athenaeum")])
+    old = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
+           .public_key(k.public_key()).serial_number(7)
+           .not_valid_before(now - datetime.timedelta(days=1))
+           .not_valid_after(now + datetime.timedelta(days=800))
+           .add_extension(x509.SubjectAlternativeName([x509.DNSName("localhost")]), False)
+           .sign(k, hashes.SHA256()))
+    cert_p, key_p = tls.cert_path(), tls.key_path()
+    cert_p.write_bytes(old.public_bytes(serialization.Encoding.PEM))
+    key_p.write_bytes(k.private_bytes(serialization.Encoding.PEM,
+                                      serialization.PrivateFormat.PKCS8,
+                                      serialization.NoEncryption()))
+    tls.ensure_certificate()
+    ca = _certs(tmp_path / moonglade_paths.TLS_CA_CERT_NAME)[0]
+    leaf = _certs(cert_p)[0]
+    assert leaf != old
+    leaf.verify_directly_issued_by(ca)
+    after = cert_p.read_bytes()
+    tls.ensure_certificate()
+    assert cert_p.read_bytes() == after
 
 
 def test_a_certificate_near_its_end_is_replaced(tmp_path):
-    pytest.importorskip("cryptography", reason="making the certificate needs cryptography")
+    _x509()
     import datetime
     from moonglade import tls
     long_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
         days=tls.CERT_LIFETIME_DAYS - tls.CERT_RENEW_BEFORE_DAYS + 2)
     cert, _key = tls.ensure_certificate(now=long_ago)
-    old = tls.fingerprint(cert)
+    old = cert.read_bytes()
+    authority = tls.fingerprint()
     tls.ensure_certificate()
-    assert tls.fingerprint(cert) != old
+    assert cert.read_bytes() != old and tls.fingerprint() == authority
 
 
 def test_without_cryptography_a_stored_pair_still_serves_and_none_says_why(tmp_path,
@@ -223,6 +372,40 @@ def test_without_cryptography_a_stored_pair_still_serves_and_none_says_why(tmp_p
     assert "cryptography" in str(e.value)
     assert tls.fingerprint() == ""
 
+
+def test_a_device_can_fetch_the_authority_before_it_signs_in(tmp_path):
+    _x509()
+    from moonglade import tls
+    app = create_app(tmp_path)
+    cli = app.test_client()
+    assert cli.get("/moonglade-ca.crt").status_code == 404           # no HTTPS this start
+    tls.ensure_certificate()
+    app.config["MG_TLS_FINGERPRINT"] = tls.fingerprint()
+    r = cli.get("/moonglade-ca.crt")                                   # no session at all
+    assert r.status_code == 200
+    assert r.mimetype == "application/x-x509-ca-cert"
+    assert r.get_data() == (tmp_path / moonglade_paths.TLS_CA_CERT_NAME).read_bytes()
+    assert b"PRIVATE KEY" not in r.get_data()
+
+
+def test_a_secret_file_is_private_before_a_byte_is_written(tmp_path, monkeypatch):
+    """Review: create, restrict, THEN write -- the temp file of every secret write."""
+    seen = []
+    real = secure_files.restrict_to_owner
+
+    def _spy(p):
+        seen.append((os.path.basename(str(p)), os.path.getsize(p) if os.path.exists(p) else -1))
+        return real(p)
+    monkeypatch.setattr(secure_files, "restrict_to_owner", _spy)
+    core.add_or_update_web_user("alice", "a-real-test-password-1")          # config.json
+    mirror_mod.save_mirror_state({"jwt": "a.b.c"})                           # the Mirror
+    temps = [(n, size) for n, size in seen if ".tmp-" in n]
+    assert any(n.startswith("config.json.tmp-") for n, _ in temps), seen
+    assert any(n.startswith(moonglade_paths.MIRROR_SESSION_NAME + ".tmp-") for n, _ in temps)
+    assert all(size == 0 for _n, size in temps), "a temp file held its secret before it was " \
+        "made private: %s" % temps
+    secure_files.write_private(tmp_path / "x.tmp", "secret")
+    assert (tmp_path / "x.tmp").read_text() == "secret"
 
 def _serve(app, ctx):
     from moonglade import tls
@@ -258,6 +441,15 @@ def test_one_port_answers_https_and_plain_http(tmp_path):
         r = conn.getresponse()
         body = r.read()
         assert r.status == 200 and b"MG_BOOT" in body
+        # A device that installed the authority: OpenSSL's own path validation (chain, the
+        # authority's name constraints, the address in the certificate) accepts the server.
+        # The stdlib context class, not truststore's, which only consults the OS store.
+        trusting = tls._stdlib_context_class()(ssl.PROTOCOL_TLS_CLIENT)
+        trusting.load_verify_locations(cafile=str(tls.ca_cert_path()))
+        v = http.client.HTTPSConnection("127.0.0.1", port, context=trusting, timeout=10)
+        v.request("GET", "/api/ping")
+        assert v.getresponse().status in (200, 401)
+        v.close()
         # the session cookie the HTTPS page set is Secure
         assert "Secure" in (r.getheader("Set-Cookie") or "")
         conn.close()
@@ -354,10 +546,10 @@ def test_every_secret_write_restricts_the_file(tmp_path, monkeypatch):
     assert moonglade_paths.MIRROR_SESSION_NAME in seen
 
 
-def test_the_startup_sweep_names_the_three_secret_files(tmp_path):
+def test_the_startup_sweep_names_every_secret_file(tmp_path):
     names = [os.path.basename(str(p)) for p in secure_files.secret_files()]
     assert names == ["config.json", moonglade_paths.MIRROR_SESSION_NAME,
-                     moonglade_paths.TLS_KEY_NAME]
+                     moonglade_paths.TLS_KEY_NAME, moonglade_paths.TLS_CA_KEY_NAME]
     src = open(g.__file__, encoding="utf-8").read()
     main_src = src[src.index("\ndef main():"):]
     assert "_secure_files.restrict_existing_secrets()" in main_src
@@ -528,6 +720,28 @@ def test_a_zip_bomb_stops_at_the_byte_budget(tmp_path, monkeypatch):
     r = _import(cli, _zip_bytes([("big.png", b"\0" * (4 * 1024 * 1024))]))
     assert r.status_code == 413 and "unpacks to more than" in r.get_json()["error"]
     assert not (tmp_path / "imported").exists()
+
+
+def test_one_huge_file_in_a_zip_stops_at_the_per_file_cap(tmp_path, monkeypatch):
+    monkeypatch.setattr(g, "ZIP_MAX_MEMBER_BYTES", 32 * 1024)
+    cli = login_client(tmp_path)
+    r = _import(cli, _zip_bytes([("small.png", b"x" * 1024), ("big.mp4", b"\0" * 200_000)]))
+    assert r.status_code == 413
+    err = r.get_json()["error"]
+    assert "A file in that zip" in err and "--import-local" in err, err
+    assert not (tmp_path / "imported").exists()
+
+
+def test_the_limits_fit_a_whole_library_and_name_the_command_line_import():
+    """Review: a 5 GB library zip, one video over 2 GB and a zip unpacking past 8 GB were all
+    refused. The limits now fit a library; every refusal names the CLI import."""
+    gb = 1024 ** 3
+    assert g.IMPORT_REQUEST_MAX_BYTES >= 50 * gb and g.ZIP_MAX_TOTAL_BYTES >= 50 * gb
+    assert g.ZIP_MAX_MEMBER_BYTES >= 8 * gb and g.UPLOAD_MAX_BYTES >= 8 * gb
+    assert g.LOOM_BUNDLE_REQUEST_MAX_BYTES >= 50 * gb and g.ZIP_MAX_MEMBERS >= 100000
+    for msg in (g.ZIP_TOO_BIG, g.ZIP_TOO_MANY_MEMBERS, g.ZIP_MEMBER_TOO_BIG,
+                g._too_large_sentence(g.IMPORT_REQUEST_MAX_BYTES)):
+        assert "python -m moonglade --import-local" in msg, msg
 
 
 def test_the_extractor_counts_what_it_writes_not_what_the_zip_claims(tmp_path):

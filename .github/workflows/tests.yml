@@ -31,7 +31,7 @@ jobs:
       # (see its own pytest.importorskip). Pulling it in just to sit unused is exactly
       # the kind of CI flakiness worth avoiding.
       - name: Install dependencies
-        run: pip install requests pillow flask truststore websockets pytest pytest-mock pytest-cov pytest-xdist playwright
+        run: pip install requests pillow flask truststore websockets cryptography pytest pytest-mock pytest-cov pytest-xdist playwright
 
       # THE GALLERY BUNDLE MUST BE THE SOURCE'S.
       #
@@ -68,7 +68,7 @@ jobs:
 
       # The same line as the pytest job's (see the note above `jobs:`).
       - name: Install dependencies
-        run: pip install requests pillow flask truststore websockets pytest pytest-mock pytest-cov pytest-xdist playwright
+        run: pip install requests pillow flask truststore websockets cryptography pytest pytest-mock pytest-cov pytest-xdist playwright
 
       # THE RENDERING HARNESS NEEDS A REAL BROWSER.
       #

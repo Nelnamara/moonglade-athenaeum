@@ -44,10 +44,11 @@ Nothing phones home.
 **Can I run it on my phone/tablet?**
 Yes — in the Control Panel's **LAN discovery** card set **Reach** to **LAN** and save (the server
 restarts), then open the address the card shows on your device, or scan its QR. That address is
-`https://`, so what you type and your session cross your network encrypted. The first visit from
-each device shows a one-time certificate warning, because Moonglade made its certificate itself:
-check that the certificate's SHA-256 fingerprint matches the one the card shows on the PC, then
-continue; see [The Gallery → Using HTTPS](Gallery#using-https). [Select mode](Collections) is touch-friendly.
+`https://`, so what you type and your session cross your network encrypted. The browser warns
+about the certificate, because Moonglade made it itself. To stop the warning, install this PC's
+certificate on the device once, from the link on the card, after checking that its SHA-256
+fingerprint matches the one the card shows on the PC; see [The Gallery → Using
+HTTPS](Gallery#using-https). [Select mode](Collections) is touch-friendly.
 
 Right after you sign in on a phone browser that can add the app to its Home Screen, a thin line under
 the gallery's buttons says **Add to Home Screen for full screen ›**. On an iPhone, in Safari, tapping it

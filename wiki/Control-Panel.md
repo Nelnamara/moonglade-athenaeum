@@ -350,10 +350,11 @@ minute, so a PixAI outage never turns into a flood of retries.
 The card that says how other devices reach Moonglade: whether it is broadcasting its name on your
 network, the address to open (with **Copy** and **QR**), and, on the server machine, **Reach**
 (**This PC** or **LAN**), the port and the broadcast name. With **Reach** on **LAN**, the address
-other devices use is `https://`, and the card shows the certificate's **SHA-256 fingerprint** so a
-phone, tablet or Mac can check its one-time certificate warning against it (see [The Gallery →
-Using HTTPS](Gallery#using-https)). Read the fingerprint here on the PC, not on the device you
-are checking. If the card says the network traffic is not encrypted, the line after it says why.
+other devices use is `https://`. The card links **this PC's certificate**: install it once on a
+phone, tablet or Mac and that device stops warning about Moonglade's certificate. The card also
+shows that certificate's **SHA-256 fingerprint** to check before you install it (see [The
+Gallery → Using HTTPS](Gallery#using-https)). Read the fingerprint here on the PC, not on the
+device you are checking. If the card says the network traffic is not encrypted, the line after it says why.
 
 ## Mirror to PixAI
 

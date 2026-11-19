@@ -38,30 +38,44 @@ and port: your Moonglade password, your session and the Mirror's PixAI sign-in (
 PixAI** bookmark) cross the network encrypted. A device that opens the old `http://` address is sent
 to the `https://` one.
 
-**The one-time certificate warning.** Moonglade makes its own certificate the first time it needs
-one and keeps it in `local\` beside the launcher, so it stays the same across restarts. No browser
-trusts a certificate a program made for itself, so the **first** visit from each phone, tablet or Mac
-shows a warning. Check it before you go on:
+**The certificate warning, and how to stop it.** Moonglade makes its own small certificate
+authority, called **Moonglade (this PC)**, the first time it needs one, and keeps it in `local\`
+beside the launcher. It signs the certificate Moonglade answers with. No browser trusts an
+authority it has never seen, so until a device has it installed, that device's browser warns.
 
-1. On the PC, open **Control Panel → LAN discovery**. The card shows the certificate's **SHA-256
-   fingerprint** (pairs of letters and digits separated by colons).
-2. On the device, open the warning's details, view the certificate, and find its SHA-256
-   fingerprint.
-3. If the two match, continue past the warning (Safari calls it visiting the website anyway,
-   Chrome **Advanced → Proceed**).
-   If they don't, stop: something between that device and your PC is answering in Moonglade's
-   place.
+**Install it once on each device to stop the warning.** On the device, open the **LAN discovery**
+card's link to *this PC's certificate* (or `https://<the address>/moonglade-ca.crt`) and install it:
 
-The warning does not come back after a restart. It comes back only if the certificate is replaced:
-when it is about a month from its end (about two years after it was made), or if you delete the two
-`tls_*.pem` files in `local\`. The card then shows the new fingerprint.
+- **iPhone or iPad:** allow the download, then **Settings → Profile Downloaded → Install**, then
+  **Settings → General → About → Certificate Trust Settings** and turn on full trust for
+  *Moonglade (this PC)*.
+- **Mac:** open the downloaded file in **Keychain Access**, then open *Moonglade (this PC)* there
+  and set **Trust → When using this certificate** to **Always Trust**.
+- **Android:** **Settings → Security → Encryption & credentials → Install a certificate → CA
+  certificate**, then pick the downloaded file. (The exact menu names differ between phones.)
 
-Making the certificate needs the `cryptography` package, which `requirements.txt` installs. Without
-it Moonglade says so at start-up and on the LAN card and serves plain `http://`; other devices'
-traffic is then unencrypted, and **Connect from PixAI** works only on the PC itself.
+**Check it before you trust it.** The card on the PC shows the authority's **SHA-256 fingerprint**
+(pairs of letters and digits separated by colons). The device shows the same fingerprint in the
+certificate's details while you install it. Install it only if the two match, reading the PC's
+copy on the PC itself; if they don't, stop: something between that device and your PC is
+answering in Moonglade's place.
 
-`--https` (see the table above) also puts the PC's own address on HTTPS. A certificate your devices
-trust without a warning, and the iPad home-screen app it would allow, are a later add.
+The authority can only vouch for this PC: it is limited to `localhost`, `.local` names, this PC's
+own name and home-network addresses, so even its key could not vouch for any website.
+
+A device you don't install it on can still go past the warning (Safari calls it visiting the
+website anyway, Chrome **Advanced → Proceed**) after the same fingerprint check against the
+authority in the warning's certificate details. That warning comes back whenever Moonglade renews
+the certificate it answers with: when your router gives the PC a new address, or about every two
+years. On a device with the authority installed, renewals pass without a word.
+
+Making the certificates needs the `cryptography` package, which `requirements.txt` installs.
+Without it, or if the certificate can't be made (a full or read-only drive, for one), Moonglade says
+so at start-up and on the LAN card and serves plain `http://`; other devices' traffic is then
+unencrypted, and **Connect from PixAI** works only on the PC itself.
+
+`--https` (see the table above) also puts the PC's own address on HTTPS. An iPad home-screen app is
+a later add.
 
 ## The header
 

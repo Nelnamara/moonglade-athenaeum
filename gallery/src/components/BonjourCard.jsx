@@ -118,13 +118,15 @@ export default function BonjourCard({ isLocal }) {
         </>
       ) : null}
 
-      {/* HTTPS on the home network (2026-11-19): the certificate's fingerprint, as text in this
-          card, so a phone or Mac can check its one-time warning against it. */}
+      {/* HTTPS on the home network (2026-11-19): this PC's certificate authority, as text and a
+          link in this card -- its fingerprint to check a device's warning or install against. */}
       {st.tls && st.tls !== "off" && st.tls_fingerprint ? (
         <div className="mgcp-tilenote">
-          Other devices open Moonglade at https://. The first visit shows a certificate warning:
-          go on only if the certificate's SHA-256 fingerprint matches this one, read here on this
-          PC: <code style={{ wordBreak: "break-all" }}>{st.tls_fingerprint}</code>
+          Other devices open Moonglade at https://. Until a device has this PC's certificate
+          installed, its browser warns. To stop the warning, open{" "}
+          <a href="/moonglade-ca.crt">this PC's certificate</a> on the device and install it once;
+          before you trust it, check that its SHA-256 fingerprint matches this one, read here on
+          this PC: <code style={{ wordBreak: "break-all" }}>{st.tls_fingerprint}</code>
         </div>
       ) : st.lan_bind && st.tls_problem ? (
         <div className="mgcp-tilenote">Not encrypted on the network: {st.tls_problem}</div>

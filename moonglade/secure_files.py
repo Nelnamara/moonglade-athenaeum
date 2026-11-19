@@ -5,8 +5,9 @@ Secrets at rest: the files that hold a credential are readable by the person run
 and nobody else on the machine.
 
 The files: config.json (the PixAI API key, the session signing key and the account hashes),
-local/mirror_session.json (the Mirror's PixAI sign-in) and local/tls_key.pem (the private key of
-the home-network certificate). local/settings.json holds no secret (the library folder, the
+local/mirror_session.json (the Mirror's PixAI sign-in), local/tls_key.pem (the home-network
+server certificate's key) and local/tls_ca_key.pem (the key of the small certificate authority
+that signs it). local/settings.json holds no secret (the library folder, the
 bind address and port, the Bonjour name, the Mirror switch, launch switches, branding) and is
 left as it is.
 
@@ -136,12 +137,32 @@ def restrict_to_owner(path):
         return False
 
 
+def write_private(path, data):
+    """Write `data` (str or bytes) to a NEW file at `path` that is owner-only BEFORE a byte of
+    it is written: the file is created empty (0600 on POSIX), restricted, and only then
+    filled and flushed to disk. For the temp file of an atomic secret write -- the caller
+    os.replace()s it into place, and NTFS and POSIX both keep the moved file's permissions.
+    Raises OSError like open() would; a restriction the OS refuses is the soft log line of
+    restrict_to_owner, never an exception."""
+    p = os.fspath(path)
+    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.close(fd)
+    restrict_to_owner(p)
+    raw = data.encode("utf-8") if isinstance(data, str) else data
+    with open(p, "r+b") as f:
+        f.write(raw)
+        f.truncate()
+        f.flush()
+        os.fsync(f.fileno())
+
+
 def secret_files():
     """Every file this install keeps a secret in, whether or not it exists yet."""
     from moonglade import paths as _paths
     return [_paths.config_path(),
             _paths.local_path(_paths.MIRROR_SESSION_NAME),
-            _paths.local_path(_paths.TLS_KEY_NAME)]
+            _paths.local_path(_paths.TLS_KEY_NAME),
+            _paths.local_path(_paths.TLS_CA_KEY_NAME)]
 
 
 def restrict_existing_secrets():

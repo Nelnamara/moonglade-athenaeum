@@ -17,7 +17,7 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Changed
-- **Your other devices reach Moonglade over HTTPS.** Once Moonglade is on your home network, a phone, tablet or Mac opens it at an `https://` address, so your password, your session and the Mirror's PixAI sign-in cross the network encrypted; an old `http://` address takes them there. This PC keeps `http://localhost`. Moonglade makes its certificate once and keeps it, so each device shows its certificate warning only the first time, and the Control Panel's LAN discovery card shows the certificate's fingerprint to check that warning against. `--https` now also puts this PC on HTTPS, and no longer makes a new certificate at every start. (2026-11-19)
+- **Your other devices reach Moonglade over HTTPS.** Once Moonglade is on your home network, a phone, tablet or Mac opens it at an `https://` address, so your password, your session and the Mirror's PixAI sign-in cross the network encrypted; an old `http://` address takes them there. This PC keeps `http://localhost`. Moonglade makes its own certificate once and keeps it; install it once on a device, from the link on the Control Panel's LAN discovery card, and that device stops warning. The card shows its fingerprint to check first. If the certificate can't be made, Moonglade starts anyway on plain `http://` and says why. `--https` now also puts this PC on HTTPS, and no longer makes a new certificate at every start. (2026-11-19)
 - **Connect from PixAI from another device works only at the `https://` address.** Over plain `http://` it is refused with a sentence saying where to go, so a PixAI sign-in never crosses your network unencrypted. (2026-11-19)
 - **Log Out really ends that session.** A copy of the signed-out cookie stops working too, and a sign-in now lasts at most 30 days however often it is used. Each device signs in once more after this update. (2026-11-19)
 - **One-click Update installs the release it announced.** It moves to exactly that release, never to whatever has been added to master since, and still only by a fast-forward from where your install is. (2026-11-19)
@@ -30,7 +30,7 @@ git tags. Full prose notes for tagged versions live on
 - **Another web page can no longer make Moonglade act.** A save, delete, spend or stop is refused unless it comes from one of Moonglade's own pages; a page from another site, or from another program's page on another port of this PC, is turned away before anything happens. (2026-11-19)
 - **Moonglade's own pages refuse to be framed and run only their own scripts,** so one slip in showing someone else's PixAI text can't run code as you. (2026-11-19)
 - **The files that hold your secrets are readable by your Windows account only:** `config.json`, the Mirror's stored sign-in and the certificate's key. (2026-11-19)
-- **Uploads, imports and zips have size limits.** A zip that unpacks past its limit, or holds too many files, is refused with a plain sentence and nothing in it is imported. (2026-11-19)
+- **Uploads, imports and zips have size limits, sized for a whole library.** A zip that unpacks past 50 GB, holds a single file over 8 GB or holds too many files is refused with a plain sentence that points to the command-line import, and nothing in it is imported. (2026-11-19)
 - **`--https` works again.** With the package that fixes HTTPS errors behind antivirus and company networks installed, as it is on most installs, it stopped the server as it started. (2026-11-19)
 
 ### For developers
