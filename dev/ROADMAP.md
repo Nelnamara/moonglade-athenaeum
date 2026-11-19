@@ -48,7 +48,7 @@ In the recommended order.
   everything meanwhile); (3) Edit Pro's new outputs — SVG, GIF and transparent backgrounds — on the
   Edit card after a look board, SVG and GIF shown in the library, and curated tiles for the seven new
   AI Tools; (4) the contest board read, which now downloads each description twice, slimmed, and its
-  row ceiling raised. Tsubaki Video's new price and the daily claim amount already flow through live.
+  row ceiling raised. Tsubaki Video's new price already flows through live.
 - **PixAI's new site areas, a look.** Library (collections, saves, batch delete), comics, creator
   series, the OC maker and the agent: a read-only look at each and a short list of what Moonglade
   could do with it, for the owner's pick. Nothing is built from it without that pick.

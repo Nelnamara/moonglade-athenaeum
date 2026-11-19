@@ -192,7 +192,7 @@ function MirrorTile() {
   // Clicked here rather than dragged: it would run on this page, not on pixai.art.
   const bookmarkClick = (e) => {
     e.preventDefault();
-    setMsg("Drag it to your bookmarks bar first, then click it on a pixai.art tab.");
+    setMsg("Don't click it here: drag the Connect from PixAI button up to your browser's bookmarks bar, then click that bookmark on a pixai.art tab.");
   };
   // §1 "The gate" (The Bridge.dc.html 65-135, renderVals 386-432): armed drives the chrome and
   // the same four rungs colour the ring -- emerald healthy / peach low / ruby expired / grey off.
@@ -252,7 +252,7 @@ function MirrorTile() {
         <div className="mgbr-connectrow">
           <a ref={bookmarkRef} className={"mgbr-connect" + (armed ? " armed" : "")} draggable="true"
             onClick={bookmarkClick} title="Drag to your bookmarks bar">Connect from PixAI</a>
-          <div className="mgbr-jwtnote">Drag it to your bookmarks bar, then click it on a pixai.art tab while signed in.</div>
+          <div className="mgbr-jwtnote">Drag the <b>Connect from PixAI</b> button on the left up to your browser's bookmarks bar. Then open pixai.art, signed in, and click that bookmark.</div>
         </div>
         {msg && <div className={"mgbr-msg" + (lineIsErr(msg) ? " err" : "")}><MsgLine m={msg} /></div>}
       </div>
