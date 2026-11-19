@@ -20,6 +20,19 @@ PixAI's site only shows a handful of images at a time and nothing older is easy 
 
 ---
 
+## Start here
+
+**You need a PixAI membership.** The API key this app runs on comes with a membership; a free PixAI account cannot get one, and without a key nothing here works.
+
+1. **Download** the zip from the [latest Release](https://github.com/Nelnamara/moonglade-athenaeum/releases/latest) and unzip it somewhere you will keep it.
+2. **Double-click `Install Moonglade.cmd`.** It sets up Python and everything else for you. If Windows asks "Do you want to run this file?", choose Run.
+3. **Paste your API key** when Moonglade asks for it.
+4. **Open the gallery.** The installer opens it for you; after that, double-click `Moonglade Launcher.pyw`.
+
+Stuck? Read the [Setup page](https://github.com/Nelnamara/moonglade-athenaeum/wiki/Setup) before asking; most questions are answered there.
+
+---
+
 ## ⚡ Quickstart — one key, that's it
 
 **On Windows, first time?** Double-click **`Install Moonglade.cmd`** in the app's folder, once. It installs Python for your account if the PC has no Python 3.10 or newer (no administrator needed), installs the packages Moonglade needs, then opens Moonglade in your browser. If you downloaded the folder, Windows may ask "Do you want to run this file?"; choose Run. After that, double-click **`Moonglade Launcher.pyw`** whenever you want Moonglade. Everyone else follows the steps below.

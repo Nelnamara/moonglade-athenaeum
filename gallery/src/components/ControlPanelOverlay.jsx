@@ -227,8 +227,10 @@ function MirrorTile() {
         <div className="mgbr-head">
           <div className="mgbr-glyph"><span>M</span><i className="mgbr-dot" /></div>
           <div className="mgbr-titlewrap">
-            <div className="mgbr-title">Mirror to PixAI</div>
-            <div className="mgbr-status">{armed ? "Armed · tier live" : "Off · tier hidden"}</div>
+            <div className="mgbr-title"
+              title="Signs in to pixai.art as you, so what you make here also lands in your PixAI web library and PixAI's one-click AI Tools work">Mirror to PixAI</div>
+            <div className="mgbr-status"
+              title={armed ? "Armed: the mirror is on, so AI Tools and the one-click presets are available" : "Off: AI Tools and the one-click presets stay hidden until you turn the mirror on"}>{armed ? "Armed · tier live" : "Off · tier hidden"}</div>
           </div>
           <button type="button" className={"mgbr-pill" + (armed ? " on" : "")} onClick={toggle}
             disabled={busy || !st} title="Arm or disarm the mirror" aria-pressed={armed}><i /></button>
