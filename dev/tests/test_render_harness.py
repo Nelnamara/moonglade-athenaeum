@@ -6376,7 +6376,9 @@ def test_the_dock_offers_unlimited_mode_and_locks_what_the_lane_runs_on(
     badge = page.locator(".mgdock-gocol > .cost-badge")
     page.wait_for_function(
         "() => document.querySelector('.mgdock-gocol > .cost-badge').dataset.state === 'paid'")
-    assert "5,100" in badge.inner_text()
+    # the price rides inside ✦ Generate since look pick round 2 (topic 1 B); the badge keeps the balance
+    go = page.locator(".mgdock-gocol > .mgdock-gen")
+    assert "5,100" in go.locator(".mgspend-s").inner_text()
     off = page.evaluate(_UNL_CONTROLS_JS)
     assert off == {"modes": [False, False],
                    "sizes": [False, False, False, False],
@@ -6389,9 +6391,11 @@ def test_the_dock_offers_unlimited_mode_and_locks_what_the_lane_runs_on(
     page.wait_for_function(
         "() => document.querySelector('.mgdock-gocol > .cost-badge').dataset.lane === 'unlimited'")
     assert badge.get_attribute("data-state") == "free"
-    assert badge.locator(".mgc-main").inner_text().replace("\n", "").strip() == "Free∞"
+    page.wait_for_function(
+        "() => document.querySelector('.mgdock-gocol > .mgdock-gen .mgspend-inf') !== null")
+    assert go.locator(".mgspend-s").inner_text().replace("\n", "").strip() == "Free∞"
     inf = page.evaluate("""() => {
-        const el = document.querySelector('.mgdock-gocol > .cost-badge .mgc-inf');
+        const el = document.querySelector('.mgdock-gocol > .mgdock-gen .mgspend-inf');
         const probe = document.createElement('span');
         probe.style.color = 'var(--green)';
         document.body.appendChild(probe);
@@ -11218,3 +11222,288 @@ def test_a_page_on_another_port_is_refused_by_the_front_door(logged_in_page, ren
     assert seen == [403], seen
     # ...and this server is still up and still has the session
     assert page.goto(target + "/api/ping").status == 200
+
+
+# ---------------------------------------------------------------------------
+# 3.21.x look picks, round 2 (moonglade-internal DECISIONS "3.21.x look picks, round 2"; the
+# pixel source is design/board/LOOK_BOARD_2026-11-19_round2.html): topic 1 option B, the price
+# as a second line INSIDE the button that spends, dim until priced; and topic 4 option C, a
+# card per video model with its price for this picture at each length. Measured at the owner's
+# desktop dock size (1568x724) and the phone (390x844).
+# ---------------------------------------------------------------------------
+LOOK_DESKTOP = {"width": 1568, "height": 724}
+
+
+def _spend_button(page, selector):
+    """The button's two lines and its box, as the browser draws them."""
+    return page.evaluate("""(sel) => {
+        const b = document.querySelector(sel);
+        if (!b) return null;
+        const a = b.querySelector('.mgspend-a'), s = b.querySelector('.mgspend-s');
+        const r = (el) => { const x = el.getBoundingClientRect();
+            return {top: x.top, bottom: x.bottom, left: x.left, right: x.right}; };
+        return {disabled: b.disabled, cls: b.className, priced: b.dataset.priced || '',
+                action: a ? a.textContent : null, sub: s ? s.textContent : null,
+                box: r(b), a: a ? r(a) : null, s: s ? r(s) : null,
+                outline: getComputedStyle(b).outlineColor, outlineStyle: getComputedStyle(b).outlineStyle,
+                vw: innerWidth, vh: innerHeight};
+    }""", selector)
+
+
+def _token_color(page, token):
+    return page.evaluate("""(t) => { const p = document.createElement('span');
+        p.style.color = 'var(' + t + ')'; document.body.appendChild(p);
+        const c = getComputedStyle(p).color; p.remove(); return c; }""", token)
+
+
+def _two_lines_inside(g):
+    """The action over the price, both inside the button, the button inside the viewport."""
+    assert g["a"] and g["s"], g
+    assert g["s"]["top"] >= g["a"]["bottom"] - 1, "the price is the SECOND line, under the action: %r" % g
+    for k in ("a", "s"):
+        assert g["box"]["left"] - 1 <= g[k]["left"] and g[k]["right"] <= g["box"]["right"] + 1, g
+        assert g["box"]["top"] - 1 <= g[k]["top"] and g[k]["bottom"] <= g["box"]["bottom"] + 1, g
+    assert 0 <= g["box"]["left"] and g["box"]["right"] <= g["vw"], g
+    assert 0 <= g["box"]["top"] and g["box"]["bottom"] <= g["vh"], g
+
+
+_UNPRICED = "Couldn't check the price"
+
+
+def test_the_dock_says_the_price_inside_generate_and_stays_dim_until_priced(logged_in_page, monkeypatch):
+    """Desktop 1568x724, look pick round 2 topic 1 B: before a model the Generate button is dim
+    and says "pick a model first"; priced, it is live with "≈ 5,100 credits" under the word (the
+    badge beside it no longer carries a price line); a free card reads "Free · uses 1 card" with
+    the emerald ring; a price check that fails leaves it dim saying "Couldn't check the price"."""
+    _fake_unlimited_pixai(monkeypatch)
+    page = logged_in_page(**LOOK_DESKTOP)
+    _run_harness_guards(page, monkeypatch)
+    answer = {"v": None}
+    page.route("**/api/price", lambda r: r.continue_() if answer["v"] is None else _q_json(r, answer["v"]))
+    _visit(page, "/")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+    page.click(".mgx-gen")
+    page.wait_for_selector(".mgdock")
+    go = ".mgdock-gocol > .mgdock-gen"
+    page.wait_for_selector(go + " .mgspend-s")
+    # the probe's first pass says "checking the price…", then lands on "nothing to price"
+    page.wait_for_function("(s) => document.querySelector(s + ' .mgspend-s').textContent === 'pick a model first'",
+                           arg=go)
+    g = _spend_button(page, go)
+    assert g["disabled"] and g["priced"] == "" and " off" in " " + g["cls"], g
+    assert (g["action"], g["sub"]) == ("✦ Generate", "pick a model first"), g
+    assert page.locator(".mgdock-gocol > .cost-badge .mgc-main").count() == 0, \
+        "the line above the button goes: the price is the button's"
+
+    if not page.locator(".mgdock-modelrow").is_visible():
+        page.click(".mgdock-expand")
+    page.wait_for_selector(".mgdock-modelrow", state="visible")
+    page.click(".mgdock-modelrow")
+    page.wait_for_selector(".mfly.open .mg-card")
+    page.locator(".mfly.open .mg-card").first.click()
+    page.wait_for_function("(s) => document.querySelector(s).dataset.priced === '1'", arg=go)
+    g = _spend_button(page, go)
+    assert g["disabled"] and g["sub"] == "≈ 5,100 credits", "priced, but the host's own gate (no prompt) holds: %r" % g
+    page.fill(".mgdock-prompt", "1girl, moonlit glade")
+    page.wait_for_function("(s) => !document.querySelector(s).disabled", arg=go)
+    _settle(page)
+    g = _spend_button(page, go)
+    assert not g["disabled"] and g["sub"] == "≈ 5,100 credits" and " free" not in " " + g["cls"], g
+    _two_lines_inside(g)
+    assert page.locator(".mgdock-gocol > .cost-badge .mgc-main").count() == 0
+
+    def reprice(payload, _size_index):
+        """Answer the next price check with `payload`, and move a priced field (the size) to
+        a stop it is not on, so the probe asks again."""
+        answer["v"] = payload
+        if not page.locator(".mgdock-slabs:not(.mgdock-editslabs)").first.is_visible():
+            page.click(".mgdock-expand")
+        page.wait_for_selector(".mgdock-slabs:not(.mgdock-editslabs) .mgdock-stops", state="visible")
+        moved = page.evaluate("""() => {
+            const slabs = [...document.querySelectorAll('.mgdock-slabs:not(.mgdock-editslabs) .mgdock-slab')];
+            const b = [...slabs[1].querySelectorAll('.mgdock-stops')[0].querySelectorAll('button')]
+                .find((x) => !x.disabled && !x.classList.contains('on'));
+            if (b) b.click();
+            return !!b; }""")
+        assert moved, "a size stop to move to"
+
+    def sub_is(text):
+        try:
+            page.wait_for_function("([s, t]) => document.querySelector(s + ' .mgspend-s').textContent === t",
+                                   arg=[go, text])
+        except _PlaywrightTimeout:
+            raise AssertionError("the button never said %r: %r" % (text, _spend_button(page, go))) from None
+
+    reprice({"cost": 5100, "free": True, "card_name": "Daily card", "cards": 3}, 1)
+    sub_is("Free · uses 1 card")
+    _settle(page)
+    g = _spend_button(page, go)
+    assert not g["disabled"] and " free" in " " + g["cls"], g
+    assert g["outlineStyle"] == "solid" and g["outline"] == _token_color(page, "--emerald"), \
+        "a free answer wears the emerald ring: %r" % g
+    _two_lines_inside(g)
+
+    reprice({"error": "the harness says no"}, 2)
+    sub_is(_UNPRICED)
+    g = _spend_button(page, go)
+    assert g["disabled"] and g["priced"] == "", "a failed check leaves the button dim: %r" % g
+
+    # The proof the dim state is the button's own rule, not a host gate: with a price back, the
+    # same button is live again.
+    reprice({"cost": 2400, "free": False}, 0)
+    sub_is("≈ 2,400 credits")
+    assert not _spend_button(page, go)["disabled"]
+
+
+def test_the_phone_create_tab_says_the_price_inside_generate(logged_in_page, monkeypatch):
+    """Phone 390x844, look pick round 2 topic 1 B: the Create tab's Generate is dim and says
+    "pick a model first" with no model; with one it is live with the price as its second line,
+    both lines inside the full-width button, on screen."""
+    _fake_unlimited_pixai(monkeypatch)
+    page = logged_in_page(**PHONE)
+    _run_harness_guards(page, monkeypatch)
+    _visit(page, "/")
+    _settle(page)
+    page.click("button:has-text('Create')")
+    page.wait_for_selector(".cm-modelrow")
+    page.wait_for_function("() => { const s = document.querySelector('.cm-generate .mgspend-s');"
+                           " return !!s && s.textContent === 'pick a model first'; }")
+    g = _spend_button(page, ".cm-generate")
+    assert g["disabled"] and (g["action"], g["sub"]) == ("✦ Generate", "pick a model first"), g
+    page.click(".cm-modelrow")
+    page.wait_for_selector(".mfly.open .mg-card")
+    page.locator(".mfly.open .mg-card").first.click()
+    page.wait_for_function("() => !document.querySelector('.mfly.open')", timeout=5000)
+    page.wait_for_function("() => document.querySelector('.cm-generate').dataset.priced === '1'")
+    page.fill("textarea.cm-ta", "1girl, moonlit glade")
+    page.wait_for_function("() => !document.querySelector('.cm-generate').disabled")
+    page.locator(".cm-generate").scroll_into_view_if_needed()
+    _settle(page)
+    g = _spend_button(page, ".cm-generate")
+    assert not g["disabled"] and g["sub"] == "≈ 5,100 credits", g
+    _two_lines_inside(g)
+    assert page.locator(".cm-cost .cost-badge .mgc-main").count() == 0, "no price line above the button"
+
+
+def _video_price(body):
+    """A price per engine and length, as /api/price would answer -- V4.0 Lite covered by a card."""
+    rate = {"v4.0.1": 5500, "v4.0": 14000, "tbkv1.0.1": 4200, "tbkv1.0": 2380, "v3.2": 3000,
+            "v3.0.2": 1800, "v3.0": 2000, "v3.0.1": 4480, "v2.7": 5600}
+    cost = rate.get(body.get("video_model"), 1000) * int(body.get("duration") or 5)
+    if body.get("video_model") == "v4.0.1":
+        return {"cost": cost, "free": True, "card_name": "V4.0 card", "cards": 9, "cards_needed": 1}
+    return {"cost": cost, "free": False}
+
+
+def _video_cards(page, root):
+    return page.evaluate("""(root) => [...document.querySelectorAll(root + ' .mgd-mcard')].map((c) => {
+        const r = c.getBoundingClientRect();
+        return {model: c.dataset.model, title: c.querySelector('.mgd-mct').textContent,
+                use: c.querySelector('.mgd-mcuse').textContent,
+                caps: [...c.querySelectorAll('.mgd-cap')].map((x) => x.textContent),
+                lines: [...c.querySelectorAll('.mgd-mcm')].map((x) => x.textContent),
+                cover: c.querySelector('.mgd-mccover').className.includes(' ok'),
+                coverColor: getComputedStyle(c.querySelector('.mgd-mccover')).color,
+                left: r.left, right: r.right, vw: innerWidth};
+    })""", root)
+
+
+def test_the_video_tab_shows_a_card_per_model_with_its_price_for_this_picture(logged_in_page, monkeypatch):
+    """Desktop 1568x724, look pick round 2 topic 4 C: the Video tab's engine slab is a card per
+    model -- name and "in use" / "Use this", its tags, the shot modes it takes, the price at each
+    length for THIS picture and what the free card does. With no picture every price reads "pick
+    a picture" and Generate video is dim; with one, each card fills in from the price check
+    (V4.0 Lite covered by the card, emerald), and "Use this" moves the engine."""
+    page = logged_in_page(**LOOK_DESKTOP)
+    _run_harness_guards(page, monkeypatch)
+    asked = []
+
+    def _price(route):
+        body = json.loads(route.request.post_data or "{}")
+        asked.append(body)
+        _q_json(route, _video_price(body))
+    page.route("**/api/price", _price)
+    _visit(page, "/")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+    page.click(".mgx-gen")
+    page.wait_for_selector(".mgdock")
+    page.click(".mgdock-tab:has-text('Video')")
+    if not page.locator(".mgd-mcards").is_visible():
+        page.click(".mgdock-expand")
+    page.wait_for_selector(".mgd-mcards", state="visible")
+    _settle(page)
+    cards = _video_cards(page, ".mgdock")
+    assert len(cards) >= 8, cards
+    cur = [c for c in cards if c["use"] == "in use"]
+    assert [c["title"] for c in cur] == ["V4.0 Lite Preview"], cards
+    assert cur[0]["caps"] == ["multi-ref", "audio", "15s", "end-frame", "default"]
+    assert cur[0]["lines"][0] == "First Frame · First & Last · Multi-Reference"
+    assert all(c["lines"][1] == "pick a picture" for c in cards), [c["lines"] for c in cards]
+    assert asked == [], "nothing is priced without a picture"
+    go = ".mgdock-gocol .mgdock-gen"   # the video drawer portals its Go into the column's slot
+    g = _spend_button(page, go)
+    assert g["disabled"] and g["sub"] == "pick a picture first", g
+
+    page.evaluate("() => document.querySelector('.gen-drawer.mgd-dock')"
+                  ".setRefs([{media_id: '424242', thumb: '/thumbs/424242.jpg'}])")
+    try:
+        page.wait_for_function("""() => { const c = document.querySelector('.mgd-mcard.cur .mgd-mcprice');
+            return c && c.textContent === '5s 27,500 · 10s 55,000 · 15s 82,500'; }""")
+    except _PlaywrightTimeout:
+        raise AssertionError("the card in use never priced: %r / asked %r"
+                             % (_video_cards(page, ".mgdock")[:2], asked[:3])) from None
+    page.wait_for_function("""() => [...document.querySelectorAll('.mgd-mcprice')]
+        .every((x) => !x.textContent.includes('…'))""", timeout=15000)
+    _settle(page)
+    cards = {c["title"]: c for c in _video_cards(page, ".mgdock")}
+    lite = cards["V4.0 Lite Preview"]
+    assert lite["lines"][2] == "Your free card covers this" and lite["cover"], lite
+    assert lite["coverColor"] == _token_color(page, "--emerald")
+    flash = cards["Tsubaki Video Flash"]
+    assert flash["lines"] == ["First Frame · First & Last · Multi-Reference · no negative, no camera",
+                              "5s 11,900 · 10s 23,800 · 15s 35,700", "No free card covers this"], flash
+    assert "cheap" in flash["caps"]
+    v27 = cards["V2.7 (High Dynamics)"]
+    assert v27["lines"][1] == "5s 28,000 · 10s 56,000" and v27["lines"][2] == "Never card-covered", v27
+    for c in cards.values():
+        assert c["right"] <= c["vw"] and c["left"] >= 0, c
+    assert len({json.dumps(b, sort_keys=True) for b in asked}) == len(asked), "each payload is asked once"
+    g = _spend_button(page, go)
+    assert not g["disabled"] and g["sub"] == "Free · uses 1 card", g
+
+    page.click(".mgd-mcard[data-model='tbkv1.0'] .mgd-mcuse")
+    page.wait_for_function("() => document.querySelector('.mgd-mcard.cur').dataset.model === 'tbkv1.0'")
+    page.wait_for_function("(s) => document.querySelector(s + ' .mgspend-s').textContent === '≈ 11,900 credits'", arg=go)
+    assert page.locator(".mgd-mcard.cur .mgd-mcuse").inner_text() == "in use"
+
+
+def test_the_phone_video_mode_shows_the_model_cards_inside_the_screen(logged_in_page, monkeypatch):
+    """Phone 390x844: the same cards in the Create tab's Video mode, every card inside the
+    screen's width, and Generate video dim with "pick a picture first" until a picture is
+    chosen and priced."""
+    page = logged_in_page(**PHONE)
+    _run_harness_guards(page, monkeypatch)
+    page.route("**/api/price", lambda r: _q_json(r, _video_price(json.loads(r.request.post_data or "{}"))))
+    _visit(page, "/")
+    _settle(page)
+    page.click("button:has-text('Create')")
+    page.click(".cm-seg3 .cm-segbtn:has-text('Video')")
+    page.wait_for_selector(".cm-videohost .mgd-mcards")
+    page.locator(".cm-videohost .mgd-mcards").scroll_into_view_if_needed()
+    _settle(page)
+    cards = _video_cards(page, ".cm-videohost")
+    assert len(cards) >= 8 and all(c["left"] >= 0 and c["right"] <= c["vw"] for c in cards), cards
+    assert all(c["lines"][1] == "pick a picture" for c in cards)
+    g = _spend_button(page, ".cm-videohost .mgd-go")
+    assert g["disabled"] and g["sub"] == "pick a picture first", g
+    page.evaluate("() => document.querySelector('.cm-videohost .gen-drawer')"
+                  ".setRefs([{media_id: '424242', thumb: '/thumbs/424242.jpg'}])")
+    page.wait_for_function("() => document.querySelector('.cm-videohost .mgd-go').dataset.priced === '1'")
+    page.locator(".cm-videohost .mgd-go").scroll_into_view_if_needed()
+    _settle(page)
+    g = _spend_button(page, ".cm-videohost .mgd-go")
+    assert not g["disabled"] and g["sub"] == "Free · uses 1 card", g
+    _two_lines_inside(g)
+    page.locator(".cm-videohost .mgd-mcards").scroll_into_view_if_needed()

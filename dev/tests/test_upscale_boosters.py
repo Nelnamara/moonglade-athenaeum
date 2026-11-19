@@ -674,7 +674,9 @@ def test_upscale_panel_offers_the_fallback_instead_of_blocking():
     # hint -- an upscale needs no model, so a missing model is never the blocker.
     assert "idle: goReady ? null : idleReason(src, mode, mx)" in src, \
         "an unpriceable state must show its real reason, not a static model hint"
-    assert "disabled={!canGo || busy}" in src
+    # the price rides inside the button (look pick round 2, topic 1 B): <SpendButton> is dim on
+    # the same gate, and while busy
+    assert "disabled={!canGo} busy={busy}" in src
     assert core.UPSCALE_FALLBACK_VERSION_ID not in src, \
         "the id must come from window.MG_UPSCALE, not a second copy in the component"
     assert "fallbackVersion()" in src

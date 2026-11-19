@@ -21,6 +21,10 @@ tabs for the card roster, coupons and the credit ledger. The card history says w
 to each card — consumed, refunded, expired or revoked — and names a task only beside a card
 that was attached to one. Every figure on it is a reading:
 the window never spends, redeems, purchases, follows or unfollows anything.
+The tile itself also holds **Ask before spending more than [ ] credits**: empty (the default)
+never asks; with an amount, a single paid send above it asks once on its own button
+(**Confirm — spend ≈ N**, press again to send). It is saved on your account, so every device
+asks at the same amount. See [Generating → The price on the button](Generating#the-price-on-the-button).
 The **Runs itself** list heads the job console; the older single **Standing order** (the timer) — the
 auto-sync schedule — still lives in that console's **Ledger** view. (The old separate
 `/panel` page retired with the classic interface, 2026-08-08.)

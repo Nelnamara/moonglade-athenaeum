@@ -14,8 +14,8 @@ Open the gallery and click **✦ Generate** to open the **Generate dock** (also 
 drawer) — the creation surface, docked at the bottom of the screen, with the live credit cost and
 free-card check up front (covered generations cost 0). Its **Image**, **Edit** and **Video** tabs
 each keep their own settings. You pick a **model** first (**Browse** opens the full picker, with the
-LoRAs beside it), describe the picture in the **prompt**, and press **Generate** — the price shows
-above it before you spend. **▲** opens the settings (frame, size, count and tuning), **History**
+LoRAs beside it), describe the picture in the **prompt**, and press **Generate** — the price is
+written inside the button, under the word, before you spend. **▲** opens the settings (frame, size, count and tuning), **History**
 shows your last seven days of runs, **Snippets** keeps prompt pieces you reuse, and **×** closes the
 dock; runs keep going. Its controls map onto the same PixAI parameters:
 
@@ -47,6 +47,27 @@ appears in the gallery. Submitting doesn't lock the button — PixAI itself runs
 generations in parallel, so you can queue up several in a row (Generate, Edit, Enhance,
 Fix, and the Video tab all work this way) and each one tracks and reports its own result
 independently.
+
+### The price on the button
+
+Every button that spends says what it will spend on a second line inside it: **✦ Generate**
+over "≈ 2,400 credits", or "Free · uses 1 card" (with a green ring) when a free card covers it.
+That is the dock's Image, Edit and Video tabs, the phone's Create tab, the Fixer, Upscale, the
+Enhance presets and The Loom's send buttons. The button stays **dim until the price is known**:
+it says why instead ("pick a model first", "checking the price…"), and if the price check fails
+it stays dim and says **Couldn't check the price**. Your balance sits beside it.
+
+**Ask before a big spend.** In the Control Panel's **PixAI account** tile, set **Ask before
+spending more than [ ] credits** (it is off until you type an amount, and it follows your
+account to every device). A single paid send above that amount turns the button into
+**Confirm — spend ≈ N** on the first press; press again within a few seconds to send. A free
+card never asks. Sends that already ask before every spend (a run of several, the Fixer, the
+Enhance presets, The Loom) keep their own question instead.
+
+**Choosing a video model.** The Video tab lists every engine as a card: its tags, the shot
+modes it takes, its price **for the picture you picked** at 5, 10 and 15 seconds, and what your
+free card does ("Your free card covers this", "Never card-covered"). The prices fill in as
+PixAI answers; with no picture they read "pick a picture". **Use this** picks the engine.
 
 ### Tsubaki.3: context images and @image prompts
 

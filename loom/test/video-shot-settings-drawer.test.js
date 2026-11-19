@@ -117,7 +117,8 @@ function mountDrawer(t, props) {
       h(arg);
       flush();
     },
-    engine: (value) => (el) => cls("mgd-engchip")(el) && el.key === value,
+    // an engine is picked with its model card's "Use this" (look pick round 2, topic 4 C)
+    engine: (value) => (el) => cls("mgd-mcuse")(el) && el.props["data-model"] === value,
     channel: (label) => (el) => cls("mgd-channel")(el) && textOf(el.props.children) === label,
     helper: cls("mgd-helper"),
     applyAll: cls("mgd-applyall"),
@@ -171,7 +172,7 @@ describe("the three shot-setting commits leave from their own control, carrying 
 });
 
 describe("\"Use these settings for every shot\" (J's button)", () => {
-  test("renders in the Loom only, under the engine meta row, worded and titled", (t) => {
+  test("renders in the Loom only, under the model cards, worded and titled", (t) => {
     const loom = mountDrawer(t, { loomCtx: true });
     const [btn, ...more] = loom.find(loom.applyAll);
     assert.ok(btn && !more.length, "the Loom's drawer has the button, once");
@@ -182,12 +183,12 @@ describe("\"Use these settings for every shot\" (J's button)", () => {
     assert.match(btn.props.title, /channel/);
     assert.match(btn.props.title, /audio/);
     assert.match(btn.props.title, /prompt helper/);
-    // Placement: in the ENGINE slab, right after .mgd-engmeta.
+    // Placement: in the ENGINE slab, right after the model cards (look pick round 2, topic 4 C).
     const [slab] = loom.find((el) => el.type === "div" && el.props.className === "mgd-slab"
-      && React.Children.toArray(el.props.children).some((c) => isElement(c) && c.props.className === "mgd-enggrid"));
+      && React.Children.toArray(el.props.children).some((c) => isElement(c) && c.props.className === "mgd-mcards"));
     const kids = React.Children.toArray(slab.props.children).filter(isElement);
-    const meta = kids.findIndex((c) => c.props.className === "mgd-engmeta");
-    assert.ok(meta >= 0 && kids[meta + 1] && kids[meta + 1].props.className === "mgd-applyall", "directly under the engine meta row");
+    const meta = kids.findIndex((c) => c.props.className === "mgd-mcards");
+    assert.ok(meta >= 0 && kids[meta + 1] && kids[meta + 1].props.className === "mgd-applyall", "directly under the model cards");
 
     for (const props of [{}, { loomCtx: false }, { dock: { topEl: null, promptEl: null, negativeEl: null, goEl: null, expanded: true } }]) {
       const g = mountDrawer(t, props);

@@ -925,19 +925,12 @@ var LoomBundle = (() => {
     return (m ? m.label : v) + " was retired by PixAI on " + when.getUTCDate() + " " + MONTHS[when.getUTCMonth()] + "; using " + (d ? d.label : DEFAULT_MODEL) + " instead.";
   }
   var MODEL_CARD = { "v3.0.1": false, "v2.7": false, "tbkv1.0": null, "tbkv1.0.1": null };
-  function cardClaim(v) {
-    const c = MODEL_CARD[v];
-    return c === false ? "never card-covered" : c === null ? "card coverage checked at price time" : "V4.0 cards apply";
-  }
   var CAP_KIND = { "top quality": "crown", "cheap": "hot", "fastest": "hot", "default": "hot" };
   function modelCaps(v) {
     const m = MODELS.find((x) => x.value === v);
     const caps = (m ? m.caps : []).map((c) => [c, CAP_KIND[c] || ""]);
     if (v === DEFAULT_MODEL) caps.push(["default", "hot"]);
     return caps;
-  }
-  function modelMeta(v) {
-    return (MODEL_MAXDUR[v] || 10) + "s max \xB7 " + cardClaim(v);
   }
   var SHOT_LABEL = { i2v: "First Frame", flf: "First & Last", r2v: "Multi-Reference" };
   var MODEL_VMODES = {
@@ -2112,9 +2105,9 @@ var LoomBundle = (() => {
     if (d.phase === "failed") return { phase: "failed", msg: friendlyGenErr2(d.error || d.status || "failed") };
     return { phase: "pending" };
   }
-  function buildShotListText(project, fmt6, actLetter2, shotText2) {
+  function buildShotListText(project, fmt8, actLetter2, shotText2) {
     let out = `${project.name}
-Runtime target ${fmt6(project.target)}
+Runtime target ${fmt8(project.target)}
 `;
     if ((project.assets || []).length) {
       out += `
@@ -2516,11 +2509,11 @@ ${"=".repeat(48)}
   var secs = (frames, fps) => (frames / fps).toFixed(3);
   var assignReels = (items) => {
     const want = (items || []).map((it) => codeAscii(it.ascii || it.code) + "_T" + it.n);
-    const count = {};
+    const count2 = {};
     want.forEach((w) => {
-      count[w] = (count[w] || 0) + 1;
+      count2[w] = (count2[w] || 0) + 1;
     });
-    const used = new Set(want.filter((w) => w.length <= 8 && count[w] === 1));
+    const used = new Set(want.filter((w) => w.length <= 8 && count2[w] === 1));
     let k = 0;
     const next = () => {
       let r;
@@ -2531,7 +2524,7 @@ ${"=".repeat(48)}
       used.add(r);
       return r;
     };
-    return want.map((w) => w.length <= 8 && count[w] === 1 ? w : next());
+    return want.map((w) => w.length <= 8 && count2[w] === 1 ? w : next());
   };
   var csvField = (v) => {
     const s = v == null ? "" : String(v);
@@ -2979,13 +2972,13 @@ ${"=".repeat(48)}
   var meanDeltaE = (pixA, pixB) => {
     if (!pixA || !pixB) return null;
     const n = Math.min(pixA.length, pixB.length);
-    let sum = 0, count = 0;
+    let sum = 0, count2 = 0;
     for (let i = 0; i + 3 < n; i += 4) {
       if (pixA[i + 3] === 0 || pixB[i + 3] === 0) continue;
       sum += deltaE76(rgbToLab([pixA[i], pixA[i + 1], pixA[i + 2]]), rgbToLab([pixB[i], pixB[i + 1], pixB[i + 2]]));
-      count += 1;
+      count2 += 1;
     }
-    return count ? sum / count : null;
+    return count2 ? sum / count2 : null;
   };
   var colourJump = (mean) => mean != null && mean > RIBBON_DE_THRESHOLD;
   var pairTitle = (pair, mean, frames) => {
@@ -4842,9 +4835,9 @@ ${"=".repeat(48)}
   function fmt(n) {
     return (Number(n) || 0).toLocaleString("en-US");
   }
-  function countClauses({ count = 0, old = 0, gone = 0 } = {}) {
+  function countClauses({ count: count2 = 0, old = 0, gone = 0 } = {}) {
     const out = [];
-    if (Number(count) > 0) out.push({ key: "count", text: fmt(count) });
+    if (Number(count2) > 0) out.push({ key: "count", text: fmt(count2) });
     if (Number(old) > 0) out.push({ key: "old", text: fmt(old) + " old" });
     if (Number(gone) > 0) out.push({ key: "gone", text: fmt(gone) + " not available" });
     return out;
@@ -4997,8 +4990,8 @@ ${"=".repeat(48)}
       document.body
     );
   }
-  function SavedHead({ title, count, old, gone, goneOpen, onGone }) {
-    const clauses = countClauses({ count, old, gone });
+  function SavedHead({ title, count: count2, old, gone, goneOpen, onGone }) {
+    const clauses = countClauses({ count: count2, old, gone });
     return /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-saved-head" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-saved-title" }, title), clauses.length ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-saved-count" }, clauses.map((c, i) => /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, { key: c.key }, i ? " \xB7 " : "", c.key === "gone" ? /* @__PURE__ */ react_global_shim_default.createElement(
       "button",
       {
@@ -6386,8 +6379,12 @@ ${"=".repeat(48)}
     const noteLine = adj ? sub ? { text: sub.text + " \xB7 " + adj, title: sub.title + " \xB7 " + adj, days: sub.days } : { text: adj, title: adj, days: null } : sub;
     const text = main + (lane ? " \u221E" : "") + (noteLine ? " \xB7 " + noteLine.text : "");
     const stack2 = !!props.stack;
+    const onButton = !!props.onButton;
     let line = "";
-    if (stack2) {
+    if (stack2 && onButton) {
+      const balanceN = props.balance != null && props.balance !== "" && isFinite(Number(props.balance)) ? Number(props.balance) : null;
+      line = [adj, balanceN != null ? fmt3(balanceN) + " left" : ""].filter(Boolean).join(" \xB7 ");
+    } else if (stack2) {
       const parts = [];
       const countN = cardCount(props.count);
       if (lane) {
@@ -6406,7 +6403,9 @@ ${"=".repeat(48)}
       if (balanceN != null) parts.push(fmt3(balanceN) + " credits");
       line = parts.join(" \xB7 ");
     }
-    return { state: state2, warn, compact, stack: stack2, short, lane, main, mainIcon, sub, noteLine, adj, title, val, valIcon, lab, tip, tipWarn, dot, text, line, d };
+    const btnNote = onButton && !stack2 && !compact && (state2 === "free" || state2 === "paid") ? [short && sub ? sub.text : "", adj].filter(Boolean).join(" \xB7 ") : "";
+    const shownNote = onButton && !stack2 && !compact ? btnNote ? { text: btnNote, title: btnNote, days: null } : null : noteLine;
+    return { state: state2, warn, compact, stack: stack2, onButton, short, lane, main, mainIcon, sub, noteLine: shownNote, adj, title, val, valIcon, lab, tip, tipWarn, dot, text, line, d };
   }
   function detailOf(m) {
     const d = m.d || {};
@@ -6426,7 +6425,7 @@ ${"=".repeat(48)}
   }
   var IDLE = { state: "idle", note: "", msg: "", raw: null };
   var CostBadge = forwardRef(function CostBadge2(props, ref) {
-    const { hint, warn, compact, stack: stack2, count, sends, balance, cardLabel, laneHeld, onCost, id, className, style } = props;
+    const { hint, warn, compact, stack: stack2, count: count2, sends, balance, cardLabel, laneHeld, onButton, onCost, id, className, style } = props;
     const [view, setView] = useState(IDLE);
     const viewRef = useRef(view);
     const propsRef = useRef(props);
@@ -6476,17 +6475,18 @@ ${"=".repeat(48)}
         propsRef.current.onCost(detailOf(build(viewRef.current, propsRef.current)));
       }
     }, [view]);
-    const m = build(view, { hint, warn, compact, stack: stack2, count, sends, balance, cardLabel, laneHeld });
+    const m = build(view, { hint, warn, compact, stack: stack2, count: count2, sends, balance, cardLabel, laneHeld, onButton });
     mRef.current = m;
     const dataWarn = m.state === "paid" && (m.warn || m.short) ? "1" : void 0;
     const dataShort = m.state === "paid" && m.short ? "1" : void 0;
     const nativeTitle = m.title && !(m.compact && m.tip) ? m.title : void 0;
     const showChip = m.compact && m.val;
+    const priceLine2 = !(m.onButton && !m.compact);
     return /* @__PURE__ */ react_global_shim_default.createElement(
       "div",
       {
         id,
-        className: "cost-badge" + (m.compact ? " compact" : "") + (m.stack ? " stack" : "") + (className ? " " + className : ""),
+        className: "cost-badge" + (m.compact ? " compact" : "") + (m.stack ? " stack" : "") + (m.onButton && !m.compact ? " onbtn" : "") + (className ? " " + className : ""),
         "data-state": m.state,
         "data-warn": dataWarn,
         "data-short": dataShort,
@@ -6500,12 +6500,186 @@ ${"=".repeat(48)}
         /* the dock's two-line stack: main line (state colour) over the DC costSubLine; the
            card-short note keeps its own amber line beneath -- the honesty content of that
            state is not something a tighter layout gets to hide */
-        /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-main" }, m.state === "checking" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-pip" }), "Checking cost\u2026") : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, m.mainIcon ? /* @__PURE__ */ react_global_shim_default.createElement(Icon, { name: m.mainIcon, className: "mgc-ico" }) : null, m.main), m.lane ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-inf" }, "\u221E") : null), m.line ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-line" }, m.line) : null, m.sub && m.short ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub", title: m.sub.title }, m.sub.text) : null)
-      ) : m.state === "checking" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-pip" }), "Checking cost\u2026") : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, m.mainIcon ? /* @__PURE__ */ react_global_shim_default.createElement(Icon, { name: m.mainIcon, className: "mgc-ico" }) : null, m.main, m.lane ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-inf" }, "\u221E") : null, m.noteLine ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub", title: m.noteLine.title }, m.noteLine.text) : null),
+        /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, priceLine2 ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-main" }, m.state === "checking" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-pip" }), "Checking cost\u2026") : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, m.mainIcon ? /* @__PURE__ */ react_global_shim_default.createElement(Icon, { name: m.mainIcon, className: "mgc-ico" }) : null, m.main), m.lane ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-inf" }, "\u221E") : null) : null, m.line ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-line" }, m.line) : null, m.sub && m.short ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub", title: m.sub.title }, m.sub.text) : null)
+      ) : m.state === "checking" && priceLine2 ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-pip" }), "Checking cost\u2026") : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, priceLine2 ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, m.mainIcon ? /* @__PURE__ */ react_global_shim_default.createElement(Icon, { name: m.mainIcon, className: "mgc-ico" }) : null, m.main, m.lane ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-inf" }, "\u221E") : null) : null, m.noteLine ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub", title: m.noteLine.title }, m.noteLine.text) : null),
       m.compact && m.tip ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-tip", "aria-hidden": "true" }, m.tipWarn ? /* @__PURE__ */ react_global_shim_default.createElement(Icon, { name: "warning", className: "mgc-ico" }) : null, m.tip) : null
     );
   });
   var CostBadge_default = CostBadge;
+
+  // ../gallery/src/gen/spendButtonCore.js
+  var SPEND_ASK_KEY = "spend.ask_above";
+  var UNPRICED_LINE = "Couldn't check the price";
+  var CHECKING_LINE = "checking the price\u2026";
+  var DEFAULT_IDLE = "nothing to price yet";
+  var ASK_ARM_MS = 6e3;
+  var ASK_MAX = 1e8;
+  function fmt4(n) {
+    return Number(n).toLocaleString();
+  }
+  function count(v) {
+    const n = Number(v);
+    return v != null && v !== "" && isFinite(n) && n >= 1 ? Math.floor(n) : 1;
+  }
+  function askThreshold(v) {
+    if (typeof v !== "number" || !isFinite(v)) return 0;
+    if (v < 1 || v > ASK_MAX || Math.floor(v) !== v) return 0;
+    return v;
+  }
+  function spendView(quote, { idle = "", sends = 1 } = {}) {
+    const q = quote && typeof quote === "object" ? quote : null;
+    const state2 = q && q.state ? q.state : "idle";
+    const raw = q && q.raw && typeof q.raw === "object" ? q.raw : {};
+    const n = count(sends);
+    if (state2 === "free") {
+      if (q.unlimited) return { state: state2, priced: true, free: true, lane: true, total: 0, sub: "Free", title: "" };
+      const k = count(raw.cards_needed) * n;
+      return {
+        state: state2,
+        priced: true,
+        free: true,
+        total: 0,
+        sub: "Free \xB7 uses " + fmt4(k) + (k === 1 ? " card" : " cards"),
+        title: ""
+      };
+    }
+    if (state2 === "paid") {
+      const c = q.cost == null || q.cost === "" ? NaN : Number(q.cost);
+      if (!isFinite(c)) return { state: "error", priced: false, free: false, total: 0, sub: UNPRICED_LINE, title: "" };
+      const total = c * n;
+      return {
+        state: state2,
+        priced: true,
+        free: false,
+        total,
+        sub: total === 0 ? "0 credits" : "\u2248 " + fmt4(total) + " credits",
+        title: ""
+      };
+    }
+    if (state2 === "checking") return { state: state2, priced: false, free: false, total: 0, sub: CHECKING_LINE, title: "" };
+    if (state2 === "error") {
+      const why = raw.error ? String(raw.error) : "";
+      return { state: state2, priced: false, free: false, total: 0, sub: UNPRICED_LINE, title: why };
+    }
+    const note3 = raw.note ? String(raw.note) : "";
+    const hint = q && typeof q.text === "string" ? q.text : "";
+    return {
+      state: "idle",
+      priced: false,
+      free: false,
+      total: 0,
+      sub: note3 || String(idle || "").trim() || hint || DEFAULT_IDLE,
+      title: ""
+    };
+  }
+  function needsAsk(view, threshold) {
+    const t = askThreshold(threshold);
+    return !!(view && view.priced && !view.free && t > 0 && Number(view.total) > t);
+  }
+  function askText(view) {
+    return "Confirm \u2014 spend \u2248 " + fmt4(view && view.total ? view.total : 0);
+  }
+  function pressAction(view, threshold, armed) {
+    if (!view || !view.priced) return "none";
+    if (armed) return "send";
+    return needsAsk(view, threshold) ? "arm" : "send";
+  }
+  function quoteFromPrice(pr) {
+    const v = classify(pr);
+    const d = v.raw || {};
+    return {
+      state: v.state,
+      cost: d.cost != null && isFinite(Number(d.cost)) ? Number(d.cost) : null,
+      free: v.state === "free",
+      unlimited: v.state === "free" && d.unlimited === true,
+      card_short: v.state === "paid" && isShort(d),
+      raw: v.raw,
+      text: v.note || ""
+    };
+  }
+  function quoteFromEntry(e) {
+    if (!e || typeof e !== "object") return null;
+    if (e.loading) return { state: "checking" };
+    if (e.noInput || e.offPicture || !Object.prototype.hasOwnProperty.call(e, "pr")) return null;
+    return quoteFromPrice(e.pr);
+  }
+
+  // ../gallery/src/components/SpendButton.jsx
+  var NOOP_SUB = () => () => {
+  };
+  var NOOP_SNAP = () => null;
+  function useAskThreshold(on = true) {
+    const store = on ? accountPrefs() : null;
+    const snap = useSyncExternalStore(
+      store ? store.subscribe : NOOP_SUB,
+      store ? store.getSnapshot : NOOP_SNAP,
+      store ? store.getSnapshot : NOOP_SNAP
+    );
+    useEffect(() => {
+      if (store) store.ensureLoaded();
+    }, [store]);
+    return on && snap ? askThreshold(readPref(snap.prefs, SPEND_ASK_KEY, 0)) : 0;
+  }
+  function SpendButton({
+    quote,
+    label,
+    busyLabel,
+    busy,
+    idle,
+    sends,
+    disabled,
+    ask = true,
+    onPress,
+    className = "",
+    offClass = "off",
+    title,
+    id,
+    "aria-label": ariaLabel
+  }) {
+    const view = spendView(quote, { idle, sends });
+    const threshold = useAskThreshold(ask);
+    const [armed, setArmed] = useState(false);
+    const timer3 = useRef(0);
+    const off = !!disabled || !!busy || !view.priced;
+    useEffect(() => {
+      setArmed(false);
+    }, [view.state, view.total, off]);
+    useEffect(() => {
+      clearTimeout(timer3.current);
+      if (armed) timer3.current = setTimeout(() => setArmed(false), ASK_ARM_MS);
+      return () => clearTimeout(timer3.current);
+    }, [armed]);
+    const press = (e) => {
+      if (off) return;
+      const act = pressAction(view, ask ? threshold : 0, armed);
+      if (act === "arm") {
+        setArmed(true);
+        return;
+      }
+      if (act !== "send") return;
+      setArmed(false);
+      if (onPress) onPress(e);
+    };
+    const cls = (className ? className + " " : "") + "mgspend" + (view.free && !off ? " free" : "") + (armed ? " armed" : "") + (off && offClass ? " " + offClass : "");
+    const tip = armed ? "Press again to send \u2014 this is above the amount you set to be asked about" : [title, view.title].filter(Boolean).join(" \u2014 ") || void 0;
+    return /* @__PURE__ */ react_global_shim_default.createElement(
+      "button",
+      {
+        type: "button",
+        id,
+        className: cls,
+        disabled: off,
+        onClick: press,
+        onBlur: () => setArmed(false),
+        title: tip,
+        "aria-label": ariaLabel,
+        "data-priced": view.priced ? "1" : void 0,
+        "data-free": view.free ? "1" : void 0,
+        "data-armed": armed ? "1" : void 0
+      },
+      armed ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgspend-a" }, askText(view)) : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgspend-a" }, busy && busyLabel ? busyLabel : label), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgspend-s" }, view.sub, view.lane ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgspend-inf" }, "\u221E") : null))
+    );
+  }
 
   // ../gallery/src/gen/priceRequest.js
   async function requestPrice(payload, { timeoutMs = PRICE_FETCH_TIMEOUT_MS, signal } = {}) {
@@ -6629,6 +6803,102 @@ ${"=".repeat(48)}
     };
   }
 
+  // ../gallery/src/gen/videoModelCardsCore.js
+  var CARD_LENGTHS = [5, 10, 15];
+  function fmt5(n) {
+    return Number(n).toLocaleString();
+  }
+  function cardLengths(model) {
+    return CARD_LENGTHS.filter((d) => durationAllowed(model, d));
+  }
+  function cardModes(model) {
+    const modes = (MODEL_VMODES[model] || ["i2v", "flf", "r2v"]).map((m) => SHOT_LABEL[m] || m);
+    const no = [];
+    if (!modelTakes(model, "negative")) no.push("no negative");
+    if (!modelTakes(model, "camera")) no.push("no camera");
+    return modes.join(" \xB7 ") + (no.length ? " \xB7 " + no.join(", ") : "");
+  }
+  function onEngine(s, model, duration) {
+    const c = {
+      ...s,
+      model,
+      duration,
+      slots: (s.slots || []).slice(),
+      imgSlots: (s.imgSlots || []).slice(),
+      vidSlots: (s.vidSlots || []).slice(),
+      modeNote: ""
+    };
+    applyModelGating(c, false);
+    return c;
+  }
+  function cardPayload(s, model, duration, promptText2 = "") {
+    const c = onEngine(s, model, duration);
+    if (c.mode !== s.mode) return { why: "mode" };
+    const p = buildPayload(c, promptText2);
+    if (!hasAnyRef(p) || flfMissingStart(c)) return { why: "pick" };
+    return { payload: p };
+  }
+  function modelCards(s, { prompt = "", price = () => void 0, now: now2 } = {}) {
+    return pickerModels(now2).map((m) => {
+      const lengths = cardLengths(m.value);
+      const cells = lengths.map((d) => {
+        const r = cardPayload(s, m.value, d, prompt);
+        if (!r.payload) return { d, why: r.why, key: "" };
+        const key = priceKey(r.payload);
+        return { d, key, payload: r.payload, answer: price(key) };
+      });
+      return {
+        value: m.value,
+        label: m.label,
+        inUse: m.value === s.model,
+        caps: modelCaps(m.value),
+        modes: cardModes(m.value),
+        cells,
+        line: priceLine(cells, SHOT_LABEL[s.mode] || s.mode),
+        cover: coverLine(m.value, cells, s.duration)
+      };
+    });
+  }
+  function priceLine(cells, modeLabel) {
+    if (!cells.length) return "";
+    if (cells.every((c) => c.why === "pick")) return "pick a picture";
+    if (cells.every((c) => c.why === "mode")) return "no " + modeLabel + " on this model";
+    return cells.map((c) => c.d + "s " + cellText(c)).join(" \xB7 ");
+  }
+  function cellText(c) {
+    if (c.why === "pick") return "pick a picture";
+    if (c.why === "mode") return "\u2014";
+    const a = c.answer;
+    if (a === void 0) return "\u2026";
+    if (!a || a.error) return "?";
+    if (a.cost != null && isFinite(Number(a.cost))) return fmt5(a.cost);
+    if (a.free) return "free";
+    return "?";
+  }
+  function coverLine(model, cells, duration) {
+    if (MODEL_CARD[model] === false) return { text: "Never card-covered", ok: false };
+    const pick = cells.find((c) => c.d === Number(duration) && c.answer) || cells.find((c) => c.answer);
+    const a = pick ? pick.answer : null;
+    if (!a || a.error) return { text: "Card coverage checked when priced", ok: false };
+    if (a.free) return { text: "Your free card covers this", ok: true };
+    if (a.card_short) return { text: "Your cards don't cover this length", ok: false };
+    return { text: "No free card covers this", ok: false };
+  }
+  function pendingPrices(cards, duration, have = () => false) {
+    const seen2 = /* @__PURE__ */ new Set();
+    const out = [];
+    const ordered = cards.slice().sort((a, b) => (b.inUse ? 1 : 0) - (a.inUse ? 1 : 0));
+    for (const card of ordered) {
+      const cells = card.cells.slice().sort((a, b) => (b.d === Number(duration) ? 1 : 0) - (a.d === Number(duration) ? 1 : 0));
+      for (const c of cells) {
+        if (!c.key || seen2.has(c.key) || have(c.key)) continue;
+        seen2.add(c.key);
+        out.push({ key: c.key, payload: c.payload });
+      }
+    }
+    return out;
+  }
+
   // ../gallery/src/gen/sendHold.js
   var SEND_HOLD_MS = 6e4;
   var UNCLEAR_SEND_MSG = "PixAI may have started this. It was not sent again; check the Activity tray (or pixai.art) before sending it again.";
@@ -6682,7 +6952,7 @@ ${"=".repeat(48)}
   var sendHolds = makeSendHolds();
 
   // ../gallery/src/gen/submitTask.js
-  async function submitTask(route, payload, { label, emit: emit7, count, onPhase, onAnswer, quote, holds = sendHolds }) {
+  async function submitTask(route, payload, { label, emit: emit7, count: count2, onPhase, onAnswer, quote, holds = sendHolds }) {
     const journalled = !!(payload && payload.submit_id);
     const key = journalled ? null : sendKey(route, payload);
     if (key && holds.held(key)) {
@@ -6758,7 +7028,7 @@ ${"=".repeat(48)}
         });
       }
       if (onPhase) onPhase(phase, data2);
-    }, count == null ? payload.count : count);
+    }, count2 == null ? payload.count : count2);
     return d.task_id;
   }
   async function submitRun(body) {
@@ -6990,6 +7260,20 @@ ${"=".repeat(48)}
     const previewRef = useRef(null);
     const audFileRef = useRef(null);
     const costRef = useRef(null);
+    const [quote, setQuote] = useState(null);
+    const cardAnswers = useRef(/* @__PURE__ */ new Map());
+    const cardBusy = useRef(false);
+    const cardCtrl = useRef(null);
+    const [, bumpCards] = useState(0);
+    const stopCardPrices = () => {
+      if (cardCtrl.current) {
+        try {
+          cardCtrl.current.abort();
+        } catch {
+        }
+      }
+    };
+    useEffect(() => stopCardPrices, []);
     const rootRef = useRef(null);
     const liveNode = useRef(null);
     const setRoot = useCallback((n) => {
@@ -7164,6 +7448,13 @@ ${"=".repeat(48)}
       applyModelGating2(true);
       reprice();
       emit7("mg-model-commit", { model: v, duration: st.current.duration });
+    };
+    const pickDuration = (d) => {
+      if (!durationAllowed(st.current.model, d) || d === st.current.duration) return;
+      st.current.duration = d;
+      rerender();
+      reprice();
+      emit7("mg-duration-commit", { duration: d });
     };
     const requestApplyAll = () => {
       const c = st.current;
@@ -7395,6 +7686,35 @@ ${"=".repeat(48)}
     const isR2v = s.mode === "r2v";
     const canGo = !s.hostBusy && !s.rendering && probe.canSubmit;
     const warn = s.model === "v4.0" ? "V4.0 full \u2014 ~2.5\xD7 Lite" : "";
+    const cardsOn = !inDock || dock.expanded !== false;
+    let cardPrompt = "";
+    try {
+      cardPrompt = promptText2();
+    } catch {
+      cardPrompt = "";
+    }
+    const ownKey = priceKey(payload());
+    const probeAnswer = (k) => probe.verdict && probe.verdict.settled && probe.verdict.pricedKey === k && probe.response ? probe.response : void 0;
+    const cards = modelCards(s, {
+      prompt: cardPrompt,
+      price: (k) => k === ownKey ? probeAnswer(k) : cardAnswers.current.has(k) ? cardAnswers.current.get(k) : void 0
+    });
+    useEffect(() => {
+      if (!cardsOn || cardBusy.current) return;
+      const next = pendingPrices(cards, s.duration, (k) => k === ownKey || cardAnswers.current.has(k))[0];
+      if (!next) return;
+      cardBusy.current = true;
+      const c = typeof AbortController !== "undefined" ? new AbortController() : null;
+      cardCtrl.current = c;
+      requestPrice(next.payload, { signal: c ? c.signal : void 0 }).then(({ response, failed }) => {
+        cardBusy.current = false;
+        if (cardCtrl.current === c) cardCtrl.current = null;
+        if (c && c.signal.aborted) return;
+        if (cardAnswers.current.size > 400) cardAnswers.current.clear();
+        cardAnswers.current.set(next.key, failed ? null : response);
+        bumpCards((n) => n + 1);
+      });
+    });
     const shotModes = ["i2v", "flf", "r2v"].map((v) => {
       const ok = allowedModes.indexOf(v) >= 0;
       return { v, ok, label: SHOT_LABEL[v], title: ok ? SHOT_LABEL[v] : SHOT_LABEL[v] + " needs the V4.0 pair" };
@@ -7508,21 +7828,29 @@ ${"=".repeat(48)}
         warn,
         cardLabel: "a video card",
         hint: "Pick a source image to see the cost.",
+        onButton: true,
+        onCost: setQuote,
         stack: inDock || void 0,
         balance: inDock ? dock.balance : void 0
       }
     );
-    const goButton = inDock ? /* @__PURE__ */ react_global_shim_default.createElement(
-      "button",
+    const goIdle = isR2v ? "pick a reference first" : flfMissingStart2() ? "pick a start frame first" : "pick a picture first";
+    const goButton = /* @__PURE__ */ react_global_shim_default.createElement(
+      SpendButton,
       {
-        type: "button",
-        className: "mgdock-gen" + (canGo ? "" : " off"),
+        className: inDock ? "mgdock-gen" : "mgd-go",
+        offClass: inDock ? "off" : "",
+        quote,
+        idle: goIdle,
+        ask: !loomCtx,
         disabled: !canGo,
-        onClick: doGenerate,
-        title: s.rendering ? "Rendering\u2026" : canGo ? "Submit \u2014 this spends credits or a card" : "Waiting for the cost to settle for these settings"
-      },
-      /* @__PURE__ */ react_global_shim_default.createElement("span", null, s.rendering ? "Rendering\u2026" : "\u2726 Generate video")
-    ) : /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-go", disabled: !canGo, onClick: doGenerate }, s.rendering ? "Rendering\u2026" : "Generate video");
+        busy: !!s.rendering,
+        busyLabel: "Rendering\u2026",
+        title: s.rendering ? "Rendering\u2026" : canGo ? "Submit \u2014 this spends credits or a card" : "Waiting for the cost to settle for these settings",
+        label: inDock ? "\u2726 Generate video" : "Generate video",
+        onPress: doGenerate
+      }
+    );
     const topRow = inDock ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgdock-modelchip static", title: "Video engine \u2014 set in the video settings" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgdock-chipph" }), /* @__PURE__ */ react_global_shim_default.createElement("span", null, chosenModel ? chosenModel.label : s.model)), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgdock-frames" }, SHOT_LABEL[s.mode] || s.mode, " \xB7 ", s.duration, "s"), ratioOffered(s) ? /* @__PURE__ */ react_global_shim_default.createElement(RatioPopover, { value: s.ratio, onPick: pickRatio }) : null, reuse && /* @__PURE__ */ react_global_shim_default.createElement(
       "button",
       {
@@ -7583,23 +7911,38 @@ ${"=".repeat(48)}
       st.current.camera = e.target.value;
       rerender();
       reprice();
-    } }, CAMERA_OPTS.map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: v, value: v }, l))))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "60ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-enghd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "Engine"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-engcur" }, chosenModel ? chosenModel.label : s.model)), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-enggrid", role: "radiogroup", "aria-label": "Video engine" }, pickerModels().map((m) => {
-      const sel = m.value === s.model;
-      const modes = (MODEL_VMODES[m.value] || ["i2v", "flf", "r2v"]).map((x) => SHOT_LABEL[x]).join(" / ");
+    } }, CAMERA_OPTS.map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: v, value: v }, l))))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "60ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-enghd mgd-mchd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "Models \xB7 this picture"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg mgd-mcseg", role: "radiogroup", "aria-label": "Length" }, CARD_LENGTHS.map((d) => {
+      const ok = durationAllowed(s.model, d);
       return /* @__PURE__ */ react_global_shim_default.createElement(
-        "div",
+        "button",
         {
-          key: m.value,
+          key: d,
+          type: "button",
           role: "radio",
-          "aria-checked": sel,
-          className: "mgd-engchip" + (sel ? " sel" : ""),
-          title: m.label + " \u2014 " + modes + " \xB7 " + (MODEL_MAXDUR[m.value] || 10) + "s max \xB7 " + (MODEL_CARD[m.value] === false ? "no card" : MODEL_CARD[m.value] === null ? "card coverage checked at price time" : "card"),
-          onClick: () => pickVideoModel(m.value)
+          "aria-checked": d === s.duration,
+          "aria-disabled": !ok,
+          className: (d === s.duration ? "on" : "") + (ok ? "" : " off"),
+          title: d + " seconds" + (ok ? "" : " \u2014 not on this engine"),
+          onClick: () => pickDuration(d)
         },
-        /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-engdot" }),
-        /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-englabel" }, m.label)
+        d,
+        "s"
       );
-    })), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-engmeta" }, /* @__PURE__ */ react_global_shim_default.createElement("span", null, modelMeta(s.model)), modelCaps(s.model).map(([t, kind]) => /* @__PURE__ */ react_global_shim_default.createElement("span", { key: t, className: "mgd-cap" + (kind ? " " + kind : "") }, t))), loomCtx ? /* @__PURE__ */ react_global_shim_default.createElement(
+    }))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-mcards", role: "radiogroup", "aria-label": "Video model" }, cards.map((c) => /* @__PURE__ */ react_global_shim_default.createElement(
+      "div",
+      {
+        key: c.value,
+        role: "radio",
+        "aria-checked": c.inUse,
+        className: "mgd-mcard" + (c.inUse ? " cur" : ""),
+        "data-model": c.value
+      },
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-mcrow" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-mct" }, c.label), c.inUse ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-mcuse on" }, "in use") : /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-mcuse", "data-model": c.value, onClick: () => pickVideoModel(c.value) }, "Use this")),
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-mccaps" }, c.caps.map(([t, kind]) => /* @__PURE__ */ react_global_shim_default.createElement("span", { key: t, className: "mgd-cap" + (kind ? " " + kind : "") }, t))),
+      /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-mcm" }, c.modes),
+      /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-mcm mgd-mcprice" }, c.line),
+      /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-mcm mgd-mccover" + (c.cover.ok ? " ok" : "") }, c.cover.text)
+    ))), loomCtx ? /* @__PURE__ */ react_global_shim_default.createElement(
       "button",
       {
         type: "button",
@@ -7671,13 +8014,7 @@ ${"=".repeat(48)}
           "aria-disabled": !ok,
           className: "mgd-stop" + (d === s.duration ? " on" : "") + (ok ? "" : " off"),
           title: d + " seconds" + (ok ? "" : " \u2014 not on this engine"),
-          onClick: () => {
-            if (!ok || d === st.current.duration) return;
-            st.current.duration = d;
-            rerender();
-            reprice();
-            emit7("mg-duration-commit", { duration: d });
-          }
+          onClick: () => pickDuration(d)
         },
         d
       );
@@ -8220,15 +8557,15 @@ ${"=".repeat(48)}
     if (p && p.timer) clearTimeout(p.timer);
     delete pending[id];
   }
-  function register(id, label, count) {
+  function register(id, label, count2) {
     if (!id || seen[id]) return;
     seen[id] = true;
-    apiPost("/api/jobs", { job_id: id, type: "generate", label: label || "Generation", status: "running", count });
+    apiPost("/api/jobs", { job_id: id, type: "generate", label: label || "Generation", status: "running", count: count2 });
     refresh();
   }
-  function track(id, label, cb, count) {
+  function track(id, label, cb, count2) {
     if (!id || seen[id]) return;
-    register(id, label, count);
+    register(id, label, count2);
     poll(id, cb);
   }
   function poll(id, cb, startedAt, tier) {
@@ -13256,7 +13593,7 @@ ${"=".repeat(48)}
   var errUnknownList = (t) => "No list named " + t + ".";
   var errEmptyList = (t) => "The list " + t + " is empty.";
   var errLongList = (t) => "The list " + t + " is too long \u2014 up to " + MAX_LIST_ITEMS + " items of up to " + LIST_ITEM_MAX + " characters.";
-  function fmt4(n) {
+  function fmt6(n) {
     const s = String(Math.trunc(Number(n) || 0));
     const neg = s.startsWith("-");
     const d = neg ? s.slice(1) : s;
@@ -13463,11 +13800,11 @@ ${"=".repeat(48)}
     const title = "Send " + n + " generations?" + (matrix ? " (matrix, queued)" : "");
     let credits;
     if (p.unlimited) credits = "free \xB7 Unlimited Mode";
-    else if (p.mode === "batch") credits = "\u2248 " + fmt4(p.total) + " credits in total \xB7 one task of " + n + " images";
-    else credits = "\u2248 " + fmt4(p.total) + " credits in total \xB7 " + fmt4(p.each) + " each \xD7 " + (jobs2 - (Number(p.covered) || 0));
+    else if (p.mode === "batch") credits = "\u2248 " + fmt6(p.total) + " credits in total \xB7 one task of " + n + " images";
+    else credits = "\u2248 " + fmt6(p.total) + " credits in total \xB7 " + fmt6(p.each) + " each \xD7 " + (jobs2 - (Number(p.covered) || 0));
     let cards;
     const covered = Number(p.covered) || 0;
-    const left = p.card && p.card.left_after != null ? " \xB7 " + fmt4(p.card.left_after) + " left after" : "";
+    const left = p.card && p.card.left_after != null ? " \xB7 " + fmt6(p.card.left_after) + " left after" : "";
     if (p.unlimited) cards = "No free card is used in Unlimited Mode.";
     else if (matrix) cards = "Free cards don\u2019t cover queued matrix runs.";
     else if (covered && p.mode === "batch") cards = "A free card covers this batch" + left;
@@ -13929,7 +14266,7 @@ ${"=".repeat(48)}
   var FIX_MIN_PX = 6;
   var FIX_MAX_BOXES = 20;
   var uid = () => Math.random().toString(36).slice(2, 9);
-  var fmt5 = (s) => {
+  var fmt7 = (s) => {
     s = Math.max(0, Math.round(s || 0));
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   };
@@ -15339,6 +15676,19 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
     const imgCostRef = useRef2(null);
     const editCostRef = useRef2(null);
     const refCostRef = useRef2(null);
+    const [imgQuote, setImgQuote] = useState2(null);
+    const [editQuote, setEditQuote] = useState2(null);
+    const [refQuote, setRefQuote] = useState2(null);
+    const [costEpoch, setCostEpoch] = useState2(0);
+    const bindCost = (refObj, setQ) => (el) => {
+      const was = refObj.current;
+      refObj.current = el;
+      if (el && el !== was) setCostEpoch((n) => n + 1);
+      if (!el) setQ(null);
+    };
+    const imgCostBind = useCallback2(bindCost(imgCostRef, setImgQuote), []);
+    const editCostBind = useCallback2(bindCost(editCostRef, setEditQuote), []);
+    const refCostBind = useCallback2(bindCost(refCostRef, setRefQuote), []);
     const priceInto = (ref, body) => {
       const badge = ref.current;
       if (!badge) return;
@@ -15694,7 +16044,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       }
       const t = setTimeout(() => priceInto(imgCostRef, buildImgGenBody(imgModel, imgLoras, imgAdv, prompt)), 250);
       return () => clearTimeout(t);
-    }, [imgModel, imgLoras, imgAdv, active.c.id, active.c.imgPrompt]);
+    }, [imgModel, imgLoras, imgAdv, active.c.id, active.c.imgPrompt, costEpoch]);
     useEffect2(() => {
       const badge = editCostRef.current;
       if (!badge) return;
@@ -15705,7 +16055,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       }
       const t = setTimeout(() => priceInto(editCostRef, { mode: "edit", source: editSrcMid, instruction, edit_model: "edit-pro" }), 250);
       return () => clearTimeout(t);
-    }, [editSrcMid, active.c.id, active.c.editPrompt]);
+    }, [editSrcMid, active.c.id, active.c.editPrompt, costEpoch]);
     useEffect2(() => {
       const badge = refCostRef.current;
       if (!badge) return;
@@ -15716,7 +16066,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       }
       const t = setTimeout(() => priceInto(refCostRef, { mode: "edit", source: refMids[0], sources: refMids, instruction: prompt, edit_model: "reference-pro" }), 250);
       return () => clearTimeout(t);
-    }, [refMidsKey, active.c.id, active.c.refPrompt]);
+    }, [refMidsKey, active.c.id, active.c.refPrompt, costEpoch]);
     const drawerModeFor2 = (m) => {
       const u = (m || "R2V").toUpperCase();
       return u === "FLF" ? "flf" : u === "I2V" ? "i2v" : "r2v";
@@ -16534,14 +16884,20 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             checked: imgAdv.promptHelper,
             onChange: (ev) => setImgAdv((a) => ({ ...a, promptHelper: ev.target.checked }))
           }
-        ), " Prompt helper")), /* @__PURE__ */ React.createElement(CostBadge_default, { ref: imgCostRef, hint: "Pick a model and write a prompt to see the cost.", cardLabel: "a card" }), /* @__PURE__ */ React.createElement(
-          "button",
+        ), " Prompt helper")), /* @__PURE__ */ React.createElement(CostBadge_default, { ref: imgCostBind, hint: "Pick a model and write a prompt to see the cost.", cardLabel: "a card", onButton: true, onCost: setImgQuote }), /* @__PURE__ */ React.createElement(
+          SpendButton,
           {
             className: "lv-go",
+            offClass: "",
+            ask: false,
+            quote: imgQuote,
+            idle: !imgModel ? "pick a model first" : "write a prompt first",
             disabled: busyI || !imgModel || !(active.c.imgPrompt || "").trim() || anyLoraUnresolved(imgLoras) || imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) || overLoraCap(imgLoras, acct && acct.lora_cap),
-            onClick: () => genImage(active)
-          },
-          busyI ? gi.msg || "generating\u2026" : anyLoraUnresolved(imgLoras) ? "waiting on LoRA\u2026" : imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) ? "incompatible LoRA \u2014 remove or switch base" : overLoraCap(imgLoras, acct && acct.lora_cap) ? "remove " + (imgLoras.length - acct.lora_cap) + " LoRA" + (imgLoras.length - acct.lora_cap === 1 ? "" : "s") + " to continue" : "\u2726 Generate reference image"
+            busy: busyI,
+            busyLabel: gi.msg || "generating\u2026",
+            label: anyLoraUnresolved(imgLoras) ? "waiting on LoRA\u2026" : imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) ? "incompatible LoRA \u2014 remove or switch base" : overLoraCap(imgLoras, acct && acct.lora_cap) ? "remove " + (imgLoras.length - acct.lora_cap) + " LoRA" + (imgLoras.length - acct.lora_cap === 1 ? "" : "s") + " to continue" : "\u2726 Generate reference image",
+            onPress: () => genImage(active)
+          }
         ), gi.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, gi.msg), gi.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gi.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gi.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeImg(routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gi.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeImg(routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gi.routed === "cast" ? " on" : ""), onClick: () => routeImg(routeTarget || active, "cast", active.c.id) }, "cast")), gi.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", gi.routed, sel ? " \xB7 it now feeds this shot's video gen" : "")));
       } else if (tab === "Edit") {
         const ge = genEditState[active.c.id] || {};
@@ -16559,7 +16915,21 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             placeholder: "e.g. make it night, add rain, warmer key light\u2026",
             onChange: (ev) => patch((c) => ({ ...c, editPrompt: ev.target.value }))
           }
-        )), /* @__PURE__ */ React.createElement(CostBadge_default, { ref: editCostRef, hint: "Add a source image and instruction to see the cost.", cardLabel: "an Edit card" }), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busyE || !src, onClick: () => genEdit(active) }, busyE ? ge.msg || "editing\u2026" : "\u2726 Edit the open frame"), ge.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, ge.msg), ge.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + ge.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "cast" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, routeTarget || active, "cast", active.c.id) }, "cast")), ge.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", ge.routed))), editSub === "fixer" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-slab" }, /* @__PURE__ */ React.createElement("div", { className: "lv-slablab" }, "Source \u2014 ", sel ? "this shot's" : "the draft's", " open frame"), src ? /* @__PURE__ */ React.createElement("div", { className: "lv-fixwrap" }, /* @__PURE__ */ React.createElement("img", { ref: fixImgRef, src: "/full/" + encodeURIComponent(src), alt: "source", onLoad: onFixImgLoad, draggable: false }), /* @__PURE__ */ React.createElement(
+        )), /* @__PURE__ */ React.createElement(CostBadge_default, { ref: editCostBind, hint: "Add a source image and instruction to see the cost.", cardLabel: "an Edit card", onButton: true, onCost: setEditQuote }), /* @__PURE__ */ React.createElement(
+          SpendButton,
+          {
+            className: "lv-go",
+            offClass: "",
+            ask: false,
+            quote: editQuote,
+            idle: !src ? "pick an open frame first" : "write an instruction first",
+            disabled: !src,
+            busy: busyE,
+            busyLabel: ge.msg || "editing\u2026",
+            label: "\u2726 Edit the open frame",
+            onPress: () => genEdit(active)
+          }
+        ), ge.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, ge.msg), ge.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + ge.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "cast" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, routeTarget || active, "cast", active.c.id) }, "cast")), ge.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", ge.routed))), editSub === "fixer" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-slab" }, /* @__PURE__ */ React.createElement("div", { className: "lv-slablab" }, "Source \u2014 ", sel ? "this shot's" : "the draft's", " open frame"), src ? /* @__PURE__ */ React.createElement("div", { className: "lv-fixwrap" }, /* @__PURE__ */ React.createElement("img", { ref: fixImgRef, src: "/full/" + encodeURIComponent(src), alt: "source", onLoad: onFixImgLoad, draggable: false }), /* @__PURE__ */ React.createElement(
           "canvas",
           {
             ref: fixCanvasRef,
@@ -16568,17 +16938,23 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             onPointerUp: fixUp,
             onPointerLeave: fixUp
           }
-        )) : /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No open-frame image yet \u2014 ", sel ? /* @__PURE__ */ React.createElement(React.Fragment, null, "route one from the ", /* @__PURE__ */ React.createElement("b", null, "Image"), " tab, or ") : null, "pick it into the open frame above.")), /* @__PURE__ */ React.createElement("div", { className: "lv-slab" }, src && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-fixhint" }, "Drag a box over the hand or face on the source."), /* @__PURE__ */ React.createElement("div", { className: "lv-slabrow" }, /* @__PURE__ */ React.createElement("div", { className: "lv-segtrack", style: { flex: "1 1 auto" } }, /* @__PURE__ */ React.createElement("span", { className: "lv-segbtn" + (fixTag !== "hand" ? " on" : ""), onClick: () => pickFixKind("face") }, "Face"), /* @__PURE__ */ React.createElement("span", { className: "lv-segbtn" + (fixTag === "hand" ? " on" : ""), onClick: () => pickFixKind("hand") }, "Hand")), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", disabled: !fixBoxes.length, onClick: () => setFixBoxes([]) }, "Clear", fixBoxes.length ? " " + fixBoxes.length : ""))), /* @__PURE__ */ React.createElement("div", { className: "lv-fixwarn" }, "A fix can't be card-covered \u2014 it always spends, and always asks first.")), /* @__PURE__ */ React.createElement("div", { className: "lv-dim", style: { padding: "4px 2px" } }, fixPriceEntry && fixPriceEntry.loading ? "checking\u2026" : fixPriceEntry && fixPriceEntry.pr && typeof fixPriceEntry.pr.cost === "number" ? "\u2248 " + Number(fixPriceEntry.pr.cost).toLocaleString() + " credits" + (fixNote ? " \xB7 " + fixNote : "") + " \u2014 never card-covered" : !src ? "Pick a source image first." : !fixBoxes.length ? "Drag at least one box to see the cost." : fixPriceEntry && fixPriceEntry.offPicture ? FIX_NO_BOX_ON_PICTURE : "Couldn't verify the cost \u2014 a Fix always spends credits."), /* @__PURE__ */ React.createElement(
-          "button",
+        )) : /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No open-frame image yet \u2014 ", sel ? /* @__PURE__ */ React.createElement(React.Fragment, null, "route one from the ", /* @__PURE__ */ React.createElement("b", null, "Image"), " tab, or ") : null, "pick it into the open frame above.")), /* @__PURE__ */ React.createElement("div", { className: "lv-slab" }, src && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-fixhint" }, "Drag a box over the hand or face on the source."), /* @__PURE__ */ React.createElement("div", { className: "lv-slabrow" }, /* @__PURE__ */ React.createElement("div", { className: "lv-segtrack", style: { flex: "1 1 auto" } }, /* @__PURE__ */ React.createElement("span", { className: "lv-segbtn" + (fixTag !== "hand" ? " on" : ""), onClick: () => pickFixKind("face") }, "Face"), /* @__PURE__ */ React.createElement("span", { className: "lv-segbtn" + (fixTag === "hand" ? " on" : ""), onClick: () => pickFixKind("hand") }, "Hand")), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", disabled: !fixBoxes.length, onClick: () => setFixBoxes([]) }, "Clear", fixBoxes.length ? " " + fixBoxes.length : ""))), /* @__PURE__ */ React.createElement("div", { className: "lv-fixwarn" }, "A fix can't be card-covered \u2014 it always spends, and always asks first.")), fixNote && fixPriceEntry && fixPriceEntry.pr && typeof fixPriceEntry.pr.cost === "number" ? /* @__PURE__ */ React.createElement("div", { className: "lv-dim", style: { padding: "4px 2px" } }, fixNote) : null, /* @__PURE__ */ React.createElement(
+          SpendButton,
           {
             className: "lv-go",
-            disabled: busyF || !src || !fixBoxes.length || !(scaleBoxes(fixBoxes, fixImgRef.current) || []).length,
-            onClick: () => {
+            offClass: "",
+            ask: false,
+            quote: quoteFromEntry(fixPriceEntry),
+            idle: !src ? "pick a source image first" : !fixBoxes.length ? "drag a box first" : fixPriceEntry && fixPriceEntry.offPicture ? FIX_NO_BOX_ON_PICTURE : "checking the price\u2026",
+            disabled: !src || !fixBoxes.length || !(scaleBoxes(fixBoxes, fixImgRef.current) || []).length,
+            busy: busyF,
+            busyLabel: gf.msg || "fixing\u2026",
+            label: "\u2726 Fix " + fixTag,
+            onPress: () => {
               const scaled = scaleBoxes(fixBoxes, fixImgRef.current);
               if (scaled && scaled.length) genFix(active, scaled);
             }
-          },
-          busyF ? gf.msg || "fixing\u2026" : "\u2726 Fix " + fixTag
+          }
         ), gf.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, gf.msg), gf.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gf.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gf.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genFixState, setGenFixState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gf.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genFixState, setGenFixState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gf.routed === "cast" ? " on" : ""), onClick: () => routeGen(genFixState, setGenFixState, routeTarget || active, "cast", active.c.id) }, "cast")), gf.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", gf.routed))), editSub === "enhance" && /* @__PURE__ */ React.createElement("div", { className: "lv-slab" }, /* @__PURE__ */ React.createElement("div", { className: "lv-slablab" }, "Art filters \xB7 free, no generation"), /* @__PURE__ */ React.createElement("button", { className: "lv-openfilters", onClick: openFilterCompare }, "\u25D0 Open filters"), /* @__PURE__ */ React.createElement("div", { className: "lv-dim", style: { padding: "0 2px" } }, "Gradient overlays, not AI \u2014 applied right in the browser: ", /* @__PURE__ */ React.createElement("b", { style: { color: "var(--text)" } }, "no credits, no request, works offline"), ".")));
       } else if (tab === "Reference") {
         const gr = genRefState[active.c.id] || {};
@@ -16592,7 +16968,21 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             placeholder: "compose a new still from the references\u2026",
             onChange: (ev) => patch((c) => ({ ...c, refPrompt: ev.target.value }))
           }
-        )), /* @__PURE__ */ React.createElement(CostBadge_default, { ref: refCostRef, hint: "Add references and a prompt to see the cost.", cardLabel: "an Edit card" }), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busyR || !refs.length, onClick: () => genRef(active) }, busyR ? gr.msg || "generating\u2026" : "\u2726 Generate from references"), gr.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, gr.msg), gr.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gr.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genRefState, setGenRefState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genRefState, setGenRefState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "cast" ? " on" : ""), onClick: () => routeGen(genRefState, setGenRefState, routeTarget || active, "cast", active.c.id) }, "cast")), gr.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", gr.routed)));
+        )), /* @__PURE__ */ React.createElement(CostBadge_default, { ref: refCostBind, hint: "Add references and a prompt to see the cost.", cardLabel: "an Edit card", onButton: true, onCost: setRefQuote }), /* @__PURE__ */ React.createElement(
+          SpendButton,
+          {
+            className: "lv-go",
+            offClass: "",
+            ask: false,
+            quote: refQuote,
+            idle: !refs.length ? "add a reference first" : "write a prompt first",
+            disabled: !refs.length,
+            busy: busyR,
+            busyLabel: gr.msg || "generating\u2026",
+            label: "\u2726 Generate from references",
+            onPress: () => genRef(active)
+          }
+        ), gr.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, gr.msg), gr.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gr.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genRefState, setGenRefState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genRefState, setGenRefState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "cast" ? " on" : ""), onClick: () => routeGen(genRefState, setGenRefState, routeTarget || active, "cast", active.c.id) }, "cast")), gr.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", gr.routed)));
       } else tabBody = /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "The ", /* @__PURE__ */ React.createElement("b", null, tab), " tab renders the shot on PixAI.");
       genHead = sel ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "lv-genhdtitle", title: sel.code + " \xB7 " + (sel.c.title || "untitled") }, /* @__PURE__ */ React.createElement(Icon, { name: "gear" }), " ", sel.code, " \xB7 ", sel.c.title || "untitled"), /* @__PURE__ */ React.createElement("span", { className: "lv-genhdfill" }), /* @__PURE__ */ React.createElement(
         "button",
@@ -18447,21 +18837,13 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         clearTimeout(t);
       };
     }, [genOpen, genTab, dfLive && dfLive.c.id, dfLive && dfLive.c.refPrompt, refMidsKey]);
-    const priceLine = (priceState, id, noInputMsg) => {
+    const priceNote = (priceState, id) => {
       const p = priceState[id];
-      if (!p) return noInputMsg;
-      if (p.loading) return "checking\u2026";
-      if (p.offPicture) return FIX_NO_BOX_ON_PICTURE;
-      const tally = p.pr ? tallyPrices([p.pr]) : null;
-      const adj = p.pr ? adjustedText(p.pr.adjusted) : "";
-      const fixNote = p.pr && typeof p.pr.cost === "number" ? fixPassNote(p.pr) : "";
-      return (tally ? formatCostEstimate(tally) : "\u2014") + (fixNote ? " \xB7 " + fixNote : "") + (adj ? " \xB7 Adjusted before sending: " + adj : "");
-    };
-    const priceTitle = (priceState, id) => {
-      const p = priceState[id];
-      const tally = p && p.pr ? tallyPrices([p.pr]) : null;
-      const adj = p && p.pr ? adjustedText(p.pr.adjusted) : "";
-      return (tally ? costTooltip(tally) : "") + (adj ? "\nAdjusted before sending: " + adj : "");
+      if (!p || p.loading || !p.pr) return null;
+      const adj = adjustedText(p.pr.adjusted);
+      const fixNote = typeof p.pr.cost === "number" ? fixPassNote(p.pr) : "";
+      const text = [fixNote, adj ? "Adjusted before sending: " + adj : ""].filter(Boolean).join(" \xB7 ");
+      return text ? /* @__PURE__ */ React.createElement("div", { className: "lm-gencost" }, /* @__PURE__ */ React.createElement("span", { className: "lm-hint lm-pricenote" }, text)) : null;
     };
     const [editSub, setEditSub] = useState2("edit");
     const [fixTag, setFixTag] = useState2("face");
@@ -19154,9 +19536,6 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
     })(), genOpen && dfLive && (() => {
       const c = dfLive.c;
       const gp = genPrice[c.id] || {};
-      const tally = gp.pr ? tallyPrices([gp.pr]) : null;
-      const costText = gp.noInput ? "attach a frame or cast image first" : gp.loading ? "checking\u2026" : tally ? formatCostEstimate(tally) : "\u2014";
-      const costTitle = tally ? costTooltip(tally) : "";
       const gsSelf = genState[c.id];
       const genBusy = !!(gsSelf && gsSelf.phase && gsSelf.phase !== "done" && gsSelf.phase !== "error" && gsSelf.phase !== "paused") || goBlocked(c, !!(gsSelf && gsSelf.phase === "paused"));
       const showClose = usesCloseFrame(c.mode);
@@ -19414,15 +19793,20 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             checked: imgAdv.promptHelper,
             onChange: (ev) => setImgAdv((a) => ({ ...a, promptHelper: ev.target.checked }))
           }
-        ), " Prompt helper"), /* @__PURE__ */ React.createElement("div", { className: "lm-gencost" }, /* @__PURE__ */ React.createElement("span", { className: "lm-gencosttext", title: priceTitle(imgPrice, c.id) }, /* @__PURE__ */ React.createElement(CostText, { text: priceLine(imgPrice, c.id, "Pick a model and write a prompt to see the cost.") }))), /* @__PURE__ */ React.createElement(
-          "button",
+        ), " Prompt helper"), priceNote(imgPrice, c.id), /* @__PURE__ */ React.createElement(
+          SpendButton,
           {
-            type: "button",
             className: "lm-genbtn",
+            offClass: "",
+            ask: false,
+            quote: quoteFromEntry(imgPrice[c.id]),
+            idle: !imgModel ? "pick a model first" : "write a prompt first",
             disabled: busyI || !imgModel || !(c.imgPrompt || "").trim() || anyLoraUnresolved(imgLoras) || imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) || overLoraCap(imgLoras, acct && acct.lora_cap),
-            onClick: () => genImage(dfLive)
-          },
-          busyI ? gi.msg || "generating\u2026" : anyLoraUnresolved(imgLoras) ? "waiting on LoRA\u2026" : imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) ? "incompatible LoRA \u2014 remove or switch base" : overLoraCap(imgLoras, acct && acct.lora_cap) ? "remove " + (imgLoras.length - acct.lora_cap) + " LoRA" + (imgLoras.length - acct.lora_cap === 1 ? "" : "s") + " to continue" : "\u2726 Generate reference image"
+            busy: busyI,
+            busyLabel: gi.msg || "generating\u2026",
+            label: anyLoraUnresolved(imgLoras) ? "waiting on LoRA\u2026" : imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) ? "incompatible LoRA \u2014 remove or switch base" : overLoraCap(imgLoras, acct && acct.lora_cap) ? "remove " + (imgLoras.length - acct.lora_cap) + " LoRA" + (imgLoras.length - acct.lora_cap === 1 ? "" : "s") + " to continue" : "\u2726 Generate reference image",
+            onPress: () => genImage(dfLive)
+          }
         ), gi.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lm-gerr" }, gi.msg), gi.mid && /* @__PURE__ */ React.createElement("div", { className: "lm-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gi.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lm-route" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gi.routed === "open" ? " on" : ""), onClick: () => routeImg(dfLive, "open", c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gi.routed === "close" ? " on" : ""), onClick: () => routeImg(dfLive, "close", c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gi.routed === "cast" ? " on" : ""), onClick: () => routeImg(dfLive, "cast", c.id) }, "cast")), gi.routed && /* @__PURE__ */ React.createElement("div", { className: "lm-ok2" }, "\u2713 sent to ", gi.routed, " \u2014 it now feeds this shot's video gen")));
       })(), genTab === "Edit" && (() => {
         const ge = genEditState[c.id] || {};
@@ -19462,7 +19846,21 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             placeholder: "e.g. make it night, add rain, warmer key light\u2026",
             onChange: (ev) => dfPatch((cc) => ({ ...cc, editPrompt: ev.target.value }))
           }
-        ), /* @__PURE__ */ React.createElement("div", { className: "lm-gencost" }, /* @__PURE__ */ React.createElement("span", { className: "lm-gencosttext", title: priceTitle(editPrice, c.id) }, /* @__PURE__ */ React.createElement(CostText, { text: priceLine(editPrice, c.id, "Add a source image and instruction to see the cost.") }))), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-genbtn", disabled: busyE || !src, onClick: () => genEdit(dfLive) }, busyE ? ge.msg || "editing\u2026" : "\u2726 Edit the open frame"), ge.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lm-gerr" }, ge.msg), ge.mid && /* @__PURE__ */ React.createElement("div", { className: "lm-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + ge.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lm-route" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (ge.routed === "open" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, dfLive, "open", c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (ge.routed === "close" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, dfLive, "close", c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (ge.routed === "cast" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, dfLive, "cast", c.id) }, "cast")), ge.routed && /* @__PURE__ */ React.createElement("div", { className: "lm-ok2" }, "\u2713 sent to ", ge.routed))), editSub === "fixer" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Source \u2014 this shot's open frame"), src ? /* @__PURE__ */ React.createElement("div", { className: "lm-fixwrap" }, /* @__PURE__ */ React.createElement(
+        ), priceNote(editPrice, c.id), /* @__PURE__ */ React.createElement(
+          SpendButton,
+          {
+            className: "lm-genbtn",
+            offClass: "",
+            ask: false,
+            quote: quoteFromEntry(editPrice[c.id]),
+            idle: !src ? "pick an open frame first" : "write an instruction first",
+            disabled: !src,
+            busy: busyE,
+            busyLabel: ge.msg || "editing\u2026",
+            label: "\u2726 Edit the open frame",
+            onPress: () => genEdit(dfLive)
+          }
+        ), ge.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lm-gerr" }, ge.msg), ge.mid && /* @__PURE__ */ React.createElement("div", { className: "lm-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + ge.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lm-route" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (ge.routed === "open" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, dfLive, "open", c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (ge.routed === "close" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, dfLive, "close", c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (ge.routed === "cast" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, dfLive, "cast", c.id) }, "cast")), ge.routed && /* @__PURE__ */ React.createElement("div", { className: "lm-ok2" }, "\u2713 sent to ", ge.routed))), editSub === "fixer" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Source \u2014 this shot's open frame"), src ? /* @__PURE__ */ React.createElement("div", { className: "lm-fixwrap" }, /* @__PURE__ */ React.createElement(
           "img",
           {
             ref: fixImgRef,
@@ -19505,19 +19903,24 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           fixBoxes.length,
           " box",
           fixBoxes.length === 1 ? "" : "es"
-        ), /* @__PURE__ */ React.createElement("div", { className: "lm-fixwarn" }, "A fix can't be card-covered \u2014 it always spends, and always asks first."), /* @__PURE__ */ React.createElement("div", { className: "lm-gencost" }, /* @__PURE__ */ React.createElement("span", { className: "lm-gencosttext", title: priceTitle(genFixPrice, c.id) }, /* @__PURE__ */ React.createElement(CostText, { text: priceLine(genFixPrice, c.id, "Drag a box over a hand or face to see the cost.") }))), /* @__PURE__ */ React.createElement(
-          "button",
+        ), /* @__PURE__ */ React.createElement("div", { className: "lm-fixwarn" }, "A fix can't be card-covered \u2014 it always spends, and always asks first."), priceNote(genFixPrice, c.id), /* @__PURE__ */ React.createElement(
+          SpendButton,
           {
-            type: "button",
             className: "lm-genbtn",
-            disabled: busyF || !src || !fixBoxes.length || !(phoneFixBoxes() || []).length,
+            offClass: "",
+            ask: false,
+            quote: quoteFromEntry(genFixPrice[c.id]),
+            idle: !src ? "pick a source image first" : !fixBoxes.length ? "drag a box first" : genFixPrice[c.id] && genFixPrice[c.id].offPicture ? FIX_NO_BOX_ON_PICTURE : "checking the price\u2026",
+            disabled: !src || !fixBoxes.length || !(phoneFixBoxes() || []).length,
+            busy: busyF,
+            busyLabel: gf.msg || "fixing\u2026",
             title: !src ? "This shot has no open-frame image yet" : !fixBoxes.length ? "Drag at least one box" : "Submit the repair \u2014 always spends",
-            onClick: () => {
+            label: "\u2726 Fix " + fixTag,
+            onPress: () => {
               const scaled = phoneFixBoxes();
               if (scaled && scaled.length) genFix(dfLive, scaled);
             }
-          },
-          busyF ? gf.msg || "fixing\u2026" : "\u2726 Fix " + fixTag
+          }
         ), gf.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lm-gerr" }, gf.msg), gf.mid && /* @__PURE__ */ React.createElement("div", { className: "lm-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gf.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lm-route" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gf.routed === "open" ? " on" : ""), onClick: () => routeGen(genFixState, setGenFixState, dfLive, "open", c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gf.routed === "close" ? " on" : ""), onClick: () => routeGen(genFixState, setGenFixState, dfLive, "close", c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gf.routed === "cast" ? " on" : ""), onClick: () => routeGen(genFixState, setGenFixState, dfLive, "cast", c.id) }, "cast")), gf.routed && /* @__PURE__ */ React.createElement("div", { className: "lm-ok2" }, "\u2713 sent to ", gf.routed))), editSub === "enhance" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Art filters \xB7 free, no generation"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-openfiltersbtn", onClick: openFilterCompare }, "\u25C9 Open filters"), /* @__PURE__ */ React.createElement("div", { className: "lm-hint", style: { marginTop: 8 } }, "Gradient overlays, not AI \u2014 applied right in the browser: no credits, no request, works offline.")));
       })(), genTab === "Reference" && (() => {
         const gr = genRefState[c.id] || {};
@@ -19556,7 +19959,21 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             placeholder: "compose a new still from the references\u2026",
             onChange: (ev) => dfPatch((cc) => ({ ...cc, refPrompt: ev.target.value }))
           }
-        ), /* @__PURE__ */ React.createElement("div", { className: "lm-gencost" }, /* @__PURE__ */ React.createElement("span", { className: "lm-gencosttext", title: priceTitle(refPrice, c.id) }, /* @__PURE__ */ React.createElement(CostText, { text: priceLine(refPrice, c.id, "Add references and a prompt to see the cost.") }))), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-genbtn", disabled: busyR || !refs.length, onClick: () => genRef(dfLive) }, busyR ? gr.msg || "generating\u2026" : "\u2726 Generate from references"), gr.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lm-gerr" }, gr.msg), gr.mid && /* @__PURE__ */ React.createElement("div", { className: "lm-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gr.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lm-route" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gr.routed === "open" ? " on" : ""), onClick: () => routeGen(genRefState, setGenRefState, dfLive, "open", c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gr.routed === "close" ? " on" : ""), onClick: () => routeGen(genRefState, setGenRefState, dfLive, "close", c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gr.routed === "cast" ? " on" : ""), onClick: () => routeGen(genRefState, setGenRefState, dfLive, "cast", c.id) }, "cast")), gr.routed && /* @__PURE__ */ React.createElement("div", { className: "lm-ok2" }, "\u2713 sent to ", gr.routed)));
+        ), priceNote(refPrice, c.id), /* @__PURE__ */ React.createElement(
+          SpendButton,
+          {
+            className: "lm-genbtn",
+            offClass: "",
+            ask: false,
+            quote: quoteFromEntry(refPrice[c.id]),
+            idle: !refs.length ? "add a reference first" : "write a prompt first",
+            disabled: !refs.length,
+            busy: busyR,
+            busyLabel: gr.msg || "generating\u2026",
+            label: "\u2726 Generate from references",
+            onPress: () => genRef(dfLive)
+          }
+        ), gr.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lm-gerr" }, gr.msg), gr.mid && /* @__PURE__ */ React.createElement("div", { className: "lm-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gr.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lm-route" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gr.routed === "open" ? " on" : ""), onClick: () => routeGen(genRefState, setGenRefState, dfLive, "open", c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gr.routed === "close" ? " on" : ""), onClick: () => routeGen(genRefState, setGenRefState, dfLive, "close", c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gr.routed === "cast" ? " on" : ""), onClick: () => routeGen(genRefState, setGenRefState, dfLive, "cast", c.id) }, "cast")), gr.routed && /* @__PURE__ */ React.createElement("div", { className: "lm-ok2" }, "\u2713 sent to ", gr.routed)));
       })(), genTab === "Video" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Mode"), /* @__PURE__ */ React.createElement("div", { className: "lm-modechips" }, MODES.map((m) => /* @__PURE__ */ React.createElement(
         "button",
         {
@@ -19650,7 +20067,21 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         /* @__PURE__ */ React.createElement("option", { value: "chinese" }, "Chinese"),
         /* @__PURE__ */ React.createElement("option", { value: "korean" }, "Korean"),
         /* @__PURE__ */ React.createElement("option", { value: "none" }, "SE only (no dialogue)")
-      ), /* @__PURE__ */ React.createElement("div", { className: "lm-gencost" }, /* @__PURE__ */ React.createElement("span", { className: "lm-gencosttext", title: costTitle }, /* @__PURE__ */ React.createElement(CostText, { text: costText })), /* @__PURE__ */ React.createElement("span", { className: "lm-hint" }, "uploads are free \xB7 one job at a time")), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-genbtn", disabled: genBusy || genSubmitting || gp.noInput, onClick: genSubmit }, genBusy ? sendUnclear(c) ? "not confirmed yet \u2014 see below" : sendHeld(c, gsSelf) ? "still being sent \u2014 see below" : "already rendering\u2026" : genSubmitting ? "submitting\u2026" : "Generate video"), wayOutShown(c, gsSelf) ? /* @__PURE__ */ React.createElement(
+      ), /* @__PURE__ */ React.createElement("div", { className: "lm-gencost" }, /* @__PURE__ */ React.createElement("span", { className: "lm-hint" }, "uploads are free \xB7 one job at a time")), /* @__PURE__ */ React.createElement(
+        SpendButton,
+        {
+          className: "lm-genbtn",
+          offClass: "",
+          ask: false,
+          quote: quoteFromEntry(gp),
+          idle: gp.noInput ? "attach a frame or cast image first" : "checking the price\u2026",
+          disabled: !!gp.noInput,
+          busy: genBusy || genSubmitting,
+          busyLabel: genBusy ? sendUnclear(c) ? "not confirmed yet \u2014 see below" : sendHeld(c, gsSelf) ? "still being sent \u2014 see below" : "already rendering\u2026" : "submitting\u2026",
+          label: "Generate video",
+          onPress: genSubmit
+        }
+      ), wayOutShown(c, gsSelf) ? /* @__PURE__ */ React.createElement(
         SendWayOut,
         {
           card: c,
@@ -22301,7 +22732,7 @@ ${emptyPromptShots.length} shot(s) have no prompt text yet: ${emptyPromptShots.m
       setTimeout(() => URL.revokeObjectURL(url), 1e3);
     };
     const exportAll = () => download(
-      buildShotListText(project, fmt5, actLetter, shotText),
+      buildShotListText(project, fmt7, actLetter, shotText),
       `${project.name.replace(/\s+/g, "_")}_shotlist.txt`,
       "text/plain"
     );

@@ -28,6 +28,8 @@ import useLayerHistory from "../hooks/useLayerHistory.js";
 import { askPicker } from "./PickerHost.jsx";
 import { ResultLines } from "./EditTab.jsx";
 import CostBadge from "./CostBadge.jsx";
+import SpendButton from "./SpendButton.jsx";
+import { quoteSends } from "../gen/templateCore.js";
 import { UnlimitedRow, UnlimitedStrip } from "./UnlimitedMode.jsx";
 import { PaletteRow } from "./ColorPalette.jsx";
 import { ListsSheet, RunConfirm, RunModeRow, RunPreview, TokenLine } from "./RunControls.jsx";
@@ -278,6 +280,9 @@ export default function CreateMobile({
   const [sheetHost, setSheetHost] = useState(null);
   useEffect(() => { setSheetHost(document.querySelector(".glm-stage") || document.body); }, []);
   const [flyKind, setFlyKind] = useState("base");
+  // The two badges' last verdicts, for the price inside ✦ Generate / ✦ Edit (SpendButton).
+  const [imgQuote, setImgQuote] = useState(null);
+  const [editQuote, setEditQuote] = useState(null);
   const [editSub, setEditSub] = useState("edit"); // Edit's own Edit/Fixer sub-tab -- local, no draft to lose
   // Advanced screen -- local (nothing here needs to survive a Gallery/Control
   // tab switch the way the composer drafts do; see header comment). Mirrors
@@ -500,7 +505,7 @@ export default function CreateMobile({
                   </MobileSheet>, sheetHost) : null}
 
                 <span className="gd-cost cm-cost">
-                  <CostBadge ref={editCostRef} hint="Pick an image to edit to see the cost." />
+                  <CostBadge ref={editCostRef} hint="Pick an image to edit to see the cost." onButton onCost={setEditQuote} />
                 </span>
 
                 {edit.gate && <div className="cm-gatenote">{edit.gate}</div>}
@@ -511,13 +516,12 @@ export default function CreateMobile({
                   </div>
                 )}
 
-                {/* Price-probe verdict ANDed into the existing gate -- same rule as Image mode. */}
-                <button type="button" className={"cm-generate" + (edit.gate || edit.busy || !edit.canSubmit ? " off" : "")}
-                  disabled={!!edit.gate || edit.busy || !edit.canSubmit}
+                {/* Price-probe verdict ANDed into the existing gate -- same rule as Image mode.
+                    The price rides inside the button (look pick round 2, topic 1 B). */}
+                <SpendButton className="cm-generate" quote={editQuote} idle="pick an image first"
+                  disabled={!!edit.gate || !edit.canSubmit} busy={edit.busy} busyLabel="◌ Queued…"
                   title={edit.gate || "Submit the edit — this spends credits or a card"}
-                  onClick={edit.run}>
-                  {edit.busy ? "◌ Queued…" : "✦ Edit"}
-                </button>
+                  label="✦ Edit" onPress={edit.run} />
               </>
             )}
 
@@ -700,7 +704,8 @@ export default function CreateMobile({
             </button>
 
             <span className="gd-cost cm-cost">
-              <CostBadge ref={costRef} laneHeld={ctxOn && unlimitedOffered(m)} />
+              <CostBadge ref={costRef} laneHeld={ctxOn && unlimitedOffered(m)} onButton onCost={setImgQuote}
+                sends={run ? quoteSends(run.plan) : 1} />
             </span>
 
             {gate && <div className="cm-gatenote">{gate}</div>}
@@ -727,14 +732,18 @@ export default function CreateMobile({
             {/* Gated on the price probe's verdict IN ADDITION to goGate/busy: the quote on the
                 badge must have been priced off the payload this click submits. generate()
                 refuses the same way (gen/priceProbeCore.js). */}
-            <button type="button" className={"cm-generate" + (gate || busy || !priceOk ? " off" : "")}
-              disabled={!!gate || busy || !priceOk}
+            {/* The price rides inside the button (look pick round 2, topic 1 B); a send of more
+                than one already asks through the Run confirm, so only a single send takes the
+                one-time ask. */}
+            <SpendButton className="cm-generate" quote={imgQuote} idle="pick a model first"
+              sends={run ? quoteSends(run.plan) : 1}
+              disabled={!!gate || !priceOk} busy={busy} busyLabel="◌ Queued…"
+              ask={!(run && run.route === "confirm")}
               title={gate || (s.unlimited ? "Submit in Unlimited Mode"
                 : run && run.images > 1 ? "Send " + run.images + " — a confirm shows the total first"
                   : "Submit — this spends credits or a card")}
-              onClick={() => generate(loraCap)}>
-              {busy ? "◌ Queued…" : "✦ Generate" + (run && run.images > 1 ? " " + run.images : "")}
-            </button>
+              label={"✦ Generate" + (run && run.images > 1 ? " " + run.images : "")}
+              onPress={() => generate(loraCap)} />
           </>
         )}
       </div>

@@ -4,6 +4,18 @@ import { submitTask, useResultLines } from "../gen/submitTask.js";
 import { ResultLines } from "./EditTab.jsx";
 import { groupFamilies } from "../gen/emotionFamilies.js";
 import { apiGet } from "../api.js";
+import SpendButton from "./SpendButton.jsx";
+
+/* The preset list's own price for the picked preset, in the shape <SpendButton> reads (a
+   <CostBadge> onCost detail): a free card, a credit price, still loading, or no price at all
+   -- which is the board's "Couldn't check the price", dim. */
+export function presetQuote(loading, p) {
+  if (loading) return { state: "checking" };
+  if (!p) return null;
+  if (p.free_card) return { state: "free", raw: {} };
+  if (p.price != null && isFinite(Number(p.price))) return { state: "paid", cost: Number(p.price), raw: {} };
+  return { state: "error", raw: {} };
+}
 
 /* The Enhance sub-tab, rebuilt to `moonglade-internal/design/enhance/Enhance Family
    Handoff.dc.html` comps A2 (drawer) and A3 (Change Emotion), picks 1c / 1f, committed
@@ -232,14 +244,14 @@ export default function EnhanceTab({ source, armed, onOpenFilters }) {
           <span>Free art filters</span><span className="go">Open the Darkroom ▸</span>
         </button>
         <ResultLines lines={lines} />
-        <button type="button" className={"mgdock-enhgen" + (genOff ? " off" : "")} disabled={genOff}
+        {/* The price rides inside the button as its second line (look pick round 2, topic 1
+            B), read off the preset list's own price; the confirm before each send stays. */}
+        <SpendButton className="mgdock-enhgen" quote={presetQuote(loading, priced)} ask={false}
+          idle="pick a preset first" disabled={genOff}
           title={!source ? "Add a source image in SOURCE above"
             : needEmotion ? "Pick a target expression first"
               : loading ? "Pricing…" : "Generate " + selRow.label + " — runs on the mirror"}
-          onClick={run}>
-          <span>&#10022; Enhance {selRow ? selRow.label : ""}</span>
-          <span className="mgdock-enhgencost">{loading ? "…" : cost(priced)}</span>
-        </button>
+          label={<>&#10022; Enhance {selRow ? selRow.label : ""}</>} onPress={run} />
       </div>
     </>
   );

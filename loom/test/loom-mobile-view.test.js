@@ -18,6 +18,7 @@ import { emptyFrameFix } from "../src/loom-frames-core.js";
 import { LOOM_VIEW_KEY } from "../src/loom-url.js";
 import { FIX_COLORS, FIX_MIN_PX, FIX_MAX_BOXES, FIX_NO_BOX_ON_PICTURE, scaleBoxes, boxesToOriginal } from "../../gallery/src/gen/editCore.js";
 import { MODELS } from "../../gallery/src/gen/videoDrawerCore.js";
+import { spendView } from "../../gallery/src/gen/spendButtonCore.js";
 
 /* LOOM MOBILE, RENDERED (the phone board/reel view in loom/master-storyboard.jsx, its wiring in
    App(), and the Mobile-view switch on both sides).
@@ -199,8 +200,23 @@ const textOf = (n) => (n == null || typeof n === "boolean" ? "" : typeof n === "
 const tree = (x) => (x && x.tree !== undefined ? x.tree : x);
 const classOf = (e) => (typeof e.props.className === "string" ? e.props.className.split(/\s+/) : []);
 const cls = (x, c) => els(tree(x)).filter((e) => classOf(e).includes(c));
-const btns = (x, label) => els(tree(x)).filter((e) => e.type === "button"
+/* A send button is a <SpendButton> since look pick round 2 (topic 1 B, 2026-11-19): the harness
+   renders no child component, so its element is read as the <button> it draws -- the label (or
+   its busy label), pressed through onPress, and dim on the host's own gates OR while its quote is
+   not priced, the button's own rule (spendButtonCore.spendView, the real code). */
+const isSpend = (e) => typeof e.type === "function" && /^SpendButton\d*$/.test(e.type.name || "");
+const asButton = (e) => (!isSpend(e) ? e : {
+  ...e, type: "button",
+  props: { ...e.props, onClick: e.props.onPress,
+    disabled: !!(e.props.disabled || e.props.busy) || !spendView(e.props.quote, e.props).priced,
+    children: e.props.busy && e.props.busyLabel ? e.props.busyLabel : e.props.label },
+});
+/** A send button's second line -- the price, or why there is none -- as spendView words it. */
+const spendLine = (e) => spendView(e.props.quote, e.props).sub;
+const btns = (x, label) => els(tree(x)).map(asButton).filter((e) => e.type === "button"
   && (label instanceof RegExp ? label.test(textOf(e)) : textOf(e).includes(label)));
+const spendOf = (x, label) => one(els(tree(x)).filter((e) => isSpend(e)
+  && (label instanceof RegExp ? label.test(textOf(e.props.label)) : textOf(e.props.label).includes(label))), "send button " + label);
 const btn = (x, label) => one(btns(x, label), "button " + label);
 const ofType = (x, type) => els(tree(x)).filter((e) => e.type === type);
 /** The static markup of what the harness rendered, parsed for queries. */
@@ -840,6 +856,9 @@ describe("scope discipline: every screen of the locked design is built (Loom Mob
    FIX_COLORS/FIX_MIN_PX/FIX_MAX_BOXES/scaleBoxes values (editCore.js), the same Pointer-Events
    box drawing, and a confirm-gated submit through /api/fix (genFix, useGenerationPipeline). */
 const fixerState = (extra = {}) => ({ dfOpen: true, genOpen: true, genTab: "Edit", editSub: "fixer", ...extra });
+// A settled Fix quote for the bound shot: since look pick round 2 (topic 1 B) a send button
+// stays dim until its price is known, so a test about what a LIVE button sends starts priced.
+const PRICED_FIX = { c1: { loading: false, pr: { cost: 4800, free: false } } };
 // A canvas and its <img> as a browser would lay them out: the canvas at (100, 50) on screen.
 function fakeCanvas() {
   const ops = [];
@@ -1092,12 +1111,12 @@ describe("Fixer: the real, mandatory spend warning and confirm-gated submit thro
     const box = { x: 1, y: 1, w: 9, h: 9, tag: "face" };
     const busy = fixer({ state: { fixBoxes: [box] }, props: { genFixState: { c1: { phase: "running", msg: "fixing 40%" } } } });
     assert.equal(one(btns(busy, "fixing 40%")).props.disabled, true);
-    assert.equal(btn(fixer({ state: { fixBoxes: [box] } }), "✦ Fix face").props.disabled, false);
+    assert.equal(btn(fixer({ state: { fixBoxes: [box], genFixPrice: PRICED_FIX } }), "✦ Fix face").props.disabled, false);
   });
 
   test("the Fix button submits the live shot and its boxes in ORIGINAL-image pixels through genFix -- once, and only when it can", () => {
     const boxes = [{ x: 40, y: 20, w: 100, h: 60, tag: "hand" }];
-    const h = fixer({ state: { fixBoxes: boxes }, refs: { fixImgRef: fakeImg({ naturalWidth: 2000, clientWidth: 400 }) } });
+    const h = fixer({ state: { fixBoxes: boxes, genFixPrice: PRICED_FIX }, refs: { fixImgRef: fakeImg({ naturalWidth: 2000, clientWidth: 400 }) } });
     const go = btn(h, "✦ Fix face");
     assert.equal(go.props.disabled, false);
     h.click(go);
@@ -1296,13 +1315,14 @@ describe("Fixer: real cost PREVIEW and real result routing, mirroring the Edit/R
     h.flush();
     t.mock.timers.tick(1000);
     assert.deepEqual(fetched("/api/price"), [], "no quote off display pixels");
-    assert.equal(one(markup(h).byClass("lm-gencosttext")).text, "checking…");
+    assert.equal(spendLine(spendOf(h, "✦ Fix")), "checking the price…");
     assert.equal(btn(h, "✦ Fix face").props.disabled, true);
   });
 
-  test("the picture's load after that early return re-prices, and ✦ Fix comes back (review 2, F1)", (t) => {
+  test("the picture's load after that early return re-prices, and ✦ Fix comes back (review 2, F1)", async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     browser.trail = [];
+    browser.reply = (url) => (url === "/api/price" ? { cost: 4800, free: false } : {});
     const img = fakeImg({ naturalWidth: 0, naturalHeight: 0 });
     const h = fixer({ refs: { fixImgRef: img } });
     h.flush();
@@ -1311,7 +1331,7 @@ describe("Fixer: real cost PREVIEW and real result routing, mirroring the Edit/R
     t.mock.timers.tick(1000);
     assert.equal(h.state("fixBoxes").length, 1);
     assert.deepEqual(fetched("/api/price"), [], "nothing priced before the picture can say its size");
-    assert.equal(one(markup(h).byClass("lm-gencosttext")).text, "checking…");
+    assert.equal(spendLine(spendOf(h, "✦ Fix")), "checking the price…");
     assert.equal(btn(h, "✦ Fix face").props.disabled, true);
     // the picture decodes: its load event is the only thing that changes
     img.naturalWidth = 1600; img.naturalHeight = 1200;
@@ -1321,7 +1341,11 @@ describe("Fixer: real cost PREVIEW and real result routing, mirroring the Edit/R
     t.mock.timers.tick(250);
     assert.deepEqual(fetched("/api/price").map((x) => x[2].boxes),
       [[{ x: 40, y: 40, width: 200, height: 240, tag: "face" }]], "the load re-ran the price");
+    // the answer lands: priced, so ✦ Fix is live again, and says what it spends
+    await settle();
+    if (h.stale) h.render();
     assert.equal(btn(h, "✦ Fix face").props.disabled, false, "and ✦ Fix is on again");
+    assert.equal(spendLine(spendOf(h, "✦ Fix")), "≈ 4,800 credits");
   });
 
   test("boxes with none on the picture (all on letterbox bars) price nothing, shut ✦ Fix and say why (review 2, F3)", (t) => {
@@ -1337,26 +1361,32 @@ describe("Fixer: real cost PREVIEW and real result routing, mirroring the Edit/R
     t.mock.timers.tick(1000);
     assert.deepEqual(h.state("fixBoxes"), [onBar], "the box is drawn (and still there)");
     assert.deepEqual(fetched("/api/price"), []);
-    assert.equal(one(markup(h).byClass("lm-gencosttext")).text, FIX_NO_BOX_ON_PICTURE);
+    assert.equal(spendLine(spendOf(h, "✦ Fix")), FIX_NO_BOX_ON_PICTURE);
     const go = btn(h, "✦ Fix face");
     assert.equal(go.props.disabled, true);
     h.click(go);
     assert.deepEqual(h.calls("genFix"), []);
     // beside a box on the picture, only the real one is sent -- the confirm counts 1 area
     const real = { x: 180, y: 100, w: 40, h: 40, tag: "face" };
-    const both = fixer({ state: { fixBoxes: [onBar, real] }, refs: { fixImgRef: img } });
+    const both = fixer({ state: { fixBoxes: [onBar, real], genFixPrice: PRICED_FIX }, refs: { fixImgRef: img } });
     both.click(btn(both, "✦ Fix face"));
     assert.equal(both.calls("genFix")[0][1].length, 1);
   });
 
-  test("a Fix answer's per-pass reading rides the cost line; a failed quote never shows a number", () => {
-    const line = (genFixPrice) => one(markup(fixer({ state: { genFixPrice } })).byClass("lm-gencosttext")).text;
+  // 2026-11-19 (look pick round 2, topic 1 B): the price is ✦ Fix's own second line; the pass
+  // reading stays as the one line above it, and only on a settled price.
+  test("a Fix answer's per-pass reading rides above a priced ✦ Fix; a failed quote never shows a number", () => {
+    const view = (genFixPrice) => fixer({ state: { genFixPrice, fixBoxes: [{ x: 1, y: 1, w: 9, h: 9, tag: "face" }] } });
+    const notes = (h) => markup(h).byClass("lm-pricenote").map((e) => e.text);
     const pr = { cost: 4800, free: false, original_cost: 8000, fix_pass: "face", fix_boxes: 1 };
-    assert.equal(line({ c1: { loading: false, pr } }), formatCostEstimate(tallyPrices([pr])) + " · face pass · 40% off 8,000");
+    const priced = view({ c1: { loading: false, pr } });
+    assert.equal(spendLine(spendOf(priced, "✦ Fix")), "≈ 4,800 credits");
+    assert.deepEqual(notes(priced), ["face pass · 40% off 8,000"]);
     const failed = { cost: null, free: false, fix_pass: "face", fix_boxes: 1 };
-    const shown = line({ c1: { loading: false, pr: failed } });
-    assert.doesNotMatch(shown, /4,800|4800|pass/, "a failed quote carries no stale number and no pass words");
-    assert.equal(shown, formatCostEstimate(tallyPrices([failed])));
+    const bad = view({ c1: { loading: false, pr: failed } });
+    assert.equal(spendLine(spendOf(bad, "✦ Fix")), "Couldn't check the price");
+    assert.equal(btn(bad, "✦ Fix face").props.disabled, true, "a failed check leaves ✦ Fix dim");
+    assert.deepEqual(notes(bad), [], "a failed quote carries no stale number and no pass words");
   });
 
   // Kept as a source pin: ONE helper for both phone call sites, which no render can show.
@@ -1372,14 +1402,13 @@ describe("Fixer: real cost PREVIEW and real result routing, mirroring the Edit/R
     assert.doesNotMatch(loomMobileSrc, /scaleFixBoxes/);
   });
 
-  test("the preview line uses the same priceLine/priceTitle as the other tabs: the tally, its tooltip, or a hint", () => {
+  test("✦ Fix reads its price the same way as the other tabs: the price, checking, or why there is none", () => {
     const pr = { cost: 850, free: false, cards: [], note: "" };
-    const tally = tallyPrices([pr]);
-    const line = (genFixPrice) => one(markup(fixer({ state: { genFixPrice } })).byClass("lm-gencosttext"));
-    assert.equal(line({ c1: { loading: false, pr } }).text, formatCostEstimate(tally));
-    assert.equal(line({ c1: { loading: false, pr } }).attr("title"), costTooltip(tally));
-    assert.equal(line({ c1: { loading: true } }).text, "checking…");
-    assert.equal(line({}).text, "Drag a box over a hand or face to see the cost.");
+    const box = { x: 1, y: 1, w: 9, h: 9, tag: "face" };
+    const line = (genFixPrice, fixBoxes = [box]) => spendLine(spendOf(fixer({ state: { genFixPrice, fixBoxes } }), "✦ Fix"));
+    assert.equal(line({ c1: { loading: false, pr } }), "≈ 850 credits");
+    assert.equal(line({ c1: { loading: true } }), "checking the price…");
+    assert.equal(line({}, []), "drag a box first");
   });
 
   test("a finished Fix routes into open/close frame or cast through the shared routeGen", () => {
@@ -1660,18 +1689,21 @@ describe("Generate: real submit, real cost preview, real generation-state tracki
     assert.deepEqual(lang.byAttr("selected").map((o) => o.attr("value")), ["english"]);
   });
 
-  test("the cost line is tallyPrices/formatCostEstimate/costTooltip over the shot's price -- or says why there is none", () => {
+  // 2026-11-19 (look pick round 2, topic 1 B): the shot's price is "Generate video"'s own second
+  // line, and the button stays dim until it is priced.
+  test("Generate video carries the shot's price -- or says why there is none, dim", () => {
     const pr = { cost: 1200, free: false, cards: [], note: "" };
-    const tally = tallyPrices([pr]);
-    const cost = (genPrice) => one(markup(gen({ state: { genPrice } })).byClass("lm-gencosttext"));
-    assert.equal(cost({ c1: { loading: false, pr } }).text, formatCostEstimate(tally));
-    assert.equal(cost({ c1: { loading: false, pr } }).attr("title"), costTooltip(tally));
+    const go = (genPrice) => spendOf(gen({ state: { genPrice } }), "Generate video");
+    assert.equal(spendLine(go({ c1: { loading: false, pr } })), "≈ 1,200 credits");
     const free = { cost: 0, free: true, cards: [{}], note: "" };
-    assert.equal(cost({ c1: { loading: false, pr: free } }).text, formatCostEstimate(tallyPrices([free])));
-    assert.equal(cost({ c1: { loading: true } }).text, "checking…");
-    assert.equal(cost({ c1: { noInput: true } }).text, "attach a frame or cast image first");
-    assert.equal(cost({}).text, "—", "unpriced is never a number");
+    assert.equal(spendLine(go({ c1: { loading: false, pr: free } })), "Free · uses 1 card");
+    assert.equal(spendLine(go({ c1: { loading: true } })), "checking the price…");
+    assert.equal(spendLine(go({ c1: { noInput: true } })), "attach a frame or cast image first");
+    assert.equal(spendLine(go({ c1: { loading: false, pr: null } })), "Couldn't check the price");
+    assert.doesNotMatch(spendLine(go({})), /\d/, "unpriced is never a number");
     assert.equal(btn(gen({ state: { genPrice: { c1: { noInput: true } } } }), "Generate video").props.disabled, true);
+    assert.equal(btn(gen({ state: { genPrice: { c1: { loading: true } } } }), "Generate video").props.disabled, true);
+    assert.equal(btn(gen({ state: { genPrice: { c1: { loading: false, pr } } } }), "Generate video").props.disabled, false);
   });
 
   test("the Video tab's cost line is priced by priceShot(dfLive), debounced, and never for a shot with nothing to send", async (t) => {
@@ -1680,20 +1712,20 @@ describe("Generate: real submit, real cost preview, real generation-state tracki
     const asked = [];
     const h = gen({ props: { priceShot: (entry) => { asked.push(entry); return Promise.resolve(pr); } } });
     h.flush();
-    assert.equal(one(markup(h).byClass("lm-gencosttext")).text, "checking…");
+    assert.equal(spendLine(spendOf(h, "Generate video")), "checking the price…");
     t.mock.timers.tick(299);
     assert.deepEqual(asked, []);
     t.mock.timers.tick(1);
     assert.deepEqual(asked, [h.entry("c1")], "the live shot itself");
     await settle(); h.render();
-    assert.equal(one(markup(h).byClass("lm-gencosttext")).text, formatCostEstimate(tallyPrices([pr])));
+    assert.equal(spendLine(spendOf(h, "Generate video")), "≈ 400 credits");
     // The empty FLF shot has no frame and no cast: nothing is priced, and the button stays shut.
     const asked3 = [];
     const e = gen({ sel: "c3", props: { priceShot: (x) => { asked3.push(x); return Promise.resolve(pr); } } });
     e.flush();
     t.mock.timers.tick(1000);
     assert.deepEqual(asked3, []);
-    assert.equal(one(markup(e).byClass("lm-gencosttext")).text, "attach a frame or cast image first");
+    assert.equal(spendLine(spendOf(e, "Generate video")), "attach a frame or cast image first");
     // A shot that is NOT the board's first, with something to send: it is the one priced.
     const asked2 = [];
     const second = gen({ sel: "c2", board: makeBoard({ c2: { openFrame: frame({ mediaId: "100002" }) } }),
@@ -1723,7 +1755,7 @@ describe("Generate: real submit, real cost preview, real generation-state tracki
   // Kept as a source pin: what the submit must NOT do (a second confirm skipped, a second POST).
   test("the real submit button calls generateShot(dfLive) UNMODIFIED -- no skipConfirm, no new confirm dialog, no new endpoint", () => {
     const genBlock = loomMobileSrc.slice(loomMobileSrc.indexOf("genOpen && dfLive && (() => {"));
-    assert.match(genBlock, /className="lm-genbtn"[\s\S]*?onClick=\{genSubmit\}/);
+    assert.match(genBlock, /<SpendButton className="lm-genbtn"[\s\S]*?onPress=\{genSubmit\}/);
     assert.doesNotMatch(loomMobileSrc, /generateShot\(dfLive, \{\s*skipConfirm/,
       "a single, owner-initiated tap must still go through generateShot's own real price-check + confirm, same as it would for any other real single submit");
     assert.match(loomMobileSrc, /r = await generateShot\(dfLive\);/);
@@ -1860,7 +1892,7 @@ describe("Image/Edit/Reference tabs -- LoomV2's own GEN_ICONS rail, ported", () 
       t.mock.timers.tick(250);
       bodies[tab] = fetched("/api/price").map((x) => x[2]);
       await settle(); h.render();
-      assert.equal(one(markup(h).byClass("lm-gencosttext")).text, formatCostEstimate(tallyPrices([pr])), tab);
+      assert.equal(spendLine(spendOf(h, /^✦ /)), "≈ 70 credits", tab);
     }
     assert.deepEqual(bodies.Image, [JSON.parse(JSON.stringify(buildImgGenBody(model, [], IMG_ADV, "neon alley")))]);
     assert.deepEqual(bodies.Edit, [{ mode: "edit", source: MID.open1, instruction: "make it night", edit_model: "edit-pro" }]);
