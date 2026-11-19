@@ -1757,56 +1757,40 @@ var LoomBundle = (() => {
     });
     return { mids: byAct.reduce((all, b) => all.concat(b.mids), []), byAct, imported };
   };
-  var tallySpend = (collected, rows) => {
-    const src = rows || {};
-    const col = collected || { byAct: [], imported: 0 };
-    const counted = /* @__PURE__ */ Object.create(null);
-    const zeroB = () => ({
-      paid: 0,
-      credits: 0,
-      zero: 0,
-      unpriced: 0,
-      missing: 0,
-      results: 0,
-      sharedElsewhere: 0,
-      sharedWith: ""
-    });
-    const total = zeroB();
-    const byAct = (col.byAct || []).map((b) => {
-      const acc = zeroB();
-      (b.mids || []).forEach((m) => {
-        const row = Object.prototype.hasOwnProperty.call(src, m) ? src[m] || {} : null;
-        const add = (k, n) => {
-          acc[k] += n;
-          total[k] += n;
-        };
-        add("results", 1);
-        if (row === null) {
-          add("missing", 1);
-          return;
-        }
-        const tid = String(row.task_id || "");
-        if (tid && Object.prototype.hasOwnProperty.call(counted, tid)) {
-          add("sharedElsewhere", 1);
-          if (!acc.sharedWith) acc.sharedWith = counted[tid];
-          return;
-        }
-        if (tid) counted[tid] = b.name || "";
-        const pc = row.paid_credit;
-        if (typeof pc !== "number" || !isFinite(pc)) {
-          add("unpriced", 1);
-          return;
-        }
-        if (pc <= 0) {
-          add("zero", 1);
-          return;
-        }
-        add("paid", 1);
-        add("credits", pc);
+  var tallySends = (sends, project) => {
+    const zeroB = () => ({ paid: 0, credits: 0, zero: 0, unpriced: 0, missing: 0, results: 0 });
+    const actOf = /* @__PURE__ */ Object.create(null);
+    const byAct = ((project || {}).acts || []).map((a, ai) => {
+      const b = { ...zeroB(), name: (a || {}).name || `Act ${ai + 1}` };
+      ((a || {}).cards || []).forEach((c) => {
+        if (c && c.id != null && c.id !== "") actOf[String(c.id)] = b;
       });
-      return { ...acc, name: b.name };
+      return b;
     });
-    return { ...total, imported: col.imported || 0, byAct };
+    const offBoard = { ...zeroB(), name: "Drafts and deleted shots" };
+    const total = zeroB();
+    (Array.isArray(sends) ? sends : []).forEach((x) => {
+      if (!x || typeof x !== "object") return;
+      const card = String(x.card == null ? "" : x.card);
+      const b = card && Object.prototype.hasOwnProperty.call(actOf, card) ? actOf[card] : offBoard;
+      const add = (k, n) => {
+        b[k] += n;
+        total[k] += n;
+      };
+      add("results", 1);
+      const c = x.cost;
+      if (typeof c !== "number" || !isFinite(c)) {
+        add("unpriced", 1);
+        return;
+      }
+      if (c <= 0) {
+        add("zero", 1);
+        return;
+      }
+      add("paid", 1);
+      add("credits", c);
+    });
+    return { ...total, imported: 0, byAct: offBoard.results ? byAct.concat([offBoard]) : byAct };
   };
   var formatSpend = ({ paid = 0, credits = 0, zero = 0, unpriced = 0, missing = 0 } = {}) => {
     const unknown = unpriced + missing;
@@ -1846,19 +1830,11 @@ var LoomBundle = (() => {
   };
   var spendPillShown = (s) => ((s || {}).results || 0) > 0 || ((s || {}).imported || 0) > 0;
   var spendTooltip = (s = {}) => {
-    const paid = s.paid || 0, credits = s.credits || 0;
-    const head = `Spent so far: ${paid} paid (~${Math.round(credits).toLocaleString()} credits), ${s.zero || 0} free-card/zero-cost, ${s.unpriced || 0} unpriced, ${s.missing || 0} with no catalog row` + (s.imported ? `, plus ${s.imported} imported clip(s) not counted \u2014 paid for elsewhere` : "") + ".";
+    const n = s.results || 0, paid = s.paid || 0, credits = s.credits || 0;
+    const head = `Spent so far: ${n} render${n === 1 ? "" : "s"} sent from this board \u2014 ${paid} paid (~${Math.round(credits).toLocaleString()} credits), ${s.zero || 0} covered by a free card, ${s.unpriced || 0} with the charge not known yet` + (s.imported ? `, plus ${s.imported} imported clip(s) not counted \u2014 paid for elsewhere` : "") + ".";
     const acts = (s.byAct || []).filter((a) => a.results > 0);
-    const actLine = (a) => {
-      const own2 = formatSpend(a);
-      if (own2) return own2;
-      if (a.sharedElsewhere > 0) {
-        return a.sharedWith ? `counted in ${a.sharedWith}` : "counted in an earlier act";
-      }
-      return "0 cr";
-    };
-    const lines = acts.length > 1 ? acts.map((a) => `  ${a.name}: ${actLine(a)}`) : [];
-    return [head].concat(lines).join("\n") + "\nCounts every attempt this board recorded; re-rolls from before the ledger existed aren't in it.";
+    const lines = acts.length > 1 ? acts.map((a) => `  ${a.name}: ${formatSpend(a) || "0 cr"}`) : [];
+    return [head].concat(lines).join("\n") + "\nCounts only renders sent from this board. A clip linked, imported or remixed onto a shot is never counted; renders from before 29 Sep 2026 count where the board kept their task.";
   };
   var durOf = (c) => {
     const a = Number(c.actualDur);
@@ -7226,7 +7202,8 @@ ${"=".repeat(48)}
       const sent = loomIds ? {
         ...p,
         submit_id: submitId,
-        ...target.draft ? {} : { loom_target: { board_id: target.board_id, card_id: target.card_id } },
+        // A draft has no shot yet, so it names its board alone: the board's send record counts it.
+        ...target.draft ? { loom_board: target.board_id } : { loom_target: { board_id: target.board_id, card_id: target.card_id } },
         ...expectFree ? { expect_free: true } : {}
       } : expectFree ? { ...p, expect_free: true } : p;
       let answer = null;
@@ -21983,19 +21960,18 @@ ${emptyPromptShots.length} shot(s) have no prompt text yet: ${emptyPromptShots.m
       return r && !r.loading;
     }).map((e) => priceCache[e.c.id].pr);
     const costEstimate = { ...tallyPrices(settled), pending: pending3, notDoneCount: notDone.length };
-    const [spendRows, setSpendRows] = useState2({});
+    const [spendSends, setSpendSends] = useState2([]);
     const [spendStatus, setSpendStatus] = useState2("loading");
     const collectedSpend = useMemo2(() => collectSpendMids(project), [project]);
-    const spendKey = collectedSpend.mids.join(",");
+    const spendKey = String(activeId || "") + "|" + collectedSpend.mids.join(",");
     const spendFetchedRef = useRef2(null);
     const spendGate = useRef2(null);
     if (!spendGate.current) spendGate.current = makeLatestOnly();
     const loadSpend = useCallback2((force) => {
-      const mids = collectedSpend.mids;
-      if (!mids.length) {
+      if (!activeId) {
         spendGate.current.cancel();
         spendFetchedRef.current = "";
-        setSpendRows({});
+        setSpendSends([]);
         setSpendStatus("ok");
         return;
       }
@@ -22006,15 +21982,15 @@ ${emptyPromptShots.length} shot(s) have no prompt text yet: ${emptyPromptShots.m
       fetch("/api/loom/spend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ media_ids: mids })
+        body: JSON.stringify({ board_id: activeId })
       }).then((r) => r.json()).then((d) => {
         if (!spendGate.current.wins(token)) return;
         if (spendFetchedRef.current !== spendKey) return;
-        if (!d || d.error || !d.rows) {
+        if (!d || d.error || !Array.isArray(d.sends)) {
           setSpendStatus("error");
           return;
         }
-        setSpendRows(d.rows);
+        setSpendSends(d.sends);
         setSpendStatus("ok");
       }).catch(() => {
         if (!spendGate.current.wins(token)) return;
@@ -22028,7 +22004,7 @@ ${emptyPromptShots.length} shot(s) have no prompt text yet: ${emptyPromptShots.m
       loadSpend();
     }, [spendKey]);
     const refreshSpend = useCallback2(() => loadSpend(true), [loadSpend]);
-    const spend = { ...tallySpend(collectedSpend, spendRows), status: spendStatus };
+    const spend = { ...tallySends(spendSends, project), imported: collectedSpend.imported, status: spendStatus };
     return {
       genState,
       setGenState,

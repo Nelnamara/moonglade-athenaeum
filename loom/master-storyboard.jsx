@@ -17,7 +17,7 @@ import {
   formatCostEstimate, costTooltip, bundleMissingReport,
   // The Generate panel's balance line: grouped, and re-read when a spend lands (walk 2026-09-30).
   balanceLine, spendLandedKey, makeAccountRefresh,
-  collectSpendMids, tallySpend, formatSpend, spendTooltip, spendPillShown, makeLatestOnly,
+  collectSpendMids, tallySends, formatSpend, spendTooltip, spendPillShown, makeLatestOnly,
   cardsToResume,
   shotPayload as buildShotPayload,
   // Spend review S3: the card's Render POSTs the priced payload itself (plus the Loom's keys).
@@ -10107,16 +10107,16 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
   const settled = notDone.filter((e) => { const r = priceCache[e.c.id]; return r && !r.loading; }).map((e) => priceCache[e.c.id].pr);
   const costEstimate = { ...tallyPrices(settled), pending, notDoneCount: notDone.length };
 
-  // ---- The standing SPEND ledger: what this project has already spent, the historical
-  // sibling of the cost-to-finish estimate above. Deliberately unlike it in every way that
-  // matters: no /api/price, no cache to warm, no staleness contract to worry about. The
-  // catalog is a settled record, so one read answers it, and the only thing that can change
-  // the answer is a shot finishing -- which changes the collected media-id set, which is
-  // exactly what this refetches on. Editing a prompt, or a poll tick, changes nothing here.
-  const [spendRows, setSpendRows] = useState({});     // media_id -> {paid_credit, task_id}
+  // ---- The standing SPEND ledger: what this board has already spent, the historical
+  // sibling of the cost-to-finish estimate above. 2026-11-18: the number is the board's SEND
+  // RECORD (/api/loom/spend {board_id} -> the renders it sent, each with PixAI's charge),
+  // summed by tallySends and nothing else -- never the media ids the cards point at. It is
+  // re-read when the board changes and when a take lands (the collected media-id set, kept
+  // for that and for the imported-clip disclosure); a click re-reads it too.
+  const [spendSends, setSpendSends] = useState([]);   // [{task_id, card, kind, cost}]
   const [spendStatus, setSpendStatus] = useState("loading");   // loading | ok | error
   const collectedSpend = useMemo(() => collectSpendMids(project), [project]);
-  const spendKey = collectedSpend.mids.join(",");
+  const spendKey = String(activeId || "") + "|" + collectedSpend.mids.join(",");
   const spendFetchedRef = useRef(null);
   // WHICH REQUEST IS THE LATEST, as its own tiny gate (makeLatestOnly, loom-core.js). The
   // staleness check below used to be spendFetchedRef alone -- "is this still the same
@@ -10128,29 +10128,28 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
   const spendGate = useRef(null);
   if (!spendGate.current) spendGate.current = makeLatestOnly();
   const loadSpend = useCallback((force) => {
-    const mids = collectedSpend.mids;
-    if (!mids.length) {
-      // Nothing to read: retire whatever is in flight, or its answer would land on an
-      // empty board and repopulate the pill from a project that no longer has those shots.
+    if (!activeId) {
+      // No board to read: retire whatever is in flight, or its answer would land here and
+      // repopulate the pill from a board that is no longer open.
       spendGate.current.cancel();
-      spendFetchedRef.current = ""; setSpendRows({}); setSpendStatus("ok"); return;
+      spendFetchedRef.current = ""; setSpendSends([]); setSpendStatus("ok"); return;
     }
     if (!force && spendFetchedRef.current === spendKey) return;
     spendFetchedRef.current = spendKey;
     const token = spendGate.current.begin();
     setSpendStatus("loading");
     fetch("/api/loom/spend", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ media_ids: mids }) })
+      body: JSON.stringify({ board_id: activeId }) })
       .then((r) => r.json())
       .then((d) => {
         if (!spendGate.current.wins(token)) return;         // a later read of this board won
         if (spendFetchedRef.current !== spendKey) return;   // a newer board superseded this read
-        if (!d || d.error || !d.rows) { setSpendStatus("error"); return; }
-        setSpendRows(d.rows); setSpendStatus("ok");
+        if (!d || d.error || !Array.isArray(d.sends)) { setSpendStatus("error"); return; }
+        setSpendSends(d.sends); setSpendStatus("ok");
       })
-      // An empty `rows` and a DEAD REQUEST are not the same fact: with rows left at {} every
-      // id would join to nothing and the pill would report the whole project "unpriced",
-      // which is a lie about the catalog rather than a report about the network. The error
+      // An empty record and a DEAD REQUEST are not the same fact: a failed read must not
+      // show the board as having spent nothing, which is a lie about the record rather
+      // than a report about the network. The error
       // status is what stops that, and clearing the ref lets the next board change retry.
       // A failure that has already been superseded says nothing about the read that won.
       .catch(() => {
@@ -10160,7 +10159,7 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
   }, [spendKey]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { loadSpend(); }, [spendKey]);   // eslint-disable-line react-hooks/exhaustive-deps
   const refreshSpend = useCallback(() => loadSpend(true), [loadSpend]);
-  const spend = { ...tallySpend(collectedSpend, spendRows), status: spendStatus };
+  const spend = { ...tallySends(spendSends, project), imported: collectedSpend.imported, status: spendStatus };
 
   return {
     genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel,

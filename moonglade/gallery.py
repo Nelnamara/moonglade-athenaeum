@@ -3189,6 +3189,130 @@ def rows_for_media_ids(db_path, ids):
         return [found[i] for i in ids if i in found]
 
 
+def paid_credit_for_tasks(db_path, task_ids):
+    """{task_id: paid_credit text} from the catalog for these task ids: PixAI's own charge
+    for the task, task-level on every row it made ('' when a row exists with no charge
+    reported). A task with no row is absent. Chunked like rows_for_media_ids."""
+    ids = sorted({str(t).strip() for t in (task_ids or []) if str(t or "").strip()})
+    out = {}
+    if not ids or not Path(db_path).exists():
+        return out
+    with catalog(db_path) as con:
+        for i in range(0, len(ids), 400):
+            chunk = ids[i:i + 400]
+            ph = ",".join("?" * len(chunk))
+            for r in con.execute(
+                "SELECT task_id, paid_credit FROM catalog WHERE task_id IN ({})".format(ph), chunk
+            ).fetchall():
+                tid, pc = str(r["task_id"]), str(r["paid_credit"] or "").strip()
+                if pc or tid not in out:          # a row that reports a charge wins
+                    out[tid] = pc
+    return out
+
+
+def loom_cost(text):
+    """A charge read off the catalog: an int, or None when nothing usable was reported. A
+    blank, junk or non-finite value is unknown, never 0 -- 0 means a settled free render."""
+    s = str(text if text is not None else "").strip()
+    if not s:
+        return None
+    try:
+        v = float(s)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(v):
+        return None
+    try:
+        return int(v)
+    except (OverflowError, ValueError):
+        return None
+
+
+# ---- THE LOOM'S SEND RECORD (2026-11-18): the one source of a board's "spent" figure --------
+# One append-only file per account (_moonglade/loom/_sends/<account>.jsonl). A line is written
+# when a render is SENT from a board -- the moment the journal records its task id -- never
+# when a picture lands on a shot. So a clip linked, imported, remixed or seeded onto a card is
+# not a send and never counts; a re-render is its own send and adds its own charge.
+#
+# Line kinds, folded by loom_sends_fold:
+#   a send      {board, card, task_id|null, submit_id|null, kind, cost|null, at}
+#               kind "render" (sent from the Loom) or "backfill" (found on a board saved
+#               before this record existed); cost 0 when a free card was attached, else the
+#               catalog's paid_credit once known, null until then (shown as unknown)
+#   a cost      {task_id, cost}         the charge, read off the catalog once it is there
+#   a void      {submit_id, void: true} an unclear send the owner released: nothing was made
+#   a marker    {board, backfilled: at} that board's one backfill has run
+
+def loom_send_key(rec):
+    tid = str(rec.get("task_id") or "")
+    return ("t:" + tid) if tid else ("s:" + str(rec.get("submit_id") or ""))
+
+
+def loom_sends_fold(lines):
+    """{"sends": {key: send}, "backfilled": {board ids}} from the record's lines. The first
+    line for a task owns its board and card, so a task is one board's send, once."""
+    sends, by_submit, backfilled = {}, {}, set()
+    for rec in lines:
+        if not isinstance(rec, dict):
+            continue
+        if rec.get("backfilled") and rec.get("board"):
+            backfilled.add(str(rec["board"]))
+        elif rec.get("void") and rec.get("submit_id"):
+            k = by_submit.get(str(rec["submit_id"]))
+            if k and k in sends and not sends[k].get("task_id"):
+                sends[k]["void"] = True
+        elif rec.get("board") and rec.get("kind"):
+            k = loom_send_key(rec)
+            if k in ("t:", "s:") or k in sends:
+                continue
+            sends[k] = dict(rec)
+            if rec.get("submit_id"):
+                by_submit[str(rec["submit_id"])] = k
+        elif rec.get("task_id") and "cost" in rec:
+            k = "t:" + str(rec["task_id"])
+            if k in sends and sends[k].get("cost") is None and isinstance(rec["cost"], int):
+                sends[k]["cost"] = rec["cost"]
+    return {"sends": sends, "backfilled": backfilled}
+
+
+def loom_backfill_sends(board, board_id, known_task_ids, journal_entries, at=0.0):
+    """The one-time backfill of a board saved before the send record existed. A send is a
+    real task id the board or the journal kept for a render of this board: a stored take
+    with source "render" that is not imported, a superseded render's task, a render still
+    pending, or a journal entry for this board that reached PixAI. A take with no task id
+    is NOT a send -- a seeded, linked, imported or remixed clip -- and nothing is ever
+    priced from a quote: cost stays null here and is read off the catalog afterwards.
+    `known_task_ids` (every task already recorded, on any board) keeps it idempotent and a
+    task one board's alone. Pure: returns the new send lines, writes nothing."""
+    seen = {str(t) for t in (known_task_ids or ())}
+    out = []
+
+    def add(tid, card):
+        tid = str(tid or "").strip()
+        if not tid or tid in seen:
+            return
+        seen.add(tid)
+        out.append({"board": board_id, "card": str(card or ""), "task_id": tid,
+                    "submit_id": None, "kind": "backfill", "cost": None, "at": at})
+
+    for act in ((board or {}).get("acts") or []):
+        for c in ((act or {}).get("cards") or []):
+            if not isinstance(c, dict):
+                continue
+            cid = c.get("id")
+            for t in (c.get("takes") or []):
+                if isinstance(t, dict) and t.get("source") == "render" and not t.get("imported"):
+                    add(t.get("taskId"), cid)
+            for tid in (c.get("supersededTasks") or []):
+                add(tid, cid)
+            add(c.get("pendingTaskId"), cid)
+    for e in (journal_entries or ()):
+        if isinstance(e, dict) and str(e.get("board") or "") == board_id \
+                and e.get("task_id") and e.get("state") == "submitted":
+            add(e.get("task_id"), e.get("card"))
+    return out
+
+
 def integrity_rows(db_path):
     """Every catalog row, narrowed to what the integrity pass (moonglade/integrity.py)
     needs: the file it claims, whether it is a video, and the two archive-only flags.
@@ -17229,6 +17353,61 @@ def create_app(out_dir: Path):
             pass
         return e
 
+    # The send record (see loom_sends_fold): its own lock, never taken while the journal's is
+    # held by the same code path that then waits on the journal -- the spend read copies the
+    # journal first, under the journal lock, and only then takes this one.
+    _loom_sends_lock = threading.Lock()
+
+    def _loom_sends_path(user):
+        d = _paths.loom_root(out_dir) / "_sends"
+        d.mkdir(parents=True, exist_ok=True)
+        return d / (_account_prefs._account_key(user) + ".jsonl")
+
+    def _loom_sends_lines(user):
+        try:
+            text = _loom_sends_path(user).read_text(encoding="utf-8")
+        except OSError:
+            return []
+        out = []
+        for ln in text.splitlines():
+            try:
+                out.append(json.loads(ln))
+            except ValueError:
+                continue
+        return out
+
+    def _loom_sends_append(user, recs):
+        if not recs:
+            return
+        try:
+            with open(_loom_sends_path(user), "a", encoding="utf-8") as fh:
+                fh.write("".join(json.dumps(r) + "\n" for r in recs))
+        except OSError:
+            pass
+
+    def _loom_send_note(user, **rec):
+        """Record one render sent from a board. Fail-soft: the record can never affect the
+        spend it describes."""
+        rec.setdefault("at", time.time())
+        rec.setdefault("kind", "render")
+        try:
+            with _loom_sends_lock:
+                _loom_sends_append(user, [rec])
+        except Exception:                                  # noqa: BLE001
+            pass
+
+    def _loom_board_saved(user, board_id):
+        """The board as saved (the kv value may be the board's JSON text), or None."""
+        v = _loom_kv_read(user, "storyboard:v2:proj:" + board_id)
+        for _ in range(3):
+            if not isinstance(v, str):
+                break
+            try:
+                v = json.loads(v)
+            except ValueError:
+                return None
+        return v if isinstance(v, dict) else None
+
     def _loom_journal_live_for(user, board, card):
         """The entry that still owns (board, card): sent or maybe sent, not finished, not
         released, younger than the poll ceiling."""
@@ -18695,80 +18874,70 @@ __DESIGN_TOKENS__
                         _loom_frame_gone.add(mid)
         return jsonify({"have": have, "fetched": fetched, "gone": gone})
 
-    # The per-project spend ledger's one server call. A cap, not a guess: rows_for_media_ids
-    # already chunks at 400 for SQLite's variable limit, so the number here only bounds how
-    # much a single request may ask for. 2000 media ids is far past any real board (a project
-    # would need ~2000 rendered shots plus re-rolls) and keeps a hostile body finite.
-    _LOOM_SPEND_MAX_IDS = 2000
-
     @app.route("/api/loom/spend", methods=["POST"])
     @tier(LOGIN)
     def loom_spend():
-        """What a Loom project has ALREADY spent: catalog `paid_credit` for a list of result
-        media_ids. Read-only and local -- one SELECT against the backup catalog, no PixAI
-        session, no network, nothing written. The historical sibling of /api/price, which
-        quotes what UNRENDERED shots would cost; this reports what finished ones really did.
+        """What a Loom board has ALREADY spent: the renders it SENT (2026-11-18). Local only --
+        no PixAI session, no network. The historical sibling of /api/price, which quotes what
+        unrendered shots would cost.
 
-        The client sends the ids (loom-core.js's collectSpendMids walks the board -- a
-        resultMid-and-attempts-only walk, deliberately NOT _loom_collect_media_ids, which also
-        gathers frame slots and cast images: those are reused INPUTS, not spend) and does the
-        arithmetic itself, so the whole ledger stays under loom/test's node --test. This route
-        is the join and nothing else.
+        The answer is read from the board's send record (loom_sends_fold) and nothing else:
+        not from the media ids its cards point at. Counting those is what broke the figure
+        over and over -- every clip attached to a shot that was not a render paid for here
+        (a linked or imported video, a remix, a seeded example, a split's twin) had to be
+        fenced out one writer at a time. A send is recorded when it happens, so none of them
+        can count.
 
-        Answers {"rows": {media_id: {"paid_credit": int|None, "task_id": str}}}. The three
-        states are distinct and the client keeps them apart all the way to the tooltip:
-          - an int          -> PixAI's actual charge for the task that made this media
-          - None            -> the row exists but paid_credit is '' (PixAI never reported one)
-          - key ABSENT      -> no catalog row at all (local file deleted, id never resolved)
-        `task_id` rides along because paid_credit is TASK-level: two media ids from one task
-        carry the same charge, and the client dedups on it rather than summing twice."""
+        On the first read of a board saved before the record existed, its one backfill runs
+        (loom_backfill_sends): the real task ids its takes and the journal kept. Each send
+        with no settled charge is then looked up in the catalog by task id; a charge found
+        there is written into the record, so it no longer depends on the catalog row.
+
+        Answers {"sends": [{"task_id": str|null, "card": str, "kind": str,
+        "cost": int|null}]}: an int is PixAI's charge for that send (0: a free card covered
+        it), null a send whose charge is not known (not collected yet, or a send with no
+        clear answer from PixAI)."""
         user = str(session.get("user") or "")
         if not user:
             return jsonify({"error": "not logged in"}), 401
         p = request.get_json(silent=True) or {}
-        raw = p.get("media_ids")
-        if not isinstance(raw, list):
-            return jsonify({"error": "media_ids must be a list"}), 400
-        ids, seen = [], set()
-        for m in raw:
-            s = str(m or "").strip()
-            if s and s not in seen:
-                seen.add(s)
-                ids.append(s)
-        if len(ids) > _LOOM_SPEND_MAX_IDS:
-            return jsonify({"error": "too many media_ids (max %d)" % _LOOM_SPEND_MAX_IDS}), 400
-        # as_int mirrors /api/history's own paid_credit reading exactly ('' -> None, a
-        # real number -> int): one interpretation of that column across both surfaces.
-        #
-        # NON-FINITE IS NOT A CHARGE, and it must not take the batch down with it. This
-        # caught ValueError only -- but int(float("Infinity")) raises OverflowError, and
-        # float("nan") converts to a meaningless integer rather than raising at all. One
-        # such row answered the whole request with a 500, so every OTHER media id in the
-        # batch lost its number too: the three states this route keeps apart mean nothing
-        # if one bad row can delete all of them at once. A value that is not a real,
-        # finite number degrades to "unpriced" -- the row exists, and nothing usable was
-        # reported for it -- which is exactly what that state is for.
-        def as_int(s):
-            s = str(s or "").strip()
-            if not s:
-                return None
-            try:
-                v = float(s)
-            except (TypeError, ValueError):
-                return None
-            if not math.isfinite(v):
-                return None
-            try:
-                return int(v)
-            except (OverflowError, ValueError):
-                return None
-        out = {}
-        for r in rows_for_media_ids(db_path, ids):
-            out[str(r.get("media_id") or "")] = {
-                "paid_credit": as_int(r.get("paid_credit")),
-                "task_id": str(r.get("task_id") or ""),
-            }
-        return jsonify({"rows": out})
+        board = str(p.get("board_id") or "")
+        if not _LOOM_ID_RE.match(board):
+            return jsonify({"error": "board_id required"}), 400
+        # The journal first, under its own lock, released before the record's is taken.
+        with _loom_journal_lock:
+            entries = [dict(e) for e in _loom_journal_load(user)["subs"].values()]
+        with _loom_sends_lock:
+            st = loom_sends_fold(_loom_sends_lines(user))
+            new = []
+            if board not in st["backfilled"]:
+                saved = _loom_board_saved(user, board)
+                known = {s.get("task_id") for s in st["sends"].values() if s.get("task_id")}
+                new = loom_backfill_sends(saved or {}, board, known, entries, at=time.time())
+                new.append({"board": board, "backfilled": time.time()})
+                _loom_sends_append(user, new)
+                st = loom_sends_fold(_loom_sends_lines(user))
+            mine = [s for s in st["sends"].values()
+                    if s.get("board") == board and not s.get("void")]
+            open_tids = [s["task_id"] for s in mine if s.get("task_id") and s.get("cost") is None]
+            if open_tids:
+                found = paid_credit_for_tasks(db_path, open_tids)
+                costs = []
+                for tid in open_tids:
+                    c = loom_cost(found.get(tid))
+                    if c is not None:
+                        costs.append({"task_id": tid, "cost": c})
+                if costs:
+                    _loom_sends_append(user, costs)
+                    st = loom_sends_fold(_loom_sends_lines(user))
+                    mine = [s for s in st["sends"].values()
+                            if s.get("board") == board and not s.get("void")]
+        mine.sort(key=lambda s: float(s.get("at") or 0))
+        return jsonify({"sends": [{"task_id": s.get("task_id") or None,
+                                   "card": str(s.get("card") or ""),
+                                   "kind": s.get("kind"),
+                                   "cost": s.get("cost") if isinstance(s.get("cost"), int) else None}
+                                  for s in mine]})
 
     @app.route("/api/loom/generate", methods=["POST"])
     @tier(LOGIN)
@@ -18801,6 +18970,9 @@ __DESIGN_TOKENS__
         target = p.pop("loom_target", None)
         submit_id = p.pop("submit_id", None)
         expect_free = bool(p.pop("expect_free", False))
+        # A draft render has no shot yet, so it names its board alone (2026-11-18): it is a
+        # render sent from that board, and the board's send record counts it.
+        draft_board = p.pop("loom_board", None)
         user = str(session.get("user") or "")
         journalled = submit_id is not None or target is not None
         board_id = card_id = None
@@ -18812,6 +18984,12 @@ __DESIGN_TOKENS__
                 board_id, card_id = str(t.get("board_id") or ""), str(t.get("card_id") or "")
                 if not _LOOM_ID_RE.match(board_id) or not _LOOM_ID_RE.match(card_id):
                     return jsonify({"error": "This render names no valid shot, so nothing was sent."}), 400
+        # Which board's send record a send from here goes into: the shot's board, or a
+        # draft's own board. None for the gallery's Video tab, which is not a board.
+        send_board, send_card = (board_id, card_id) if board_id else (None, "")
+        if journalled and not send_board and isinstance(draft_board, str) \
+                and _LOOM_ID_RE.match(draft_board):
+            send_board = draft_board
         sending_key = (_account_prefs._account_key(user), submit_id) if journalled else None
         try:
             _core._check_read_only(_core._SUBMIT_ACTION_DEFAULT)
@@ -19062,6 +19240,13 @@ __DESIGN_TOKENS__
             except Exception:
                 pass
             _journal(state="submitted", task_id=str(task_id))
+            if send_board:
+                # THE SEND RECORD: the one source of the board's "spent" figure. A free card
+                # attached by the card step is a charge of 0; otherwise the charge is read off
+                # the catalog once PixAI reports it.
+                _loom_send_note(user, board=send_board, card=send_card, task_id=str(task_id),
+                                submit_id=submit_id,
+                                cost=0 if (req.parameters or {}).get("kaisuukenId") else None)
             return jsonify({"task_id": task_id, "uploaded": len(image_ids)})
         except Exception as e:
             msg = _log_gen_failure("/api/loom/generate", e, locals().get("params"))[:300]
@@ -19074,6 +19259,11 @@ __DESIGN_TOKENS__
             else:
                 state = "may_have_started"
             _journal(state=state, error=msg)
+            if state == "may_have_started" and send_board:
+                # Sent with no clear answer: the board may have spent on it, and nobody can say
+                # what. It counts as unknown until the owner releases it (submit-abandon).
+                _loom_send_note(user, board=send_board, card=send_card, task_id=None,
+                                submit_id=submit_id, cost=None)
             if state == "may_have_started":
                 return jsonify({"error": msg, "unclear": True, "state": state}), 200
             return jsonify({"error": msg, "state": state}), 200
@@ -19142,6 +19332,9 @@ __DESIGN_TOKENS__
                 return jsonify({"error": "That render was sent (task …%s), so it can't be released."
                                          % str(e["task_id"])[-6:], "task_id": e["task_id"]}), 409
             _loom_journal_note(user, sid, state="abandoned")
+            # Released: nothing was made, so its unknown leaves the board's send record.
+            with _loom_sends_lock:
+                _loom_sends_append(user, [{"submit_id": sid, "void": True, "at": time.time()}])
         return jsonify({"ok": True})
 
 
