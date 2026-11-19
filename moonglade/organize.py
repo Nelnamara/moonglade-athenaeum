@@ -10,6 +10,7 @@ them, never at the top, so importing this module never imports the engine.
 """
 import csv
 import sys
+import threading
 import time
 from collections import defaultdict, Counter
 
@@ -39,21 +40,32 @@ _BUCKET_PRIORITY = {"batches": 0, "month": 1, "images": 2, "other": 3}
 _bucket_of = bucket_of
 
 
+_STRICT_DECODE = threading.Lock()
+
+
 def _opens_as_image(path):
     """True when the file decodes as a whole image, False when it does not (truncated,
     corrupt, not an image at all), None when Pillow is missing and nobody can tell.
     A full decode (load()), the strictest check Pillow offers, so a file that opens here
     is one the gallery can show."""
     try:
-        from PIL import Image
+        from PIL import Image, ImageFile
     except ImportError:
         return None
-    try:
-        with Image.open(path) as im:
-            im.load()
-        return True
-    except Exception:          # noqa: BLE001 -- any failure to decode means "damaged"
-        return False
+    # Strict for this one decode. moonglade/similar.py turns Pillow's process-wide
+    # LOAD_TRUNCATED_IMAGES on at import, and with it a truncated PNG or JPEG "opens", padded
+    # with grey: in any process that has imported it, a damaged copy would pass as whole.
+    with _STRICT_DECODE:
+        was = ImageFile.LOAD_TRUNCATED_IMAGES
+        ImageFile.LOAD_TRUNCATED_IMAGES = False
+        try:
+            with Image.open(path) as im:
+                im.load()
+            return True
+        except Exception:      # noqa: BLE001 -- any failure to decode means "damaged"
+            return False
+        finally:
+            ImageFile.LOAD_TRUNCATED_IMAGES = was
 
 
 def _scan_media_files(out_dir):

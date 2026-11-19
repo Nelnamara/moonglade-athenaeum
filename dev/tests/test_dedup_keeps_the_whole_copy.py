@@ -55,6 +55,18 @@ def test_a_damaged_copy_in_the_preferred_folder_is_the_one_deleted(tmp_path):
     assert not month.exists(), "the damaged copy is the redundant one"
 
 
+def test_a_truncated_copy_is_damaged_even_after_similar_relaxed_pillow(tmp_path, monkeypatch):
+    """moonglade/similar.py sets Pillow's process-wide LOAD_TRUNCATED_IMAGES at import, and
+    with it a half PNG "opens". The check must not depend on what the process imported."""
+    from PIL import ImageFile
+    monkeypatch.setattr(ImageFile, "LOAD_TRUNCATED_IMAGES", True)
+    whole = _png("red")
+    half = tmp_path / "half.png"
+    half.write_bytes(whole[: len(whole) // 2])
+    assert organize_mod._opens_as_image(half) is False
+    assert ImageFile.LOAD_TRUNCATED_IMAGES is True, "the check must put the setting back"
+
+
 def test_a_damaged_copy_loses_even_when_it_is_the_bigger_file(tmp_path):
     """Size alone is no proof: a truncated download of a busy picture can still outweigh a
     whole copy of a plain one."""
