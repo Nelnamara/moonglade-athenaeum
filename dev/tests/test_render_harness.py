@@ -5177,9 +5177,9 @@ def test_the_bridges_mirror_tile_rests_off_and_refuses_to_arm_itself(logged_in_p
          its own message line, and no /api/mirror write -- and no request to any host but
          this harness's own server -- ever leaves the page.
 
-    The Connect button is deliberately never pressed: /api/mirror/connect makes the SERVER
-    read this machine's real browser cookie store. Reading the tile's resting state is the
-    guard the roadmap asked for; arming it is not.
+    The Connect from PixAI bookmark is deliberately never clicked: it belongs on a real
+    pixai.art tab. Reading the tile's resting state is the guard the roadmap asked for;
+    arming it is not.
     """
     from urllib.parse import urlparse
 

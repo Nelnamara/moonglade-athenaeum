@@ -15351,9 +15351,10 @@ def main():
                     help="show your free-generation cards (kaisuuken) + their ids, then exit. "
                          "Read-only; pass an id to a run with --kaisuuken-id")
     ap.add_argument("--mirror-check", action="store_true",
-                    help="check/bootstrap the 'Mirror to PixAI website' session (reads the "
-                         "pixai.art session from a local browser, refreshes the JWT) and "
-                         "report days-left, then exit. Never prints the token; spends nothing")
+                    help="check the 'Mirror to PixAI website' session: renew the saved "
+                         "sign-in once and report days-left, then exit. Never reads a browser "
+                         "(connect with the Connect from PixAI bookmark), never prints the "
+                         "token; spends nothing")
     ap.add_argument("--card-history", action="store_true",
                     help="show recent benefit-card usage (redemptions + refunds), then exit. "
                          "Read-only. Pass --card-history-all for the full lifetime card-type "

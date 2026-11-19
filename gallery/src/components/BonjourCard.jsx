@@ -152,7 +152,9 @@ export default function BonjourCard({ isLocal }) {
             {msg ? <span className="mgcp-tilenote">{msg}</span> : null}
           </div>
           <div className="mgcp-tilenote">
-            Changing Reach or Port restarts the server. Installing as an iPad app (HTTPS) is a later add.
+            Changing Reach or Port restarts the server. Another device's traffic is encrypted only at
+            an https:// address, which the --https switch turns on (Help › The Gallery › Using HTTPS).
+            An iPad home-screen app is a later add.
           </div>
         </div>
       ) : (

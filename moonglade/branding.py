@@ -387,6 +387,40 @@ def _moment_clip_rels():
     return frozenset(_public_rel_to_coded(n) for n in _MOMENT_CLIPS.values())
 
 
+# ---------------------------------------------------------------------------
+# /branding/ SERVES PICTURES (owner, 2026-11-18: "Just images should be accepted.
+# that was the design."). The route is PUBLIC tier, so a hand-dropped .html or .svg
+# in the tree must never come back as a page on this origin (red team, same day).
+# Raster types only -- animated webp included -- and every other type is a 404,
+# whether the bytes are loose or in the pack.
+#
+# The one carve-out is the pack's own moment media the shipped front end plays
+# from /branding/ today: the two moments' clips (_MOMENT_CLIPS, ClipMoment's
+# <video>) and the starfall moment's two sounds (ClipMoment's cast + loop). They
+# are named here by exact file, nothing else of their kind serves, and they keep
+# their seal (_seal_rule's moment branch). Held for the owner's word rather than
+# broken: they are the only shipped non-picture files the front end asks for.
+# ---------------------------------------------------------------------------
+BRANDING_IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico", ".avif"})
+_MOMENT_SOUNDS = ("ee_starfall_cast.ogg", "ee_starfall_loop.ogg")
+
+
+def _shipped_moment_media_rels():
+    """CODED rels (lowercased) of the moment clips and sounds the front end plays."""
+    names = tuple(_MOMENT_CLIPS.values()) + _MOMENT_SOUNDS
+    return frozenset(_public_rel_to_coded(n).lower() for n in names)
+
+
+def branding_serves_type(coded):
+    """True when /branding/ may serve this CODED rel's type at all: a raster picture,
+    or one of the named shipped moment files. Everything else is a 404."""
+    low = str(coded or "").lower()
+    dot = low.rfind(".")
+    if dot > low.rfind("/") and low[dot:] in BRANDING_IMAGE_EXTS:
+        return True
+    return low in _shipped_moment_media_rels()
+
+
 def _container_clip_bytes(rel):
     """One moment clip's bytes from the container, read and verified ONCE per
     content digest and served from memory after that. None when the container is
