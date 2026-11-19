@@ -67,6 +67,9 @@ export default function EnhanceTab({ source, armed, onOpenFilters }) {
   const [emotions, setEmotions] = useState(null);   // Change Emotion options; null = not loaded
   const [emotionKey, setEmotionKey] = useState("");
   const [fam, setFam] = useState(0);                // which family tab is up
+  // Bumped after every send or refusal: a card was used, or the "free" the chip showed was
+  // wrong, so the prices are read again (2026-11-18).
+  const [priceSeq, setPriceSeq] = useState(0);
 
   useEffect(() => {
     if (!armed) { setPresets(null); return undefined; }
@@ -74,7 +77,7 @@ export default function EnhanceTab({ source, armed, onOpenFilters }) {
     apiGet("/api/enhance/presets")
       .then((d) => { if (live) setPresets((d && d.presets) || []); });
     return () => { live = false; };
-  }, [armed]);
+  }, [armed, priceSeq]);
 
   // Lazily load the staged Change-Emotion options the first time that preset is opened.
   useEffect(() => {
@@ -113,8 +116,9 @@ export default function EnhanceTab({ source, armed, onOpenFilters }) {
       ? { source, workflow_name: priced.workflow_name }
       : { source, workflow_id: priced.workflow_id };
     if (sel === "emotion" && emotionKey) body.emotion = emotionKey;
-    await submitTask("/api/enhance", body, { label: priced.label, emit });
+    await submitTask("/api/enhance", body, { label: priced.label, emit, quote: { free: !!priced.free_card } });
     busyRef.current = false; setBusy(false);
+    setPriceSeq((n) => n + 1);
   };
 
   // Only block on picking an expression when options are actually staged; with none staged,

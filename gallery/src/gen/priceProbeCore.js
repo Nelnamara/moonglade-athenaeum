@@ -103,3 +103,15 @@ export const PRICE_DEBOUNCE_MS = 250;
 // would leave Go disabled forever with no message. The server's own upstream PixAI calls are
 // bounded at 30s/60s, so 25s here only ever fires on a transport stall, not a slow price.
 export const PRICE_FETCH_TIMEOUT_MS = 25000;
+
+/* ---- what a single send carries of the quote it was allowed on (2026-11-18) ----------------
+   A send whose settled quote was FREE goes out with `expect_free: true`, so the server refuses
+   it (nothing sent, an {error} the line shows) if the card that quote found is gone by the time
+   the card step runs -- the Loom's F13 rule, on the gallery's own sends. A priced quote, an
+   Unlimited Mode quote (free by the entitlement, never by a card), an error answer or no quote
+   at all leaves the payload exactly as it was: same object, no key added. */
+export function quotedSendBody(payload, quote) {
+  const q = quote || null;
+  if (!q || q.free !== true || q.unlimited || q.error) return payload;
+  return { ...payload, expect_free: true };
+}

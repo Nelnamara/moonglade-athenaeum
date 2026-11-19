@@ -1256,6 +1256,7 @@ def test_locked_mark_art_is_sealed_server_side(tmp_path, monkeypatch):
     assert cli.get("/branding/marks/mk_free.png").status_code == 200      # free art serves
     assert cli.get("/branding/marks/mk_arch.png").status_code == 404      # locked art sealed
     assert cli.get("/branding/marks/mk_arch.ico").status_code == 404      # and its icon
-    assert cli.get("/branding/marks/marks.json").status_code == 200       # the manifest stays open
+    # the manifest is read server-side (/api/branding); /branding/ serves pictures only (2026-11-18)
+    assert cli.get("/branding/marks/marks.json").status_code == 404
     monkeypatch.setattr(branding_mod, "_earned_achievement_ids", lambda *a, **k: frozenset({"archivist"}))
     assert cli.get("/branding/marks/mk_arch.png").status_code == 200      # earned -> art serves

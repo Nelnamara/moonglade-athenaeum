@@ -18,6 +18,7 @@ import { apiGet, apiPost } from "../api.js";
 import { show as toastShow } from "./toastStore.js";
 import { note as noteUpdate } from "./updateStore.js";
 import { noteServerNotice } from "./serverNotice.js";
+import { doneNotice } from "./doneNotice.js";
 
 const LSK = "mg_jobs_open";
 
@@ -123,10 +124,12 @@ function toastTransitions(rows) {
         const mid = (j.media_ids || [])[0] || "";
         // A delete row (2026-09-07: single deletes write one, bulk deletes always did) says what
         // it did; "Added to your gallery." is a generation's sentence and was wrong on both.
-        const isDelete = j.type === "delete";
+        // Likewise a Control Panel maintenance job (Duplicate audit, Catalog stats ...) adds
+        // nothing: doneNotice() says "Added to your gallery." only for jobs that add art.
+        const dn = doneNotice(j);
         toastShow({
-          kind: "ok", title: (j.label || "Generation") + (isDelete ? "" : " — done"),
-          msg: isDelete ? "Gone from PixAI." : "Added to your gallery.",
+          kind: "ok", title: dn.title,
+          msg: dn.msg,
           thumb: mid ? "/thumbs/" + encodeURIComponent(mid) + ".jpg" : null,
         });
       } else if (st === "done_with_errors") {

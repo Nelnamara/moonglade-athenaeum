@@ -35,7 +35,7 @@ QUICK START
   python -m moonglade --max 40           # small test first
 """
 
-__version__ = "3.21.0"
+__version__ = "3.21.1"
 
 import argparse
 import base64
@@ -1663,6 +1663,8 @@ def ext_from_ct(ct):
         return ".jpg"
     if "webp" in ct:
         return ".webp"
+    if "svg" in ct:
+        return ".svg"
     if "gif" in ct:
         return ".gif"
     if "avif" in ct:
@@ -5796,6 +5798,56 @@ VIDEO_MODELS = {
 }
 
 
+# PixAI retires V3.2 video on 2026-11-23 03:00 UTC (their announcement, 10 Nov 2026). From that
+# instant this app stops offering it and refuses a submit that names it, before any network call.
+# The front end keeps a mirror of this table (gallery/src/gen/videoDrawerCore.js
+# VIDEO_MODEL_RETIRED) because its engine list is static JS; a parity test holds the two together.
+# VIDEO_MODELS keeps the entry so old V3.2 videos in the library keep their "V3.2" label.
+VIDEO_MODEL_RETIRED = {"v3.2": "2026-11-23T03:00:00Z"}
+
+
+def _video_clock():
+    """Now, in UTC. A seam so a test can stand either side of the retirement instant."""
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def video_model_retired(model, now=None):
+    """True from the instant PixAI retires this video engine (VIDEO_MODEL_RETIRED)."""
+    when = VIDEO_MODEL_RETIRED.get(str(model or "").strip())
+    if not when:
+        return False
+    cut = datetime.datetime.strptime(when, "%Y-%m-%dT%H:%M:%SZ").replace(
+        tzinfo=datetime.timezone.utc)
+    now = now or _video_clock()
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=datetime.timezone.utc)
+    return now >= cut
+
+
+def check_video_model_retired(model, now=None):
+    """Refuse a retired engine in plain words (PixAIError, raised before any network call, so
+    nothing is created or charged)."""
+    if video_model_retired(model, now):
+        name = str(model).strip()
+        label = (VIDEO_MODELS.get(name) or {}).get("label") or name
+        when = datetime.datetime.strptime(VIDEO_MODEL_RETIRED[name], "%Y-%m-%dT%H:%M:%SZ")
+        raise PixAIError("{} was retired by PixAI on {} {} -- pick another video engine "
+                         "(nothing was created or charged).".format(
+                             label, when.day, when.strftime("%b")))
+
+
+def _params_video_models(params):
+    """The video engine names a createGenerationTask `parameters` carries (i2vPro.model /
+    referenceVideo.model); empty for anything that is not a video submit."""
+    out = []
+    if isinstance(params, dict):
+        for key in ("i2vPro", "referenceVideo"):
+            blk = params.get(key)
+            if isinstance(blk, dict) and blk.get("model"):
+                out.append(blk["model"])
+    return out
+
+
 def video_model_id(name):
     """Numeric top-level `modelId` for a video `.model` name ('' if unknown). A submit MUST
     include this or PixAI can't resolve the model and no free card can match."""
@@ -5921,6 +5973,7 @@ def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
     # let the server pick" is ~3x the money. Every caller today passes a real
     # value; this guard is for the next caller, and it fails LOUDLY at build time
     # (previews run this builder long before any --confirm can spend).
+    check_video_model_retired(model)
     if mode not in ("basic", "professional"):
         raise ValueError("i2vPro.mode must be 'basic' or 'professional', got %r -- "
                          "omitting it triples the price (issue #6)" % (mode,))
@@ -6006,6 +6059,7 @@ def build_reference_video_parameters(prompt, image_media_ids=(), *, video_media_
     all-or-nothing (see input_video_durations()); this only sends what it is given, as
     positive floats. PixAI floors each entry and bills the output seconds PLUS the input
     seconds; an empty list is priced as a flat 15 s of input in total."""
+    check_video_model_retired(model)
     _check_video_ref_caps(model, video_media_ids)
     rv = {
         "mode": mode,
@@ -8674,6 +8728,8 @@ def submit_generation(session, params, *, on_send=None, exact=False):
     for, and the Turbo fallback would also flip the process-wide _turbo_refused. It goes out
     once; PixAI's refusal comes back in plain words. It never carries a card."""
     _check_read_only("submit a generation (spends credits)")
+    for _vm in _params_video_models(params):
+        check_video_model_retired(_vm)       # before any network call: no spend, no round-trip
     lane = is_lane_request(params)
     if lane and params.get("kaisuukenId"):
         raise PixAIError(_UNLIMITED_NO_CARD)
@@ -9641,7 +9697,7 @@ def _shape_creativity(params, level, rs, version_id, adjusted):
     params["promptHelper"] = {"creativity": used, "forcePromptHelperDetectionSide": "server"}
 
 
-def price(session, req):
+def price(session, req, *, card_session=None):
     """The live cost + free-card verdict for a request. READ-ONLY -- it creates nothing
     and spends nothing, and the object it prices is the very `req.parameters` a submit
     would send, which is the whole point of this road.
@@ -9661,8 +9717,12 @@ def price(session, req):
     anything -- a clamp, or the per-model gate's snap/strip/conversion -- so the drawer's and
     the Loom's badges can say so BEFORE a spend. Absent when nothing was changed, the same
     rule /api/generate's response follows (a key on every answer is a key clients ignore).
-    The object priced and card-matched here is req.parameters, already gated at build."""
-    out = _price_answer(session, req)
+    The object priced and card-matched here is req.parameters, already gated at build.
+
+    `card_session` (2026-11-18) is the identity the free-card check reads under -- the one the
+    send will create on (_apply_kaisuuken checks there, through _session_for_create), so the
+    quote and the send cannot disagree about a card. Defaults to `session`, as before."""
+    out = _price_answer(session, req, card_session=card_session)
     if req.adjusted:
         out["adjusted"] = list(req.adjusted)
     # The breakdown notes ride a PAID quote only: on a card-covered one "+X" would read as a
@@ -9704,7 +9764,7 @@ def _price_breakdown(session, params, cost):
     return out
 
 
-def _price_answer(session, req):
+def _price_answer(session, req, card_session=None):
     """price()'s verdict, minus the receipt (see price)."""
     if req.parameters is None:
         return {"cost": None, "free": False, "note": req.note}
@@ -9741,7 +9801,8 @@ def _price_answer(session, req):
         verdict = _recipes.price_verdict(session, req.parameters, cost)
         if verdict is not None:
             return verdict
-    best = None if req.no_card else match_kaisuuken(session, req.parameters, enrich=True)
+    best = None if req.no_card else match_kaisuuken(card_session or session, req.parameters,
+                                                    enrich=True)
     covered = card_covers(best)
     out = {"cost": cost, "free": covered,
            "cards": (best or {}).get("total"),
@@ -9888,7 +9949,7 @@ def send_run(session, jobs, *, hooks, budget=None, gap_s=None, sleep=None):
             if budget is None or params.get("kaisuukenId"):
                 return
             if state["charged"] + int(budget["each"]) > int(budget["total"]):
-                raise LocalRefusal(_run_budget_note(state["sent"]))
+                raise LocalRefusal(budget.get("note") or _run_budget_note(state["sent"]))
 
         try:
             task_id = submit(session, job["req"], no_card=job.get("no_card"),
@@ -13279,8 +13340,8 @@ def run_claims(args):
 # error in parentheses, like the "Lost to the Void" message beside them.
 _SIGNIN_REFUSED_MIRROR = (
     "PixAI no longer accepts this app's website sign-in, so nothing was submitted and "
-    "nothing was spent. If pixai.art has signed you out, sign in there first, then press "
-    "↻ Refresh session on the Mirror to PixAI tile in the Control Panel and try again. "
+    "nothing was spent. Sign in to pixai.art, click your Connect from PixAI bookmark on "
+    "that tab (it is on the Mirror to PixAI tile in the Control Panel), and try again. "
     "({})")
 _SIGNIN_REFUSED_API_KEY = (
     "PixAI no longer accepts this app's API key, so nothing was submitted and nothing was "
@@ -15295,9 +15356,10 @@ def main():
                     help="show your free-generation cards (kaisuuken) + their ids, then exit. "
                          "Read-only; pass an id to a run with --kaisuuken-id")
     ap.add_argument("--mirror-check", action="store_true",
-                    help="check/bootstrap the 'Mirror to PixAI website' session (reads the "
-                         "pixai.art session from a local browser, refreshes the JWT) and "
-                         "report days-left, then exit. Never prints the token; spends nothing")
+                    help="check the 'Mirror to PixAI website' session: renew the saved "
+                         "sign-in once and report days-left, then exit. Never reads a browser "
+                         "(connect with the Connect from PixAI bookmark), never prints the "
+                         "token; spends nothing")
     ap.add_argument("--card-history", action="store_true",
                     help="show recent benefit-card usage (redemptions + refunds), then exit. "
                          "Read-only. Pass --card-history-all for the full lifetime card-type "

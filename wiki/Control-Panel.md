@@ -29,7 +29,7 @@ Like every page in the gallery, it needs a login (see [Setup](Setup)).
 
 The round **?** in the Panel's header opens the app's [guide](Home#help-inside-the-app) on this
 page. The first time you open the Panel, a welcome card offers a short tour of the console, **Runs
-itself**, **Sync now** and the version stamp (see
+itself**, **Sync now** and the About row (see
 [The first-run guide](Home#the-first-run-guide)).
 
 ## Library at a glance
@@ -91,9 +91,13 @@ the server's own disk.
   manifest to undo the undo.
 - **Dedup** — a chain of five steps: **Audit → Preview → Quarantine → Verify → Delete**.
   Each step is greyed out until the one before it has finished (hover it: *Run the earlier
-  stages first*), so you can't reach the end by accident. **Audit** writes the location-only
-  duplicate report to `audit_report.csv` in the library's `_moonglade/records/` folder; the
-  slower byte-compare pass is `python -m moonglade --audit` on the command line. **Preview**
+  stages first*), so you can't reach the end by accident. **Audit** runs the full check
+  (identical files under different names too, so it finds the same copies Preview does) and
+  writes the report to `audit_report.csv` in the library's `_moonglade/records/` folder; the
+  quick same-id-only check is `python -m moonglade --audit --no-content` on the command line.
+  Each step ends with one plain sentence saying what it found or did (for example *"14
+  duplicate files would move to _duplicates/ (25.6 MB). Nothing moved yet."*), and the file
+  list sits folded under **Show the 14 files**. **Preview**
   shows the plan without moving anything. **Quarantine** (marked with a lock) moves redundant
   copies aside to `_duplicates/`, keeping the most-organized one. **Verify** confirms every
   quarantined file is byte-identical to a surviving copy, and flags orphans, before you
@@ -348,17 +352,26 @@ is also filed into your **pixai.art web library** — the same place things land
 generate on the website — instead of living only in your local backup. Handy if you like
 having your work visible in your PixAI account too. When it's off, nothing changes.
 
-It works by riding your own logged-in browser session:
+It works by riding your own PixAI sign-in from the website:
 
-1. Click **Connect…**. Moonglade reads the session from a browser signed in to PixAI **on
-   the server machine** (Chrome, Edge, or Brave). Nothing is pasted, and the credential
-   never leaves that machine — the tile shows *Connected · N days left*, never the token.
-2. Flip the toggle to **on**. It refuses to turn on until a session is connected, and tells
-   you so.
-3. From then on it renews itself while the app is running. PixAI's session lasts a week from
-   each renewal, and Moonglade renews it in the background every few days, so you'll only need
-   **Refresh session** if you sign out of PixAI in the browser, or if the app was closed for
-   more than a week and the session lapsed in the meantime.
+1. Drag **Connect from PixAI** from the tile to your browser's bookmarks bar. (Clicking it
+   on the Control Panel itself does nothing but remind you; it has to run on PixAI.) The
+   bookmark remembers the address you opened Moonglade at, so make it in the browser you
+   use for PixAI, from the address that browser reaches Moonglade on.
+2. Open **pixai.art**, sign in, and click the bookmark. A small Moonglade window opens (sign
+   in to Moonglade there if it asks), takes your PixAI sign-in from that tab, and shows
+   *Connected · N days left*, or a plain reason it wasn't. It only accepts a sign-in for the
+   **same PixAI account as your API key**; a tab signed in as anyone else is refused. Close
+   the window when you're done.
+3. Flip the toggle to **on**. It refuses to turn on until a session is connected, and tells
+   you so. The switch only works from the server machine itself; the bookmark works from any
+   device on your home network. From another device the sign-in travels encrypted only when
+   that device reaches Moonglade at its `https://` address; Moonglade serves plain `http://`
+   unless you turn on its `--https` switch (see [The Gallery → Using HTTPS](Gallery#using-https)).
+4. From then on it renews itself while the app is running. PixAI's session lasts a week from
+   each renewal, and Moonglade renews it about once a day, so it survives the app being closed
+   for up to about six days. You only need the bookmark again if you sign out of PixAI, or if
+   the app was closed long enough for the session to lapse.
 
 The ring on the tile shows how much of the current session is left, out of its own week. It
 stays green through the normal renewal; it turns peach only if a renewal actually failed (it
@@ -374,7 +387,7 @@ Things worth knowing:
   nothing** rather than quietly falling back to your API key. See
   [Trust & Safety](Trust-and-Safety).
 - `python -m moonglade --mirror-check` verifies the renewal loop from the command
-  line without spending anything.
+  line without spending anything, once the bookmark has connected a session.
 
 ## Server
 
@@ -392,10 +405,10 @@ running, reopening it picks the wait back up instead of showing an idle Panel.
 
 Moonglade watches for new releases **while it is running** — it asks about once an hour, so
 you find out that a version is out without having to come and look. When one turns up it
-says so in three places at once: the **version stamp** at the foot of this sidebar turns
-gold and reads *"v3.7.3 available — view"*, a strip appears across the top of
+says so in three places at once: the **About** row at the foot of this sidebar gains a gold
+dot and reads *"About Moonglade · ● 3.7.3 available"*, a strip appears across the top of
 whatever screen you are on — *"Moonglade v3.7.3 is ready"*, with **Update** and **Not now** —
-and the stamp opens **About** when you click it. **Not now** folds the strip into a small
+and the row opens **About** when you click it. **Not now** folds the strip into a small
 *v3.7.3 ready* pill.
 
 **It never installs anything by itself.** The check tells you a release exists and stops

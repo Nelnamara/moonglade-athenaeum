@@ -5177,9 +5177,9 @@ def test_the_bridges_mirror_tile_rests_off_and_refuses_to_arm_itself(logged_in_p
          its own message line, and no /api/mirror write -- and no request to any host but
          this harness's own server -- ever leaves the page.
 
-    The Connect button is deliberately never pressed: /api/mirror/connect makes the SERVER
-    read this machine's real browser cookie store. Reading the tile's resting state is the
-    guard the roadmap asked for; arming it is not.
+    The Connect from PixAI bookmark is deliberately never clicked: it belongs on a real
+    pixai.art tab. Reading the tile's resting state is the guard the roadmap asked for;
+    arming it is not.
     """
     from urllib.parse import urlparse
 
@@ -11055,3 +11055,52 @@ def test_a_first_inbox_page_that_fits_still_reads_the_older_ones(logged_in_page)
         else:
             assert box["sh"] > box["ch"] + 40 and box["top"] == 0, ("the list overflows, unscrolled", where)
             assert asked == [], ("an overflowing list waits for the reader to scroll", where)
+
+
+def test_the_desktop_contests_card_grid_fits_the_window(logged_in_page):
+    """The community card grid must never be wider than the Contests window. A bare `1fr`
+    track has an automatic minimum of its content's min-content width, and the card title is
+    `white-space: nowrap`, so one long contest title used to push both tracks past the
+    window and the slab scrolled sideways (owner, 1568x724, 2026-11-18). Measured on the
+    scroller itself, not read off the stylesheet."""
+    long_title = "The Very Long Contest Title " * 5          # well past 120 characters
+    board = {"contests": [
+        {"id": "c%d" % i, "slug": "long-%d" % i,
+         "title": long_title if i < 2 else "Short %d" % i,
+         "type": "community", "status": "running", "active": True,
+         "vote_type": "user_vote", "prize_amount": 500000, "prize_distribution": [],
+         "cover_url": "https://harness.invalid/wide-%d.svg" % i,
+         "start_at": "2026-08-01T00:00:00.000Z", "end_at": "2099-01-01T00:00:00.000Z",
+         "result_at": "2099-02-01T00:00:00.000Z",
+         "url": "https://pixai.art/en/contest/long-%d" % i,
+         "description": "x", "rules": [], "tack_name": "t", "desc_url": "", "result_url": ""}
+        for i in range(4)], "official": 0, "community": 4}
+    page = logged_in_page(width=1568, height=724)
+    _json_route(page, "**/api/contests", board)
+    _json_route(page, "**/api/contest/mine",
+                {"contests": [], "total_entries": 0, "sync_running": False})
+    _json_route(page, "**/api/contest/*/artworks", {"entries": [], "total_count": 0})
+    _json_route(page, "**/api/contest/sync", {"started": False, "skipped": "recent"})
+    page.route("https://harness.invalid/**", lambda route: route.fulfill(
+        status=200, content_type="image/svg+xml",
+        body='<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="300"/>'))
+    page.goto("/", wait_until="domcontentloaded")
+    _freeze_motion(page)
+    page.wait_for_selector(".mgx-navspine", timeout=10_000)
+    page.click('.mgx-navspine button.mgx-nav:has-text("Contests")')
+    page.wait_for_selector(".mgct-cardwrap", timeout=10_000)
+    _settle(page)
+    geo = page.evaluate("""() => {
+        const slab = document.querySelector('.mgct-slab');
+        const s = slab.getBoundingClientRect();
+        return {sw: slab.scrollWidth, cw: slab.clientWidth, right: s.right,
+                cards: [...document.querySelectorAll('.mgct-cardwrap')]
+                         .map(c => c.getBoundingClientRect().right)};
+    }""")
+    assert len(geo["cards"]) == 4, geo
+    assert geo["sw"] <= geo["cw"] + 1, (
+        "the Contests window scrolls sideways: scrollWidth {} > clientWidth {}".format(
+            geo["sw"], geo["cw"]))
+    for right in geo["cards"]:
+        assert right <= geo["right"] + 1, (
+            "a contest card's right edge {} is past the window's {}".format(right, geo["right"]))

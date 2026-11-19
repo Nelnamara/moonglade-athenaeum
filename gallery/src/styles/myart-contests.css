@@ -251,7 +251,7 @@ button.mgma2-toolbtn.danger { color: var(--red, #f38ba8); border-color: rgba(243
 .mgct-dates { font-size: 10.5px; color: var(--subtext); font-variant-numeric: tabular-nums; }
 
 /* Fixed 2-col (gallery-era correction) -- was auto-fill minmax(300px). */
-.mgct-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.mgct-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .mgct-card { border-radius: 12px; overflow: hidden; border: 1px solid var(--surface1);
   background: rgba(33,31,58,.5); cursor: pointer; transition: border-color .2s;
   display: block; font-family: inherit; text-align: left; padding: 0; width: 100%; }
@@ -260,7 +260,7 @@ button.mgma2-toolbtn.danger { color: var(--red, #f38ba8); border-color: rgba(243
 /* Shortlist -- the card is a <button>, so the "☆ Shortlist" control is a SIBLING
    overlaid on it (a button inside a button is invalid HTML), positioned in the card's
    own relative wrapper. */
-.mgct-cardwrap { position: relative; }
+.mgct-cardwrap { position: relative; min-width: 0; }
 .mgct-shortlist { position: absolute; top: 8px; right: 8px; z-index: 2;
   font-size: 10.5px; font-weight: 600; padding: 4px 9px; border-radius: var(--radius-control-sm);
   border: 1px solid var(--surface1); background: rgba(12,10,28,.78); color: var(--subtext);

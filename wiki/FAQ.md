@@ -43,8 +43,12 @@ Nothing phones home.
 
 **Can I run it on my phone/tablet?**
 Yes — in the Control Panel's **LAN discovery** card set **Reach** to **LAN** and save (the server
-restarts), then open the address the card shows on your device, or scan its QR. For HTTPS, add
-`--https` to `launch_args` in `local\settings.json` beside the launcher. [Select mode](Collections) is touch-friendly.
+restarts), then open the address the card shows on your device, or scan its QR. By default that
+address is plain `http://`, so what you type and your session cross your network unencrypted. To
+encrypt it, turn on the `--https` switch: `pip install cryptography`, stop Moonglade, add
+`"launch_args": ["--https"]` to `local\settings.json` beside the launcher, and start it again;
+the card then shows the `https://` address. The browser warns about the self-signed
+certificate; see [The Gallery → Using HTTPS](Gallery#using-https). [Select mode](Collections) is touch-friendly.
 
 Right after you sign in on a phone browser that can add the app to its Home Screen, a thin line under
 the gallery's buttons says **Add to Home Screen for full screen ›**. On an iPhone, in Safari, tapping it
@@ -95,8 +99,9 @@ setting the API key, the library folder, or the launcher icon; importing local f
 / `--import-local`); and changing the account roster — adding an account, removing someone
 *else's*, or resetting someone else's password.
 
-Still use a trusted network: the app is served over plain HTTP unless you pass `--https`,
-and a signed-in session on a shared network can spend your credits.
+Still use a trusted network: the app is served over plain HTTP unless you turn on `--https`
+([Using HTTPS](Gallery#using-https)), and a signed-in session on a shared network can spend
+your credits.
 
 **How do I add another person, or get back in if I'm locked out?**
 
@@ -138,8 +143,8 @@ No. Lookups are by `media_id`, so files can live in any subfolder.
 **Moonglade tells you when there is something to update to.** While it runs it checks for a
 new release about once an hour, and when one turns up a strip appears across the top of the screen —
 *"Moonglade v3.7.3 is ready"*, with **Update** and **Not now** — once per version, wherever
-in the app you are. **Update** opens the update window; or **open the Control Panel** (it re-checks on the spot) and the version
-stamp at the bottom of its sidebar is gold: *"v3.7.3 available — view"*. Click it and **About**
+in the app you are. **Update** opens the update window; or **open the Control Panel** (it re-checks on the spot) and the About row
+at the bottom of its sidebar carries a gold dot: *"About Moonglade · ● 3.7.3 available"*. Click it and **About**
 opens leading with *"v3.7.3 is out"* and **View the update ›**; that opens the confirm, which
 tells you what will happen — the update is pulled atomically, dependencies install
 only if they changed, the server restarts, and the tab reloads itself.

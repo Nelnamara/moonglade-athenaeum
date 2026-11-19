@@ -10,7 +10,7 @@ for prune / reconcile (see [Deleting & Sync](Deleting)).
 ```bash
 python -m moonglade.gallery                          # http://127.0.0.1:5000
 python -m moonglade.gallery --port 5757
-python -m moonglade.gallery --host 0.0.0.0 --https   # LAN + PWA
+python -m moonglade.gallery --host 0.0.0.0 --https   # LAN, encrypted
 python -m moonglade.gallery --rebuild-thumbs         # regenerate thumbnails
 ```
 
@@ -22,12 +22,28 @@ disabled — **`Moonglade Launcher.pyw`** is the everyday launch. All of the ser
 | `--out` | the library folder set in the Control Panel, else `pixai_backup` | the backup folder that holds `catalog.db`. Typing it always wins over the saved setting, for that start only. A run that names its own library never moves one, and refuses a library still in an older layout |
 | `--port` | `5000` | the port to listen on — or the port saved on the Control Panel's **LAN discovery** card (it lives in `local\settings.json`). Typing it always wins |
 | `--host` | `127.0.0.1` | the address to listen on — or the saved one (also in `local\settings.json`). `0.0.0.0` lets other devices on your network in. Typing it always wins |
-| `--https` | off | serve over a self-signed certificate, which installing the phone app (PWA) over your LAN needs. Requires the `cryptography` package, and browsers show a one-time certificate warning |
+| `--https` | off | serve over HTTPS, so everything between a device and Moonglade is encrypted: your Moonglade password and session, and the PixAI sign-in the **Connect from PixAI** bookmark hands over. The certificate is self-signed and made fresh each time the server starts, so browsers warn about it, and the warning can come back after a restart. Needs the `cryptography` package (`pip install cryptography`); without it the server says so and serves plain HTTP. It does not make an iPad or phone home-screen app work: that needs a certificate your devices trust, a later add. See [Using HTTPS](#using-https) |
 | `--allow-port-reuse` | off | start even if something is already listening on the port. Off on purpose: Windows lets a **second** server share a port that is already serving, and requests then land on either one at random |
 | `--rebuild-thumbs` | off | regenerate every thumbnail, including the ones that already exist |
 | `--skip-thumbs` | off | don't build catalog thumbnails at start-up — a fast boot; missing ones show *no preview* until they are built. Thumbnails for new generations are still made |
 | `--open-browser` | off | open the gallery in your browser about a second and a half after the server starts. For a terminal launch — the **`Moonglade Launcher`** waits until the server answers and opens the browser itself |
 | `-v` / `--verbose` | off | also print info-level lines (request activity, start-up steps) on the console. The log file, `local\logs\moonglade.log` beside the program, always has them |
+
+## Using HTTPS
+
+Moonglade serves plain `http://` by default. On the machine running it that is fine; across your
+home network it means your Moonglade password, your session and the Mirror's PixAI sign-in (the
+**Connect from PixAI** bookmark) travel unencrypted. To encrypt them:
+
+1. `pip install cryptography` once.
+2. Stop Moonglade, open `local\settings.json` beside the launcher, and add the switch to its
+   launch list: `"launch_args": ["--https"]`. Start Moonglade again with **`Moonglade Launcher`**.
+3. Open the gallery at `https://` instead of `http://` (same address and port). The browser warns
+   that the certificate is not trusted, because Moonglade made it itself; accept it to go on. The
+   certificate is new each time the server starts, so the warning can come back after a restart.
+
+Everything is encrypted only when you reach Moonglade at its `https://` address. A certificate
+your devices trust without a warning, and the iPad home-screen app it would allow, are a later add.
 
 ## The header
 

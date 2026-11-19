@@ -70,8 +70,16 @@ test("confirmSpend's window.confirm gate is UNCHANGED and still runs at submit t
   // FULL buildImgGenBody() shape (size/mode/count/seed/etc now all affect real cost) -- the
   // gate itself is unchanged, only what it prices got more accurate. See
   // loom-mutations.test.js's "buildImgGenBody" suite for the body-shape coverage.
-  assert.match(src, /const body = buildImgGenBody\(imgModel, imgLoras, imgAdv, prompt\);\s*\n\s*if \(!\(await confirmSpend\(body, `Generate a reference image/,
+  // 2026-11-18: a yes is `{ quote }`, a no is false; the send carries the quote's verdict
+  // (quotedSendBody), so one that went with no ask because it was FREE is sent expect_free.
+  assert.match(src, /const body = buildImgGenBody\(imgModel, imgLoras, imgAdv, prompt\);\s*\n\s*const ok = await confirmSpend\(body, `Generate a reference image[^\n]*\n\s*if \(!ok\) return;/,
     "genImage must still gate its real submit on confirmSpend, pricing the exact body it submits");
+  assert.match(src, /body: JSON\.stringify\(\{ \.\.\.quotedSendBody\(body, ok\.quote\), \.\.\.loomTargetOf\(c\.id\) \}\) \}\);/,
+    "genImage must send the quote's verdict with the body it priced, and its board");
+  assert.match(src, /body: JSON\.stringify\(\{ \.\.\.quotedSendBody\(body, ok\.quote\), \.\.\.loomTargetOf\(cardId\) \}\) \}\);/,
+    "runGen (Edit, Reference, Fix) must send the quote's verdict, and its board");
+  assert.match(src, /if \(pr && pr\.free\) return \{ quote: pr \};/,
+    "a FREE quote, sent with no ask, hands that quote to the send");
   // The trailing `jobLabel` param (2026-07-24 Job Tracker registration fix -- see
   // loom-image-job-register.test.js) is additive and sits AFTER `label`; the gate below is
   // what this assertion is about, so the signature is matched up to `label` rather than
@@ -80,7 +88,7 @@ test("confirmSpend's window.confirm gate is UNCHANGED and still runs at submit t
   // file's one price call site, and a parameter of that name shadows the function runGen and
   // confirmSpend now have to reach. The GATE is untouched -- same position, same short-circuit,
   // same confirmSpend.
-  assert.match(src, /const runGen = async \(setState, cardId, endpoint, body, quoteBody, label[^)]*\) => \{\s*\n\s*if \(quoteBody && !\(await confirmSpend\(quoteBody, label\)\)\) return;/,
+  assert.match(src, /const runGen = async \(setState, cardId, endpoint, body, quoteBody, label[^)]*\) => \{\s*\n\s*const ok = quoteBody \? await confirmSpend\(quoteBody, label\) : \{ quote: null \};\s*\n\s*if \(!ok\) return;/,
     "runGen (genEdit/genRef's shared submit path) must still gate on confirmSpend");
   assert.match(src, /return window\.confirm\(`\$\{label\}/,
     "confirmSpend itself must still fall through to a real window.confirm");
@@ -98,7 +106,7 @@ test("confirmSpend's window.confirm gate is UNCHANGED and still runs at submit t
 test("confirmSpend and generateShot branch short-vs-unmatched, and still fail closed on an unverified price", () => {
   assert.match(src, /priceIsShort, shortSpendLine,/, "the .jsx must import the shared short-case helpers");
   // confirmSpend: `${label}\n\n${line}` where line is short OR the original not-matched sentence
-  assert.match(src, /const line = priceIsShort\(pr\)\s*\n\s*\? shortSpendLine\(pr, "this"\)\s*\n\s*: `No free card covers it — it will spend ~\$\{pr\.cost\.toLocaleString\(\)\} credits\.`;\s*\n\s*return window\.confirm\(`\$\{label\}\\n\\n\$\{line\}\\n\\nGenerate anyway\?`\);/,
+  assert.match(src, /const line = priceIsShort\(pr\)\s*\n\s*\? shortSpendLine\(pr, "this"\)\s*\n\s*: `No free card covers it — it will spend ~\$\{pr\.cost\.toLocaleString\(\)\} credits\.`;\s*\n\s*return window\.confirm\(`\$\{label\}\\n\\n\$\{line\}\\n\\nGenerate anyway\?`\) \? \{ quote: pr \} : false;/,
     "confirmSpend must word the short case honestly and keep the not-matched sentence otherwise");
   // askShotSpend (video; generateShot's ask and the Loom Video tab's Go's): names the shot's
   // duration in the short sentence, and (issue #90 K) the engine the payload renders on in

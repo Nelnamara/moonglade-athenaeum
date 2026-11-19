@@ -27,10 +27,13 @@ test("the tile drives off the SERVER's real status, never a fabricated object", 
   // no `enabled` key that drove the toggle from `undefined`. It must be gone.
   assert.doesNotMatch(src, /connected: true, days_left: d\.days_left/,
     "connect() must NOT fabricate a status object; it must refresh() the real one");
-  // Both connect() and toggle() end by re-reading the real status.
-  const refreshCalls = (src.match(/await refresh\(\)/g) || []).length;
-  assert.ok(refreshCalls >= 2,
-    `connect() and toggle() must both await refresh() (found ${refreshCalls})`);
+  // toggle() ends by re-reading the real status. Since 3.21.1 a connect finishes in the window
+  // the "Connect from PixAI" bookmark opens, so the tile has no connect() of its own: it
+  // re-reads the real status when the user comes back to this tab (window focus).
+  assert.match(src, /setBusy\(false\);\s*if \(d && d\.error\) \{ setMsg\(errLine\(d\.error\)\); return; \}\s*await refresh\(\);/,
+    "toggle() must await refresh() after the enable POST");
+  assert.match(src, /const onFocus = \(\) => \{ refresh\(\); \};\s*window\.addEventListener\("focus", onFocus\);/,
+    "the tile must re-read the real status when the user returns from the connect window");
 });
 
 test("the toggle refuses to enable the credential switch with no session", () => {

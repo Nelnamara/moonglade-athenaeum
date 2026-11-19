@@ -5,6 +5,7 @@ import { note as noteUpdate, subscribe as subscribeUpdate,
 import { invalidate, peek, put } from "./swrCache.js";
 import { noticeAchievements } from "../notify/ach.js";
 import { DETAIL_PREFIX } from "../apiRoutes.js";
+import { parseDedupResult } from "../lib/dedupResult.js";
 import { clearPowerNote, notePower, powerToResume, readPowerNote } from "../lib/powerResume.js";
 
 /* Control Panel's own fetch/poll/action/power data layer, mechanically lifted out of
@@ -341,10 +342,13 @@ export default function useControlPanel() {
       // place left to show it), and call out done_with_errors + warn_count specifically
       // rather than folding it into an identical-looking "done".
       const tail = lines.slice(-6).filter(Boolean);
+      // A Dedup stage leads with its one sentence and folds its file lines (lib/dedupResult.js).
+      const dedup = DEDUP_STAGES.some((s) => s.key === finishedKey) ? parseDedupResult(lines) : null;
       setJobResult({
         ok: d.status !== "done_with_errors",
         warnCount: d.warn_count || 0,
-        lines: tail,
+        lines: dedup ? [] : tail,
+        dedup,
       });
       if (finishedKey === "organize-dry") {
         const planLine = lines.find((ln) => /^Organize plan:/.test(ln));

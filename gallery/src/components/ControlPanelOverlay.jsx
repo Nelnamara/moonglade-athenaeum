@@ -13,6 +13,7 @@ import BonjourCard from "./BonjourCard.jsx";
 import { isBlurOff, setBlurOff, applyBlurClass } from "../lib/blurPref.js";
 import { lastRanAt } from "../lib/livingRow.js";
 import { PAIRINGS, DEFAULT_PAIRING_ID, pairingById, readPairing, setPairing } from "../lib/fonts.js";
+import JobResultBox from "./JobResultBox.jsx";
 import Icon from "../icons/Icons.jsx";
 import UpdatePhases, { UpdateRefusal, UPDATE_WHAT } from "./UpdatePhases.jsx";
 import { takeOpenIntent, subscribeOpenIntent } from "../notify/bannerStore.js";
@@ -21,10 +22,12 @@ import useBrandingBeat from "../hooks/useBrandingBeat.js";
 import HelpButton from "../help/HelpButton.jsx";
 import GuideHost from "../help/GuideHost.jsx";
 import { openAbout } from "../help/helpStore.js";
+import { versionFromStamp } from "../notify/updateStore.js";
 import { useSwrGet } from "../hooks/swrCache.js";
 import { openBrokenFiles } from "../lib/brokenFilesNav.js";
 import { reviewLabel } from "../lib/brokenFilesCore.js";
 import { trashOnlyCopyNote } from "../lib/onlyCopy.js";
+import { mirrorBookmarklet } from "../lib/mirrorBookmarklet.js";
 
 /* A status line that is an error carries a flag, not a glyph: errLine(text) makes one, and
    <MsgLine> draws the warning icon where it renders. Plain strings stay plain lines. */
@@ -136,14 +139,18 @@ function ledgerResult(j) {
 }
 
 /* "Mirror to PixAI website" — the credential-switch toggle. Self-contained: loads its
-   own status (offline days-left, never the token), flips MIRROR_TO_PIXAI, and Connect
-   runs the server-side browser-session bootstrap (the server reads ITS OWN local browser;
-   no credential crosses the network). See moonglade_backup.py's mirror helpers + the
+   own status (offline days-left, never the token) and flips MIRROR_TO_PIXAI. Connecting is
+   the "Connect from PixAI" bookmark (2026-11-18, lib/mirrorBookmarklet.js): PixAI no longer
+   keeps its sign-in where the server could read it from this machine's browser, so the user
+   drags the link to the bookmarks bar and clicks it on a signed-in pixai.art tab, which hands
+   that tab's sign-in to this Moonglade's /mirror/connect page. The link is the old Connect
+   button's own chip (.mgbr-connect), in its place. See moonglade/mirror.py's helpers + the
    submit-path invariants. */
 function MirrorTile() {
   const [st, setSt] = useState(null);      // {enabled, connected, days_left} — null until loaded
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const bookmarkRef = useRef(null);
   const refresh = async () => {
     // Always drive the tile from the SERVER's real state, never a fabricated object -- a
     // fabricated {connected:true} with no `enabled` key drove the toggle from `undefined`.
@@ -156,11 +163,24 @@ function MirrorTile() {
     window.dispatchEvent(new CustomEvent("mg-mirror-changed", { detail: j }));
   };
   useEffect(() => { refresh(); }, []);
+  // The bookmark's href is set on the element, not through JSX: React warns on (and later
+  // versions block) a javascript: URL in href. Built from THIS page's origin, so the bookmark
+  // comes back to whichever address this Moonglade was reached at.
+  useEffect(() => {
+    if (bookmarkRef.current) bookmarkRef.current.setAttribute("href", mirrorBookmarklet(window.location.origin));
+  }, []);
+  // A connect finishes in the window the bookmark opened; re-read the status when the user
+  // comes back to this tab so the tile shows it without a reload.
+  useEffect(() => {
+    const onFocus = () => { refresh(); };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
   const toggle = async () => {
     if (!st || busy) return;
     const want = !st.enabled;
     if (want && !st.connected) {            // never enable the credential switch with no session
-      setMsg("Connect a session first (the button below), then turn this on.");
+      setMsg("Connect a session first (the Connect from PixAI bookmark below), then turn this on.");
       return;
     }
     setBusy(true); setMsg("");
@@ -169,14 +189,10 @@ function MirrorTile() {
     if (d && d.error) { setMsg(errLine(d.error)); return; }
     await refresh();                        // reflect the real persisted flag
   };
-  const connect = async () => {
-    if (busy) return;
-    setBusy(true); setMsg("Reading this machine's browser session…");
-    const d = await apiPost("/api/mirror/connect", {});
-    setBusy(false);
-    if (!d || !d.ok) { setMsg(errLine((d && d.error) || "couldn't connect")); return; }
-    setMsg("Connected.");
-    await refresh();                        // re-read real status (enabled + connected + days)
+  // Clicked here rather than dragged: it would run on this page, not on pixai.art.
+  const bookmarkClick = (e) => {
+    e.preventDefault();
+    setMsg("Don't click it here: drag the Connect from PixAI button up to your browser's bookmarks bar, then click that bookmark on a pixai.art tab.");
   };
   // §1 "The gate" (The Bridge.dc.html 65-135, renderVals 386-432): armed drives the chrome and
   // the same four rungs colour the ring -- emerald healthy / peach low / ruby expired / grey off.
@@ -184,7 +200,7 @@ function MirrorTile() {
   //   - the arc is the token's seconds left out of its OWN life (the server's left_s / span_s;
   //     never iat to exp, which grows with every renewal), not out of a fixed 40 days;
   //   - peach means a renewal FAILED or cannot run (READ_ONLY), not "7 days or fewer" -- a
-  //     7-day token sits under 7 days for its whole healthy life and renews itself at 3;
+  //     7-day token sits under 7 days for its whole healthy life and renews itself at 6;
   //   - ruby is decided by the real seconds left, not the floored days (10 h left is 0 days).
   const armed = !!(st && st.enabled);
   const days = st && st.days_left != null ? Math.max(0, st.days_left) : 0;
@@ -195,10 +211,10 @@ function MirrorTile() {
   const renewal = (st && st.renewal && st.renewal.state) || "ok";
   const daysLeft = days >= 1 ? days + " day" + (days === 1 ? "" : "s") + " left" : "less than a day left";
   const C = 163.4;  // 2*pi*26
-  let ringMod, sessionSub, connectLabel = "Refresh session";
-  if (!st) { ringMod = "off"; sessionSub = "…"; connectLabel = "Connect"; }
-  else if (!armed) { ringMod = "off"; sessionSub = "Not connected — Connect to arm the tier."; connectLabel = "Connect"; }
-  else if (expired) { ringMod = "expired"; sessionSub = "Session expired — reconnect to keep tools live."; connectLabel = "Reconnect"; }
+  let ringMod, sessionSub;
+  if (!st) { ringMod = "off"; sessionSub = "…"; }
+  else if (!armed) { ringMod = "off"; sessionSub = "Not connected — Connect to arm the tier."; }
+  else if (expired) { ringMod = "expired"; sessionSub = "Session expired — reconnect to keep tools live."; }
   else if (renewal === "failed") { ringMod = "low"; sessionSub = "Couldn't renew — " + daysLeft + ". Retrying."; }
   else if (renewal === "paused") { ringMod = "low"; sessionSub = "Renewal is paused while READ_ONLY is on — " + daysLeft + "."; }
   else { ringMod = "healthy"; sessionSub = "Healthy — renews itself while the app runs."; }
@@ -234,9 +250,9 @@ function MirrorTile() {
         </div>
 
         <div className="mgbr-connectrow">
-          <button type="button" className={"mgbr-connect" + (armed ? " armed" : "")}
-            onClick={connect} disabled={busy}>↻ {connectLabel}</button>
-          <div className="mgbr-jwtnote">re-reads the browser JWT</div>
+          <a ref={bookmarkRef} className={"mgbr-connect" + (armed ? " armed" : "")} draggable="true"
+            onClick={bookmarkClick} title="Drag to your bookmarks bar">Connect from PixAI</a>
+          <div className="mgbr-jwtnote">Drag the <b>Connect from PixAI</b> button on the left up to your browser's bookmarks bar. Then open pixai.art, signed in, and click that bookmark.</div>
         </div>
         {msg && <div className={"mgbr-msg" + (lineIsErr(msg) ? " err" : "")}><MsgLine m={msg} /></div>}
       </div>
@@ -357,6 +373,8 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
   useEffect(() => {
     apiGet("/api/watch/status").then((d) => { if (!d.error) setWatch(d); });
   }, []);
+
+  const aboutVer = versionFromStamp((boot && boot.build_stamp) || "");
 
   const {
     summary, summaryErr, skins, activeSkin, pickSkin, brandingUnlocked, achievementsFresh, achievements,
@@ -609,35 +627,31 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
 
               <BonjourCard isLocal={isLocal} />
 
-              {/* Control Panel.dc.html:77 -- a version/date footer, margin-top:auto to sit
-                  at the sidebar's bottom. boot.build_stamp (git short SHA + version) is the
-                  real content for this slot -- it used to occupy the HEADER's credits slot
-                  instead (see the credits fix above); this is where it actually belongs.
-                  out_dir (local-only) stays as a real, useful addition alongside it. */}
-              {/* The version stamp WAKES UP when a newer release exists (owner ruling
-                  2026-09-01, Variant A): no new chrome, the stamp that was always here
-                  just becomes the notice. Up to date, it is byte-identical to what it
-                  has always rendered -- the whole point of the variant. */}
-              {/* ...and since Session I (decision 3a) the stamp is also About's door: up to
-                  date it opens the About card; with a release out it keeps its "vX available
-                  — view" wording and About LEADS with the update card, whose button opens the
-                  same update modal this stamp used to open directly. Mid-apply it still goes
-                  straight to the modal that is reporting the apply. */}
+              {/* The foot of the left column is About's door: the phone's own About row (owner pick,
+                  2026-11-18, option A). Up to date it opens the About card; with a release out
+                  the row carries the gold dot and "<latest> available" and About LEADS with the
+                  update card; mid-apply it goes straight to the modal reporting the apply.
+                  out_dir (local-only) stays beneath it. */}
               <div className="mgcp-ver">
                 {update?.behind ? (
-                  <button type="button" className="mgcp-verup"
+                  <button type="button" className="mghelp-aboutrow"
                     title={"You are on " + (update.current || "?") + "; " + update.latest + " is out"}
                     onClick={() => (updPhase === "applying" || updPhase === "done"
                       ? setUpdOpen(true) : openAbout("update"))}>
-                    <span className="dot" aria-hidden="true">●</span>
-                    {updPhase === "applying" || updPhase === "done" ? "updating…"
-                      : update.latest + " available — view"}
+                    <span>About Moonglade · <span className="v mgcp-verup">
+                      <span className="dot" aria-hidden="true">●</span>{" "}
+                      {updPhase === "applying" || updPhase === "done" ? "updating…" : update.latest + " available"}
+                    </span></span>
+                    <span className="c" aria-hidden="true">›</span>
                   </button>
                 ) : (
-                  <button type="button" className="mgcp-verbtn" title="About Moonglade Athenaeum"
-                    onClick={() => openAbout("")}>{boot?.build_stamp || "—"}</button>
+                  <button type="button" className="mghelp-aboutrow" title="About Moonglade Athenaeum"
+                    onClick={() => openAbout("")}>
+                    <span>About Moonglade{aboutVer ? " · " : ""}<span className="v">{aboutVer}</span></span>
+                    <span className="c" aria-hidden="true">›</span>
+                  </button>
                 )}
-                {isLocal && summary.out_dir ? <><br /><span title={summary.out_dir}>{summary.out_dir}</span></> : null}
+                {isLocal && summary.out_dir ? <div className="mgcp-verdir" title={summary.out_dir}>{summary.out_dir}</div> : null}
               </div>
             </div>
 
@@ -671,19 +685,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                           </div>
                           <span className="mgcp-consolehint">one job at a time</span>
                         </div>
-                        {jobResult && (
-                          <div className={"mgcp-runresult" + (jobResult.ok ? "" : " warn")}>
-                            <div className="mgcp-runresulthead">
-                              {jobResult.ok ? "✓ Finished" : <><Icon name="warning" /> {"Finished with " + jobResult.warnCount + " warning" + (jobResult.warnCount !== 1 ? "s" : "")}</>}
-                              <button type="button" className="mgcp-run" onClick={() => setJobResult(null)}>dismiss</button>
-                            </div>
-                            {jobResult.lines.length > 0 && (
-                              <div className="mgcp-runresultlog">
-                                {jobResult.lines.map((ln, i) => <div key={i}>{ln}</div>)}
-                              </div>
-                            )}
-                          </div>
-                        )}
+                        {jobResult && <JobResultBox jobResult={jobResult} onDismiss={() => setJobResult(null)} />}
                         {heart === "pipelines" && (
                         <>
                         {/* ---- RUNS ITSELF: the living library (2026-09-06) ------------

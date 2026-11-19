@@ -26,7 +26,14 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   the full credit price** — nothing is partly applied — and the preview says exactly that. It is
   not refused: matching the website, Generate still spends if you click, and The Loom's batch
   confirm counts tickets against your pool and names which shots will spend before you confirm.
-  The guarantee is honesty, not refusal: a paid clip is never shown as free. Details and the
+  The guarantee is honesty, not refusal: a paid clip is never shown as free. The other way round
+  is refused: if the card a free price was shown for has been used elsewhere or has expired by
+  the time you send, nothing is sent and the app says the card is gone, so a send shown as free
+  is never charged. That holds for every send that shows a price first: the Generate dock (a
+  `{a|b}` prompt and a confirmed run included), Edit, Upscale, AI presets, the Video tab, and
+  the Loom's renders and its Image, Edit and Reference tabs. A training run's confirm prices it
+  again and asks before it charges. The price and the send check your cards under the same
+  sign-in. Details and the
   exact preview wording are in [Generating → Free cards and videos](Generating#free-cards-and-videos).
 - **Delete from your PixAI account** — irreversible on PixAI's side. Gated behind typing
   `DELETE` in the gallery's confirm dialog, and it works only from the machine running the
@@ -65,10 +72,19 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   behind a flag, not commented out, not planned. `--account` only ever *reads* your
   credits/membership status.
 - **Touch anyone's account but yours.** Every request rides your own API key — or, if you
-  turn on **Mirror to PixAI** (Control Panel ▸ Maintenance), your own logged-in
-  browser session, read from a browser signed in to PixAI on the server machine. That
-  session is read locally and never leaves that machine; the tile shows how many days it has
-  left, never the credential itself. And it's a hard switch, not a preference: when
+  turn on **Mirror to PixAI** (Control Panel ▸ Maintenance), your own PixAI website
+  sign-in. You hand it over yourself, by clicking the **Connect from PixAI** bookmark on a
+  pixai.art tab you are signed in on: the sign-in goes from that tab to your own Moonglade
+  (the address the bookmark was made from) and nowhere else, and Moonglade keeps it only if
+  it belongs to the same PixAI account as your API key. It is stored on the server machine;
+  the tile shows how many days it has left, never the credential itself. If you click the
+  bookmark on another device on your home network, the sign-in travels from that device to
+  the server **encrypted only when you reach Moonglade over `https://`**. Moonglade serves
+  plain `http://` unless you turn on its `--https` switch (see
+  [The Gallery](Gallery#running-it-from-a-terminal)), and over plain `http://` the sign-in
+  travels **unencrypted**, the same way your Moonglade login does. It is never accepted
+  from outside your home network.
+  And it's a hard switch, not a preference: when
   mirroring is on and the session isn't usable, the submit **refuses and spends nothing** —
   it never quietly falls back to your API key and files the piece somewhere you didn't
   ask. `python -m moonglade --mirror-check` verifies the session without spending.
@@ -93,7 +109,9 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   still be cleared locally), and the static pieces the login page needs to render: your
   branding art and the web-app manifest, none of which carries any library content. Sessions
   are signed cookies over scrypt-hashed passwords,
-  rate-limited per address. **Log Out** signs out the device you pressed it on and nothing
+  rate-limited per address. Over the network, your password and that cookie are encrypted
+  only when you reach Moonglade over `https://`: plain `http://` is the default, and the
+  `--https` switch ([The Gallery](Gallery#running-it-from-a-terminal)) turns encryption on. **Log Out** signs out the device you pressed it on and nothing
   else — your other devices stay signed in. If a device is lost, or you think a session was
   captured, **change your password** in **Control Panel → Accounts → Manage…**: that signs out every other
   device on your account at once and keeps the one you changed it from. (Nothing that merely

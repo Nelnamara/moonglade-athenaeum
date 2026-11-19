@@ -1110,6 +1110,64 @@ LOOM_BED_FILE_RE = re.compile(r"^[0-9a-f]{40}\.(mp3|wav|m4a|aac|ogg|flac)$")
 LOOM_BUNDLE_MAX_BEDS = 1
 LOOM_BED_MIMES = {"mp3": "audio/mpeg", "wav": "audio/wav", "m4a": "audio/mp4", "aac": "audio/aac",
                   "ogg": "audio/ogg", "flac": "audio/flac"}
+
+
+# ---------------------------------------------------------------------------
+# FILES FROM THE LIBRARY NEVER RUN AS A PAGE (red team, 2026-11-18)
+# ---------------------------------------------------------------------------
+# Every route that hands back a file someone else made -- a library picture or clip, a
+# thumb, a music bed, a PixAI CDN cover, an export -- goes out through
+# harden_file_response. A browser shown only a raster picture, a video or a sound has
+# nothing to run; anything else (an SVG above all: Edit Pro makes them, the library
+# catalogs them, and an SVG may carry <script>) opened at its own URL would run AS
+# Moonglade, with the signed-in session. So: every such response says nosniff (the
+# browser keeps to the stated type) and a CSP sandbox (no script, no same-origin even if
+# it did render), and a type outside the list below is sent as a download. An <img>,
+# <video> or <audio> ignores Content-Disposition, so in-page display is unchanged.
+_INLINE_FILE_TYPES = frozenset({
+    "image/png", "image/jpeg", "image/pjpeg", "image/webp", "image/gif", "image/avif",
+    "image/bmp", "image/x-icon", "image/vnd.microsoft.icon",
+    "video/mp4", "video/webm", "video/quicktime", "video/x-m4v",
+    "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/wave", "audio/mp4",
+    "audio/aac", "audio/ogg", "audio/flac", "audio/x-flac",
+})
+FILE_RESPONSE_CSP = "sandbox"
+# The library's own picture and clip types, named here rather than asked of the system's
+# type table (on Windows that reads the registry, which can say anything).
+_MEDIA_TYPE_BY_EXT = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
+    ".gif": "image/gif", ".avif": "image/avif", ".mp4": "video/mp4", ".webm": "video/webm",
+    ".mov": "video/quicktime", ".m4v": "video/x-m4v",
+}
+
+
+def media_type_for(name):
+    """The fixed type for a library picture or clip by its extension; None for anything
+    else (the caller's guess then stands, and harden_file_response makes it a download)."""
+    return _MEDIA_TYPE_BY_EXT.get(os.path.splitext(str(name or ""))[1].lower())
+
+
+def _attachment_disposition(name):
+    """`attachment; filename=...` for any name: an ASCII fallback plus the RFC 5987 form."""
+    from urllib.parse import quote
+    name = os.path.basename(str(name or "")) or "download"
+    plain = re.sub(r'[^\x20-\x7e]|["\\]', "_", name)
+    return "attachment; filename=\"{}\"; filename*=UTF-8''{}".format(plain, quote(name, safe=""))
+
+
+def harden_file_response(resp, filename=None):
+    """Stamp a served file's response so it can never run as a page on this origin.
+
+    Always: X-Content-Type-Options: nosniff and Content-Security-Policy: sandbox. And a
+    type that is not a raster picture, a video or a sound goes out as a download
+    (Content-Disposition: attachment), whatever the route asked for. Returns resp."""
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Content-Security-Policy"] = FILE_RESPONSE_CSP
+    mime = (resp.mimetype or "").lower()
+    if mime not in _INLINE_FILE_TYPES:
+        if not (resp.headers.get("Content-Disposition") or "").lower().startswith("attachment"):
+            resp.headers["Content-Disposition"] = _attachment_disposition(filename)
+    return resp
 # A bed added in the last few minutes may belong to a board whose save has not landed yet, so
 # the unused list never offers it (the sweep re-checks the same rule).
 LOOM_BED_UNUSED_GRACE_S = 10 * 60
@@ -3187,6 +3245,130 @@ def rows_for_media_ids(db_path, ids):
             ).fetchall():
                 found[str(r["media_id"])] = dict(r)
         return [found[i] for i in ids if i in found]
+
+
+def paid_credit_for_tasks(db_path, task_ids):
+    """{task_id: paid_credit text} from the catalog for these task ids: PixAI's own charge
+    for the task, task-level on every row it made ('' when a row exists with no charge
+    reported). A task with no row is absent. Chunked like rows_for_media_ids."""
+    ids = sorted({str(t).strip() for t in (task_ids or []) if str(t or "").strip()})
+    out = {}
+    if not ids or not Path(db_path).exists():
+        return out
+    with catalog(db_path) as con:
+        for i in range(0, len(ids), 400):
+            chunk = ids[i:i + 400]
+            ph = ",".join("?" * len(chunk))
+            for r in con.execute(
+                "SELECT task_id, paid_credit FROM catalog WHERE task_id IN ({})".format(ph), chunk
+            ).fetchall():
+                tid, pc = str(r["task_id"]), str(r["paid_credit"] or "").strip()
+                if pc or tid not in out:          # a row that reports a charge wins
+                    out[tid] = pc
+    return out
+
+
+def loom_cost(text):
+    """A charge read off the catalog: an int, or None when nothing usable was reported. A
+    blank, junk or non-finite value is unknown, never 0 -- 0 means a settled free render."""
+    s = str(text if text is not None else "").strip()
+    if not s:
+        return None
+    try:
+        v = float(s)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(v):
+        return None
+    try:
+        return int(v)
+    except (OverflowError, ValueError):
+        return None
+
+
+# ---- THE LOOM'S SEND RECORD (2026-11-18): the one source of a board's "spent" figure --------
+# One append-only file per account (_moonglade/loom/_sends/<account>.jsonl). A line is written
+# when a render is SENT from a board -- the moment the journal records its task id -- never
+# when a picture lands on a shot. So a clip linked, imported, remixed or seeded onto a card is
+# not a send and never counts; a re-render is its own send and adds its own charge.
+#
+# Line kinds, folded by loom_sends_fold:
+#   a send      {board, card, task_id|null, submit_id|null, kind, cost|null, at}
+#               kind "render" (sent from the Loom) or "backfill" (found on a board saved
+#               before this record existed); cost 0 when a free card was attached, else the
+#               catalog's paid_credit once known, null until then (shown as unknown)
+#   a cost      {task_id, cost}         the charge, read off the catalog once it is there
+#   a void      {submit_id, void: true} an unclear send the owner released: nothing was made
+#   a marker    {board, backfilled: at} that board's one backfill has run
+
+def loom_send_key(rec):
+    tid = str(rec.get("task_id") or "")
+    return ("t:" + tid) if tid else ("s:" + str(rec.get("submit_id") or ""))
+
+
+def loom_sends_fold(lines):
+    """{"sends": {key: send}, "backfilled": {board ids}} from the record's lines. The first
+    line for a task owns its board and card, so a task is one board's send, once."""
+    sends, by_submit, backfilled = {}, {}, set()
+    for rec in lines:
+        if not isinstance(rec, dict):
+            continue
+        if rec.get("backfilled") and rec.get("board"):
+            backfilled.add(str(rec["board"]))
+        elif rec.get("void") and rec.get("submit_id"):
+            k = by_submit.get(str(rec["submit_id"]))
+            if k and k in sends and not sends[k].get("task_id"):
+                sends[k]["void"] = True
+        elif rec.get("board") and rec.get("kind"):
+            k = loom_send_key(rec)
+            if k in ("t:", "s:") or k in sends:
+                continue
+            sends[k] = dict(rec)
+            if rec.get("submit_id"):
+                by_submit[str(rec["submit_id"])] = k
+        elif rec.get("task_id") and "cost" in rec:
+            k = "t:" + str(rec["task_id"])
+            if k in sends and sends[k].get("cost") is None and isinstance(rec["cost"], int):
+                sends[k]["cost"] = rec["cost"]
+    return {"sends": sends, "backfilled": backfilled}
+
+
+def loom_backfill_sends(board, board_id, known_task_ids, journal_entries, at=0.0):
+    """The one-time backfill of a board saved before the send record existed. A send is a
+    real task id the board or the journal kept for a render of this board: a stored take
+    with source "render" that is not imported, a superseded render's task, a render still
+    pending, or a journal entry for this board that reached PixAI. A take with no task id
+    is NOT a send -- a seeded, linked, imported or remixed clip -- and nothing is ever
+    priced from a quote: cost stays null here and is read off the catalog afterwards.
+    `known_task_ids` (every task already recorded, on any board) keeps it idempotent and a
+    task one board's alone. Pure: returns the new send lines, writes nothing."""
+    seen = {str(t) for t in (known_task_ids or ())}
+    out = []
+
+    def add(tid, card):
+        tid = str(tid or "").strip()
+        if not tid or tid in seen:
+            return
+        seen.add(tid)
+        out.append({"board": board_id, "card": str(card or ""), "task_id": tid,
+                    "submit_id": None, "kind": "backfill", "cost": None, "at": at})
+
+    for act in ((board or {}).get("acts") or []):
+        for c in ((act or {}).get("cards") or []):
+            if not isinstance(c, dict):
+                continue
+            cid = c.get("id")
+            for t in (c.get("takes") or []):
+                if isinstance(t, dict) and t.get("source") == "render" and not t.get("imported"):
+                    add(t.get("taskId"), cid)
+            for tid in (c.get("supersededTasks") or []):
+                add(tid, cid)
+            add(c.get("pendingTaskId"), cid)
+    for e in (journal_entries or ()):
+        if isinstance(e, dict) and str(e.get("board") or "") == board_id \
+                and e.get("task_id") and e.get("state") == "submitted":
+            add(e.get("task_id"), e.get("card"))
+    return out
 
 
 def integrity_rows(db_path):
@@ -5743,7 +5925,7 @@ def create_app(out_dir: Path):
     PANEL_ACTIONS = {
         "sync":          {"args": ["--sync"], "label": "Sync now — pull new + fill metadata", "destructive": False},
         "stats":         {"args": ["--catalog-stats"], "label": "Catalog stats", "destructive": False},
-        "audit":         {"args": ["--audit", "--no-content"], "label": "Duplicate audit (fast, read-only)", "destructive": False},
+        "audit":         {"args": ["--audit"], "label": "Duplicate audit (read-only)", "destructive": False},
         # The "full audit" checkbox in the UI does NOT append a flag to the action above --
         # it selects this separate whitelisted entry. Same for dedup-delete below. Keeping
         # the client to a fixed set of action KEYS is what preserves the property the
@@ -10069,13 +10251,14 @@ def create_app(out_dir: Path):
                 and "\\" not in media_id and ".." not in media_id:
             p = _sized_thumb(media_id, size_key)
             if p is not None:
-                resp = send_from_directory(str(p.parent), p.name, max_age=86400)
+                resp = send_from_directory(str(p.parent), p.name, max_age=86400,
+                                           mimetype="image/jpeg")
                 resp.headers["Cache-Control"] = _STRIP_CACHE
-                return resp
+                return harden_file_response(resp, p.name)
         resp = send_from_directory(str(thumb_dir), "{}.jpg".format(media_id),
-                                   max_age=300)
+                                   max_age=300, mimetype="image/jpeg")
         resp.headers["Cache-Control"] = _THUMB_CACHE
-        return resp
+        return harden_file_response(resp, "{}.jpg".format(media_id))
 
     @app.route("/video-file/<media_id>")
     @tier(LOGIN)
@@ -10104,9 +10287,10 @@ def create_app(out_dir: Path):
             # it here keeps "found" meaning the same thing to the resolver and to the serve.
             return "Video not found.", 404
         # send_from_directory supports HTTP Range, so the <video> can seek
-        resp = send_from_directory(str(out_dir), rel, max_age=31536000)
+        resp = send_from_directory(str(out_dir), rel, max_age=31536000,
+                                   mimetype=media_type_for(p.name))
         resp.headers["Cache-Control"] = _IMMUTABLE
-        return resp
+        return harden_file_response(resp, p.name)
 
     @app.route("/full/<media_id>")
     @tier(LOGIN)
@@ -10119,11 +10303,14 @@ def create_app(out_dir: Path):
             return "Not found", 404
         # ?dl=1 -> force a SAVE with the real filename (the detail page's plain Download);
         # without it, inline (the lightbox displays the image). Same file either way.
+        # A type that is not a raster picture (an SVG from Edit Pro) is a download either
+        # way: harden_file_response never lets it open as a page on this origin.
         dl = bool(request.args.get("dl"))
         resp = send_from_directory(str(p.parent), p.name, max_age=31536000,
+                                   mimetype=media_type_for(p.name),
                                    as_attachment=dl, download_name=(p.name if dl else None))
         resp.headers["Cache-Control"] = _IMMUTABLE
-        return resp
+        return harden_file_response(resp, p.name)
 
     @app.route("/export-zip", methods=["POST"])
     @tier(LOGIN)
@@ -11101,6 +11288,12 @@ def create_app(out_dir: Path):
         except (ValueError, OSError):
             abort(404)
         coded = _branding._public_rel_to_coded(target.relative_to(bdir).as_posix())
+        # Pictures only (owner, 2026-11-18): any other type -- a hand-dropped .html or
+        # .svg above all, on this PUBLIC route -- is a 404 before anything is read,
+        # loose or packed. branding_serves_type names the one carve-out (the shipped
+        # moments' clips and sounds) and why.
+        if not _branding.branding_serves_type(coded):
+            abort(404)
         # The unlock split, enforced (see _seal_rule, which judges the CODED
         # rel -- a probe that guesses a coded path passes through translation
         # unchanged, so it faces the same verdict): achievement-bound art only
@@ -11126,7 +11319,7 @@ def create_app(out_dir: Path):
             if have_render:
                 resp = send_from_directory(str(cdir), coded)
                 resp.headers["Cache-Control"] = "no-cache, must-revalidate"
-                return resp
+                return harden_file_response(resp, coded)
             # Container-ONLY read (not _branding_bytes, which would try the
             # coded root loose first): an older pack may carry a top-level flat.
             box = _branding._get_container()
@@ -11155,7 +11348,7 @@ def create_app(out_dir: Path):
         elif (bdir / coded).is_file():
             resp = send_from_directory(str(bdir), coded)
             resp.headers["Cache-Control"] = "no-cache, must-revalidate"   # branding art gets re-cut; never serve a stale copy
-            return resp
+            return harden_file_response(resp, coded)
         elif coded in _branding._moment_clip_rels():
             # A moment's clip, container-sourced (no loose copy): verified once,
             # then sliced from memory for every range the <video> asks for.
@@ -11171,7 +11364,8 @@ def create_app(out_dir: Path):
         # send_from_directory streams, so it gets the Range handling that would
         # have given a loose file.
         mime = mimetypes.guess_type(coded)[0] or "application/octet-stream"
-        return _branding._ranged_bytes_response(app.response_class, raw, mime)
+        return harden_file_response(
+            _branding._ranged_bytes_response(app.response_class, raw, mime), coded)
 
     @app.route("/badge-thumb/<aid>.png", defaults={"ext": "png"})
     @app.route("/badge-thumb/<aid>.webp", defaults={"ext": "webp"})
@@ -13235,7 +13429,9 @@ def create_app(out_dir: Path):
             resp = app.response_class(r.content,
                                       mimetype=r.headers.get("content-type", "image/webp"))
             resp.headers["Cache-Control"] = "public, max-age=86400"
-            return resp
+            # Someone else's file under this origin: a cover that is not a raster
+            # picture goes out as a download, never as a page.
+            return harden_file_response(resp, _up.urlparse(raw).path.rsplit("/", 1)[-1])
         except Exception:
             return ("fetch failed", 502)
 
@@ -14726,28 +14922,71 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:160]}), 200
         return jsonify({"enabled": want})
 
-    @app.route("/api/mirror/connect", methods=["POST"])
+    # The old Connect (POST /api/mirror/connect) read whatever pixai.art sign-in a browser
+    # profile on THIS machine held and stored it with no check that it was the API key's
+    # account. PixAI no longer keeps its sign-in where that read looked, and the route was a
+    # cross-account risk, so it is gone (2026-11-18). Connect from PixAI, below, is the one way
+    # in: the user's own pixai.art tab hands its sign-in over and accept_site_token checks it.
+
+    @app.route("/mirror/connect")
     @tier(LOGIN)
-    def api_mirror_connect():
-        """Bootstrap/refresh the mirror session: read the pixai.art session from THIS
-        machine's browser, renew the JWT, store it. Reports only ok +
-        days-left -- NEVER the token (review F13). No credential crosses the network: the
-        server reads its own local browser store. LOGIN tier."""
+    def mirror_connect_page():
+        """The window the Control Panel's "Connect from PixAI" bookmark opens from a pixai.art
+        tab. It tells its opener it is ready (to https://pixai.art only), takes the sign-in
+        back only from that exact origin and that window, and hands it to
+        /api/mirror/connect-token with this session's CSRF token. Login-gated like every page:
+        a signed-out visitor goes through /login and lands back here, still the opener's
+        window. Dressed in the login card's own classes -- no new design. Holds no credential
+        itself; the page is marked no-store all the same."""
+        session.setdefault("csrf", secrets.token_hex(16))
+        resp = app.response_class(render_template_string(
+            MIRROR_CONNECT_PAGE.replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS),
+            boot={"csrf": session["csrf"]}), mimetype="text/html")
+        resp.headers["Cache-Control"] = "no-store"
+        resp.headers["Referrer-Policy"] = "no-referrer"
+        return resp
+
+    @app.route("/api/mirror/connect-token", methods=["POST"])
+    @tier(LOGIN)
+    def api_mirror_connect_token():
+        """Connect from PixAI: store the sign-in the user's own pixai.art tab handed over
+        (body {csrf, token}). LOGIN tier, a client on this machine or a private home network
+        (mirror.home_network_address), the session's CSRF token, and a same-origin request
+        only (an Origin header naming another site is refused). READ_ONLY refuses,
+        as Connect always has. Then mirror.accept_site_token checks the token -- a PixAI JWT,
+        unexpired, and for the SAME PixAI account the API key resolves to -- before storing
+        it. Answers only ok + days left, or a plain sentence; never the token, a claim or the
+        account id, and nothing here logs."""
+        # Home network only (2026-11-18). Moonglade is served over plain HTTP, so a sign-in
+        # posted from another device crosses the network unencrypted, like the Moonglade login
+        # itself; never accept one from outside a home network. Same client address the
+        # localhost-only checks read (request.remote_addr, the real TCP peer; no forwarded
+        # header is trusted anywhere in this app).
+        if not _mirror.home_network_address(request.remote_addr):
+            return jsonify({"ok": False, "error": _mirror.SITE_TOKEN_NOT_HOME}), 403
+        origin = request.headers.get("Origin")
+        if origin and origin.rstrip("/") != request.host_url.rstrip("/"):
+            return jsonify({"ok": False, "error": "That request didn't come from this "
+                            "Moonglade page, so nothing was saved."}), 403
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict) or not _check_csrf(body):
+            return jsonify({"ok": False, "error": "Your session expired. Reload the page and "
+                            "try again."}), 400
         from moonglade import backup as core
         try:
-            core._check_read_only("connect the PixAI mirror")   # the renewal is account-mutating
-            # A press (#71): re-read the browser even for a usable stored token, keep the
-            # later-expiring of the two, and try a due renewal even inside a failure backoff.
-            s = _mirror.make_mirror_session(bootstrap_from_browser=True, user_initiated=True)
-        except Exception as e:
+            core._check_read_only("connect the PixAI mirror")
+        except Exception as e:                          # noqa: BLE001
             return jsonify({"ok": False, "error": _redact_host_paths(str(e))[:160]}), 200
-        if s is None:
-            return jsonify({"ok": False, "error": "Couldn't read a pixai.art session from a "
-                            "browser on this machine. Sign in to pixai.art in Chrome/Edge/Brave "
-                            "(reload the page once so the token is written), then try again."}), 200
-        jwt = (_mirror.load_mirror_state().get("jwt") or "")
-        return jsonify({"ok": bool(jwt),
-                        "days_left": _mirror.jwt_days_left(jwt) if jwt else None})
+
+        def _api_key_account():
+            # The account the API key REALLY is, asked of PixAI every time: a USER_ID pinned
+            # in config.json is a legacy override and must not decide whose sign-in is kept.
+            s = core._make_session(None, resolve_user=False)
+            return core.resolve_user_id(s)
+        out = _mirror.accept_site_token(body.get("token"), _api_key_account)
+        if out.get("ok"):
+            return jsonify({"ok": True, "days_left": out.get("days_left")})
+        return jsonify({"ok": False, "error": out.get("error") or "Not connected."}), 200
 
     @app.route("/api/branding", methods=["GET", "POST"])
     @tier(LOGIN)
@@ -15706,6 +15945,56 @@ def create_app(out_dir: Path):
             pass
         return msg
 
+    # THE SINGLE SENDS' HALF OF THE LOOM'S F13 GUARD (2026-11-18). A gallery send whose cost
+    # badge said FREE carries `expect_free`. The card is matched again at send time
+    # (_apply_kaisuuken), and if the card the quote found is gone by then -- used elsewhere,
+    # expired, now short -- sending would charge a price nobody was shown, with only a server
+    # console line to say so. So that case is refused before anything goes out, in words the
+    # drawer shows. A send whose badge showed a PRICE carries nothing and goes out exactly as
+    # before (issue #15: a card that covers only part still spends, the full price stated).
+    _QUOTED_FREE_GONE = ("The free card this was priced with is gone (used elsewhere or "
+                         "expired), so sending it would spend credits. Nothing was sent. "
+                         "Check the price again before you send.")
+
+    def _pop_expect_free(body):
+        """The client's 'my badge said FREE' flag, popped so it never reaches build_request,
+        the single-send record or PixAI."""
+        return bool(body.pop("expect_free", False)) if isinstance(body, dict) else False
+
+    def _pop_loom_target(body):
+        """The Loom's {board_id, card_id} on a send from one of its tabs (Image, Edit,
+        Reference, Fix), popped so it never reaches the builder or PixAI. (board, card) or
+        None; a card id that is not one is kept as "" (the board still owns the send)."""
+        t = body.pop("loom_target", None) if isinstance(body, dict) else None
+        if not isinstance(t, dict):
+            return None
+        b, c = str(t.get("board_id") or ""), str(t.get("card_id") or "")
+        if not _LOOM_ID_RE.match(b):
+            return None
+        return (b, c if _LOOM_ID_RE.match(c) else "")
+
+    def _record_loom_send(target, task_id, params, kind):
+        """A Loom tab's send into its board's send record (the one source of the board's
+        "spent" figure): the task, 0 when a free card was attached, else the catalog's charge
+        once known. Fail-soft, and a no-op for any send that did not come from a board."""
+        if not target or not task_id:
+            return
+        _loom_send_note(str(session.get("user") or ""), board=target[0], card=target[1],
+                        task_id=str(task_id), submit_id=None, kind=kind,
+                        cost=0 if (params or {}).get("kaisuukenId") else None)
+
+    def _quoted_free_hooks(core, req, expect_free):
+        """core.submit's before_send for a send quoted FREE: runs after the card step, before
+        the one mutation, and refuses when no card was attached. An Unlimited Mode request is
+        free by the entitlement, never by a card, so it is never held to this."""
+        if not expect_free or req.unlimited:
+            return {}
+
+        def _before_send(params):
+            if not params.get("kaisuukenId"):
+                raise core.LocalRefusal(_QUOTED_FREE_GONE)
+        return {"before_send": _before_send}
+
     @app.route("/api/price", methods=["POST"])
     @tier(LOGIN)
     def api_price():
@@ -15741,7 +16030,15 @@ def create_app(out_dir: Path):
                 # becomes the badge's own note, not a 500 and not a number.
                 return jsonify({"cost": None, "free": False,
                                 "note": _redact_host_paths(str(e))[:140]})
-            return jsonify(core.price(gsession, req))
+            # The card check reads under the identity the send will create on (the Mirror's
+            # sign-in when it is on), so the badge and the send's card step agree (2026-11-18).
+            # A Mirror that cannot be reached falls back to the API key: that send is refused
+            # before anything goes out anyway, for the Mirror, not for a card.
+            try:
+                card_session = _card_session(core, gsession)
+            except Exception:                              # noqa: BLE001
+                card_session = gsession
+            return jsonify(core.price(gsession, req, card_session=card_session))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "cost": None, "free": False}), 200
 
@@ -15760,6 +16057,8 @@ def create_app(out_dir: Path):
         try:
             core, session = _gen_session()
             body = request.get_json(silent=True) or {}
+            expect_free = _pop_expect_free(body)
+            loom_target = _pop_loom_target(body)
             # Session M (BUILD-w5-m review F2): this route is a SINGLE send. More than one
             # generation goes through the confirm (/api/generate/plan -> /run), so a count
             # other than 1 is refused here -- never clamped -- whoever sent it (a stale
@@ -15815,7 +16114,9 @@ def create_app(out_dir: Path):
                                          "remove {} to continue.".format(
                                              _cap, "" if _cap == 1 else "s",
                                              len(req.lora_version_ids) - _cap)}), 400
-            task_id = core.submit(session, req)["task_id"]
+            task_id = core.submit(session, req,
+                                  **_quoted_free_hooks(core, req, expect_free))["task_id"]
+            _record_loom_send(loom_target, task_id, req.parameters, "image")
             if req.unlimited:
                 # The lane mark on the job, written by the server rather than trusted from the
                 # client's own registration, so the one-at-a-time rule above can read it.
@@ -16219,6 +16520,10 @@ def create_app(out_dir: Path):
             return jsonify({"error": "Expected a JSON object."}), 400
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 403
+        # A single send through this road (a template prompt) carries what its badge showed,
+        # as /api/generate does (2026-11-18): popped here, before anything reads the body.
+        expect_free = _pop_expect_free(body)
+        loom_target = _pop_loom_target(body)
         from moonglade import backup as core
         try:
             core._check_read_only(core._SUBMIT_ACTION_DEFAULT)
@@ -16263,12 +16568,13 @@ def create_app(out_dir: Path):
                 return jsonify({"error": "That run id is taken — nothing was sent."}), 200
             _run_inflight.update(run_id=run_id, account=user, done=0, total=0)
         try:
-            return _run_send(core, store, run_id, body, user)
+            return _run_send(core, store, run_id, body, user, expect_free=expect_free,
+                             loom_target=loom_target)
         finally:
             with _run_lock:
                 _run_inflight.clear()
 
-    def _run_send(core, store, run_id, body, user):
+    def _run_send(core, store, run_id, body, user, expect_free=False, loom_target=None):
         from moonglade import runs
         try:
             # Step 5, local: expand and count before any network call.
@@ -16357,12 +16663,19 @@ def create_app(out_dir: Path):
                          source="web")
                 store.set_job(run_id, cell, state="sent", task_id=task_id,
                               request=_strip_request(request_), card=int(bool(card)))
+                # A run sent from a Loom board is that board's spend, job by job.
+                _record_loom_send(loom_target, task_id,
+                                  {"kaisuukenId": "card"} if card else {}, "image")
 
             def failed(self, cell, state, error, request_):
                 store.set_job(run_id, cell, state=state, error=error,
                               request=_strip_request(request_))
 
         budget = {"each": each, "total": planned["total"]} if multi else None
+        if not multi and expect_free and built and not built[0]["req"].unlimited:
+            # A single send its badge called FREE: a confirmed total of 0, so the job is refused
+            # before its create if the card step attaches no card -- in a single send's words.
+            budget = {"each": 1, "total": 0, "note": _QUOTED_FREE_GONE}
         res = core.send_run(gsession, [{"cell": b["cell"], "req": b["req"],
                                         "no_card": b["no_card"]} for b in built],
                             hooks=_Hooks(), budget=budget)
@@ -16499,6 +16812,8 @@ def create_app(out_dir: Path):
             # the read above), not a read of Flask's session.
             core, gsession = _gen_session()
             p = request.get_json(silent=True) or {}
+            expect_free = _pop_expect_free(p)
+            loom_target = _pop_loom_target(p)
             req = core.build_request(p, mode="edit", user=user,
                                      resolve=_submit_resolver(core, gsession))
             params = req.parameters          # bound for _log_gen_failure's locals().get()
@@ -16506,7 +16821,9 @@ def create_app(out_dir: Path):
                 return jsonify({"error": "pick an image to edit (and a valid preset if set)"}), 400
             if not (p.get("preset") or "").strip() and not (p.get("instruction") or "").strip():
                 return jsonify({"error": "describe the edit"}), 400
-            task_id = core.submit(gsession, req)["task_id"]
+            task_id = core.submit(gsession, req,
+                                  **_quoted_free_hooks(core, req, expect_free))["task_id"]
+            _record_loom_send(loom_target, task_id, req.parameters, "edit")
             # (edits is counted from the catalog's edit rows since 2026-10-02.)
             _telemetry.telem_set_add("tools", "edit", out_dir=out_dir)
             return jsonify({"task_id": task_id})
@@ -16554,7 +16871,7 @@ def create_app(out_dir: Path):
     # stable (source- AND priority-independent, verified live 2026-08-18), so a slab mount
     # need not be a dozen live REST calls. Only a REAL (mirror-reached) result is cached; a
     # null-priced result is not, so it retries once the mirror is back. TTL in seconds.
-    _enh_price_cache = {"at": 0.0, "presets": None}
+    _enh_price_cache = {"at": 0.0, "presets": None, "gen": 0}
     _ENH_PRICE_TTL = 3600.0
 
     @app.route("/api/enhance/presets")
@@ -16575,6 +16892,9 @@ def create_app(out_dir: Path):
         cached = _enh_price_cache["presets"]
         if cached is not None and (now - _enh_price_cache["at"]) < _ENH_PRICE_TTL:
             return jsonify({"presets": cached})
+        # The cache's generation when this read began: a send or refusal that lands while it
+        # runs bumps it, and this read's (older) answer is then never cached.
+        gen0 = _enh_price_cache["gen"]
         # Stored session (no bootstrap) -- as the gate uses -- and only while the Mirror is ON,
         # like the scene routes: make_mirror_session can renew the token, and nothing may renew
         # it as a side effect while the owner has the Mirror switched off (#71).
@@ -16590,7 +16910,10 @@ def create_app(out_dir: Path):
                     params = core.build_panelplugin_parameters(
                         "1", row["workflow_id"], workflow_name=row["workflow_name"])
                     row["price"] = core.price_task(s, params)
-                    row["free_card"] = bool(core.match_kaisuuken(s, params))
+                    # card_covers, the one coverage verdict the send reads too (2026-11-18): a
+                    # card that matched but does not cover the job is not "free".
+                    row["free_card"] = core.card_covers(
+                        core.match_kaisuuken(s, params, enrich=True))
                 except Exception:
                     row["price"] = None
             return row
@@ -16607,7 +16930,8 @@ def create_app(out_dir: Path):
                 out = list(ex.map(_row, core.BRIDGE_ENHANCE_PRESETS))
         else:
             out = [_row(pr) for pr in core.BRIDGE_ENHANCE_PRESETS]
-        if s is not None and all(r["price"] is not None for r in out):   # cache only a fully-real result
+        if s is not None and all(r["price"] is not None for r in out) \
+                and _enh_price_cache["gen"] == gen0:     # cache only a fully-real, current result
             _enh_price_cache["presets"] = out
             _enh_price_cache["at"] = now
         return jsonify({"presets": out})
@@ -16639,6 +16963,7 @@ def create_app(out_dir: Path):
         try:
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
+            expect_free = _pop_expect_free(p)
             # Same road as every other create: build_request resolves the source image,
             # translates the Change-Emotion control and calls build_panelplugin_parameters;
             # core.submit is the READ_ONLY + free-card choke. A panelplugin task can never
@@ -16650,7 +16975,13 @@ def create_app(out_dir: Path):
             params = req.parameters          # bound for _log_gen_failure's locals().get()
             if params is None:
                 return jsonify({"error": req.note}), 400
-            task_id = core.submit(session, req)["task_id"]
+            # A send uses a card, and a refusal means the cached "free" was wrong: either way
+            # the presets' cached verdicts are dropped, so the tab's next read asks PixAI
+            # again instead of offering "free" for an hour (2026-11-18).
+            _enh_price_cache["presets"] = None
+            _enh_price_cache["gen"] += 1
+            task_id = core.submit(session, req,
+                                  **_quoted_free_hooks(core, req, expect_free))["task_id"]
             # [BLOCKER] Telemetry is DEFERRED, not fired here: submit_generation returns the id at
             # createGenerationTask ACCEPTANCE (before start/completion), and a panelplugin job can
             # be accepted then reaped. Record the identity ACTUALLY submitted (workflowName when a
@@ -16854,6 +17185,7 @@ def create_app(out_dir: Path):
         try:
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
+            loom_target = _pop_loom_target(p)
             # READ_ONLY first: the submit resolver below uploads the local file (a network
             # call), so the refusal has to come before it, not only inside submit_fixer.
             core._check_read_only(core._SUBMIT_ACTIONS["fix"])
@@ -16876,6 +17208,7 @@ def create_app(out_dir: Path):
             # "which boxes did we actually ask about" is half the diagnosis.
             fix_params = {"mediaId": req.media_id, "boxes": req.boxes}
             task_id = core.submit(session, req)["task_id"]
+            _record_loom_send(loom_target, task_id, req.parameters, "fix")
             _telemetry.telem_set_add("tools", "fix", out_dir=out_dir)   # Full Toolbox
             return jsonify({"task_id": task_id})
         except Exception as e:
@@ -17134,6 +17467,61 @@ def create_app(out_dir: Path):
         except OSError:
             pass
         return e
+
+    # The send record (see loom_sends_fold): its own lock, never taken while the journal's is
+    # held by the same code path that then waits on the journal -- the spend read copies the
+    # journal first, under the journal lock, and only then takes this one.
+    _loom_sends_lock = threading.Lock()
+
+    def _loom_sends_path(user):
+        d = _paths.loom_root(out_dir) / "_sends"
+        d.mkdir(parents=True, exist_ok=True)
+        return d / (_account_prefs._account_key(user) + ".jsonl")
+
+    def _loom_sends_lines(user):
+        try:
+            text = _loom_sends_path(user).read_text(encoding="utf-8")
+        except OSError:
+            return []
+        out = []
+        for ln in text.splitlines():
+            try:
+                out.append(json.loads(ln))
+            except ValueError:
+                continue
+        return out
+
+    def _loom_sends_append(user, recs):
+        if not recs:
+            return
+        try:
+            with open(_loom_sends_path(user), "a", encoding="utf-8") as fh:
+                fh.write("".join(json.dumps(r) + "\n" for r in recs))
+        except OSError:
+            pass
+
+    def _loom_send_note(user, **rec):
+        """Record one render sent from a board. Fail-soft: the record can never affect the
+        spend it describes."""
+        rec.setdefault("at", time.time())
+        rec.setdefault("kind", "render")
+        try:
+            with _loom_sends_lock:
+                _loom_sends_append(user, [rec])
+        except Exception:                                  # noqa: BLE001
+            pass
+
+    def _loom_board_saved(user, board_id):
+        """The board as saved (the kv value may be the board's JSON text), or None."""
+        v = _loom_kv_read(user, "storyboard:v2:proj:" + board_id)
+        for _ in range(3):
+            if not isinstance(v, str):
+                break
+            try:
+                v = json.loads(v)
+            except ValueError:
+                return None
+        return v if isinstance(v, dict) else None
 
     def _loom_journal_live_for(user, board, card):
         """The entry that still owns (board, card): sent or maybe sent, not finished, not
@@ -17426,6 +17814,91 @@ __DESIGN_TOKENS__
    redirected `next` path can never break out of this inline script. #}
 <script>window.MG_BOOT = {{ boot|tojson }};</script>
 <script type="module" src="/next/assets/app.js"></script>
+</body></html>"""
+
+    # /mirror/connect's page (Connect from PixAI, 2026-11-18): the login card's own markup and
+    # classes (gallery/src/styles/login.css, already in app.css), no bundle -- a few lines of
+    # inline script do the whole job. PIXAI is the one origin a sign-in is taken from (www.
+    # redirects to it), and the ready ping names it as its target, never "*". The token lives
+    # in one closure variable for the length of one POST and is never written to the page.
+    MIRROR_CONNECT_PAGE = """<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Connect from PixAI · Moonglade Athenaeum</title>
+<link rel="icon" type="image/png" href="/branding/favicon.png">
+""" + _PREPAINT_BOOT_JS + _AUTH_401_GUARD_JS + """
+<link rel="stylesheet" href="/next/assets/app.css">
+<style>
+__DESIGN_TOKENS__
+</style>
+</head><body>
+<div class="lgn-stage">
+  <div class="lgn-wash lgn-wash-a"></div>
+  <div class="lgn-wash lgn-wash-b"></div>
+  <div class="lgn-frame">
+    <div class="lgn-card">
+      <div class="lgn-titlewrap">
+        <div class="lgn-title">Connect from PixAI</div>
+        <div class="lgn-framing" id="mc-status" role="status">Waiting for your pixai.art tab…</div>
+      </div>
+      <div class="lgn-error" id="mc-error" role="alert" hidden></div>
+      <button type="button" class="lgn-signbtn" id="mc-close">Close</button>
+    </div>
+  </div>
+</div>
+<script>window.MG_MIRROR_CONNECT = {{ boot|tojson }};</script>
+<script>
+(function () {
+  var PIXAI = "https://pixai.art";
+  var boot = window.MG_MIRROR_CONNECT || {};
+  var status = document.getElementById("mc-status");
+  var error = document.getElementById("mc-error");
+  function say(t) { status.textContent = t; }
+  function fail(t) { error.textContent = t; error.hidden = false; }
+  document.getElementById("mc-close").addEventListener("click", function () { window.close(); });
+  var opener = window.opener;
+  if (!opener) {
+    say("Not connected.");
+    fail("Open this from the Connect from PixAI bookmark, clicked on a pixai.art tab.");
+    return;
+  }
+  var got = false, tries = 0;
+  function ping() {
+    if (got) return;
+    try { opener.postMessage({ type: "moonglade-mirror-ready" }, PIXAI); } catch (e) {}
+    if (++tries < 360) { setTimeout(ping, 500); return; }
+    say("Not connected.");
+    fail("Nothing came from pixai.art. Click the bookmark again on a pixai.art tab.");
+  }
+  function days(n) {
+    return n >= 1 ? n + (n === 1 ? " day" : " days") + " left" : "less than a day left";
+  }
+  window.addEventListener("message", function (e) {
+    if (got || e.origin !== PIXAI || e.source !== opener) return;
+    var d = e.data;
+    if (!d || d.type !== "moonglade-mirror-token" || typeof d.token !== "string") return;
+    got = true;
+    say("Checking your PixAI sign-in…");
+    var token = d.token;
+    fetch("/api/mirror/connect-token", {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ csrf: boot.csrf || "", token: token })
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; });
+    }).then(function (j) {
+      if (j && j.ok) { say("Connected · " + days(j.days_left)); return; }
+      say("Not connected.");
+      fail((j && j.error) || "Moonglade couldn't save that sign-in.");
+    }).catch(function () {
+      say("Not connected.");
+      fail("Couldn't reach Moonglade. Check that it is still running, then try again.");
+    });
+    token = null;
+  });
+  ping();
+})();
+</script>
 </body></html>"""
 
     # "/" is the FRONT DOOR (the flip, 2026-08-01) and, since issue #51, the
@@ -18391,7 +18864,7 @@ __DESIGN_TOKENS__
                 os.utime(png, None)            # used now: the LRU keeps it
             except OSError:
                 pass
-            return send_file(str(png), mimetype="image/png", max_age=3600)
+            return harden_file_response(send_file(str(png), mimetype="image/png", max_age=3600))
         # A COMPLETE library file only (Invariant 3): a .part download or a zero-byte file is
         # never read -- the same resolver the EDL zip uses.
         vid = _loom_complete_clip(mid)
@@ -18428,7 +18901,7 @@ __DESIGN_TOKENS__
             _loom_frame_sweep(fdir)
         if not png.is_file():
             return jsonify({"error": "the frame cache is full"}), 404
-        return send_file(str(png), mimetype="image/png", max_age=3600)
+        return harden_file_response(send_file(str(png), mimetype="image/png", max_age=3600))
 
     # ---- FRAMES SPLICED BEFORE 3.15.0 (GitHub #62) -------------------------------------------
     # 3.15.0 writes a thumbnail when a splice uploads a frame, but a frame spliced earlier is a
@@ -18516,80 +18989,70 @@ __DESIGN_TOKENS__
                         _loom_frame_gone.add(mid)
         return jsonify({"have": have, "fetched": fetched, "gone": gone})
 
-    # The per-project spend ledger's one server call. A cap, not a guess: rows_for_media_ids
-    # already chunks at 400 for SQLite's variable limit, so the number here only bounds how
-    # much a single request may ask for. 2000 media ids is far past any real board (a project
-    # would need ~2000 rendered shots plus re-rolls) and keeps a hostile body finite.
-    _LOOM_SPEND_MAX_IDS = 2000
-
     @app.route("/api/loom/spend", methods=["POST"])
     @tier(LOGIN)
     def loom_spend():
-        """What a Loom project has ALREADY spent: catalog `paid_credit` for a list of result
-        media_ids. Read-only and local -- one SELECT against the backup catalog, no PixAI
-        session, no network, nothing written. The historical sibling of /api/price, which
-        quotes what UNRENDERED shots would cost; this reports what finished ones really did.
+        """What a Loom board has ALREADY spent: the renders it SENT (2026-11-18). Local only --
+        no PixAI session, no network. The historical sibling of /api/price, which quotes what
+        unrendered shots would cost.
 
-        The client sends the ids (loom-core.js's collectSpendMids walks the board -- a
-        resultMid-and-attempts-only walk, deliberately NOT _loom_collect_media_ids, which also
-        gathers frame slots and cast images: those are reused INPUTS, not spend) and does the
-        arithmetic itself, so the whole ledger stays under loom/test's node --test. This route
-        is the join and nothing else.
+        The answer is read from the board's send record (loom_sends_fold) and nothing else:
+        not from the media ids its cards point at. Counting those is what broke the figure
+        over and over -- every clip attached to a shot that was not a render paid for here
+        (a linked or imported video, a remix, a seeded example, a split's twin) had to be
+        fenced out one writer at a time. A send is recorded when it happens, so none of them
+        can count.
 
-        Answers {"rows": {media_id: {"paid_credit": int|None, "task_id": str}}}. The three
-        states are distinct and the client keeps them apart all the way to the tooltip:
-          - an int          -> PixAI's actual charge for the task that made this media
-          - None            -> the row exists but paid_credit is '' (PixAI never reported one)
-          - key ABSENT      -> no catalog row at all (local file deleted, id never resolved)
-        `task_id` rides along because paid_credit is TASK-level: two media ids from one task
-        carry the same charge, and the client dedups on it rather than summing twice."""
+        On the first read of a board saved before the record existed, its one backfill runs
+        (loom_backfill_sends): the real task ids its takes and the journal kept. Each send
+        with no settled charge is then looked up in the catalog by task id; a charge found
+        there is written into the record, so it no longer depends on the catalog row.
+
+        Answers {"sends": [{"task_id": str|null, "card": str, "kind": str,
+        "cost": int|null}]}: an int is PixAI's charge for that send (0: a free card covered
+        it), null a send whose charge is not known (not collected yet, or a send with no
+        clear answer from PixAI)."""
         user = str(session.get("user") or "")
         if not user:
             return jsonify({"error": "not logged in"}), 401
         p = request.get_json(silent=True) or {}
-        raw = p.get("media_ids")
-        if not isinstance(raw, list):
-            return jsonify({"error": "media_ids must be a list"}), 400
-        ids, seen = [], set()
-        for m in raw:
-            s = str(m or "").strip()
-            if s and s not in seen:
-                seen.add(s)
-                ids.append(s)
-        if len(ids) > _LOOM_SPEND_MAX_IDS:
-            return jsonify({"error": "too many media_ids (max %d)" % _LOOM_SPEND_MAX_IDS}), 400
-        # as_int mirrors /api/history's own paid_credit reading exactly ('' -> None, a
-        # real number -> int): one interpretation of that column across both surfaces.
-        #
-        # NON-FINITE IS NOT A CHARGE, and it must not take the batch down with it. This
-        # caught ValueError only -- but int(float("Infinity")) raises OverflowError, and
-        # float("nan") converts to a meaningless integer rather than raising at all. One
-        # such row answered the whole request with a 500, so every OTHER media id in the
-        # batch lost its number too: the three states this route keeps apart mean nothing
-        # if one bad row can delete all of them at once. A value that is not a real,
-        # finite number degrades to "unpriced" -- the row exists, and nothing usable was
-        # reported for it -- which is exactly what that state is for.
-        def as_int(s):
-            s = str(s or "").strip()
-            if not s:
-                return None
-            try:
-                v = float(s)
-            except (TypeError, ValueError):
-                return None
-            if not math.isfinite(v):
-                return None
-            try:
-                return int(v)
-            except (OverflowError, ValueError):
-                return None
-        out = {}
-        for r in rows_for_media_ids(db_path, ids):
-            out[str(r.get("media_id") or "")] = {
-                "paid_credit": as_int(r.get("paid_credit")),
-                "task_id": str(r.get("task_id") or ""),
-            }
-        return jsonify({"rows": out})
+        board = str(p.get("board_id") or "")
+        if not _LOOM_ID_RE.match(board):
+            return jsonify({"error": "board_id required"}), 400
+        # The journal first, under its own lock, released before the record's is taken.
+        with _loom_journal_lock:
+            entries = [dict(e) for e in _loom_journal_load(user)["subs"].values()]
+        with _loom_sends_lock:
+            st = loom_sends_fold(_loom_sends_lines(user))
+            new = []
+            if board not in st["backfilled"]:
+                saved = _loom_board_saved(user, board)
+                known = {s.get("task_id") for s in st["sends"].values() if s.get("task_id")}
+                new = loom_backfill_sends(saved or {}, board, known, entries, at=time.time())
+                new.append({"board": board, "backfilled": time.time()})
+                _loom_sends_append(user, new)
+                st = loom_sends_fold(_loom_sends_lines(user))
+            mine = [s for s in st["sends"].values()
+                    if s.get("board") == board and not s.get("void")]
+            open_tids = [s["task_id"] for s in mine if s.get("task_id") and s.get("cost") is None]
+            if open_tids:
+                found = paid_credit_for_tasks(db_path, open_tids)
+                costs = []
+                for tid in open_tids:
+                    c = loom_cost(found.get(tid))
+                    if c is not None:
+                        costs.append({"task_id": tid, "cost": c})
+                if costs:
+                    _loom_sends_append(user, costs)
+                    st = loom_sends_fold(_loom_sends_lines(user))
+                    mine = [s for s in st["sends"].values()
+                            if s.get("board") == board and not s.get("void")]
+        mine.sort(key=lambda s: float(s.get("at") or 0))
+        return jsonify({"sends": [{"task_id": s.get("task_id") or None,
+                                   "card": str(s.get("card") or ""),
+                                   "kind": s.get("kind"),
+                                   "cost": s.get("cost") if isinstance(s.get("cost"), int) else None}
+                                  for s in mine]})
 
     @app.route("/api/loom/generate", methods=["POST"])
     @tier(LOGIN)
@@ -18622,6 +19085,9 @@ __DESIGN_TOKENS__
         target = p.pop("loom_target", None)
         submit_id = p.pop("submit_id", None)
         expect_free = bool(p.pop("expect_free", False))
+        # A draft render has no shot yet, so it names its board alone (2026-11-18): it is a
+        # render sent from that board, and the board's send record counts it.
+        draft_board = p.pop("loom_board", None)
         user = str(session.get("user") or "")
         journalled = submit_id is not None or target is not None
         board_id = card_id = None
@@ -18633,6 +19099,12 @@ __DESIGN_TOKENS__
                 board_id, card_id = str(t.get("board_id") or ""), str(t.get("card_id") or "")
                 if not _LOOM_ID_RE.match(board_id) or not _LOOM_ID_RE.match(card_id):
                     return jsonify({"error": "This render names no valid shot, so nothing was sent."}), 400
+        # Which board's send record a send from here goes into: the shot's board, or a
+        # draft's own board. None for the gallery's Video tab, which is not a board.
+        send_board, send_card = (board_id, card_id) if board_id else (None, "")
+        if journalled and not send_board and isinstance(draft_board, str) \
+                and _LOOM_ID_RE.match(draft_board):
+            send_board = draft_board
         sending_key = (_account_prefs._account_key(user), submit_id) if journalled else None
         try:
             _core._check_read_only(_core._SUBMIT_ACTION_DEFAULT)
@@ -18708,9 +19180,13 @@ __DESIGN_TOKENS__
             if expect_free and not params.get("kaisuukenId"):
                 raise _core.LocalRefusal(
                     "The free card this render was priced with was used elsewhere, so it would "
-                    "spend credits. Nothing was sent. Press Render again to see the new price.")
+                    "spend credits. Nothing was sent. Press Render again to see the new price."
+                    if journalled else _QUOTED_FREE_GONE)
 
-        hooks = {"before_send": _before_send, "on_send": _on_send} if journalled else {}
+        # The gallery's own Video tab (no Loom keys) is held to the same rule when its badge
+        # said FREE (2026-11-18): before, the guard rode only a journalled Loom render.
+        hooks = ({"before_send": _before_send, "on_send": _on_send} if journalled
+                 else {"before_send": _before_send} if expect_free else {})
 
         def _journal(**fields):
             if journalled:
@@ -18879,6 +19355,13 @@ __DESIGN_TOKENS__
             except Exception:
                 pass
             _journal(state="submitted", task_id=str(task_id))
+            if send_board:
+                # THE SEND RECORD: the one source of the board's "spent" figure. A free card
+                # attached by the card step is a charge of 0; otherwise the charge is read off
+                # the catalog once PixAI reports it.
+                _loom_send_note(user, board=send_board, card=send_card, task_id=str(task_id),
+                                submit_id=submit_id,
+                                cost=0 if (req.parameters or {}).get("kaisuukenId") else None)
             return jsonify({"task_id": task_id, "uploaded": len(image_ids)})
         except Exception as e:
             msg = _log_gen_failure("/api/loom/generate", e, locals().get("params"))[:300]
@@ -18891,6 +19374,11 @@ __DESIGN_TOKENS__
             else:
                 state = "may_have_started"
             _journal(state=state, error=msg)
+            if state == "may_have_started" and send_board:
+                # Sent with no clear answer: the board may have spent on it, and nobody can say
+                # what. It counts as unknown until the owner releases it (submit-abandon).
+                _loom_send_note(user, board=send_board, card=send_card, task_id=None,
+                                submit_id=submit_id, cost=None)
             if state == "may_have_started":
                 return jsonify({"error": msg, "unclear": True, "state": state}), 200
             return jsonify({"error": msg, "state": state}), 200
@@ -18959,6 +19447,9 @@ __DESIGN_TOKENS__
                 return jsonify({"error": "That render was sent (task …%s), so it can't be released."
                                          % str(e["task_id"])[-6:], "task_id": e["task_id"]}), 409
             _loom_journal_note(user, sid, state="abandoned")
+            # Released: nothing was made, so its unknown leaves the board's send record.
+            with _loom_sends_lock:
+                _loom_sends_append(user, [{"submit_id": sid, "void": True, "at": time.time()}])
         return jsonify({"ok": True})
 
 
@@ -19098,8 +19589,9 @@ __DESIGN_TOKENS__
         p = _loom_bed_path(user, name)
         if p is None:
             return jsonify({"error": "no such music bed"}), 404
-        return send_file(str(p), mimetype=LOOM_BED_MIMES.get(p.suffix.lstrip("."), "application/octet-stream"),
-                         conditional=True, max_age=3600)
+        return harden_file_response(
+            send_file(str(p), mimetype=LOOM_BED_MIMES.get(p.suffix.lstrip("."), "application/octet-stream"),
+                      conditional=True, max_age=3600), p.name)
 
     @app.route("/api/loom/beds/unused")
     @tier(LOGIN)
@@ -19562,8 +20054,9 @@ __DESIGN_TOKENS__
         name = _export_job.get("out") or "loom_cut.mp4"
         if not (_export_dir / name).exists():
             return "No export available.", 404
-        return send_from_directory(str(_export_dir), name, as_attachment=True,
-                                   download_name="moonglade-loom-cut.mp4")
+        return harden_file_response(
+            send_from_directory(str(_export_dir), name, as_attachment=True,
+                                download_name="moonglade-loom-cut.mp4"), name)
 
     @app.route("/api/loom/export-cancel", methods=["POST"])
     @tier(LOGIN)

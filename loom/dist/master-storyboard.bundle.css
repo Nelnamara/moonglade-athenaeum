@@ -7527,20 +7527,6 @@ html.mg-noblur .mgab-scrim {
   padding: 10px 12px;
   font-size: 12px;
 }
-.mgcp-verbtn {
-  background: none;
-  border: 0;
-  padding: 0;
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
-  text-align: left;
-}
-.mgcp-verbtn:hover {
-  color: var(--text);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
 .mghelp-aboutrow {
   display: flex;
   align-items: center;

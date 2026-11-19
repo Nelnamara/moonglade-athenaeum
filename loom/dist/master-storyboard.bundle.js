@@ -885,6 +885,11 @@ var LoomBundle = (() => {
   }
   var PRICE_DEBOUNCE_MS = 250;
   var PRICE_FETCH_TIMEOUT_MS = 25e3;
+  function quotedSendBody(payload, quote) {
+    const q = quote || null;
+    if (!q || q.free !== true || q.unlimited || q.error) return payload;
+    return { ...payload, expect_free: true };
+  }
 
   // ../gallery/src/gen/videoDrawerCore.js
   var MODELS = [
@@ -901,6 +906,24 @@ var LoomBundle = (() => {
     { value: "v2.7", label: "V2.7 (High Dynamics)", caps: ["camera moves", "dynamic", "no card"] }
   ];
   var DEFAULT_MODEL = "v4.0.1";
+  var VIDEO_MODEL_RETIRED = { "v3.2": "2026-11-23T03:00:00Z" };
+  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  var videoClock = () => typeof globalThis.__mgVideoNow === "function" ? globalThis.__mgVideoNow() : Date.now();
+  function modelRetired(v, now2) {
+    const when = VIDEO_MODEL_RETIRED[String(v == null ? "" : v).trim()];
+    if (!when) return false;
+    const t = now2 == null ? videoClock() : +now2;
+    return t >= Date.parse(when);
+  }
+  function pickerModels(now2) {
+    return MODELS.filter((m) => !modelRetired(m.value, now2));
+  }
+  function retiredNote(v) {
+    const m = MODELS.find((x) => x.value === v);
+    const d = MODELS.find((x) => x.value === DEFAULT_MODEL);
+    const when = new Date(VIDEO_MODEL_RETIRED[v]);
+    return (m ? m.label : v) + " was retired by PixAI on " + when.getUTCDate() + " " + MONTHS[when.getUTCMonth()] + "; using " + (d ? d.label : DEFAULT_MODEL) + " instead.";
+  }
   var MODEL_CARD = { "v3.0.1": false, "v2.7": false, "tbkv1.0": null, "tbkv1.0.1": null };
   function cardClaim(v) {
     const c = MODEL_CARD[v];
@@ -1053,7 +1076,8 @@ var LoomBundle = (() => {
     if (!durationAllowed(model, d)) d = snapDuration(d, model);
     return { mode: m, duration: d };
   }
-  function applyModelGating(s, userDriven) {
+  function applyModelGating(s, userDriven, now2) {
+    if (modelRetired(s.model, now2)) s.model = DEFAULT_MODEL;
     const g = gatedShot(s.mode, s.duration, s.model);
     if (g.mode !== s.mode) {
       const from = s.mode, to = g.mode;
@@ -1089,7 +1113,14 @@ var LoomBundle = (() => {
     s.modeNote = "";
     s.ratio = VIDEO_RATIOS.indexOf(o.ratio) >= 0 ? o.ratio : o.same_shot ? s.ratio : "adaptive";
     if (o.mode && MODE_LBL[String(o.mode).toLowerCase()]) applyMode(s, String(o.mode).toLowerCase());
-    if (o.video_model != null) s.model = o.video_model;
+    if (o.video_model != null) {
+      s.model = o.video_model;
+      if (modelRetired(s.model, o.now)) {
+        const gone = s.model;
+        s.model = DEFAULT_MODEL;
+        s.modeNote = retiredNote(gone);
+      }
+    }
     if (o.duration != null) s.duration = snapDuration(o.duration);
     if (o.quality != null) s.quality = o.quality;
     if (o.is_private != null) s.channel = o.is_private ? "enhanced" : "normal";
@@ -1251,7 +1282,7 @@ var LoomBundle = (() => {
   });
   var engineId = (v) => {
     const s = String(v == null ? "" : v).trim();
-    return MODELS.some((m) => m.value === s) ? s : DEFAULT_MODEL;
+    return MODELS.some((m) => m.value === s) && !modelRetired(s) ? s : DEFAULT_MODEL;
   };
   var engineOf = (c) => engineId(c && c.videoModel);
   var engineLabel = (v) => {
@@ -1726,56 +1757,40 @@ var LoomBundle = (() => {
     });
     return { mids: byAct.reduce((all, b) => all.concat(b.mids), []), byAct, imported };
   };
-  var tallySpend = (collected, rows) => {
-    const src = rows || {};
-    const col = collected || { byAct: [], imported: 0 };
-    const counted = /* @__PURE__ */ Object.create(null);
-    const zeroB = () => ({
-      paid: 0,
-      credits: 0,
-      zero: 0,
-      unpriced: 0,
-      missing: 0,
-      results: 0,
-      sharedElsewhere: 0,
-      sharedWith: ""
-    });
-    const total = zeroB();
-    const byAct = (col.byAct || []).map((b) => {
-      const acc = zeroB();
-      (b.mids || []).forEach((m) => {
-        const row = Object.prototype.hasOwnProperty.call(src, m) ? src[m] || {} : null;
-        const add = (k, n) => {
-          acc[k] += n;
-          total[k] += n;
-        };
-        add("results", 1);
-        if (row === null) {
-          add("missing", 1);
-          return;
-        }
-        const tid = String(row.task_id || "");
-        if (tid && Object.prototype.hasOwnProperty.call(counted, tid)) {
-          add("sharedElsewhere", 1);
-          if (!acc.sharedWith) acc.sharedWith = counted[tid];
-          return;
-        }
-        if (tid) counted[tid] = b.name || "";
-        const pc = row.paid_credit;
-        if (typeof pc !== "number" || !isFinite(pc)) {
-          add("unpriced", 1);
-          return;
-        }
-        if (pc <= 0) {
-          add("zero", 1);
-          return;
-        }
-        add("paid", 1);
-        add("credits", pc);
+  var tallySends = (sends, project) => {
+    const zeroB = () => ({ paid: 0, credits: 0, zero: 0, unpriced: 0, missing: 0, results: 0 });
+    const actOf = /* @__PURE__ */ Object.create(null);
+    const byAct = ((project || {}).acts || []).map((a, ai) => {
+      const b = { ...zeroB(), name: (a || {}).name || `Act ${ai + 1}` };
+      ((a || {}).cards || []).forEach((c) => {
+        if (c && c.id != null && c.id !== "") actOf[String(c.id)] = b;
       });
-      return { ...acc, name: b.name };
+      return b;
     });
-    return { ...total, imported: col.imported || 0, byAct };
+    const offBoard = { ...zeroB(), name: "Drafts and deleted shots" };
+    const total = zeroB();
+    (Array.isArray(sends) ? sends : []).forEach((x) => {
+      if (!x || typeof x !== "object") return;
+      const card = String(x.card == null ? "" : x.card);
+      const b = card && Object.prototype.hasOwnProperty.call(actOf, card) ? actOf[card] : offBoard;
+      const add = (k, n) => {
+        b[k] += n;
+        total[k] += n;
+      };
+      add("results", 1);
+      const c = x.cost;
+      if (typeof c !== "number" || !isFinite(c)) {
+        add("unpriced", 1);
+        return;
+      }
+      if (c <= 0) {
+        add("zero", 1);
+        return;
+      }
+      add("paid", 1);
+      add("credits", c);
+    });
+    return { ...total, imported: 0, byAct: offBoard.results ? byAct.concat([offBoard]) : byAct };
   };
   var formatSpend = ({ paid = 0, credits = 0, zero = 0, unpriced = 0, missing = 0 } = {}) => {
     const unknown = unpriced + missing;
@@ -1815,19 +1830,11 @@ var LoomBundle = (() => {
   };
   var spendPillShown = (s) => ((s || {}).results || 0) > 0 || ((s || {}).imported || 0) > 0;
   var spendTooltip = (s = {}) => {
-    const paid = s.paid || 0, credits = s.credits || 0;
-    const head = `Spent so far: ${paid} paid (~${Math.round(credits).toLocaleString()} credits), ${s.zero || 0} free-card/zero-cost, ${s.unpriced || 0} unpriced, ${s.missing || 0} with no catalog row` + (s.imported ? `, plus ${s.imported} imported clip(s) not counted \u2014 paid for elsewhere` : "") + ".";
+    const n = s.results || 0, paid = s.paid || 0, credits = s.credits || 0;
+    const head = `Spent so far: ${n} render${n === 1 ? "" : "s"} sent from this board \u2014 ${paid} paid (~${Math.round(credits).toLocaleString()} credits), ${s.zero || 0} covered by a free card, ${s.unpriced || 0} with the charge not known yet` + (s.imported ? `, plus ${s.imported} imported clip(s) not counted \u2014 paid for elsewhere` : "") + ".";
     const acts = (s.byAct || []).filter((a) => a.results > 0);
-    const actLine = (a) => {
-      const own2 = formatSpend(a);
-      if (own2) return own2;
-      if (a.sharedElsewhere > 0) {
-        return a.sharedWith ? `counted in ${a.sharedWith}` : "counted in an earlier act";
-      }
-      return "0 cr";
-    };
-    const lines = acts.length > 1 ? acts.map((a) => `  ${a.name}: ${actLine(a)}`) : [];
-    return [head].concat(lines).join("\n") + "\nCounts every attempt this board recorded; re-rolls from before the ledger existed aren't in it.";
+    const lines = acts.length > 1 ? acts.map((a) => `  ${a.name}: ${formatSpend(a) || "0 cr"}`) : [];
+    return [head].concat(lines).join("\n") + "\nCounts only renders sent from this board. A clip linked, imported or remixed onto a shot is never counted; renders from before 29 Sep 2026 count where the board kept their task.";
   };
   var durOf = (c) => {
     const a = Number(c.actualDur);
@@ -2463,11 +2470,11 @@ ${"=".repeat(48)}
     const skipped = all - segs.length;
     return "cut length " + len.toFixed(1) + " s" + (skipped > 0 ? " \xB7 " + skipped + " unrendered skipped" : "");
   };
-  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  var MONTHS2 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   var savedDay = (iso) => {
     if (!iso) return "";
     const d = new Date(String(iso));
-    return Number.isNaN(d.getTime()) ? "" : MONTHS[d.getMonth()] + " " + d.getDate();
+    return Number.isNaN(d.getTime()) ? "" : MONTHS2[d.getMonth()] + " " + d.getDate();
   };
   var andList = (xs) => xs.length < 2 ? xs.join("") : xs.slice(0, -1).join(", ") + " and " + xs[xs.length - 1];
   var unreadableBedsNote = (u) => {
@@ -6623,13 +6630,13 @@ ${"=".repeat(48)}
   }
 
   // ../gallery/src/gen/submitTask.js
-  async function submitTask(route, payload, { label, emit: emit7, count, onPhase, onAnswer }) {
+  async function submitTask(route, payload, { label, emit: emit7, count, onPhase, onAnswer, quote }) {
     let d, status = 0;
     try {
       const r = await fetch(route, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(quotedSendBody(payload, quote))
       });
       status = r.status;
       d = await r.json();
@@ -7195,9 +7202,10 @@ ${"=".repeat(48)}
       const sent = loomIds ? {
         ...p,
         submit_id: submitId,
-        ...target.draft ? {} : { loom_target: { board_id: target.board_id, card_id: target.card_id } },
+        // A draft has no shot yet, so it names its board alone: the board's send record counts it.
+        ...target.draft ? { loom_board: target.board_id } : { loom_target: { board_id: target.board_id, card_id: target.card_id } },
         ...expectFree ? { expect_free: true } : {}
-      } : p;
+      } : expectFree ? { ...p, expect_free: true } : p;
       let answer = null;
       const startedAt = Date.now();
       let taskId = null;
@@ -7511,7 +7519,7 @@ ${"=".repeat(48)}
       st.current.camera = e.target.value;
       rerender();
       reprice();
-    } }, CAMERA_OPTS.map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: v, value: v }, l))))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "60ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-enghd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "Engine"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-engcur" }, chosenModel ? chosenModel.label : s.model)), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-enggrid", role: "radiogroup", "aria-label": "Video engine" }, MODELS.map((m) => {
+    } }, CAMERA_OPTS.map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: v, value: v }, l))))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "60ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-enghd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "Engine"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-engcur" }, chosenModel ? chosenModel.label : s.model)), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-enggrid", role: "radiogroup", "aria-label": "Video engine" }, pickerModels().map((m) => {
       const sel = m.value === s.model;
       const modes = (MODEL_VMODES[m.value] || ["i2v", "flf", "r2v"]).map((x) => SHOT_LABEL[x]).join(" / ");
       return /* @__PURE__ */ react_global_shim_default.createElement(
@@ -7964,6 +7972,21 @@ ${"=".repeat(48)}
     return true;
   }
 
+  // ../gallery/src/notify/doneNotice.js
+  var PANEL_ADDS_ART = /* @__PURE__ */ new Set(["sync", "resync-full", "test-pull", "sync-videos"]);
+  var ADDING_TYPES = /* @__PURE__ */ new Set(["generate", "import"]);
+  function addsToGallery(j) {
+    j = j || {};
+    if (ADDING_TYPES.has(j.type)) return true;
+    return j.type === "panel" && PANEL_ADDS_ART.has(j.action);
+  }
+  function doneNotice(j) {
+    j = j || {};
+    if (j.type === "delete") return { title: j.label || "Generation", msg: "Gone from PixAI." };
+    const title = (j.label || "Generation") + " \u2014 done";
+    return { title, msg: addsToGallery(j) ? "Added to your gallery." : "" };
+  }
+
   // ../gallery/src/notify/jobsStore.js
   var LSK = "mg_jobs_open";
   var jobs = [];
@@ -8034,11 +8057,11 @@ ${"=".repeat(48)}
       if (seeded && !TERMINAL[prev] && TERMINAL[st]) {
         if (st === "done") {
           const mid = (j.media_ids || [])[0] || "";
-          const isDelete = j.type === "delete";
+          const dn = doneNotice(j);
           show({
             kind: "ok",
-            title: (j.label || "Generation") + (isDelete ? "" : " \u2014 done"),
-            msg: isDelete ? "Gone from PixAI." : "Added to your gallery.",
+            title: dn.title,
+            msg: dn.msg,
             thumb: mid ? "/thumbs/" + encodeURIComponent(mid) + ".jpg" : null
           });
         } else if (st === "done_with_errors") {
@@ -11071,7 +11094,7 @@ ${"=".repeat(48)}
           tour: "Runs itself: the jobs the app does on its own, how often, and Run now."
         },
         { id: "sync", at: ".mgcp-syncbtn", tour: "Sync now pulls new work and fills in what's missing." },
-        { id: "version", at: ".mgcp-ver", tour: "The version stamp. Click it for About and what changed." },
+        { id: "version", at: ".mgcp-ver", tour: "The About row. Click it for the version and what changed." },
         { id: "ledger", at: ".mgcp-seg", note: "Ledger lists every run the console has recorded." },
         { id: "server", at: ".mgcp-srvrow", note: "Restart or stop the server from here." },
         { id: "lan", at: ".mgcp-bonjour", note: "Let phones on your Wi-Fi find the gallery." }
@@ -12763,7 +12786,7 @@ ${"=".repeat(48)}
     if (s < 86400) return Math.floor(s / 3600) + "h ago";
     return Math.floor(s / 86400) + "d ago";
   }
-  var MONTHS2 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  var MONTHS3 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   function pad2(n) {
     return (n < 10 ? "0" : "") + n;
   }
@@ -12771,7 +12794,7 @@ ${"=".repeat(48)}
     if (!ts) return "\u2014";
     const d = new Date(ts * 1e3);
     const h = d.getHours(), ap = h >= 12 ? "PM" : "AM", h12 = h % 12 || 12;
-    return MONTHS2[d.getMonth()] + " " + d.getDate() + ", " + h12 + ":" + pad2(d.getMinutes()) + " " + ap;
+    return MONTHS3[d.getMonth()] + " " + d.getDate() + ", " + h12 + ":" + pad2(d.getMinutes()) + " " + ap;
   }
   function fmtDuration(s) {
     s = Math.max(0, Math.floor(s || 0));
@@ -13348,10 +13371,20 @@ ${"=".repeat(48)}
       if (!plan || plan.error) return { ok: false, error: plan && plan.error || "Couldn't price this \u2014 nothing was sent." };
       if (plan.read_only) return { ok: false, error: "READ_ONLY is on in config.json, so nothing can be sent." };
       const multi = Number(plan.count) > 1;
-      if ((multi || Number(plan.total) > 0) && !deps.confirm(runConfirmText(plan, label))) return { ok: false };
+      const freeSingle = !multi && !plan.unlimited && Number(plan.covered) >= 1;
+      const laneFree = !multi && !!plan.unlimited && plan.total === 0;
+      if (!freeSingle && !laneFree && !deps.confirm(runConfirmText(plan, label))) return { ok: false };
       if (opts.onSending) opts.onSending();
       const runId = opts.runId || newRunId();
-      const ans = await deps.run({ ...rb, csrf, run_id: runId, ...multi ? { ack: ackOf(plan) } : {} });
+      const ans = await deps.run({
+        ...rb,
+        csrf,
+        run_id: runId,
+        ...multi ? { ack: ackOf(plan) } : {},
+        ...freeSingle ? { expect_free: true } : {},
+        // The board this run is sent from, so its board's send record counts every job.
+        ...opts.loomTarget ? { loom_target: opts.loomTarget } : {}
+      });
       if (!ans || ans.lost) return { ok: false, error: LOST_POST_WORDS };
       const d = ans.data || {};
       const jobs2 = Array.isArray(d.jobs) ? d.jobs : [];
@@ -20926,20 +20959,20 @@ Your currently-open board is left untouched.`)) return;
     const priceShot = (entry) => priceBody(shotPayload2(entry));
     const confirmSpend = async (quoteBody, label) => {
       const pr = await priceBody(quoteBody);
-      if (pr && pr.free) return true;
+      if (pr && pr.free) return { quote: pr };
       if (pr && !pr.free && pr.cost != null) {
         const line = priceIsShort(pr) ? shortSpendLine(pr, "this") : `No free card covers it \u2014 it will spend ~${pr.cost.toLocaleString()} credits.`;
         return window.confirm(`${label}
 
 ${line}
 
-Generate anyway?`);
+Generate anyway?`) ? { quote: pr } : false;
       }
       return window.confirm(`${label}
 
 Couldn't verify the cost or free-card coverage \u2014 it may spend credits.
 
-Generate anyway?`);
+Generate anyway?`) ? { quote: null } : false;
     };
     const askShotSpend = async (p) => {
       const pr = await priceBody(p);
@@ -21597,11 +21630,16 @@ Generate anyway?`)) return { go: false };
       setTimeout(tick, 2500);
     };
     const pollImg = (cardId, tid) => pollTaskWithCeiling(tid, setGenImgState, cardId);
+    const loomTargetOf = (cardId) => ({ loom_target: {
+      board_id: String(activeIdRef && activeIdRef.current || activeId || ""),
+      card_id: String(cardId || "")
+    } });
     const genImageRun = async (entry, body) => {
       const c = entry.c;
       const label = `Generate ${body.count > 1 ? body.count + " reference images" : "a reference image"} for ${c.title || "this shot"}?`;
       const out = await sendImgRun(body, label, LOOM_RUN_DEPS, {
         key: c.id,
+        loomTarget: loomTargetOf(c.id).loom_target,
         onSending: () => setGenImgState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting\u2026" } }))
       });
       if (!out.ok) {
@@ -21635,13 +21673,14 @@ Generate anyway?`)) return { go: false };
       const asked2 = buildImgGenBody(imgModel, imgLoras, imgAdv, prompt);
       if (imgSendRoute(asked2) === "run") return genImageRun(entry, asked2);
       const body = buildImgGenBody(imgModel, imgLoras, imgAdv, prompt);
-      if (!await confirmSpend(body, `Generate a reference image for ${c.title || "this shot"}?`)) return;
+      const ok = await confirmSpend(body, `Generate a reference image for ${c.title || "this shot"}?`);
+      if (!ok) return;
       setGenImgState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting\u2026" } }));
       try {
         const r = await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body)
+          body: JSON.stringify({ ...quotedSendBody(body, ok.quote), ...loomTargetOf(c.id) })
         });
         const d = await r.json();
         if (d.error || !d.task_id) {
@@ -21667,11 +21706,16 @@ Generate anyway?`)) return { go: false };
       setGenImgState((s) => ({ ...s, [sid]: { ...s[sid], routed: target } }));
     };
     const runGen = async (setState, cardId, endpoint, body, quoteBody, label, jobLabel) => {
-      if (quoteBody && !await confirmSpend(quoteBody, label)) return;
+      const ok = quoteBody ? await confirmSpend(quoteBody, label) : { quote: null };
+      if (!ok) return;
       setState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting\u2026" } }));
       const poll2 = (tid) => pollTaskWithCeiling(tid, setState, cardId);
       try {
-        const r = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const r = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...quotedSendBody(body, ok.quote), ...loomTargetOf(cardId) })
+        });
         const d = await r.json();
         if (d.error || !d.task_id) {
           setState((s) => ({ ...s, [cardId]: { phase: "error", msg: d.error ? friendlyGenErr2(d.error) : "submit failed" } }));
@@ -21937,19 +21981,18 @@ ${emptyPromptShots.length} shot(s) have no prompt text yet: ${emptyPromptShots.m
       return r && !r.loading;
     }).map((e) => priceCache[e.c.id].pr);
     const costEstimate = { ...tallyPrices(settled), pending: pending3, notDoneCount: notDone.length };
-    const [spendRows, setSpendRows] = useState2({});
+    const [spendSends, setSpendSends] = useState2([]);
     const [spendStatus, setSpendStatus] = useState2("loading");
     const collectedSpend = useMemo2(() => collectSpendMids(project), [project]);
-    const spendKey = collectedSpend.mids.join(",");
+    const spendKey = String(activeId || "") + "|" + collectedSpend.mids.join(",");
     const spendFetchedRef = useRef2(null);
     const spendGate = useRef2(null);
     if (!spendGate.current) spendGate.current = makeLatestOnly();
     const loadSpend = useCallback2((force) => {
-      const mids = collectedSpend.mids;
-      if (!mids.length) {
+      if (!activeId) {
         spendGate.current.cancel();
         spendFetchedRef.current = "";
-        setSpendRows({});
+        setSpendSends([]);
         setSpendStatus("ok");
         return;
       }
@@ -21960,15 +22003,15 @@ ${emptyPromptShots.length} shot(s) have no prompt text yet: ${emptyPromptShots.m
       fetch("/api/loom/spend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ media_ids: mids })
+        body: JSON.stringify({ board_id: activeId })
       }).then((r) => r.json()).then((d) => {
         if (!spendGate.current.wins(token)) return;
         if (spendFetchedRef.current !== spendKey) return;
-        if (!d || d.error || !d.rows) {
+        if (!d || d.error || !Array.isArray(d.sends)) {
           setSpendStatus("error");
           return;
         }
-        setSpendRows(d.rows);
+        setSpendSends(d.sends);
         setSpendStatus("ok");
       }).catch(() => {
         if (!spendGate.current.wins(token)) return;
@@ -21982,7 +22025,7 @@ ${emptyPromptShots.length} shot(s) have no prompt text yet: ${emptyPromptShots.m
       loadSpend();
     }, [spendKey]);
     const refreshSpend = useCallback2(() => loadSpend(true), [loadSpend]);
-    const spend = { ...tallySpend(collectedSpend, spendRows), status: spendStatus };
+    const spend = { ...tallySends(spendSends, project), imported: collectedSpend.imported, status: spendStatus };
     return {
       genState,
       setGenState,

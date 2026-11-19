@@ -118,9 +118,10 @@ def test_sealed_paths_serve_once_earned(tmp_path, sealed_donor_present):
     assert cli.get("/branding/ee_nelstarfall.png").status_code == 200
     assert cli.get("/branding/ee_starfall_cast.ogg").status_code == 200
     assert cli.get("/branding/ee_starfall_loop.ogg").status_code == 200
-    # the breadcrumb README (materialized by the discovery scaffold at startup)
+    # the breadcrumb README (materialized by the discovery scaffold at startup) is a file
+    # to find in the folder, not a picture: /branding/ serves pictures only (2026-11-18)
     crumb = branding_mod._role_rel("breadcrumb", "README.txt")
-    assert cli.get("/branding/" + crumb).status_code == 200
+    assert cli.get("/branding/" + crumb).status_code == 404
 
 
 def test_earned_banner_gated_and_void_banner_never_serves(tmp_path, sealed_donor_present):

@@ -1,3 +1,4 @@
+import "./fixtures/pin-video-clock.js";
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
