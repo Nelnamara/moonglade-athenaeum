@@ -937,39 +937,25 @@ def _mirror_try_renew(*, user_initiated=False, fallback="", now=None):
         return cur, "failed"
 
 
-def make_mirror_session(bootstrap_from_browser=False, user_initiated=False):
-    """The mirror submit/refresh session: a requests.Session authed with the browser JWT
+def make_mirror_session(user_initiated=False):
+    """The mirror submit/refresh session: a requests.Session authed with the stored website JWT
     (Bearer) presenting the WEB client identity. Returns None -- NEVER raises -- when there is
-    no USABLE (present, parseable, unexpired) JWT even after a browser re-read and a refresh;
-    callers must then refuse and spend nothing, never an API-key fallback (review F5).
+    no USABLE (present, parseable, unexpired) JWT even after a refresh; callers must then
+    refuse and spend nothing, never an API-key fallback (review F5).
 
     JWT-only, and built via _mirror_session_from (NOT _make_session): the API-key path's
-    precondition/USER_ID-resolution must not run over the browser token (review).
+    precondition/USER_ID-resolution must not run over the website token (review).
 
-    `user_initiated` is a press of Connect (#71): it re-reads the browser even when the stored
-    token is still usable -- PixAI can revoke a token before its exp -- and keeps whichever of
-    the two expires later; and its renewal tries once even inside a failure backoff.
+    It never reads a browser. A sign-in gets in only through accept_site_token -- Connect from
+    PixAI, and the one-click Connect's browser read (POST /api/mirror/connect) -- which checks
+    it is the API key's own account first (invariant #7). The 3.20 browser read in here saved
+    a token with no such check, so it is not restored (security review, 2026-11-19).
 
-    Lock scope: the SLOW browser read runs OUTSIDE _mirror_lock; only the keep-the-later choice
-    and the refresh->persist critical section (_mirror_try_renew) take the lock."""
+    `user_initiated`: its renewal tries once even inside a failure backoff (#71).
+
+    Lock scope: only the refresh->persist critical section (_mirror_try_renew) takes the lock."""
     from moonglade.backup import READ_ONLY, _read_only_now
     jwt = load_mirror_state().get("jwt") or ""
-    # (Re-)bootstrap from the browser whenever the stored JWT is not USABLE -- not merely when
-    # it is absent. Gating on `not jwt` meant an expired stored token could never be replaced,
-    # which left Connect and --mirror-check permanently dead until the file was hand-deleted
-    # (review). The browser read is slow, so it happens before the lock.
-    if bootstrap_from_browser and (user_initiated or not _jwt_usable(jwt)):
-        bj = read_browser_jwt()
-        # Only a USABLE browser token replaces the stored one: an old, already-expired value
-        # left in the browser's store used to overwrite an expired stored token (and drop its
-        # minted_at) for nothing.
-        if bj and _jwt_usable(bj):
-            with _mirror_lock:
-                cur = load_mirror_state().get("jwt") or ""
-                if not _jwt_usable(cur) or (jwt_expiry(bj) or 0) > (jwt_expiry(cur) or 0):
-                    save_mirror_state({"jwt": bj})        # a browser token: no minted_at
-                    cur = bj
-                jwt = cur
     # Roll the JWT forward when inside the refresh cushion -- but never under READ_ONLY
     # (the renewal is account-mutating; _mirror_try_renew checks again inside its lock).
     if jwt and mirror_needs_refresh(jwt) and not (READ_ONLY or _read_only_now()):

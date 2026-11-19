@@ -558,21 +558,17 @@ def test_read_browser_jwt_logout_tombstone_across_ldb_and_log(tmp_path, monkeypa
     assert mirror_mod.read_browser_jwt(browsers=("chrome",)) == ""     # logged out -> no token
 
 
-def test_make_mirror_session_bootstraps_from_localstorage_jwt_without_cookies(tmp_path, monkeypatch):
-    """The v20-cookie case: the cookie store can't be decrypted (and the app no longer reads
-    it), but the JWT reads from localStorage -> a JWT-only mirror session is built AND
-    persisted, so a later call needs no browser. This is exactly what Connect does on a
-    current Chrome."""
+def test_make_mirror_session_never_reads_a_browser(tmp_path, monkeypatch):
+    """A browser sign-in gets in only through accept_site_token, which checks the account
+    (security review 2026-11-19): make_mirror_session has no browser read and no
+    bootstrap_from_browser argument to switch one on."""
+    import inspect
     p = tmp_path / "m.json"
     monkeypatch.setattr(mirror_mod, "_mirror_state_path", lambda: p)
-    monkeypatch.setattr(mj, "_make_session", _fake_make_session)
-    fresh = _jwt_in(27)
-    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: fresh)
-    monkeypatch.setattr(mirror_mod, "refresh_jwt", lambda *a, **k: (_ for _ in ()).throw(
-        AssertionError("a fresh ~27d jwt must not trigger refresh")))
-    s = mirror_mod.make_mirror_session(bootstrap_from_browser=True)
-    assert s is not None and s.headers["Authorization"] == "Bearer " + fresh
-    assert mirror_mod.load_mirror_state()["jwt"] == fresh                # persisted for next time
+    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("make_mirror_session must not read a browser")))
+    assert mirror_mod.make_mirror_session(user_initiated=True) is None   # nothing stored
+    assert "bootstrap_from_browser" not in inspect.signature(mirror_mod.make_mirror_session).parameters
 
 
 # ---- ultrareview fixes (2026-08-15) ---------------------------------------------------
@@ -593,21 +589,6 @@ def test_jwt_claims_non_object_payload_never_raises():
     assert mirror_mod.jwt_expiry(tok) is None            # must NOT raise
     assert mirror_mod.jwt_days_left(tok, now=NOW) is None
     assert mirror_mod._pick_pixai_token([(_LS_KEY, b"\x01" + tok.encode(), 1, False)]) == ""
-
-
-def test_make_mirror_session_rebootstraps_when_stored_jwt_expired(tmp_path, monkeypatch):
-    """Review: gating the browser re-read on `not jwt` meant an EXPIRED stored token could
-    never be replaced -- both recovery paths were dead. Re-read whenever it's UNUSABLE."""
-    p = tmp_path / "m.json"
-    monkeypatch.setattr(mirror_mod, "_mirror_state_path", lambda: p)
-    mirror_mod.save_mirror_state({"jwt": _jwt_in(-2)})                    # expired stored token
-    fresh = _jwt_in(27)
-    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: fresh)
-    monkeypatch.setattr(mirror_mod, "refresh_jwt", lambda *a, **k: (_ for _ in ()).throw(
-        AssertionError("a freshly-read 27d jwt needs no refresh")))
-    s = mirror_mod.make_mirror_session(bootstrap_from_browser=True)
-    assert s is not None and s.headers["Authorization"] == "Bearer " + fresh
-    assert mirror_mod.load_mirror_state()["jwt"] == fresh
 
 
 def test_make_mirror_session_skips_refresh_under_read_only(tmp_path, monkeypatch):
@@ -765,7 +746,7 @@ def test_the_tick_and_a_connect_renew_once_between_them(tmp_path, monkeypatch):
     import time as _t
     stale, fresh = _jwt_in(2), _jwt_in(7)
     _armed(tmp_path, monkeypatch, jwt=stale)
-    entered, release, b_reading = threading.Event(), threading.Event(), threading.Event()
+    entered, release = threading.Event(), threading.Event()
     calls = []
 
     def _slow_refresh(session, current_jwt=None, **k):
@@ -774,15 +755,13 @@ def test_the_tick_and_a_connect_renew_once_between_them(tmp_path, monkeypatch):
         release.wait(5)
         return fresh
     monkeypatch.setattr(mirror_mod, "refresh_jwt", _slow_refresh)
-    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: b_reading.set() or "")
     out = {}
     a = threading.Thread(target=lambda: out.update(tick=mirror_mod.mirror_renew_tick()))
     b = threading.Thread(target=lambda: out.update(s=mirror_mod.make_mirror_session(
-        bootstrap_from_browser=True, user_initiated=True)))
+        user_initiated=True)))
     a.start()
     assert entered.wait(5)
     b.start()
-    assert b_reading.wait(5)
     _t.sleep(0.2)                               # let Connect reach the lock
     release.set()
     a.join(5)
@@ -861,27 +840,6 @@ def test_status_states_paused_off_and_expired_from_seconds(tmp_path, monkeypatch
     assert mirror_mod.mirror_renewal_status(now=NOW)["state"] == "ok"   # READ_ONLY, but nothing due
     _armed(tmp_path, monkeypatch, jwt=_jwt(NOW + 2 * DAY), enabled=False)
     assert mirror_mod.mirror_renewal_status(now=NOW)["state"] == "off"
-
-
-def test_a_connect_reads_the_browser_and_keeps_the_later_expiring_token(tmp_path, monkeypatch):
-    """A press of Connect reads the browser even when the stored token is still usable (PixAI
-    can revoke a token before its exp), and keeps whichever of the two expires later."""
-    stored = _jwt_in(6.3)
-    _armed(tmp_path, monkeypatch, jwt=stored)
-    monkeypatch.setattr(mirror_mod, "refresh_jwt", lambda *a, **k: (_ for _ in ()).throw(
-        AssertionError("nothing here is due")))
-    later = _jwt_in(6.8)
-    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: later)
-    s = mirror_mod.make_mirror_session(bootstrap_from_browser=True, user_initiated=True)
-    assert s.headers["Authorization"] == "Bearer " + later
-    assert mirror_mod.load_mirror_state()["jwt"] == later
-    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: _jwt_in(6.1))
-    s = mirror_mod.make_mirror_session(bootstrap_from_browser=True, user_initiated=True)
-    assert mirror_mod.load_mirror_state()["jwt"] == later                 # the earlier one is not kept
-    # and an ordinary (not user-initiated) call never reads the browser for a usable token
-    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: (_ for _ in ()).throw(
-        AssertionError("only a press of Connect re-reads a usable token's browser")))
-    mirror_mod.make_mirror_session(bootstrap_from_browser=True)
 
 
 def test_api_mirror_status_carries_the_span_and_the_renewal_state(tmp_path, monkeypatch):
