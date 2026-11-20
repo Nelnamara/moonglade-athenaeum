@@ -1470,6 +1470,59 @@ def _cached_version_read(cache, session, version_id, suffix, parse):
     return value
 
 
+_edit_caps_cache = {}                       # edit version_id -> (fetched_at_monotonic, caps|None)
+
+
+def edit_output_caps_live(session, model_id):
+    """An edit model VERSION's output capabilities from its live record (DESIGN_3.22 5.1):
+    {"output_formats": [...], "backgrounds": [...]} from extra.chatEditing's
+    supportedOutputFormatOptions and supportedBackgroundOptions, or None when it cannot be
+    read -- the caller then uses the baked EDIT_MODELS lists (gen_params.edit_output_caps).
+
+    The record is a row of GET /v2/generation-model/<MODEL id>/versions (the route the
+    2026-10-26 and 11-18 probes read these lists from), found by the version id an edit sends
+    as chat.modelId; the model id is the table's `base_model_id`. A version the table does not
+    know is None. A record that IS read but lists neither key offers neither (png only): what
+    the record says wins. Cached with the gate's discipline (an hour on an answer, 60 s on a
+    failure, short timeout, fail soft). Read-only."""
+    from moonglade.backup import _rest_get
+    from moonglade.gen_params import edit_model_by_id
+    vid = str(model_id or "").strip()
+    base = str((edit_model_by_id(vid) or {}).get("base_model_id") or "")
+    if not vid or not base.isdigit():
+        return None
+    now = time.monotonic()
+    hit = _edit_caps_cache.get(vid)
+    if hit is not None:
+        ttl = _PROFILE_CACHE_TTL if hit[1] is not None else _PROFILE_FAIL_TTL
+        if (now - hit[0]) < ttl:
+            return hit[1]
+    value = None
+    try:
+        data = _rest_get(session, "/generation-model/" + base + "/versions",
+                         timeout=_GATE_READ_TIMEOUT)
+        rows = data if isinstance(data, list) else (data or {}).get("data") or []
+        row = next((r for r in rows if isinstance(r, dict) and str(r.get("id") or "") == vid),
+                   None)
+        extra = row.get("extra") if isinstance(row, dict) else None
+        ce = extra.get("chatEditing") if isinstance(extra, dict) else None
+        if isinstance(ce, dict):
+            def _names(v):
+                return [str(x) for x in v if isinstance(x, str)] if isinstance(v, list) else []
+            value = {"output_formats": _names(ce.get("supportedOutputFormatOptions")),
+                     "backgrounds": _names(ce.get("supportedBackgroundOptions"))}
+    except Exception:                                        # noqa: BLE001 -- fail soft
+        value = None
+    _edit_caps_cache[vid] = (now, value)
+    return value
+
+
+def edit_caps_resolver(session):
+    """RequestResolver.edit_caps for one session: model_id -> the live capability read (or
+    None). The quote and the spend carry the same one, so they apply the same rules."""
+    return lambda model_id: edit_output_caps_live(session, model_id)
+
+
 def _parse_features(data):
     """/features body -> {"model_type": "MMDIT26B_MODEL", "status": {featureName: status}},
     or None for a body without a `features` list. Status strings are kept LITERAL: a strip

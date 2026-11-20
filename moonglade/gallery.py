@@ -16482,7 +16482,8 @@ def create_app(out_dir: Path):
             gate=_gen_road.gate_resolver(gsession),
             video_duration=_video_duration_lookup,
             unlimited=_gen_road.unlimited_resolver(gsession),
-            features=_models.features_resolver(gsession))
+            features=_models.features_resolver(gsession),
+            edit_caps=_models.edit_caps_resolver(gsession))
 
     def _submit_resolver(core, gsession):
         """For a SPEND. The price resolver plus the input resolver: a catalog media_id is
@@ -16497,7 +16498,8 @@ def create_app(out_dir: Path):
             gate=_gen_road.gate_resolver(gsession),
             video_duration=_video_duration_lookup,
             unlimited=_gen_road.unlimited_resolver(gsession),
-            features=_models.features_resolver(gsession))
+            features=_models.features_resolver(gsession),
+            edit_caps=_models.edit_caps_resolver(gsession))
 
     def _lane_job_running(core):
         """True while the app's own job log holds an Unlimited Mode task that has not

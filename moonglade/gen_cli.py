@@ -977,6 +977,10 @@ def run_edit_image(args):
                          "or --task-id to recover an existing edit.")
     if not existing_task and override:
         _gen_params.check_params_retired(json.loads(override))   # sent as given: no builder checks it
+        # Edit Pro's new outputs (3.22 S5): a hand-written shape meets the builder's rules on the
+        # baked capability lists here, before anything is uploaded or sent; a --confirm run
+        # checks again on the model's live record once it has a session.
+        _gen_params.check_edit_outputs(json.loads(override))
 
     # PREVIEW: no upload, no submit, no credits. Local files shown as placeholders.
     if not existing_task and not getattr(args, "confirm", False):
@@ -1016,6 +1020,9 @@ def run_edit_image(args):
         _check_read_only("submit an edit (spends credits unless a card applies)")
         if override:
             params = json.loads(override)
+            chat = params.get("chat") if isinstance(params, dict) else None
+            _gen_params.check_edit_outputs(params, _models.edit_output_caps_live(
+                session, chat.get("modelId") if isinstance(chat, dict) else ""))
         else:
             media_ids = []
             for s in srcs:

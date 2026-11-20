@@ -819,6 +819,10 @@ class RequestResolver:
                           architecture the creativity shape is decided on, the gate's
                           own cached read (features_resolver); absent = the web
                           payload's `creativity` is not honoured (legacy helper only)
+    edit_caps(model_id) -> {output_formats, backgrounds} or None -- 3.22 S5: an edit
+                          model's output lists from its live record
+                          (models.edit_caps_resolver); absent or None = the baked
+                          EDIT_MODELS lists
 
     `media_id` is deliberately absent when pricing. /api/price fires on every
     keystroke in the drawer, and resolving there would upload the same file once
@@ -833,6 +837,7 @@ class RequestResolver:
     video_duration: object = None
     unlimited: object = None
     features: object = None
+    edit_caps: object = None
 
 
 def model_version_resolver(session):
@@ -1020,6 +1025,41 @@ def _gen_args_from_web_payload(p):
         clamped=adjusted)
 
 
+def _edit_outputs_from_payload(p):
+    """The Edit payload's new-output keys (output_format, frame_count, frame_duration_ms,
+    transparent, auto_tone) as build_chat_edit_parameters' keyword arguments. Absent keys are
+    left out (the builder's defaults: png, PixAI's own frame defaults, no see-through, auto
+    tone on). A whole number may come as a JSON number or digits; anything else -- a bool, a
+    fraction, text -- is passed through as it came, so the builder refuses it rather than this
+    reading it into something else. LocalRefusal for an on/off key that is neither."""
+    from moonglade.backup import LocalRefusal
+    out = {}
+    fmt = p.get("output_format")
+    if fmt not in (None, ""):
+        out["output_format"] = fmt.strip().lower() if isinstance(fmt, str) else fmt
+    for key in ("frame_count", "frame_duration_ms"):
+        v = p.get(key)
+        if v in (None, ""):
+            continue
+        if isinstance(v, str) and re.fullmatch(r"\s*\d{1,6}\s*", v):
+            v = int(v)
+        elif isinstance(v, float) and v.is_integer():
+            v = int(v)
+        out[key] = v
+    for key, default in (("transparent", False), ("auto_tone", True)):
+        v = p.get(key)
+        if v in (None, ""):
+            continue
+        if v in (True, 1, "1", "true", "on"):
+            out[key] = True
+        elif v in (False, 0, "0", "false", "off"):
+            out[key] = False
+        else:
+            raise LocalRefusal("The {} setting must be on or off, so nothing was sent."
+                               .format(key.replace("_", " ")))
+    return out
+
+
 def _edit_parameters_from_payload(p, user, resolve):
     """Build the instruct-edit `chat` params from the Edit tab's JSON. Source is a
     catalog media_id (the image being edited). A `preset` name swaps in a locally
@@ -1061,6 +1101,12 @@ def _edit_parameters_from_payload(p, user, resolve):
                                     (p.get("aspect") or _gen_params.edit_default_aspect(model_id)))
     kwargs = dict(resolution=res, aspect_ratio=asp, quality=q, scene_id=scene_id,
                   model_id=model_id)
+    # Edit Pro's new outputs (3.22 S5, DESIGN_3.22 5.1), read strictly and never clamped: the
+    # builder refuses a combination outside the rules with a sentence. The capability lists
+    # come from the model's live record through the resolver -- the same one for the quote and
+    # the spend -- and fall back to the baked table.
+    kwargs.update(_edit_outputs_from_payload(p))
+    kwargs["caps"] = resolve.edit_caps(model_id) if resolve.edit_caps is not None else None
     # multi-image: sources[] (primary + extra refs) if the client sent them, else [source];
     # capped to the resolved row's OWN reference limit (Edit Pro v1.0 4; Edit Pro V2.0, Edit
     # v4.0 and Reference Pro 10) -- two versions of one model can differ, so never a fixed cap.

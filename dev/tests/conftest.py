@@ -1001,11 +1001,13 @@ def _clear_gate_caches():
     models_mod._size_config_cache.clear()
     gen_road_mod._unlimited_cache.clear()
     models_mod._model_config_cache.clear()
+    models_mod._edit_caps_cache.clear()          # 3.22 S5: an edit model's output lists
     yield
     models_mod._features_cache.clear()
     models_mod._size_config_cache.clear()
     gen_road_mod._unlimited_cache.clear()
     models_mod._model_config_cache.clear()
+    models_mod._edit_caps_cache.clear()
 
 
 @pytest.fixture(autouse=True)

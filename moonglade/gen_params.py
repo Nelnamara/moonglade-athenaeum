@@ -1338,6 +1338,14 @@ EDIT_PRO_MODEL_ID = "2006468692917575683"
 # Labelled as PixAI labels it, "PixAI Edit (v4.0)": the latest version of PixAI's general Edit
 # model, not Edit Pro and not Tsubaki.3 (the owner's walk, 2026-10-03).
 #
+# The two output capability lists (DESIGN_3.22 5.1), baked from the version records'
+# extra.chatEditing (PROBE_2026-11-18_site): `output_formats` is supportedOutputFormatOptions
+# (only Edit Pro V2.0 lists png/svg/gif), `backgrounds` is supportedBackgroundOptions
+# (transparent on Edit Pro v1.0 and V2.0). The live /versions record wins when it can be read
+# (models.edit_output_caps_live, by `base_model_id`, the MODEL id that route takes:
+# PROBE_2026-10-26_site and 11-18 read Edit Pro 2006468692900798466, Reference Pro
+# 1948514378379046913, PixAI Edit 1882220606138613945); this table is the fallback.
+#
 # PixAI Edit Pro V2.0 (#67, PROBE_2026-10-02_site): a new VERSION of the Edit Pro model
 # (2026-09-29), not a new model, copied from its own version row 2061589941358465024,
 # extra.chatEditing: maxInputImageCount 10; 1K/2K; low/medium/high; eleven aspects (v1.0's
@@ -1355,6 +1363,7 @@ EDIT_MODELS = {
         "aspects": [EDIT_ASPECT_AUTO, "16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5",
                     "5:4", "21:9", "1:4", "4:1", "1:8", "8:1"],
         "default": {"resolution": "1K", "quality": "", "aspect": EDIT_ASPECT_AUTO},
+        "base_model_id": "1882220606138613945", "output_formats": [], "backgrounds": [],
     },
     "edit-pro": {
         "model_id": EDIT_PRO_MODEL_ID,
@@ -1364,6 +1373,8 @@ EDIT_MODELS = {
         "aspects": ["3:5", "5:3", "16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5",
                     "5:4", "1:3", "3:1"],
         "default": {"resolution": "1K", "quality": "medium", "aspect": "3:5"},
+        "base_model_id": "2006468692900798466", "output_formats": [],
+        "backgrounds": ["transparent"],
     },
     "edit-pro-v2": {
         "model_id": "2061589941358465024",
@@ -1373,6 +1384,8 @@ EDIT_MODELS = {
         "aspects": ["16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "3:5",
                     "5:3"],
         "default": {"resolution": "1K", "quality": "medium", "aspect": "3:5"},
+        "base_model_id": "2006468692900798466", "output_formats": ["png", "svg", "gif"],
+        "backgrounds": ["transparent"],
     },
     "reference-pro": {
         "model_id": "1948514378441961474",
@@ -1382,6 +1395,7 @@ EDIT_MODELS = {
         "aspects": [EDIT_ASPECT_AUTO, "16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5",
                     "5:4", "21:9"],
         "default": {"resolution": "2K", "quality": "", "aspect": EDIT_ASPECT_AUTO},
+        "base_model_id": "1948514378379046913", "output_formats": [], "backgrounds": [],
     },
 }
 DEFAULT_EDIT_MODEL = "edit-pro"
@@ -1461,9 +1475,109 @@ def _is_local_source(src):
         return False
 
 
+# Edit Pro's new outputs (DESIGN_3.22 5.1; chatEditing-DtzDRo8B.js's enums): the formats, and the
+# GIF frame count and frame length PixAI takes, as whole numbers.
+EDIT_OUTPUT_FORMATS = ("png", "svg", "gif")
+EDIT_FRAME_COUNT_RANGE = (2, 16)          # PixAI's default 9, sent only when asked for
+EDIT_FRAME_MS_RANGE = (20, 2000)          # PixAI's default 200, sent only when asked for
+
+
+def edit_output_caps(model_id, live=None):
+    """{"output_formats": [...], "backgrounds": [...]} for an edit model: `live` (the version
+    record's extra.chatEditing as models.edit_output_caps_live reads it) when it is a dict,
+    else the baked EDIT_MODELS lists. A model outside the table offers neither. Pure."""
+    if isinstance(live, dict):
+        return {"output_formats": [str(f) for f in live.get("output_formats") or []],
+                "backgrounds": [str(b) for b in live.get("backgrounds") or []]}
+    spec = edit_model_by_id(model_id) or {}
+    return {"output_formats": list(spec.get("output_formats") or []),
+            "backgrounds": list(spec.get("backgrounds") or [])}
+
+
+def edit_output_config(model_id, *, output_format=None, frame_count=None,
+                       frame_duration_ms=None, transparent=False, auto_tone=True, caps=None):
+    """The chat.modelConfig keys Edit Pro's new outputs add (DESIGN_3.22 5.1), or LocalRefusal
+    with a sentence. Never clamps: a value outside the rules is refused and nothing is sent.
+
+      output_format      png (the default, sent as nothing), svg or gif -- svg and gif only
+                         when the model's record lists them (supportedOutputFormatOptions)
+      frame_count        a whole number 2-16, gif only (PixAI's default 9 when unset)
+      frame_duration_ms  a whole number 20-2000, gif only (PixAI's default 200 when unset)
+      transparent        background "transparent", only when the model lists it
+                         (supportedBackgroundOptions) and the format is png
+      auto_tone          on (the default) sends nothing; off sends colorTone "original",
+                         only with transparent
+
+    `caps` is the live capability read (edit_output_caps' `live`); None uses the baked table."""
+    from moonglade.backup import LocalRefusal
+    fmt = None if output_format in (None, "") else output_format
+    if fmt is not None and (not isinstance(fmt, str) or fmt not in EDIT_OUTPUT_FORMATS):
+        raise LocalRefusal("The output format must be PNG, SVG or GIF, so nothing was sent.")
+    have = edit_output_caps(model_id, caps)
+    if fmt in ("svg", "gif") and fmt not in have["output_formats"]:
+        raise LocalRefusal("This edit model can't make {} pictures, so nothing was sent."
+                           .format(fmt.upper()))
+    out = {}
+    if fmt in ("svg", "gif"):
+        out["outputFormat"] = fmt
+    for value, key, (lo, hi), label in (
+            (frame_count, "frameCount", EDIT_FRAME_COUNT_RANGE, "The frame count"),
+            (frame_duration_ms, "frameDurationMs", EDIT_FRAME_MS_RANGE, "The frame length")):
+        if value is None:
+            continue
+        if fmt != "gif":
+            raise LocalRefusal("{} goes only with a GIF, so nothing was sent.".format(label))
+        if isinstance(value, bool) or not isinstance(value, int) or not lo <= value <= hi:
+            raise LocalRefusal("{} must be a whole number from {} to {}, so nothing was sent."
+                               .format(label, lo, hi))
+        out[key] = value
+    if not isinstance(transparent, bool) or not isinstance(auto_tone, bool):
+        raise LocalRefusal("The background setting must be on or off, so nothing was sent.")
+    if transparent:
+        if "transparent" not in have["backgrounds"]:
+            raise LocalRefusal("This edit model can't make a see-through background, so "
+                               "nothing was sent.")
+        if fmt not in (None, "png"):
+            raise LocalRefusal("A see-through background goes only with a PNG, so nothing "
+                               "was sent.")
+        out["background"] = "transparent"
+        if not auto_tone:
+            out["colorTone"] = "original"
+    elif not auto_tone:
+        raise LocalRefusal("Auto tone goes only with a see-through background, so nothing "
+                           "was sent.")
+    return out
+
+
+def check_edit_outputs(params, caps=None):
+    """edit_output_config's rules over an edit's BUILT chat.modelConfig (a --params-json, a
+    banked shape): LocalRefusal when its new-output keys break them. Pure; returns None."""
+    from moonglade.backup import LocalRefusal
+    chat = params.get("chat") if isinstance(params, dict) else None
+    mc = chat.get("modelConfig") if isinstance(chat, dict) else None
+    if not isinstance(mc, dict):
+        return None
+    bg, tone = mc.get("background"), mc.get("colorTone")
+    if bg is not None and bg != "transparent":
+        raise LocalRefusal("The background must be see-through or left out, so nothing was "
+                           "sent.")
+    if tone is not None and tone != "original":
+        raise LocalRefusal("The colour tone must be original or left out, so nothing was sent.")
+    fmt = mc.get("outputFormat")
+    if fmt == "png":
+        fmt = None              # png is the default the app sends as nothing; PixAI takes it
+    edit_output_config(chat.get("modelId"), output_format=fmt,
+                       frame_count=mc.get("frameCount"),
+                       frame_duration_ms=mc.get("frameDurationMs"),
+                       transparent=bg == "transparent", auto_tone=tone is None, caps=caps)
+    return None
+
+
 def build_chat_edit_parameters(prompt, media_ids, model_id=EDIT_PRO_MODEL_ID, *,
                                resolution="1K", aspect_ratio=None, quality="medium",
-                               kaisuuken_id="", scene_id=""):
+                               kaisuuken_id="", scene_id="", output_format=None,
+                               frame_count=None, frame_duration_ms=None, transparent=False,
+                               auto_tone=True, caps=None):
     """Build createGenerationTask's `parameters` for an instruct edit (the `chat`
     block), verified against a real Edit-Pro submit (2026-07-01). `media_ids` is one
     or more source media_ids (an array => multi-image reference editing); the first
@@ -1481,6 +1595,11 @@ def build_chat_edit_parameters(prompt, media_ids, model_id=EDIT_PRO_MODEL_ID, *,
     leaves the frame to PixAI. Only for a model whose table lists "auto": on any other model
     (Edit Pro, or one outside the table) "auto" is not a value it takes, so it gets that
     model's default instead (3:5 on Edit Pro, the pre-table 3:4 off the table).
+
+    Edit Pro's new outputs (DESIGN_3.22 5.1) -- `output_format`, `frame_count`,
+    `frame_duration_ms`, `transparent`, `auto_tone` -- go into chat.modelConfig only when set,
+    under edit_output_config's rules (`caps`: the live capability read, None = the baked
+    table); a combination outside them is LocalRefusal, never clamped.
     """
     from moonglade.backup import PixAIError
     ids = [str(m) for m in (media_ids or []) if str(m).strip()]
@@ -1497,6 +1616,10 @@ def build_chat_edit_parameters(prompt, media_ids, model_id=EDIT_PRO_MODEL_ID, *,
     # one would be a bogus knob; Edit Pro still sends low/medium/high.
     if quality:
         model_config["quality"] = quality
+    model_config.update(edit_output_config(
+        mid, output_format=output_format, frame_count=frame_count,
+        frame_duration_ms=frame_duration_ms, transparent=transparent, auto_tone=auto_tone,
+        caps=caps))
     params = {"chat": {
         "prompts": prompt or "",
         "mediaId": ids[0],
@@ -1719,9 +1842,12 @@ _WIRE_IMAGE = {                                                        # `yt`, t
 _WIRE_CHAT = {                                                         # `rs`
     "prompts": _SCALAR, "mediaId": _SCALAR, "mediaIds": [_SCALAR], "modelId": _SCALAR,
     "workspaceId": _SCALAR,
-    "modelConfig": {k: _SCALAR for k in (                               # `Ln`
-        "resolution", "aspectRatio", "quality", "layerDecomposition", "background",
-        "colorTone", "outputFormat", "frameCount", "frameDurationMs")},
+    # `Ln`, cut to the keys this app builds (DESIGN_3.22 5.1): the three it always sent and Edit
+    # Pro's five new outputs. `layerDecomposition` is PixAI's and never built here, so it is
+    # refused like a misspelling (the refuse reading).
+    "modelConfig": {k: _SCALAR for k in (
+        "resolution", "aspectRatio", "quality",
+        "outputFormat", "frameCount", "frameDurationMs", "background", "colorTone")},
 }
 #: The final body per door kind -- the wrapper included for /task/create (`ys` takes
 #: `parameters` and `thread`; the app never sends a thread, so only `parameters` is allowed).
