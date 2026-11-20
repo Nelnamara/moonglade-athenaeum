@@ -615,6 +615,46 @@ def test_a_card_job_still_running_is_read_until_it_ends(monkeypatch):
     assert slept == [gen_road.RUN_CARD_PROOF_POLL_S] * 2
 
 
+def test_a_card_charged_at_its_terminal_read_is_marked_unused(monkeypatch):
+    """3.22 review F2 (T-V3): the terminal read shows a charge on card job A -- its record and
+    the run's hook both say the card was not used, and the run is held to its total."""
+    marked, sent = [], []
+    monkeypatch.setattr(core, "_create", lambda s, k, b: {"id": "A"} if not sent else {"id": "B"})
+
+    def _card(session, params, args):
+        params["kaisuukenId"] = "K1"
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", _card)
+    monkeypatch.setattr(task_reads_mod, "generation_status",
+                        lambda s, t: {"phase": "done", "paid_credit": 100})
+    hooks = SimpleNamespace(sending=lambda c: None,
+                            sent=lambda *a, **k: sent.append((a[0], k)),
+                            failed=lambda *a: None,
+                            card_unused=lambda cell, tid: marked.append((cell, tid)))
+    jobs = [{"cell": i, "req": _image_req(), "no_card": None} for i in range(2)]
+    res = gen_road.send_run(pc.PixAIClient(Wire()), jobs, hooks=hooks,
+                            budget={"each": 100, "total": 100}, gap_s=0, sleep=lambda s: None)
+    assert res["jobs"][0]["card_unused"] is True and marked == [(0, "A")]
+    assert [j["state"] for j in res["jobs"]] == ["sent", "not_sent"]
+    assert sent == [(0, {})]
+
+
+def test_a_card_charged_at_create_reaches_the_sent_hook(monkeypatch):
+    sent = []
+    monkeypatch.setattr(core, "_create", lambda s, k, b: {"id": "A", "paidQuota": 100})
+
+    def _card(session, params, args):
+        params["kaisuukenId"] = "K1"
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", _card)
+    hooks = SimpleNamespace(sending=lambda c: None,
+                            sent=lambda *a, **k: sent.append((a[0], a[3], k)),
+                            failed=lambda *a: None)
+    res = gen_road.send_run(pc.PixAIClient(Wire()),
+                            [{"cell": 0, "req": _image_req(), "no_card": None}], hooks=hooks,
+                            budget={"each": 100, "total": 100}, gap_s=0, sleep=lambda s: None)
+    assert res["jobs"][0]["card_unused"] is True
+    assert sent == [(0, True, {"card_unused": True})]
+
+
 def test_a_card_job_that_never_ends_in_time_holds_the_run(monkeypatch):
     slept = []
     res = _run(monkeypatch, [{"id": "A"}, {"id": "B"}, {"id": "C"}],

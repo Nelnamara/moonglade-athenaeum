@@ -796,6 +796,12 @@ def job_view(job, run_status=None):
         out["expected"] = job["expected"]
     if job.get("paid") is not None:
         out["paid"] = job["paid"]
+        # DESIGN_3.22 2.4 rule 7: a card job that ended charged -- its card was not used.
+        try:
+            if job.get("card") and float(job["paid"]) > 0:
+                out["card_unused"] = True
+        except (TypeError, ValueError):
+            pass
     return out
 
 

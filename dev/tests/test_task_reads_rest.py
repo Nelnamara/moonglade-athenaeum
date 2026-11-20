@@ -176,6 +176,33 @@ def test_a_poll_that_never_reads_says_the_task_may_still_be_running(monkeypatch)
     assert len(calls) > 1
 
 
+# --- 3.22 review F2: the card check at the terminal read (DESIGN_3.22 2.4 rule 7, T-V3) --------
+
+@pytest.mark.parametrize("paid, sent, phase, want", [
+    (3000, True, "done", True),
+    (0, True, "done", False),
+    (None, True, "done", False),
+    (3000, False, "done", False),
+    (3000, True, "failed", False),          # a failed task is refunded: not judged
+    (3000, True, "running", False),         # not ended: proves nothing
+])
+def test_the_terminal_card_check(paid, sent, phase, want, caplog):
+    import logging
+    with caplog.at_level(logging.WARNING, logger="moonglade.create"):
+        assert task_reads.card_unused("T1", paid, sent, phase) is want
+    assert any("card was not used" in r.getMessage() for r in caplog.records) is want
+
+
+@pytest.mark.parametrize("card_sent", [True, False])
+def test_the_cli_done_line_says_the_card_was_not_used(monkeypatch, capsys, card_sent):
+    monkeypatch.setattr(task_reads.time, "sleep", lambda s: None)
+    monkeypatch.setattr(core, "_rest_get", lambda s, path, params=None, **k: BATCH)
+    assert task_reads._poll_task_status(object(), BATCH["id"], 30, card_sent=card_sent) == 3000
+    line = [x for x in capsys.readouterr().out.splitlines() if "actual cost" in x][0]
+    assert "3,000 credits" in line
+    assert ("free card was NOT used" in line) is card_sent
+
+
 @pytest.mark.parametrize("bad", ["", "../task/1", "1/media/2", "a b", "x" * 65])
 def test_an_id_that_could_leave_its_path_is_never_read(pixai, bad):
     with pytest.raises(core.PixAIError):

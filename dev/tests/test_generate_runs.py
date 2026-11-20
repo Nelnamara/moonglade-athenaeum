@@ -996,6 +996,32 @@ def test_task_status_reports_the_expected_charge_beside_the_paid_one(cli, rig, m
     assert runs.RunsStore(tmp_path).get(d["run_id"])["jobs"][0]["paid"] == 1600
 
 
+def test_task_status_says_a_card_that_went_unused(cli, rig, monkeypatch, tmp_path):
+    """3.22 review F2 (DESIGN_3.22 2.4 rule 7, T-V3): a card job that completed with a charge
+    -- PixAI ignored the card -- is said at the terminal read: on the answer, on the done job
+    event (the Activity row's data) and on the run's job row. A paid job without a card is not."""
+    rig.cards = [dict(CARD, total=1)]
+    p = plan(cli, prompt="{a|b} x", count=2).get_json()
+    rig.cards = [dict(CARD, total=1), dict(CARD, total=1)]   # the run's quote, job 1; then none
+    _cards_prove_free(monkeypatch)                    # the run's own read before job 2
+    d = run(cli, ack=ack_of(p), prompt="{a|b} x", count=2).get_json()
+    card_tid, paid_tid = d["jobs"][0]["task_id"], d["jobs"][1]["task_id"]
+    assert d["jobs"][0]["card"] is True and d["jobs"][1]["card"] is False
+    monkeypatch.setattr(task_reads_mod, "generation_status",
+                        lambda s, t: {"phase": "done", "paid_credit": 1600, "status": "completed"})
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
+                        lambda s, t, out, **k: {"media_ids": ["OUT1"], "saved": 1, "is_video": False})
+    st = cli.get("/api/task-status", query_string={"task_id": card_tid}).get_json()
+    assert st["card_unused"] is True
+    other = cli.get("/api/task-status", query_string={"task_id": paid_tid}).get_json()
+    assert "card_unused" not in other
+    events = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}
+    assert events[card_tid]["card_unused"] is True and "card_unused" not in events[paid_tid]
+    rows = runs.RunsStore(tmp_path).get(d["run_id"])["jobs"]
+    assert runs.job_view(rows[0]).get("card_unused") is True
+    assert "card_unused" not in runs.job_view(rows[1])
+
+
 # ---------------------------------------------------------------------------------------
 # Recipes ride the same road, per job (BUILD-w2-recipes)
 # ---------------------------------------------------------------------------------------

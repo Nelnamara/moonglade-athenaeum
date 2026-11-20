@@ -219,6 +219,29 @@ def _rest_detail_fallback(session, task_id):
             "_rest_fallback": True}
 
 
+#: The CLI's done-line words when a card went unused (DESIGN_3.22 2.4 rule 7).
+CARD_UNUSED_WORDS = "your free card was NOT used: PixAI charged for this task"
+
+
+def card_unused(task_id, paid_credit, card_sent, phase="done"):
+    """THE terminal card check (DESIGN_3.22 2.4 rule 7, T-V3): True when a send that carried a
+    `kaisuukenId` COMPLETED with paidQuota > 0, i.e. PixAI ignored the card and charged. Logs
+    the loud warning (logger moonglade.create, the create-time check's own) when it is. Only a
+    completed task is judged: a failed one is refunded, and one still running proves nothing.
+    Pure but for the log line; never raises."""
+    try:
+        if not card_sent or phase != "done" or paid_credit is None \
+                or isinstance(paid_credit, bool) or float(paid_credit) <= 0:
+            return False
+    except (TypeError, ValueError):
+        return False
+    import logging
+    logging.getLogger("moonglade.create").warning(
+        "task %s: a free card was sent and the task ended with paidQuota %s: the card was "
+        "not used", task_id, paid_credit)
+    return True
+
+
 _GEN_STATUS = ("query($id: ID!) { task(id: $id) "
                "{ id status paidCredit startedAt outputs } }")
 # startedAt + outputs are load-bearing, not decoration: `startedAt` is the ONLY way to
@@ -227,11 +250,13 @@ _GEN_STATUS = ("query($id: ID!) { task(id: $id) "
 # a cancellation (e.g. "waiting timeout"). Without them this poller could only ever see
 # `status`, which is how five of the owner's generations died silently across four days.
 def _poll_task_status(session, task_id, timeout, *, interval=3, label="task",
-                      fail_noun="task"):
+                      fail_noun="task", card_sent=False):
     """Poll `_GEN_STATUS` until the task completes, fails, or times out. Returns the
     server-authoritative `paidCredit` (or None) and prints it as the actual cost on
-    completion. Raises PixAIError on failure/timeout. Shared by the generate / video /
-    edit submit paths so their poll behaviour can't drift."""
+    completion -- with CARD_UNUSED_WORDS when `card_sent` (the send carried a kaisuukenId)
+    and the completed task shows a charge (card_unused, 2.4 rule 7). Raises PixAIError on
+    failure/timeout. Shared by the generate / video / edit submit paths so their poll
+    behaviour can't drift."""
     from moonglade.backup import PixAIError, LocalRefusal, vlog
     deadline = time.time() + timeout
     paid_credit = None
@@ -269,7 +294,9 @@ def _poll_task_status(session, task_id, timeout, *, interval=3, label="task",
         # and then reported it as still running on PixAI.
         if status in _GEN_DONE:
             if paid_credit is not None:
-                print("  actual cost: {:,} credits".format(int(paid_credit)))
+                unused = card_unused(task_id, paid_credit, card_sent)
+                print("  actual cost: {:,} credits{}".format(
+                    int(paid_credit), " -- " + CARD_UNUSED_WORDS if unused else ""))
             return paid_credit
         if status in _GEN_FAIL:
             raise PixAIError("{} ended with status: {}{}".format(

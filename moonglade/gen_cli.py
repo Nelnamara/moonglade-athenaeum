@@ -107,6 +107,12 @@ def _print_gate_receipt(adjusted, gated=True):
             " ({})".format(why) if why else ""))
 
 
+def _card_sent(params):
+    """True when the send carried a free card (the card step wrote kaisuukenId into it), for
+    the poll's terminal card check (DESIGN_3.22 2.4 rule 7)."""
+    return bool(isinstance(params, dict) and params.get("kaisuukenId"))
+
+
 def run_generate(args):
     """Create images via PixAI (createGenerationTask), poll to completion, download
     the results into the backup, and catalog them as source='api'. GUARDED: without
@@ -213,7 +219,8 @@ def run_generate(args):
         print("  task id:", task_id)
 
         _task_reads._poll_task_status(session, task_id, getattr(args, "poll_timeout", 300),
-                          interval=3, label="generate", fail_noun="generation")
+                          interval=3, label="generate", fail_noun="generation",
+                          card_sent=_card_sent(params))
 
     # The Task type exposes its media under `outputs` (mediaId / batchMediaIds /
     # videos), NOT at the top level. getTaskById returns that whole object and is
@@ -785,7 +792,8 @@ def run_generate_video(args):
         print("  task id:", task_id)
         _cards._bump_card_use(params)
         _task_reads._poll_task_status(session, task_id, getattr(args, "poll_timeout", 600),
-                          interval=5, label="video", fail_noun="video generation")
+                          interval=5, label="video", fail_noun="video generation",
+                          card_sent=_card_sent(params))
 
     # Result: getTaskById -> outputs.videos -> fileUrl -> download mp4 (same as --sync-videos).
     result = _task_reads.task_detail_gql(session, task_id) or {}
@@ -946,7 +954,8 @@ def run_reference_video(args):
         print("  task id:", task_id)
         _cards._bump_card_use(params)
         _task_reads._poll_task_status(session, task_id, getattr(args, "poll_timeout", 600), interval=5,
-                          label="reference video", fail_noun="reference video generation")
+                          label="reference video", fail_noun="reference video generation",
+                          card_sent=_card_sent(params))
 
     result = _task_reads.task_detail_gql(session, task_id) or {}
     _maybe_dump_params(args, result)
@@ -1072,7 +1081,8 @@ def run_edit_image(args):
         print("  task id:", task_id)
         _cards._bump_card_use(params)
         _task_reads._poll_task_status(session, task_id, getattr(args, "poll_timeout", 300),
-                          interval=3, label="edit", fail_noun="edit")
+                          interval=3, label="edit", fail_noun="edit",
+                          card_sent=_card_sent(params))
 
     result = _task_reads.task_detail_gql(session, task_id) or {}
     _maybe_dump_params(args, result)

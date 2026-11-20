@@ -17747,18 +17747,19 @@ def create_app(out_dir: Path):
             def sending(self, cell):
                 store.set_job(run_id, cell, state="sending")
 
-            def sent(self, cell, task_id, request_, card):
+            def sent(self, cell, task_id, request_, card, card_unused=False):
                 b = by_cell[cell]
                 with _run_lock:
                     _run_inflight["done"] = _run_inflight.get("done", 0) + 1
                 # The job event first: the Activity tray and the reel see every task even if
-                # the store write below fails or the tab closed (review F5).
+                # the store write below fails or the tab closed (review F5). `card_unused`
+                # (2.4 rule 7): the create answer already showed a charge on a card job.
                 _log_job(task_id, status="running", type="generate",
                          label="{} {}/{}".format(label_kind, cell + 1, len(built))
                          if len(built) > 1 else "Generated",
                          count=b["job"]["batch"], run=run_id, cell=cell, run_mode=mode,
                          lane=_gen_road.UNLIMITED_LANE if b["req"].unlimited else None,
-                         source="web")
+                         source="web", card_unused=True if card_unused else None)
                 store.set_job(run_id, cell, state="sent", task_id=task_id,
                               request=_strip_request(request_), card=int(bool(card)))
                 # A run sent from a Loom board is that board's spend, job by job.
@@ -17768,6 +17769,11 @@ def create_app(out_dir: Path):
             def failed(self, cell, state, error, request_):
                 store.set_job(run_id, cell, state=state, error=error,
                               request=_strip_request(request_))
+
+            def card_unused(self, cell, task_id):
+                # 2.4 rule 7: the card job's terminal read showed a charge. The Activity row's
+                # data (the job event); the store's row reads it from card + paid (job_view).
+                _log_job(task_id, card_unused=True)
 
         budget = {"each": each, "total": planned["total"]} if multi else None
         if not multi and expect_free and built and not built[0]["req"].unlimited:
@@ -17894,6 +17900,27 @@ def create_app(out_dir: Path):
         except Exception:                                    # noqa: BLE001
             return None
 
+    # Task ids this process sent with a free card on a road the Runs store does not record
+    # (an edit, a Loom send). The store's own `card` column covers /api/generate's single sends
+    # and every run, and survives a restart; this set does not. Read by the terminal card check.
+    _card_sent_tasks = set()
+
+    def _note_card_sent(task_id, params):
+        if task_id and isinstance(params, dict) and params.get("kaisuukenId"):
+            _card_sent_tasks.add(str(task_id))
+
+    def _card_was_sent(tid):
+        """True when the send behind task `tid` carried a free card (2.4 rule 7): the Runs
+        store's row, else this process's own note. Fail-soft: unknown is False."""
+        if str(tid) in _card_sent_tasks:
+            return True
+        try:
+            from moonglade import runs
+            found = runs.RunsStore(out_dir).find_task(tid)
+            return bool(found and found[1].get("card"))
+        except Exception:                                    # noqa: BLE001
+            return False
+
     @app.route("/api/edit", methods=["POST"])
     @tier(LOGIN)
     def api_edit():
@@ -17933,6 +17960,7 @@ def create_app(out_dir: Path):
             task_id = _gen_road.submit(gsession, req,
                                   **_quoted_free_hooks(core, req, expect_free))["task_id"]
             _send_settle(held_key, "sent")
+            _note_card_sent(task_id, req.parameters)         # 2.4 rule 7's terminal check
             _record_loom_send(loom_target, task_id, req.parameters, "edit")
             # (edits is counted from the catalog's edit rows since 2026-10-02.)
             _telemetry.telem_set_add("tools", "edit", out_dir=out_dir)
@@ -20532,6 +20560,7 @@ __DESIGN_TOKENS__
             except Exception:
                 pass
             _send_settle(held_key, "sent")
+            _note_card_sent(task_id, req.parameters)         # 2.4 rule 7's terminal check
             _journal(state="submitted", task_id=str(task_id))
             if send_board:
                 # THE SEND RECORD: the one source of the board's "spent" figure. A free card
@@ -21825,9 +21854,15 @@ __DESIGN_TOKENS__
                 # makes an unexpected spend visible in the Activity tray afterwards. Passed
                 # through even when 0 -- a card-covered generation really is free, and
                 # "free" must stay distinguishable from "unknown".
+                # 2.4 rule 7 (V3): THE terminal card check -- a send that carried a free card
+                # and completed with a charge is a loud warning (logged inside card_unused) and
+                # rides the done event, the Activity row's data, as card_unused.
+                unused = _task_reads.card_unused(tid, st.get("paid_credit"),
+                                                 _card_was_sent(tid), st.get("phase"))
                 _log_job(tid, status="done", media_ids=got["media_ids"],
                          is_video=got.get("is_video", False),
-                         paid_credit=st.get("paid_credit"))
+                         paid_credit=st.get("paid_credit"),
+                         card_unused=True if unused else None)
                 # TERMINAL SUCCESS with output: the ONLY point an enhance is allowed to count
                 # (deferred from /api/enhance's submit-acceptance). No-op for non-enhance tasks;
                 # swallows its own errors so a post-charge telemetry blip can't fail this poll.
@@ -21841,6 +21876,8 @@ __DESIGN_TOKENS__
                         "is_video": got.get("is_video", False),
                         "duration": dur,
                         "paid_credit": st["paid_credit"]}
+                if unused:
+                    done["card_unused"] = True
                 # Session M (review F14): a run job's charge beside what its confirm expected,
                 # so the dock can mark a mismatch peach. Absent for everything else.
                 expected = _run_note_paid(tid, st.get("paid_credit"))

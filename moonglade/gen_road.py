@@ -1798,7 +1798,9 @@ def _card_job_charge(session, task_id, pause, wait_s=None, poll_s=None):
             return "held"
         phase = st.get("phase")
         if _paid_quota({"paidCredit": st.get("paid_credit")}) > 0:
-            return "card_unused" if phase == "done" else "held"
+            # The terminal card check logs its own loud warning (task_reads.card_unused).
+            return ("card_unused" if _task_reads.card_unused(task_id, st.get("paid_credit"),
+                                                              True, phase) else "held")
         if phase in ("done", "failed"):
             return "free"
         if waited >= wait:
@@ -1829,10 +1831,16 @@ def send_run(session, jobs, *, hooks, budget=None, gap_s=None, sleep=None):
                sending(cell)                        committed BEFORE the job's submit; if it
                                                     raises, the run stops, nothing more sent
                sent(cell, task_id, request, card)   after the mutation; a raise is swallowed
-                                                    (the task exists; the answer carries it)
+                                                    (the task exists; the answer carries it).
+                                                    card_unused=True is added when the create
+                                                    answer already shows a charge on a card job
                failed(cell, state, error, request)  a job that did not go out cleanly
+               card_unused(cell, task_id)           optional: a card job sent earlier was shown
+                                                    by its terminal read to have been charged
+                                                    (2.4 rule 7); a raise is swallowed
     Returns {"status": "sent"|"stopped", "reason"?, "jobs": [{cell, state, task_id?, card,
-             error?, recipe_error?}]} with state sent | refused | may_have_started | not_sent.
+             card_unused?, error?, recipe_error?}]} with state sent | refused |
+             may_have_started | not_sent.
 
     State after a failure (s4.4): an exception before on_send fired means the mutation was
     never reached -> not_sent; after it, a definite refusal (a GraphQL error, a 401, a local
@@ -1883,12 +1891,20 @@ def send_run(session, jobs, *, hooks, budget=None, gap_s=None, sleep=None):
             # that failed, or a task that had not ended in time all count the job as charged
             # at its quoted price, so every later job is held to the confirmed total. Only an
             # ended task showing no charge counts the card as used.
-            proof = _card_job_charge(session, state["card_pending"], pause)
+            p_cell, p_tid, p_rec = state["card_pending"]
+            proof = _card_job_charge(session, p_tid, pause)
             if proof != "free":
                 state["charged"] += int(budget["each"])
                 state["card_ignored"] = True
                 if proof == "held" and state["hold_note"] is None:
                     state["hold_note"] = _run_unproven_note(state["sent"])
+            if proof == "card_unused":
+                # 2.4 rule 7: the card was not used -- on the job's record and the run's side.
+                p_rec["card_unused"] = True
+                try:
+                    hooks.card_unused(p_cell, p_tid)
+                except Exception:                            # noqa: BLE001 -- incl. no hook
+                    pass
             state["card_pending"] = None
         try:
             task_id = submit(session, job["req"], no_card=job.get("no_card"),
@@ -1915,21 +1931,30 @@ def send_run(session, jobs, *, hooks, budget=None, gap_s=None, sleep=None):
             state["stop"] = rec["error"]
             continue
         card = bool((seen["request"] or {}).get("kaisuukenId"))
+        # A card job whose create answer already shows a charge: the card was not used (2.4
+        # rules 6 and 7; the create-time warning is _observe_created's).
+        unused = card and _paid_quota(seen["answer"]) > 0
+        rec = {"cell": cell, "state": "sent", "task_id": str(task_id), "card": card}
+        if unused:
+            rec["card_unused"] = True
         if not card and budget is not None:
             state["charged"] += int(budget["each"])
         elif card and budget is not None and _card_unproven(job["req"]):
             # 2.4 rule 7 (V3): until R8 has proven a card free on the REST create, a card job
             # whose create answer shows a charge counts as charged at its quoted full price, so
             # a run can never pay past its confirmed total because PixAI ignored a card.
-            if _paid_quota(seen["answer"]) > 0:
+            if unused:
                 state["charged"] += int(budget["each"])
                 state["card_ignored"] = True
             else:
-                state["card_pending"] = str(task_id)
+                state["card_pending"] = (cell, str(task_id), rec)
         state["sent"] += 1
-        out.append({"cell": cell, "state": "sent", "task_id": str(task_id), "card": card})
+        out.append(rec)
         try:
-            hooks.sent(cell, str(task_id), seen["request"], card)
+            if unused:
+                hooks.sent(cell, str(task_id), seen["request"], card, card_unused=True)
+            else:
+                hooks.sent(cell, str(task_id), seen["request"], card)
         except Exception:                                    # noqa: BLE001
             pass
     res = {"status": "stopped" if state["stop"] is not None else "sent", "jobs": out}
