@@ -129,6 +129,9 @@ def get_image(media_id: str, include_image: bool = True):
     path = g.find_image_file(OUT, media_id, row.get("filename") or "")
     if not path:
         return {**meta, "note": "image file not found on disk"}
+    if str(path).lower().endswith(".svg") or str(row.get("output_format") or "") == "svg":
+        # 3.22 S5 (DESIGN_3.22 5.4): an SVG is a document, never opened or drawn here.
+        return {**meta, "note": "an SVG is not drawn here; open it in the gallery"}
     try:
         import PIL.Image
         im = PIL.Image.open(path)

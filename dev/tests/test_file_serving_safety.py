@@ -32,10 +32,10 @@ def _library(tmp_path):
     return login_test_client(app)
 
 
-def _hardened(r):
+def _hardened(r, csp=None):
     assert r.headers.get("X-Content-Type-Options") == "nosniff"
-    assert r.headers.get("Content-Security-Policy") == g.FILE_RESPONSE_CSP
-    assert "sandbox" in g.FILE_RESPONSE_CSP
+    assert r.headers.get("Content-Security-Policy") == (csp or g.FILE_RESPONSE_CSP)
+    assert "sandbox" in g.FILE_RESPONSE_CSP and "sandbox" in g.SVG_FILE_CSP
 
 
 # ---- /full/: an SVG is a download, a PNG still shows ------------------------------------
@@ -47,7 +47,8 @@ def test_a_hostile_svg_via_full_is_an_attachment_with_nosniff_and_csp(tmp_path):
         assert r.status_code == 200, url
         assert r.headers["Content-Disposition"].startswith("attachment"), url
         assert "123456789.svg" in r.headers["Content-Disposition"], url
-        _hardened(r)
+        assert r.mimetype == "image/svg+xml", url                 # 3.22 S5: <img> draws it
+        _hardened(r, g.SVG_FILE_CSP)
         r.close()
 
 
@@ -77,7 +78,8 @@ def test_harden_file_response_downloads_every_type_that_is_not_a_picture_video_o
         cd = resp.headers.get("Content-Disposition") or ""
         assert cd.startswith("attachment") is (not inline), mime
         assert resp.headers["X-Content-Type-Options"] == "nosniff", mime
-        assert resp.headers["Content-Security-Policy"] == g.FILE_RESPONSE_CSP, mime
+        assert resp.headers["Content-Security-Policy"] == (
+            g.SVG_FILE_CSP if mime == "image/svg+xml" else g.FILE_RESPONSE_CSP), mime
 
 
 def test_the_attachment_name_is_safe_for_any_file_name():

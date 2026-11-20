@@ -1323,12 +1323,20 @@ _INLINE_FILE_TYPES = frozenset({
     "audio/aac", "audio/ogg", "audio/flac", "audio/x-flac",
 })
 FILE_RESPONSE_CSP = "sandbox"
+# An SVG (3.22 S5, DESIGN_3.22 5.4) goes out under its real type, image/svg+xml, so an <img src>
+# (or a CSS background-image) can draw it -- an image context never runs SVG script. It is still
+# always a download (an SVG is not on _INLINE_FILE_TYPES), so a direct visit never becomes a
+# page on Moonglade's origin, and this policy is the belt if a browser ignores the disposition:
+# sandboxed, nothing fetched, only its own inline styles. Never shown any other way: no
+# <object>, <embed>, <iframe>, innerHTML, data URL from its text or fetch-then-inject.
+SVG_FILE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'"
 # The library's own picture and clip types, named here rather than asked of the system's
 # type table (on Windows that reads the registry, which can say anything).
 _MEDIA_TYPE_BY_EXT = {
     ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
     ".gif": "image/gif", ".avif": "image/avif", ".mp4": "video/mp4", ".webm": "video/webm",
     ".mov": "video/quicktime", ".m4v": "video/x-m4v",
+    ".svg": "image/svg+xml",           # a download with SVG_FILE_CSP (harden_file_response)
 }
 
 
@@ -1349,12 +1357,14 @@ def _attachment_disposition(name):
 def harden_file_response(resp, filename=None):
     """Stamp a served file's response so it can never run as a page on this origin.
 
-    Always: X-Content-Type-Options: nosniff and Content-Security-Policy: sandbox. And a
-    type that is not a raster picture, a video or a sound goes out as a download
-    (Content-Disposition: attachment), whatever the route asked for. Returns resp."""
+    Always: X-Content-Type-Options: nosniff and Content-Security-Policy: sandbox (an SVG,
+    by its type or its name: the stricter SVG_FILE_CSP). And a type that is not a raster
+    picture, a video or a sound goes out as a download (Content-Disposition: attachment),
+    whatever the route asked for. Returns resp."""
     resp.headers["X-Content-Type-Options"] = "nosniff"
-    resp.headers["Content-Security-Policy"] = FILE_RESPONSE_CSP
     mime = (resp.mimetype or "").lower()
+    svg = mime == "image/svg+xml" or str(filename or "").lower().endswith(".svg")
+    resp.headers["Content-Security-Policy"] = SVG_FILE_CSP if svg else FILE_RESPONSE_CSP
     if mime not in _INLINE_FILE_TYPES:
         if not (resp.headers.get("Content-Disposition") or "").lower().startswith("attachment"):
             resp.headers["Content-Disposition"] = _attachment_disposition(filename)
