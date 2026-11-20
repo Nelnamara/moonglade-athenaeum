@@ -88,6 +88,20 @@ function timeAgo(ts) {
   return Math.floor(s / 3600) + "h ago";
 }
 
+// 3.22: the task feed (the REST stream) has its own record in /api/watch/status. One short
+// phrase for the tile's existing line: a wording change, the tile's layout is untouched.
+function taskFeedNote(ts) {
+  if (!ts) return null;
+  switch (ts.state) {
+    case "open": return "task feed live";
+    case "idle": return "task feed idle (wakes when you send one)";
+    case "capped": return "task feed waiting (too many streams open)";
+    case "stopped": return ts.stopped_reason || "task feed stopped";
+    case "connecting": case "backoff": case "reconnecting": return "task feed reconnecting";
+    default: return null;
+  }
+}
+
 // Ledger timestamps -- Control Panel.dc.html:517's own "today 14:02" shape, extended
 // with yesterday/date for real multi-day history the DC's demo data never had.
 function fmtWhen(ts) {
@@ -567,14 +581,16 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
   // into the two pieces the desktop design's markup expects instead of one
   // run-on string.
   const mirrorLead = !watch ? "Checking." : watch.connected ? "Listening." : "Reconnecting.";
+  const feedNote = watch ? taskFeedNote(watch.task_stream) : null;
   const mirrorRest = !watch
     ? ""
     : watch.connected
       ? [
           (watch.mirrored || 0) + " mirrored this session",
           watch.last_event_at ? "last event " + timeAgo(watch.last_event_at) : null,
+          feedNote,
         ].filter(Boolean).join(" · ")
-      : (watch.last_error || "waiting to reconnect…");
+      : [(watch.last_error || "waiting to reconnect…"), feedNote].filter(Boolean).join(" · ");
 
   return (
     <>

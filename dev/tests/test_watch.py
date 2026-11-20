@@ -99,6 +99,15 @@ def test_watch_backup_mirrors_completed_only(monkeypatch, tmp_path):
     monkeypatch.setattr(task_feed_mod, "_watch_events_async", fake_watch)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
 
+    class _FeedFrames:   # 3.22: the CLI's REST stream; here it carries the lifecycle instead
+        def __init__(self, make_session, on_task, **kw):
+            self._on = on_task
+
+        def run(self):
+            for st in ("waiting", "running", "completed", "completed"):
+                self._on({"id": "T9", "status": st, "mediaId": "M9"})
+    monkeypatch.setattr(task_feed_mod, "TaskStream", _FeedFrames)
+
     class _FakeThread:   # run the mirror synchronously so the test is deterministic
         def __init__(self, target=None, args=(), daemon=None):
             self._t, self._a = target, args

@@ -6941,6 +6941,7 @@ def test_the_phones_use_default_is_off_when_the_pack_has_no_default_to_go_back_t
     _settle(page)
     _dismiss_any_achievement_toast(page)
     page.click('button:has-text("Control")')
+    _ctm_section(page, "This phone")   # the Branding tile lives in This phone (look pick B, 2026-11-19)
     page.wait_for_selector(".mgcp-tile.click")
     page.locator('.mgcp-tile.click:has-text("Branding")').click()
     page.wait_for_selector(".mgcp-brandgrid")
@@ -6965,12 +6966,13 @@ def test_the_phone_branding_roles_push_a_role_screen_with_44_px_controls(
     _settle(page)
     _dismiss_any_achievement_toast(page)
     page.click('button:has-text("Control")')
+    _ctm_section(page, "This phone")   # the Branding tile lives in This phone (look pick B, 2026-11-19)
     page.wait_for_selector(".mgcp-tile.click")
     page.locator('.mgcp-tile.click:has-text("Branding")').click()
     page.wait_for_selector(".mgcp-brandgrid")
     page.click('.mgcp-brandnav:has-text("Roles")')
     page.wait_for_selector(".mgcp-rlm-row")
-    rows = page.evaluate("""() => [...document.querySelectorAll('.mgcp-rlm-row')].map(r => ({
+    rows =page.evaluate("""() => [...document.querySelectorAll('.mgcp-rlm-row')].map(r => ({
         name: r.querySelector('.mgcp-rl-name > div').textContent,
         state: r.querySelectorAll('.mgcp-rl-name > div')[1].textContent,
         h: Math.round(r.getBoundingClientRect().height),
@@ -7351,6 +7353,12 @@ def test_the_phone_create_tab_has_last_presets_quick_picks_and_no_matrix_setup(
         page.fill("textarea.cm-ta", "1girl")
         page.click(".pm-key")
         assert page.input_value("textarea.cm-ta") == "1girl{a|b}", "the { } key inserts a variable at the caret"
+        # The key then selects "a|b" from a setTimeout(0) (PowerMobile.jsx PromptTools.insert), so
+        # the next keystrokes replace it. A fill that lands before that timer runs has its
+        # select-all undone by it and replaces only "a|b" (the CI failure artifact read
+        # "1girl{1girl, {silver|cobalt} hair}", a nested brace). Wait for the selection.
+        page.wait_for_function("() => { const t = document.querySelector('textarea.cm-ta');"
+                               " return t.selectionStart === 6 && t.selectionEnd === 9; }")
         page.fill("textarea.cm-ta", "1girl, {silver|cobalt} hair")
         page.wait_for_selector(".mgrun-toks .mgrun-tok.var")
         row = page.locator(".mgrun-moderow.phone")
@@ -11785,6 +11793,11 @@ def test_the_phone_video_mode_shows_the_model_cards_inside_the_screen(logged_in_
     cards = _video_cards(page, ".cm-videohost")
     assert len(cards) >= 8 and all(c["left"] >= 0 and c["right"] <= c["vw"] for c in cards), cards
     assert all(c["lines"][1] == "pick a picture" for c in cards)
+    # Entering Video mode re-prices at once: usePriceProbe.refresh blanks the button to
+    # "checking the price…" synchronously and settles on the idle words only after
+    # PRICE_DEBOUNCE_MS (250ms); _settle is two frames. Wait for the settled state.
+    page.wait_for_function("() => { const s = document.querySelector('.cm-videohost .mgd-go .mgspend-s');"
+                           " return s && s.textContent === 'pick a picture first'; }")
     g = _spend_button(page, ".cm-videohost .mgd-go")
     assert g["disabled"] and g["sub"] == "pick a picture first", g
     page.evaluate("() => document.querySelector('.cm-videohost .gen-drawer')"

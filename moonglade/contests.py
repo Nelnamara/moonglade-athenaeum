@@ -28,7 +28,7 @@ _CONTEST_PAGE_SIZE = 50
 # oldest page silently fell off. Pages are read 0.35 s apart, the contest sweep's own pace
 # (moonglade.contest_sync._CONTEST_SYNC_PAUSE): the board is a public read and CLAUDE.md asks for
 # paced requests.
-_CONTEST_MAX_PAGES = 20
+_CONTEST_MAX_PAGES = 100   # 3.22: 5,000 rows, about two years at the current rate
 _CONTEST_PAGE_PAUSE = 0.35
 
 
@@ -51,69 +51,143 @@ def _contest_rule(rule):
     return out
 
 
-def list_contests(session, active_only=False, max_pages=_CONTEST_MAX_PAGES, meta=None):
-    """Return the PixAI contest board as normalized dicts, newest-first. `active_only`
-    keeps just the currently-running ones (runtimeStatus=='running'). Pages through
-    /v2/contest/list until the board's own `totalPage`, never past `max_pages`
-    (_CONTEST_MAX_PAGES), pausing _CONTEST_PAGE_PAUSE between pages; when the ceiling rather
-    than `totalPage` ends the walk, the log says so. Read-only, no spend.
+def _contest_row(r):
+    """One raw board row -> the normalized dict every consumer reads. The mapper is the same
+    one list_contests always had; the only addition is that a row carrying `descriptionForApp`
+    and no `description` (a byte-identical copy of it upstream) reads the former."""
+    status = (r.get("runtimeStatus") or "").lower()
+    mid = str(r.get("mediaId") or "")
+    slug = r.get("slug") or ""
+    return {
+        "id": str(r.get("id") or ""),
+        "title": _contest_title(r.get("title")),
+        "slug": slug,
+        "type": (r.get("type") or "").lower(),          # 'official' | 'community'
+        "status": status,                                # 'running' | 'ended'
+        "active": status == "running",
+        "vote_type": r.get("voteType") or "",            # creator_pick | user_vote
+        "prize_amount": int(r.get("prizeAmount") or 0),
+        "prize_distribution": [p for p in (r.get("prizeDistribution") or [])
+                               if isinstance(p, dict)],
+        "cover_url": ("https://api.pixai.art/v1/media/%s/thumbnail" % mid) if mid else "",
+        "start_at": r.get("startAt") or "",
+        "end_at": r.get("endAt") or "",
+        "result_at": r.get("resultAt") or "",
+        "url": ("https://pixai.art/en/contest/%s" % slug) if slug else "",
+        # WHOLE, never truncated. It used to be sliced to 600 chars, which was
+        # safe only while nothing rendered it. The brief is MARKDOWN upstream, so
+        # a mid-token cut can sever a **bold** run or a [link](url) and leave the
+        # renderer holding half a construct -- and the detail view now renders it.
+        "description": _contest_title(r.get("description") or r.get("descriptionForApp")),
+        # The entry requirements, straight through (contest detail view):
+        #   rules  -- [{type: 'required_model_ids', model_ids: [...]} | {type: 'required_lora_ids', lora_ids: [...]} | {type: 'required_recipe_ids', recipe_ids: [...]}]; [] = no restriction
+        #   tack_name -- the tag an entry must carry (PixAI calls a tag a "tack")
+        #   desc_url / result_url -- the contest's own rules + results documents,
+        #     both frequently absent (null upstream -> "" here)
+        "rules": [_contest_rule(x) for x in (r.get("rules") or [])
+                  if isinstance(x, dict)],
+        "tack_name": r.get("proposedTackName") or "",
+        "desc_url": r.get("descUrl") or "",
+        "result_url": r.get("resultUrl") or "",
+        # Settlement (L3, PROBE 2026-09-29): `rewardStatus` reads "distributed" once
+        # the prizes have been paid out, which is the signal the win check uses to stop
+        # re-reading a contest early. Absent upstream -> "" (unknown, never a guess).
+        "reward_status": str(r.get("rewardStatus") or "").lower(),
+        "reward_distributed_at": r.get("rewardDistributedAt") or "",
+    }
 
-    `meta`, when given, is an out-dict the caller reads afterwards (the return value stays a
-    plain list): pages_read, total_page, total_count, limit (rows the walk could read) and
-    `truncated` -- True only when the ceiling, not the board's own `totalPage`, ended it."""
+
+# --- The settled-row cache (3.22, design 6) ----------------------------------------
+# A contest that has ended and paid out cannot change, so re-reading it every walk is waste:
+# the whole board is about 2.8 MB on the wire. Mapped rows are kept in
+# local/cache/contest_board.json (written atomically, only ever rebuildable), and ONLY a
+# settled row is ever served from it. The route takes no field selection, so the fix is to stop
+# re-reading what cannot change, and only that.
+CONTEST_CACHE_NAME = "contest_board.json"
+CONTEST_FULL_WALK_S = 24 * 3600        # a full walk at least this often (and on Refresh)
+CONTEST_RESEEN_S = 7 * 24 * 3600       # a cached row not seen for this long is re-read
+_CONTEST_CACHE_VERSION = 1
+
+
+def contest_cache_path():
+    """local/cache/contest_board.json, through moonglade.paths."""
+    from moonglade import paths as _paths
+    return _paths.cache_dir() / CONTEST_CACHE_NAME
+
+
+def _raw_settled(r):
+    """Settled = ended with `rewardStatus` "distributed", or `lifecycleStatus` "cancelled".
+    "pending_distribute" (seen by probe P6) is unsettled."""
+    if str(r.get("lifecycleStatus") or "").lower() == "cancelled":
+        return True
+    return (str(r.get("runtimeStatus") or "").lower() == "ended"
+            and str(r.get("rewardStatus") or "").lower() == "distributed")
+
+
+def _load_contest_cache(path):
+    """The cache dict, or None when absent, unreadable or from another version."""
+    import json
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            c = json.load(f)
+        if (isinstance(c, dict) and c.get("v") == _CONTEST_CACHE_VERSION
+                and isinstance(c.get("rows"), dict)):
+            return c
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def _save_contest_cache(path, cache):
+    """Atomic: a same-directory temp file, then os.replace, so a reader (or a crash) sees the
+    whole old file or the whole new one. A failed write is logged and never fails the read."""
+    import json
+    import os
+    try:
+        import tempfile
+        folder = os.path.dirname(str(path))
+        os.makedirs(folder, exist_ok=True)
+        # A unique temp name per write (two threads of one process share a pid), made beside the
+        # target so os.replace stays on one volume; removed again if the write or swap fails.
+        fd, tmp = tempfile.mkstemp(dir=folder, prefix=os.path.basename(str(path)) + ".")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(cache, f, separators=(",", ":"))
+            for attempt in range(5):
+                try:
+                    os.replace(tmp, path)
+                    return
+                except PermissionError:        # Windows: a scanner can hold the target a moment
+                    if attempt == 4:
+                        raise
+                    time.sleep(0.05 * (2 ** attempt))
+        finally:
+            try:
+                os.unlink(tmp)                 # gone already after a good os.replace
+            except OSError:
+                pass
+    except Exception as e:                     # noqa: BLE001 -- a cache write must not fail the read
+        from moonglade import logs as moonglade_logging
+        moonglade_logging.get_logger().warning(
+            "contest board: could not write the cache (%s: %s)", type(e).__name__, str(e)[:120])
+
+
+def _board_page(session, page):
     from moonglade.backup import _rest_get
-    out = []
+    return _rest_get(session, "/contest/list",
+                     params={"page": page, "pageSize": _CONTEST_PAGE_SIZE}) or {}
+
+
+def _walk_all(session, max_pages, meta):
+    """The full walk: page 1 to the board's own `totalPage`, never past `max_pages`, paced.
+    Returns [(page, raw_row), ...] in board order and fills `meta`."""
+    reads = []
     page = 1
     while True:
         if page > 1:
             time.sleep(_CONTEST_PAGE_PAUSE)
-        d = _rest_get(session, "/contest/list",
-                      params={"page": page, "pageSize": _CONTEST_PAGE_SIZE}) or {}
-        rows = d.get("data") or []
-        for r in rows:
-            status = (r.get("runtimeStatus") or "").lower()
-            active = status == "running"
-            if active_only and not active:
-                continue
-            mid = str(r.get("mediaId") or "")
-            slug = r.get("slug") or ""
-            out.append({
-                "id": str(r.get("id") or ""),
-                "title": _contest_title(r.get("title")),
-                "slug": slug,
-                "type": (r.get("type") or "").lower(),          # 'official' | 'community'
-                "status": status,                                # 'running' | 'ended'
-                "active": active,
-                "vote_type": r.get("voteType") or "",            # creator_pick | user_vote
-                "prize_amount": int(r.get("prizeAmount") or 0),
-                "prize_distribution": [p for p in (r.get("prizeDistribution") or [])
-                                       if isinstance(p, dict)],
-                "cover_url": ("https://api.pixai.art/v1/media/%s/thumbnail" % mid) if mid else "",
-                "start_at": r.get("startAt") or "",
-                "end_at": r.get("endAt") or "",
-                "result_at": r.get("resultAt") or "",
-                "url": ("https://pixai.art/en/contest/%s" % slug) if slug else "",
-                # WHOLE, never truncated. It used to be sliced to 600 chars, which was
-                # safe only while nothing rendered it. The brief is MARKDOWN upstream, so
-                # a mid-token cut can sever a **bold** run or a [link](url) and leave the
-                # renderer holding half a construct -- and the detail view now renders it.
-                "description": _contest_title(r.get("description")),
-                # The entry requirements, straight through (contest detail view):
-                #   rules  -- [{type: 'required_model_ids', model_ids: [...]} | {type: 'required_lora_ids', lora_ids: [...]} | {type: 'required_recipe_ids', recipe_ids: [...]}]; [] = no restriction
-                #   tack_name -- the tag an entry must carry (PixAI calls a tag a "tack")
-                #   desc_url / result_url -- the contest's own rules + results documents,
-                #     both frequently absent (null upstream -> "" here)
-                "rules": [_contest_rule(x) for x in (r.get("rules") or [])
-                          if isinstance(x, dict)],
-                "tack_name": r.get("proposedTackName") or "",
-                "desc_url": r.get("descUrl") or "",
-                "result_url": r.get("resultUrl") or "",
-                # Settlement (L3, PROBE 2026-09-29): `rewardStatus` reads "distributed" once
-                # the prizes have been paid out, which is the signal the win check uses to stop
-                # re-reading a contest early. Absent upstream -> "" (unknown, never a guess).
-                "reward_status": str(r.get("rewardStatus") or "").lower(),
-                "reward_distributed_at": r.get("rewardDistributedAt") or "",
-            })
+        d = _board_page(session, page)
+        reads.extend((page, r) for r in (d.get("data") or []))
         total_page = int(d.get("totalPage") or 1)
         total_count = int(d.get("totalCount") or 0)
         if page >= total_page:
@@ -132,6 +206,141 @@ def list_contests(session, active_only=False, max_pages=_CONTEST_MAX_PAGES, meta
                 total_page - page)
             break
         page += 1
+    return reads
+
+
+def _walk_newest_first(session, cache, max_pages, meta, now):
+    """The incremental walk (design 6 item 2). Reads newest-first and may skip ahead once a
+    page is all settled, cached and unchanged, using the cache's page map -- a HINT, never a
+    proof: new contests shift rows down. Before it ends, every unsettled cached id must have
+    been seen in THIS walk's own reads, and it keeps reading the next unread pages until it
+    is. An id still missing once every page is read is gone upstream and drops off the board.
+    Returns [(page, raw_row), ...] for the pages it actually read."""
+    entries = cache["rows"]
+    unsettled = {i for i, e in entries.items() if not e.get("settled")}
+    stale = {i for i, e in entries.items() if now - float(e.get("seen_at") or 0) >= CONTEST_RESEEN_S}
+    page_map = {}
+    for i, e in entries.items():
+        page_map.setdefault(int(e.get("page") or 0), set()).add(i)
+    must_read = {p for p, ids in page_map.items() if ids & (unsettled | stale)}
+    known_max = max(page_map) if page_map else 0
+    read = {}                                   # page -> raw rows
+    seen = set()
+    state = {"total": 1, "count": 0, "first": True}
+
+    def fetch(p):
+        if not state["first"]:
+            time.sleep(_CONTEST_PAGE_PAUSE)
+        state["first"] = False
+        d = _board_page(session, p)
+        state["total"] = int(d.get("totalPage") or 1)
+        state["count"] = int(d.get("totalCount") or 0)
+        rows = d.get("data") or []
+        read[p] = rows
+        seen.update(str(r.get("id") or "") for r in rows)
+        return rows
+
+    def clean(rows):
+        for r in rows:
+            e = entries.get(str(r.get("id") or ""))
+            if not (e and e.get("settled") and _raw_settled(r)
+                    and e.get("updated_at") == (r.get("updatedAt") or "")):
+                return False
+        return bool(rows)
+
+    p = 1
+    while True:
+        rows = fetch(p)
+        limit = min(state["total"], max_pages)
+        nxt = p + 1
+        if clean(rows):
+            # Every row here is settled and unchanged: jump to the next page the cache says
+            # holds something that can still change (or that it has never mapped).
+            cand = [q for q in range(p + 1, limit + 1) if q in must_read or q > known_max]
+            nxt = cand[0] if cand else limit + 1
+        if nxt > limit:
+            break
+        p = nxt
+    limit = min(state["total"], max_pages)
+    missing = unsettled - seen
+    for q in range(1, limit + 1):
+        if not missing:
+            break
+        if q in read:
+            continue
+        fetch(q)
+        missing -= seen
+    if meta is not None:
+        meta.update(pages_read=len(read), total_page=state["total"],
+                    total_count=state["count"], limit=limit * _CONTEST_PAGE_SIZE,
+                    truncated=state["total"] > max_pages)
+    if state["total"] > max_pages:
+        from moonglade import logs as moonglade_logging
+        moonglade_logging.get_logger().warning(
+            "contest board: stopped at the %d-page ceiling; the board reports %d pages, "
+            "so its oldest %d page(s) were not read", max_pages, state["total"],
+            state["total"] - max_pages)
+    return [(p, r) for p in sorted(read) for r in read[p]]
+
+
+def _id_key(row):
+    i = str(row.get("id") or "")
+    return int(i) if i.isdigit() else -1
+
+
+def list_contests(session, active_only=False, max_pages=_CONTEST_MAX_PAGES, meta=None,
+                  cache_path=None, full=False):
+    """Return the PixAI contest board as normalized dicts, newest-first. `active_only`
+    keeps just the currently-running ones (runtimeStatus=='running'), filtered LOCALLY: the
+    list route ignores `runtimeStatus`, and `/list/ongoing` is a capped rotating sample, not
+    the running set (probe P6). Pages through /v2/contest/list until the board's own
+    `totalPage`, never past `max_pages` (_CONTEST_MAX_PAGES), pausing _CONTEST_PAGE_PAUSE
+    between pages; when the ceiling rather than `totalPage` ends the walk, the log says so.
+    Read-only, no spend.
+
+    With `cache_path` the settled-row cache is used: a FULL walk once a day and when `full`
+    is True (the board's Refresh), the newest-first walk otherwise (see _walk_newest_first).
+    Without it, every call is a full walk and nothing is written.
+
+    `meta`, when given, is an out-dict the caller reads afterwards (the return value stays a
+    plain list): pages_read, total_page, total_count, limit (rows the walk could read) and
+    `truncated` -- True only when the ceiling, not the board's own `totalPage`, ended it."""
+    now = time.time()
+    cache = _load_contest_cache(cache_path) if cache_path else None
+    do_full = (cache_path is None or full or cache is None
+               or now - float(cache.get("full_at") or 0) >= CONTEST_FULL_WALK_S)
+    if do_full:
+        reads = _walk_all(session, max_pages, meta)
+        base = {}
+    else:
+        reads = _walk_newest_first(session, cache, max_pages, meta, now)
+        base = cache["rows"]
+    fresh = [(p, r, _contest_row(r)) for p, r in reads]
+    if cache_path:
+        rows = {}
+        for i, e in base.items():
+            if e.get("settled"):               # an unsettled row is only ever a FRESH read
+                rows[i] = e
+        for p, r, m in fresh:
+            rows[m["id"]] = {"row": m, "updated_at": r.get("updatedAt") or "", "page": p,
+                             "seen_at": now, "settled": _raw_settled(r)}
+        _save_contest_cache(cache_path, {
+            "v": _CONTEST_CACHE_VERSION, "saved_at": now,
+            "full_at": now if do_full else float(cache.get("full_at") or 0),
+            "rows": rows})
+        if do_full:
+            out = [m for _p, _r, m in fresh]
+        else:
+            fresh_ids = {m["id"] for _p, _r, m in fresh}
+            out = [m for _p, _r, m in fresh] + [
+                e["row"] for i, e in rows.items() if i not in fresh_ids]
+            out.sort(key=_id_key, reverse=True)
+        if meta is not None:
+            meta["mode"] = "full" if do_full else "newest-first"
+    else:
+        out = [m for _p, _r, m in fresh]
+    if active_only:
+        out = [m for m in out if m["active"]]
     return out
 
 

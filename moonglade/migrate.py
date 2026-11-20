@@ -441,6 +441,70 @@ def _host():
         return "?"
 
 
+def _darwin_libs():
+    """(libproc, libc) for macOS, loaded by their system names; OSError when absent."""
+    import ctypes
+    import ctypes.util
+    proc = ctypes.CDLL(ctypes.util.find_library("proc") or "/usr/lib/libproc.dylib",
+                       use_errno=True)
+    libc = ctypes.CDLL(ctypes.util.find_library("c") or "/usr/lib/libSystem.B.dylib",
+                       use_errno=True)
+    return proc, libc
+
+
+def _darwin_process_started(pid, libproc=None):
+    """macOS: when `pid` started, from proc_pidinfo(PROC_PIDTBSDINFO)'s pbi_start_tvsec
+    (there is no /proc), or None when it can't be read. `libproc` is the loaded library (a
+    test passes a stand-in)."""
+    import ctypes
+
+    class ProcBsdInfo(ctypes.Structure):        # struct proc_bsdinfo, 136 bytes
+        _fields_ = [("pbi_flags", ctypes.c_uint32), ("pbi_status", ctypes.c_uint32),
+                    ("pbi_xstatus", ctypes.c_uint32), ("pbi_pid", ctypes.c_uint32),
+                    ("pbi_ppid", ctypes.c_uint32), ("pbi_uid", ctypes.c_uint32),
+                    ("pbi_gid", ctypes.c_uint32), ("pbi_ruid", ctypes.c_uint32),
+                    ("pbi_rgid", ctypes.c_uint32), ("pbi_svuid", ctypes.c_uint32),
+                    ("pbi_svgid", ctypes.c_uint32), ("rfu_1", ctypes.c_uint32),
+                    ("pbi_comm", ctypes.c_char * 16), ("pbi_name", ctypes.c_char * 32),
+                    ("pbi_nfiles", ctypes.c_uint32), ("pbi_pgid", ctypes.c_uint32),
+                    ("pbi_pjobc", ctypes.c_uint32), ("e_tdev", ctypes.c_uint32),
+                    ("e_tpgid", ctypes.c_uint32), ("pbi_nice", ctypes.c_int32),
+                    ("pbi_start_tvsec", ctypes.c_uint64),
+                    ("pbi_start_tvusec", ctypes.c_uint64)]
+    try:
+        if libproc is None:
+            libproc = _darwin_libs()[0]
+        info = ProcBsdInfo()
+        got = libproc.proc_pidinfo(int(pid), 3, 0, ctypes.byref(info),   # PROC_PIDTBSDINFO
+                                   ctypes.sizeof(info))
+        if got != ctypes.sizeof(info) or not info.pbi_start_tvsec:
+            return None
+        return info.pbi_start_tvsec + info.pbi_start_tvusec / 1e6
+    except (OSError, AttributeError, ValueError, TypeError):
+        return None
+
+
+def _darwin_boot_time(libc=None):
+    """macOS: when this Mac last started, from sysctlbyname("kern.boottime") (a struct
+    timeval), or None when it can't be read."""
+    import ctypes
+
+    class TimeVal(ctypes.Structure):
+        _fields_ = [("tv_sec", ctypes.c_int64), ("tv_usec", ctypes.c_int32),
+                    ("pad", ctypes.c_int32)]
+    try:
+        if libc is None:
+            libc = _darwin_libs()[1]
+        tv = TimeVal()
+        size = ctypes.c_size_t(ctypes.sizeof(tv))
+        if libc.sysctlbyname(b"kern.boottime", ctypes.byref(tv), ctypes.byref(size),
+                             None, 0) != 0 or not tv.tv_sec:
+            return None
+        return tv.tv_sec + tv.tv_usec / 1e6
+    except (OSError, AttributeError, ValueError, TypeError):
+        return None
+
+
 def _process_started(pid):
     """When process `pid` started (seconds since the epoch), or None when that cannot be
     known. A lock is only ever taken over from a dead holder: a pid that is running but
@@ -467,6 +531,8 @@ def _process_started(pid):
                 k32.CloseHandle(h)
         except (OSError, AttributeError, ValueError):
             return None
+    if sys.platform == "darwin":
+        return _darwin_process_started(pid)
     try:
         with open("/proc/%d/stat" % pid, "rb") as f:
             fields = f.read().rsplit(b")", 1)[1].split()
@@ -489,6 +555,8 @@ def _boot_time():
             return time.time() - k32.GetTickCount64() / 1000.0
         except (OSError, AttributeError, ValueError):
             return None
+    if sys.platform == "darwin":
+        return _darwin_boot_time()
     try:
         with open("/proc/stat", "rb") as f:
             for line in f:
@@ -722,8 +790,13 @@ class FolderLock:
         # service or winlogon holding a dead start's reused number): dead when the lock was
         # made before this PC last started, and otherwise alive only until it has gone
         # LOCK_STALE_S untouched (#8) -- a live holder touches it every HEARTBEAT_S.
-        boot = _boot_time() if made is not None else None
-        if boot is not None and made < boot - BOOT_SLACK_S:
+        boot = _boot_time()
+        if boot is None:
+            # This platform can say neither when the holder started nor when it last booted
+            # (no /proc, no libproc): a running number can't be told from the holder, so a
+            # live-looking lock is never taken over on age alone.
+            return False, seen
+        if made is not None and made < boot - BOOT_SLACK_S:
             return True, seen
         return age > LOCK_STALE_S, seen
 

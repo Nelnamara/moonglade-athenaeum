@@ -95,6 +95,20 @@ function timeAgo(ts) {
   return Math.floor(s / 3600) + "h ago";
 }
 
+// 3.22: the task feed (the REST stream) has its own record in /api/watch/status. One short
+// phrase for the tile's existing line: a wording change, the tile's layout is untouched.
+function taskFeedNote(ts) {
+  if (!ts) return null;
+  switch (ts.state) {
+    case "open": return "task feed live";
+    case "idle": return "task feed idle (wakes when you send one)";
+    case "capped": return "task feed waiting (too many streams open)";
+    case "stopped": return ts.stopped_reason || "task feed stopped";
+    case "connecting": case "backoff": case "reconnecting": return "task feed reconnecting";
+    default: return null;
+  }
+}
+
 // Verbatim from ControlPanelOverlay.jsx's own pair (same per-file convention as
 // timeAgo above) -- ledger row timestamp + result-column text off real event fields.
 function fmtWhen(ts) {
@@ -284,8 +298,10 @@ export default function ControlMobile({
           "connected",
           (watch.mirrored || 0) + " mirrored this session",
           watch.last_event_at ? "last event " + timeAgo(watch.last_event_at) : null,
+          taskFeedNote(watch.task_stream),
         ].filter(Boolean).join(" · ")
-      : (watch.last_error ? "reconnecting… (" + watch.last_error + ")" : "connecting…");
+      : [watch.last_error ? "reconnecting… (" + watch.last_error + ")" : "connecting…",
+         taskFeedNote(watch.task_stream)].filter(Boolean).join(" · ");
 
   // What the update screen is talking about: the frozen target once an apply is under way
   // (the hourly check can land mid-apply and must not rewrite what is being installed --
