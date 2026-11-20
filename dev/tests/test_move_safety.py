@@ -728,6 +728,69 @@ def test_a_lock_whose_process_can_t_be_opened_counts_only_until_it_goes_untouche
         assert taken.held
 
 
+def test_a_running_holder_is_never_taken_over_on_age_alone_when_nothing_can_be_read(
+        tmp_path, monkeypatch):
+    """A platform that can say neither when the holder started nor when the PC booted (macOS
+    before the libproc/sysctl readers) must not fall back to age: a live holder in a stalled
+    move would be broken. Its lock stays however old, while a dead holder's still goes."""
+    import time
+    monkeypatch.setattr(migrate, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(migrate, "_process_started", lambda pid: None)
+    monkeypatch.setattr(migrate, "_boot_time", lambda: None)
+    lock = migrate.FolderLock(tmp_path, "the app folder")
+    lock.path.write_text("4 %s %.3f" % (migrate._host(), time.time() - 86400),
+                         encoding="ascii")
+    old = lock.path.stat().st_mtime - migrate.LOCK_STALE_S * 10
+    os.utime(lock.path, (old, old))
+    assert lock._stale()[0] is False
+    with pytest.raises(migrate.MoveStopped):
+        migrate.FolderLock(tmp_path, "the app folder").acquire(wait=0.3)
+    assert lock.path.exists()
+    monkeypatch.setattr(migrate, "_pid_alive", lambda pid: False)
+    with migrate.FolderLock(tmp_path, "the app folder").acquire(wait=0.3) as taken:
+        assert taken.held
+
+
+def test_the_darwin_readers_use_libproc_and_sysctl(monkeypatch):
+    """macOS has no /proc: the start time comes from proc_pidinfo's pbi_start_tvsec and the
+    boot time from sysctlbyname("kern.boottime"). Stand-in libraries fill the structs."""
+    import ctypes
+
+    class Proc:
+        def proc_pidinfo(self, pid, flavor, arg, buf, size):
+            assert (pid, flavor, arg, size) == (321, 3, 0, 136)
+            base = ctypes.addressof(buf._obj)
+            ctypes.memmove(base + 120, (1700000000).to_bytes(8, "little"), 8)
+            ctypes.memmove(base + 128, (500000).to_bytes(8, "little"), 8)
+            return size
+    assert migrate._darwin_process_started(321, Proc()) == 1700000000.5
+
+    class NoProc:
+        def proc_pidinfo(self, *a):
+            return 0                      # no such process / not permitted
+    assert migrate._darwin_process_started(321, NoProc()) is None
+
+    class Libc:
+        def sysctlbyname(self, name, buf, size, new, newlen):
+            assert name == b"kern.boottime"
+            base = ctypes.addressof(buf._obj)
+            ctypes.memmove(base, (1699990000).to_bytes(8, "little"), 8)
+            ctypes.memmove(base + 8, (250000).to_bytes(4, "little"), 4)
+            return 0
+    assert migrate._darwin_boot_time(Libc()) == 1699990000.25
+
+    class BadLibc:
+        def sysctlbyname(self, *a):
+            return -1
+    assert migrate._darwin_boot_time(BadLibc()) is None
+
+    monkeypatch.setattr(migrate.sys, "platform", "darwin")
+    monkeypatch.setattr(migrate, "_darwin_process_started", lambda pid: 42.0)
+    monkeypatch.setattr(migrate, "_darwin_boot_time", lambda: 7.0)
+    assert migrate._process_started(5) == 42.0
+    assert migrate._boot_time() == 7.0
+
+
 def test_a_take_over_never_moves_the_lock_aside(tmp_path, monkeypatch):
     """#7: moving a possibly live lock aside lets a third start's O_EXCL land in the gap, and
     off Windows the put-back could fail and delete it. The take-over only ever removes the
