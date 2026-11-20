@@ -19,6 +19,7 @@ from moonglade.gallery import CATALOG_FIELDS, save_catalog  # noqa: E402
 
 from tests.conftest import login_client  # noqa: E402
 from moonglade import jobs as jobs_mod
+from moonglade import task_reads as task_reads_mod
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -83,7 +84,7 @@ def _lone_task(media_id):
 def _reads(monkeypatch, task):
     """Answer the live read with `task` and count how often it was asked."""
     seen = []
-    monkeypatch.setattr(core, "task_detail_gql",
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql",
                         lambda s, tid, **k: seen.append(str(tid)) or task)
     return seen
 

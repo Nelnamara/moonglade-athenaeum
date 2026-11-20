@@ -18,6 +18,7 @@ from moonglade import backup as core
 from moonglade.gallery import (CATALOG_FIELDS, catalog, delete_from_catalog, load_catalog,
                                merge_over_current, save_catalog, save_catalog_over_snapshot,
                                update_prompt_full, update_rating)
+from moonglade import task_reads as task_reads_mod
 
 
 def _row(**kw):
@@ -126,7 +127,7 @@ def test_the_backfill_step_keeps_edits_made_while_it_ran(tmp_path, monkeypatch):
         return {"parameters": {"modelId": "V1", "prompts": "a cat"}, "outputs": {}}
 
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: SimpleNamespace())
-    monkeypatch.setattr(core, "task_detail_gql", detail)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", detail)
     monkeypatch.setattr(core, "model_name_gql", lambda *a, **k: "Model")
     monkeypatch.setattr(core, "resolve_loras", lambda s, t: "")
     monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, t: fm)

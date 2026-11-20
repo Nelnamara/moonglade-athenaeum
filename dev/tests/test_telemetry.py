@@ -17,6 +17,7 @@ from moonglade import mirror as mirror_mod
 from moonglade import telemetry as telemetry_mod
 from moonglade import achievements as achievements_mod
 from moonglade import branding as branding_mod
+from moonglade import task_reads as task_reads_mod
 
 # The roster is sealed in the container (built from the private donor), not in source.
 # Gate ONLY the tests that assert sealed roster/skin/criteria CONTENT -- NOT the whole
@@ -636,7 +637,7 @@ def test_enhance_tools_complete(tmp_path, monkeypatch):
     _arm_mirror_bridge(monkeypatch, core)
     save_catalog(tmp_path / "catalog.db", [])
     cli = login_client(tmp_path)
-    monkeypatch.setattr(core, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
+    monkeypatch.setattr(task_reads_mod, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
     monkeypatch.setattr(core, "collect_generation",
                         lambda s, t, out, **k: {"media_ids": ["OUT1"], "saved": 1, "is_video": False})
     # unique task id per submit so each terminal poll fires its own deferred record
@@ -705,7 +706,7 @@ def test_scene_and_gen_daymark_hooks_fire_on_terminal_success(tmp_path, monkeypa
     r = cli.post("/api/scene", json={"scene_id": "the-sun", "media_ids": ["srcABC"]})
     assert r.get_json().get("task_id") == "T-SCENE-1"
     assert telemetry_mod.telemetry_metrics(tmp_path)["scenes_used"] == 0          # deferred: nothing at submit
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, tid: {"phase": "done", "paid_credit": 0})
     monkeypatch.setattr(core, "collect_generation",
                         lambda s, tid, out, **k: {"media_ids": ["OUT1"], "saved": 1, "is_video": False})
@@ -732,7 +733,7 @@ def test_a_regular_mirror_gen_is_not_a_bridge_tool(tmp_path, monkeypatch):
     a bridge gen and the metric measured traffic instead of tool use."""
     from moonglade import backup as core
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
+    monkeypatch.setattr(task_reads_mod, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
     monkeypatch.setattr(core, "collect_generation",
                         lambda s, t, out, **k: {"media_ids": ["OUT1"], "saved": 1, "is_video": False})
     save_catalog(tmp_path / "catalog.db", [])
@@ -753,7 +754,7 @@ def test_an_enhance_terminal_counts_as_a_bridge_tool(tmp_path, monkeypatch):
     re-poll cannot inflate it."""
     from moonglade import backup as core
     _arm_mirror_bridge(monkeypatch, core)
-    monkeypatch.setattr(core, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
+    monkeypatch.setattr(task_reads_mod, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
     monkeypatch.setattr(core, "collect_generation",
                         lambda s, t, out, **k: {"media_ids": ["OUT1"], "saved": 1, "is_video": False})
     save_catalog(tmp_path / "catalog.db", [])

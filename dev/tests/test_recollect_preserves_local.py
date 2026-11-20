@@ -16,6 +16,7 @@ from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, create_app, load_catalog, save_catalog
 
 from tests.conftest import login_test_client
+from moonglade import task_reads as task_reads_mod
 
 
 def _row(**kw):
@@ -81,7 +82,7 @@ def test_a_second_poll_of_a_done_task_does_not_collect_again(tmp_path, monkeypat
         return {"media_ids": ["m1"], "saved": 1, "is_video": False}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "collect_generation", _collect)
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, t: {"phase": "done", "paid_credit": 0})
     # the task's media is ALREADY catalogued, with local curation on it
     cli = _client(tmp_path, [_row(media_id="m1", task_id="t1", filename="images/a.png",
@@ -106,7 +107,7 @@ def test_an_uncollected_done_task_still_collects(tmp_path, monkeypatch):
         return {"media_ids": ["mX"], "saved": 1, "is_video": False}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "collect_generation", _collect)
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, t: {"phase": "done", "paid_credit": 0})
     cli = _client(tmp_path, [])
     d = cli.get("/api/task-status", query_string={"task_id": "t-new"}).get_json()

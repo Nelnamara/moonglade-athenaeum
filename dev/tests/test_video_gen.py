@@ -8,6 +8,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import media_tools as media_tools_mod
+from moonglade import task_reads as task_reads_mod
 
 
 def test_build_video_parameters_matches_real_submit():
@@ -391,7 +392,7 @@ def test_build_shot_video_params_r2v_video_and_audio_ids_flow_through():
 
 
 def test_collect_generation_detects_video(monkeypatch, tmp_path):
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, t: {"outputs": {"videos": [{"mediaId": "V9"}]}})
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: {"outputs": {"videos": [{"mediaId": "V9"}]}})
     monkeypatch.setattr(core, "video_outputs", lambda r: ([{"video_media_id": "V9"}], {"prompt": "p"}))
     monkeypatch.setattr(core, "_download_video_task", lambda *a, **k: ["/V9.mp4"])
     got = core.collect_generation(object(), "T", str(tmp_path))

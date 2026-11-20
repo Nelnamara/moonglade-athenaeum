@@ -32,6 +32,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from moonglade import backup as core  # noqa: E402
 from tests.fake_pixai import operation_name  # noqa: E402
+from moonglade import task_reads as task_reads_mod
 
 DELETED_AT = "2026-09-06T11:22:33.000Z"
 
@@ -276,7 +277,7 @@ def test_the_plan_carries_the_deleted_stamp_of_an_already_deleted_image():
 def test_a_read_that_fails_plans_a_refusal_and_sends_nothing(monkeypatch):
     """task_detail_gql fails SOFT to None on a network blip. The delete must come to a stop
     there and say so -- never fall through to a mutation on a task it could not see."""
-    monkeypatch.setattr(core, "task_detail_gql", lambda *a, **k: None)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda *a, **k: None)
     monkeypatch.setattr(core, "READ_ONLY", False)
     dbl = _Double(None)
     plan = core.delete_image_routed(dbl, "TASK-BATCH", "m0", confirmed_plan="per-image")

@@ -21,6 +21,7 @@ from moonglade.gallery import CATALOG_FIELDS, save_catalog, load_catalog
 
 from tests.conftest import login_client
 from moonglade import scan as scan_mod
+from moonglade import task_reads as task_reads_mod
 
 
 def _row(**kw):
@@ -312,7 +313,7 @@ def test_bulk_delete_leaves_the_only_copy_left_anywhere_alone(tmp_path, monkeypa
     The worker reads the live task once before it purges and walks around those rows."""
     db = _keepback_batch(tmp_path)
     monkeypatch.setattr(core, "delete_task", lambda sess, tid: None)
-    monkeypatch.setattr(core, "task_detail_gql",
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql",
                         lambda sess, tid, **k: _live_task_with_one_deleted())
 
     cli = login_client(tmp_path)
@@ -339,7 +340,7 @@ def test_bulk_delete_marks_the_row_it_kept(tmp_path, monkeypatch, pixai):
     complete row is never revisited and nothing else would ever write this."""
     db = _keepback_batch(tmp_path)
     monkeypatch.setattr(core, "delete_task", lambda sess, tid: None)
-    monkeypatch.setattr(core, "task_detail_gql",
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql",
                         lambda sess, tid, **k: _live_task_with_one_deleted())
 
     cli = login_client(tmp_path)
@@ -361,7 +362,7 @@ def test_bulk_delete_keeps_a_marked_row_when_the_live_read_fails(tmp_path, monke
     def _blip(sess, tid, **k):
         raise core.PixAIError("network error reading task")
 
-    monkeypatch.setattr(core, "task_detail_gql", _blip)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", _blip)
 
     cli = login_client(tmp_path)
     assert cli.post("/api/delete-tasks", json={"task_ids": ["T1"]}).get_json()["ok"] is True
@@ -380,7 +381,7 @@ def test_bulk_delete_still_takes_the_whole_task_when_nothing_was_deleted_on_pixa
     rows kept, because none were."""
     db = _keepback_batch(tmp_path)
     monkeypatch.setattr(core, "delete_task", lambda sess, tid: None)
-    monkeypatch.setattr(core, "task_detail_gql", lambda sess, tid, **k: {
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda sess, tid, **k: {
         "id": "T1", "outputs": {"batch": [{"mediaId": m} for m in ("m1", "m2", "gone")]}})
 
     cli = login_client(tmp_path)

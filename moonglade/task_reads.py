@@ -1,0 +1,261 @@
+"""
+moonglade/task_reads.py
+=======================
+Reading a task back from PixAI: the task-detail document and its reader (`task_detail_gql`),
+the status read (`_GEN_STATUS`, the terminal-status sets, `generation_status`,
+`_poll_task_status`) and the failure words (`_task_failure_reason`, `describe_failure`,
+`_pixai_reason_suffix`, `_never_dispatched`). Moved verbatim out of moonglade/backup.py in the
+3.22 split (phase 5).
+
+The names it reads from the engine (gql_adhoc, PixAIError, vlog) are imported from
+moonglade.backup inside each function that uses them, at call time, so a test's patch of
+backup's binding still reaches them and importing this module never imports the engine.
+"""
+import sys
+import time
+
+try:
+    import requests
+except ImportError:
+    sys.exit("Missing dependency. Run:  pip install requests")
+
+
+# Task detail as a full document: every field the saved request's answer carried, so every
+# reader of a task -- extract_full_meta, the delete plan, the video sync, the Fix and lineage
+# readers, --backfill-full-meta's media read -- finds what it always found. `parameters` and
+# `outputs` are JSON scalars, so everything nested in them rides whole (as _GEN_STATUS
+# proves). It needs no saved copy on PixAI's side. The one it replaced (getTaskById's hash) is
+# no longer sent by PixAI's own site, whose current document changed, and its servers were
+# answering it from a cache (#91; PROBE_2026-10-26_task-model-detail: six tasks read both
+# ways, the same answer but for __typename, which nothing reads). Named, so the fake PixAI
+# keys it by its own name and never by _GEN_STATUS's anonymous root field `task`.
+_TASK_DETAIL_DOC = (
+    "query TaskDetail($id: ID!) { task(id: $id) { id userId parameters outputs status "
+    "priority runnerId startedAt endAt createdAt updatedAt retryCount paidCredit "
+    "cancelability moderationAction { promptsModerationAction } enrolledExperiment "
+    "detectPromptHelperResult { needToEnable enableReasonCode } favoritedAt artworkId "
+    "artworkIds artworks { createdAt hidePrompts id isNsfw isSensitive visibility mediaId "
+    "title updatedAt flag { shouldBlur } } mediaId media { id type width height "
+    "urls { variant url } imageType fileUrl duration thumbnailUrl hlsUrl size "
+    "flag { shouldBlur } } stages { id } } }")
+
+
+def task_detail_gql(session, task_id, retries=3, timeout=60):
+    """Read one task back from PixAI: `_TASK_DETAIL_DOC` POSTed through `gql_adhoc`, a query.
+    Returns the task dict or None on failure.
+
+    `timeout` is the per-attempt socket timeout, handed straight to the transport. A
+    caller under a wall-clock ceiling passes the time it has left rather than letting a
+    stalled read run out the transport's own 60s (the delete preview's live check does
+    exactly that -- moonglade/gallery.py's DELETE_PREVIEW_LIVE_BUDGET_S).
+
+    RETRIED with backoff -- the same 3-retry shape `gql_adhoc` gives any query -- because a
+    single blip here is read downstream as a LOST GENERATION. The moment that matters is the
+    tail of a create path: the task has already completed and already been CHARGED, and a
+    `None` here reaches `_outputs_or_raise` as "task completed but no media ids found",
+    which says "your images are gone" when the task, its images and the credits are all
+    exactly where PixAI left them. One timeout should not produce that sentence.
+
+    Retrying is safe HERE specifically because this is a read-only QUERY. The rule that
+    forbids a silent retry (see `gql_mutate`) is about a re-POST paying for a second
+    generation; a repeated task read cannot spend, delete or change anything.
+
+    A genuine failure now says so, instead of leaving the caller to describe an outage as
+    an empty result. That includes an answer with no `task` field in it: a body that is not
+    GraphQL at all (an edge's or a stale credential's own JSON) comes back from the ad-hoc
+    POST as {}, which answered nothing about the task."""
+    from moonglade.backup import gql_adhoc, PixAIError
+    # The 3-retry count is passed straight through -- a blip here is read downstream as a
+    # LOST GENERATION -- and `timeout` reaches the socket on every attempt. Still fails SOFT:
+    # this path must return None and never raise, so a single outage is not reported as
+    # "your images are gone" -- the raise is caught here and turned back into None.
+    try:
+        data = gql_adhoc(session, _TASK_DETAIL_DOC, {"id": str(task_id)}, retries=retries,
+                         timeout=timeout)
+        if not isinstance(data, dict) or "task" not in data:
+            raise PixAIError("PixAI answered, but with no task in it")
+    except (PixAIError, requests.RequestException) as e:
+        print("  could not read task {} back from PixAI ({}). Nothing was spent and nothing "
+              "is lost -- this call only READS a task, so the generation and its credits are "
+              "exactly as PixAI left them. Try again in a moment.".format(task_id, e))
+        return None
+    return data.get("task")
+
+
+_GEN_STATUS = ("query($id: ID!) { task(id: $id) "
+               "{ id status paidCredit startedAt outputs } }")
+# startedAt + outputs are load-bearing, not decoration: `startedAt` is the ONLY way to
+# tell a task PixAI queued-but-never-dispatched from one that is genuinely running (both
+# sit at a non-terminal status), and `outputs.reason` carries PixAI's own explanation for
+# a cancellation (e.g. "waiting timeout"). Without them this poller could only ever see
+# `status`, which is how five of the owner's generations died silently across four days.
+def _poll_task_status(session, task_id, timeout, *, interval=3, label="task",
+                      fail_noun="task"):
+    """Poll `_GEN_STATUS` until the task completes, fails, or times out. Returns the
+    server-authoritative `paidCredit` (or None) and prints it as the actual cost on
+    completion. Raises PixAIError on failure/timeout. Shared by the generate / video /
+    edit submit paths so their poll behaviour can't drift."""
+    from moonglade.backup import gql_adhoc, PixAIError, vlog
+    deadline = time.time() + timeout
+    paid_credit = None
+    started_at, last_status = None, ""
+    while time.time() < deadline:
+        task = (gql_adhoc(session, _GEN_STATUS, {"id": task_id}) or {}).get("task") or {}
+        status = str(task.get("status", "")).lower()
+        last_status = status or last_status
+        started_at = task.get("startedAt") or started_at
+        if task.get("paidCredit") is not None:
+            paid_credit = task.get("paidCredit")     # server-authoritative actual cost
+        vlog("{} poll: {}{}".format(label, status or "(unknown)",
+                                    "" if started_at else " (not started yet)"))
+        # _GEN_DONE / _GEN_FAIL are this module's single source of truth for a terminal
+        # status -- generation_status() and _outputs_or_raise() already read them. This loop
+        # used to carry its own hand-copied tuples, and they had drifted out of step: they
+        # were missing 'finished' (a real success) and 'rejected' (a real failure, and named
+        # as terminal in EmptyOutputsError's own docstring). A rejected generation is
+        # already refunded, but the poller went on waiting for it until the timeout expired
+        # and then reported it as still running on PixAI.
+        if status in _GEN_DONE:
+            if paid_credit is not None:
+                print("  actual cost: {:,} credits".format(int(paid_credit)))
+            return paid_credit
+        if status in _GEN_FAIL:
+            raise PixAIError("{} ended with status: {}{}".format(
+                fail_noun, status, _pixai_reason_suffix(task)))
+        time.sleep(interval)
+    if _never_dispatched(last_status, started_at):
+        raise PixAIError(
+            "{} was accepted by PixAI but NEVER started. After {}s it is still queued "
+            "with no start time, so no worker ever picked it up -- waiting longer will "
+            "not help, and --task-id recovery has nothing to fetch. PixAI reaps an "
+            "unstarted task at about 60 minutes and issues a refund then, so the credits "
+            "should come back on their own; check your credit history if they don't. "
+            "(task {})".format(fail_noun, timeout, task_id))
+    raise PixAIError(
+        "stopped waiting after {}s, but the task is STILL RUNNING on PixAI (task {}). "
+        "Nothing is lost: recover it free once it finishes with --task-id {} "
+        "(or it arrives in your next --update).".format(timeout, task_id, task_id))
+
+
+def _task_failure_reason(outputs):
+    """PixAI's own explanation for a failure, from whichever key it used this time.
+
+    It does NOT use one key. A task it cancelled says `{"reason": "waiting timeout"}`, while a
+    task its model refused says `{"finish_reason": "ERROR", "modelResponse": [],
+    "failureMessage": "Provider refused to answer", "failure_reason":
+    "PROVIDER_REFUSE_ANSWER"}`. Reading only `reason` made three real, fully-explained
+    content refusals look unexplained, and they were written up as model flakiness -- the
+    opposite advice from what the payload actually said.
+
+    Preference order is deliberate: the human sentence first, then the enum (still far better
+    than nothing), then the cancelled-task key. `finish_reason` is skipped -- "ERROR" is a
+    category, not information.
+
+    NOTE the projection trap: this is the GRAPHQL `outputs`. REST `/v2/task/{id}` returns a
+    DIFFERENT `outputs` ({mediaIds, mediaUrls}) with no failure detail at all, so a probe
+    against REST will report no reason exists when one does."""
+    if not isinstance(outputs, dict):
+        return ""
+    for key in ("failureMessage", "failure_reason", "reason"):
+        val = outputs.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return ""
+
+
+def describe_failure(status, reason="", started=True):
+    """A failure message a person can act on, from what PixAI actually tells us.
+
+    Their status string for a failed generation is genuinely just "failed", and `outputs`
+    frequently comes back empty, so faithfully forwarding their words leaves the user with
+    one useless word -- which is exactly what the owner saw on three consecutive hand-fix
+    attempts (2026-07-25): status `failed`, error `failed`, nothing else. Forwarding is
+    still right when they DO explain themselves; this only fills the silence.
+
+    Three distinct cases, because they send you to three different places:
+      - reason given      -> lead with THEIR words; ours must never bury them.
+      - never dispatched  -> it did not "fail to render", no worker ever took it. Saying
+                             otherwise sends someone off debugging a prompt that was never
+                             read. These are reaped and refunded at ~60 minutes.
+      - ran, then failed  -> their model errored. Nothing to fix in the request, and the
+                             credits come back on their own (observed: charged and refunded
+                             within 2-3 seconds), which is the first thing anyone wants to
+                             know.
+
+    Their reason and our explanation are ADDITIVE, not either/or. "waiting timeout" is
+    their jargon: accurate, and meaningless to anyone who does not already know it means
+    no worker ever picked the task up. Lead with their words, then say what happened."""
+    status = str(status or "failed").strip() or "failed"
+    reason = str(reason or "").strip()
+    parts = [status]
+    if reason:
+        parts.append("PixAI's reason: {}".format(reason))
+        # A provider/content refusal is the moderator declining the content, not a system
+        # fault. Saying so turns a dead end into a next step -- the fix is rewording, and
+        # without this the message reads like something is broken and needs debugging.
+        if "refus" in reason.lower() or "policy" in reason.lower():
+            parts.append("That is a content refusal, not a fault: rewording the prompt "
+                         "usually clears it. Nothing was charged — refused generations "
+                         "are refunded.")
+    if not started:
+        parts.append("It was queued but never started, so nothing rendered — unstarted "
+                     "tasks are cancelled and refunded after about an hour.")
+    elif not reason:
+        parts.append("PixAI ran this and it failed without giving a reason. Failed "
+                     "generations are refunded automatically, so the credits come back.")
+    return " — ".join(parts)
+
+
+def _pixai_reason_suffix(task):
+    """PixAI's own explanation for a terminal status, from `outputs.reason` (e.g.
+    "waiting timeout"). Surfaced because a bare "cancelled" reads as though the USER
+    cancelled something -- the owner saw exactly that five times and had no way to know
+    PixAI had timed the task out of its own queue."""
+    reason = _task_failure_reason((task or {}).get("outputs"))
+    return " (PixAI's reason: {})".format(reason) if reason else ""
+
+
+def _never_dispatched(status, started_at):
+    """True when PixAI accepted a task, queued it, and never assigned it a worker.
+
+    Keys on `startedAt` being absent AND a POSITIVE observation of a pre-run status. Two
+    deliberate exclusions, both of which would otherwise produce a confident lie:
+      - `running` without a `startedAt` has obviously started, so it stays on the
+        reassuring "still running, recover it free" timeout path.
+      - an EMPTY status means we never actually observed the task (e.g. a zero/expired
+        timeout that never entered the poll loop). "Not observed" is not "not dispatched",
+        so that also stays on the reassuring path -- claiming a task is dead because we
+        never looked at it is the same class of error as the message this fix removes."""
+    return not started_at and str(status or "").lower() in ("waiting", "pending", "queued")
+
+
+
+
+_GEN_DONE = ("completed", "success", "succeeded", "done", "finished")
+_GEN_FAIL = ("failed", "error", "cancelled", "canceled", "rejected")
+
+
+def generation_status(session, task_id):
+    """One status check for a task -> {status, phase, paid_credit, started, reason}.
+    `phase` normalizes the raw status into 'running' | 'done' | 'failed' for the async
+    poller. Read-only.
+
+    `started` and `reason` exist because 'what' without 'why' is how five of the owner's
+    generations died unnoticed over four days (2026-07-21..24):
+      - `started` is False until PixAI actually assigns a worker. A task it accepted,
+        queued and never dispatched sits at a NON-TERMINAL status for ~60 minutes before
+        being reaped, so on status alone it is indistinguishable from real work and shows
+        as an indefinite spinner. This is the only field that tells them apart.
+      - `reason` is PixAI's own explanation from `outputs.reason` (e.g. "waiting
+        timeout"). Without it a caller can only report "cancelled", which reads as though
+        the USER cancelled something they never started.
+    Callers that only want the original three keys are unaffected -- those are unchanged."""
+    from moonglade.backup import gql_adhoc
+    d = gql_adhoc(session, _GEN_STATUS, {"id": str(task_id)}) or {}
+    t = d.get("task") or {}
+    raw = (t.get("status") or "").lower()
+    phase = ("done" if raw in _GEN_DONE else
+             "failed" if raw in _GEN_FAIL else "running")
+    return {"status": t.get("status") or "", "phase": phase, "paid_credit": t.get("paidCredit"),
+            "started": bool(t.get("startedAt")),
+            "reason": _task_failure_reason(t.get("outputs"))}

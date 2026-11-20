@@ -19,6 +19,7 @@ from moonglade import jobs as jobs_mod
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import media_tools as media_tools_mod
 from moonglade import living as living_mod
+from moonglade import task_reads as task_reads_mod
 
 
 def _row(**kw):
@@ -1034,7 +1035,7 @@ def test_edit_scene_id_passthrough():
 
 
 def test_presets_import_and_use(tmp_path, monkeypatch, pixai):
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid: {
         "parameters": {"sceneId": "character-card",
                        "chat": {"prompts": "BIG CANNED PROMPT",
                                 "modelId": "1948514378441961474"}}})
@@ -1062,7 +1063,7 @@ def test_one_account_cannot_see_or_clobber_anothers_presets(tmp_path, monkeypatc
     could read AND wholesale-overwrite every other account's imported presets."""
     from moonglade.gallery import create_app
     from tests.conftest import login_test_client
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid: {
         "parameters": {"sceneId": "alice-scene",
                        "chat": {"prompts": "ALICE PROMPT", "modelId": "1"}}})
     app = create_app(tmp_path)
@@ -1075,7 +1076,7 @@ def test_one_account_cannot_see_or_clobber_anothers_presets(tmp_path, monkeypatc
     assert bob.get("/api/presets").get_json()["presets"] == {}, (
         "bob can see alice's presets -- the store is not per-account")
 
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid: {
         "parameters": {"sceneId": "bob-scene",
                        "chat": {"prompts": "BOB PROMPT", "modelId": "2"}}})
     bob.post("/api/presets", json=with_csrf(bob, {"task_id": "222"}))
@@ -1091,7 +1092,7 @@ def test_presets_are_independent_for_accounts_differing_only_by_case(tmp_path, m
     read/save clobbers Nel's."""
     from moonglade.gallery import create_app
     from tests.conftest import login_test_client
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid: {
         "parameters": {"sceneId": "upper-scene",
                        "chat": {"prompts": "UPPER PROMPT", "modelId": "1"}}})
     app = create_app(tmp_path)
@@ -1103,7 +1104,7 @@ def test_presets_are_independent_for_accounts_differing_only_by_case(tmp_path, m
     assert lower.get("/api/presets").get_json()["presets"] == {}, (
         "nel can see Nel's presets -- case-differing usernames collide on disk")
 
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid: {
         "parameters": {"sceneId": "lower-scene",
                        "chat": {"prompts": "LOWER PROMPT", "modelId": "2"}}})
     lower.post("/api/presets", json=with_csrf(lower, {"task_id": "222"}))
@@ -1118,7 +1119,7 @@ def test_the_legacy_shared_presets_are_given_to_each_login_by_the_move(tmp_path,
     old shared toolbox_presets.json (D:'s is live) into every login with no file of its own,
     then deletes it; the app reads only the login's own file."""
     from moonglade import migrate
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid: {
         "parameters": {"sceneId": "new-scene",
                        "chat": {"prompts": "NEW PROMPT", "modelId": "3"}}})
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",

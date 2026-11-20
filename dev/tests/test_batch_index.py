@@ -11,6 +11,7 @@ the <n> in the site's own from-PixAI-<taskId>-<n> download names). Pins:
     original numbers, nothing is ever renumbered.
 """
 from moonglade import backup as core
+from moonglade import task_reads as task_reads_mod
 
 
 def _seed(tmp_path, rows):
@@ -177,7 +178,7 @@ def test_a_deleted_member_reports_no_position():
 def _answers(monkeypatch, task):
     """The live read answers `task`. task_media_index reads the task before it counts, and
     nothing here goes near the network."""
-    monkeypatch.setattr(core, "task_detail_gql", lambda session, tid, **kw: task)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda session, tid, **kw: task)
     return object()
 
 

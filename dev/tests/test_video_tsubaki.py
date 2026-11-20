@@ -15,6 +15,7 @@ from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, save_catalog, load_catalog
 from moonglade import media_tools as media_tools_mod
+from moonglade import task_reads as task_reads_mod
 
 TBKV = ("tbkv1.0", "tbkv1.0.1")
 TBKV_IDS = {"tbkv1.0": "2042030623542642408", "tbkv1.0.1": "2054378086834851904"}
@@ -637,7 +638,7 @@ def _recover_i2v(tmp_path, monkeypatch, task, lookup=None):
     v4.0.1, and the row must still be filed from the recovered task."""
     from pathlib import Path
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, t, **k: task)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t, **k: task)
     monkeypatch.setattr(core, "media_file_gql", lambda s, m: {"fileUrl": "https://x/v.mp4"})
 
     def _dl(session, url, stem, **kw):
@@ -733,7 +734,7 @@ def test_video_task_params_route_reports_the_sources_ratio(tmp_path, monkeypatch
     from tests.conftest import login_test_client
     save_catalog(tmp_path / "catalog.db", [_row(media_id="780000000000000001", task_id="T-v",
                                                 is_video="1", filename="videos/v.mp4")])
-    monkeypatch.setattr(core, "task_detail_gql",
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql",
                         lambda s, t, **k: _vtask(_RV_TBKV, TBKV_IDS["tbkv1.0"]))
     cli = login_test_client(g.create_app(tmp_path))
     d = cli.get("/api/video-task-params/T-v").get_json()

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from moonglade import gallery as moonglade_gallery
 from moonglade import backup as core
 from moonglade import pixai_client as pixai_client_mod
+from moonglade import task_reads as task_reads_mod
 
 _SEARCH = {"data": [
     {"id": "1982880136609467518", "title": "Tsubaki.2", "type": "MMDIT26A_MODEL",
@@ -885,8 +886,8 @@ def _stub_generate_network(monkeypatch, outputs):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: "")
     monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", lambda s, q, v=None, retries=None: {"createGenerationTask": {"id": "T1"}})
-    monkeypatch.setattr(core, "_poll_task_status", lambda *a, **k: None)
-    monkeypatch.setattr(core, "task_detail_gql",
+    monkeypatch.setattr(task_reads_mod, "_poll_task_status", lambda *a, **k: None)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql",
                         lambda s, t: {"createdAt": "2026-07-22T00:00:00Z", "outputs": outputs})
     seen_mids = []
     def fake_resolve(s, mid):
@@ -972,8 +973,8 @@ def test_task_detail_query_reads_the_full_document(monkeypatch):
     monkeypatch.setattr(core, "gql_adhoc", fake_adhoc)
     t = core._task_detail_query(object(), "T7")
     assert t["id"] == "T7" and t["status"] == "completed"
-    assert sent == [(core._TASK_DETAIL_DOC, {"id": "T7"})]
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {"id": tid, "via": "detail"})
+    assert sent == [(task_reads_mod._TASK_DETAIL_DOC, {"id": "T7"})]
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid: {"id": tid, "via": "detail"})
     assert core._task_detail_query(object(), "T8") == {"id": "T8", "via": "detail"}
 
 
@@ -1054,12 +1055,12 @@ def test_generation_status_phases(monkeypatch):
                        ("cancelled", "failed"), ("running", "running"), ("pending", "running")]:
         monkeypatch.setattr(core, "gql_adhoc",
                             lambda s, q, v=None, _r=raw: {"task": {"status": _r, "paidCredit": 7}})
-        st = core.generation_status(object(), "T")
+        st = task_reads_mod.generation_status(object(), "T")
         assert st["phase"] == phase and st["paid_credit"] == 7
 
 
 def test_collect_generation(monkeypatch, tmp_path):
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, t: {"outputs": {"mediaId": "M1"}})
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: {"outputs": {"mediaId": "M1"}})
     monkeypatch.setattr(core, "extract_full_meta", lambda r: {"prompt_full": "p"})
     monkeypatch.setattr(core, "_download_image_task", lambda *a, **k: ["/M1.webp"])
     got = core.collect_generation(object(), "T", str(tmp_path))
@@ -1095,7 +1096,7 @@ def test_run_generate_persists_paid_credit(monkeypatch, tmp_path):
     top-level paidCredit) on every row it catalogs -- it's a TASK-level value,
     repeated on each of the task's media rows."""
     _stub_generate_network(monkeypatch, _BATCH_OUTPUTS)
-    monkeypatch.setattr(core, "task_detail_gql",
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql",
                         lambda s, t: {"createdAt": "2026-07-23T00:00:00Z",
                                       "outputs": _BATCH_OUTPUTS, "paidCredit": 2750})
     args = SimpleNamespace(out=str(tmp_path), params_json='{"prompts": "x", "modelId": "v"}',
@@ -1109,7 +1110,7 @@ def test_collect_generation_persists_paid_credit_zero_not_blank(monkeypatch, tmp
     """collect_generation is the shared collect for the web async poll (/api/task-status)
     and the --watch-backup live mirror. paidCredit 0 is a REAL value (a free card /
     daily-free gen) and must be stored as '0' -- never collapsed into '' (unknown)."""
-    monkeypatch.setattr(core, "task_detail_gql",
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql",
                         lambda s, t: {"createdAt": "2026-07-23T00:00:00Z",
                                       "outputs": {"mediaId": "M1", "seed": "9"},
                                       "paidCredit": 0})

@@ -32,6 +32,7 @@ from types import SimpleNamespace
 import pytest
 
 from moonglade import backup as core
+from moonglade import task_reads as task_reads_mod
 
 
 def _args(tmp_path, **extra):
@@ -70,8 +71,8 @@ class TestRunGenerateReadOnly:
         resp.status_code = 200
         resp.json.return_value = {"data": {"createGenerationTask": {"id": "t1"}}}
         mock_session.post.return_value = resp
-        monkeypatch.setattr(core, "_poll_task_status", lambda *a, **k: None)
-        monkeypatch.setattr(core, "task_detail_gql", lambda *a, **k: {"outputs": {"mediaId": "m1"}})
+        monkeypatch.setattr(task_reads_mod, "_poll_task_status", lambda *a, **k: None)
+        monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda *a, **k: {"outputs": {"mediaId": "m1"}})
         monkeypatch.setattr(core, "_download_image_task", lambda *a, **k: [])
         core.run_generate(_args(tmp_path))
         mock_session.post.assert_called()
@@ -141,7 +142,7 @@ class TestReadOnlyStillAllowsFreeTaskRecovery:
     def test_generate_video_recovery_not_blocked(self, tmp_path, mock_session, monkeypatch):
         monkeypatch.setattr(core, "READ_ONLY", True)
         monkeypatch.setattr(core, "_make_session", lambda token: mock_session)
-        monkeypatch.setattr(core, "task_detail_gql", lambda *a, **k: {})
+        monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda *a, **k: {})
         monkeypatch.setattr(core, "_maybe_dump_params", lambda *a, **k: None)
         monkeypatch.setattr(core, "_download_video_task", lambda *a, **k: [])
         # No PixAIError -- recovery must proceed even with READ_ONLY set.

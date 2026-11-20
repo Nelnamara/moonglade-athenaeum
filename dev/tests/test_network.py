@@ -5,9 +5,10 @@ import requests
 
 from moonglade import backup as core
 from moonglade import paths
+from moonglade import task_reads as task_reads_mod
 from tests.fake_pixai import FakePixAI, operation_name
 
-TASK_DETAIL = operation_name(core._TASK_DETAIL_DOC)        # "TaskDetail"
+TASK_DETAIL = operation_name(task_reads_mod._TASK_DETAIL_DOC)        # "TaskDetail"
 MODEL_VERSION = operation_name(core._MODEL_VERSION_DOC)    # "ModelVersion"
 
 
@@ -191,7 +192,7 @@ class TestTaskDetailGql:
     def test_returns_task_on_success(self):
         task = {"id": "t1", "parameters": {"prompts": "full prompt"}, "outputs": {}}
         fake = FakePixAI().on(TASK_DETAIL, {"task": task})
-        assert core.task_detail_gql(fake, "t1")["id"] == "t1"
+        assert task_reads_mod.task_detail_gql(fake, "t1")["id"] == "t1"
 
     def test_returns_none_on_server_failure(self):
         """A read that fails at the seam (a 500 surfaces there as an HTTPError; a 401/GraphQL
@@ -199,14 +200,14 @@ class TestTaskDetailGql:
         downstream as a LOST GENERATION, and this path exists so an outage is not reported as
         'your images are gone'."""
         fake = FakePixAI().fail(TASK_DETAIL, requests.HTTPError("HTTP 500"))
-        assert core.task_detail_gql(fake, "t1") is None
+        assert task_reads_mod.task_detail_gql(fake, "t1") is None
 
     def test_an_answer_with_no_task_in_it_fails_soft(self, capsys):
         """There is no hash to be missing any more (the empty-hash raise went with it, #91).
         What replaces it at this edge: a body that is not GraphQL comes back from the ad-hoc
         POST as {}, and that is a failed read -- None, with the sentence -- not a task."""
         fake = FakePixAI().on(TASK_DETAIL, {})
-        assert core.task_detail_gql(fake, "t1") is None
+        assert task_reads_mod.task_detail_gql(fake, "t1") is None
         assert "could not read task t1 back from PixAI" in capsys.readouterr().out
 
 
@@ -1153,7 +1154,7 @@ def test_backfill_full_meta_recovers_historical_paid_credit(tmp_path, mocker, pi
         "t2": {"parameters": {"prompts": "ignored -- row already has meta"},
                "outputs": {}, "paidCredit": 0},
     }
-    mocker.patch.object(core, "task_detail_gql", side_effect=lambda s, tid: tasks[str(tid)])
+    mocker.patch.object(task_reads_mod, "task_detail_gql", side_effect=lambda s, tid: tasks[str(tid)])
 
     # Pass 1: plain backfill -> t1 fetched (missing meta) and gains cost; t2 untouched.
     core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
@@ -1259,7 +1260,7 @@ def test_the_backfill_separates_errors_from_tasks_that_carried_no_prompt(tmp_pat
             return {"parameters": {"prompts": "real"}, "outputs": {}}
         return {"parameters": {}, "outputs": {}}          # fetched fine, no prompt
 
-    mocker.patch.object(core, "task_detail_gql", side_effect=detail)
+    mocker.patch.object(task_reads_mod, "task_detail_gql", side_effect=detail)
     core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
     out = capsys.readouterr().out
     assert "Why they failed:" in out and "429" in out, "the real error must be named"
@@ -1331,7 +1332,7 @@ def test_backfill_names_why_tasks_failed(tmp_path, mocker, capsys, pixai):
     save_catalog(tmp_path / "catalog.db",
                  [base | {"media_id": "m%d" % i, "task_id": "t%d" % i,
                           "filename": "%d.png" % i} for i in range(40)])
-    mocker.patch.object(core, "task_detail_gql",
+    mocker.patch.object(task_reads_mod, "task_detail_gql",
                         side_effect=core.PixAIError("HTTP 429 rate limited"))
     core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
                                                 workers=4))
@@ -1426,7 +1427,7 @@ def test_backfill_full_meta_refetches_rows_that_have_only_a_prompt(tmp_path, moc
     task = {"parameters": {"prompts": "night elf druid", "modelId": "4242"},
             "outputs": {"seed": 5, "detailParameters": {"samplingSteps": 25,
                                                         "samplingMethod": "Euler a"}}}
-    mocker.patch.object(core, "task_detail_gql", side_effect=lambda s, tid: task)
+    mocker.patch.object(task_reads_mod, "task_detail_gql", side_effect=lambda s, tid: task)
     mocker.patch.object(core, "model_name_gql", side_effect=lambda s, mid: "WAI v17")
     mocker.patch.object(core, "resolve_loras", side_effect=lambda s, t: "")
 
@@ -1438,7 +1439,7 @@ def test_backfill_full_meta_refetches_rows_that_have_only_a_prompt(tmp_path, moc
     # And it settles: a second pass has nothing left to do, so this does not become a row
     # that is re-fetched on every sweep forever.
     calls = []
-    mocker.patch.object(core, "task_detail_gql",
+    mocker.patch.object(task_reads_mod, "task_detail_gql",
                         side_effect=lambda s, tid: calls.append(tid) or task)
     core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
     assert calls == [], "the filled row is being re-fetched on every run"

@@ -15,6 +15,7 @@ from moonglade.gallery import (CATALOG_FIELDS, save_catalog, load_catalog,
 
 from tests.conftest import login_client
 from moonglade import scan as scan_mod
+from moonglade import task_reads as task_reads_mod
 
 
 def _row(**kw):
@@ -350,7 +351,7 @@ def test_delete_preview_reads_each_selected_task_back_from_pixai_once(tmp_path, 
         reads.append(str(tid))
         return live[str(tid)]
 
-    monkeypatch.setattr(core, "task_detail_gql", _read)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", _read)
 
     client = login_client(tmp_path)
     body = client.post("/api/delete-preview",
@@ -383,7 +384,7 @@ def test_delete_preview_counts_a_row_the_catalog_already_marked_gone(tmp_path, m
     _fake_session(monkeypatch)
     # The live read no longer lists c2 as deleted; the catalog's own marker still stands
     # on its own, exactly as it does at delete time.
-    monkeypatch.setattr(core, "task_detail_gql",
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql",
                         lambda sess, tid, **k: _live_task("T9", ["c1", "c2"]))
 
     client = login_client(tmp_path)
@@ -406,7 +407,7 @@ def test_delete_preview_over_the_cap_reads_nothing_and_says_it_is_an_estimate(
     _fake_session(monkeypatch)
 
     reads = []
-    monkeypatch.setattr(core, "task_detail_gql",
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql",
                         lambda sess, tid, **k: reads.append(tid))
 
     client = login_client(tmp_path)
@@ -437,7 +438,7 @@ def test_delete_preview_at_exactly_the_cap_still_reads(tmp_path, monkeypatch):
         reads.append(str(tid))
         return _live_task(str(tid), [str(tid).replace("F", "f")])
 
-    monkeypatch.setattr(core, "task_detail_gql", _read)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", _read)
 
     client = login_client(tmp_path)
     body = client.post("/api/delete-preview", json={
@@ -465,7 +466,7 @@ def test_delete_preview_counts_a_task_whose_read_failed_from_the_catalog(
             raise core.PixAIError("network error reading task")
         return _live_task("H1", ["h1", "h2"], gone=("h2",))
 
-    monkeypatch.setattr(core, "task_detail_gql", _read)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", _read)
 
     client = login_client(tmp_path)
     body = client.post("/api/delete-preview",
@@ -525,7 +526,7 @@ def test_delete_preview_writes_down_what_pixai_said_so_the_delete_keeps_it(
         _row(media_id="k3", task_id="K1", filename="k3.png"),
     ], {"k1.png": b"a", "k2.png": b"b", "k3.png": b"c"})
     _fake_session(monkeypatch)
-    monkeypatch.setattr(core, "task_detail_gql", lambda sess, tid, **k: _live_task(
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda sess, tid, **k: _live_task(
         "K1", ["k1", "k2", "k3"], gone=("k3",)))
 
     client = login_client(tmp_path)
@@ -545,7 +546,7 @@ def test_delete_preview_writes_down_what_pixai_said_so_the_delete_keeps_it(
     def _blip(sess, tid, **k):
         raise core.PixAIError("network error reading task")
 
-    monkeypatch.setattr(core, "task_detail_gql", _blip)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", _blip)
 
     assert client.post("/api/delete-tasks",
                        json={"media_ids": ["k1"]}).get_json()["ok"] is True
@@ -599,7 +600,7 @@ def test_delete_preview_answers_inside_its_budget_when_a_read_hangs(tmp_path, mo
             raise core.PixAIError("read timed out")
         return _live_task("S1", ["s1", "s2"], gone=("s2",))
 
-    monkeypatch.setattr(core, "task_detail_gql", _read)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", _read)
 
     client = login_client(tmp_path)
     try:
@@ -649,7 +650,7 @@ def test_delete_preview_counts_published_artwork_off_the_live_read(tmp_path, mon
     _fake_session(monkeypatch)
     live = {"P1": _published(_live_task("P1", ["p1", "p2"]), ["A-p2"]),
             "Q1": _published(_live_task("Q1", ["q1"]), [])}
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid, **k: live[str(tid)])
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid, **k: live[str(tid)])
 
     body = login_client(tmp_path).post("/api/delete-preview",
                                        json={"media_ids": ["p1", "q1"]}).get_json()
@@ -663,7 +664,7 @@ def test_delete_preview_caps_a_tasks_artworks_at_its_files(tmp_path, monkeypatch
     # batch-over-rows case is test_delete_preview_caps_the_live_count_at_pixais_batch_...
     _seed(tmp_path, [_row(media_id="r1", task_id="R1", filename="r1.png")], {})
     _fake_session(monkeypatch)
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid, **k: _published(
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid, **k: _published(
         _live_task("R1", ["r1"]), ["A1", "A2", "A1"]))
     body = login_client(tmp_path).post("/api/delete-preview",
                                        json={"media_ids": ["r1"]}).get_json()
@@ -680,7 +681,7 @@ def test_delete_preview_falls_back_to_the_catalog_over_the_live_cap(tmp_path, mo
     rows[3]["artwork_id"] = "ART3"
     _seed(tmp_path, rows, {})
     _fake_session(monkeypatch)
-    monkeypatch.setattr(core, "task_detail_gql",
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql",
                         lambda s, tid, **k: pytest.fail("over the cap nothing is read"))
     body = login_client(tmp_path).post("/api/delete-preview", json={
         "media_ids": ["e{}".format(i) for i in range(n)]}).get_json()
@@ -696,7 +697,7 @@ def test_delete_preview_says_publication_was_not_checked_when_nothing_can_answer
     -- rather than a 0 the dialog would have to read as "none published"."""
     _seed(tmp_path, [_row(media_id="u1", task_id="U1", filename="u1.png")], {})
     _fake_session(monkeypatch)
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid, **k: None)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid, **k: None)
     body = login_client(tmp_path).post("/api/delete-preview",
                                        json={"media_ids": ["u1"]}).get_json()
     assert body["unverified"] == 1
@@ -710,7 +711,7 @@ def test_a_read_without_artwork_ids_is_unknown_not_unpublished(tmp_path, monkeyp
         _row(media_id="w1", task_id="W1", filename="w1.png", artwork_id="ARTW"),
     ], {})
     _fake_session(monkeypatch)
-    monkeypatch.setattr(core, "task_detail_gql",
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql",
                         lambda s, tid, **k: _live_task("W1", ["w1"]))   # no artworkIds key
     body = login_client(tmp_path).post("/api/delete-preview",
                                        json={"media_ids": ["w1"]}).get_json()
@@ -743,7 +744,7 @@ def test_delete_preview_caps_the_live_count_at_pixais_batch_not_the_librarys_row
     live batch's size (or the library's rows, if more), never the library's rows alone."""
     _seed(tmp_path, [_row(media_id="k1", task_id="K1", filename="k1.png")], {})
     _fake_session(monkeypatch)
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid, **k: _published(
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid, **k: _published(
         _live_task("K1", ["k1", "k2", "k3", "k4"]), ["A1", "A2", "A3", "A4"]))
     body = login_client(tmp_path).post("/api/delete-preview",
                                        json={"media_ids": ["k1"]}).get_json()
@@ -759,7 +760,7 @@ def test_delete_preview_counts_the_tasks_it_could_not_check(tmp_path, monkeypatc
         _row(media_id="n1", task_id="N1", filename="n1.png"),
     ], {})
     _fake_session(monkeypatch)
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid, **k: (
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid, **k: (
         _published(_live_task("L1", ["l1"]), ["A1"]) if tid == "L1" else None))
     body = login_client(tmp_path).post("/api/delete-preview",
                                        json={"media_ids": ["l1", "n1"]}).get_json()

@@ -15,6 +15,7 @@ from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_client, login_test_client
 from moonglade import jobs as jobs_mod
+from moonglade import task_reads as task_reads_mod
 
 
 def _row(**kw):
@@ -464,7 +465,7 @@ def test_api_jobs_endpoint_reconciles_a_stale_orphan_on_poll(tmp_path, monkeypat
 
     def _boom(session, tid):
         raise RuntimeError("network blip")
-    monkeypatch.setattr(core, "generation_status", _boom)
+    monkeypatch.setattr(task_reads_mod, "generation_status", _boom)
 
     jobs = cli.get("/api/jobs").get_json()["jobs"]
     by_id = {j["job_id"]: j for j in jobs}
@@ -482,7 +483,7 @@ def test_empty_output_task_is_logged_failed_not_left_running(tmp_path, monkeypat
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "555", "type": "generate", "label": "Enhanced"})
 
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, tid: {"status": "completed", "phase": "done",
                                         "paid_credit": 0})
 
@@ -505,7 +506,7 @@ def test_a_transient_blip_still_does_not_write_a_false_failure(tmp_path, monkeyp
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "556", "type": "generate", "label": "Enhanced"})
 
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, tid: {"status": "completed", "phase": "done",
                                         "paid_credit": 0})
 
@@ -534,7 +535,7 @@ def test_collect_is_single_flight_across_watcher_and_poll(tmp_path, monkeypatch,
     app = create_app(tmp_path)
     cli = login_test_client(app)
 
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, tid: {"status": "completed", "phase": "done",
                                         "paid_credit": 0})
 
@@ -741,7 +742,7 @@ def test_generation_status_surfaces_pixai_cancel_reason(monkeypatch):
     monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {
         "status": "cancelled", "startedAt": None,
         "outputs": {"reason": "waiting timeout"}, "paidCredit": 1200}})
-    st = core.generation_status(object(), "2037594262049550370")
+    st = task_reads_mod.generation_status(object(), "2037594262049550370")
     assert st["phase"] == "failed"
     assert st.get("reason") == "waiting timeout", \
         "PixAI's own reason must survive into the status dict: {!r}".format(st)
@@ -753,11 +754,11 @@ def test_generation_status_reports_whether_the_task_ever_started(monkeypatch):
     only show an indefinite spinner -- which is exactly how an hour of nothing looked."""
     monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {
         "status": "waiting", "startedAt": None}})
-    assert core.generation_status(object(), "t1")["started"] is False
+    assert task_reads_mod.generation_status(object(), "t1")["started"] is False
 
     monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {
         "status": "running", "startedAt": "2026-07-25T05:00:00.000Z"}})
-    assert core.generation_status(object(), "t2")["started"] is True
+    assert task_reads_mod.generation_status(object(), "t2")["started"] is True
 
 
 def test_generation_status_keeps_its_existing_keys(monkeypatch):
@@ -765,7 +766,7 @@ def test_generation_status_keeps_its_existing_keys(monkeypatch):
     adding fields must not drop the three they already depend on."""
     monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {
         "status": "completed", "paidCredit": 42}})
-    st = core.generation_status(object(), "t3")
+    st = task_reads_mod.generation_status(object(), "t3")
     assert st["status"] == "completed" and st["phase"] == "done" and st["paid_credit"] == 42
 
 
@@ -777,7 +778,7 @@ def test_reaped_task_logs_pixai_reason_not_a_bare_cancelled(tmp_path, monkeypatc
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "2037594262049550370", "type": "generate",
                                 "label": "Enhanced"})
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, tid: {"status": "cancelled", "phase": "failed",
                                         "paid_credit": 1200, "started": False,
                                         "reason": "waiting timeout"})
@@ -797,7 +798,7 @@ def test_running_response_says_whether_a_worker_ever_picked_it_up(tmp_path, monk
     to real work over the wire, so the tracker could only show an endless spinner. Pass
     `started` through so the card can say "queued" instead of implying progress."""
     cli = _authed_client(tmp_path)
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, tid: {"status": "waiting", "phase": "running",
                                         "paid_credit": None, "started": False, "reason": ""})
     body = cli.get("/api/task-status?task_id=999").get_json()
@@ -862,7 +863,7 @@ def test_api_jobs_endpoint_marks_a_never_started_orphan_stale(tmp_path, monkeypa
     old_ts = time.time() - jobs_mod.JOBS_ORPHAN_SWEEP_AGE - 100
     jobs_mod.append_job_event(tmp_path, "2037625229523385030", status="running",
                           type="generate", label="Enhanced", ts=old_ts)
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, tid: {"status": "waiting", "phase": "running",
                                         "paid_credit": 1200, "started": False, "reason": ""})
 
@@ -881,7 +882,7 @@ def test_done_event_records_what_the_generation_actually_cost(tmp_path, monkeypa
     re-querying PixAI per task, and it is exactly what makes an unexpected spend visible."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "4242", "type": "generate", "label": "Generated"})
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, tid: {"status": "completed", "phase": "done",
                                         "paid_credit": 3700, "started": True, "reason": ""})
     monkeypatch.setattr(core, "collect_generation",
@@ -899,7 +900,7 @@ def test_a_free_card_generation_records_zero_not_missing(tmp_path, monkeypatch, 
     tray would hide the cost row on exactly the generations worth confirming were free."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "4243", "type": "generate", "label": "Generated"})
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, tid: {"status": "completed", "phase": "done",
                                         "paid_credit": 0, "started": True, "reason": ""})
     monkeypatch.setattr(core, "collect_generation",
@@ -921,7 +922,7 @@ def test_failed_with_no_reason_explains_itself_instead_of_saying_failed(tmp_path
     credits come back."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "9101", "type": "generate", "label": "Fixed"})
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, tid: {"status": "failed", "phase": "failed",
                                         "paid_credit": 8000, "started": True, "reason": ""})
 
@@ -939,7 +940,7 @@ def test_failed_before_it_ever_started_says_so_rather_than_blaming_the_render(tm
     render failed when no worker ever took it sends them debugging their prompt."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "9102", "type": "generate", "label": "Enhanced"})
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, tid: {"status": "cancelled", "phase": "failed",
                                         "paid_credit": 1200, "started": False,
                                         "reason": "waiting timeout"})
@@ -955,7 +956,7 @@ def test_a_reason_from_pixai_is_never_buried_under_our_own_words(tmp_path, monke
     replaced by our generic copy."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "9103", "type": "generate", "label": "Generated"})
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, tid: {"status": "failed", "phase": "failed",
                                         "paid_credit": 0, "started": True,
                                         "reason": "content policy"})
@@ -993,7 +994,7 @@ def test_a_queued_job_is_recorded_as_not_yet_started(tmp_path, monkeypatch, pixa
     could not tell the two apart."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "7001", "type": "generate", "label": "Generated"})
-    monkeypatch.setattr(core, "generation_status", _queued())
+    monkeypatch.setattr(task_reads_mod, "generation_status", _queued())
     _no_estimate(monkeypatch)
 
     cli.get("/api/task-status?task_id=7001")
@@ -1010,7 +1011,7 @@ def test_the_phase_is_written_once_per_change_not_once_per_poll(tmp_path, monkey
     cross JOBS_ORPHAN_SWEEP_AGE."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "7002", "type": "generate", "label": "Generated"})
-    monkeypatch.setattr(core, "generation_status", _queued())
+    monkeypatch.setattr(task_reads_mod, "generation_status", _queued())
     _no_estimate(monkeypatch)
 
     before = _raw_lines(tmp_path)
@@ -1026,11 +1027,11 @@ def test_a_worker_picking_the_job_up_flips_the_recorded_phase(tmp_path, monkeypa
     has to stop saying queued. One more line, and only one."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "7003", "type": "generate", "label": "Generated"})
-    monkeypatch.setattr(core, "generation_status", _queued())
+    monkeypatch.setattr(task_reads_mod, "generation_status", _queued())
     _no_estimate(monkeypatch)
     cli.get("/api/task-status?task_id=7003")
 
-    monkeypatch.setattr(core, "generation_status", _queued("processing", started=True))
+    monkeypatch.setattr(task_reads_mod, "generation_status", _queued("processing", started=True))
     before = _raw_lines(tmp_path)
     cli.get("/api/task-status?task_id=7003")
     cli.get("/api/task-status?task_id=7003")
@@ -1047,11 +1048,11 @@ def test_a_terminal_poll_writes_no_running_phase_and_forgets_the_task(tmp_path, 
     the drop is that a later queued sighting of the same id writes again."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "7004", "type": "generate", "label": "Generated"})
-    monkeypatch.setattr(core, "generation_status", _queued())
+    monkeypatch.setattr(task_reads_mod, "generation_status", _queued())
     _no_estimate(monkeypatch)
     cli.get("/api/task-status?task_id=7004")
 
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, tid: {"status": "completed", "phase": "done",
                                         "paid_credit": 0, "started": True, "reason": ""})
     monkeypatch.setattr(core, "collect_generation",
@@ -1060,7 +1061,7 @@ def test_a_terminal_poll_writes_no_running_phase_and_forgets_the_task(tmp_path, 
     cli.get("/api/task-status?task_id=7004")
     assert _raw_lines(tmp_path) - before == 1, "the done poll wrote more than its done event"
 
-    monkeypatch.setattr(core, "generation_status", _queued())
+    monkeypatch.setattr(task_reads_mod, "generation_status", _queued())
     before = _raw_lines(tmp_path)
     cli.get("/api/task-status?task_id=7004")
     assert _raw_lines(tmp_path) - before == 1, \
@@ -1077,7 +1078,7 @@ def test_pixais_own_queue_estimate_is_recorded_when_a_job_is_seen_queued(tmp_pat
     owner can compare it against."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "7005", "type": "generate", "label": "Generated"})
-    monkeypatch.setattr(core, "generation_status", _queued())
+    monkeypatch.setattr(task_reads_mod, "generation_status", _queued())
     asked = []
     monkeypatch.setattr(core, "_task_detail_query",
                         lambda s, tid: {"parameters": {"modelId": "1983308862240288769",
@@ -1101,7 +1102,7 @@ def test_a_job_that_starts_before_its_first_poll_costs_no_extra_calls(tmp_path, 
     per-poll."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "7006", "type": "generate", "label": "Generated"})
-    monkeypatch.setattr(core, "generation_status", _queued("processing", started=True))
+    monkeypatch.setattr(task_reads_mod, "generation_status", _queued("processing", started=True))
     monkeypatch.setattr(core, "_task_detail_query",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not ask")))
     monkeypatch.setattr(core, "queue_wait_estimate",
@@ -1118,7 +1119,7 @@ def test_an_unavailable_estimate_still_ships_the_phase(tmp_path, monkeypatch, pi
     fine, degrading to "no phase" puts the spinner back."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "7007", "type": "generate", "label": "Generated"})
-    monkeypatch.setattr(core, "generation_status", _queued())
+    monkeypatch.setattr(task_reads_mod, "generation_status", _queued())
     monkeypatch.setattr(core, "_task_detail_query",
                         lambda *a, **k: (_ for _ in ()).throw(core.PixAIError("boom")))
 
@@ -1150,7 +1151,7 @@ def test_a_slow_eta_fetch_cannot_overwrite_a_newer_rendering_phase(tmp_path, mon
     cli.post("/api/jobs", json={"job_id": "race1", "type": "generate", "label": "Generated"})
 
     phases = iter([False, True])          # first poll: queued. second: rendering.
-    monkeypatch.setattr(core, "generation_status", lambda s, tid: {
+    monkeypatch.setattr(task_reads_mod, "generation_status", lambda s, tid: {
         "status": "running", "phase": "running", "paid_credit": None,
         "started": next(phases, True), "reason": ""})
 
@@ -1284,7 +1285,7 @@ def test_task_status_reports_our_OWN_defect_as_failed(tmp_path, monkeypatch, pix
     """
     def boom(*_a, **_k):
         raise TypeError("unsupported operand type(s)")
-    monkeypatch.setattr(core, "generation_status", boom)
+    monkeypatch.setattr(task_reads_mod, "generation_status", boom)
     d = _status_client(tmp_path).get("/api/task-status?task_id=T1").get_json()
     assert d["phase"] == "failed", d
     assert "internal error" in (d.get("error") or "").lower()
@@ -1294,7 +1295,7 @@ def test_task_status_still_treats_a_pixai_blip_as_non_terminal(tmp_path, monkeyp
     """The other half, so the above can't be 'achieved' by making everything terminal."""
     def blip(*_a, **_k):
         raise core.PixAIError("502 Bad Gateway")
-    monkeypatch.setattr(core, "generation_status", blip)
+    monkeypatch.setattr(task_reads_mod, "generation_status", blip)
     d = _status_client(tmp_path).get("/api/task-status?task_id=T2").get_json()
     assert d["phase"] == "running", "a transient blip must stay non-terminal: %s" % d
 

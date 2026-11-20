@@ -29,6 +29,7 @@ from moonglade import backup as core
 from tests.fake_pixai import FakePixAI, UnregisteredOperation, operation_name
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import mirror as mirror_mod
+from moonglade import task_reads as task_reads_mod
 
 
 class FakeResponse:
@@ -247,7 +248,9 @@ class TestTheDetailReadsRideTheClient:
 
     @pytest.mark.parametrize("name", DOCUMENT_READERS)
     def test_a_detail_read_rides_the_document_and_speaks_no_http_itself(self, name):
-        src = inspect.getsource(getattr(core, name))
+        # task_reads_mod holds the task detail read since 3.22
+        home = next(m for m in (core, task_reads_mod) if hasattr(m, name))
+        src = inspect.getsource(getattr(home, name))
         assert "gql_adhoc(" in src or "_model_version_gql(" in src, \
             "{} no longer reads its document".format(name)
         assert ".persisted(" not in src, "{} rides a saved request again".format(name)
@@ -263,8 +266,8 @@ class TestTheDetailReadsRideTheClient:
         return s.calls[0][2]
 
     def test_task_detail_gql_wire(self):
-        kw = self._post(lambda c: core.task_detail_gql(c, "T7"), {"task": {"id": "T7"}})
-        assert kw["json"] == {"query": core._TASK_DETAIL_DOC, "variables": {"id": "T7"}}
+        kw = self._post(lambda c: task_reads_mod.task_detail_gql(c, "T7"), {"task": {"id": "T7"}})
+        assert kw["json"] == {"query": task_reads_mod._TASK_DETAIL_DOC, "variables": {"id": "T7"}}
         assert kw["timeout"] == 60                     # task_detail_gql's own default
 
     def test_model_name_gql_wire(self):
@@ -295,7 +298,7 @@ class TestTheDetailReadsRideTheClient:
         quietly swallow it into a None."""
         fake = FakePixAI()
         with pytest.raises(UnregisteredOperation, match="TaskDetail"):
-            core.task_detail_gql(fake, "T9")
+            task_reads_mod.task_detail_gql(fake, "T9")
 
 
 # ---------------------------------------------------------------------------

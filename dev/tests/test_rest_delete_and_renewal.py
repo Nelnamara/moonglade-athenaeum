@@ -57,6 +57,7 @@ from tests.conftest import login_client
 from tests.fake_pixai import FakePixAI
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import mirror as mirror_mod
+from moonglade import task_reads as task_reads_mod
 
 REPO = Path(__file__).resolve().parents[2]
 TID = "2065852033099888102"
@@ -347,7 +348,7 @@ class TestTheGalleryRoads:
         save_catalog(tmp_path / "catalog.db", [_row(media_id="solo", task_id="T1",
                                                     filename="solo.png")])
         (tmp_path / "solo.png").write_bytes(b"x")
-        monkeypatch.setattr(core, "task_detail_gql", lambda s, tid, **k: {
+        monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid, **k: {
             "id": "T1", "status": "completed", "outputs": {"mediaId": "solo"}})
         pixai.on("/task/T1/delete", {"success": False})
         cli = login_client(tmp_path)
@@ -362,7 +363,7 @@ class TestTheGalleryRoads:
         save_catalog(tmp_path / "catalog.db", [_row(media_id="solo", task_id="T1",
                                                     filename="solo.png")])
         (tmp_path / "solo.png").write_bytes(b"x")
-        monkeypatch.setattr(core, "task_detail_gql", lambda s, tid, **k: {
+        monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid, **k: {
             "id": "T1", "status": "completed", "outputs": {"mediaId": "solo"}})
         monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: pytest.fail(
             "the delete reached for the mirror session"))

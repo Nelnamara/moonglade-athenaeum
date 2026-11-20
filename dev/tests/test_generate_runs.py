@@ -40,6 +40,7 @@ from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_client, login_test_client
 from moonglade import jobs as jobs_mod
+from moonglade import task_reads as task_reads_mod
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 VECTORS = json.load(open(os.path.join(HERE, "fixtures", "template_vectors.json"), encoding="utf-8"))
@@ -788,7 +789,7 @@ def test_the_inspector_falls_back_to_pixai_only_for_a_library_task_with_no_recor
     assert cli.get("/api/generate/request/424242").status_code == 404
     save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "M1", "task_id": "424242", "filename": "2025-01/a.png"}])
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid, retries=None: {
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid, retries=None: {
         "parameters": {"prompts": "x", "modelId": "V1", "authToken": "SECRET"}})
     d = cli.get("/api/generate/request/424242").get_json()
     assert d["source"] == "pixai"
@@ -961,7 +962,7 @@ def test_task_status_reports_the_expected_charge_beside_the_paid_one(cli, rig, m
     rig.cards = [dict(CARD, total=1)]
     d = run(cli, ack=ack_of(p), prompt="{a|b} x", count=2).get_json()
     tid = d["jobs"][0]["task_id"]
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, t: {"phase": "done", "paid_credit": 1600, "status": "completed"})
     monkeypatch.setattr(core, "collect_generation",
                         lambda s, t, out, **k: {"media_ids": ["OUT1"], "saved": 1, "is_video": False})

@@ -38,6 +38,7 @@ from unittest import mock
 import pytest
 from moonglade import telemetry as telemetry_mod
 from moonglade import branding as branding_mod
+from moonglade import task_reads as task_reads_mod
 
 _HARNESS = Path(__file__).resolve().parent / "test_render_harness.py"
 
@@ -203,7 +204,7 @@ def _collect_at_three(root, monkeypatch):
                                               "created_at": stamp}
     save_catalog(root / "catalog.db", [])
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, tid: {"phase": "done", "paid_credit": 0})
 
     def _collect(session, tid, out, **k):

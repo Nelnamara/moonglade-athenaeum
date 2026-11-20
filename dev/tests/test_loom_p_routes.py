@@ -40,6 +40,7 @@ from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 from moonglade.account_prefs import _account_key
 from tests.conftest import _TEST_USERNAME, login_test_client
 from moonglade import media_tools as media_tools_mod
+from moonglade import task_reads as task_reads_mod
 
 REPO = Path(__file__).resolve().parents[2]
 OTHER_USER, OTHER_PW = "someone-else", "another-real-password-2"
@@ -949,7 +950,7 @@ def poll(tmp_path, monkeypatch):
     got = {"value": {"media_ids": ["7001"], "saved": 1, "is_video": True, "duration": None}}
     measured = []
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
+    monkeypatch.setattr(task_reads_mod, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
     monkeypatch.setattr(core, "collect_generation", lambda s, tid, out: dict(got["value"]))
     monkeypatch.setattr(media_tools_mod, "duration", lambda p, **k: measured.append(Path(p).name) or 10.0417)
     for name in ("submit", "submit_generation", "gql_mutate", "upload_media"):

@@ -48,6 +48,7 @@ from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
 from tests.fake_pixai import FakePixAI, UnregisteredOperation, operation_name
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import media_tools as media_tools_mod
+from moonglade import task_reads as task_reads_mod
 
 REPO = Path(__file__).resolve().parents[2]
 RECORDED = json.loads((Path(__file__).resolve().parent / "fixtures" /
@@ -56,7 +57,7 @@ TASKS = RECORDED["tasks"]
 MODELS = RECORDED["models"]
 KINDS = sorted(TASKS)
 
-TASK_DETAIL = operation_name(core._TASK_DETAIL_DOC)        # what the fake keys it by
+TASK_DETAIL = operation_name(task_reads_mod._TASK_DETAIL_DOC)        # what the fake keys it by
 MODEL_VERSION = operation_name(core._MODEL_VERSION_DOC)
 
 # The fixed part of task_detail_gql's sentence (the task id and PixAI's error sit in front).
@@ -167,7 +168,7 @@ def fresh_model_caches():
 # =====================================================================================
 
 def test_the_task_document_is_the_query_the_probe_validated():
-    doc = " ".join(core._TASK_DETAIL_DOC.split())
+    doc = " ".join(task_reads_mod._TASK_DETAIL_DOC.split())
     assert doc == RECORDED["documents"]["TaskDetail"]
     assert pixai_client_mod._is_mutation_document(doc) is False
     assert TASK_DETAIL == "TaskDetail"
@@ -177,7 +178,7 @@ def test_the_task_document_is_the_query_the_probe_validated():
 def test_the_task_document_selects_every_key_the_saved_answer_carried(kind):
     """The saved request's answer is the reference: every top-level key it carried (bar
     __typename, which nothing reads) is selected, and nothing else."""
-    selected = _top_fields(core._TASK_DETAIL_DOC, "task")
+    selected = _top_fields(task_reads_mod._TASK_DETAIL_DOC, "task")
     assert len(selected) == len(set(selected))
     assert set(selected) == set(_saved(kind)) - {"__typename"}
     # and PixAI answered the document with the saved answer, less __typename (the probe)
@@ -195,8 +196,8 @@ def test_the_model_document_is_the_query_the_probe_validated():
 def test_neither_document_keys_like_the_generation_poll():
     """The poll's own small document is anonymous and keys by its root field, `task`; both
     detail documents are named, so the fake can never hand one's answer to the other."""
-    assert operation_name(core._GEN_STATUS) == "task"
-    assert len({operation_name(core._GEN_STATUS), TASK_DETAIL, MODEL_VERSION}) == 3
+    assert operation_name(task_reads_mod._GEN_STATUS) == "task"
+    assert len({operation_name(task_reads_mod._GEN_STATUS), TASK_DETAIL, MODEL_VERSION}) == 3
 
 
 # =====================================================================================
@@ -207,40 +208,40 @@ def test_a_task_read_is_one_post_of_the_full_document_never_a_saved_get():
     """The mutation proof for the task road: with task_detail_gql back on the saved
     request, the GET below raises and this fails."""
     s = _Session(_Response({"data": {"task": _document("lone")}}))
-    task = core.task_detail_gql(pixai_client_mod.PixAIClient(s), "T1")
+    task = task_reads_mod.task_detail_gql(pixai_client_mod.PixAIClient(s), "T1")
     assert task == _document("lone")
     [post] = s.posts
     assert post.url == core.API_URL
-    assert post.json == {"query": core._TASK_DETAIL_DOC, "variables": {"id": "T1"}}
+    assert post.json == {"query": task_reads_mod._TASK_DETAIL_DOC, "variables": {"id": "T1"}}
     assert post.timeout == 60                                  # task_detail_gql's default
 
 
 def test_through_the_fake_it_is_a_query_of_the_named_document(pixai):
     pixai.on(TASK_DETAIL, {"task": _document("batch")})
-    assert core.task_detail_gql(pixai, 1934) == _document("batch")
+    assert task_reads_mod.task_detail_gql(pixai, 1934) == _document("batch")
     [call] = pixai.calls
     assert (call.verb, call.op, call.variables) == ("query", "TaskDetail", {"id": "1934"})
-    assert call.document == core._TASK_DETAIL_DOC
+    assert call.document == task_reads_mod._TASK_DETAIL_DOC
     assert (call.retries, call.timeout) == (3, 60)
 
 
 def test_the_timeout_reaches_every_attempt(no_backoff):
     """The delete preview hands its remaining budget down; every attempt gets it."""
     s = _Session(requests.ConnectionError("reset"), _Response({"data": {"task": {"id": "T1"}}}))
-    assert core.task_detail_gql(pixai_client_mod.PixAIClient(s), "T1", retries=1,
+    assert task_reads_mod.task_detail_gql(pixai_client_mod.PixAIClient(s), "T1", retries=1,
                                 timeout=2.5) == {"id": "T1"}
     assert [p.timeout for p in s.posts] == [2.5, 2.5]
 
 
 def test_the_delete_preview_s_budget_reaches_the_read(pixai):
     pixai.on(TASK_DETAIL, {"task": {"id": "T1"}})
-    core.task_detail_gql(pixai, "T1", retries=1, timeout=0.75)
+    task_reads_mod.task_detail_gql(pixai, "T1", retries=1, timeout=0.75)
     assert (pixai.calls[0].retries, pixai.calls[0].timeout) == (1, 0.75)
 
 
 def test_a_5xx_is_asked_three_more_times_then_fails_soft(no_backoff, capsys):
     s = _Session(_Response({"message": "bad gateway"}, status=502))
-    assert core.task_detail_gql(pixai_client_mod.PixAIClient(s), "T5") is None
+    assert task_reads_mod.task_detail_gql(pixai_client_mod.PixAIClient(s), "T5") is None
     assert len(s.posts) == 4                                  # the original + 3 retries
     out = capsys.readouterr().out
     assert "could not read task T5 back from PixAI" in out and SENTENCE in out
@@ -248,7 +249,7 @@ def test_a_5xx_is_asked_three_more_times_then_fails_soft(no_backoff, capsys):
 
 def test_a_5xx_that_passes_is_read_on_the_retry(no_backoff):
     s = _Session(_Response({}, status=503), _Response({"data": {"task": {"id": "T5"}}}))
-    assert core.task_detail_gql(pixai_client_mod.PixAIClient(s), "T5") == {"id": "T5"}
+    assert task_reads_mod.task_detail_gql(pixai_client_mod.PixAIClient(s), "T5") == {"id": "T5"}
     assert len(s.posts) == 2
 
 
@@ -259,7 +260,7 @@ def test_a_5xx_that_passes_is_read_on_the_retry(no_backoff):
 ], ids=["graphql-refusal", "401", "network"])
 def test_a_failed_read_is_none_with_the_sentence_never_a_raise(pixai, capsys, error):
     pixai.fail(TASK_DETAIL, error)
-    assert core.task_detail_gql(pixai, "T6") is None
+    assert task_reads_mod.task_detail_gql(pixai, "T6") is None
     out = capsys.readouterr().out
     assert "could not read task T6 back from PixAI" in out and SENTENCE in out
 
@@ -267,7 +268,7 @@ def test_a_failed_read_is_none_with_the_sentence_never_a_raise(pixai, capsys, er
 def test_a_graphql_refusal_on_the_wire_is_not_retried_and_fails_soft(capsys):
     s = _Session(_Response({"errors": [{"message": "Cannot query field \"x\" on \"Task\"."}],
                             "data": None}))
-    assert core.task_detail_gql(pixai_client_mod.PixAIClient(s), "T7") is None
+    assert task_reads_mod.task_detail_gql(pixai_client_mod.PixAIClient(s), "T7") is None
     assert len(s.posts) == 1
     assert SENTENCE in capsys.readouterr().out
 
@@ -278,7 +279,7 @@ def test_an_answer_that_is_not_graphql_is_a_failed_read_not_a_task(status, capsy
     from the ad-hoc POST as {}. The saved road raised on it, and so does this one: None, with
     the sentence."""
     s = _Session(_Response({"message": "Forbidden"}, status=status))
-    assert core.task_detail_gql(pixai_client_mod.PixAIClient(s), "T8") is None
+    assert task_reads_mod.task_detail_gql(pixai_client_mod.PixAIClient(s), "T8") is None
     assert len(s.posts) == 1
     out = capsys.readouterr().out
     assert "no task in it" in out and SENTENCE in out
@@ -287,13 +288,13 @@ def test_an_answer_that_is_not_graphql_is_a_failed_read_not_a_task(status, capsy
 def test_a_task_pixai_does_not_have_is_none_without_the_sentence(pixai, capsys):
     """`task: null` is PixAI's answer, not a failed read."""
     pixai.on(TASK_DETAIL, {"task": None})
-    assert core.task_detail_gql(pixai, "T9") is None
+    assert task_reads_mod.task_detail_gql(pixai, "T9") is None
     assert SENTENCE not in capsys.readouterr().out
 
 
 def test_an_unregistered_read_is_never_swallowed_into_none():
     with pytest.raises(UnregisteredOperation, match="TaskDetail"):
-        core.task_detail_gql(FakePixAI(), "T9")
+        task_reads_mod.task_detail_gql(FakePixAI(), "T9")
 
 
 # =====================================================================================
@@ -304,7 +305,7 @@ def test_an_unregistered_read_is_never_swallowed_into_none():
 def test_extract_full_meta_reads_the_document_answer_as_it_read_the_saved_one(pixai, kind):
     doc, saved = _document(kind), _saved(kind)
     pixai.on(TASK_DETAIL, {"task": doc})
-    task = core.task_detail_gql(pixai, doc["id"])
+    task = task_reads_mod.task_detail_gql(pixai, doc["id"])
     assert core.extract_full_meta(task) == core.extract_full_meta(saved)
     assert core.extract_full_meta(task)["paid_credit"] == str(saved["paidCredit"])
 
@@ -313,7 +314,7 @@ def test_extract_full_meta_reads_the_document_answer_as_it_read_the_saved_one(pi
 def test_every_other_reader_of_a_task_reads_it_the_same(pixai, kind):
     doc, saved = _document(kind), _saved(kind)
     pixai.on(TASK_DETAIL, {"task": doc})
-    task = core.task_detail_gql(pixai, doc["id"])
+    task = task_reads_mod.task_detail_gql(pixai, doc["id"])
     for reader in (core.video_outputs, core.source_media_of_task, core.fixer_block,
                    core.task_artwork_ids, core._paid_credit_str):
         assert reader(task) == reader(saved), reader.__name__
@@ -346,7 +347,7 @@ def test_a_fix_reads_the_same_through_the_document(pixai):
     doc["parameters"]["chat"]["fixer"] = copy.deepcopy(fixer)
     saved["parameters"]["chat"]["fixer"] = copy.deepcopy(fixer)
     pixai.on(TASK_DETAIL, {"task": doc})
-    task = core.task_detail_gql(pixai, doc["id"])
+    task = task_reads_mod.task_detail_gql(pixai, doc["id"])
     assert core.fixer_block(task) == fixer == core.fixer_block(saved)
     assert core.extract_full_meta(task) == core.extract_full_meta(saved)
 
@@ -627,7 +628,7 @@ def test_the_retired_saved_requests_leave_nothing_behind():
         assert not hits, "{} still names a retired saved request: {}".format(module.name, hits)
     example = (REPO / "config.example.json").read_text(encoding="utf-8")
     assert "TASK_DETAIL_HASH" not in example and "MODEL_DETAIL_HASH" not in example
-    for reader in (core.task_detail_gql, core._model_version_gql, core.model_name_gql,
+    for reader in (task_reads_mod.task_detail_gql, core._model_version_gql, core.model_name_gql,
                    core.resolve_model_base_id, core._resolve_model_preset,
                    core._task_detail_query):
         assert ".persisted(" not in inspect.getsource(reader), reader.__name__

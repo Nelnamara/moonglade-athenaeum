@@ -34,6 +34,7 @@ import requests
 from moonglade import backup as core
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import mirror as mirror_mod
+from moonglade import task_reads as task_reads_mod
 
 
 # Every function that fires a credit-spending or account-mutating GraphQL call. When a new
@@ -124,8 +125,8 @@ def cli_stubs(mock_session, monkeypatch):
     card (the spend-time check is a live REST call), and no polling."""
     monkeypatch.setattr(core, "_make_session", lambda token: mock_session)
     monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "_poll_task_status", lambda *a, **k: None)
-    monkeypatch.setattr(core, "task_detail_gql", lambda *a, **k: {})
+    monkeypatch.setattr(task_reads_mod, "_poll_task_status", lambda *a, **k: None)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda *a, **k: {})
     monkeypatch.setattr(core, "_maybe_dump_params", lambda *a, **k: None)
     monkeypatch.setattr(core, "_download_video_task", lambda *a, **k: [])
     return mock_session

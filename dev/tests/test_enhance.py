@@ -11,6 +11,7 @@ from moonglade import gallery as moonglade_gallery
 from tests.conftest import login_client
 from moonglade import mirror as mirror_mod
 from moonglade import telemetry as telemetry_mod
+from moonglade import task_reads as task_reads_mod
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -151,7 +152,7 @@ def test_enhance_telemetry_fires_only_on_terminal_success(tmp_path, monkeypatch)
     assert not telem["sets"].get("enhance_workflows")
 
     # Now the poll reports a terminal SUCCESS with output -> all three fire, exactly once.
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda session, tid: {"phase": "done", "paid_credit": 0})
     monkeypatch.setattr(core, "collect_generation",
                         lambda s, tid, out, **k: {"media_ids": ["OUT1"], "saved": 1,
@@ -179,7 +180,7 @@ def test_enhance_telemetry_does_not_fire_on_dispatched_then_failed(tmp_path, mon
                                           "workflow_name": "kyo/emotionlab"}
                     ).get_json().get("task_id") == "T-ENH-1"
 
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda session, tid: {"phase": "failed", "status": "cancelled",
                                               "reason": "waiting timeout", "started": False})
     d = cli.get("/api/task-status", query_string={"task_id": "T-ENH-1"}).get_json()
@@ -198,7 +199,7 @@ def test_enhance_workflow_name_preset_counts_toward_adept(tmp_path, monkeypatch)
     cli = _enhance_client(tmp_path)
     cli.post("/api/enhance", json={"source": "srcABC",
                                    "workflow_name": "mymusise/39a2c67c:unet-0.1.3.2"})
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda session, tid: {"phase": "done", "paid_credit": 0})
     monkeypatch.setattr(core, "collect_generation",
                         lambda s, tid, out, **k: {"media_ids": ["OUT1"], "saved": 1,

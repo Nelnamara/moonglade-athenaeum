@@ -33,6 +33,7 @@ from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
 from tests.conftest import login_test_client
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import media_tools as media_tools_mod
+from moonglade import task_reads as task_reads_mod
 
 
 # --------------------------------------------------------------------------------------
@@ -380,7 +381,7 @@ def _stub_generate(monkeypatch, out):
     path = _stub_file(out, "old.png", "images")
     monkeypatch.setattr(core, "_gen_parameters", lambda a: dict(GEN_PARAMS))
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, t: dict(RESULT))
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: dict(RESULT))
     monkeypatch.setattr(core, "_maybe_dump_params", lambda a, r: None)
     monkeypatch.setattr(core, "_task_image_media", lambda outputs: [("m-golden", "424242")])
     monkeypatch.setattr(core, "video_outputs", lambda r: ([], {}))
@@ -439,7 +440,7 @@ def _stub_edit(monkeypatch, out):
     path = _stub_file(out, "old.png", "images")
     monkeypatch.setattr(core, "_edit_config_from_args", lambda a: dict(EDIT_CFG))
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, t: dict(RESULT))
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: dict(RESULT))
     monkeypatch.setattr(core, "_maybe_dump_params", lambda a, r: None)
     monkeypatch.setattr(core, "_task_image_media", lambda outputs: [("m-golden", "424242")])
     monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(FM))
@@ -498,7 +499,7 @@ def _stub_sync_videos(monkeypatch, out):
                         lambda s: types.SimpleNamespace(user_id="u1"))
     monkeypatch.setattr(core, "gql", lambda s, v: {})
     monkeypatch.setattr(core, "find_connection", _find_connection)
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, t: task)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: task)
     monkeypatch.setattr(core, "video_outputs", lambda r: ([dict(VOUT)], dict(VSHARED)))
     monkeypatch.setattr(core, "media_file_gql", lambda s, m: {"fileUrl": "https://x/v.mp4"})
     monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(FM))

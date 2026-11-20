@@ -17,6 +17,7 @@ patched on `core`, with _make_session stubbed."""
 from moonglade import backup as core
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_client
+from moonglade import task_reads as task_reads_mod
 
 TID = "9000000000000007041"
 
@@ -42,7 +43,7 @@ def _wire_task(monkeypatch, task, *, bases=None, names=None, metas=None):
     def detail(session, tid, retries=3):
         calls["retries"] = retries
         return task
-    monkeypatch.setattr(core, "task_detail_gql", detail)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", detail)
     monkeypatch.setattr(core, "resolve_model_base_id",
                         lambda s, vid: (bases or {}).get(str(vid), ""))
     monkeypatch.setattr(core, "model_name_gql",
@@ -155,7 +156,7 @@ def test_exception_answers_redacted_error(tmp_path, monkeypatch):
 
     def boom(session, tid, retries=3):
         raise RuntimeError(r"C:\Users\gwilkins\secret\place blew up")
-    monkeypatch.setattr(core, "task_detail_gql", boom)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", boom)
     r = cli.get("/api/task-params/" + TID)
     d = r.get_json()
     assert r.status_code == 200 and d["error"]
@@ -206,7 +207,7 @@ def test_a_lora_resolve_costs_one_read_and_never_asks_for_profiles(tmp_path, mon
         return [{"id": "ver-" + path.split("/")[2], "modelType": "SDXL_MODEL",
                  "loraBaseModelType": "SDXL_MODEL", "extra": {}}]
 
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid, retries=3: {
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid, retries=3: {
         "parameters": {"modelId": "vER1",
                        "lora": {"L1v": 0.9, "L2v": 0.8, "L3v": 0.7, "L4v": 0.6}}})
     monkeypatch.setattr(core, "resolve_model_base_id",

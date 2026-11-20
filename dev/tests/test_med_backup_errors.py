@@ -33,6 +33,7 @@ import requests
 from moonglade import backup as core
 from moonglade import media_tools as media_tools_mod
 from moonglade import telemetry as telemetry_mod
+from moonglade import task_reads as task_reads_mod
 
 
 @pytest.fixture()
@@ -555,7 +556,7 @@ def recovery_network(monkeypatch):
 
     def install(task, video_download="ok"):
         monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-        monkeypatch.setattr(core, "task_detail_gql", lambda s, t: task)
+        monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: task)
         monkeypatch.setattr(core, "media_file_gql",
                             lambda s, mid: {"fileUrl": "https://cdn/{}.mp4".format(mid)})
         monkeypatch.setattr(core, "resolve_media",

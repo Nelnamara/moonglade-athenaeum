@@ -8,6 +8,7 @@ import websockets
 
 from moonglade import backup as core
 from moonglade import jobs as jobs_mod
+from moonglade import task_reads as task_reads_mod
 
 
 class _FakeWS:
@@ -315,14 +316,14 @@ def test_mirror_and_reconcile_agree_on_what_done_means():
     i = text.index("def _watch_on_event(ev):")
     loop = text[i:i + 4000]
 
-    assert "if status in core._GEN_DONE and tid and tid not in _watch_backed:" in loop, (
+    assert "if status in _task_reads._GEN_DONE and tid and tid not in _watch_backed:" in loop, (
         "the mirror's collect branch must accept every _GEN_DONE status, not one exact string")
     assert "status == core._WS_DONE_STATUS" not in loop, (
         "the single-status collect trigger is back -- see this test's docstring")
 
     # And the constant it now shares really is the broader set.
-    assert core._WS_DONE_STATUS in core._GEN_DONE
-    assert len(core._GEN_DONE) > 1
+    assert core._WS_DONE_STATUS in task_reads_mod._GEN_DONE
+    assert len(task_reads_mod._GEN_DONE) > 1
 
 
 def test_catchup_sweep_is_bounded_rate_limited_and_off_thread():
@@ -380,7 +381,7 @@ def test_catchup_sweep_is_bounded_rate_limited_and_off_thread():
     assert "except Exception as e:" in body
 
     # Only finished tasks are candidates.
-    assert "core._GEN_DONE" in body
+    assert "_task_reads._GEN_DONE" in body       # task_reads holds the statuses since 3.22
 
     # And it is invoked OFF the WebSocket event loop: the subscribe and the periodic backstop
     # only ASK (_request_catchup takes a flag lock and may start the one worker thread). The

@@ -20,6 +20,7 @@ itself, so task_detail_gql is patched on `core`, with _make_session stubbed."""
 from moonglade import backup as core
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_client
+from moonglade import task_reads as task_reads_mod
 
 VID_TID = "8000000000000009001"
 
@@ -43,7 +44,7 @@ def _wire_task(monkeypatch, task):
     def detail(session, tid, retries=3):
         calls["retries"] = retries
         return task
-    monkeypatch.setattr(core, "task_detail_gql", detail)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", detail)
     return calls
 
 
@@ -187,7 +188,7 @@ def test_exception_answers_redacted_error(tmp_path, monkeypatch):
 
     def boom(session, tid, retries=3):
         raise RuntimeError(r"C:\Users\gwilkins\secret\place blew up")
-    monkeypatch.setattr(core, "task_detail_gql", boom)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", boom)
     r = cli.get("/api/video-task-params/" + VID_TID)
     d = r.get_json()
     assert r.status_code == 200 and d["error"]

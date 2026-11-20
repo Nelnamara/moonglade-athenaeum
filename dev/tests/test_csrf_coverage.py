@@ -38,6 +38,7 @@ from moonglade import paths
 from moonglade.gallery import create_app
 from moonglade.account_prefs import _account_key
 from tests.conftest import login_test_client, session_csrf, with_csrf
+from moonglade import task_reads as task_reads_mod
 
 _GALLERY = Path(__file__).resolve().parents[2] / "moonglade" / "gallery.py"
 _STATE_CHANGING = {"POST", "PUT", "PATCH", "DELETE"}
@@ -357,7 +358,7 @@ def test_a_preset_import_without_the_token_never_reaches_pixai(tmp_path, monkeyp
     """/api/presets reads the task from PixAI with the owner's key: a refused POST must
     stop before that read, not after it."""
     seen = []
-    monkeypatch.setattr(core, "task_detail_gql",
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql",
                         lambda s, tid: seen.append(tid) or {
                             "parameters": {"sceneId": "a-scene",
                                            "chat": {"prompts": "P", "modelId": "1"}}})
@@ -399,7 +400,7 @@ def test_the_presets_store_file_is_where_this_test_looks(tmp_path, monkeypatch, 
     """Keeps the 'writes nothing' assertions above honest: a successful import really
     does land in toolbox_presets/<account>.json, so its absence after a refusal means
     something."""
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid: {
         "parameters": {"sceneId": "s", "chat": {"prompts": "P", "modelId": "1"}}})
     alice, _bob = _two_sessions(tmp_path)
     alice.post("/api/presets", json=with_csrf(alice, {"task_id": "9"}))

@@ -14,6 +14,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import organize as organize_mod
+from moonglade import task_reads as task_reads_mod
 
 
 def test_read_only_defaults_to_false():
@@ -92,7 +93,7 @@ class TestRoutedImageDeleteReadOnly:
             self, mock_session, monkeypatch, outputs, branch):
         monkeypatch.setattr(core, "READ_ONLY", True)
         reads = []
-        monkeypatch.setattr(core, "task_detail_gql",
+        monkeypatch.setattr(task_reads_mod, "task_detail_gql",
                             lambda *a, **k: reads.append(1) or {"outputs": outputs})
         target = "m0" if branch == "per-image" else "solo1"
         with pytest.raises(core.PixAIError, match="READ_ONLY"):

@@ -211,6 +211,10 @@ SEAMS = {
         "brand_context", "_mark_ico_path", "make_launcher_shortcut", "PACK_PROGID",
         "PACK_TYPE_NAME", "register_pack_file_type", "_pack_type_icon",
         "_tell_explorer_file_types_changed"]},
+    "moonglade.task_reads": {"from": "moonglade.backup", "names": [
+        "_TASK_DETAIL_DOC", "task_detail_gql", "_GEN_STATUS", "_poll_task_status",
+        "_task_failure_reason", "describe_failure", "_pixai_reason_suffix", "_never_dispatched",
+        "_GEN_DONE", "_GEN_FAIL", "generation_status"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -828,6 +832,41 @@ SOURCE_READERS_REVIEWED = {
     # nothing it reads moved to pixai_client or mirror.
     ('tests/test_unclear_single_sends.py', 'moonglade.pixai_client'),
     ('tests/test_unclear_single_sends.py', 'moonglade.mirror'),
+    # 3.22 phase 5, task_reads: no reader reads text that left backup.py. The ones that name a moved
+    # read (test_network, test_pixai_client, test_task_model_detail_document, test_spend_no_retry,
+    # test_poll) call or getsource it through task_reads_mod; test_pixai_client's detail-read loop
+    # looks the name up in whichever module holds it, which made it an untraced reader: nothing it
+    # reads moved to organize, jobs or media_tools either. test_watch's gallery reads expect
+    # `_task_reads._GEN_DONE`.
+    ('tests/test_pixai_client.py', 'moonglade.jobs'),
+    ('tests/test_pixai_client.py', 'moonglade.media_tools'),
+    ('tests/test_pixai_client.py', 'moonglade.organize'),
+    ('loom/test/ledger-known-reasons.test.js', 'moonglade.task_reads'),
+    ('loom/test/video-roster-parity.test.js', 'moonglade.task_reads'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.task_reads'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.task_reads'),
+    ('tests/test_config_path_routing.py', 'moonglade.task_reads'),
+    ('tests/test_csrf_coverage.py', 'moonglade.task_reads'),
+    ('tests/test_delete_routing.py', 'moonglade.task_reads'),
+    ('tests/test_enhance.py', 'moonglade.task_reads'),
+    ('tests/test_evidence_counters.py', 'moonglade.task_reads'),
+    ('tests/test_gen_surface.py', 'moonglade.task_reads'),
+    ('tests/test_history_feed_document.py', 'moonglade.task_reads'),
+    ('tests/test_jwt.py', 'moonglade.task_reads'),
+    ('tests/test_living_library.py', 'moonglade.task_reads'),
+    ('tests/test_loom_notify.py', 'moonglade.task_reads'),
+    ('tests/test_network.py', 'moonglade.task_reads'),
+    ('tests/test_pixai_client.py', 'moonglade.task_reads'),
+    ('tests/test_read_only.py', 'moonglade.task_reads'),
+    ('tests/test_settings_store.py', 'moonglade.task_reads'),
+    ('tests/test_setup_prepare.py', 'moonglade.task_reads'),
+    ('tests/test_spend_no_retry.py', 'moonglade.task_reads'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.task_reads'),
+    ('tests/test_telemetry.py', 'moonglade.task_reads'),
+    ('tests/test_training_advanced.py', 'moonglade.task_reads'),
+    ('tests/test_training_parity.py', 'moonglade.task_reads'),
+    ('tests/test_video_tsubaki.py', 'moonglade.task_reads'),
+    ('tests/test_web_auth.py', 'moonglade.task_reads'),
 }
 
 

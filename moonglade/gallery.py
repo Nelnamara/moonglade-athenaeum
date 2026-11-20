@@ -53,6 +53,7 @@ from moonglade import scan as _scan
 from moonglade import series as _series
 from moonglade import hostcheck as _hostcheck
 from moonglade import settings as _settings
+from moonglade import task_reads as _task_reads
 from moonglade import telemetry as _telemetry
 from moonglade import updater as _updater
 from moonglade import secure_files as _secure_files
@@ -7560,7 +7561,7 @@ def create_app(out_dir: Path):
         So this closes a website row without knowing or caring that it is one."""
         from moonglade import backup as core
         try:
-            term = "failed" if ws_status in core._GEN_FAIL else "done"
+            term = "failed" if ws_status in _task_reads._GEN_FAIL else "done"
             j = next((x for x in _jobs.read_jobs(out_dir)
                       if str(x.get("job_id")) == str(tid)), None)
             if j and j.get("status") not in ("done", "failed"):
@@ -7723,7 +7724,7 @@ def create_app(out_dir: Path):
             # Guarded end-to-end by dev/tests/test_jobs.py's
             # test_api_jobs_endpoint_marks_a_never_started_orphan_stale, which drives the
             # real endpoint rather than the library function.
-            return core.generation_status(box["s"], tid)
+            return _task_reads.generation_status(box["s"], tid)
         try:
             _jobs.resolve_orphan_jobs(out_dir, _status, min_age=min_age)
         except Exception:                          # noqa: BLE001
@@ -7791,7 +7792,7 @@ def create_app(out_dir: Path):
             for edge in edges:
                 node = edge.get("node", edge)
                 tid = str(node.get("id") or "")
-                if not tid or str(node.get("status") or "") not in core._GEN_DONE:
+                if not tid or str(node.get("status") or "") not in _task_reads._GEN_DONE:
                     continue
                 failed_at = _catchup_failed.get(tid)
                 if failed_at is not None and \
@@ -8028,13 +8029,13 @@ def create_app(out_dir: Path):
         # while still resolving the Activity row. Every task checked on 2026-07-26
         # reports "completed", so this was not that day's cause, but the asymmetry
         # produces exactly that symptom and is just as invisible.
-        if status in core._GEN_DONE and tid and tid not in _watch_backed:
+        if status in _task_reads._GEN_DONE and tid and tid not in _watch_backed:
             _watch_backed.add(tid)
             _log.info("live mirror: task %s reported %s -- mirroring", tid, status)
             threading.Thread(target=_watch_mirror, args=(tid,), daemon=True).start()
         # Reconcile the Activity log from the SAME event stream, so a job resolves
         # even if the Generate card that was polling /api/task-status is gone.
-        if tid and (status in core._GEN_DONE or status in core._GEN_FAIL):
+        if tid and (status in _task_reads._GEN_DONE or status in _task_reads._GEN_FAIL):
             _reconcile_job(tid, status)
 
     # Test seam (same rationale as mg_watch_mirror / mg_watch_catchup above): the frame
@@ -10140,7 +10141,7 @@ def create_app(out_dir: Path):
         keep = {str(r["media_id"]) for r in rows
                 if str(r.get("cloud_deleted_at") or "").strip()}
         try:
-            task = core.task_detail_gql(session, str(task_id)) if session is not None else None
+            task = _task_reads.task_detail_gql(session, str(task_id)) if session is not None else None
         except Exception:                            # noqa: BLE001 -- fail soft, see above
             task = None
         batch = ((task or {}).get("outputs") or {}).get("batch")
@@ -10233,7 +10234,7 @@ def create_app(out_dir: Path):
             if remaining <= 0:
                 return tid, None                     # budget spent: don't start another
             try:
-                task = core.task_detail_gql(session, tid, retries=1, timeout=remaining)
+                task = _task_reads.task_detail_gql(session, tid, retries=1, timeout=remaining)
             except Exception:                        # noqa: BLE001 -- fail soft, see above
                 return tid, None
             if task is None:
@@ -11712,7 +11713,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": "not an image-generation task"}), 400
         try:
             core, session = _gen_session()
-            task = core.task_detail_gql(session, tid, retries=1)
+            task = _task_reads.task_detail_gql(session, tid, retries=1)
             if not task:
                 return jsonify({"error": "couldn't read the task from PixAI"}), 200
             params = task.get("parameters") or {}
@@ -11787,7 +11788,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": "not a video task"}), 400
         try:
             core, session = _gen_session()
-            task = core.task_detail_gql(session, tid, retries=1)
+            task = _task_reads.task_detail_gql(session, tid, retries=1)
             if not task:
                 return jsonify({"error": "couldn't read the task from PixAI"}), 200
             params = task.get("parameters") or {}
@@ -16544,7 +16545,7 @@ def create_app(out_dir: Path):
                 return jsonify({"error": "task_id required"}), 400
             try:
                 core, gsession = _gen_session()
-                task = core.task_detail_gql(gsession, tid) or {}
+                task = _task_reads.task_detail_gql(gsession, tid) or {}
                 params = task.get("parameters") or {}
                 chat = params.get("chat") or {}
                 prompt = chat.get("prompts") or params.get("prompts") or ""
@@ -17802,7 +17803,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": "not found"}), 404
         try:
             core, gsession = _gen_session()
-            task = core.task_detail_gql(gsession, tid, retries=1)
+            task = _task_reads.task_detail_gql(gsession, tid, retries=1)
         except Exception as e:                               # noqa: BLE001
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
         if not task:
@@ -21715,7 +21716,7 @@ __DESIGN_TOKENS__
             return jsonify({"phase": "failed", "error": "task_id required"}), 400
         try:
             core, session = _gen_session()
-            st = core.generation_status(session, tid)
+            st = _task_reads.generation_status(session, tid)
             if st["phase"] == "done":
                 _forget_gen_phase(tid)
                 got = _collect_single_flight(core, session, tid)
@@ -21759,7 +21760,7 @@ __DESIGN_TOKENS__
                 # so the tracker and the CLI could say no more than "cancelled", which
                 # reads as though HE cancelled a job that in fact never started.
                 reason = (st.get("reason") or "").strip()
-                detail = core.describe_failure(st.get("status"), reason,
+                detail = _task_reads.describe_failure(st.get("status"), reason,
                                                started=bool(st.get("started")))
                 _log_job(tid, status="failed", error=detail)
                 _loom_journal_finish_task(tid)
@@ -22110,7 +22111,7 @@ __DESIGN_TOKENS__
             prompt = str(row.get("prompt_full") or row.get("prompt_preview") or "")
             loras, unresolved = [], 0
             tid = str(row.get("task_id") or "").strip()
-            task = core.task_detail_gql(gsession, tid, retries=1) if tid else None
+            task = _task_reads.task_detail_gql(gsession, tid, retries=1) if tid else None
             params = (task or {}).get("parameters") or {}
             if isinstance(params.get("prompts"), str) and params.get("prompts").strip():
                 prompt = params["prompts"]

@@ -7,6 +7,7 @@ import types
 
 from moonglade import backup as core
 from moonglade.gallery import CATALOG_FIELDS, save_catalog, load_catalog
+from moonglade import task_reads as task_reads_mod
 
 
 _SURFACE = ["inference_profile", "quality_tag", "prompt_helper", "control_nets", "lora_parameters",
@@ -191,7 +192,7 @@ def test_with_surface_gate_readmits_pre18_rows(monkeypatch, tmp_path, pixai):
                 "outputs": {}, "updatedAt": "2026-08-01T00:00:00Z",
                 "moderationAction": {"promptsModerationAction": "PASS"}}
 
-    monkeypatch.setattr(core, "task_detail_gql", detail)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", detail)
     monkeypatch.setattr(core, "model_name_gql", lambda s, mid: "My Model")
     monkeypatch.setattr(core, "resolve_loras", lambda s, t: "")
     monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, t: fm)
@@ -238,7 +239,7 @@ def test_backfill_checkpoints_incrementally_not_only_at_the_end(monkeypatch, tmp
         return {"parameters": {"modelId": "V1", "inferenceProfile": "lite", "prompts": "a cat"},
                 "outputs": {}, "updatedAt": "2026-08-1" + tid[-1]}
 
-    monkeypatch.setattr(core, "task_detail_gql", detail)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", detail)
     monkeypatch.setattr(core, "model_name_gql", lambda s, mid: "M")
     monkeypatch.setattr(core, "resolve_loras", lambda s, t: "")
     monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, t: fm)

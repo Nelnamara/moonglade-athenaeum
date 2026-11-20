@@ -34,6 +34,7 @@ from moonglade import backup as core
 from tests.conftest import login_client
 from moonglade import jobs as jobs_mod
 from moonglade import mirror as mirror_mod
+from moonglade import task_reads as task_reads_mod
 
 ROOT = Path(__file__).resolve().parents[2]
 NODE = shutil.which("node")
@@ -743,7 +744,7 @@ def test_run_generate_card_matches_and_submits_the_gated_dict(rest, monkeypatch,
 
     def stop(*a, **k):
         raise _Stop()
-    monkeypatch.setattr(core, "_poll_task_status", stop)
+    monkeypatch.setattr(task_reads_mod, "_poll_task_status", stop)
     with pytest.raises(_Stop):
         core.run_generate(_cli_args(tmp_path))
     assert sent[0] is matched[0]

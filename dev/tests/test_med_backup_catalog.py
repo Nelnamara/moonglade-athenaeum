@@ -27,6 +27,7 @@ from moonglade import gallery
 from moonglade.gallery import load_catalog
 from moonglade.scan import DELETED_DIRNAME
 from moonglade import media_tools as media_tools_mod
+from moonglade import task_reads as task_reads_mod
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +297,7 @@ _VIDEO_TASK = {
 def video_task_network(monkeypatch):
     """Stub every network touch of a --task-id recovery whose task turns out to be a video."""
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, t: _VIDEO_TASK)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: _VIDEO_TASK)
     monkeypatch.setattr(core, "media_file_gql",
                         lambda s, mid: {"fileUrl": "https://cdn/{}.mp4".format(mid)})
     # A video's media object resolves to a perfectly good URL -- which is exactly why the old
@@ -377,7 +378,7 @@ def edit_task_network(monkeypatch):
 
     def _install(task, resolved_name):
         monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-        monkeypatch.setattr(core, "task_detail_gql", lambda s, t: task)
+        monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: task)
         monkeypatch.setattr(core, "resolve_media",
                             lambda s, mid: ("https://cdn/{}.png".format(mid),
                                             {"width": 8, "height": 8}))

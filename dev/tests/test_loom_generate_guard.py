@@ -18,6 +18,7 @@ from moonglade import backup as core
 from moonglade.gallery import create_app
 from moonglade.account_prefs import _account_key
 from tests.conftest import _TEST_PASSWORD, _TEST_USERNAME, _do_login, login_test_client
+from moonglade import task_reads as task_reads_mod
 
 MID = "733917871331404290"
 
@@ -345,7 +346,7 @@ def test_the_journal_survives_a_recreated_app(rig):
 
 def test_task_status_marks_a_journalled_task_finished(rig, monkeypatch):
     rig["cli"].post("/api/loom/generate", json=_body(submit_id="s1"))
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda session, tid: {"phase": "failed", "status": "failed", "reason": ""})
     rig["cli"].get("/api/task-status?task_id=task-1")
     assert rig["cli"].get("/api/loom/submit-status?submit_id=s1").get_json().get("finished") is True
