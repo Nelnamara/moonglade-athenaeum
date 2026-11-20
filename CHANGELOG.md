@@ -16,6 +16,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.22.0] - 2026-11-20 — New Roads
+
 ### Added
 - **Edit Pro can make SVG and GIF.** The Edit request accepts an output format (SVG, or an animated GIF with a frame count and a frame length), and a see-through background with an auto-tone switch. What a model may do is read from PixAI's own record of that model, and a combination it does not allow is refused with a sentence before anything is sent, never quietly changed. The Edit card has no controls for these yet. (2026-11-20)
 - **SVG and GIF results are recorded and shown.** A picture's record keeps its output format (and a GIF's frame count and length); a GIF's thumbnail is its first frame; an SVG is drawn from the file itself. The picture list the Apple TV client reads leaves SVGs out. (2026-11-20)
