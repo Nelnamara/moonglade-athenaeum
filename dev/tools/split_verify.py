@@ -6,7 +6,8 @@ OLDREL/NEWREL are repo-relative (moonglade/gallery.py, moonglade/health.py); STA
 EXTRA_LINEs are the lines the move cut, numbered as in OLDREL at HEAD (the commit before the
 move). Two checks, against `git show HEAD:OLDREL`, LF-normalised:
 
-  1. NEWREL holds the original block (and each extra line) byte for byte, once the lazy
+  1. NEWREL holds the original block, and the extra lines as one run in the order given (split_move
+     writes them so), byte for byte, once the lazy
      `from moonglade.backup|gallery import ...` lines inside functions are set aside on both
      sides (they are the wiring split_move.py's `lazy` adds).
   2. OLDREL is the original minus the cut, once its `ALIAS.` prefixes on the moved names and
@@ -64,6 +65,11 @@ def main(argv):
     print("   (lazy import lines: %d in the original block, %d in the new module)" % (n_old, n_new))
     for e in extra:
         assert lines[e - 1] in new, "extra line %d missing" % e
+    if extra:
+        # split_move puts the extra lines, in the order given, right after the header: so
+        # together, in that order, they are one verbatim run of the new module too.
+        extra_s, _ = strip_lazy("".join(lines[e - 1] for e in extra))
+        assert extra_s in new_s, "the extra lines are not one verbatim run, in order"
     print("1. block (%d lines) + %d extra line(s) verbatim in %s"
           % (end - start + 1, len(extra), new_rel))
 
