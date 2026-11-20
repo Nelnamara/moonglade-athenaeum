@@ -211,6 +211,13 @@ shipped bug.
   backend succeeded) submits and pays for a SECOND generation. `gql_adhoc`'s default is
   document-aware as a backstop (0 for a mutation, 3 for a query), but new spend paths call
   `gql_mutate` so the intent is reviewable. Guarded by `dev/tests/test_spend_no_retry.py`.
+- **Every image, edit, AI-Tools scene, enhance and Fix send goes through `PixAIClient.create()`
+  (the create door), never a hand-built request.** It makes ONE POST on PixAI's REST route for
+  that kind, with no retries argument and no loop; a lost answer comes back as
+  `CreateOutcomeUnknown` ("may have started"), which nothing re-sends. It checks `READ_ONLY`,
+  the kind, the identity and the final bytes before anything leaves. Video and reference video
+  are the exceptions: they still go through `gql_mutate()` as above. `gen_road.CREATE_ROAD` names
+  the road each kind rides, and `dev/tests/test_create_door.py` and `test_spend_no_retry.py` guard it.
 - **`READ_ONLY` in config.json overrides `--confirm`/`--apply`.** Any new code path that
   submits a generation, submits a fix, deletes a task, or claims a reward must call
   `_check_read_only(...)` before the network call fires — it is not optional per-path opt-in,
@@ -230,13 +237,14 @@ shipped bug.
 
 ## Deleting from your account
 
-**There are two deletes and they are NOT interchangeable.** `deleteBatchMedia`
-(inside `updateGenerationTask`) drops ONE member of a task's `outputs.batch[]`, and PixAI
+**There are two deletes and they are NOT interchangeable.** The per-image delete
+(`delete_task_media`: `POST /v2/task/{id}/media/{mediaId}/delete`, since 3.22; before that a
+GraphQL `deleteBatchMedia`) drops ONE member of a task's `outputs.batch[]`, and PixAI
 accepts it only while the task would still have an output left afterwards. For a lone-image
 task (no `batch` key — the picture is `outputs.mediaId`) and for the LAST live member of a
 batch, PixAI answers 403 `task outputs does not include any media with mediaId`; their own
 site sends its whole-task delete for those two cases. The gallery's single-image delete sent
-`deleteBatchMedia` unconditionally from v2.5.0 to 2026-09-06 and had never once worked on a
+the per-image delete unconditionally from v2.5.0 to 2026-09-06 and had never once worked on a
 single-image generation.
 
 - **Read, then route.** `route_image_delete(task, media_id)` (pure) decides from a live
@@ -250,7 +258,12 @@ single-image generation.
   task's `updatedAt` does NOT move on a per-image delete; `getTaskById` still resolves a
   whole-task-deleted task, so it cannot be used as an existence check.
 - **The fail-safe direction is always refuse.** A read that failed, a media id the task does
-  not list, an already-deleted member, a video task: no mutation, a plain-words message.
+  not list, an already-deleted member, a video task: no mutation, a plain-words message. So is a
+  DEGRADED read: the task read's fallback record (`_rest_fallback`) lacks the deleted-member marks
+  and the video outputs, so `route_image_delete` refuses it and no delete is routed off it. The
+  per-image delete is a single attempt and `{"success": true}` is its only success, exactly like
+  the whole-task delete below; anything else leaves the image counted as NOT deleted and its local
+  copy in place.
 - The whole-task delete is `delete_task`: `POST /v2/task/{id}/delete` on the API key, through `rest_post` (#92), the route pixai.art's own task menu calls. **Single attempt** (no retry loop anywhere on that road, and no redirect followed: every write verb — `rest_post`/`rest_put`/`rest_patch`, a mutation document over GraphQL, the Mirror's renewal — sends `allow_redirects=False` and treats a 3xx as an error). **`{"success": true}` is the only success** — any other 2xx, a body that is not JSON, any non-2xx or a network error raises, and the task counts as NOT deleted. The route is **idempotent** (deleting an already-deleted or missing task also succeeds), so a success is never an existence check. A task id that could leave its path segment is refused before anything is sent.
 - **There is no command-line delete.** `--delete-task` (deprecated 2026-09-06) and the `--yes` that only it used are gone. The roads are the gallery's per-image delete (`/api/delete-image`, two-phase: preview then confirm) and the bulk task delete (`/api/delete-tasks`: localhost-only, typed `DELETE`, `READ_ONLY` refuses before any job starts). `delete_task` stays because those routes call it. A bulk delete sent with `purge_local: false` is cloud-only and leaves local rows behind for `--reconcile-deleted`.
 - `cloud_deleted_at` is the PER-ROW catalog column for "PixAI dropped this one image", set from that `deletedAt`. It is deliberately not `deleted_remote`, which is task-level and is rewritten by every `--reconcile-deleted`.
@@ -267,17 +280,25 @@ single-image generation.
 ## When PixAI changes their site
 
 No operation rides a saved (hash-only) request any more (#88, #89, #91, #92): every GraphQL read
-and write sends a full document through `gql_adhoc()`/`gql_mutate()`, and the whole-task delete
+and write sends a full document through `gql_adhoc()`/`gql_mutate()`. Since 3.22 more of it is
+REST: the image, edit, AI-Tools scene, enhance and Fix creates go through the create door
+(`PixAIClient.create`), the whole-task and per-image deletes and the task read have `/v2` routes,
 and the Mirror's session renewal (`POST /v2/auth/refresh-token`, on the Mirror's own JWT, never
-the API key) go to PixAI's `/v2` REST routes. Symptoms of a site change are now "Cannot query
-field…" on a document or a REST 4xx, and the fix is in code, not in `config.json`.
+the API key) is REST as well. Video and reference video, and most reads, are still GraphQL.
+Symptoms of a site change are "Cannot query field…" on a document or a REST 4xx (a create the
+door's wire guard refuses before sending reads as a refusal naming the field), and the fix is in
+code, not in `config.json`. The monthly probe that finds the change first is
+`../moonglade-internal/probes/RUNBOOK.md`.
 
 ---
 
 ## Creating, the web suite, and feature history
 
-All creation (generate/video/reference-video/edit/upload/cards) rides one
-`createGenerationTask` mutation over `gql_mutate`, and every credit-spending path is
+Creation is on two roads, one per kind (`gen_road.CREATE_ROAD`). Image, edit (Edit, Edit Pro
+multi-reference, Toolbox presets), AI-Tools scene, enhance and the hand/face Fix go through the
+create door, `PixAIClient.create`, on PixAI's REST routes, web and CLI alike. Video and
+reference video stay on the GraphQL `createGenerationTask` mutation over `gql_mutate`. There is
+no fallback between the roads and no setting to switch them. Every credit-spending path is
 preview-only until `--confirm` — see `../moonglade-internal/architecture.md`'s function reference for the
 per-command shapes and the **Quick command reference** below for usage. The Flask gallery
 is a full web creation suite (Generate drawer, Picker, The Loom, live-events push, Control

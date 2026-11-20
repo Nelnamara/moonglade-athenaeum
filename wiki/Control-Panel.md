@@ -415,6 +415,12 @@ reads back your most recent generations, collecting anything that finished while
 away. A connection that keeps failing straight away waits a little longer each time, up to a
 minute, so a PixAI outage never turns into a flood of retries.
 
+Finished generations arrive on their own **task feed** (a separate connection that only listens);
+the push connection above carries your notifications. The tile's line says how the task feed is
+doing: live, idle (it wakes when you send a generation), waiting, reconnecting, or stopped with
+the reason, such as PixAI refusing the API key. Whatever the feed misses, the catch-up reads back
+after every reconnect.
+
 > Not to be confused with **Mirror to PixAI** (Maintenance tab, below), which goes the
 > *other* direction. Live Mirror pulls what you make on PixAI *into* your local library;
 > Mirror to PixAI files what you make *in Moonglade* out to your PixAI web library.

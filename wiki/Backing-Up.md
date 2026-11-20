@@ -214,7 +214,7 @@ python -m moonglade --convert-existing --dry-run          # preview first
 
 ## Live watch (`--watch`)
 
-A live WebSocket feed of your account: watch generations complete in real time, and
+A live feed of your account: watch generations complete in real time, and
 optionally auto-collect each one the moment it finishes.
 
 ```bash

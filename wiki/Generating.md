@@ -301,7 +301,7 @@ without Unlimited Mode the badge shows the refusal. When the grant ends the swit
 offered. `READ_ONLY` still refuses first.
 
 ### The model-vs-version-id gotcha
-`createGenerationTask` needs a model's **version id**, not its model id. A model page
+A generation needs a model's **version id**, not its model id. A model page
 URL (`pixai.art/model/<id>`) gives the *model* id, which generation rejects
 ("Invalid modelId"). The drawer's **model search** (and the CLI's `--list-models`) hand
 you the correct version id — prefer those.
@@ -970,7 +970,8 @@ used*. "Used" means a picture in this library was made with it, any version. A m
 could not look up says *couldn't check*, and a recipe says *not recorded here*, because recipes
 are not recorded per picture; neither is ever shown as "not used". Below that sit both dates, a preview of the entries,
 and the winners once results land. Each winner shows the **tier** it won — PixAI pays by tier
-(a tier can hold many winners), so the list never numbers its places — and what that tier paid. If PixAI's contest board ever
+(a tier can hold many winners), so the list never numbers its places — and what that tier paid. The board reads PixAI's whole list, newest first, and keeps the contests that have ended and
+paid out in a small local cache, so opening it does not re-read the old ones every time. If PixAI's contest board ever
 grows past what the app reads, the list says so.
 
 **Wins are verified, never taken on trust.** For every contest you entered, the app checks
@@ -1034,7 +1035,11 @@ the button comes back — the app will tell you it doesn't know rather than leav
   from the roomier one to the tighter one can't keep everything you picked. **It now tells
   you what it dropped** — "Only 3 reference images kept … 3 of your 6 references were left
   out" — instead of thinning the strip in silence and letting you submit a paid edit
-  believing all six were still attached.
+  believing all six were still attached. An **SVG** (an Edit Pro vector result) can't be an
+  edit source, a video frame, a reference or base picture, or go through an AI tool, and a **GIF**
+  can't be an edit source, a video frame, a reference or base picture (the Upscale road included)
+  or go through an AI tool; both are refused with a sentence before anything is uploaded or sent,
+  the same rule PixAI's own site applies. A GIF can still be read for a prompt.
 - **Video** — first-frame / first+last / multi-reference shots; pick reference images straight
   from your own gallery (badged `@image1…`, removable, hover to preview); typing `@image1` in
   the prompt turns into a chip; model + duration + audio, and a **Video prompt helper**

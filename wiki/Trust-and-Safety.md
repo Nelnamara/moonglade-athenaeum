@@ -31,7 +31,9 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   The guarantee is honesty, not refusal: a paid clip is never shown as free. The other way round
   is refused: if the card a free price was shown for has been used elsewhere or has expired by
   the time you send, nothing is sent and the app says the card is gone, so a send shown as free
-  is never charged. That holds for every send that shows a price first: the Generate dock (a
+  is never charged. A card is all or nothing: if PixAI says a job needs credits beyond what the
+  card covers, the app adds none, tells you "the free card doesn't cover this", and does not
+  send it again. That holds for every send that shows a price first: the Generate dock (a
   `{a|b}` prompt and a confirmed run included), Edit, Upscale, AI presets, the Video tab, and
   the Loom's renders and its Image, Edit and Reference tabs. A training run's confirm prices it
   again and asks before it charges. The price and the send check your cards under the same
@@ -43,7 +45,8 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   nothing on the command line can delete from your account. A **single-image** delete asks PixAI what it still has of that generation
   first and tells you which of two things the click will do — remove just this picture, or,
   when it is the last one that generation still has on PixAI, remove the whole generation
-  record. It never sends a delete on a generation it could not read. Whenever a delete
+  record. It never sends a delete on a generation it could not read in full: if PixAI's
+  answer comes back only in part, the delete is refused and nothing is removed. Whenever a delete
   removes a whole generation record, the dialog also says if that generation is published on
   PixAI: its own description of that delete says the published artwork goes with it.
 - **Claim your own daily rewards** (credits/stamina) — a routine entitlement, not something
@@ -237,7 +240,7 @@ for handing the tool to someone else — add this to your `config.json`:
 With it set, every path that can actually mutate your account — submitting a generation
 (image, video, reference video, or an edit, including each picture of a Random or Matrix run
 and each Loom render), submitting a hand/face fix, starting, describing, publishing or retrying
-a LoRA training run, deleting a task, claiming a reward, publishing an artwork, publishing or
+a LoRA training run, deleting a task or one picture of it, claiming a reward, publishing an artwork, publishing or
 changing a recipe or a recipe set, saving a model or LoRA to PixAI or changing its sets (the
 pickers' **⊕ Save** and **Keep this model**), uploading a frame from The Loom (splice and Re-anchor),
 posting or deleting a reply to a comment, claiming a gift, marking a PixAI notification read, or

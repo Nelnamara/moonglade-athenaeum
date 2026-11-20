@@ -16,6 +16,24 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Added
+- **Edit Pro can make SVG and GIF.** The Edit request accepts an output format (SVG, or an animated GIF with a frame count and a frame length), and a see-through background with an auto-tone switch. What a model may do is read from PixAI's own record of that model, and a combination it does not allow is refused with a sentence before anything is sent, never quietly changed. The Edit card has no controls for these yet. (2026-11-20)
+- **SVG and GIF results are recorded and shown.** A picture's record keeps its output format (and a GIF's frame count and length); a GIF's thumbnail is its first frame; an SVG is drawn from the file itself. The picture list the Apple TV client reads leaves SVGs out. (2026-11-20)
+- **The live feed shows how finished generations arrive.** The Control Panel's Live Mirror line now says whether the task feed is live, idle, waiting, reconnecting or stopped, and why. (2026-11-20)
+
+### Changed
+- **Generations ride PixAI's own REST create routes.** Image, Edit (Edit Pro multi-reference and the Toolbox presets included), the AI Tools scenes, the Enhance presets and the hand/face Fix are each sent once through one door, on the PC and the command line alike. Video and reference video stay on the route they used. Nothing is re-sent after a lost answer, and a send the door cannot check is refused before it leaves. (2026-11-20)
+- **Finished generations arrive on a new task feed.** PixAI stopped sending task updates on its WebSocket, so Moonglade listens on a separate stream for them and keeps the WebSocket for notifications. The catch-up still reads back anything missed after a reconnect. (2026-11-20)
+- **Deleting one picture of a generation uses PixAI's own per-picture route.** What the dialog tells you and the question it asks are unchanged. (2026-11-20)
+- **The Contests board reads the whole list.** It is no longer cut off at the first thousand contests: it reads newest first, keeps contests that have ended and paid out in a small local cache, and no longer re-reads them every time. A forced refresh from the board is limited to one full read every few minutes. (2026-11-20)
+- **An SVG or a GIF is refused where PixAI refuses it, before anything is uploaded.** An SVG can't be edited, used as a reference or base picture, framed for video or sent through an AI tool; a GIF can't be edited, used as a reference or base picture (Upscale included), or framed for video; a GIF can still be read for a prompt. (2026-11-20)
+- **A free card that can't cover a job says so.** If PixAI answers that the job needs credits beyond the card, the message reads "the free card doesn't cover this"; the app never adds credits to a card, and the send is not repeated. (2026-11-20)
+
+### Fixed
+- **A half-read generation can no longer lead to a delete.** If PixAI's full record of a task can't be read, a single-picture delete is refused ("PixAI's full record of this task could not be read, so nothing was deleted. Try again in a minute.") instead of being routed from the partial one. (2026-11-20)
+- **The picker no longer scrolls the library behind it.** While the Gallery picker is open the page behind it stays still, which also stops the flicker on a Mac in Chrome. (2026-11-20)
+- **SVG files draw in the gallery and still download safely.** They are served with their real type so a picture can show them, as a download only, under a strict sandbox. (2026-11-20)
+
 ## [3.21.4] - 2026-11-20 — The Extra Day
 
 ### Fixed
