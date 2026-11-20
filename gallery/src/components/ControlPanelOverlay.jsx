@@ -152,6 +152,8 @@ function ledgerResult(j) {
    Disconnect (2026-11-19, app security review finding 7): a text control in the session block,
    on the home network (the route is LOGIN plus a home-network check, the reach of Connect from PixAI), shown while a sign-in is stored.
    It deletes the stored sign-in, stops its renewal and turns the switch off. */
+const PC_ONLY_SWITCH = "Turn the mirror on or off on the PC Moonglade runs on.";
+
 function MirrorTile({ isLocal, csrf, homeNet }) {
   const [st, setSt] = useState(null);      // {enabled, connected, days_left} — null until loaded
   const [busy, setBusy] = useState(false);
@@ -184,6 +186,9 @@ function MirrorTile({ isLocal, csrf, homeNet }) {
   }, []);
   const toggle = async () => {
     if (!st || busy) return;
+    // Arming writes the PC's own settings, so the server takes it from the PC only. Say that
+    // here instead of sending a press that comes back as a bare "localhost-only" (2026-11-19 walk).
+    if (!isLocal) { setMsg(PC_ONLY_SWITCH); return; }
     const want = !st.enabled;
     if (want && !st.connected) {            // never enable the credential switch with no session
       setMsg("Connect a session first (the Connect from PixAI bookmark below), then turn this on.");
@@ -261,7 +266,7 @@ function MirrorTile({ isLocal, csrf, homeNet }) {
               data-tip={statusTip} role="note" aria-label={(armed ? "Armed · tier live. " : "Off · tier hidden. ") + statusTip}>{armed ? "Armed · tier live" : "Off · tier hidden"}</div>
           </div>
           <button type="button" className={"mgbr-pill" + (armed ? " on" : "")} onClick={toggle}
-            disabled={busy || !st} title="Arm or disarm the mirror" aria-pressed={armed}><i /></button>
+            disabled={busy || !st} title={isLocal ? "Arm or disarm the mirror" : PC_ONLY_SWITCH} aria-pressed={armed}><i /></button>
         </div>
 
         <div className="mgbr-ringrow">
@@ -277,7 +282,7 @@ function MirrorTile({ isLocal, csrf, homeNet }) {
             <div className="mgbr-session-lbl">Web session</div>
             <div className={"mgbr-session-sub " + ringMod}>{sessionSub}</div>
             {homeNet && st && st.connected && (
-              <button type="button" className="mgcp-useraction" onClick={disconnect} disabled={busy}
+              <button type="button" className="mgcp-smallchip mgbr-disconnect" onClick={disconnect} disabled={busy}
                 title="Forget the stored PixAI sign-in and stop renewing it">Disconnect</button>
             )}
           </div>
@@ -289,7 +294,7 @@ function MirrorTile({ isLocal, csrf, homeNet }) {
           <button type="button" className={"mgbr-connect" + (armed ? " armed" : "")}
             onClick={connect} disabled={busy}
             title="Read the pixai.art sign-in from this PC's Chrome, Edge or Brave">↻ Connect</button>
-          <div className="mgbr-jwtnote">Drag the <b>Connect from PixAI</b> button on the left up to your browser's bookmarks bar. Then open pixai.art, signed in, and click that bookmark.</div>
+          <p className="mgbr-jwtnote">Drag <b>Connect from PixAI</b> to your bookmarks bar, then click that bookmark on pixai.art while signed in. <b>↻ Connect</b> reads the sign-in from this PC's browser instead.</p>
         </div>
         {msg && <div className={"mgbr-msg" + (lineIsErr(msg) ? " err" : "")}><MsgLine m={msg} /></div>}
       </div>

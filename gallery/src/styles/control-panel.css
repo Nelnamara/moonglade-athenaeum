@@ -676,14 +676,19 @@ button.mgcp-pwr-ghost { display: inline-block; white-space: nowrap; margin-top: 
 .mgbr-session-sub.expired { color: var(--ruby); }
 .mgbr-session-sub.off { color: var(--overlay0); }
 
-.mgbr-connectrow { display: flex; gap: 8px; margin-top: auto; }
+/* Two buttons at their own height, the hint as one flowing line under them (2026-11-19 walk:
+   the hint was a flex box, which cut its sentence into side-by-side columns and stretched
+   both buttons to its height). */
+.mgbr-connectrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: auto; }
 .mgbr-connect { flex: none; padding: 8px 14px; border-radius: var(--radius-control); font-size: 11.5px; font-weight: 600; cursor: pointer;
   font-family: inherit; color: #14102a; background: var(--lavender); border: 1px solid transparent;
   text-decoration: none; }  /* the chip is a link now (the Connect from PixAI bookmark) */
 .mgbr-connect.armed { color: var(--emerald); background: transparent; border-color: color-mix(in oklab, var(--emerald) 40%, transparent); }
 .mgbr-connect:disabled { opacity: .6; cursor: default; }
-.mgbr-jwtnote { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; font-size: 11px;
-  color: var(--overlay0); border: 1px dashed var(--surface1); border-radius: 10px; padding: 8px; text-align: center; }
+.mgbr-jwtnote { flex: 1 0 100%; margin: 0; font-size: 11.5px; line-height: 1.45;
+  color: var(--overlay0); border: 1px dashed var(--surface1); border-radius: 10px; padding: 8px 10px; }
+.mgbr-jwtnote b { color: var(--subtext); font-weight: 600; }
+.mgbr-disconnect { margin-top: 6px; }
 .mgbr-msg { font-size: 11px; color: var(--emerald); }
 .mgbr-msg.err { color: var(--red, #f38ba8); }
 

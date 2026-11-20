@@ -152,7 +152,9 @@ describe("the strip is gone: three groups, styled as groups, and the reveal stil
     // the quieted look: 600 (pick 3B) and the control corner (pick 5B)
     assert.match(css, /\.p-actions \.btn \{ font-size: 11px; font-weight: 600; white-space: nowrap; padding: 8px 14px;\r?\n\s*border-radius: var\(--radius-control\);/);
     assert.match(css, /\.p-actions \.btn-danger[^{]*\{ border: 1px solid rgba\(243,139,168,\.35\);\r?\n\s*background: rgba\(243,139,168,\.1\); color: var\(--red\);/);
-    assert.match(css, /\.p-actions-more \.btn \{ font-size: 10px;/);
+    // the More row is quieter by colour only, never smaller (2026-11-19 walk: "These buttons are tiny")
+    assert.doesNotMatch(css, /\.p-actions-more \.btn \{[^}]*font-size/);
+    assert.doesNotMatch(css, /\.p-actions-more \.btn \{[^}]*padding/);
     assert.match(css, /\.p-actions-more \.btn:not\(\.mgx-metal\):not\(\.btn-danger\) \{ color: var\(--overlay0\);/);
     // the existing .btn base is untouched
     assert.match(css, /\n\.btn \{ border-radius: var\(--radius-control\); border: 1px solid var\(--surface1\); color: var\(--text\);/);
