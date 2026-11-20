@@ -6,6 +6,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import cloud_delete as cloud_delete_mod
 
 
 def _one_poll_then_timeout(monkeypatch, task):
@@ -206,7 +207,7 @@ def test_delete_one_image_sends_the_right_mutation(monkeypatch):
     monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post",
                         lambda s, q, v=None, retries=3: seen.update(q=q, v=v or {}) or
                         {"updateGenerationTask": {"id": "T1"}})
-    core.delete_batch_media_gql(object(), "T1", "M9")
+    cloud_delete_mod.delete_batch_media_gql(object(), "T1", "M9")
     # (That this destructive mutation is never retried -- retries == 0 at the loop -- is held
     # by dev/tests/test_spend_no_retry.py::TestSpendingPathsAreSingleAttempt::test_delete_batch_media
     # and, over the real transport, dev/tests/test_delete_image.py::test_the_cloud_delete_is_single_attempt.)
@@ -228,7 +229,7 @@ def test_delete_one_image_honors_read_only(monkeypatch):
     called = []
     monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: called.append(1))
     with pytest.raises(core.PixAIError):
-        core.delete_batch_media_gql(object(), "T1", "M9")
+        cloud_delete_mod.delete_batch_media_gql(object(), "T1", "M9")
     assert not called, "the network call fired despite READ_ONLY"
 
 
@@ -238,4 +239,4 @@ def test_delete_one_image_requires_both_ids(monkeypatch):
     monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {})
     for tid, mid in (("", "M9"), ("T1", ""), ("", "")):
         with pytest.raises(core.PixAIError):
-            core.delete_batch_media_gql(object(), tid, mid)
+            cloud_delete_mod.delete_batch_media_gql(object(), tid, mid)

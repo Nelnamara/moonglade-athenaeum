@@ -35,6 +35,7 @@ from moonglade import backup as core
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import mirror as mirror_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import cloud_delete as cloud_delete_mod
 
 
 # Every function that fires a credit-spending or account-mutating GraphQL call. When a new
@@ -63,6 +64,14 @@ SPEND_PATHS = ("submit_generation", "run_generate", "run_generate_video",
                # Session M's run sender (2026-09-29): up to 24 generations, one after
                # another, each through submit() -> submit_generation(exact=True).
                "send_run")
+
+# Where each spend path lives: backup, or the split module it moved to (3.22, phase 5).
+_HOMES = (core, cloud_delete_mod)
+
+
+def _spend_path(name):
+    return next((getattr(m, name) for m in _HOMES if hasattr(m, name)), None)
+
 
 # A real call, not a mention: the comments in these functions name gql_adhoc on purpose
 # ("gql_mutate, never gql_adhoc") and must not trip the check.
@@ -295,8 +304,8 @@ class TestSpendingPathsAreSingleAttempt:
     def test_delete_batch_media(self, mock_session, gql_calls):
         """Already single-attempt before this pass -- pinned here too so the whole rule
         lives in one place, not split across two files."""
-        core.delete_batch_media_gql(mock_session, "T1", "M1")
-        _assert_single_attempt(gql_calls, core._DELETE_BATCH_MEDIA_MUT)
+        cloud_delete_mod.delete_batch_media_gql(mock_session, "T1", "M1")
+        _assert_single_attempt(gql_calls, cloud_delete_mod._DELETE_BATCH_MEDIA_MUT)
 
     def test_submit_training(self, mock_session, gql_calls, monkeypatch):
         """LoRA training spends real credits once the free-training quota is gone; a re-POST
@@ -331,7 +340,7 @@ class TestNoSpendPathReachesPastTheHelper:
 
     @pytest.mark.parametrize("name", SPEND_PATHS)
     def test_no_spend_path_calls_gql_adhoc_directly(self, name):
-        src = inspect.getsource(getattr(core, name))
+        src = inspect.getsource(_spend_path(name))
         assert not _CALLS_GQL_ADHOC.search(src), (
             "{}() calls gql_adhoc() directly -- a spending path must call gql_mutate(), "
             "which cannot be given a retry count. gql_adhoc's mutation-aware default "
@@ -341,7 +350,7 @@ class TestNoSpendPathReachesPastTheHelper:
     def test_every_declared_spend_path_exists(self):
         """A renamed-away entry in SPEND_PATHS would silently stop guarding anything."""
         for name in SPEND_PATHS:
-            assert callable(getattr(core, name, None)), \
+            assert callable(_spend_path(name)), \
                 "SPEND_PATHS names {}, which no longer exists".format(name)
 
 
@@ -370,8 +379,8 @@ class TestRestSpendPathsAreSingleAttempt:
 
         Parsed rather than string-scanned, so prose in the docstrings ("for it", "wait for")
         cannot make this pass or fail by accident."""
-        for fn, name in ((core.delete_image_routed, "delete_image_routed"),
-                         (core.delete_task, "delete_task")):
+        for fn, name in ((cloud_delete_mod.delete_image_routed, "delete_image_routed"),
+                         (cloud_delete_mod.delete_task, "delete_task")):
             tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
             loops = [n for n in ast.walk(tree)
                      if isinstance(n, (ast.For, ast.AsyncFor, ast.While))]
@@ -387,7 +396,7 @@ class TestRestSpendPathsAreSingleAttempt:
                 "{} grew a loop around a destructive delete -- it must fire once".format(name))
         # ONE send in delete_task: a single rest_post call, and no raw session verb at all.
         # (`answer.get("success")` reads the parsed reply; it is not a send.)
-        tree = ast.parse(textwrap.dedent(inspect.getsource(core.delete_task)))
+        tree = ast.parse(textwrap.dedent(inspect.getsource(cloud_delete_mod.delete_task)))
         sends = [n.func.attr for n in ast.walk(tree)
                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
                  and n.func.attr in ("rest_post", "post", "get", "put", "patch", "delete",

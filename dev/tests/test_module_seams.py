@@ -215,6 +215,11 @@ SEAMS = {
         "_TASK_DETAIL_DOC", "task_detail_gql", "_GEN_STATUS", "_poll_task_status",
         "_task_failure_reason", "describe_failure", "_pixai_reason_suffix", "_never_dispatched",
         "_GEN_DONE", "_GEN_FAIL", "generation_status"]},
+    "moonglade.cloud_delete": {"from": "moonglade.backup", "names": [
+        "_TASK_ID_RE", "TASK_DELETE_PATH", "ImageDeleteRoute", "batch_entry", "live_batch_media",
+        "deleted_batch_media", "route_image_delete", "_DELETE_BATCH_MEDIA_MUT",
+        "delete_batch_media_gql", "delete_task", "ImageDeletePlan", "task_artwork_ids",
+        "_image_delete_plan", "plan_image_delete", "NO_CONFIRMED_PLAN", "delete_image_routed"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -234,7 +239,6 @@ SOURCE_READERS = {
     "tests/test_config_path_routing.py": ("moonglade.backup",),
     "tests/test_contest_wins.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_csrf_coverage.py": ("moonglade.backup", "moonglade.gallery"),
-    "tests/test_delete_routing.py": ("moonglade.backup",),
     "tests/test_design_kit_sync.py": ("moonglade.gallery",),
     "tests/test_doc_truth_residuals.py": ("moonglade.gallery",),
     "tests/test_edit_upload.py": ("moonglade.backup",),
@@ -258,7 +262,6 @@ SOURCE_READERS = {
     "tests/test_pack_file_type.py": ("moonglade.gallery",),
     "tests/test_panel.py": ("moonglade.gallery",),
     "tests/test_pixai_client.py": ("moonglade.backup",),
-    "tests/test_read_only.py": ("moonglade.backup",),
     "tests/test_module_seams.py": ("moonglade.backup", "moonglade.gallery"),   # every module
     "tests/test_rest_delete_and_renewal.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_security_review_fixes.py": ("moonglade.gallery",),
@@ -867,6 +870,34 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_training_parity.py', 'moonglade.task_reads'),
     ('tests/test_video_tsubaki.py', 'moonglade.task_reads'),
     ('tests/test_web_auth.py', 'moonglade.task_reads'),
+    # 3.22 phase 5, cloud_delete: no reader reads text that left backup.py. test_spend_no_retry
+    # reads its spend paths through _spend_path (backup, or the module a path moved to) and the
+    # delete paths' parsed source through cloud_delete_mod; test_task_model_detail_document's delete
+    # plan reads go through cloud_delete_mod. test_delete_routing and test_read_only read only the
+    # moved router's source, now through cloud_delete_mod, so they left SOURCE_READERS.
+    ('loom/test/ledger-known-reasons.test.js', 'moonglade.cloud_delete'),
+    ('loom/test/video-roster-parity.test.js', 'moonglade.cloud_delete'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.cloud_delete'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.cloud_delete'),
+    ('tests/test_config_path_routing.py', 'moonglade.cloud_delete'),
+    ('tests/test_csrf_coverage.py', 'moonglade.cloud_delete'),
+    ('tests/test_enhance.py', 'moonglade.cloud_delete'),
+    ('tests/test_evidence_counters.py', 'moonglade.cloud_delete'),
+    ('tests/test_gen_surface.py', 'moonglade.cloud_delete'),
+    ('tests/test_history_feed_document.py', 'moonglade.cloud_delete'),
+    ('tests/test_jwt.py', 'moonglade.cloud_delete'),
+    ('tests/test_living_library.py', 'moonglade.cloud_delete'),
+    ('tests/test_loom_notify.py', 'moonglade.cloud_delete'),
+    ('tests/test_network.py', 'moonglade.cloud_delete'),
+    ('tests/test_pixai_client.py', 'moonglade.cloud_delete'),
+    ('tests/test_settings_store.py', 'moonglade.cloud_delete'),
+    ('tests/test_setup_prepare.py', 'moonglade.cloud_delete'),
+    ('tests/test_spend_no_retry.py', 'moonglade.cloud_delete'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.cloud_delete'),
+    ('tests/test_telemetry.py', 'moonglade.cloud_delete'),
+    ('tests/test_training_advanced.py', 'moonglade.cloud_delete'),
+    ('tests/test_training_parity.py', 'moonglade.cloud_delete'),
+    ('tests/test_web_auth.py', 'moonglade.cloud_delete'),
 }
 
 

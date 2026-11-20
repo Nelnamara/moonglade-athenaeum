@@ -37,6 +37,7 @@ from moonglade import account_prefs as _account_prefs
 from moonglade import achievements as _achievements
 from moonglade import assets as moonglade_assets
 from moonglade import branding as _branding
+from moonglade import cloud_delete as _cloud_delete
 from moonglade import container as moonglade_container
 from moonglade import contest_sync as _contest_sync
 from moonglade import contest_wins
@@ -9981,7 +9982,7 @@ def create_app(out_dir: Path):
         if not preview and not str(body.get("plan") or "").strip():
             # A confirm carries the plan it confirms. Without one there is nothing to hold
             # the fresh read against, so it is refused here, before any call to PixAI.
-            return jsonify({"error": core.NO_CONFIRMED_PLAN, "plan": "refuse"}), 400
+            return jsonify({"error": _cloud_delete.NO_CONFIRMED_PLAN, "plan": "refuse"}), 400
         try:
             # _make_session takes a REQUIRED positional; every other call site in this
             # file passes None. Omitting it raised TypeError on every click, which the
@@ -9989,9 +9990,9 @@ def create_app(out_dir: Path):
             # looking like a PixAI-side failure.
             _core_session = core._make_session(None)
             if preview:
-                plan = core.plan_image_delete(_core_session, tid, mid)
+                plan = _cloud_delete.plan_image_delete(_core_session, tid, mid)
             else:
-                plan = core.delete_image_routed(_core_session, tid, mid,
+                plan = _cloud_delete.delete_image_routed(_core_session, tid, mid,
                                                 confirmed_plan=body.get("plan") or None)
         except Exception as e:                        # noqa: BLE001
             line = _redact_host_paths(str(e))[:240]
@@ -10145,9 +10146,9 @@ def create_app(out_dir: Path):
         except Exception:                            # noqa: BLE001 -- fail soft, see above
             task = None
         batch = ((task or {}).get("outputs") or {}).get("batch")
-        for mid in core.deleted_batch_media(batch):
+        for mid in _cloud_delete.deleted_batch_media(batch):
             keep.add(str(mid))
-            stamp = str((core.batch_entry(batch, mid) or {}).get("deletedAt") or "")
+            stamp = str((_cloud_delete.batch_entry(batch, mid) or {}).get("deletedAt") or "")
             if stamp:
                 mark_cloud_deleted(db_path, mid, stamp)
         return keep
@@ -10240,17 +10241,17 @@ def create_app(out_dir: Path):
             if task is None:
                 return tid, None
             batch = (task.get("outputs") or {}).get("batch")
-            gone_ids = {str(m) for m in core.deleted_batch_media(batch) if m}
+            gone_ids = {str(m) for m in _cloud_delete.deleted_batch_media(batch) if m}
             # WRITE IT DOWN, right here, with the same verb the delete's own read uses.
             # See the docstring: this is what stops the delete-time read's failure from
             # taking the rows this preview is about to promise would stay.
             for mid in gone_ids:
-                stamp = str((core.batch_entry(batch, mid) or {}).get("deletedAt") or "")
+                stamp = str((_cloud_delete.batch_entry(batch, mid) or {}).get("deletedAt") or "")
                 if stamp:
                     mark_cloud_deleted(db_path, mid, stamp)
             # The same read already carries the task's published artworks -- no second call --
             # and the task's size on PixAI, which is what the artwork count is capped at.
-            return tid, (gone_ids, core.task_artwork_ids(task),
+            return tid, (gone_ids, _cloud_delete.task_artwork_ids(task),
                          len(batch) if isinstance(batch, list) else 0)
 
         # Every task starts unverified and EARNS its way out, so a task whose worker never
@@ -10508,7 +10509,7 @@ def create_app(out_dir: Path):
                     keep = (_rows_the_bulk_purge_must_keep(session, tid, rows)
                             if purge_local else set())
                     try:
-                        core.delete_task(session, tid)          # cloud delete (irreversible)
+                        _cloud_delete.delete_task(session, tid)          # cloud delete (irreversible)
                         deleted += 1
                     except Exception:                            # noqa: BLE001
                         failed += 1

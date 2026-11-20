@@ -15,6 +15,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import organize as organize_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import cloud_delete as cloud_delete_mod
 
 
 def test_read_only_defaults_to_false():
@@ -53,7 +54,7 @@ class TestDeleteTaskReadOnly:
     def test_blocked_when_read_only(self, mock_session, monkeypatch):
         monkeypatch.setattr(core, "READ_ONLY", True)
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.delete_task(mock_session, "123")
+            cloud_delete_mod.delete_task(mock_session, "123")
         mock_session.post.assert_not_called()
 
     def test_the_gallery_delete_route_sends_nothing(self, pixai, monkeypatch, tmp_path):
@@ -97,7 +98,7 @@ class TestRoutedImageDeleteReadOnly:
                             lambda *a, **k: reads.append(1) or {"outputs": outputs})
         target = "m0" if branch == "per-image" else "solo1"
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.delete_image_routed(mock_session, "T1", target)
+            cloud_delete_mod.delete_image_routed(mock_session, "T1", target)
         mock_session.post.assert_not_called()
         assert reads == [], (
             "it read the task from PixAI before refusing -- READ_ONLY must stop the delete "
@@ -111,9 +112,12 @@ class TestRoutedImageDeleteReadOnly:
         import inspect
         import textwrap
         fn = ast.parse(textwrap.dedent(
-            inspect.getsource(core.delete_image_routed))).body[0]
+            inspect.getsource(cloud_delete_mod.delete_image_routed))).body[0]
+        # (the lazy `from moonglade.backup import ...` is the split's wiring, not a statement
+        # of the function's own: 3.22 moved it to moonglade/cloud_delete.py)
         body = [n for n in fn.body if not (isinstance(n, ast.Expr)
-                                           and isinstance(n.value, ast.Constant))]
+                                           and isinstance(n.value, ast.Constant))
+                and not (isinstance(n, ast.ImportFrom) and n.module == "moonglade.backup")]
         first = body[0]
         assert (isinstance(first, ast.Expr) and isinstance(first.value, ast.Call)
                 and getattr(first.value.func, "id", "") == "_check_read_only"), (

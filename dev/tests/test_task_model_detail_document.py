@@ -49,6 +49,7 @@ from tests.fake_pixai import FakePixAI, UnregisteredOperation, operation_name
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import cloud_delete as cloud_delete_mod
 
 REPO = Path(__file__).resolve().parents[2]
 RECORDED = json.loads((Path(__file__).resolve().parent / "fixtures" /
@@ -316,13 +317,13 @@ def test_every_other_reader_of_a_task_reads_it_the_same(pixai, kind):
     pixai.on(TASK_DETAIL, {"task": doc})
     task = task_reads_mod.task_detail_gql(pixai, doc["id"])
     for reader in (core.video_outputs, core.source_media_of_task, core.fixer_block,
-                   core.task_artwork_ids, core._paid_credit_str):
+                   cloud_delete_mod.task_artwork_ids, core._paid_credit_str):
         assert reader(task) == reader(saved), reader.__name__
     assert core._task_image_media(task["outputs"]) == core._task_image_media(saved["outputs"])
     assert core._prompt_helper_label(task["parameters"], task) == \
         core._prompt_helper_label(saved["parameters"], saved)
     for mid in {doc["mediaId"], *(b["mediaId"] for b in doc["outputs"].get("batch") or [])}:
-        assert core._image_delete_plan(task, mid) == core._image_delete_plan(saved, mid)
+        assert cloud_delete_mod._image_delete_plan(task, mid) == cloud_delete_mod._image_delete_plan(saved, mid)
 
 
 def test_the_recorded_answers_exercise_what_the_readers_read():
@@ -334,7 +335,7 @@ def test_the_recorded_answers_exercise_what_the_readers_read():
     assert (fm["i2v"]["derive_kind"], fm["i2v"]["video_model"]) == ("video", "v4.0.1")
     assert fm["edit"]["derive_kind"] == "edit" and fm["edit"]["model_name"] == "Edit Pro"
     assert core.video_outputs(_document("video2"))[0][0]["poster_media_id"]
-    assert core.task_artwork_ids(_document("published")) == tuple(
+    assert cloud_delete_mod.task_artwork_ids(_document("published")) == tuple(
         _document("published")["artworkIds"]) != ()
     assert len(_document("batch")["outputs"]["batch"]) == 4
 
@@ -363,7 +364,7 @@ def test_the_delete_plan_routes_the_recorded_batch_per_image(pixai):
     doc = _document("batch")
     member = doc["outputs"]["batch"][0]["mediaId"]
     pixai.on(TASK_DETAIL, {"task": doc})
-    plan = core.plan_image_delete(pixai, doc["id"], member)
+    plan = cloud_delete_mod.plan_image_delete(pixai, doc["id"], member)
     assert plan.plan == "per-image" and plan.live_siblings == 3
     assert [c.verb for c in pixai.calls] == ["query"] and pixai.mutations() == 0
     assert pixai.calls[0].variables == {"id": doc["id"]}
@@ -373,7 +374,7 @@ def test_the_delete_plan_routes_the_last_live_member_whole_task(pixai):
     doc = _batch_with_deleted(1, 2, 3)
     member = doc["outputs"]["batch"][0]["mediaId"]
     pixai.on(TASK_DETAIL, {"task": doc})
-    plan = core.plan_image_delete(pixai, doc["id"], member)
+    plan = cloud_delete_mod.plan_image_delete(pixai, doc["id"], member)
     assert plan.plan == "whole-task" and plan.live_siblings == 0
     assert sorted(plan.keep_media) == sorted(
         b["mediaId"] for b in doc["outputs"]["batch"][1:])
@@ -383,12 +384,12 @@ def test_the_delete_plan_routes_the_last_live_member_whole_task(pixai):
 def test_the_delete_plan_routes_the_recorded_lone_image_whole_task(pixai):
     doc = _document("lone")
     pixai.on(TASK_DETAIL, {"task": doc})
-    assert core.plan_image_delete(pixai, doc["id"], doc["mediaId"]).plan == "whole-task"
+    assert cloud_delete_mod.plan_image_delete(pixai, doc["id"], doc["mediaId"]).plan == "whole-task"
 
 
 def test_a_failed_read_plans_a_refusal(pixai):
     pixai.fail(TASK_DETAIL, requests.ConnectionError("reset"))
-    plan = core.plan_image_delete(pixai, "T1", "m1")
+    plan = cloud_delete_mod.plan_image_delete(pixai, "T1", "m1")
     assert plan.plan == "refuse" and pixai.mutations() == 0
 
 
