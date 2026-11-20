@@ -85,6 +85,26 @@ EDIT_CHAT = {"prompts": "make it night", "mediaId": "111", "mediaIds": ["111"],
              "modelId": gen_params.EDIT_PRO_MODEL_ID, "modelConfig": {"resolution": "1K"}}
 
 
+FIX_BOX = {"x": 1, "y": 2, "width": 30, "height": 40, "tag": "hand"}
+
+
+def test_a_fix_over_the_real_door_is_one_post_of_the_cleaned_body(door):
+    wire = Wire(_Answer(200, {"id": "F1"}))
+    assert gen_road.submit_fixer(pc.PixAIClient(wire), "111", [dict(FIX_BOX, tag="HAND")]) \
+        == "F1"
+    (url, body), = wire.posts
+    assert url.endswith("/task/fixer") and body == {"mediaId": "111", "boxes": [FIX_BOX]}
+
+
+@pytest.mark.parametrize("answer", [_Answer(200, {}), requests.ReadTimeout("slow"),
+                                    _Answer(307, {"id": "F1"})])
+def test_a_fix_without_a_proven_id_is_unknown_and_sent_once(door, answer):
+    wire = Wire(answer)
+    with pytest.raises(core.CreateOutcomeUnknown):
+        gen_road.submit_fixer(pc.PixAIClient(wire), "111", [dict(FIX_BOX)])
+    assert len(wire.posts) == 1
+
+
 def _image_req(params=None):
     return gen_road.GenerationRequest(mode="image", parameters=dict(params or IMAGE_P),
                                       no_card=True)
@@ -148,6 +168,12 @@ SENDERS = {
             mode="edit", parameters={"chat": dict(EDIT_CHAT)}, no_card=True))),
         ("run_edit_image", lambda s, tmp: _drive(gen_cli.run_edit_image, _cli_args(
             tmp, edit_src=["111"], params_json=json.dumps({"chat": EDIT_CHAT})))),
+    ],
+    # The Fix has no CLI runner: its one sender is the web road (submit -> submit_fixer).
+    "fix": [
+        ("web submit", lambda s, tmp: gen_road.submit(s, gen_road.GenerationRequest(
+            mode="fix", media_id="111", boxes=[dict(FIX_BOX)], no_card=True,
+            parameters={"mediaId": "111", "boxes": [dict(FIX_BOX)]}))),
     ],
 }
 

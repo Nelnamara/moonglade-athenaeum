@@ -1084,11 +1084,11 @@ def test_collect_generation(monkeypatch, tmp_path):
 
 def test_submit_fixer_filters_and_submits(monkeypatch):
     seen = {}
-    def fake_post(s, path, body, **k):
-        seen["path"] = path
+    def fake_create(s, kind, body):              # the create door (3.22 S3-fix)
+        seen["path"] = {"fix": "/task/fixer"}[kind]
         seen["body"] = body
         return {"id": "F1"}
-    monkeypatch.setattr(core, "_rest_post", fake_post)
+    monkeypatch.setattr(core, "_create", fake_create)
     tid = gen_road_mod.submit_fixer(object(), "M", [
         {"x": 10, "y": 20, "width": 30, "height": 40, "tag": "FACE"},  # kept (tag lowercased)
         {"x": 1, "y": 1, "width": 0, "height": 5, "tag": "hand"},      # dropped (w == 0)

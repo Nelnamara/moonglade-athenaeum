@@ -391,13 +391,12 @@ class TestRestSpendPathsAreSingleAttempt:
     would silently make a Fix submit, a claim, and a contest entry double-fire. (The contest
     entry's single POST is pinned in dev/tests/test_contest.py::TestContestEnterIsGuarded.)"""
 
-    def test_submit_fixer_posts_once(self, mock_session, monkeypatch):
-        posts = []
-        monkeypatch.setattr(core, "_rest_post",
-                            lambda s, p, b, **k: posts.append(p) or {"id": "T1"})
+    def test_submit_fixer_posts_once(self, mock_session, door_calls, monkeypatch):
+        """The Fix rides the create door since 3.22 S3-fix: one create, kind "fix"."""
+        monkeypatch.setattr(core, "_rest_post", lambda *a, **k: pytest.fail("rest_post spend"))
         boxes = [{"x": 0, "y": 0, "width": 10, "height": 10, "tag": "hand"}]
         assert gen_road_mod.submit_fixer(mock_session, "mid1", boxes) == "T1"
-        assert posts == ["/task/fixer"]
+        assert [c.kind for c in door_calls] == ["fix"]
 
     def test_the_routed_image_delete_has_no_retry_loop(self):
         """The per-image delete's WHOLE-TASK branch calls delete_task, which makes one

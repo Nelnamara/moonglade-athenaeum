@@ -675,8 +675,8 @@ def submit_fixer(session, media_id, boxes, on_send=None):
     READ_ONLY first, then build_fixer_body -- so a body with no usable box, or with two kinds
     PixAI would refuse, is refused here before any network call. Never sends cusPrompts.
     `on_send(body)` is called immediately before the one POST (observation only)."""
-    from moonglade.backup import _check_read_only, PixAIError, _rest_post
-    _check_read_only("submit a hand/face fix (spends credits)")
+    from moonglade import backup as _core
+    _core._check_read_only("submit a hand/face fix (spends credits)")
     body = _gen_params.build_fixer_body(media_id, boxes)
     # The fixer IS a credit-spending create, so it rides the mirror JWT session when the
     # toggle is on (review F1: the choke belongs at "a create", not only at gql_mutate sites).
@@ -684,11 +684,11 @@ def submit_fixer(session, media_id, boxes, on_send=None):
     # when the mirror is off; refuses before spend if the mirror is on but unavailable (F5).
     create_session = _mirror._session_for_create(session)
     _observe_send(on_send, body)
-    data = _rest_post(create_session, "/task/fixer", body) or {}
-    tid = data.get("id")
-    if not tid:
-        raise PixAIError("fixer: no task id returned: " + json.dumps(data)[:200])
-    return str(tid)
+    # THE create door (3.22 S3-fix): one POST to /v2/task/fixer, checked on its final bytes.
+    # An id-less or lost answer is CreateOutcomeUnknown, never a success with no id.
+    answer = _core._create(create_session, "fix", body)
+    _observe_created("fix", body, answer)
+    return str(answer["id"])
 
 # =============================================================================
 # ONE PAYLOAD ROAD -- price and submit build the same dict
@@ -1882,7 +1882,7 @@ CREATE_ROAD = {
     "edit": "rest",
     "scene": "graphql",
     "enhance": "graphql",
-    "fix": "rest_post",
+    "fix": "rest",
     "video": "graphql",
     "refvideo": "graphql",
 }

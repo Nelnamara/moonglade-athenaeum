@@ -219,7 +219,14 @@ def _record_posts(monkeypatch, answer=None):
         if path == "/task/fixer":
             return {"id": "F1"}
         return answer if answer is not None else {"actualPrice": 4800, "originalPrice": 8000}
+
+    def fake_create(s, kind, body):
+        # the Fix's spend rides the create door since 3.22 S3-fix (core._create)
+        assert kind == "fix"
+        posts.append(("/task/fixer", body))
+        return {"id": "F1"}
     monkeypatch.setattr(core, "_rest_post", fake_post)
+    monkeypatch.setattr(core, "_create", fake_create)
     return posts
 
 
@@ -296,6 +303,7 @@ def test_fix_body_refuses_two_kinds():
 
 def test_submit_fixer_refuses_two_kinds_before_any_network(monkeypatch):
     monkeypatch.setattr(core, "_rest_post", _tripwire("_rest_post"))
+    monkeypatch.setattr(core, "_create", _tripwire("_create"))
     monkeypatch.setattr(mirror_mod, "_session_for_create", _tripwire("_session_for_create"))
     with pytest.raises(core.PixAIError, match="one kind"):
         gen_road_mod.submit_fixer(object(), "700", [FACE, HAND])
@@ -467,15 +475,16 @@ def test_an_identical_fix_inside_the_window_is_refused_before_any_network(tmp_pa
 
 
 def _failing_then_ok(monkeypatch, exc):
-    """_rest_post that raises `exc` on the first spend POST and answers a task id after."""
+    """The create door (core._create, 3.22 S3-fix) raising `exc` on the first Fix and
+    answering a task id after."""
     posts = []
 
-    def fake_post(s, path, body, **k):
-        posts.append(path)
+    def fake_create(s, kind, body):
+        posts.append("/task/fixer")
         if len(posts) == 1:
             raise exc
         return {"id": "F2"}
-    monkeypatch.setattr(core, "_rest_post", fake_post)
+    monkeypatch.setattr(core, "_create", fake_create)
     return posts
 
 
@@ -538,8 +547,8 @@ def test_a_retry_after_an_unknown_outcome_is_still_refused(exc, tmp_path, monkey
            "unlisted-code": _rest_refusal(404, "FILE_NOT_FOUND")}.get(exc, exc) \
         if isinstance(exc, str) else exc
     if exc == "no-id":
-        posts = []
-        monkeypatch.setattr(core, "_rest_post", lambda s, path, body, **k: posts.append(path) or {})
+        # the door reads an id-less 2xx as CreateOutcomeUnknown (DESIGN_3.22 2.2)
+        posts = _failing_then_ok(monkeypatch, core.CreateOutcomeUnknown("no id", kind="fix"))
     else:
         posts = _failing_then_ok(monkeypatch, exc)
     payload = {"source": "700", "boxes": [FACE]}
