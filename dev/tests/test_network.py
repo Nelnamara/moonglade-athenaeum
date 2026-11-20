@@ -1,5 +1,6 @@
 """Tests for network-layer functions with mocked requests.Session."""
 import json
+from pathlib import Path
 import pytest
 import requests
 
@@ -718,7 +719,11 @@ def test_parallel_workers_download_new_skip_known(tmp_path, mocker):
     assert any("_a" in n for n in names) and any("_b" in n for n in names)  # both new fetched
 
 
-def test_update_and_workers_compose(tmp_path, mocker):
+def test_update_and_workers_compose(tmp_path_factory, mocker):
+    # The library lives under a folder whose PATH contains "old" (as macOS temp dirs do):
+    # the skipped-item check below must match the file name, never the whole path.
+    tmp_path = tmp_path_factory.mktemp("old_folder") / "lib"
+    tmp_path.mkdir()
     # --update (early-stop) + --workers (parallel) together: new items fetched
     # concurrently at the top, then stop once a page is fully on disk.
     core.mark_walk_end_reached(tmp_path)   # a settled library: the stop is armed
@@ -742,7 +747,8 @@ def test_update_and_workers_compose(tmp_path, mocker):
     names = [str(c.args[2]) for c in dl.call_args_list]
     assert gql.call_count == 2                                   # stopped before page 3
     assert any("new1" in n for n in names) and any("new2" in n for n in names)
-    assert not any("old" in n for n in names)                   # on-disk skipped
+    assert "old" in str(tmp_path)                                # the path check cannot regress
+    assert not any("old" in Path(n).name for n in names)        # on-disk skipped
 
 
 def test_extract_artwork_meta():
