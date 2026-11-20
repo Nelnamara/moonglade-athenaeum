@@ -273,6 +273,7 @@ SOURCE_READERS = {
     "tests/test_watch.py": ("moonglade.gallery",),
     "tests/test_web_auth.py": ("moonglade.backup",),
     "tools/export_design_kit.py": ("moonglade.gallery",),     # reads DESIGN_TOKENS_CSS by path
+    "tools/split_names.py": ("moonglade.backup", "moonglade.gallery"),   # the move proof's sweep
     "loom/test/import-batches.test.js": ("moonglade.scan",),
     "loom/test/ledger-known-reasons.test.js": ("moonglade.backup",),
     "loom/test/med-loom-bundle-missing-report.test.js": ("moonglade.gallery",),
