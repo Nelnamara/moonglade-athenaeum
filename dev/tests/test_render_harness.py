@@ -99,8 +99,11 @@ from tests.conftest import _SEALED_DONOR, stub_code_module
 
 from moonglade import account_prefs as account_prefs_mod
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import jobs as jobs_mod
+from moonglade import models as models_mod
 from moonglade import paths as moonglade_paths
+from moonglade import training as training_mod
 from moonglade import updater as updater_mod
 from moonglade.gallery import CATALOG_FIELDS, create_app, load_catalog, save_catalog
 from moonglade.achievements import achievement_metrics, compute_achievements, save_ach_state
@@ -5382,8 +5385,8 @@ def _fake_market_pages(monkeypatch, per_page=24, pages=3, overlap=0):
             return hits(keyword)
         n = int(after[1:]) if after else 1
         return page(n)
-    monkeypatch.setattr(core, "model_search_market_gql", fake_search)
-    monkeypatch.setattr(core, "model_search_rest", fake_search)
+    monkeypatch.setattr(models_mod, "model_search_market_gql", fake_search)
+    monkeypatch.setattr(models_mod, "model_search_rest", fake_search)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     return calls
 
@@ -5593,8 +5596,8 @@ def _fake_training(pixai, monkeypatch, quota=0):
     def _no_cdn(*a, **k):
         raise core.PixAIError("the CDN is not reachable from the render harness")
     monkeypatch.setattr(_requests, "get", _no_cdn)
-    monkeypatch.setattr(core, "training_free_quota", lambda s: quota)
-    monkeypatch.setattr(core, "match_training_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(training_mod, "training_free_quota", lambda s: quota)
+    monkeypatch.setattr(training_mod, "match_training_kaisuuken", lambda *a, **k: None)
 
     def task(tid, status, progress=None):
         return {"trainingTask": {
@@ -6042,7 +6045,7 @@ def _fake_advanced(pixai, monkeypatch):
         pixai.on(base + "/submit", {"trainingTaskId": tid, "status": "waiting"})
     for tid in tasks:
         register(tid)
-    monkeypatch.setattr(core, "fetch_caption_text", lambda url, limit=0:
+    monkeypatch.setattr(training_mod, "fetch_caption_text", lambda url, limit=0:
                         "night elf, moonwell, image " + url.rsplit("/", 1)[-1])
     return tasks
 
@@ -6353,10 +6356,10 @@ def _fake_unlimited_pixai(monkeypatch, days=9.5):
                 "has_more": False, "next_cursor": ""}
     matched = []
     monkeypatch.setattr(core, "_rest_get", fake_rest_get)
-    monkeypatch.setattr(core, "model_search_market_gql", fake_search)
-    monkeypatch.setattr(core, "model_search_rest", fake_search)
+    monkeypatch.setattr(models_mod, "model_search_market_gql", fake_search)
+    monkeypatch.setattr(models_mod, "model_search_rest", fake_search)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "match_kaisuuken",
+    monkeypatch.setattr(cards_mod, "match_kaisuuken",
                         lambda s, params, **k: matched.append(dict(params)) or None)
     return matched
 
@@ -6938,6 +6941,7 @@ def test_the_phones_use_default_is_off_when_the_pack_has_no_default_to_go_back_t
     _settle(page)
     _dismiss_any_achievement_toast(page)
     page.click('button:has-text("Control")')
+    _ctm_section(page, "This phone")   # the Branding tile lives in This phone (look pick B, 2026-11-19)
     page.wait_for_selector(".mgcp-tile.click")
     page.locator('.mgcp-tile.click:has-text("Branding")').click()
     page.wait_for_selector(".mgcp-brandgrid")
@@ -6962,12 +6966,13 @@ def test_the_phone_branding_roles_push_a_role_screen_with_44_px_controls(
     _settle(page)
     _dismiss_any_achievement_toast(page)
     page.click('button:has-text("Control")')
+    _ctm_section(page, "This phone")   # the Branding tile lives in This phone (look pick B, 2026-11-19)
     page.wait_for_selector(".mgcp-tile.click")
     page.locator('.mgcp-tile.click:has-text("Branding")').click()
     page.wait_for_selector(".mgcp-brandgrid")
     page.click('.mgcp-brandnav:has-text("Roles")')
     page.wait_for_selector(".mgcp-rlm-row")
-    rows = page.evaluate("""() => [...document.querySelectorAll('.mgcp-rlm-row')].map(r => ({
+    rows =page.evaluate("""() => [...document.querySelectorAll('.mgcp-rlm-row')].map(r => ({
         name: r.querySelector('.mgcp-rl-name > div').textContent,
         state: r.querySelectorAll('.mgcp-rl-name > div')[1].textContent,
         h: Math.round(r.getBoundingClientRect().height),
@@ -7348,6 +7353,12 @@ def test_the_phone_create_tab_has_last_presets_quick_picks_and_no_matrix_setup(
         page.fill("textarea.cm-ta", "1girl")
         page.click(".pm-key")
         assert page.input_value("textarea.cm-ta") == "1girl{a|b}", "the { } key inserts a variable at the caret"
+        # The key then selects "a|b" from a setTimeout(0) (PowerMobile.jsx PromptTools.insert), so
+        # the next keystrokes replace it. A fill that lands before that timer runs has its
+        # select-all undone by it and replaces only "a|b" (the CI failure artifact read
+        # "1girl{1girl, {silver|cobalt} hair}", a nested brace). Wait for the selection.
+        page.wait_for_function("() => { const t = document.querySelector('textarea.cm-ta');"
+                               " return t.selectionStart === 6 && t.selectionEnd === 9; }")
         page.fill("textarea.cm-ta", "1girl, {silver|cobalt} hair")
         page.wait_for_selector(".mgrun-toks .mgrun-tok.var")
         row = page.locator(".mgrun-moderow.phone")
@@ -7465,7 +7476,9 @@ def test_the_phone_opens_a_matrix_as_a_grid_and_inspects_the_request_from_the_de
         page.wait_for_selector(".glm-sheet button:has-text('Inspect the request')")
         page.click(".glm-sheet button:has-text('Inspect the request')")
         page.wait_for_selector(".mgrun-insp .mgrun-inspbody")
-        page.wait_for_function("() => document.querySelector('.mgrun-inspbody').innerText.includes('createGenerationTask')")
+        # A run's image job rides the create door since 3.22 S3-image, so the Inspector names
+        # PixAI's REST operation (gen_road.request_record).
+        page.wait_for_function("() => document.querySelector('.mgrun-inspbody').innerText.includes('task.createTask')")
         assert page.locator(".mgrun-inspbtn").count() == 0, "the phone's Inspect is Copy JSON only: no CLI tab"
         assert page.inner_text(".mgrun-copy") == "Copy JSON"
         body = page.inner_text(".mgrun-inspbody")
@@ -11590,6 +11603,10 @@ def test_the_dock_says_the_price_inside_generate_and_stays_dim_until_priced(logg
     page.fill(".mgdock-prompt", "1girl, moonlit glade")
     page.wait_for_function("(s) => !document.querySelector(s).disabled", arg=go)
     _settle(page)
+    # Entering a mode or a field re-prices at once: usePriceProbe.refresh blanks the button's
+    # sub line and settles it only after PRICE_DEBOUNCE_MS (250ms); _settle is two frames.
+    page.wait_for_function("([s, t]) => { const e = document.querySelector(s + ' .mgspend-s');"
+                           " return e && e.textContent === t; }", arg=[go, "≈ 5,100 credits"])
     g = _spend_button(page, go)
     assert not g["disabled"] and g["sub"] == "≈ 5,100 credits" and " free" not in " " + g["cls"], g
     _two_lines_inside(g)
@@ -11664,6 +11681,10 @@ def test_the_phone_create_tab_says_the_price_inside_generate(logged_in_page, mon
     page.wait_for_function("() => !document.querySelector('.cm-generate').disabled")
     page.locator(".cm-generate").scroll_into_view_if_needed()
     _settle(page)
+    # Entering a mode or a field re-prices at once: usePriceProbe.refresh blanks the button's
+    # sub line and settles it only after PRICE_DEBOUNCE_MS (250ms); _settle is two frames.
+    page.wait_for_function("([s, t]) => { const e = document.querySelector(s + ' .mgspend-s');"
+                           " return e && e.textContent === t; }", arg=[".cm-generate", "≈ 5,100 credits"])
     g = _spend_button(page, ".cm-generate")
     assert not g["disabled"] and g["sub"] == "≈ 5,100 credits", g
     _two_lines_inside(g)
@@ -11727,6 +11748,10 @@ def test_the_video_tab_shows_a_card_per_model_with_its_price_for_this_picture(lo
     assert all(c["lines"][1] == "pick a picture" for c in cards), [c["lines"] for c in cards]
     assert asked == [], "nothing is priced without a picture"
     go = ".mgdock-gocol .mgdock-gen"   # the video drawer portals its Go into the column's slot
+    # Entering a mode or a field re-prices at once: usePriceProbe.refresh blanks the button's
+    # sub line and settles it only after PRICE_DEBOUNCE_MS (250ms); _settle is two frames.
+    page.wait_for_function("([s, t]) => { const e = document.querySelector(s + ' .mgspend-s');"
+                           " return e && e.textContent === t; }", arg=[go, "pick a picture first"])
     g = _spend_button(page, go)
     assert g["disabled"] and g["sub"] == "pick a picture first", g
 
@@ -11780,6 +11805,11 @@ def test_the_phone_video_mode_shows_the_model_cards_inside_the_screen(logged_in_
     cards = _video_cards(page, ".cm-videohost")
     assert len(cards) >= 8 and all(c["left"] >= 0 and c["right"] <= c["vw"] for c in cards), cards
     assert all(c["lines"][1] == "pick a picture" for c in cards)
+    # Entering Video mode re-prices at once: usePriceProbe.refresh blanks the button to
+    # "checking the price…" synchronously and settles on the idle words only after
+    # PRICE_DEBOUNCE_MS (250ms); _settle is two frames. Wait for the settled state.
+    page.wait_for_function("() => { const s = document.querySelector('.cm-videohost .mgd-go .mgspend-s');"
+                           " return s && s.textContent === 'pick a picture first'; }")
     g = _spend_button(page, ".cm-videohost .mgd-go")
     assert g["disabled"] and g["sub"] == "pick a picture first", g
     page.evaluate("() => document.querySelector('.cm-videohost .gen-drawer')"

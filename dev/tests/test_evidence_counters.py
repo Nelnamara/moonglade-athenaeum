@@ -27,11 +27,13 @@ import json
 
 from moonglade import backup as core
 from moonglade import gallery as g
+from moonglade import gen_road as gen_road_mod
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_client
 from moonglade import organize as organize_mod
 from moonglade import telemetry as telemetry_mod
 from moonglade import achievements as achievements_mod
+from moonglade import task_reads as task_reads_mod
 
 
 def _row(**kw):
@@ -79,14 +81,14 @@ def _collect_app(tmp_path, monkeypatch, rows):
     core.collect_generation does for a finished generation."""
     save_catalog(tmp_path / "catalog.db", [])
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, tid: {"phase": "done", "paid_credit": 0})
 
     def _collect(session, tid, out, **k):
         save_catalog(tmp_path / "catalog.db", rows)
         return {"media_ids": [r["media_id"] for r in rows], "saved": len(rows),
                 "is_video": False}
-    monkeypatch.setattr(core, "collect_generation", _collect)
+    monkeypatch.setattr(gen_road_mod, "collect_generation", _collect)
     return login_client(tmp_path)
 
 
@@ -279,7 +281,7 @@ def test_registered_job_rows_cannot_raise_the_peak(tmp_path, monkeypatch):
                                            "type": "generate"}).get_json()["ok"] is True
     cli.post("/api/jobs", json={"job_id": "9001", "status": "running", "type": "generate"})
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, t: {"phase": "running", "started": True, "paid_credit": 0})
     cli.get("/api/task-status", query_string={"task_id": "9001"})
     assert telemetry_mod.telemetry_metrics(tmp_path)["jobs_concurrent"] == 1

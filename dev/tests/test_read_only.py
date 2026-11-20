@@ -13,7 +13,11 @@ READ_ONLY at all -- see dev/tests/test_read_only_cli_paths.py for that half."""
 import pytest
 
 from moonglade import backup as core
+from moonglade import gen_road as gen_road_mod
 from moonglade import organize as organize_mod
+from moonglade import task_reads as task_reads_mod
+from moonglade import cloud_delete as cloud_delete_mod
+from moonglade import training as training_mod
 
 
 def test_read_only_defaults_to_false():
@@ -26,16 +30,18 @@ class TestSubmitGeneration:
     def test_blocked_when_read_only(self, mock_session, monkeypatch):
         monkeypatch.setattr(core, "READ_ONLY", True)
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.submit_generation(mock_session, {"prompt": "a cat"})
+            gen_road_mod.submit_generation(mock_session, {"prompt": "a cat"})
         mock_session.post.assert_not_called()  # the property that matters: no network call
 
     def test_allowed_when_not_read_only(self, mock_session, mocker, monkeypatch):
         monkeypatch.setattr(core, "READ_ONLY", False)
+        from tests.conftest import _REAL_CREATE          # an image create rides the door (3.22)
+        monkeypatch.setattr(core, "_create", _REAL_CREATE)
         resp = mocker.MagicMock()
         resp.status_code = 200
-        resp.json.return_value = {"data": {"createGenerationTask": {"id": "t1"}}}
+        resp.json.return_value = {"id": "t1"}
         mock_session.post.return_value = resp
-        assert core.submit_generation(mock_session, {"prompt": "a cat"}) == "t1"
+        assert gen_road_mod.submit_generation(mock_session, {"prompts": "a cat"}) == "t1"
         mock_session.post.assert_called_once()
 
 
@@ -44,7 +50,7 @@ class TestSubmitFixer:
         monkeypatch.setattr(core, "READ_ONLY", True)
         boxes = [{"x": 0, "y": 0, "width": 10, "height": 10, "tag": "hand"}]
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.submit_fixer(mock_session, "mid1", boxes)
+            gen_road_mod.submit_fixer(mock_session, "mid1", boxes)
         mock_session.post.assert_not_called()
 
 
@@ -52,7 +58,7 @@ class TestDeleteTaskReadOnly:
     def test_blocked_when_read_only(self, mock_session, monkeypatch):
         monkeypatch.setattr(core, "READ_ONLY", True)
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.delete_task(mock_session, "123")
+            cloud_delete_mod.delete_task(mock_session, "123")
         mock_session.post.assert_not_called()
 
     def test_the_gallery_delete_route_sends_nothing(self, pixai, monkeypatch, tmp_path):
@@ -92,11 +98,11 @@ class TestRoutedImageDeleteReadOnly:
             self, mock_session, monkeypatch, outputs, branch):
         monkeypatch.setattr(core, "READ_ONLY", True)
         reads = []
-        monkeypatch.setattr(core, "task_detail_gql",
+        monkeypatch.setattr(task_reads_mod, "task_detail_gql",
                             lambda *a, **k: reads.append(1) or {"outputs": outputs})
         target = "m0" if branch == "per-image" else "solo1"
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.delete_image_routed(mock_session, "T1", target)
+            cloud_delete_mod.delete_image_routed(mock_session, "T1", target)
         mock_session.post.assert_not_called()
         assert reads == [], (
             "it read the task from PixAI before refusing -- READ_ONLY must stop the delete "
@@ -110,9 +116,12 @@ class TestRoutedImageDeleteReadOnly:
         import inspect
         import textwrap
         fn = ast.parse(textwrap.dedent(
-            inspect.getsource(core.delete_image_routed))).body[0]
+            inspect.getsource(cloud_delete_mod.delete_image_routed))).body[0]
+        # (the lazy `from moonglade.backup import ...` is the split's wiring, not a statement
+        # of the function's own: 3.22 moved it to moonglade/cloud_delete.py)
         body = [n for n in fn.body if not (isinstance(n, ast.Expr)
-                                           and isinstance(n.value, ast.Constant))]
+                                           and isinstance(n.value, ast.Constant))
+                and not (isinstance(n, ast.ImportFrom) and n.module == "moonglade.backup")]
         first = body[0]
         assert (isinstance(first, ast.Expr) and isinstance(first.value, ast.Call)
                 and getattr(first.value.func, "id", "") == "_check_read_only"), (
@@ -148,7 +157,7 @@ class TestTrainingAndArtworkMutationsReadOnly:
         # _check_read_only runs before validate_training, so even wholly-invalid args must
         # be refused at the guard, not fall through to a validation error.
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.submit_training(mock_session, "base1", ["m1"], "Title", "trig", "style")
+            training_mod.submit_training(mock_session, "base1", ["m1"], "Title", "trig", "style")
         mock_session.post.assert_not_called()
 
     def test_publish_artwork_blocked(self, mock_session, monkeypatch):

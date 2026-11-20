@@ -6,12 +6,13 @@ These pin that the dates now reach /api/account's per-type breakdown, which the 
 peach underline and its tooltip lines (and the phone's Gift box row) are drawn from. Nothing new
 is read: the summary is the same call the chip already makes. No network: the `pixai` fixture."""
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 from tests.conftest import login_test_client
 
 
 def test_the_summary_keeps_every_expiry_date_per_card_type():
-    n = core._normalize_kaisuuken({
+    n = cards_mod._normalize_kaisuuken({
         "count": 13, "templateName": "Tsubaki.3", "templateId": "t1",
         "soonestExpireAt": "2026-10-06T00:00:00Z",
         "expiryCounts": [{"expiresAt": "2026-10-06T00:00:00Z", "count": 5},
@@ -22,12 +23,12 @@ def test_the_summary_keeps_every_expiry_date_per_card_type():
 
 
 def test_a_summary_row_without_dates_has_none():
-    assert core._normalize_kaisuuken({"count": 1, "templateName": "x"})["expiry_counts"] == []
+    assert cards_mod._normalize_kaisuuken({"count": 1, "templateName": "x"})["expiry_counts"] == []
 
 
 def test_the_account_breakdown_carries_the_dates(tmp_path, monkeypatch, pixai):
     monkeypatch.setattr(core, "account_info", lambda s: {"quotaAmount": 1})
-    monkeypatch.setattr(core, "list_kaisuukens", lambda s: [
+    monkeypatch.setattr(cards_mod, "list_kaisuukens", lambda s: [
         {"name": "Tsubaki.3", "count": 5, "expires": "2026-10-06T00:00:00Z",
          "category": "Model Card",
          "expiry_counts": [{"expires_at": "2026-10-06T00:00:00Z", "count": 5}]},

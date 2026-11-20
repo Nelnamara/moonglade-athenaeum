@@ -16,6 +16,10 @@ import re
 import pytest
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
+from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
+from moonglade import models as models_mod
 from tests.conftest import login_client
 from moonglade import mirror as mirror_mod
 
@@ -136,14 +140,14 @@ def test_a_cover_off_pixais_cdn_is_not_proxied(monkeypatch, tmp_path):
 # ---- the request cleaner ---------------------------------------------------------------
 
 def test_clean_palette_upper_cases_and_keeps_only_the_groups_given():
-    assert core.clean_color_palette(PALETTE) == SENT
-    assert core.clean_color_palette(None) is None
-    assert core.clean_color_palette({}) is None
-    out = core.clean_color_palette({"name": "  ", "palette": {
+    assert gen_params_mod.clean_color_palette(PALETTE) == SENT
+    assert gen_params_mod.clean_color_palette(None) is None
+    assert gen_params_mod.clean_color_palette({}) is None
+    out = gen_params_mod.clean_color_palette({"name": "  ", "palette": {
         "background": {"colors": [{"hex": "#000000", "ratio": 99.6}]}}})
-    assert out == {"name": core.PALETTE_NAME_DEFAULT,
+    assert out == {"name": gen_params_mod.PALETTE_NAME_DEFAULT,
                    "palette": {"background": {"colors": [{"hex": "#000000", "ratio": 100}]}}}
-    assert len(core.clean_color_palette({"name": "x" * 90, "palette": SENT["palette"]})["name"]) == 50
+    assert len(gen_params_mod.clean_color_palette({"name": "x" * 90, "palette": SENT["palette"]})["name"]) == 50
 
 
 @pytest.mark.parametrize("bad", [
@@ -160,15 +164,15 @@ def test_clean_palette_upper_cases_and_keeps_only_the_groups_given():
 ])
 def test_clean_palette_refuses_what_pixai_would(bad):
     with pytest.raises(core.PixAIError) as e:
-        core.clean_color_palette(bad)
+        gen_params_mod.clean_color_palette(bad)
     assert "nothing was sent or charged" in str(e.value)
 
 
 # ---- the image road: built, gated, quoted, submitted ---------------------------------------
 
 def _road(payload, **kw):
-    return core.build_request(payload, mode="image", resolve=core.RequestResolver(
-        gate=core.gate_resolver(object())), **kw)
+    return gen_road_mod.build_request(payload, mode="image", resolve=gen_road_mod.RequestResolver(
+        gate=gen_road_mod.gate_resolver(object())), **kw)
 
 
 def _img(vid, **kw):
@@ -219,24 +223,24 @@ def test_a_context_image_takes_no_palette_one_receipt(rest):
 def test_a_dict_carrying_context_images_or_an_upscale_loses_the_palette_at_the_gate(rest):
     base = {"prompts": "<p>", "modelId": T3, "width": 1024, "height": 1024, "batchSize": 1,
             "colorPalette": SENT}
-    out, adj = core._gate_image_params(object(), dict(base, contextImages=["M1"]))
+    out, adj = models_mod._gate_image_params(object(), dict(base, contextImages=["M1"]))
     assert "colorPalette" not in out and adj[0]["why"] == "a context image takes no colour palette"
-    out, adj = core._gate_image_params(object(), dict(base, mediaId="M1", enlarge=2.0))
+    out, adj = models_mod._gate_image_params(object(), dict(base, mediaId="M1", enlarge=2.0))
     assert "colorPalette" not in out
     assert [a["why"] for a in adj if a["field"] == "colorPalette"] == ["an upscale takes no colour palette"]
     # and the backstop form is idempotent on an already-gated dict
     gated = _road(_img(T3)).parameters
-    assert core._gate_params_for_model(object(), gated) is gated
+    assert models_mod._gate_params_for_model(object(), gated) is gated
 
 
 def test_the_meta_says_which_versions_take_a_palette(rest):
-    assert core._attach_features(object(), {"version_id": T3})["color_palette"] is True
-    assert core._attach_features(object(), {"version_id": FLASH_OFF})["color_palette"] is False
-    assert core._attach_features(object(), {"version_id": "V-UNREAD"})["color_palette"] is None
+    assert models_mod._attach_features(object(), {"version_id": T3})["color_palette"] is True
+    assert models_mod._attach_features(object(), {"version_id": FLASH_OFF})["color_palette"] is False
+    assert models_mod._attach_features(object(), {"version_id": "V-UNREAD"})["color_palette"] is None
 
 
 def test_api_price_quotes_without_it_and_refuses_a_bad_one(tmp_path, rest, monkeypatch):
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
     cli = login_client(tmp_path)
     d = cli.post("/api/price", json=_img(T3)).get_json()
     assert d["cost"] == 5100 and not d.get("adjusted")
@@ -256,12 +260,11 @@ def _web(monkeypatch, tmp_path):
 def test_api_generate_sends_the_palette_it_quoted(tmp_path, rest, monkeypatch):
     cli = _web(monkeypatch, tmp_path)
     cards = []
-    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, **k: cards.append(dict(params)))
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, **k: cards.append(dict(params)))
     sent = []
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
-    monkeypatch.setattr(core, "gql_mutate",
-                        lambda s, q, v=None: sent.append(v["parameters"])
-                        or {"createGenerationTask": {"id": "4242"}})
+    monkeypatch.setattr(core, "_create",                # the create door (3.22 S3-image)
+                        lambda s, kind, v: sent.append(v) or {"id": "4242"})
     d = cli.post("/api/generate", json=_img(T3)).get_json()
     assert d.get("task_id") == "4242", d
     assert len(sent) == 1 and sent[0]["colorPalette"] == SENT
@@ -272,7 +275,8 @@ def test_read_only_refuses_a_palette_generate_before_anything_is_sent(tmp_path, 
     cli = _web(monkeypatch, tmp_path)
     sent = []
     monkeypatch.setattr(core, "gql_mutate", lambda *a, **k: sent.append(a) or {})
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(core, "_create", lambda *a, **k: sent.append(a) or {})
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "READ_ONLY", True)
     d = cli.post("/api/generate", json=_img(T3)).get_json()
     assert "READ_ONLY" in d["error"] and sent == []

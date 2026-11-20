@@ -3,6 +3,7 @@ import PickerCore from "../picker/pickerCore.js";
 import Icon from "../icons/Icons.jsx";
 import { apiUpload } from "../api.js";
 import { isPrivacyBlurOn, privacyBlurClass } from "../lib/privacyBlur.js";
+import useScrollLock from "../hooks/useScrollLock.js";
 import "../styles/gallery-picker.css";
 
 /* Faithful React port of static/mg-gallery-picker.js (2026-08-08, the vanilla static/ ->
@@ -29,6 +30,13 @@ export default function GalleryPicker({
 }) {
   // 'all' is a REAL value (server maps '' -> image for back-compat); resolve like the element did.
   const initType = defaultType === "video" ? "video" : defaultType === "all" ? "all" : "image";
+
+  // Hold the page still while the picker is up. Over the Video drawer the wheel used to leak
+  // through to the library behind it, which scrolled under three stacked backdrop blurs and
+  // flickered on Mac Chrome. useScrollLock is reference-counted and restores the page's own
+  // overflow when the LAST layer unmounts, so two stacked pickers (or a picker over another
+  // overlay) never release the page early.
+  useScrollLock();
 
   const [images, setImages] = useState([]);
   const [collections, setCollections] = useState([]);

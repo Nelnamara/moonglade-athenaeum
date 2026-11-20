@@ -42,8 +42,11 @@ from types import SimpleNamespace as NS
 import pytest
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
+from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 
-P_TURBO, P_HIGH, P_LOW = core.PRIORITY_TURBO, core.PRIORITY_HIGH, core.PRIORITY_LOW
+P_TURBO, P_HIGH, P_LOW = gen_params_mod.PRIORITY_TURBO, gen_params_mod.PRIORITY_HIGH, gen_params_mod.PRIORITY_LOW
 
 
 # =============================================================================
@@ -74,19 +77,19 @@ def _img_payload(a):
 
 
 def _img_web(a):
-    return core.build_request(_img_payload(a), mode="image", resolve=None, is_member=None).parameters
+    return gen_road_mod.build_request(_img_payload(a), mode="image", resolve=None, is_member=None).parameters
 
 
 def test_image_plain_case_is_byte_identical():
     """The fold boundary: a plain, in-range, no-special-flag generate DOES round-trip
     through build_request unchanged. This is the subset a fold could ever be safe on."""
     a = _img_args()
-    assert _img_web(a) == core._gen_parameters(a)
+    assert _img_web(a) == gen_params_mod._gen_parameters(a)
 
 
 def test_image_diverges_on_kaisuuken_id():
     a = _img_args(kaisuuken_id="CARD-42")
-    old = core._gen_parameters(a)
+    old = gen_params_mod._gen_parameters(a)
     assert old.get("kaisuukenId") == "CARD-42"          # the CLI embeds the forced card
     assert "kaisuukenId" not in _img_web(a)             # the web road cannot
     assert _img_web(a) != old
@@ -95,13 +98,13 @@ def test_image_diverges_on_kaisuuken_id():
 def test_image_diverges_on_params_json_passthrough():
     raw = '{"prompts": "verbatim", "modelId": "9", "batchSize": 1}'
     a = _img_args(params_json=raw)
-    assert core._gen_parameters(a) == {"prompts": "verbatim", "modelId": "9", "batchSize": 1}
-    assert _img_web(a) != core._gen_parameters(a)        # web has no raw-params field
+    assert gen_params_mod._gen_parameters(a) == {"prompts": "verbatim", "modelId": "9", "batchSize": 1}
+    assert _img_web(a) != gen_params_mod._gen_parameters(a)        # web has no raw-params field
 
 
 def test_image_diverges_on_out_of_range_dimensions():
     a = _img_args(width=8000, steps=400, count=8)
-    old = core._gen_parameters(a)
+    old = gen_params_mod._gen_parameters(a)
     web = _img_web(a)
     assert old["width"] == 8000 and web["width"] == 4096       # CLI floors only; web clamps
     assert old["samplingSteps"] == 400 and web["samplingSteps"] == 150
@@ -112,15 +115,15 @@ def test_image_diverges_on_empty_model():
     """CLI defaults an empty model to DEFAULT_GEN_MODEL and submits; the web road refuses
     ('pick a model', parameters None). Folding would turn a working default into a refusal."""
     a = _img_args(model="")
-    assert core._gen_parameters(a)["modelId"] == core.DEFAULT_GEN_MODEL
-    assert core.build_request(_img_payload(a), mode="image", resolve=None).parameters is None
+    assert gen_params_mod._gen_parameters(a)["modelId"] == gen_params_mod.DEFAULT_GEN_MODEL
+    assert gen_road_mod.build_request(_img_payload(a), mode="image", resolve=None).parameters is None
 
 
 def test_image_diverges_on_low_priority():
     """--low-priority / --priority 0 is a real CLI channel; the web adapter can only emit
     TURBO or HIGH, so it would silently re-price a deliberate standard-speed submit."""
     a = _img_args(priority=P_LOW)
-    assert core._gen_parameters(a)["priority"] == P_LOW
+    assert gen_params_mod._gen_parameters(a)["priority"] == P_LOW
     assert _img_web(a)["priority"] == P_TURBO
 
 
@@ -147,14 +150,14 @@ def _vid_payload(a):
 
 def test_i2v_plain_case_is_byte_identical():
     a = _vid_args()
-    web = core.build_request(_vid_payload(a), mode="video", resolve=None).parameters
-    assert web == core._gen_video_parameters(a)
+    web = gen_road_mod.build_request(_vid_payload(a), mode="video", resolve=None).parameters
+    assert web == gen_params_mod._gen_video_parameters(a)
 
 
 def test_i2v_diverges_on_kaisuuken_id():
     a = _vid_args(kaisuuken_id="CARD-9")
-    old = core._gen_video_parameters(a)
-    web = core.build_request(_vid_payload(a), mode="video", resolve=None).parameters
+    old = gen_params_mod._gen_video_parameters(a)
+    web = gen_road_mod.build_request(_vid_payload(a), mode="video", resolve=None).parameters
     assert old.get("kaisuukenId") == "CARD-9"
     assert "kaisuukenId" not in web
 
@@ -163,10 +166,10 @@ def test_i2v_diverges_on_prompt_over_maxlen():
     """A >2000-char prompt builds fine on the CLI (PixAI rejects it at submit) but the web
     video wrapper RAISES at build time -- so a fold would make a preview abort where it
     prints today."""
-    a = _vid_args(prompt="x" * (core.VIDEO_PROMPT_MAXLEN + 100))
-    core._gen_video_parameters(a)                       # no raise
+    a = _vid_args(prompt="x" * (gen_params_mod.VIDEO_PROMPT_MAXLEN + 100))
+    gen_params_mod._gen_video_parameters(a)                       # no raise
     with pytest.raises(core.PixAIError):
-        core.build_request(_vid_payload(a), mode="video", resolve=None)
+        gen_road_mod.build_request(_vid_payload(a), mode="video", resolve=None)
 
 
 # =============================================================================
@@ -182,21 +185,21 @@ def test_refvideo_modelid_now_agrees_on_a_nondefault_model():
     omits the key rather than borrowing v4.0.1's."""
     for model in ("v4.0", "v3.2", "tbkv1.0.1"):
         # exactly what run_reference_video._build() does with these args:
-        cli = core.build_reference_video_parameters(
+        cli = gen_params_mod.build_reference_video_parameters(
             "a pan @image1", image_media_ids=["55"], video_media_ids=[], audio_media_ids=[],
-            model=model, duration=core._snap_video_duration(5, model), mode="professional",
+            model=model, duration=gen_params_mod._snap_video_duration(5, model), mode="professional",
             generate_audio=False, audio_language="english", is_private=True, kaisuuken_id="")
-        web = core.build_request(
+        web = gen_road_mod.build_request(
             {"mode": "R2V", "images": ["55"], "prompt": "a pan @image1", "duration": 5,
              "video_model": model, "quality": "professional", "is_private": True},
             mode="video", resolve=None).parameters
-        assert cli["modelId"] == web["modelId"] == core.video_model_id(model), model
-        assert cli["modelId"] != core.REFVIDEO_MODEL_ID, model
+        assert cli["modelId"] == web["modelId"] == gen_params_mod.video_model_id(model), model
+        assert cli["modelId"] != gen_params_mod.REFVIDEO_MODEL_ID, model
     # v4.0.1 -- the default engine -- is byte-identical to before: its own id IS that id.
-    assert core.build_reference_video_parameters(
-        "x", image_media_ids=["55"], model="v4.0.1")["modelId"] == core.REFVIDEO_MODEL_ID
+    assert gen_params_mod.build_reference_video_parameters(
+        "x", image_media_ids=["55"], model="v4.0.1")["modelId"] == gen_params_mod.REFVIDEO_MODEL_ID
     # An engine with no published id omits the key (the i2v builder's rule), never "".
-    assert "modelId" not in core.build_reference_video_parameters(
+    assert "modelId" not in gen_params_mod.build_reference_video_parameters(
         "x", image_media_ids=["55"], model="v9.9-unknown")
 
 
@@ -211,14 +214,14 @@ def _edit_args(**over):
 
 
 def _edit_old(a, src="5550"):
-    cfg = core._edit_config_from_args(a)
-    return core.build_chat_edit_parameters(
+    cfg = gen_params_mod._edit_config_from_args(a)
+    return gen_params_mod.build_chat_edit_parameters(
         a.prompt, [src], model_id=cfg["model_id"], resolution=cfg["resolution"],
         aspect_ratio=cfg["aspect_ratio"], quality=cfg["quality"], kaisuuken_id=cfg["kaisuuken_id"])
 
 
 def _edit_web(a, src="5550"):
-    return core.build_request(
+    return gen_road_mod.build_request(
         {"source": src, "sources": [src], "instruction": a.prompt,
          "edit_model": (a.edit_model or "edit-pro"), "resolution": a.edit_resolution,
          "aspect": a.edit_aspect, "quality": a.edit_quality},
@@ -242,11 +245,11 @@ def test_edit_diverges_on_raw_model_id():
     """`--edit-model` is a RAW model id on the CLI; the web edit road reads it as a KEY, so a
     raw Reference-Pro id lands as Reference-Pro (2K, no quality knob) on the CLI and falls
     back to Edit-Pro (1K/medium) on the web road -- a different model AND config."""
-    ref_id = core.EDIT_MODELS["reference-pro"]["model_id"]
+    ref_id = gen_params_mod.EDIT_MODELS["reference-pro"]["model_id"]
     a = _edit_args(edit_model=ref_id)
     old, web = _edit_old(a), _edit_web(a)
     assert old["chat"]["modelId"] == ref_id
-    assert web["chat"]["modelId"] == core.EDIT_PRO_MODEL_ID
+    assert web["chat"]["modelId"] == gen_params_mod.EDIT_PRO_MODEL_ID
     assert old["chat"]["modelConfig"] != web["chat"]["modelConfig"]
 
 
@@ -260,10 +263,10 @@ def test_submit_road_cannot_force_a_kaisuuken_id(monkeypatch):
     hands _apply_kaisuuken, with every network leg stubbed."""
     seen = {}
     monkeypatch.setattr(core, "_check_read_only", lambda *a, **k: None)
-    monkeypatch.setattr(core, "submit_generation", lambda s, p: "TASK-1")
-    monkeypatch.setattr(core, "_apply_kaisuuken",
+    monkeypatch.setattr(gen_road_mod, "submit_generation", lambda s, p: "TASK-1")
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken",
                         lambda s, p, args: seen.setdefault("args", args))
-    req = core.GenerationRequest(mode="image", parameters={"prompts": "x"}, no_card=False)
-    out = core.submit(None, req)
+    req = gen_road_mod.GenerationRequest(mode="image", parameters={"prompts": "x"}, no_card=False)
+    out = gen_road_mod.submit(None, req)
     assert out == {"task_id": "TASK-1"}
     assert seen["args"].kaisuuken_id == ""              # no seam to force a specific card

@@ -15,8 +15,10 @@ Patch seam (see dev/tests/test_loom_import_frames.py's header): _gen_session is 
 closure handing back the moonglade_backup module itself, so the functions are
 patched on `core`, with _make_session stubbed."""
 from moonglade import backup as core
+from moonglade import models as models_mod
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_client
+from moonglade import task_reads as task_reads_mod
 
 TID = "9000000000000007041"
 
@@ -42,12 +44,12 @@ def _wire_task(monkeypatch, task, *, bases=None, names=None, metas=None):
     def detail(session, tid, retries=3):
         calls["retries"] = retries
         return task
-    monkeypatch.setattr(core, "task_detail_gql", detail)
-    monkeypatch.setattr(core, "resolve_model_base_id",
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", detail)
+    monkeypatch.setattr(models_mod, "resolve_model_base_id",
                         lambda s, vid: (bases or {}).get(str(vid), ""))
-    monkeypatch.setattr(core, "model_name_gql",
+    monkeypatch.setattr(models_mod, "model_name_gql",
                         lambda s, vid, **k: (names or {}).get(str(vid), ""))
-    monkeypatch.setattr(core, "resolve_version_meta",
+    monkeypatch.setattr(models_mod, "resolve_version_meta",
                         lambda s, mid: (metas or {}).get(str(mid), {}))
     return calls
 
@@ -155,7 +157,7 @@ def test_exception_answers_redacted_error(tmp_path, monkeypatch):
 
     def boom(session, tid, retries=3):
         raise RuntimeError(r"C:\Users\gwilkins\secret\place blew up")
-    monkeypatch.setattr(core, "task_detail_gql", boom)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", boom)
     r = cli.get("/api/task-params/" + TID)
     d = r.get_json()
     assert r.status_code == 200 and d["error"]
@@ -206,13 +208,13 @@ def test_a_lora_resolve_costs_one_read_and_never_asks_for_profiles(tmp_path, mon
         return [{"id": "ver-" + path.split("/")[2], "modelType": "SDXL_MODEL",
                  "loraBaseModelType": "SDXL_MODEL", "extra": {}}]
 
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid, retries=3: {
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid, retries=3: {
         "parameters": {"modelId": "vER1",
                        "lora": {"L1v": 0.9, "L2v": 0.8, "L3v": 0.7, "L4v": 0.6}}})
-    monkeypatch.setattr(core, "resolve_model_base_id",
+    monkeypatch.setattr(models_mod, "resolve_model_base_id",
                         lambda s, vid: {"L1v": "b1", "L2v": "b2",
                                         "L3v": "b3", "L4v": "b4"}[str(vid)])
-    monkeypatch.setattr(core, "model_name_gql", lambda s, vid, **k: "A LoRA")
+    monkeypatch.setattr(models_mod, "model_name_gql", lambda s, vid, **k: "A LoRA")
     monkeypatch.setattr(core, "_rest_get", rest)
 
     d = cli.get("/api/task-params/" + TID).get_json()

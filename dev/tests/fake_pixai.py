@@ -181,12 +181,44 @@ class FakePixAI:
         call = self._record(verb="rest_patch", op=path, path=path, body=body)
         return self._resolve("PATCH " + path, "REST PATCH path", call)
 
-    def for_create(self):
+    def create(self, kind, body):
+        """THE create door's verb, answered from the registry under the door's own path
+        (`/task/create`, `/task/fixer`, ...): `fake.on("/task/create", {"id": "T1"})`. The call
+        records `verb="create"`, `kind` and the body. The door's pre-send rules that need no
+        network hold here too, so a test cannot pass against a fake that allows what the real
+        door refuses: the kind must be in the table, scene and enhance need a `web-jwt` fake,
+        and the body is checked by the real wire guard. No `retries` parameter."""
+        from moonglade import backup as core
+        from moonglade import gen_params
+        from moonglade.pixai_client import (CREATE_PATHS, CREATE_WEB_JWT_KINDS,
+                                            CREATE_WRAPPED_KINDS)
+        path = CREATE_PATHS.get(kind)
+        if path is None:
+            raise core.LocalRefusal("no create route named {!r}".format(kind))
+        if kind in CREATE_WEB_JWT_KINDS and self.auth_kind != "web-jwt":
+            raise core.LocalRefusal("this runs only on the website sign-in")
+        inner = gen_params.rest_wire(kind, body)
+        final = {"parameters": inner} if kind in CREATE_WRAPPED_KINDS else inner
+        gen_params.check_wire(kind, final)
+        call = self._record(verb="create", op=path, path=path, body=final)
+        call.kind = kind
+        return self._resolve(path, "create route", call)
+
+    def for_create(self, require=None):
         """The fake IS the create adapter. The mirror-vs-key choice is the real client's
         rule and is tested there (dev/tests/test_pixai_client.py::TestForCreate); a test that
         wants to exercise it drives `core._session_for_create` / `PixAIClient.for_create`
-        directly rather than through this."""
+        directly rather than through this. `require="web-jwt"` refuses unless this fake was
+        built with that identity, as the real client refuses without an armed Mirror."""
+        if require is not None and self.auth_kind != require:
+            from moonglade import backup as core
+            raise core.LocalRefusal("this runs only on the website sign-in")
         return self
+
+    def creates(self, path=None):
+        """How many times the create door was asked -- for one route, or in total."""
+        return len([c for c in self.calls
+                    if c.verb == "create" and (path is None or c.op == path)])
 
     # -- the transition surface ---------------------------------------------
     @property

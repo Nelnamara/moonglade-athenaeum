@@ -1,0 +1,430 @@
+"""The contest board's settled-row cache and newest-first walk (3.22, design 6).
+
+Offline: a fake board serves pages from a list (page size 2, so a short list is many pages) and
+counts which pages were read. Only a settled row is ever served from the cache, an unsettled
+cached row is re-read wherever new contests have pushed it, and the cache is written atomically
+through moonglade.paths."""
+import json
+import os
+
+import pytest
+
+from moonglade import contests as c
+from moonglade import contest_sync
+
+
+def raw(i, settled=True, updated="u1", **kw):
+    r = {"id": str(i), "title": {"en": "C%s" % i}, "slug": "c%s" % i, "type": "community",
+         "runtimeStatus": "ended" if settled else "running",
+         "rewardStatus": "distributed" if settled else "pending_distribute",
+         "updatedAt": updated, "description": {"en": "d%s" % i},
+         "descriptionForApp": {"en": "d%s" % i}, "mediaId": ""}
+    r.update(kw)
+    return r
+
+
+class Board:
+    """The upstream board, newest-first, served two rows a page."""
+    def __init__(self, rows):
+        self.rows, self.reads = list(rows), []
+
+    def page(self, session, page):
+        self.reads.append(page)
+        n = c._CONTEST_PAGE_SIZE
+        chunk = self.rows[(page - 1) * n: page * n]
+        return {"data": chunk, "page": page, "pageSize": n,
+                "totalPage": max(1, -(-len(self.rows) // n)), "totalCount": len(self.rows)}
+
+
+@pytest.fixture()
+def rig(monkeypatch, tmp_path):
+    monkeypatch.setattr(c, "_CONTEST_PAGE_SIZE", 2)
+    monkeypatch.setattr(c.time, "sleep", lambda s: None)
+    path = tmp_path / "cache" / "contest_board.json"
+
+    class Rig:
+        cache = path
+
+        def use(self, board):
+            self.board = board
+            monkeypatch.setattr(c, "_board_page", board.page)
+            return board
+
+        def read(self, **kw):
+            self.board.reads.clear()
+            meta = {}
+            rows = c.list_contests(object(), cache_path=path, meta=meta, **kw)
+            return rows, meta, list(self.board.reads)
+    return Rig()
+
+
+def ids(rows):
+    return [r["id"] for r in rows]
+
+
+def test_the_first_read_is_a_full_walk_and_writes_the_cache(rig):
+    rig.use(Board([raw(i) for i in range(10, 0, -1)]))
+    rows, meta, reads = rig.read()
+    assert reads == [1, 2, 3, 4, 5] and meta["mode"] == "full"
+    assert ids(rows) == [str(i) for i in range(10, 0, -1)]
+    saved = json.loads(rig.cache.read_text(encoding="utf-8"))
+    assert set(saved["rows"]) == {str(i) for i in range(1, 11)}
+    assert saved["rows"]["10"]["row"]["description"] == "d10"
+    assert "descriptionForApp" not in json.dumps(saved)         # the copy is never kept
+    assert not [f for f in os.listdir(rig.cache.parent) if ".tmp-" in f]
+
+
+def test_the_cache_lives_under_moonglade_paths():
+    from moonglade import paths
+    assert c.contest_cache_path() == paths.cache_dir() / "contest_board.json"
+
+
+def test_settled_pages_come_from_the_cache_and_an_unsettled_row_is_re_read_T_F8(rig):
+    rows = [raw(i) for i in range(12, 0, -1)]            # six pages, all settled...
+    rows[8] = raw(rows[8]["id"], settled=False)          # ...but the row on page 5
+    rig.use(Board(rows))
+    rig.read()
+    rows, _meta, reads = rig.read()
+    assert reads == [1, 5, 6]                            # page 1 clean -> jump to page 5; it is not clean, so 6 follows
+    assert not {2, 3, 4} & set(reads)                    # the settled pages come from the cache
+    assert len(rows) == 12
+
+
+def test_unsettled_rows_are_never_served_from_the_cache(rig):
+    board = rig.use(Board([raw(9), raw(8), raw(7, settled=False), raw(6), raw(5)]))
+    rig.read()
+    board.rows[2] = raw(7, settled=True, updated="u2", title={"en": "Renamed"})   # it ended
+    rows, _m, reads = rig.read()
+    assert 2 in reads
+    assert [r["title"] for r in rows if r["id"] == "7"] == ["Renamed"]
+
+
+def test_new_contests_shifting_an_unsettled_row_down_do_not_hide_it_T_V4(rig):
+    base = [raw(i) for i in range(20, 8, -1)]            # ids 20..9, six pages
+    base[3] = raw(17, settled=False)                     # unsettled at the end of page 2
+    board = rig.use(Board(base))
+    rig.read()
+    # Three new contests land on top; the unsettled row slides from page 2 to page 3.
+    board.rows = [raw(23, settled=False), raw(22, settled=False), raw(21, settled=False)] + board.rows
+    board.rows[3 + 3] = raw(17, settled=False, updated="u9", title={"en": "Fresh"})
+    rows, _m, reads = rig.read()
+    assert 3 in reads                                    # re-read from its NEW page
+    got = {r["id"]: r for r in rows}
+    assert got["17"]["title"] == "Fresh"                 # fresh, not the cached copy
+    assert {"21", "22", "23"} <= set(got)
+
+
+def test_a_row_that_moved_off_the_pages_the_map_names_is_still_found(rig):
+    base = [raw(i) for i in range(12, 0, -1)]
+    base[1] = raw(11, settled=False)                     # page 1
+    board = rig.use(Board(base))
+    rig.read()
+    # It sinks to the far end (a re-sort): the walk must keep reading until it sees it.
+    moved = board.rows.pop(1)
+    board.rows.append(moved)
+    rows, _m, reads = rig.read()
+    assert "11" in ids(rows) and reads[-1] == 6
+
+
+def test_an_unsettled_row_gone_upstream_drops_off_after_a_full_read(rig):
+    base = [raw(i) for i in range(8, 0, -1)]
+    base[5] = raw(3, settled=False)
+    board = rig.use(Board(base))
+    rig.read()
+    del board.rows[5]
+    rows, _m, reads = rig.read()
+    assert "3" not in ids(rows) and sorted(set(reads)) == [1, 2, 3, 4]
+
+
+def test_pending_distribute_is_unsettled_and_cancelled_is_settled():
+    assert not c._raw_settled(raw(1, settled=False))
+    assert not c._raw_settled({"runtimeStatus": "ended", "rewardStatus": "pending_distribute"})
+    assert c._raw_settled({"runtimeStatus": "running", "lifecycleStatus": "cancelled"})
+    assert c._raw_settled({"runtimeStatus": "ended", "rewardStatus": "distributed"})
+
+
+def test_a_settled_row_whose_updatedat_moved_is_read_again(rig):
+    board = rig.use(Board([raw(i) for i in range(10, 0, -1)]))
+    rig.read()
+    board.rows[0] = raw(10, updated="u2")
+    _rows, _m, reads = rig.read()
+    assert reads == [1, 2]                               # page 1 changed: read on; page 2 is clean and nothing later can change
+
+
+def test_a_full_walk_runs_on_refresh_and_once_a_day(rig, monkeypatch):
+    rig.use(Board([raw(i) for i in range(10, 0, -1)]))
+    rig.read()
+    assert rig.read()[2] == [1]                          # nothing can change: page 1 only
+    assert rig.read(full=True)[2] == [1, 2, 3, 4, 5]     # Refresh
+    real = c.time.time
+    monkeypatch.setattr(c.time, "time", lambda: real() + c.CONTEST_FULL_WALK_S + 5)
+    assert rig.read()[1]["mode"] == "full"
+
+
+def test_the_hundred_page_ceiling_bounds_the_walk_and_says_so(rig):
+    rig.use(Board([raw(i) for i in range(210, 0, -1)]))   # 105 pages
+    rows, meta, reads = rig.read()
+    assert len(reads) == 100 and meta["truncated"] is True and meta["total_page"] == 105
+    assert c._CONTEST_MAX_PAGES == 100
+
+
+def test_the_running_view_is_filtered_locally_from_the_cached_board(rig):
+    rig.use(Board([raw(6, settled=False), raw(5), raw(4, settled=False), raw(3)]))
+    rig.read()
+    rows, _m, _r = rig.read(active_only=True)
+    assert ids(rows) == ["6", "4"]
+
+
+def test_a_missing_or_corrupt_cache_is_just_a_full_walk(rig):
+    rig.use(Board([raw(i) for i in range(4, 0, -1)]))
+    rig.cache.parent.mkdir(parents=True)
+    rig.cache.write_text("{not json", encoding="utf-8")
+    assert rig.read()[1]["mode"] == "full"
+
+
+def test_the_mapper_reads_descriptionforapp_when_description_is_absent():
+    r = raw(1)
+    del r["description"]
+    assert c._contest_row(r)["description"] == "d1"
+    r2 = raw(2, description={"en": "own"})
+    assert c._contest_row(r2)["description"] == "own"
+
+
+def test_the_board_read_goes_through_the_cache(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(c, "list_contests", lambda s, **k: seen.update(k) or [])
+    contest_sync._contests_cache.clear()
+    contest_sync.contest_board(None, object(), full=True)
+    assert seen["cache_path"] == c.contest_cache_path() and seen["full"] is True
+    contest_sync._contests_cache.clear()
+
+
+# ---- the board walk: a forced walk is rationed, and concurrent callers share one walk -------
+
+class _Walks:
+    """list_contests stand-in that counts walks and can hold one open."""
+    def __init__(self, gate=None):
+        import threading
+        self.n, self.live, self.peak = 0, 0, 0
+        self.gate, self.lock = gate, threading.Lock()
+
+    def __call__(self, session, **kw):
+        with self.lock:
+            self.n += 1
+            self.live += 1
+            self.peak = max(self.peak, self.live)
+        try:
+            if self.gate is not None:
+                self.gate.wait(5)
+            return [{"id": "w%d" % self.n}]
+        finally:
+            with self.lock:
+                self.live -= 1
+
+
+def test_two_forced_calls_inside_the_window_make_one_walk(monkeypatch):
+    walks = _Walks()
+    monkeypatch.setattr(c, "list_contests", walks)
+    contest_sync._contests_cache.clear()
+    first = contest_sync.contest_board(None, object(), force=True, full=True)
+    second = contest_sync.contest_board(None, object(), force=True, full=True)
+    assert walks.n == 1 and second == first      # served from the memo, not an error
+
+
+def test_a_forced_call_after_the_window_walks_again(monkeypatch):
+    walks = _Walks()
+    monkeypatch.setattr(c, "list_contests", walks)
+    contest_sync._contests_cache.clear()
+    contest_sync.contest_board(None, object(), force=True, full=True)
+    contest_sync._contests_cache["forced_at"] -= contest_sync.CONTESTS_FORCE_COOLDOWN_S + 1
+    rows = contest_sync.contest_board(None, object(), force=True, full=True)
+    assert walks.n == 2 and rows == [{"id": "w2"}]
+    assert contest_sync.CONTESTS_FORCE_COOLDOWN_S == 300.0
+
+
+def test_concurrent_callers_make_one_walk(monkeypatch):
+    import threading
+    gate = threading.Event()
+    walks = _Walks(gate)
+    monkeypatch.setattr(c, "list_contests", walks)
+    contest_sync._contests_cache.clear()
+    got, errs = [], []
+
+    def go(force):
+        try:
+            got.append(contest_sync.contest_board(None, object(), force=force, full=force))
+        except Exception as e:                   # noqa: BLE001
+            errs.append(e)
+    threads = [threading.Thread(target=go, args=(i % 2 == 0,)) for i in range(6)]
+    for t in threads:
+        t.start()
+    import time
+    deadline = time.time() + 5
+    while walks.n < 1 and time.time() < deadline:
+        time.sleep(0.01)
+    time.sleep(0.2)                              # the rest are queued behind the one walk
+    gate.set()
+    for t in threads:
+        t.join(10)
+    assert not errs and len(got) == 6
+    assert walks.n == 1 and walks.peak == 1
+    assert all(g == [{"id": "w1"}] for g in got)
+
+
+def test_the_memo_lock_is_free_while_a_walk_is_out(monkeypatch):
+    import threading
+    gate = threading.Event()
+    walks = _Walks(gate)
+    monkeypatch.setattr(c, "list_contests", walks)
+    contest_sync._contests_cache.clear()
+    t = threading.Thread(target=lambda: contest_sync.contest_board(None, object(), force=True))
+    t.start()
+    import time
+    while walks.n < 1:
+        time.sleep(0.01)
+    try:
+        assert contest_sync._contests_cache_lock.acquire(timeout=1), "held across the walk"
+        contest_sync._contests_cache_lock.release()
+    finally:
+        gate.set()
+        t.join(10)
+
+
+def test_the_cache_temp_names_are_unique_and_leave_nothing_behind(tmp_path, monkeypatch):
+    path = tmp_path / "sub" / "contest_cache.json"
+    seen = []
+    real = os.replace
+
+    def spy(src, dst, *a, **k):
+        seen.append(os.path.basename(src))
+        return real(src, dst, *a, **k)
+    monkeypatch.setattr(os, "replace", spy)
+    for _ in range(3):
+        c._save_contest_cache(str(path), {"v": 1, "rows": {}})
+    assert len(set(seen)) == 3 and all(n.startswith("contest_cache.json.") for n in seen)
+    assert sorted(x.name for x in path.parent.iterdir()) == ["contest_cache.json"]
+
+    def boom(src, dst, *a, **k):
+        raise OSError("no")
+    monkeypatch.setattr(os, "replace", boom)
+    c._save_contest_cache(str(path), {"v": 1, "rows": {}})        # logged, never raised
+    assert sorted(x.name for x in path.parent.iterdir()) == ["contest_cache.json"], \
+        "a failed swap leaves no temp file"
+
+
+# ---- the cold open: the saved list answers at once, a walk refreshes behind ---------------------
+
+def _row(i, active=True):
+    return {"id": str(i), "title": "C%s" % i, "slug": "c%s" % i, "type": "community", "active": active}
+
+
+class _GatedWalk:
+    """list_contests stand-in: counts walks, blocks each on an event, returns fresh rows."""
+    def __init__(self):
+        import threading
+        self.gate, self.lock = threading.Event(), threading.Lock()
+        self.n, self.live, self.peak = 0, 0, 0
+
+    def __call__(self, session, **kw):
+        with self.lock:
+            self.n += 1
+            self.live += 1
+            self.peak = max(self.peak, self.live)
+        try:
+            self.gate.wait(10)
+            return [_row(9, True)]
+        finally:
+            with self.lock:
+                self.live -= 1
+
+
+def _wait(pred, secs=5.0):
+    import time
+    end = time.time() + secs
+    while not pred() and time.time() < end:
+        time.sleep(0.01)
+    return pred()
+
+
+def _cold_client(tmp_path, monkeypatch, with_cache):
+    from moonglade.gallery import create_app
+    from tests.conftest import login_test_client
+    walk = _GatedWalk()
+    monkeypatch.setattr(c, "list_contests", walk)
+    contest_sync._contests_cache.clear()
+    contest_sync._contests_bg["running"] = False
+    if with_cache:
+        c._save_contest_cache(c.contest_cache_path(), {
+            "v": 1, "saved_at": 1234.5, "full_at": 1234.5,
+            "rows": {str(i): {"row": _row(i), "updated_at": "u", "page": 1, "seen_at": 1.0,
+                              "settled": True} for i in (1, 2)}})
+    return login_test_client(create_app(tmp_path)), walk
+
+
+def test_a_cold_open_with_a_saved_list_answers_stale_without_waiting_for_the_walk(
+        tmp_path, monkeypatch, pixai):
+    cli, walk = _cold_client(tmp_path, monkeypatch, True)
+    try:
+        d = cli.get("/api/contests").get_json()          # the walk is blocked: this must not wait
+        assert d["stale"] is True and d["saved_at"] == 1234.5
+        assert [x["id"] for x in d["contests"]] == ["2", "1"]
+        assert _wait(lambda: walk.n == 1)
+        # the title lookup of My entries does not wait either, and starts no second walk
+        assert cli.get("/api/contest/mine").status_code == 200
+        again = cli.get("/api/contests").get_json()
+        assert again["stale"] is True
+        assert walk.n == 1 and walk.peak == 1, "one walk at a time"
+    finally:
+        walk.gate.set()
+    assert _wait(lambda: "board" in contest_sync._contests_cache)
+    done = cli.get("/api/contests").get_json()
+    assert "stale" not in done and [x["id"] for x in done["contests"]] == ["9"]
+    assert _wait(lambda: not contest_sync._contests_bg["running"])
+
+
+def test_a_cold_open_with_no_saved_list_waits_for_the_walk(tmp_path, monkeypatch, pixai):
+    import threading
+    cli, walk = _cold_client(tmp_path, monkeypatch, False)
+    got = []
+    t = threading.Thread(target=lambda: got.append(cli.get("/api/contests").get_json()))
+    t.start()
+    try:
+        assert _wait(lambda: walk.n == 1)
+        t.join(0.4)
+        assert t.is_alive() and not got, "no cache file: it waits, as before"
+    finally:
+        walk.gate.set()
+    t.join(10)
+    assert got and "stale" not in got[0] and [x["id"] for x in got[0]["contests"]] == ["9"]
+
+
+def test_a_forced_refresh_still_waits_for_the_real_walk(tmp_path, monkeypatch, pixai):
+    import threading
+    cli, walk = _cold_client(tmp_path, monkeypatch, True)
+    got = []
+    t = threading.Thread(target=lambda: got.append(cli.get("/api/contests?refresh=1").get_json()))
+    t.start()
+    try:
+        assert _wait(lambda: walk.n == 1)
+        t.join(0.4)
+        assert t.is_alive() and not got, "refresh=1 does not answer from the saved list"
+    finally:
+        walk.gate.set()
+    t.join(10)
+    assert got and "stale" not in got[0] and [x["id"] for x in got[0]["contests"]] == ["9"]
+
+
+def test_an_expired_memo_answers_stale_from_its_own_rows(monkeypatch):
+    import time
+    walk = _GatedWalk()
+    monkeypatch.setattr(c, "list_contests", walk)
+    contest_sync._contests_bg["running"] = False
+    contest_sync._contests_cache["board"] = {
+        "at": time.time() - contest_sync.CONTESTS_TTL - 5, "rows": [_row(5)], "meta": {}}
+    try:
+        rows, saved = contest_sync.contest_board_swr(None, object())
+        assert rows == [_row(5)] and saved is not None
+        assert _wait(lambda: walk.n == 1)
+    finally:
+        walk.gate.set()
+    assert _wait(lambda: not contest_sync._contests_bg["running"])

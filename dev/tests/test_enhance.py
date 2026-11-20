@@ -6,11 +6,16 @@ for free). All pure/mocked -- no network, no spend (submit is always mocked)."""
 from pathlib import Path
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import gallery as moonglade_gallery
+from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
+from moonglade import models as models_mod
 
 from tests.conftest import login_client
 from moonglade import mirror as mirror_mod
 from moonglade import telemetry as telemetry_mod
+from moonglade import task_reads as task_reads_mod
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -24,10 +29,11 @@ def _enhance_client(tmp_path):
 
 def _arm_mirror(monkeypatch):
     """Mirror ARMED with a live session, and every spend/collect entry point mocked so nothing
-    reaches the network. submit_generation is mocked so no createGenerationTask is ever sent."""
+    reaches the network. submit_enhance (the create door's enhance, 3.22) is mocked so nothing
+    is ever sent, and PixAI's live config answers the enhance-type map."""
     calls = {"submit": 0, "last_params": None}
 
-    def _submit(session, params):
+    def _submit(session, params, **_kw):
         calls["submit"] += 1
         calls["last_params"] = params
         return "T-ENH-1"
@@ -35,8 +41,16 @@ def _arm_mirror(monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
     monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "submit_generation", _submit)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(gen_road_mod, "submit_enhance", _submit)
+    monkeypatch.setattr(core, "_cached_config", lambda key, **k: {"imageEnhancementPlugins": {
+        "handfix": {"workflowName": "mymusise/hand-fix"},
+        "face-detailer": {"workflowName": "kyo/face-detailer"},
+        "emotion": {"workflowName": "kyo/emotionlab"},
+        "background-remover": {"workflowName": "mymusise/39a2c67c"},
+        "image-to-lineart": {"workflowName": "pixai-official/image-to-lineart"},
+        "sketch-coloring": {"workflowName": "pixai-official/sketch-coloring-workflow"}}}
+                        if key == "constants" else None)
     return calls
 
 
@@ -95,11 +109,13 @@ def test_panelplugin_surface_restored_mirror_gated():
     Inverts the old "must stay gone" grep: the two literals a panelplugin submit cannot do
     without -- the model id and the workflow-id parameter -- must now be PRESENT in core, in the
     restored builder. The CLI flag that fed the API-key path stays gone (the Bridge is web-only)."""
-    assert hasattr(core, "build_panelplugin_parameters")
-    assert hasattr(core, "workflow_catalog")
+    assert hasattr(gen_params_mod, "build_panelplugin_parameters")
+    assert hasattr(models_mod, "workflow_catalog")
     core_src = (ROOT / "moonglade" / "backup.py").read_text(encoding="utf-8")
-    assert "pixai-panelplugin" in core_src, "the restored builder must name the panelplugin model"
-    assert "workflowId" in core_src, "the restored builder must address a panelplugin workflow"
+    # the builder lives in moonglade/gen_params.py since 3.22; the CLI parser stays in backup
+    builder_src = (ROOT / "moonglade" / "gen_params.py").read_text(encoding="utf-8")
+    assert "pixai-panelplugin" in builder_src, "the restored builder must name the panelplugin model"
+    assert "workflowId" in builder_src, "the restored builder must address a panelplugin workflow"
     # LEFT INTACT: the CLI --workflow-id flag stays deleted -- the Bridge is web-route-only, and a
     # bare CLI flag could submit a panelplugin task on the API key (the reaped-at-60-min bug).
     assert '"--workflow-id"' not in core_src
@@ -115,14 +131,14 @@ def test_enhance_refuses_when_mirror_off(tmp_path, monkeypatch, pixai):
     So a mirror-off request must 409 and submit NOTHING (no createGenerationTask, no charge)."""
     monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: False)          # mirror OFF
     submitted = {"n": 0}
-    monkeypatch.setattr(core, "submit_generation",
+    monkeypatch.setattr(gen_road_mod, "submit_generation",
                         lambda *a, **k: submitted.__setitem__("n", submitted["n"] + 1) or "X")
     # make_mirror_session must never even be consulted for a spend here, but stub it defensively.
     monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: None)
 
     cli = _enhance_client(tmp_path)
     r = cli.post("/api/enhance", json={"source": "srcABC",
-                                       "workflow_id": "1793447160259872021"})
+                                       "workflow_name": "pixai-official/image-to-lineart:0a59dd67"})
     assert r.status_code == 409
     assert "Mirror to PixAI must be armed" in (r.get_json() or {}).get("error", "")
     assert submitted["n"] == 0, "a mirror-off enhance reached the submit choke"
@@ -142,7 +158,7 @@ def test_enhance_telemetry_fires_only_on_terminal_success(tmp_path, monkeypatch)
 
     # Submit accepted -> task_id returned, but telemetry has NOT moved yet.
     r = cli.post("/api/enhance", json={"source": "srcABC",
-                                       "workflow_id": "1793447160259872021"})
+                                       "workflow_name": "pixai-official/image-to-lineart:0a59dd67"})
     assert r.status_code == 200 and r.get_json().get("task_id") == "T-ENH-1"
     assert calls["submit"] == 1
     telem = telemetry_mod.load_telemetry(tmp_path)
@@ -151,9 +167,9 @@ def test_enhance_telemetry_fires_only_on_terminal_success(tmp_path, monkeypatch)
     assert not telem["sets"].get("enhance_workflows")
 
     # Now the poll reports a terminal SUCCESS with output -> all three fire, exactly once.
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda session, tid: {"phase": "done", "paid_credit": 0})
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: {"media_ids": ["OUT1"], "saved": 1,
                                                   "is_video": False})
     d = cli.get("/api/task-status", query_string={"task_id": "T-ENH-1"}).get_json()
@@ -161,8 +177,8 @@ def test_enhance_telemetry_fires_only_on_terminal_success(tmp_path, monkeypatch)
     telem = telemetry_mod.load_telemetry(tmp_path)
     assert telem["counters"].get("enhances") == 1
     assert "enhance" in telem["sets"].get("tools", [])
-    # The identity ACTUALLY submitted (here the numeric id) is what counts toward Enhance Adept.
-    assert "1793447160259872021" in telem["sets"].get("enhance_workflows", [])
+    # The identity ACTUALLY submitted (the preset's workflow name) counts toward Enhance Adept.
+    assert "pixai-official/image-to-lineart:0a59dd67" in telem["sets"].get("enhance_workflows", [])
 
     # A second poll of the same finished task must NOT double-count (pending entry consumed).
     cli.get("/api/task-status", query_string={"task_id": "T-ENH-1"})
@@ -176,10 +192,10 @@ def test_enhance_telemetry_does_not_fire_on_dispatched_then_failed(tmp_path, mon
     _arm_mirror(monkeypatch)
     cli = _enhance_client(tmp_path)
     assert cli.post("/api/enhance", json={"source": "srcABC",
-                                          "workflow_name": "kyo/emotionlab"}
+                                          "workflow_name": "kyo/emotionlab", "emotion": "happy"}
                     ).get_json().get("task_id") == "T-ENH-1"
 
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda session, tid: {"phase": "failed", "status": "cancelled",
                                               "reason": "waiting timeout", "started": False})
     d = cli.get("/api/task-status", query_string={"task_id": "T-ENH-1"}).get_json()
@@ -198,9 +214,9 @@ def test_enhance_workflow_name_preset_counts_toward_adept(tmp_path, monkeypatch)
     cli = _enhance_client(tmp_path)
     cli.post("/api/enhance", json={"source": "srcABC",
                                    "workflow_name": "mymusise/39a2c67c:unet-0.1.3.2"})
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda session, tid: {"phase": "done", "paid_credit": 0})
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: {"media_ids": ["OUT1"], "saved": 1,
                                                   "is_video": False})
     cli.get("/api/task-status", query_string={"task_id": "T-ENH-1"})
@@ -217,10 +233,10 @@ def test_source_media_of_task_derives_enhance_lineage():
     TODO(bridge): re-verify this against a REAL captured COMPLETED panelplugin task from
     getTaskById -- PixAI may camelCase media_id -> mediaId on the persisted read-back. This
     fixture proves the derive branch, not the field name PixAI stores it under."""
-    params = core.build_panelplugin_parameters("SRC123", "1796053397111789217")
+    params = gen_params_mod.build_panelplugin_parameters("SRC123", "1796053397111789217")
     assert core.source_media_of_task({"parameters": params}) == ("SRC123", "enhance")
     # A workflowName preset carries the same inputs.image.media_id shape.
-    p2 = core.build_panelplugin_parameters("SRC456", workflow_name="mymusise/hand-fix")
+    p2 = gen_params_mod.build_panelplugin_parameters("SRC456", workflow_name="mymusise/hand-fix")
     assert core.source_media_of_task({"parameters": p2}) == ("SRC456", "enhance")
     # A plain txt2img (no inputs.image) is still an original -> (None, None), unchanged.
     assert core.source_media_of_task({"parameters": {"modelId": "m", "prompt": "x"}}) == (None, None)

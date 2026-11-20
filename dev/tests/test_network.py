@@ -1,14 +1,18 @@
 """Tests for network-layer functions with mocked requests.Session."""
 import json
+from pathlib import Path
 import pytest
 import requests
 
 from moonglade import backup as core
+from moonglade import gen_cli as gen_cli_mod
+from moonglade import models as models_mod
 from moonglade import paths
+from moonglade import task_reads as task_reads_mod
 from tests.fake_pixai import FakePixAI, operation_name
 
-TASK_DETAIL = operation_name(core._TASK_DETAIL_DOC)        # "TaskDetail"
-MODEL_VERSION = operation_name(core._MODEL_VERSION_DOC)    # "ModelVersion"
+TASK_DETAIL = operation_name(task_reads_mod._TASK_DETAIL_DOC)        # "TaskDetail"
+MODEL_VERSION = operation_name(models_mod._MODEL_VERSION_DOC)    # "ModelVersion"
 
 
 def _make_response(mocker, status_code=200, json_body=None, text="", raises=None):
@@ -191,7 +195,7 @@ class TestTaskDetailGql:
     def test_returns_task_on_success(self):
         task = {"id": "t1", "parameters": {"prompts": "full prompt"}, "outputs": {}}
         fake = FakePixAI().on(TASK_DETAIL, {"task": task})
-        assert core.task_detail_gql(fake, "t1")["id"] == "t1"
+        assert task_reads_mod.task_detail_gql(fake, "t1")["id"] == "t1"
 
     def test_returns_none_on_server_failure(self):
         """A read that fails at the seam (a 500 surfaces there as an HTTPError; a 401/GraphQL
@@ -199,14 +203,14 @@ class TestTaskDetailGql:
         downstream as a LOST GENERATION, and this path exists so an outage is not reported as
         'your images are gone'."""
         fake = FakePixAI().fail(TASK_DETAIL, requests.HTTPError("HTTP 500"))
-        assert core.task_detail_gql(fake, "t1") is None
+        assert task_reads_mod.task_detail_gql(fake, "t1") is None
 
     def test_an_answer_with_no_task_in_it_fails_soft(self, capsys):
         """There is no hash to be missing any more (the empty-hash raise went with it, #91).
         What replaces it at this edge: a body that is not GraphQL comes back from the ad-hoc
         POST as {}, and that is a failed read -- None, with the sentence -- not a task."""
         fake = FakePixAI().on(TASK_DETAIL, {})
-        assert core.task_detail_gql(fake, "t1") is None
+        assert task_reads_mod.task_detail_gql(fake, "t1") is None
         assert "could not read task t1 back from PixAI" in capsys.readouterr().out
 
 
@@ -215,11 +219,11 @@ class TestModelNameGql:
         mv = {"name": "v1", "model": {"title": "Tsubaki.2"}}
         fake = FakePixAI().on(MODEL_VERSION, {"generationModelVersion": mv})
         # A unique id keeps the module-level lookup cache from answering with a prior test's.
-        assert core.model_name_gql(fake, "unique_model_id_test_123") == "Tsubaki.2 v1"
+        assert models_mod.model_name_gql(fake, "unique_model_id_test_123") == "Tsubaki.2 v1"
 
     def test_returns_empty_for_empty_id(self):
-        assert core.model_name_gql(FakePixAI(), "") == ""
-        assert core.model_name_gql(FakePixAI(), None) == ""
+        assert models_mod.model_name_gql(FakePixAI(), "") == ""
+        assert models_mod.model_name_gql(FakePixAI(), None) == ""
 
 
 class TestResolveModelBaseId:
@@ -231,34 +235,34 @@ class TestResolveModelBaseId:
     def test_returns_the_base_models_own_id(self):
         mv = {"name": "v1", "model": {"id": "1982880136609467518", "title": "Tsubaki.2"}}
         fake = FakePixAI().on(MODEL_VERSION, {"generationModelVersion": mv})
-        assert core.resolve_model_base_id(fake, "1983308862240288769") == "1982880136609467518"
+        assert models_mod.resolve_model_base_id(fake, "1983308862240288769") == "1982880136609467518"
 
     def test_empty_id_short_circuits(self):
-        assert core.resolve_model_base_id(FakePixAI(), "") == ""
-        assert core.resolve_model_base_id(FakePixAI(), None) == ""
+        assert models_mod.resolve_model_base_id(FakePixAI(), "") == ""
+        assert models_mod.resolve_model_base_id(FakePixAI(), None) == ""
 
     def test_an_answer_that_is_not_graphql_fails_soft(self):
         """No hash to be unconfigured any more (#91). A body that is not GraphQL comes back
         from the ad-hoc POST as {}: no model in it, so ''."""
         fake = FakePixAI().on(MODEL_VERSION, {})
-        assert core.resolve_model_base_id(fake, "V1") == ""
+        assert models_mod.resolve_model_base_id(fake, "V1") == ""
 
     def test_graphql_error_fails_soft_not_raises(self):
         """A GraphQL error is raised at the seam (the ad-hoc POST turns an `errors` array into
         a PixAIError); this soft-restore path swallows it and returns '' rather than surfacing
         a wrong-id toast for a case that is not the user's mistake."""
         fake = FakePixAI().fail(MODEL_VERSION, core.PixAIError("GraphQL error: nope"))
-        assert core.resolve_model_base_id(fake, "V1") == ""
+        assert models_mod.resolve_model_base_id(fake, "V1") == ""
 
     def test_removed_model_fails_soft(self):
         """generationModelVersion: null (the model/version is gone) -- same '' answer as
         any other unresolvable case, never a crash."""
         fake = FakePixAI().on(MODEL_VERSION, {"generationModelVersion": None})
-        assert core.resolve_model_base_id(fake, "V1") == ""
+        assert models_mod.resolve_model_base_id(fake, "V1") == ""
 
     def test_network_exception_fails_soft(self):
         fake = FakePixAI().fail(MODEL_VERSION, RuntimeError("boom"))
-        assert core.resolve_model_base_id(fake, "V1") == ""
+        assert models_mod.resolve_model_base_id(fake, "V1") == ""
 
 
 class TestQuickCount:
@@ -715,7 +719,11 @@ def test_parallel_workers_download_new_skip_known(tmp_path, mocker):
     assert any("_a" in n for n in names) and any("_b" in n for n in names)  # both new fetched
 
 
-def test_update_and_workers_compose(tmp_path, mocker):
+def test_update_and_workers_compose(tmp_path_factory, mocker):
+    # The library lives under a folder whose PATH contains "old" (as macOS temp dirs do):
+    # the skipped-item check below must match the file name, never the whole path.
+    tmp_path = tmp_path_factory.mktemp("old_folder") / "lib"
+    tmp_path.mkdir()
     # --update (early-stop) + --workers (parallel) together: new items fetched
     # concurrently at the top, then stop once a page is fully on disk.
     core.mark_walk_end_reached(tmp_path)   # a settled library: the stop is armed
@@ -739,7 +747,8 @@ def test_update_and_workers_compose(tmp_path, mocker):
     names = [str(c.args[2]) for c in dl.call_args_list]
     assert gql.call_count == 2                                   # stopped before page 3
     assert any("new1" in n for n in names) and any("new2" in n for n in names)
-    assert not any("old" in n for n in names)                   # on-disk skipped
+    assert "old" in str(tmp_path)                                # the path check cannot regress
+    assert not any("old" in Path(n).name for n in names)        # on-disk skipped
 
 
 def test_extract_artwork_meta():
@@ -943,7 +952,7 @@ def test_sync_artworks_counts_failed_video_downloads_as_a_failure(tmp_path, mock
 
 
 def test_resolve_loras(mocker):
-    mocker.patch.object(core, "model_name_gql",
+    mocker.patch.object(models_mod, "model_name_gql",
                         side_effect=lambda s, vid: {"111": "DetailLora", "222": "222"}.get(str(vid), str(vid)))
     task = {"parameters": {"lora": {"111": 0.7, "222": 0.5}}}
     out = core.resolve_loras(mocker.MagicMock(), task)
@@ -976,7 +985,7 @@ def test_fix_models_resolves_numeric_names(tmp_path, mocker, pixai):
         {f: "" for f in CATALOG_FIELDS} | {"media_id": "m3", "filename": "c.png",
                                            "model_id": "111", "model_name": "Already Named"},
     ])
-    mocker.patch.object(core, "model_name_gql", return_value="Tsubaki.2 v1")
+    mocker.patch.object(models_mod, "model_name_gql", return_value="Tsubaki.2 v1")
 
     res = core.run_fix_models(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
 
@@ -1153,7 +1162,7 @@ def test_backfill_full_meta_recovers_historical_paid_credit(tmp_path, mocker, pi
         "t2": {"parameters": {"prompts": "ignored -- row already has meta"},
                "outputs": {}, "paidCredit": 0},
     }
-    mocker.patch.object(core, "task_detail_gql", side_effect=lambda s, tid: tasks[str(tid)])
+    mocker.patch.object(task_reads_mod, "task_detail_gql", side_effect=lambda s, tid, **kw: tasks[str(tid)])
 
     # Pass 1: plain backfill -> t1 fetched (missing meta) and gains cost; t2 untouched.
     core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
@@ -1201,7 +1210,7 @@ def test_live_capture_writes_every_field_the_backfill_would(monkeypatch, tmp_pat
                 if k in CATALOG_FIELDS and str(v or "").strip()}
     expected |= {"loras"}          # "" by design out of extract_full_meta; caller resolves it
     src = (pathlib.Path(__file__).resolve().parents[2]
-           / "moonglade" / "backup.py").read_text(encoding="utf-8")
+           / "moonglade" / "gen_cli.py").read_text(encoding="utf-8")      # since 3.22
     # _download_image_task is the SHARED downloader: collect_generation (the web
     # app + job tracker) goes through it, so it is the path that matters most.
     # Since issue #19 it hands the fields to build_catalog_row as KEYWORDS rather than
@@ -1226,14 +1235,14 @@ def test_a_freshly_captured_generation_gets_its_model_NAME_not_just_its_id(monke
     happened past. Reported from the owner's own gallery: "Model 1983308862240288769".
     """
     assert core._resolved_model_name(object(), {"model_name": "Reference Pro"}, "1") ==         "Reference Pro", "a chat task's locally-resolved label must win"
-    monkeypatch.setattr(core, "model_name_gql", lambda s, mid: "Tsubaki .2")
+    monkeypatch.setattr(models_mod, "model_name_gql", lambda s, mid: "Tsubaki .2")
     assert core._resolved_model_name(object(), {}, "1983308862240288769") == "Tsubaki .2"
     assert core._resolved_model_name(object(), {}, "") == "", "no id, nothing to resolve"
 
     def boom(s, mid):
         raise core.PixAIError("lookup down")
 
-    monkeypatch.setattr(core, "model_name_gql", boom)
+    monkeypatch.setattr(models_mod, "model_name_gql", boom)
     assert core._resolved_model_name(object(), {}, "1") == "", (
         "a failed lookup must cost the label, never the row")
 
@@ -1249,17 +1258,17 @@ def test_the_backfill_separates_errors_from_tasks_that_carried_no_prompt(tmp_pat
     save_catalog(tmp_path / "catalog.db",
                  [base | {"media_id": "m%d" % i, "task_id": "t%d" % i,
                           "filename": "%d.png" % i} for i in range(4)])
-    mocker.patch.object(core, "model_name_gql", side_effect=lambda s, m: "M")
+    mocker.patch.object(models_mod, "model_name_gql", side_effect=lambda s, m: "M")
     mocker.patch.object(core, "resolve_loras", side_effect=lambda s, t: "")
 
-    def detail(_s, tid):
+    def detail(_s, tid, **kw):
         if tid == "t0":
             raise core.PixAIError("HTTP 429 rate limited")
         if tid == "t1":
             return {"parameters": {"prompts": "real"}, "outputs": {}}
         return {"parameters": {}, "outputs": {}}          # fetched fine, no prompt
 
-    mocker.patch.object(core, "task_detail_gql", side_effect=detail)
+    mocker.patch.object(task_reads_mod, "task_detail_gql", side_effect=detail)
     core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
     out = capsys.readouterr().out
     assert "Why they failed:" in out and "429" in out, "the real error must be named"
@@ -1331,7 +1340,7 @@ def test_backfill_names_why_tasks_failed(tmp_path, mocker, capsys, pixai):
     save_catalog(tmp_path / "catalog.db",
                  [base | {"media_id": "m%d" % i, "task_id": "t%d" % i,
                           "filename": "%d.png" % i} for i in range(40)])
-    mocker.patch.object(core, "task_detail_gql",
+    mocker.patch.object(task_reads_mod, "task_detail_gql",
                         side_effect=core.PixAIError("HTTP 429 rate limited"))
     core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
                                                 workers=4))
@@ -1426,8 +1435,8 @@ def test_backfill_full_meta_refetches_rows_that_have_only_a_prompt(tmp_path, moc
     task = {"parameters": {"prompts": "night elf druid", "modelId": "4242"},
             "outputs": {"seed": 5, "detailParameters": {"samplingSteps": 25,
                                                         "samplingMethod": "Euler a"}}}
-    mocker.patch.object(core, "task_detail_gql", side_effect=lambda s, tid: task)
-    mocker.patch.object(core, "model_name_gql", side_effect=lambda s, mid: "WAI v17")
+    mocker.patch.object(task_reads_mod, "task_detail_gql", side_effect=lambda s, tid, **kw: task)
+    mocker.patch.object(models_mod, "model_name_gql", side_effect=lambda s, mid: "WAI v17")
     mocker.patch.object(core, "resolve_loras", side_effect=lambda s, t: "")
 
     core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
@@ -1438,8 +1447,8 @@ def test_backfill_full_meta_refetches_rows_that_have_only_a_prompt(tmp_path, moc
     # And it settles: a second pass has nothing left to do, so this does not become a row
     # that is re-fetched on every sweep forever.
     calls = []
-    mocker.patch.object(core, "task_detail_gql",
-                        side_effect=lambda s, tid: calls.append(tid) or task)
+    mocker.patch.object(task_reads_mod, "task_detail_gql",
+                        side_effect=lambda s, tid, **kw: calls.append(tid) or task)
     core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
     assert calls == [], "the filled row is being re-fetched on every run"
 
@@ -1591,3 +1600,32 @@ def test_resolve_server_settings_precedence_and_bonjour_defaults(tmp_path):
     assert g.resolve_server_settings(None, None)["host"] == "192.168.1.9"
     # an explicit --host is trusted as typed, even a hostname
     assert g.resolve_server_settings("myhost.lan", None)["host"] == "myhost.lan"
+
+
+class TestDownloadTempNameIsUniquePerProcessAndThread:
+    """3.22 review N2: two collectors on one account must not share one .part name."""
+    def test_part_name_carries_pid_and_thread_and_still_ends_in_part(
+            self, mock_session, mocker, tmp_path):
+        import os
+        import threading
+        seen = []
+
+        def chunks():
+            seen.extend(p.name for p in tmp_path.glob("*.part"))
+            yield b"abc"
+
+        resp = mocker.MagicMock()
+        resp.status_code = 200
+        resp.headers = {"Content-Type": "image/webp"}
+        resp.raise_for_status.return_value = None
+        resp.iter_content.return_value = chunks()
+        resp.__enter__ = mocker.Mock(return_value=resp)
+        resp.__exit__ = mocker.Mock(return_value=False)
+        mock_session.get.return_value = resp
+
+        status, path = core.download(mock_session, "http://x/img", tmp_path / "stem", retries=0)
+
+        assert status == "ok" and path.read_bytes() == b"abc"
+        assert len(seen) == 1 and seen[0].endswith(".part")
+        assert str(os.getpid()) in seen[0] and str(threading.get_ident()) in seen[0]
+        assert not list(tmp_path.glob("*.part"))

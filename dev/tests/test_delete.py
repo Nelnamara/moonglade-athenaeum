@@ -9,6 +9,7 @@ import pytest
 import requests
 
 from moonglade import backup as core
+from moonglade import cloud_delete as cloud_delete_mod
 
 
 def _post_response(mocker, status_code=200, json_body=None, text=""):
@@ -30,13 +31,13 @@ def _post_response(mocker, status_code=200, json_body=None, text=""):
 class TestDeleteTask:
     def test_success_returns_true_after_one_post(self, mock_session, mocker):
         mock_session.post.return_value = _post_response(mocker, json_body={"success": True})
-        assert core.delete_task(mock_session, "123") is True
+        assert cloud_delete_mod.delete_task(mock_session, "123") is True
         mock_session.post.assert_called_once()  # single attempt, no retry loop
         mock_session.get.assert_not_called()
 
     def test_the_wire_is_the_rest_route_with_an_empty_body(self, mock_session, mocker):
         mock_session.post.return_value = _post_response(mocker, json_body={"success": True})
-        core.delete_task(mock_session, "123")
+        cloud_delete_mod.delete_task(mock_session, "123")
         args, kwargs = mock_session.post.call_args
         assert args[0] == core.REST_API_BASE + "/task/123/delete"
         assert kwargs["json"] == {}
@@ -45,24 +46,24 @@ class TestDeleteTask:
     def test_a_success_false_is_not_a_delete(self, mock_session, mocker):
         mock_session.post.return_value = _post_response(mocker, json_body={"success": False})
         with pytest.raises(core.PixAIError, match="not deleted"):
-            core.delete_task(mock_session, "123")
+            cloud_delete_mod.delete_task(mock_session, "123")
         mock_session.post.assert_called_once()
 
     def test_401_raises(self, mock_session, mocker):
         mock_session.post.return_value = _post_response(mocker, status_code=401, json_body={})
         with pytest.raises(core.PixAIError, match="401"):
-            core.delete_task(mock_session, "123")
+            cloud_delete_mod.delete_task(mock_session, "123")
         mock_session.post.assert_called_once()
 
     def test_a_network_error_is_one_attempt(self, mock_session):
         mock_session.post.side_effect = requests.ConnectionError("boom")
         with pytest.raises(core.PixAIError, match="network error deleting task 123"):
-            core.delete_task(mock_session, "123")
+            cloud_delete_mod.delete_task(mock_session, "123")
         mock_session.post.assert_called_once()
 
     def test_a_bad_id_sends_nothing(self, mock_session):
         with pytest.raises(core.PixAIError, match="not a PixAI task id"):
-            core.delete_task(mock_session, "../graphql")
+            cloud_delete_mod.delete_task(mock_session, "../graphql")
         mock_session.post.assert_not_called()
 
 
@@ -85,7 +86,7 @@ class TestNoCommandLineDelete:
         import sys
         monkeypatch.setattr(core, "_make_session",
                             lambda *a, **k: (_ for _ in ()).throw(AssertionError("network!")))
-        monkeypatch.setattr(core, "delete_task",
+        monkeypatch.setattr(cloud_delete_mod, "delete_task",
                             lambda *a, **k: pytest.fail("a delete was sent"))
         monkeypatch.setattr(sys, "argv", ["prog", *argv])
         with pytest.raises(SystemExit) as exc:

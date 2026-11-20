@@ -13,11 +13,14 @@ import time
 
 import pytest
 
+from moonglade import cards as cards_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import paths as _paths
 from moonglade import backup as core
 from moonglade.gallery import create_app
 from moonglade.account_prefs import _account_key
 from tests.conftest import _TEST_PASSWORD, _TEST_USERNAME, _do_login, login_test_client
+from moonglade import task_reads as task_reads_mod
 
 MID = "733917871331404290"
 
@@ -35,13 +38,13 @@ def rig(tmp_path, monkeypatch):
         rec["uploads"].append(str(path))
         return "999000111222"
 
-    real_build = core.build_request
+    real_build = gen_road_mod.build_request
 
     def _build(payload, *a, **k):
         rec["built"].append(dict(payload))
         return real_build(payload, *a, **k)
 
-    def _submit_gen(session, params, on_send=None, exact=False):
+    def _submit_gen(session, params, on_send=None, exact=False, **_kw):
         if on_send:
             on_send(params)
         rec["submits"].append(dict(params))
@@ -52,9 +55,9 @@ def rig(tmp_path, monkeypatch):
 
     monkeypatch.setattr(core, "_make_session", _session)
     monkeypatch.setattr(core, "upload_media", _upload)
-    monkeypatch.setattr(core, "build_request", _build)
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "submit_generation", _submit_gen)
+    monkeypatch.setattr(gen_road_mod, "build_request", _build)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(gen_road_mod, "submit_generation", _submit_gen)
     app = create_app(tmp_path)
     cli = login_test_client(app)
     rec["cli"], rec["app"], rec["tmp"] = cli, app, tmp_path
@@ -290,7 +293,7 @@ def test_a_fallback_that_fails_before_its_send_is_not_sent(rig, monkeypatch):
     set, so the shot was journalled may_have_started and held for 6 h over a render that was
     never created."""
     rig["behaviour"] = lambda params: (_ for _ in ()).throw(core.graphql_error("invalid_media_id", code="BAD_REQUEST"))
-    real_build = core.build_request
+    real_build = gen_road_mod.build_request
     calls = []
 
     def _build_then_fail(payload, *a, **k):
@@ -298,12 +301,12 @@ def test_a_fallback_that_fails_before_its_send_is_not_sent(rig, monkeypatch):
         if len(calls) >= 2:
             raise ConnectionError("frame upload dropped")
         return real_build(payload, *a, **k)
-    monkeypatch.setattr(core, "build_request", _build_then_fail)
+    monkeypatch.setattr(gen_road_mod, "build_request", _build_then_fail)
     r = rig["cli"].post("/api/loom/generate", json=_body(submit_id="sN1")).get_json()
     assert len(rig["submits"]) == 1, "only the refused passthrough reached the mutation"
     assert r["state"] == "not_sent" and not r.get("unclear")
     rig["behaviour"] = None
-    monkeypatch.setattr(core, "build_request", real_build)
+    monkeypatch.setattr(gen_road_mod, "build_request", real_build)
     assert rig["cli"].post("/api/loom/generate", json=_body(submit_id="sN1b")).get_json()["task_id"], \
         "nothing exists, so the shot is free for the owner's next Render"
 
@@ -326,7 +329,7 @@ def test_a_free_quote_whose_card_is_gone_refuses_and_sends_nothing(rig):
 
 
 def test_a_free_quote_with_its_card_attached_sends(rig, monkeypatch):
-    monkeypatch.setattr(core, "_apply_kaisuuken",
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken",
                         lambda session, params, args: params.update(kaisuukenId="card-1"))
     r = rig["cli"].post("/api/loom/generate", json=_body(expect_free=True)).get_json()
     assert r["task_id"] and rig["submits"][0]["kaisuukenId"] == "card-1"
@@ -345,7 +348,7 @@ def test_the_journal_survives_a_recreated_app(rig):
 
 def test_task_status_marks_a_journalled_task_finished(rig, monkeypatch):
     rig["cli"].post("/api/loom/generate", json=_body(submit_id="s1"))
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda session, tid: {"phase": "failed", "status": "failed", "reason": ""})
     rig["cli"].get("/api/task-status?task_id=task-1")
     assert rig["cli"].get("/api/loom/submit-status?submit_id=s1").get_json().get("finished") is True
@@ -496,8 +499,10 @@ def test_old_journal_lines_are_pruned_on_first_read(tmp_path, monkeypatch):
 def test_the_new_routes_and_the_handoff_never_reach_a_submit(rig, monkeypatch):
     def _no(*a, **k):
         raise AssertionError("a spend function was called")
-    for name in ("submit", "submit_generation", "build_request", "gql_mutate"):
+    for name in ("gql_mutate",):
         monkeypatch.setattr(core, name, _no)
+    for name in ("submit", "submit_generation", "build_request"):  # in gen_road since 3.22
+        monkeypatch.setattr(gen_road_mod, name, _no)
     rig["cli"].get("/api/loom/submit-status?submit_id=s1")
     rig["cli"].post("/api/loom/submit-abandon", json={"csrf": _csrf(rig["cli"]), "submit_id": "s1"})
     r = rig["cli"].post("/api/loom/handoff", json={"video_media_id": MID, "trim_out": 3.0})
@@ -562,7 +567,8 @@ def test_the_handoff_source_names_no_spend_call():
     for fn in ("def loom_handoff", "def loom_submit_status", "def loom_submit_abandon"):
         i = src.index(fn)
         body = src[i:src.index("\n    @app.route", i)]
-        for bad in ("core.submit(", "submit_generation(", "build_request(", "gql_mutate(", "gql_adhoc("):
+        for bad in ("core.submit(", "_gen_road.submit(", "submit_generation(", "build_request(",
+                    "gql_mutate(", "gql_adhoc("):
             assert bad not in body, "%s reaches %s" % (fn, bad)
     ast.parse(src)
 

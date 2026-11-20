@@ -120,3 +120,17 @@ def test_tag_suggest_reports_error_not_raises(monkeypatch):
     monkeypatch.setattr(mb, "suggest_prompt", boom)
     out = m.tag_suggest("x9")
     assert out["suggestions"] == [] and "network down" in out["error"]
+
+
+def test_get_image_never_opens_an_svg(catalog, monkeypatch):
+    """3.22 S5 (DESIGN_3.22 5.4): the MCP server's image read skips an SVG -- a document, never
+    opened or drawn here -- and still answers its metadata."""
+    g.save_catalog(catalog, [_row(media_id="m9", filename="m9.svg", created_at="2026-05-01",
+                                  output_format="svg")])
+    (catalog.parent / "m9.svg").write_text("<svg xmlns='http://www.w3.org/2000/svg'/>",
+                                           encoding="utf-8")
+    monkeypatch.setattr(g, "find_image_file", lambda out, mid, fn: catalog.parent / fn)
+    import PIL.Image
+    monkeypatch.setattr(PIL.Image, "open", lambda *a, **k: pytest.fail("opened an SVG"))
+    out = m.get_image("m9")
+    assert isinstance(out, dict) and "SVG" in out["note"] and out["media_id"] == "m9"

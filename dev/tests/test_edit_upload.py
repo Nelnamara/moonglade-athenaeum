@@ -6,13 +6,18 @@ from types import SimpleNamespace
 import pytest
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
+from moonglade import gen_cli as gen_cli_mod
+from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import pixai_client as pixai_client_mod
+from moonglade import pricing as pricing_mod
 
 
 # ---- build_chat_edit_parameters (pinned to the captured Edit-Pro submit) ----
 
 def test_build_chat_edit_parameters_matches_real_submit():
-    p = core.build_chat_edit_parameters(
+    p = gen_params_mod.build_chat_edit_parameters(
         "Change it to nighttime moonlight", ["738939216332293270"],
         model_id="2006468692917575683",
         resolution="1K", aspect_ratio="3:4", quality="medium")
@@ -28,16 +33,16 @@ def test_build_chat_edit_parameters_matches_real_submit():
 
 
 def test_build_chat_edit_multi_reference():
-    p = core.build_chat_edit_parameters("blend", ["10", "20", "30"])
+    p = gen_params_mod.build_chat_edit_parameters("blend", ["10", "20", "30"])
     chat = p["chat"]
     assert chat["mediaId"] == "10"                 # first is the primary
     assert chat["mediaIds"] == ["10", "20", "30"]  # array => multi-image reference
-    assert chat["modelId"] == core.EDIT_PRO_MODEL_ID
+    assert chat["modelId"] == gen_params_mod.EDIT_PRO_MODEL_ID
 
 
 def test_build_chat_edit_requires_a_source():
     with pytest.raises(core.PixAIError):
-        core.build_chat_edit_parameters("x", [])
+        gen_params_mod.build_chat_edit_parameters("x", [])
 
 
 # ---- _is_local_source: file => upload; numeric media_id => passthrough ----
@@ -45,9 +50,9 @@ def test_build_chat_edit_requires_a_source():
 def test_is_local_source_distinguishes_file_from_media_id(tmp_path):
     f = tmp_path / "pic.png"
     f.write_bytes(b"\x89PNG\r\n")
-    assert core._is_local_source(str(f)) is True
-    assert core._is_local_source("738939216332293270") is False
-    assert core._is_local_source("") is False
+    assert gen_params_mod._is_local_source(str(f)) is True
+    assert gen_params_mod._is_local_source("738939216332293270") is False
+    assert gen_params_mod._is_local_source("") is False
 
 
 # ---- upload_media: the 3-step S3 handshake ----
@@ -109,7 +114,7 @@ def test_edit_previews_without_confirm(tmp_path, monkeypatch):
         raise AssertionError("network/upload must not run in preview")
     monkeypatch.setattr(core, "gql_adhoc", boom)
     monkeypatch.setattr(core, "upload_media", boom)
-    res = core.run_edit_image(_edit_args(tmp_path))
+    res = gen_cli_mod.run_edit_image(_edit_args(tmp_path))
     assert res == {"submitted": False}
 
 
@@ -118,14 +123,48 @@ def test_edit_preview_shows_local_files_without_uploading(tmp_path, monkeypatch,
     f.write_bytes(b"x")
     monkeypatch.setattr(core, "upload_media",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("no upload in preview")))
-    core.run_edit_image(_edit_args(tmp_path, edit_src=[str(f)]))
+    gen_cli_mod.run_edit_image(_edit_args(tmp_path, edit_src=[str(f)]))
     out = capsys.readouterr().out
     assert "<upload:" in out and "PREVIEW" in out
 
 
 def test_edit_requires_a_source(tmp_path):
     with pytest.raises(core.PixAIError):
-        core.run_edit_image(_edit_args(tmp_path, edit_src=[], params_json="", task_id=""))
+        gen_cli_mod.run_edit_image(_edit_args(tmp_path, edit_src=[], params_json="", task_id=""))
+
+
+@pytest.mark.parametrize("confirm", [False, True])
+def test_an_unknown_edit_model_id_is_refused_before_anything_moves(tmp_path, monkeypatch,
+                                                                    confirm):
+    """3.22 review N1: `--edit-model <id>` with an id no edit model has is refused, preview and
+    --confirm alike, before a session, an upload or a price read, naming the known models."""
+    def boom(*a, **k):
+        raise AssertionError("nothing may move for an unknown edit model")
+    monkeypatch.setattr(core, "_make_session", boom)
+    monkeypatch.setattr(core, "upload_media", boom)
+    with pytest.raises(core.LocalRefusal) as ei:
+        gen_cli_mod.run_edit_image(_edit_args(tmp_path, edit_model="1234567890", confirm=confirm))
+    msg = str(ei.value)
+    assert "1234567890" in msg and "nothing was sent" in msg
+    for spec in gen_params_mod.EDIT_MODELS.values():
+        assert spec["label"] in msg and spec["model_id"] in msg
+
+
+@pytest.mark.parametrize("quote, cost", [(8000, "~8,000 credits"),
+                                         (None, "couldn't verify the cost")])
+def test_edit_preview_first_line_names_the_default_model_and_its_price(
+        tmp_path, monkeypatch, capsys, quote, cost):
+    """3.22 review: with no --edit-model the preview's FIRST line says the default (the
+    gallery Edit tab's own, Edit Pro) is used, with its quote; a named model is named."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, p: quote)
+    gen_cli_mod.run_edit_image(_edit_args(tmp_path, no_card=True))
+    first = capsys.readouterr().out.splitlines()[0]
+    assert first == "No --edit-model given: using Edit Pro ({}), {}.".format(
+        gen_params_mod.EDIT_PRO_MODEL_ID, cost)
+    gen_cli_mod.run_edit_image(_edit_args(tmp_path, no_card=True, edit_model=REF_PRO))
+    assert capsys.readouterr().out.splitlines()[0] == "Edit model: Reference Pro ({}).".format(
+        REF_PRO)
 
 
 def test_edit_config_from_args_clamps_to_model_caps(tmp_path):
@@ -139,7 +178,7 @@ def test_edit_config_from_args_clamps_to_model_caps(tmp_path):
     fails -- cfg comes back with the raw, unclamped 1K/medium instead."""
     args = _edit_args(tmp_path, edit_model="1948514378441961474",
                       edit_resolution="1K", edit_aspect="21:9", edit_quality="medium")
-    cfg = core._edit_config_from_args(args)
+    cfg = gen_params_mod._edit_config_from_args(args)
     assert cfg["resolution"] == "2K"
     assert cfg["quality"] == ""
     assert cfg["aspect_ratio"] == "21:9"
@@ -150,7 +189,7 @@ def test_edit_preview_shows_the_clamped_config_not_the_raw_defaults(tmp_path, ca
     actually submit) reflects the clamped values, not the CLI's raw defaults."""
     args = _edit_args(tmp_path, edit_model="1948514378441961474",
                       edit_resolution="1K", edit_aspect="21:9", edit_quality="medium")
-    core.run_edit_image(args)
+    gen_cli_mod.run_edit_image(args)
     out = capsys.readouterr().out
     assert '"resolution": "2K"' in out
     assert '"quality"' not in out   # reference-pro exposes no quality knob at all
@@ -165,7 +204,7 @@ def test_auto_aspect_sends_no_aspect_ratio():
     """Reference Pro publishes no default aspect, so PixAI's own Edit sends NO aspectRatio
     (the owner's two Reference Pro edits on the wire: modelConfig {resolution: "2K"}, nothing
     else). "auto" is that choice; it must leave the key out entirely, never send "auto"."""
-    p = core.build_chat_edit_parameters("x", ["10"], model_id=REF_PRO, resolution="2K",
+    p = gen_params_mod.build_chat_edit_parameters("x", ["10"], model_id=REF_PRO, resolution="2K",
                                         aspect_ratio="auto", quality="")
     assert p["chat"]["modelConfig"] == {"resolution": "2K"}
 
@@ -174,41 +213,41 @@ def test_an_unset_aspect_takes_the_models_own_default():
     """No aspect picked -> the model's table default, not a fixed 3:4: Reference Pro goes
     out as Auto (no aspectRatio), Edit Pro as 3:5. A model the table does not know keeps
     the pre-table 3:4 (its behaviour without one is unobserved)."""
-    ref = core.build_chat_edit_parameters("x", ["10"], model_id=REF_PRO, resolution="2K",
+    ref = gen_params_mod.build_chat_edit_parameters("x", ["10"], model_id=REF_PRO, resolution="2K",
                                           quality="")
     assert "aspectRatio" not in ref["chat"]["modelConfig"]
-    ep = core.build_chat_edit_parameters("x", ["10"])
+    ep = gen_params_mod.build_chat_edit_parameters("x", ["10"])
     assert ep["chat"]["modelConfig"]["aspectRatio"] == "3:5"
-    other = core.build_chat_edit_parameters("x", ["10"], model_id="999")
+    other = gen_params_mod.build_chat_edit_parameters("x", ["10"], model_id="999")
     assert other["chat"]["modelConfig"]["aspectRatio"] == "3:4"
 
 
 def test_clamp_keeps_auto_only_where_the_model_offers_it():
-    assert core.clamp_edit_config(REF_PRO, "2K", "", "auto") == ("2K", "", "auto")
+    assert gen_params_mod.clamp_edit_config(REF_PRO, "2K", "", "auto") == ("2K", "", "auto")
     # Edit Pro publishes a default, so Auto is not one of its values: it snaps to 3:5,
     # the same "leaving Auto takes the model's default" rule PixAI's own control follows.
-    assert core.clamp_edit_config(core.EDIT_PRO_MODEL_ID, "1K", "medium", "auto") == \
+    assert gen_params_mod.clamp_edit_config(gen_params_mod.EDIT_PRO_MODEL_ID, "1K", "medium", "auto") == \
         ("1K", "medium", "3:5")
     for a in ("3:5", "5:3"):              # Edit Pro's two new ratios are legal now
-        assert core.clamp_edit_config(core.EDIT_PRO_MODEL_ID, "1K", "medium", a)[2] == a
+        assert gen_params_mod.clamp_edit_config(gen_params_mod.EDIT_PRO_MODEL_ID, "1K", "medium", a)[2] == a
 
 
 def test_cli_with_no_edit_aspect_takes_the_models_default(tmp_path):
     """--edit-aspect defaults to "" now, so the chosen model decides."""
-    cfg = core._edit_config_from_args(_edit_args(tmp_path, edit_model=REF_PRO, edit_aspect=""))
+    cfg = gen_params_mod._edit_config_from_args(_edit_args(tmp_path, edit_model=REF_PRO, edit_aspect=""))
     assert cfg["aspect_ratio"] == "auto"
-    cfg = core._edit_config_from_args(_edit_args(tmp_path, edit_model="", edit_aspect=""))
+    cfg = gen_params_mod._edit_config_from_args(_edit_args(tmp_path, edit_model="", edit_aspect=""))
     assert cfg["aspect_ratio"] == "3:5"
     import inspect
     assert 'dest="edit_aspect", default=""' in inspect.getsource(core.main)
 
 
 def test_web_payload_with_no_aspect_takes_the_models_default():
-    rs = core.RequestResolver()
-    ref = core._edit_parameters_from_payload(
+    rs = gen_road_mod.RequestResolver()
+    ref = gen_road_mod._edit_parameters_from_payload(
         {"source": "55", "instruction": "x", "edit_model": "reference-pro"}, "", rs)
     assert ref["chat"]["modelConfig"] == {"resolution": "2K"}
-    ep = core._edit_parameters_from_payload(
+    ep = gen_road_mod._edit_parameters_from_payload(
         {"source": "55", "instruction": "x", "edit_model": "edit-pro"}, "", rs)
     assert ep["chat"]["modelConfig"]["aspectRatio"] == "3:5"
 
@@ -223,9 +262,9 @@ def test_the_priced_auto_edit_is_the_submitted_one(tmp_path, monkeypatch):
                                                 media_id="1", filename="a_1.png")])
     seen = {}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(priced=params) or 8000)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "submit",
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(priced=params) or 8000)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(gen_road_mod, "submit",
                         lambda s, req, **k: seen.update(sent=req.parameters) or {"task_id": "t1"})
     cli = login_test_client(create_app(tmp_path))
     body = {"mode": "edit", "edit_model": "reference-pro", "source": "55",
@@ -280,8 +319,8 @@ def test_edit_caps_and_edit_models_agree():
     label a collected edit is catalogued under is EDIT_MODELS' -- a row named one thing on the
     card and another on the picture it made would leave the owner guessing which version ran."""
     js = _js_edit_caps()
-    assert list(js) == list(core.EDIT_MODELS)
-    for key, spec in core.EDIT_MODELS.items():
+    assert list(js) == list(gen_params_mod.EDIT_MODELS)
+    for key, spec in gen_params_mod.EDIT_MODELS.items():
         aspects, dflt, extra = js[key]
         assert aspects == spec["aspects"], key
         assert dflt == spec["default"], key
@@ -298,14 +337,14 @@ def test_auto_on_a_model_outside_the_table_fails_open_to_3_4():
     """What a model outside EDIT_MODELS does with no aspectRatio is unobserved, so "auto" --
     or no aspect -- is the pre-table 3:4 there, in the clamp AND in the builder; any other
     aspect still passes through unchanged."""
-    assert core.clamp_edit_config("999", "1K", "medium", "auto") == ("1K", "medium", "3:4")
-    assert core.clamp_edit_config("999", "1K", "medium", "")[2] == "3:4"
-    assert core.clamp_edit_config("999", "1K", "medium", "16:9")[2] == "16:9"
+    assert gen_params_mod.clamp_edit_config("999", "1K", "medium", "auto") == ("1K", "medium", "3:4")
+    assert gen_params_mod.clamp_edit_config("999", "1K", "medium", "")[2] == "3:4"
+    assert gen_params_mod.clamp_edit_config("999", "1K", "medium", "16:9")[2] == "16:9"
     for mid in ("999", EDIT_V3):
-        p = core.build_chat_edit_parameters("x", ["10"], model_id=mid, aspect_ratio="auto")
+        p = gen_params_mod.build_chat_edit_parameters("x", ["10"], model_id=mid, aspect_ratio="auto")
         assert p["chat"]["modelConfig"]["aspectRatio"] == "3:4", mid
     # and on Edit Pro, which publishes a default, "auto" is its default -- never "no aspect"
-    ep = core.build_chat_edit_parameters("x", ["10"], aspect_ratio="auto")
+    ep = gen_params_mod.build_chat_edit_parameters("x", ["10"], aspect_ratio="auto")
     assert ep["chat"]["modelConfig"]["aspectRatio"] == "3:5"
 
 
@@ -314,8 +353,8 @@ def test_a_preset_on_an_off_table_model_from_an_auto_card_sends_3_4():
     card is sitting on Reference Pro's default, Auto. The preset's model does not list Auto,
     so the submit must carry the old 3:4 -- not an unobserved no-aspect shape."""
     pre = {"prompt": "<preset prompt>", "scene_id": "character-card", "model_id": EDIT_V3}
-    rs = core.RequestResolver(preset=lambda user, name: pre if name == "cc" else None)
-    p = core._edit_parameters_from_payload(
+    rs = gen_road_mod.RequestResolver(preset=lambda user, name: pre if name == "cc" else None)
+    p = gen_road_mod._edit_parameters_from_payload(
         {"source": "55", "preset": "cc", "edit_model": "reference-pro", "aspect": "auto",
          "resolution": "2K", "quality": ""}, "", rs)
     assert p["chat"]["modelId"] == EDIT_V3
@@ -329,21 +368,21 @@ EDIT_V4 = "1983993578828959744"      # its version row's extra.chatEditing, read
 
 
 def test_edit_v4_is_first_with_its_own_record():
-    assert list(core.EDIT_MODELS)[0] == "edit-v4"
-    spec = core.EDIT_MODELS["edit-v4"]
-    assert core.edit_model_id("edit-v4") == EDIT_V4
+    assert list(gen_params_mod.EDIT_MODELS)[0] == "edit-v4"
+    spec = gen_params_mod.EDIT_MODELS["edit-v4"]
+    assert gen_params_mod.edit_model_id("edit-v4") == EDIT_V4
     assert spec["max_refs"] == 10 and spec["resolutions"] == ["1K", "2K", "4K"]
     assert spec["qualities"] == [] and spec["default"] == {"resolution": "1K", "quality": "",
                                                           "aspect": "auto"}
     assert spec["aspects"][0] == "auto" and spec["aspects"][-4:] == ["1:4", "4:1", "1:8", "8:1"]
-    assert core.DEFAULT_EDIT_MODEL == "edit-pro"          # the card's default is unchanged
+    assert gen_params_mod.DEFAULT_EDIT_MODEL == "edit-pro"          # the card's default is unchanged
 
 
 def test_edit_v4_is_labelled_as_pixai_labels_it():
     """The owner's walk, 2026-10-03: it is PixAI's own "PixAI Edit (v4.0)", the latest version of
     PixAI's general Edit model -- not Edit Pro, not Tsubaki.3 -- and it reads exactly that on the
     card and on the picture it makes."""
-    assert core.EDIT_MODELS["edit-v4"]["label"] == "PixAI Edit (v4.0)"
+    assert gen_params_mod.EDIT_MODELS["edit-v4"]["label"] == "PixAI Edit (v4.0)"
     meta = core.extract_full_meta({"parameters": {"chat": {
         "prompts": "x", "mediaId": "1", "mediaIds": ["1"], "modelId": EDIT_V4,
         "modelConfig": {"resolution": "1K"}}}, "outputs": {}})
@@ -351,23 +390,23 @@ def test_edit_v4_is_labelled_as_pixai_labels_it():
 
 
 def test_edit_v4_clamps_to_what_it_takes():
-    assert core.clamp_edit_config(EDIT_V4, "4K", "medium", "8:1") == ("4K", "", "8:1")
-    assert core.clamp_edit_config(EDIT_V4, "8K", "high", "3:5") == ("1K", "", "auto")
+    assert gen_params_mod.clamp_edit_config(EDIT_V4, "4K", "medium", "8:1") == ("4K", "", "8:1")
+    assert gen_params_mod.clamp_edit_config(EDIT_V4, "8K", "high", "3:5") == ("1K", "", "auto")
     # Edit Pro still has no 4K; Reference Pro no 1:8
-    assert core.clamp_edit_config(core.EDIT_PRO_MODEL_ID, "4K", "medium", "3:5")[0] == "1K"
-    assert core.clamp_edit_config("1948514378441961474", "2K", "", "1:8")[2] == "auto"
+    assert gen_params_mod.clamp_edit_config(gen_params_mod.EDIT_PRO_MODEL_ID, "4K", "medium", "3:5")[0] == "1K"
+    assert gen_params_mod.clamp_edit_config("1948514378441961474", "2K", "", "1:8")[2] == "auto"
 
 
 def test_edit_v4_sends_ten_inputs_no_quality_and_no_aspect_on_auto():
-    rs = core.RequestResolver()
-    p = core._edit_parameters_from_payload(
+    rs = gen_road_mod.RequestResolver()
+    p = gen_road_mod._edit_parameters_from_payload(
         {"source": "1", "sources": [str(i) for i in range(1, 13)], "instruction": "x",
          "edit_model": "edit-v4", "resolution": "4K", "quality": "", "aspect": "auto"}, "", rs)
     chat = p["chat"]
     assert chat["modelId"] == EDIT_V4
     assert chat["mediaIds"] == [str(i) for i in range(1, 11)] and chat["mediaId"] == "1"
     assert chat["modelConfig"] == {"resolution": "4K"}
-    p = core._edit_parameters_from_payload(
+    p = gen_road_mod._edit_parameters_from_payload(
         {"source": "1", "instruction": "x", "edit_model": "edit-v4", "resolution": "2K",
          "quality": "medium", "aspect": "1:8"}, "", rs)
     assert p["chat"]["modelConfig"] == {"resolution": "2K", "aspectRatio": "1:8"}
@@ -380,9 +419,9 @@ def test_the_priced_v4_edit_is_the_submitted_one(tmp_path, monkeypatch):
                                                 media_id="1", filename="a_1.png")])
     seen = {}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(priced=params) or 9000)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "submit",
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(priced=params) or 9000)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(gen_road_mod, "submit",
                         lambda s, req, **k: seen.update(sent=req.parameters) or {"task_id": "t1"})
     cli = login_test_client(create_app(tmp_path))
     body = {"mode": "edit", "edit_model": "edit-v4", "source": "55",
@@ -407,8 +446,8 @@ EDIT_PRO_V2_ASPECTS = ["16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5",
 
 
 def test_edit_pro_v2_is_its_own_row_beside_v1():
-    spec = core.EDIT_MODELS["edit-pro-v2"]
-    assert core.edit_model_id("edit-pro-v2") == EDIT_PRO_V2
+    spec = gen_params_mod.EDIT_MODELS["edit-pro-v2"]
+    assert gen_params_mod.edit_model_id("edit-pro-v2") == EDIT_PRO_V2
     assert spec["label"] == "Edit Pro (v2.0)"          # PixAI's "PixAI Edit Pro (v2.0)"
     assert spec["max_refs"] == 10
     assert spec["aspects"] == EDIT_PRO_V2_ASPECTS      # v1.0's 13 minus 1:3 and 3:1
@@ -416,38 +455,38 @@ def test_edit_pro_v2_is_its_own_row_beside_v1():
     assert spec["qualities"] == ["low", "medium", "high"]
     assert spec["default"] == {"resolution": "1K", "quality": "medium", "aspect": "3:5"}
     # offered BESIDE v1.0, which keeps its id, its cap and its place as the card's default
-    keys = list(core.EDIT_MODELS)
+    keys = list(gen_params_mod.EDIT_MODELS)
     assert keys.index("edit-pro-v2") == keys.index("edit-pro") + 1
-    assert core.EDIT_PRO_MODEL_ID == EDIT_PRO_V1
-    assert core.edit_model_id("edit-pro") == EDIT_PRO_V1
-    assert core.EDIT_MODELS["edit-pro"]["max_refs"] == 4
-    assert core.DEFAULT_EDIT_MODEL == "edit-pro"
+    assert gen_params_mod.EDIT_PRO_MODEL_ID == EDIT_PRO_V1
+    assert gen_params_mod.edit_model_id("edit-pro") == EDIT_PRO_V1
+    assert gen_params_mod.EDIT_MODELS["edit-pro"]["max_refs"] == 4
+    assert gen_params_mod.DEFAULT_EDIT_MODEL == "edit-pro"
 
 
 def test_edit_pro_v2_clamps_to_its_own_aspects():
     # V2.0 dropped 1:3 and 3:1: they snap to its 3:5 default; v1.0 still takes them
-    assert core.clamp_edit_config(EDIT_PRO_V2, "1K", "medium", "1:3") == ("1K", "medium", "3:5")
-    assert core.clamp_edit_config(EDIT_PRO_V2, "2K", "high", "5:3") == ("2K", "high", "5:3")
-    assert core.clamp_edit_config(EDIT_PRO_V2, "4K", "xhigh", "auto") == ("1K", "medium", "3:5")
-    assert core.clamp_edit_config(EDIT_PRO_V1, "1K", "medium", "1:3")[2] == "1:3"
+    assert gen_params_mod.clamp_edit_config(EDIT_PRO_V2, "1K", "medium", "1:3") == ("1K", "medium", "3:5")
+    assert gen_params_mod.clamp_edit_config(EDIT_PRO_V2, "2K", "high", "5:3") == ("2K", "high", "5:3")
+    assert gen_params_mod.clamp_edit_config(EDIT_PRO_V2, "4K", "xhigh", "auto") == ("1K", "medium", "3:5")
+    assert gen_params_mod.clamp_edit_config(EDIT_PRO_V1, "1K", "medium", "1:3")[2] == "1:3"
 
 
 def test_edit_pro_v2_payload_sends_its_model_and_up_to_ten_refs():
     """The submit shape is v1.0's chat block with V2.0's modelId; the slice follows the ROW's
     own max_refs -- ten on V2.0, still four on v1.0 -- never one fixed number."""
-    rs = core.RequestResolver()
+    rs = gen_road_mod.RequestResolver()
     srcs = [str(i) for i in range(1, 13)]
-    p = core._edit_parameters_from_payload(
+    p = gen_road_mod._edit_parameters_from_payload(
         {"source": "1", "sources": srcs, "instruction": "x", "edit_model": "edit-pro-v2",
          "resolution": "2K", "quality": "high", "aspect": "16:9"}, "", rs)
     assert p == {"chat": {
         "prompts": "x", "mediaId": "1", "mediaIds": srcs[:10], "modelId": EDIT_PRO_V2,
         "modelConfig": {"resolution": "2K", "aspectRatio": "16:9", "quality": "high"}}}
-    v1 = core._edit_parameters_from_payload(
+    v1 = gen_road_mod._edit_parameters_from_payload(
         {"source": "1", "sources": srcs, "instruction": "x", "edit_model": "edit-pro"}, "", rs)
     assert v1["chat"]["modelId"] == EDIT_PRO_V1 and v1["chat"]["mediaIds"] == srcs[:4]
     # no aspect picked -> V2.0's own 3:5 default
-    p = core._edit_parameters_from_payload(
+    p = gen_road_mod._edit_parameters_from_payload(
         {"source": "1", "instruction": "x", "edit_model": "edit-pro-v2"}, "", rs)
     assert p["chat"]["modelConfig"] == {"resolution": "1K", "aspectRatio": "3:5",
                                         "quality": "medium"}
@@ -467,9 +506,9 @@ def test_the_priced_edit_pro_v2_edit_is_the_submitted_one(tmp_path, monkeypatch)
                                                 media_id="1", filename="a_1.png")])
     seen = {}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(priced=params) or 27800)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "submit",
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(priced=params) or 27800)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(gen_road_mod, "submit",
                         lambda s, req, **k: seen.update(sent=req.parameters) or {"task_id": "t1"})
     cli = login_test_client(create_app(tmp_path))
     srcs = [str(55 + i) for i in range(11)]

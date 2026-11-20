@@ -6,7 +6,10 @@ import tempfile
 import types
 
 from moonglade import backup as core
+from moonglade import gen_cli as gen_cli_mod
+from moonglade import models as models_mod
 from moonglade.gallery import CATALOG_FIELDS, save_catalog, load_catalog
+from moonglade import task_reads as task_reads_mod
 
 
 _SURFACE = ["inference_profile", "quality_tag", "prompt_helper", "control_nets", "lora_parameters",
@@ -120,6 +123,8 @@ def test_every_capture_path_builds_its_row_through_the_shared_builder():
     copy of its pre-refactor output."""
     import pathlib
     src = pathlib.Path(core.__file__).read_text(encoding="utf-8")
+    # the CLI runners and the task downloaders are in moonglade/gen_cli.py since 3.22
+    src += "\n" + pathlib.Path(gen_cli_mod.__file__).read_text(encoding="utf-8")
 
     builder = _function_body(src, "def build_catalog_row")
     assert "for k in _TASK_ROW_FIELDS" in builder, \
@@ -185,14 +190,14 @@ def test_with_surface_gate_readmits_pre18_rows(monkeypatch, tmp_path, pixai):
 
     fetched = []
 
-    def detail(session, tid):
+    def detail(session, tid, **kw):
         fetched.append(tid)
         return {"parameters": {"modelId": "V1", "inferenceProfile": "lite"},
                 "outputs": {}, "updatedAt": "2026-08-01T00:00:00Z",
                 "moderationAction": {"promptsModerationAction": "PASS"}}
 
-    monkeypatch.setattr(core, "task_detail_gql", detail)
-    monkeypatch.setattr(core, "model_name_gql", lambda s, mid: "My Model")
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", detail)
+    monkeypatch.setattr(models_mod, "model_name_gql", lambda s, mid: "My Model")
     monkeypatch.setattr(core, "resolve_loras", lambda s, t: "")
     monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, t: fm)
 
@@ -234,12 +239,12 @@ def test_backfill_checkpoints_incrementally_not_only_at_the_end(monkeypatch, tmp
         rows.append(r)
     save_catalog(db, rows)
 
-    def detail(session, tid):
+    def detail(session, tid, **kw):
         return {"parameters": {"modelId": "V1", "inferenceProfile": "lite", "prompts": "a cat"},
                 "outputs": {}, "updatedAt": "2026-08-1" + tid[-1]}
 
-    monkeypatch.setattr(core, "task_detail_gql", detail)
-    monkeypatch.setattr(core, "model_name_gql", lambda s, mid: "M")
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", detail)
+    monkeypatch.setattr(models_mod, "model_name_gql", lambda s, mid: "M")
     monkeypatch.setattr(core, "resolve_loras", lambda s, t: "")
     monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, t: fm)
     monkeypatch.setattr(core, "_BACKFILL_CHECKPOINT_TASKS", 1)     # flush after every task
@@ -274,7 +279,7 @@ def test_run_generate_reads_sampling_fields_from_the_model_not_the_submit():
     to preempt this for `steps` and leak the submitted value for `cfg`; source-level because the
     run_generate builder does real downloads no unit test drives."""
     import pathlib
-    src = pathlib.Path(core.__file__).read_text(encoding="utf-8")
+    src = pathlib.Path(gen_cli_mod.__file__).read_text(encoding="utf-8")    # since 3.22
     region = src[src.index("def run_generate("):src.index("def _download_video_task(")]
     for f in ("steps", "cfg_scale", "sampler"):
         assert '{0}=fm.get("{0}"'.format(f) in region, \

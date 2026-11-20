@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from moonglade import backup as core
+from moonglade import gen_cli as gen_cli_mod
 from moonglade import paths as moonglade_paths
 from moonglade import paths
 
@@ -518,7 +519,7 @@ def test_generate_preview_spends_nothing(tmp_path):
     a = SimpleNamespace(prompt="elf", negative="", model="", width=512, height=512,
                         steps=25, cfg=7.0, count=1, seed=None, params_json="",
                         confirm=False, out=str(tmp_path))
-    assert core.run_generate(a) == {"submitted": False}
+    assert gen_cli_mod.run_generate(a) == {"submitted": False}
 
 
 # ---------------------------------------------------------------------------

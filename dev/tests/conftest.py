@@ -16,9 +16,12 @@ from moonglade import branding as branding_mod
 from moonglade import container as _mc
 from moonglade import contest_sync as contest_sync_mod
 from moonglade import gallery
+from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import health as health_mod
 from moonglade import migrate as moonglade_migrate
 from moonglade import mirror as mirror_mod
+from moonglade import models as models_mod
 from moonglade import paths as moonglade_paths
 from moonglade import telemetry as telemetry_mod
 
@@ -980,9 +983,9 @@ def _clear_profile_cache():
     (keyed by version_id, with a TTL) so the submit/price gate avoids a network GET on every
     /api/price keystroke. Clear it around every test so one test's profiles can't leak into
     another. Same isolation contract as the gallery cache resets above."""
-    core._profile_cache.clear()
+    models_mod._profile_cache.clear()
     yield
-    core._profile_cache.clear()
+    models_mod._profile_cache.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -994,15 +997,17 @@ def _clear_gate_caches():
     Unlimited Mode status cache (SCOPE_2026-09-26_unlimited-mode) is the same kind of read
     and is cleared with them, and so is Session H's /model-config read (the live context-image
     max)."""
-    core._features_cache.clear()
-    core._size_config_cache.clear()
-    core._unlimited_cache.clear()
-    core._model_config_cache.clear()
+    models_mod._features_cache.clear()
+    models_mod._size_config_cache.clear()
+    gen_road_mod._unlimited_cache.clear()
+    models_mod._model_config_cache.clear()
+    models_mod._edit_caps_cache.clear()          # 3.22 S5: an edit model's output lists
     yield
-    core._features_cache.clear()
-    core._size_config_cache.clear()
-    core._unlimited_cache.clear()
-    core._model_config_cache.clear()
+    models_mod._features_cache.clear()
+    models_mod._size_config_cache.clear()
+    gen_road_mod._unlimited_cache.clear()
+    models_mod._model_config_cache.clear()
+    models_mod._edit_caps_cache.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -1061,10 +1066,24 @@ def _no_live_card_network(monkeypatch):
     # The training routes' PUT and PATCH (Session J) ride the same /v2 road.
     monkeypatch.setattr(core, "_rest_put", _blocked, raising=False)
     monkeypatch.setattr(core, "_rest_patch", _blocked, raising=False)
+    # The create door (3.22, DESIGN_3.22 2.2) rides the same /v2 road: blocked the same way,
+    # and restored to the real delegate by the `pixai` fixture so it reaches the FAKE.
+    monkeypatch.setattr(core, "_create", _blocked, raising=False)
     # Pin USER_ID so _make_session (now reached from generation previews) never triggers a
     # live resolve_user_id lookup. Setting the global -- not stubbing the function -- keeps
     # resolve_user_id itself testable in test_auth.
     monkeypatch.setattr(core, "USER_ID", "0", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_repeat_hold():
+    """The single sends' repeat hold lives in gen_road since 3.22 (DESIGN_3.22 3.4): one record
+    per process, as one server is one process. Cleared around every test, so one test's send
+    can never hold another test's identical one."""
+    from moonglade import gen_road as _gen_road
+    _gen_road._repeat_records.clear()
+    yield
+    _gen_road._repeat_records.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -1108,6 +1127,7 @@ _REAL_REST_GET = core._rest_get
 _REAL_REST_POST = core._rest_post
 _REAL_REST_PUT = core._rest_put
 _REAL_REST_PATCH = core._rest_patch
+_REAL_CREATE = core._create
 
 
 @pytest.fixture()
@@ -1136,6 +1156,7 @@ def pixai(monkeypatch):
     monkeypatch.setattr(core, "_rest_post", _REAL_REST_POST)
     monkeypatch.setattr(core, "_rest_put", _REAL_REST_PUT)
     monkeypatch.setattr(core, "_rest_patch", _REAL_REST_PATCH)
+    monkeypatch.setattr(core, "_create", _REAL_CREATE)
     return fake
 
 
@@ -1330,5 +1351,5 @@ def _video_retirement_clock_pinned(monkeypatch):
     as an ordinary engine must mean the same thing on any date, so the clock reads a day before the
     cut; the retirement tests inject their own instant on either side."""
     import datetime
-    monkeypatch.setattr(core, "_video_clock", lambda: datetime.datetime(
+    monkeypatch.setattr(gen_params_mod, "_video_clock", lambda: datetime.datetime(
         2026, 11, 18, 12, 0, tzinfo=datetime.timezone.utc))

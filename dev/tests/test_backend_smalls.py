@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -66,7 +67,7 @@ def test_credit_log_reason_not_in_help_or_wiki(monkeypatch, capsys):
 
 
 def test_list_credit_log_has_no_reason_argument():
-    params = inspect.signature(core.list_credit_log).parameters
+    params = inspect.signature(cards_mod.list_credit_log).parameters
     assert "reason" not in params
     assert list(params) == ["session", "last", "before"]
 
@@ -82,7 +83,7 @@ def test_credit_log_route_does_not_pass_reason_down(tmp_path, monkeypatch):
         return {"entries": [], "has_more": False, "next_cursor": None}
 
     monkeypatch.setattr(core, "_make_session", lambda token=None: object())
-    monkeypatch.setattr(core, "list_credit_log", strict_list)
+    monkeypatch.setattr(cards_mod, "list_credit_log", strict_list)
     client = login_client(tmp_path)
     r = client.get("/api/account/credit-log?count=12&before=cur-1&reason=task_cost")
     assert r.status_code == 200

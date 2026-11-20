@@ -108,11 +108,15 @@ the only ones left anywhere, and a whole-generation delete does not change that.
 one file or several — however many you had already deleted there — and the dialog says how
 many.
 
-Two more answers you may get instead of a dialog:
+Three more answers you may get instead of a dialog:
 
 - **"This image is already deleted on PixAI."** Nothing is sent and nothing local is
   touched — your copy is now the only one, and it stays. The catalog row records the date
   PixAI dropped it, so the app stops treating it as an image PixAI still holds.
+- **"Couldn't read the task from PixAI; nothing was deleted, try again."** The app could not
+  get PixAI's full record of the generation. A partial or plainer record is never enough: it
+  cannot show whether the picture is a video clip or whether its siblings are already gone, so
+  the delete never routes from one. Nothing is sent; try again.
 - **"Video clips are deleted from the task's page on PixAI."** Deleting a clip is not
   something this app does yet; do it on PixAI's own page for that generation.
 

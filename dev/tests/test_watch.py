@@ -7,7 +7,10 @@ import json
 import websockets
 
 from moonglade import backup as core
+from moonglade import gen_road as gen_road_mod
 from moonglade import jobs as jobs_mod
+from moonglade import task_feed as task_feed_mod
+from moonglade import task_reads as task_reads_mod
 
 
 class _FakeWS:
@@ -39,7 +42,7 @@ def _run(monkeypatch, script):
     ws = _FakeWS(script)
     monkeypatch.setattr(websockets, "connect", lambda *a, **k: ws)
     got = []
-    asyncio.run(core._watch_events_async("Bearer sk-x", got.append, None))
+    asyncio.run(task_feed_mod._watch_events_async("Bearer sk-x", got.append, None))
     return ws, got
 
 
@@ -74,7 +77,7 @@ def test_watch_answers_ping_and_raises_on_error(monkeypatch):
     ws = _FakeWS(script)
     monkeypatch.setattr(websockets, "connect", lambda *a, **k: ws)
     try:
-        asyncio.run(core._watch_events_async("Bearer x", lambda e: None, None))
+        asyncio.run(task_feed_mod._watch_events_async("Bearer x", lambda e: None, None))
         assert False, "expected PixAIError on the error frame"
     except core.PixAIError as e:
         assert "rejected" in str(e)
@@ -93,8 +96,17 @@ def test_watch_backup_mirrors_completed_only(monkeypatch, tmp_path):
         on_event({"taskUpdated": {"id": "T9", "status": "running"}})
         on_event({"taskUpdated": {"id": "T9", "status": "completed", "mediaId": "M9"}})
         on_event({"taskUpdated": {"id": "T9", "status": "completed", "mediaId": "M9"}})  # dup
-    monkeypatch.setattr(core, "_watch_events_async", fake_watch)
+    monkeypatch.setattr(task_feed_mod, "_watch_events_async", fake_watch)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
+
+    class _FeedFrames:   # 3.22: the CLI's REST stream; here it carries the lifecycle instead
+        def __init__(self, make_session, on_task, **kw):
+            self._on = on_task
+
+        def run(self):
+            for st in ("waiting", "running", "completed", "completed"):
+                self._on({"id": "T9", "status": st, "mediaId": "M9"})
+    monkeypatch.setattr(task_feed_mod, "TaskStream", _FeedFrames)
 
     class _FakeThread:   # run the mirror synchronously so the test is deterministic
         def __init__(self, target=None, args=(), daemon=None):
@@ -104,11 +116,11 @@ def test_watch_backup_mirrors_completed_only(monkeypatch, tmp_path):
     monkeypatch.setattr(threading, "Thread", _FakeThread)
 
     calls = []
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: calls.append(tid) or {"saved": 4})
 
     args = SimpleNamespace(token=None, watch_seconds=0, watch_backup=True, out=str(tmp_path))
-    core.run_watch(args)
+    task_feed_mod.run_watch(args)
     assert calls == ["T9"]   # mirrored exactly once, only on 'completed' (waiting/running ignored)
 
 
@@ -120,7 +132,7 @@ def test_watch_no_ack_raises(monkeypatch):
     ws = _FakeWS([json.dumps({"type": "connection_error", "payload": "nope"})])
     monkeypatch.setattr(websockets, "connect", lambda *a, **k: ws)
     try:
-        asyncio.run(core._watch_events_async("Bearer x", lambda e: None, None))
+        asyncio.run(task_feed_mod._watch_events_async("Bearer x", lambda e: None, None))
         assert False, "expected PixAIError when no connection_ack"
     except core.PixAIError as e:
         assert "handshake" in str(e).lower()
@@ -156,16 +168,16 @@ def test_watch_raises_when_connection_goes_stale_despite_looking_healthy(monkeyp
     _WS_STALE_TIMEOUT stands in for the real several-minute one so the test itself
     stays fast; the mechanism under test is the same either way -- ws.recv() is
     awaited with a timeout, and a lapse raises WatchStaleError instead of hanging."""
-    monkeypatch.setattr(core, "_WS_STALE_TIMEOUT", 0.05)
+    monkeypatch.setattr(task_feed_mod, "_WS_STALE_TIMEOUT", 0.05)
     ws = _SilentAfterAckWS([json.dumps({"type": "connection_ack"})])
     monkeypatch.setattr(websockets, "connect", lambda *a, **k: ws)
     got = []
     try:
-        asyncio.run(core._watch_events_async("Bearer x", got.append, None))
+        asyncio.run(task_feed_mod._watch_events_async("Bearer x", got.append, None))
         assert False, "expected WatchStaleError when the socket goes silent"
     except core.WatchStaleError as e:
         assert "no frame" in str(e).lower()             # says what happened
-        assert str(core._WS_STALE_TIMEOUT) in str(e)    # names the timeout it hit
+        assert str(task_feed_mod._WS_STALE_TIMEOUT) in str(e)    # names the timeout it hit
         # WatchStaleError must still be a PixAIError so nothing that already does a
         # bare `except PixAIError` (or `except Exception`, like _watch_loop) needs
         # to change to start handling it.
@@ -195,7 +207,7 @@ def test_watch_pings_reset_the_staleness_clock(monkeypatch):
     # well past the 0.5s timeout a cumulative clock would have hit around frame 25.
     PACE, TIMEOUT, PINGS = 0.02, 0.5, 40
     assert PACE * PINGS > TIMEOUT, "script must outlast the timeout or this proves nothing"
-    monkeypatch.setattr(core, "_WS_STALE_TIMEOUT", TIMEOUT)
+    monkeypatch.setattr(task_feed_mod, "_WS_STALE_TIMEOUT", TIMEOUT)
     script = [json.dumps({"type": "connection_ack"})]
     script += [json.dumps({"type": "ping"})] * PINGS
     script += [json.dumps({"type": "complete"})]
@@ -208,7 +220,7 @@ def test_watch_pings_reset_the_staleness_clock(monkeypatch):
     ws = _PacedWS(script)
     monkeypatch.setattr(websockets, "connect", lambda *a, **k: ws)
     got = []
-    asyncio.run(core._watch_events_async("Bearer x", got.append, None))   # must not raise
+    asyncio.run(task_feed_mod._watch_events_async("Bearer x", got.append, None))   # must not raise
     assert any(m.get("type") == "pong" for m in ws.sent)   # still answered every ping
 
 
@@ -254,33 +266,33 @@ def test_an_idle_connection_pings_and_the_pong_keeps_it_alive(monkeypatch):
     WatchStaleError at 0.5s."""
     HEARTBEAT, TIMEOUT, PONGS = 0.02, 0.5, 40
     assert HEARTBEAT * PONGS > TIMEOUT, "script must outlast the timeout or this proves nothing"
-    monkeypatch.setattr(core, "_WS_HEARTBEAT", HEARTBEAT)
-    monkeypatch.setattr(core, "_WS_STALE_TIMEOUT", TIMEOUT)
+    monkeypatch.setattr(task_feed_mod, "_WS_HEARTBEAT", HEARTBEAT)
+    monkeypatch.setattr(task_feed_mod, "_WS_STALE_TIMEOUT", TIMEOUT)
     ws = _IdleServerWS(PONGS)
     monkeypatch.setattr(websockets, "connect", lambda *a, **k: ws)
     got = []
-    asyncio.run(core._watch_events_async("Bearer x", got.append, None))   # must not raise
+    asyncio.run(task_feed_mod._watch_events_async("Bearer x", got.append, None))   # must not raise
     assert sum(1 for m in ws.sent if m.get("type") == "ping") == PONGS
     assert got and got[0].get("__meta__") == "subscribed"
 
 
 def test_a_server_that_answers_not_even_our_ping_still_goes_stale(monkeypatch):
     """The watchdog keeps its teeth: pinging does not paper over a dead connection."""
-    monkeypatch.setattr(core, "_WS_HEARTBEAT", 0.02)
-    monkeypatch.setattr(core, "_WS_STALE_TIMEOUT", 0.1)
+    monkeypatch.setattr(task_feed_mod, "_WS_HEARTBEAT", 0.02)
+    monkeypatch.setattr(task_feed_mod, "_WS_STALE_TIMEOUT", 0.1)
     ws = _SilentAfterAckWS([json.dumps({"type": "connection_ack"})])
     monkeypatch.setattr(websockets, "connect", lambda *a, **k: ws)
     try:
-        asyncio.run(core._watch_events_async("Bearer x", lambda e: None, None))
+        asyncio.run(task_feed_mod._watch_events_async("Bearer x", lambda e: None, None))
         assert False, "expected WatchStaleError when nothing answers"
     except core.WatchStaleError as e:
-        assert "no frame" in str(e).lower() and str(core._WS_STALE_TIMEOUT) in str(e)
+        assert "no frame" in str(e).lower() and str(task_feed_mod._WS_STALE_TIMEOUT) in str(e)
     assert sum(1 for m in ws.sent if m.get("type") == "ping") >= 2    # it did ask
 
 
 def test_a_quiet_heartbeat_is_not_the_stale_timeout():
     """The keepalive fires well inside the stale window, or it could never reset it."""
-    assert 0 < core._WS_HEARTBEAT < core._WS_STALE_TIMEOUT / 2
+    assert 0 < task_feed_mod._WS_HEARTBEAT < task_feed_mod._WS_STALE_TIMEOUT / 2
 
 
 def test_a_stale_reconnect_does_not_wait_out_the_long_backoff():
@@ -290,7 +302,7 @@ def test_a_stale_reconnect_does_not_wait_out_the_long_backoff():
     (watch_reconnect_plan), so this pin moved from the stale branch's own `backoff = 5` to the
     rule: a connection that lived a stale window is a healthy one, and reconnects at once."""
     from moonglade import gallery as mg
-    assert mg.watch_reconnect_plan(60, core._WS_STALE_TIMEOUT) == (1, 5)
+    assert mg.watch_reconnect_plan(60, task_feed_mod._WS_STALE_TIMEOUT) == (1, 5)
 
 
 def test_mirror_and_reconcile_agree_on_what_done_means():
@@ -315,14 +327,16 @@ def test_mirror_and_reconcile_agree_on_what_done_means():
     i = text.index("def _watch_on_event(ev):")
     loop = text[i:i + 4000]
 
-    assert "if status in core._GEN_DONE and tid and tid not in _watch_backed:" in loop, (
+    assert "if status in _task_reads._GEN_DONE and tid and tid not in _watch_backed:" in loop, (
         "the mirror's collect branch must accept every _GEN_DONE status, not one exact string")
     assert "status == core._WS_DONE_STATUS" not in loop, (
         "the single-status collect trigger is back -- see this test's docstring")
+    assert "status == _task_feed._WS_DONE_STATUS" not in loop, (      # task_feed since 3.22
+        "the single-status collect trigger is back -- see this test's docstring")
 
     # And the constant it now shares really is the broader set.
-    assert core._WS_DONE_STATUS in core._GEN_DONE
-    assert len(core._GEN_DONE) > 1
+    assert task_feed_mod._WS_DONE_STATUS in task_reads_mod._GEN_DONE
+    assert len(task_reads_mod._GEN_DONE) > 1
 
 
 def test_catchup_sweep_is_bounded_rate_limited_and_off_thread():
@@ -380,7 +394,7 @@ def test_catchup_sweep_is_bounded_rate_limited_and_off_thread():
     assert "except Exception as e:" in body
 
     # Only finished tasks are candidates.
-    assert "core._GEN_DONE" in body
+    assert "_task_reads._GEN_DONE" in body       # task_reads holds the statuses since 3.22
 
     # And it is invoked OFF the WebSocket event loop: the subscribe and the periodic backstop
     # only ASK (_request_catchup takes a flag lock and may start the one worker thread). The
@@ -442,7 +456,7 @@ def test_catchup_backfills_absent_media_skips_present_and_rate_limits(monkeypatc
     monkeypatch.setattr(time, "sleep", lambda *a, **k: None)   # keep the paced sweep fast
 
     collected = []
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: collected.append(str(tid)) or {"saved": 1})
     reads = []
     monkeypatch.setattr(core, "find_connection",
@@ -565,7 +579,7 @@ def test_the_whole_lifecycle_closes_one_website_row_with_its_media(tmp_path, mon
     app = _watch_app(tmp_path)
     _sync_threads(monkeypatch)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: {"media_ids": ["MA", "MB"], "saved": 2,
                                                   "is_video": False})
 
@@ -621,7 +635,7 @@ def test_the_catchup_writes_a_done_row_for_a_website_task_it_had_to_collect(tmp_
     monkeypatch.setattr(core, "find_connection", lambda *a, **k: {"edges": edges})
     monkeypatch.setattr(mg, "get_row", lambda db_path, m: None)     # nothing catalogued yet
     monkeypatch.setattr(time, "sleep", lambda *a, **k: None)
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: {"media_ids": ["M5"], "saved": 1,
                                                   "is_video": False})
 
@@ -660,7 +674,7 @@ def test_the_event_path_and_the_catchup_converge_on_one_row(tmp_path, monkeypatc
     def fake_collect(s, tid, out, **k):
         collected.append(tid)
         return {"media_ids": ["M6"], "saved": 1, "is_video": False}
-    monkeypatch.setattr(core, "collect_generation", fake_collect)
+    monkeypatch.setattr(gen_road_mod, "collect_generation", fake_collect)
 
     app.extensions["mg_watch_on_event"](_frame("W6", "waiting"))
     app.extensions["mg_watch_catchup"]("startup")
@@ -679,7 +693,7 @@ def test_an_app_run_is_untouched_by_any_of_this(tmp_path, monkeypatch):
     app = _watch_app(tmp_path)
     _sync_threads(monkeypatch)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: {"media_ids": ["MX"], "saved": 1,
                                                   "is_video": False})
     # exactly what api_jobs_register writes for a dock submit
@@ -816,7 +830,7 @@ def test_catchup_tests_the_ids_the_catalog_actually_holds(monkeypatch, tmp_path,
     monkeypatch.setattr(time, "sleep", lambda *a, **k: None)
 
     collected = []
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: collected.append(str(tid)) or {"saved": 1})
 
     with caplog.at_level("INFO"):
@@ -934,7 +948,7 @@ def test_a_drop_after_a_healthy_connection_reconnects_at_once_and_catches_up(tmp
             clock["t"] += 100
             raise wse.ConnectionClosedError(None, None)
 
-    monkeypatch.setattr(core, "_watch_events_async", fake_watch)
+    monkeypatch.setattr(task_feed_mod, "_watch_events_async", fake_watch)
     cycle = app.extensions["mg_watch_cycle"]
     cycle(state)
     assert slept == [1] and state["backoff"] == 5
@@ -961,7 +975,7 @@ def test_a_fast_failing_connection_climbs_the_ladder(tmp_path, monkeypatch):
     async def refused(auth, on_event, seconds):
         raise OSError("connection refused")
 
-    monkeypatch.setattr(core, "_watch_events_async", refused)
+    monkeypatch.setattr(task_feed_mod, "_watch_events_async", refused)
     cycle = app.extensions["mg_watch_cycle"]
     for _ in range(5):
         cycle(state)
@@ -972,7 +986,7 @@ def test_a_fast_failing_connection_climbs_the_ladder(tmp_path, monkeypatch):
         clock["t"] += 10
         raise OSError("dropped")
 
-    monkeypatch.setattr(core, "_watch_events_async", flaps)
+    monkeypatch.setattr(task_feed_mod, "_watch_events_async", flaps)
     slept.clear()
     state["backoff"] = 5
     for _ in range(4):
@@ -993,7 +1007,7 @@ def test_a_clean_end_logs_the_wait_it_really_takes(tmp_path, monkeypatch, caplog
         on_event({"__meta__": "subscribed"})
         clock["t"] += 400
 
-    monkeypatch.setattr(core, "_watch_events_async", completes)
+    monkeypatch.setattr(task_feed_mod, "_watch_events_async", completes)
     with caplog.at_level("INFO"):
         app.extensions["mg_watch_cycle"](state)
     assert slept == [1] and state["backoff"] == 5
@@ -1072,7 +1086,7 @@ def test_a_failed_collect_is_retried_after_300s_not_every_sweep(tmp_path, monkey
         tries.append(tid)
         raise core.PixAIError("PixAI said no")
 
-    monkeypatch.setattr(core, "collect_generation", _boom)
+    monkeypatch.setattr(gen_road_mod, "collect_generation", _boom)
     sweep = app.extensions["mg_watch_catchup"]
     sweep("reconnect")
     sweep("reconnect")
@@ -1099,7 +1113,7 @@ def test_a_task_the_sweep_collected_is_not_mirrored_again_by_a_late_frame(tmp_pa
     monkeypatch.setattr(core, "find_connection", lambda *a, **k: {"edges": edges})
     monkeypatch.setattr(mg, "get_row", lambda db_path, m: None)
     monkeypatch.setattr(mg, "get_row_by_task", lambda db_path, t: None)
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: {"media_ids": ["M_late"], "saved": 1,
                                                   "is_video": False})
     app.extensions["mg_watch_catchup"]("reconnect")
@@ -1135,7 +1149,7 @@ def test_watch_status_reports_how_the_last_connection_ended(tmp_path, monkeypatc
         clock["t"] += 3600
         raise wse.ConnectionClosedOK(Close(1001, "CloudFlare WebSocket proxy restarting"), None)
 
-    monkeypatch.setattr(core, "_watch_events_async", going_away)
+    monkeypatch.setattr(task_feed_mod, "_watch_events_async", going_away)
     app.extensions["mg_watch_cycle"](state)
     d = login_test_client(app).get("/api/watch/status").get_json()
     assert d["last_close"] == {"kind": "closed", "code": 1001,

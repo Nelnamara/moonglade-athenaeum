@@ -13,14 +13,19 @@ import pytest
 import requests
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import gallery as moonglade_gallery
+from moonglade import gen_cli as gen_cli_mod
+from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
+from moonglade import pricing as pricing_mod
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client
 from moonglade import mirror as mirror_mod
 
 
-REFERENCE_PRO = core.EDIT_MODELS["reference-pro"]["model_id"]
+REFERENCE_PRO = gen_params_mod.EDIT_MODELS["reference-pro"]["model_id"]
 
 # The prompt PixAI writes into a fixer task itself. It is a FIXED template -- identical on
 # every Fix ever submitted -- which is exactly why naming the output from it produced a
@@ -112,8 +117,8 @@ def test_collect_names_a_fix_from_its_source_image_not_the_template(monkeypatch,
                  [_row(media_id="700", filename="images/a_night_elf_druid_T0_700.jpg",
                        prompt_preview="a night elf druid, moonlight")])
     _stub_collect(monkeypatch, tmp_path)
-    monkeypatch.setattr(core, "_task_detail_query", lambda s, t: _fixer_task())
-    core.collect_generation(object(), "T1", str(tmp_path))
+    monkeypatch.setattr(gen_cli_mod, "_task_detail_query", lambda s, t: _fixer_task())
+    gen_road_mod.collect_generation(object(), "T1", str(tmp_path))
     row = next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
                if r["media_id"] == "M9")
     assert row["filename"] == "images/a_night_elf_druid_moonlight_fix-hand_T1_M9.jpg"
@@ -125,8 +130,8 @@ def test_collect_falls_back_to_the_source_media_id_when_it_is_not_in_the_catalog
     """A Fix run on an image this backup has never seen (a fresh upload) still must not
     inherit the template name -- the source media_id is at least a real handle."""
     _stub_collect(monkeypatch, tmp_path)
-    monkeypatch.setattr(core, "_task_detail_query", lambda s, t: _fixer_task(source="700"))
-    core.collect_generation(object(), "T1", str(tmp_path))
+    monkeypatch.setattr(gen_cli_mod, "_task_detail_query", lambda s, t: _fixer_task(source="700"))
+    gen_road_mod.collect_generation(object(), "T1", str(tmp_path))
     row = next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
                if r["media_id"] == "M9")
     assert row["filename"] == "images/700_fix-hand_T1_M9.jpg"
@@ -136,10 +141,10 @@ def test_collect_still_names_an_ordinary_generation_from_its_prompt(monkeypatch,
     """No-regression: only the fixer family changes. A normal generation keeps
     build_stem_name's <prompt>_<task>_<media>."""
     _stub_collect(monkeypatch, tmp_path)
-    monkeypatch.setattr(core, "_task_detail_query", lambda s, t: {
+    monkeypatch.setattr(gen_cli_mod, "_task_detail_query", lambda s, t: {
         "parameters": {"prompts": "a night elf druid", "modelId": "V1"},
         "outputs": {"mediaId": "M9", "seed": 42}})
-    core.collect_generation(object(), "T1", str(tmp_path))
+    gen_road_mod.collect_generation(object(), "T1", str(tmp_path))
     row = next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
                if r["media_id"] == "M9")
     assert row["filename"] == "images/a_night_elf_druid_T1_M9.jpg"
@@ -174,8 +179,8 @@ def test_collect_writes_the_fix_model_and_leaves_the_rest_empty(monkeypatch, tmp
     """The catalog row is what the detail page renders. Model was an em-dash because the
     collect path never wrote model_id/model_name at all."""
     _stub_collect(monkeypatch, tmp_path)
-    monkeypatch.setattr(core, "_task_detail_query", lambda s, t: _fixer_task())
-    core.collect_generation(object(), "T1", str(tmp_path))
+    monkeypatch.setattr(gen_cli_mod, "_task_detail_query", lambda s, t: _fixer_task())
+    gen_road_mod.collect_generation(object(), "T1", str(tmp_path))
     row = next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
                if r["media_id"] == "M9")
     assert row["model_id"] == REFERENCE_PRO and row["model_name"] == "Reference Pro"
@@ -214,7 +219,14 @@ def _record_posts(monkeypatch, answer=None):
         if path == "/task/fixer":
             return {"id": "F1"}
         return answer if answer is not None else {"actualPrice": 4800, "originalPrice": 8000}
+
+    def fake_create(s, kind, body):
+        # the Fix's spend rides the create door since 3.22 S3-fix (core._create)
+        assert kind == "fix"
+        posts.append(("/task/fixer", body))
+        return {"id": "F1"}
     monkeypatch.setattr(core, "_rest_post", fake_post)
+    monkeypatch.setattr(core, "_create", fake_create)
     return posts
 
 
@@ -228,10 +240,10 @@ def test_fix_body_is_the_submit_body(monkeypatch):
     boxes += [dict(HAND, x=i) for i in range(20)]                        # 21 usable in all
     posts = _record_posts(monkeypatch)
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
-    assert core.submit_fixer(object(), "700", boxes) == "F1"
+    assert gen_road_mod.submit_fixer(object(), "700", boxes) == "F1"
     (path, sent), = posts
     assert path == "/task/fixer"
-    body = core.build_fixer_body("700", boxes)
+    body = gen_params_mod.build_fixer_body("700", boxes)
     assert sent == body
     assert set(sent) == {"mediaId", "boxes"}, "never cusPrompts, never anything else"
     assert sent["mediaId"] == "700"
@@ -242,20 +254,20 @@ def test_fix_body_is_the_submit_body(monkeypatch):
 def test_a_box_off_the_top_or_left_is_clipped_not_shifted():
     """#93 review F3: x -160 width 360 covers 0..200 of the picture. Shifting it to x 0 kept
     the width and repaired 0..360; the part on the picture is 0..200."""
-    out = core.clean_fix_boxes([{"x": -160, "y": -10, "width": 360, "height": 210, "tag": "face"}])
+    out = gen_params_mod.clean_fix_boxes([{"x": -160, "y": -10, "width": 360, "height": 210, "tag": "face"}])
     assert out == [{"x": 0, "y": 0, "width": 200, "height": 200, "tag": "face"}]
     # wholly off the picture: nothing left, so the box is dropped
-    assert core.clean_fix_boxes([{"x": -50, "y": 5, "width": 50, "height": 9, "tag": "hand"}]) == []
+    assert gen_params_mod.clean_fix_boxes([{"x": -50, "y": 5, "width": 50, "height": 9, "tag": "hand"}]) == []
     # an in-picture box is untouched
-    assert core.clean_fix_boxes([HAND]) == [HAND]
+    assert gen_params_mod.clean_fix_boxes([HAND]) == [HAND]
 
 
 @pytest.mark.parametrize("bad", [float("inf"), float("-inf"), float("nan")])
 def test_a_non_finite_box_is_dropped_not_raised(bad, monkeypatch):
     box = {"x": bad, "y": 1, "width": 5, "height": 5, "tag": "face"}
-    assert core.clean_fix_boxes([box, FACE]) == [FACE]
+    assert gen_params_mod.clean_fix_boxes([box, FACE]) == [FACE]
     monkeypatch.setattr(core, "_rest_post", _tripwire("_rest_post"))
-    assert core.price_fixer(object(), {"mediaId": "700", "boxes": [box]}) is None
+    assert pricing_mod.price_fixer(object(), {"mediaId": "700", "boxes": [box]}) is None
 
 
 @pytest.mark.parametrize("raw", ["Infinity", "-Infinity", "NaN"])
@@ -273,38 +285,39 @@ def test_a_non_finite_box_on_the_routes_is_a_note_and_never_sent(raw, tmp_path, 
 
 def test_fix_body_refuses_no_usable_box():
     with pytest.raises(core.PixAIError, match="drag a box"):
-        core.build_fixer_body("700", [])
+        gen_params_mod.build_fixer_body("700", [])
     with pytest.raises(core.PixAIError, match="drag a box"):
-        core.build_fixer_body("700", [{"x": 1, "y": 1, "width": 5, "height": 5, "tag": "elbow"}])
+        gen_params_mod.build_fixer_body("700", [{"x": 1, "y": 1, "width": 5, "height": 5, "tag": "elbow"}])
 
 
 def test_fix_body_refuses_two_kinds():
     with pytest.raises(core.PixAIError, match="one kind") as err:
-        core.build_fixer_body("700", [FACE, HAND])
-    assert str(err.value) == core.FIX_ONE_KIND
+        gen_params_mod.build_fixer_body("700", [FACE, HAND])
+    assert str(err.value) == gen_params_mod.FIX_ONE_KIND
     # case does not smuggle a second kind past the check
     with pytest.raises(core.PixAIError, match="one kind"):
-        core.build_fixer_body("700", [dict(FACE, tag="FACE"), dict(HAND, tag="Hand")])
+        gen_params_mod.build_fixer_body("700", [dict(FACE, tag="FACE"), dict(HAND, tag="Hand")])
     # ...and one kind, however many boxes, is fine
-    assert len(core.build_fixer_body("700", [FACE, dict(FACE, x=9)])["boxes"]) == 2
+    assert len(gen_params_mod.build_fixer_body("700", [FACE, dict(FACE, x=9)])["boxes"]) == 2
 
 
 def test_submit_fixer_refuses_two_kinds_before_any_network(monkeypatch):
     monkeypatch.setattr(core, "_rest_post", _tripwire("_rest_post"))
+    monkeypatch.setattr(core, "_create", _tripwire("_create"))
     monkeypatch.setattr(mirror_mod, "_session_for_create", _tripwire("_session_for_create"))
     with pytest.raises(core.PixAIError, match="one kind"):
-        core.submit_fixer(object(), "700", [FACE, HAND])
+        gen_road_mod.submit_fixer(object(), "700", [FACE, HAND])
     # READ_ONLY is still checked FIRST: the refusal a read-only install sees is READ_ONLY's.
     monkeypatch.setattr(core, "READ_ONLY", True)
     with pytest.raises(core.PixAIError, match="READ_ONLY"):
-        core.submit_fixer(object(), "700", [FACE, HAND])
+        gen_road_mod.submit_fixer(object(), "700", [FACE, HAND])
 
 
 def _price_client(tmp_path, monkeypatch, answer=None):
     seen = {}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "price_task", _tripwire("price_task (GET /v2/task-price)"))
-    monkeypatch.setattr(core, "match_kaisuuken",
+    monkeypatch.setattr(pricing_mod, "price_task", _tripwire("price_task (GET /v2/task-price)"))
+    monkeypatch.setattr(cards_mod, "match_kaisuuken",
                         lambda s, params, **k: seen.setdefault("card_checked", True)
                         and {"id": "c1", "total": 9})
     seen["posts"] = _record_posts(monkeypatch, answer)
@@ -353,10 +366,10 @@ def test_price_route_omits_the_list_price_unless_it_is_higher(tmp_path, monkeypa
 
 def test_fix_price_never_touches_the_spend_route(tmp_path, monkeypatch):
     import inspect
-    assert core._FIXER_PRICE_PATH == "/task/fixer/price"
-    assert core._FIXER_PRICE_PATH != "/task/fixer"
+    assert pricing_mod._FIXER_PRICE_PATH == "/task/fixer/price"
+    assert pricing_mod._FIXER_PRICE_PATH != "/task/fixer"
     # price_fixer takes no path: nothing a caller hands it can turn the quote into a spend
-    assert list(inspect.signature(core.price_fixer).parameters) == ["session", "body"]
+    assert list(inspect.signature(pricing_mod.price_fixer).parameters) == ["session", "body"]
     # it rides the session it is handed -- never the mirror's create session
     monkeypatch.setattr(mirror_mod, "_session_for_create", _tripwire("_session_for_create"))
     cli, seen = _price_client(tmp_path, monkeypatch)
@@ -382,20 +395,20 @@ def test_fix_price_fails_soft(exc, tmp_path, monkeypatch):
     d = r.get_json()
     assert r.status_code == 200 and "error" not in d
     assert d["cost"] is None and d["free"] is False and "original_cost" not in d
-    assert core.price_fixer(object(), {"mediaId": "700", "boxes": [FACE]}) is None
+    assert pricing_mod.price_fixer(object(), {"mediaId": "700", "boxes": [FACE]}) is None
 
 
 @pytest.mark.parametrize("answer", [{}, {"originalPrice": 8000}, [], None, {"actualPrice": "n/a"}])
 def test_fix_price_without_a_price_is_no_price(answer, monkeypatch):
     monkeypatch.setattr(core, "_rest_post", lambda *a, **k: answer)
-    assert core.price_fixer(object(), {"mediaId": "700", "boxes": [FACE]}) is None
+    assert pricing_mod.price_fixer(object(), {"mediaId": "700", "boxes": [FACE]}) is None
 
 
 def test_price_fixer_refuses_a_hand_built_body_before_any_network(monkeypatch):
     monkeypatch.setattr(core, "_rest_post", _tripwire("_rest_post"))
     for body in ({"mediaId": "700", "boxes": [FACE, HAND]}, {"mediaId": "700", "boxes": []},
                  {"mediaId": "", "boxes": [FACE]}, {}, None):
-        assert core.price_fixer(object(), body) is None
+        assert pricing_mod.price_fixer(object(), body) is None
 
 
 def test_price_route_two_kinds_is_a_note_not_a_price(tmp_path, monkeypatch):
@@ -403,7 +416,7 @@ def test_price_route_two_kinds_is_a_note_not_a_price(tmp_path, monkeypatch):
     d = cli.post("/api/price", json={"mode": "fix", "source": "700",
                                      "boxes": [FACE, HAND]}).get_json()
     assert d["cost"] is None and d["free"] is False
-    assert d["note"] == core.FIX_ONE_KIND
+    assert d["note"] == gen_params_mod.FIX_ONE_KIND
     assert seen["posts"] == [], "no network call for a body PixAI refuses"
 
 
@@ -462,15 +475,16 @@ def test_an_identical_fix_inside_the_window_is_refused_before_any_network(tmp_pa
 
 
 def _failing_then_ok(monkeypatch, exc):
-    """_rest_post that raises `exc` on the first spend POST and answers a task id after."""
+    """The create door (core._create, 3.22 S3-fix) raising `exc` on the first Fix and
+    answering a task id after."""
     posts = []
 
-    def fake_post(s, path, body, **k):
-        posts.append(path)
+    def fake_create(s, kind, body):
+        posts.append("/task/fixer")
         if len(posts) == 1:
             raise exc
         return {"id": "F2"}
-    monkeypatch.setattr(core, "_rest_post", fake_post)
+    monkeypatch.setattr(core, "_create", fake_create)
     return posts
 
 
@@ -533,8 +547,8 @@ def test_a_retry_after_an_unknown_outcome_is_still_refused(exc, tmp_path, monkey
            "unlisted-code": _rest_refusal(404, "FILE_NOT_FOUND")}.get(exc, exc) \
         if isinstance(exc, str) else exc
     if exc == "no-id":
-        posts = []
-        monkeypatch.setattr(core, "_rest_post", lambda s, path, body, **k: posts.append(path) or {})
+        # the door reads an id-less 2xx as CreateOutcomeUnknown (DESIGN_3.22 2.2)
+        posts = _failing_then_ok(monkeypatch, core.CreateOutcomeUnknown("no id", kind="fix"))
     else:
         posts = _failing_then_ok(monkeypatch, exc)
     payload = {"source": "700", "boxes": [FACE]}
@@ -577,8 +591,8 @@ def _collect_fix(monkeypatch, tmp_path, fixer):
     _stub_collect(monkeypatch, tmp_path)
     task = _fixer_task(source="700")
     task["parameters"]["chat"]["fixer"] = fixer
-    monkeypatch.setattr(core, "_task_detail_query", lambda s, t: task)
-    core.collect_generation(object(), "T1", str(tmp_path))
+    monkeypatch.setattr(gen_cli_mod, "_task_detail_query", lambda s, t: task)
+    gen_road_mod.collect_generation(object(), "T1", str(tmp_path))
     return next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
                 if r["media_id"] == "M9")["filename"]
 

@@ -10,6 +10,7 @@ stricter mobile-app tier. So the picker's search, its bookmark tab and a picked 
 present as the website. The credential is never touched by that -- Authorization stays as built.
 """
 from moonglade import backup as core
+from moonglade import models as models_mod
 from tests.conftest import login_client
 from moonglade import mirror as mirror_mod
 
@@ -47,7 +48,7 @@ def test_model_search_route_browses_the_market_as_the_website(tmp_path, monkeypa
         seen["headers"] = dict(session.headers)
         seen["keyword"] = kw.get("keyword")
         return {"results": [], "has_more": False, "next_cursor": ""}
-    monkeypatch.setattr(core, "model_search_market_gql", fake_market)
+    monkeypatch.setattr(models_mod, "model_search_market_gql", fake_market)
     cli = login_client(tmp_path)
     d = cli.get("/api/model-search?kind=lora&size=24&q=cum&src=market&sort=liked").get_json()
     assert not d.get("error"), d
@@ -64,7 +65,7 @@ def test_bookmark_tab_browses_as_the_website_too(tmp_path, monkeypatch):
     def fake_bookmarks(session, **kw):
         seen["headers"] = dict(session.headers)
         return {"results": [], "has_more": False, "next_cursor": ""}
-    monkeypatch.setattr(core, "model_bookmarks_gql", fake_bookmarks)
+    monkeypatch.setattr(models_mod, "model_bookmarks_gql", fake_bookmarks)
     cli = login_client(tmp_path)
     d = cli.get("/api/model-search?kind=lora&size=24&q=&src=bookmark").get_json()
     assert not d.get("error"), d
@@ -79,7 +80,7 @@ def test_model_version_route_reads_versions_as_the_website(tmp_path, monkeypatch
         seen["headers"] = dict(session.headers)
         seen["mid"] = mid
         return []
-    monkeypatch.setattr(core, "list_model_versions", fake_versions)
+    monkeypatch.setattr(models_mod, "list_model_versions", fake_versions)
     cli = login_client(tmp_path)
     d = cli.get("/api/model-version?model_id=123&all=1").get_json()
     assert d.get("versions") == [], d

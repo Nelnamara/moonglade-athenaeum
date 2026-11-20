@@ -19,6 +19,8 @@ from moonglade.gallery import CATALOG_FIELDS, save_catalog  # noqa: E402
 
 from tests.conftest import login_client  # noqa: E402
 from moonglade import jobs as jobs_mod
+from moonglade import task_reads as task_reads_mod
+from moonglade import cloud_delete as cloud_delete_mod
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -83,7 +85,7 @@ def _lone_task(media_id):
 def _reads(monkeypatch, task):
     """Answer the live read with `task` and count how often it was asked."""
     seen = []
-    monkeypatch.setattr(core, "task_detail_gql",
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql",
                         lambda s, tid, **k: seen.append(str(tid)) or task)
     return seen
 
@@ -108,7 +110,7 @@ def test_it_deletes_only_the_named_image_and_leaves_its_siblings(tmp_path, monke
     seen = {}
     monkeypatch.setattr(core, "_make_session", _session_stub)
     _reads(monkeypatch, _all_live())
-    monkeypatch.setattr(core, "delete_batch_media_gql",
+    monkeypatch.setattr(cloud_delete_mod, "delete_task_media",
                         lambda s, tid, mid: seen.update(task=tid, media=mid))
     for f in ("a.png", "b.png", "c.png"):
         (tmp_path / f).write_bytes(b"x")
@@ -136,7 +138,7 @@ def test_a_failed_cloud_delete_leaves_the_local_copy_alone(tmp_path, monkeypatch
     def boom(s, tid, mid):
         raise core.PixAIError("HTTP 500 from PixAI")
 
-    monkeypatch.setattr(core, "delete_batch_media_gql", boom)
+    monkeypatch.setattr(cloud_delete_mod, "delete_task_media", boom)
     (tmp_path / "b.png").write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
 
@@ -156,7 +158,7 @@ def test_a_failed_local_purge_comes_back_as_an_error_body(tmp_path, monkeypatch)
     quietly stays in the catalog."""
     monkeypatch.setattr(core, "_make_session", _session_stub)
     _reads(monkeypatch, _all_live())
-    monkeypatch.setattr(core, "delete_batch_media_gql", lambda s, tid, mid: None)
+    monkeypatch.setattr(cloud_delete_mod, "delete_task_media", lambda s, tid, mid: None)
     (tmp_path / "b.png").write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
 
@@ -183,9 +185,9 @@ def test_a_failed_local_purge_comes_back_as_an_error_body(tmp_path, monkeypatch)
 
 def _nothing_deletes(monkeypatch):
     """Both delete mutations wired to fail the test if either one is reached."""
-    monkeypatch.setattr(core, "delete_batch_media_gql", lambda *a, **k: pytest.fail(
+    monkeypatch.setattr(cloud_delete_mod, "delete_task_media", lambda *a, **k: pytest.fail(
         "the per-image mutation fired"))
-    monkeypatch.setattr(core, "delete_task", lambda *a, **k: pytest.fail(
+    monkeypatch.setattr(cloud_delete_mod, "delete_task", lambda *a, **k: pytest.fail(
         "the whole-task mutation fired"))
 
 
@@ -256,9 +258,9 @@ def test_the_whole_task_branch_keeps_what_pixai_already_deleted(tmp_path, monkey
     # PixAI's copy of this task: `a` was deleted earlier, `c` is the one image still there,
     # and `b` is a local row PixAI's copy no longer lists at all.
     _reads(monkeypatch, _live_task(("a", True), ("c", False)))
-    monkeypatch.setattr(core, "delete_task",
+    monkeypatch.setattr(cloud_delete_mod, "delete_task",
                         lambda s, tid: fired.update(task=tid))
-    monkeypatch.setattr(core, "delete_batch_media_gql", lambda *a, **k: pytest.fail(
+    monkeypatch.setattr(cloud_delete_mod, "delete_task_media", lambda *a, **k: pytest.fail(
         "the per-image mutation fired on the last live image of a batch"))
     for f in ("a.png", "b.png", "c.png"):
         (tmp_path / f).write_bytes(b"x")
@@ -290,7 +292,7 @@ def test_every_image_pixai_already_deleted_is_kept_back_not_just_one(tmp_path, m
     monkeypatch.setattr(core, "_make_session", _session_stub)
     # PixAI kept `c` only; `a` and `b` were both deleted from its website earlier.
     _reads(monkeypatch, _live_task(("a", True), ("b", True), ("c", False)))
-    monkeypatch.setattr(core, "delete_task", lambda s, tid: fired.update(task=tid))
+    monkeypatch.setattr(cloud_delete_mod, "delete_task", lambda s, tid: fired.update(task=tid))
     for f in ("a.png", "b.png", "c.png"):
         (tmp_path / f).write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
@@ -334,7 +336,7 @@ def test_a_confirmed_delete_writes_one_activity_row(tmp_path, monkeypatch):
     """
     monkeypatch.setattr(core, "_make_session", _session_stub)
     _reads(monkeypatch, _all_live())
-    monkeypatch.setattr(core, "delete_batch_media_gql", lambda s, tid, mid: None)
+    monkeypatch.setattr(cloud_delete_mod, "delete_task_media", lambda s, tid, mid: None)
     for f in ("a.png", "b.png", "c.png"):
         (tmp_path / f).write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
@@ -358,7 +360,7 @@ def test_a_whole_task_delete_says_so_on_its_row(tmp_path, monkeypatch):
     warns about before the click has to be the fact the tracker records after it."""
     monkeypatch.setattr(core, "_make_session", _session_stub)
     _reads(monkeypatch, _lone_task("b"))
-    monkeypatch.setattr(core, "delete_task", lambda s, tid: None)
+    monkeypatch.setattr(cloud_delete_mod, "delete_task", lambda s, tid: None)
     (tmp_path / "b.png").write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
 
@@ -413,7 +415,7 @@ def test_a_cloud_delete_that_errors_is_logged_as_a_failure(tmp_path, monkeypatch
     def boom(s, tid, mid):
         raise core.PixAIError("HTTP 500 from PixAI")
 
-    monkeypatch.setattr(core, "delete_batch_media_gql", boom)
+    monkeypatch.setattr(cloud_delete_mod, "delete_task_media", boom)
     (tmp_path / "b.png").write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
 
@@ -430,8 +432,8 @@ def test_a_lone_image_uses_the_whole_task_mutation(tmp_path, monkeypatch):
     fired = {}
     monkeypatch.setattr(core, "_make_session", _session_stub)
     _reads(monkeypatch, _lone_task("b"))
-    monkeypatch.setattr(core, "delete_task", lambda s, tid: fired.update(task=tid))
-    monkeypatch.setattr(core, "delete_batch_media_gql", lambda *a, **k: pytest.fail(
+    monkeypatch.setattr(cloud_delete_mod, "delete_task", lambda s, tid: fired.update(task=tid))
+    monkeypatch.setattr(cloud_delete_mod, "delete_task_media", lambda *a, **k: pytest.fail(
         "the per-image mutation fired on a task with no batch -- PixAI answers 403"))
     (tmp_path / "b.png").write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
@@ -532,7 +534,7 @@ def test_it_refuses_without_the_confirm_flag(tmp_path, monkeypatch):
     could delete."""
     called = []
     monkeypatch.setattr(core, "_make_session", _session_stub)
-    monkeypatch.setattr(core, "delete_batch_media_gql",
+    monkeypatch.setattr(cloud_delete_mod, "delete_task_media",
                         lambda s, t, m: called.append((t, m)))
     cli = _cli(tmp_path, _batch(tmp_path))
     r = cli.post("/api/delete-image", json={"media_id": "b"})
@@ -553,7 +555,7 @@ def test_a_confirm_without_the_plan_it_confirms_is_refused(tmp_path, monkeypatch
     cli = _cli(tmp_path, _batch(tmp_path))
     r = cli.post("/api/delete-image", json={"media_id": "b", "confirm": True, **extra})
     assert r.status_code == 400
-    assert r.get_json()["error"] == core.NO_CONFIRMED_PLAN
+    assert r.get_json()["error"] == cloud_delete_mod.NO_CONFIRMED_PLAN
     assert (tmp_path / "b.png").exists()
     with sqlite3.connect(str(tmp_path / "catalog.db")) as con:
         assert con.execute("SELECT COUNT(*) FROM catalog WHERE media_id='b'").fetchone()[0] == 1
@@ -565,7 +567,7 @@ def test_an_imported_file_says_so_instead_of_erroring(tmp_path, monkeypatch):
     blank task id."""
     called = []
     monkeypatch.setattr(core, "_make_session", _session_stub)
-    monkeypatch.setattr(core, "delete_batch_media_gql",
+    monkeypatch.setattr(cloud_delete_mod, "delete_task_media",
                         lambda s, t, m: called.append((t, m)))
     cli = _cli(tmp_path, _batch(tmp_path))
     d = cli.post("/api/delete-image", json=_confirmed(cli, "z")).get_json()
@@ -617,7 +619,7 @@ def test_the_cloud_delete_is_single_attempt(monkeypatch):
 
     monkeypatch.setattr(core, "READ_ONLY", False)
     with pytest.raises(Exception):
-        core.delete_batch_media_gql(_Session(), "T1", "m1")
+        cloud_delete_mod.delete_batch_media_gql(_Session(), "T1", "m1")
     assert len(attempts) == 1, (
         "the delete was POSTed {} times -- a destructive mutation must fire once"
         .format(len(attempts)))
@@ -716,9 +718,9 @@ def test_a_read_without_artwork_ids_falls_back_to_the_catalog(tmp_path, monkeypa
 
 
 def test_the_plan_carries_the_reads_artwork_ids():
-    plan = core._image_delete_plan(_with_artworks(_lone_task("z1"), ["A", "B", "A"]), "z1")
+    plan = cloud_delete_mod._image_delete_plan(_with_artworks(_lone_task("z1"), ["A", "B", "A"]), "z1")
     assert plan.artwork_ids == ("A", "B")
-    assert core._image_delete_plan(_lone_task("z1"), "z1").artwork_ids is None
+    assert cloud_delete_mod._image_delete_plan(_lone_task("z1"), "z1").artwork_ids is None
 
 
 def test_the_whole_task_count_is_capped_at_pixais_batch_not_the_librarys_rows(

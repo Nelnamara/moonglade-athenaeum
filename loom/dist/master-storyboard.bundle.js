@@ -4317,6 +4317,43 @@ ${"=".repeat(48)}
     return on ? " " + PRIVACY_BLUR_CLASS : "";
   }
 
+  // ../gallery/src/hooks/useScrollLock.js
+  var _locks = 0;
+  var _prevOverflow = "";
+  var _prevPadRight = "";
+  function _gutterIsReserved() {
+    try {
+      return typeof CSS !== "undefined" && CSS.supports && CSS.supports("scrollbar-gutter", "stable");
+    } catch {
+      return false;
+    }
+  }
+  function useScrollLock() {
+    useEffect(() => {
+      if (_locks === 0) {
+        _prevOverflow = document.body.style.overflow;
+        if (!_gutterIsReserved()) {
+          const bar = window.innerWidth - document.documentElement.clientWidth;
+          if (bar > 0) {
+            _prevPadRight = document.body.style.paddingRight;
+            document.body.style.paddingRight = bar + "px";
+          }
+        }
+        document.body.style.overflow = "hidden";
+      }
+      _locks += 1;
+      return () => {
+        _locks -= 1;
+        if (_locks === 0) {
+          document.body.style.overflow = _prevOverflow;
+          if (!_gutterIsReserved()) {
+            document.body.style.paddingRight = _prevPadRight;
+          }
+        }
+      };
+    }, []);
+  }
+
   // ../gallery/src/components/GalleryPicker.jsx
   var COPY_KEY = "pick-copyprompt";
   var TILE_KEY = "mg-pk-tile";
@@ -4345,6 +4382,7 @@ ${"=".repeat(48)}
     onClose
   }) {
     const initType = defaultType === "video" ? "video" : defaultType === "all" ? "all" : "image";
+    useScrollLock();
     const [images, setImages] = useState([]);
     const [collections, setCollections] = useState([]);
     const [total, setTotal] = useState(0);
@@ -13329,7 +13367,8 @@ ${"=".repeat(48)}
     const pct = st === "running" && j.total ? Math.min(100, Math.round((j.done || 0) / j.total * 100)) : null;
     const showErr = (st === "failed" || st === "done_with_errors" || st === "stale") && j.error;
     const runMoon = integrity && st === "running" ? fractionOf(j.done, j.total) : null;
-    const cls = st === "failed" ? " at-failed" : st === "done_with_errors" || st === "stale" ? " at-warn" : "";
+    const cardUnused = st === "done" && j.card_unused === true && typeof j.paid_credit === "number" && isFinite(j.paid_credit) && j.paid_credit > 0;
+    const cls = st === "failed" ? " at-failed" : st === "done_with_errors" || st === "stale" || cardUnused ? " at-warn" : "";
     const icon = st === "done" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-ok at-glyph" }, "\u2713"), /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "at-nel", src: "/branding/mascots/trk_done.png", alt: "", onError: (e) => e.currentTarget.remove() })) : st === "done_with_errors" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-warn at-glyph" }, /* @__PURE__ */ react_global_shim_default.createElement(Icon, { name: "warning", title: "Finished with errors" })), /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "at-nel", src: "/branding/mascots/trk_done.png", alt: "", onError: (e) => e.currentTarget.remove() })) : st === "failed" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-err at-glyph" }, /* @__PURE__ */ react_global_shim_default.createElement(Icon, { name: "warning", title: "Failed" })), /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "at-nel", src: "/branding/mascots/trk_fail.png", alt: "", onError: (e) => e.currentTarget.remove() })) : st === "stale" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-warn at-glyph" }, "?"), /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "at-nel", src: "/branding/mascots/trk_fail.png", alt: "", onError: (e) => e.currentTarget.remove() })) : /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-spin" + (queued ? " at-queued" : "") }, /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "at-nel", src: "/branding/nel_spinner.png", alt: "", onError: (e) => e.currentTarget.remove() }), /* @__PURE__ */ react_global_shim_default.createElement("i", { className: "at-ring" }));
     const [, tick] = useState(0);
     const running = st === "running";
@@ -13390,6 +13429,7 @@ ${"=".repeat(48)}
       ) : null),
       pct != null ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-bar" }, /* @__PURE__ */ react_global_shim_default.createElement("i", { style: { width: pct + "%" } })) : null,
       showErr ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-errmsg" }, j.error) : null,
+      cardUnused ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-errmsg" }, "Your free card wasn't used. PixAI charged " + groupThousands(j.paid_credit) + " credits.") : null,
       j.pixai_says ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-says" }, "PixAI says: ", j.pixai_says) : null,
       expanded ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-detail" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-drow" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dk" }, "Status"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dv" + (st === "failed" ? " bad" : st === "done_with_errors" || st === "stale" ? " warn" : st === "done" ? " good" : "") }, fin ? st === "done" ? "Done" : st === "failed" ? "Failed" : st === "stale" ? "Stalled" : "Done, with errors" : queued ? "Queued" : "Running")), typeof j.paid_credit === "number" && isFinite(j.paid_credit) ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-drow" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dk" }, "Cost"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dv" }, groupThousands(j.paid_credit), " credits")) : null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-drow" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dk" }, "Task"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dv at-mono" }, j.job_id || "\u2014"), /* @__PURE__ */ react_global_shim_default.createElement("button", { className: "at-copy" + (copied ? " copied" : ""), title: "Copy task ID", onClick: copy }, copied ? "copied!" : "\u29C9")), !compact ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-drow at-divider" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dk" }, "Sent"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dv at-mono" }, fmtClock(startedAt))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-drow" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dk" }, "Spent"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dv at-mono" }, fmtDuration(spent), running ? " so far" : ""))) : null, typeof j.eta_seconds === "number" && isFinite(j.eta_seconds) ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-drow" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dk" }, "Est. wait"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dv at-mono" }, fmtDuration(j.eta_seconds), " (PixAI, when queued)")) : null) : null,
       fin ? /* @__PURE__ */ react_global_shim_default.createElement("button", { className: "at-x", title: "Dismiss", onClick: stopTracking }, "\xD7") : /* @__PURE__ */ react_global_shim_default.createElement("button", { className: "at-x at-forcex", title: "Stop tracking this job -- does not cancel it on PixAI", onClick: stopTracking }, "Stop tracking")

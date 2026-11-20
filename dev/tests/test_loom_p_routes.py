@@ -33,6 +33,7 @@ from pathlib import Path
 
 import pytest
 
+from moonglade import gen_road as gen_road_mod
 from moonglade import paths as _paths
 from moonglade import backup as core
 from moonglade import gallery as g
@@ -40,6 +41,7 @@ from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 from moonglade.account_prefs import _account_key
 from tests.conftest import _TEST_USERNAME, login_test_client
 from moonglade import media_tools as media_tools_mod
+from moonglade import task_reads as task_reads_mod
 
 REPO = Path(__file__).resolve().parents[2]
 OTHER_USER, OTHER_PW = "someone-else", "another-real-password-2"
@@ -79,9 +81,10 @@ def traps(monkeypatch):
             hit.append(name)
             raise AssertionError("a Loom local route reached " + name)
         return f
-    for name in ("submit", "submit_generation", "build_request", "gql_mutate", "gql_adhoc",
-                 "_make_session", "upload_media"):
+    for name in ("gql_mutate", "gql_adhoc", "_make_session", "upload_media"):
         monkeypatch.setattr(core, name, _trap(name))
+    for name in ("submit", "submit_generation", "build_request"):  # in gen_road since 3.22
+        monkeypatch.setattr(gen_road_mod, name, _trap(name))
     return hit
 
 
@@ -949,11 +952,14 @@ def poll(tmp_path, monkeypatch):
     got = {"value": {"media_ids": ["7001"], "saved": 1, "is_video": True, "duration": None}}
     measured = []
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
-    monkeypatch.setattr(core, "collect_generation", lambda s, tid, out: dict(got["value"]))
+    monkeypatch.setattr(task_reads_mod, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
+    monkeypatch.setattr(gen_road_mod, "collect_generation", lambda s, tid, out: dict(got["value"]))
     monkeypatch.setattr(media_tools_mod, "duration", lambda p, **k: measured.append(Path(p).name) or 10.0417)
-    for name in ("submit", "submit_generation", "gql_mutate", "upload_media"):
+    for name in ("gql_mutate", "upload_media"):
         monkeypatch.setattr(core, name, lambda *a, **k: (_ for _ in ()).throw(AssertionError("spent")))
+    for name in ("submit", "submit_generation"):  # in gen_road since 3.22
+        monkeypatch.setattr(gen_road_mod, name,
+                            lambda *a, **k: (_ for _ in ()).throw(AssertionError("spent")))
     cli = login_test_client(create_app(tmp))
     return {"cli": cli, "got": got, "measured": measured, "tmp": tmp, "mp": monkeypatch}
 
@@ -1026,9 +1032,10 @@ def ft(tmp_path, monkeypatch):
             hit.append(name)
             raise AssertionError("the frame-thumbs route reached " + name)
         return f
-    for name in ("submit", "submit_generation", "build_request", "gql_mutate", "gql_adhoc", "upload_media",
-                 "submit_fixer"):
+    for name in ("gql_mutate", "gql_adhoc", "upload_media"):
         monkeypatch.setattr(core, name, _trap(name))
+    for name in ("submit", "submit_generation", "build_request", "submit_fixer"):  # in gen_road since 3.22
+        monkeypatch.setattr(gen_road_mod, name, _trap(name))
     session = object()
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: session)
     urls = {"222": "https://images-ng.pixai.art/images/thumb/two", "333": None,

@@ -32,6 +32,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from moonglade import backup as core  # noqa: E402
 from tests.fake_pixai import operation_name  # noqa: E402
+from moonglade import task_reads as task_reads_mod
+from moonglade import cloud_delete as cloud_delete_mod
 
 DELETED_AT = "2026-09-06T11:22:33.000Z"
 
@@ -82,7 +84,7 @@ def _video_task():
 def test_a_live_member_with_live_siblings_goes_per_image():
     """The only case `deleteBatchMedia` was ever right for: after this delete the task still
     has outputs, so PixAI keeps the record and drops one image out of it."""
-    plan, reason, live_siblings, entry = core.route_image_delete(
+    plan, reason, live_siblings, entry = cloud_delete_mod.route_image_delete(
         _batch_task(False, False, False, False), "m1")
     assert plan == "per-image"
     assert live_siblings == 3, "the three untouched siblings were miscounted"
@@ -94,7 +96,7 @@ def test_the_last_live_member_goes_whole_task():
     """Three of four already deleted: deleting the fourth would leave the task with no
     outputs at all, which is the 403 case. PixAI's own site sends the whole-task mutation
     here, and so must this."""
-    plan, reason, live_siblings, entry = core.route_image_delete(
+    plan, reason, live_siblings, entry = cloud_delete_mod.route_image_delete(
         _batch_task(True, True, False, True), "m2")
     assert plan == "whole-task"
     assert live_siblings == 0, "it thought a sibling would survive this delete"
@@ -106,7 +108,7 @@ def test_it_counts_live_members_not_array_positions():
     they stay in the array with a `deletedAt` -- so array length and array position say
     nothing about how many images are still there. Position 0 of a four-entry array is the
     LAST live image here."""
-    plan, _reason, live_siblings, _entry = core.route_image_delete(
+    plan, _reason, live_siblings, _entry = cloud_delete_mod.route_image_delete(
         _batch_task(False, True, True, True), "m0")
     assert (plan, live_siblings) == ("whole-task", 0), (
         "routed off the array rather than off how many images are still live")
@@ -115,7 +117,7 @@ def test_it_counts_live_members_not_array_positions():
 def test_a_task_that_made_one_image_goes_whole_task():
     """No `batch` key at all: the picture IS `outputs.mediaId`, and `deleteBatchMedia` has no
     batch to delete from -- PixAI answers 403."""
-    plan, reason, live_siblings, entry = core.route_image_delete(_lone_task(), "solo1")
+    plan, reason, live_siblings, entry = cloud_delete_mod.route_image_delete(_lone_task(), "solo1")
     assert plan == "whole-task"
     assert live_siblings == 0
     assert entry is None, "a task with no batch has no batch entry to report"
@@ -125,7 +127,7 @@ def test_a_task_that_made_one_image_goes_whole_task():
 def test_an_edit_or_chat_task_goes_whole_task():
     """Same shape rule, different surface: a chat/edit task's outputs are
     `{mediaId, modelResponse}` -- one image, no batch."""
-    plan, _reason, _live, _entry = core.route_image_delete(_chat_task(), "edited1")
+    plan, _reason, _live, _entry = cloud_delete_mod.route_image_delete(_chat_task(), "edited1")
     assert plan == "whole-task"
 
 
@@ -136,7 +138,7 @@ def test_an_edit_or_chat_task_goes_whole_task():
 def test_an_already_deleted_member_is_refused():
     """Its entry carries `deletedAt`, so PixAI has already dropped it. Re-sending either
     mutation would either fail or, worse, take the whole task with it."""
-    plan, reason, _live, entry = core.route_image_delete(
+    plan, reason, _live, entry = cloud_delete_mod.route_image_delete(
         _batch_task(True, True, False, True), "m0")
     assert plan == "refuse"
     assert "already deleted" in reason.lower(), reason
@@ -147,7 +149,7 @@ def test_an_already_deleted_member_is_refused():
 def test_a_video_task_is_refused():
     """Video clips hang off `outputs.videos[]` and neither mutation is known to be the right
     one for them. Refusing beats guessing a destructive call."""
-    plan, reason, _live, _entry = core.route_image_delete(_video_task(), "clip1")
+    plan, reason, _live, _entry = cloud_delete_mod.route_image_delete(_video_task(), "clip1")
     assert plan == "refuse"
     assert "video" in reason.lower(), reason
 
@@ -155,7 +157,7 @@ def test_a_video_task_is_refused():
 def test_a_media_id_the_task_does_not_list_is_refused():
     """A stale catalog row, or an id that rotated. Nothing on PixAI's side matches it, so
     there is nothing to aim a delete at."""
-    plan, reason, _live, entry = core.route_image_delete(
+    plan, reason, _live, entry = cloud_delete_mod.route_image_delete(
         _batch_task(False, False, False, False), "not-in-this-task")
     assert plan == "refuse"
     assert "no longer lists" in reason.lower(), reason
@@ -166,7 +168,7 @@ def test_a_task_that_could_not_be_read_is_refused():
     """The fail-safe direction. `task_detail_gql` fails SOFT to None on a network blip, and
     the answer to "I don't know what this task looks like" must never be the whole-task
     mutation -- that would delete a whole generation off a dropped packet."""
-    plan, reason, _live, _entry = core.route_image_delete(None, "m1")
+    plan, reason, _live, _entry = cloud_delete_mod.route_image_delete(None, "m1")
     assert plan == "refuse"
     assert "nothing was deleted" in reason.lower(), reason
 
@@ -176,7 +178,7 @@ def test_the_combined_preview_picture_is_refused():
     batch; the individual images live in `outputs.batch[]` and the two sets never overlap.
     Treating the preview as "the lone image" would route a four-image batch to the whole-task
     delete."""
-    plan, reason, _live, entry = core.route_image_delete(
+    plan, reason, _live, entry = cloud_delete_mod.route_image_delete(
         _batch_task(False, False, False, False), "GRID-COMBINED")
     assert plan == "refuse"
     assert "preview" in reason.lower(), reason
@@ -185,7 +187,7 @@ def test_the_combined_preview_picture_is_refused():
 
 def test_a_blank_media_id_is_refused():
     """A delete with nothing to aim at."""
-    assert core.route_image_delete(_lone_task(), "")[0] == "refuse"
+    assert cloud_delete_mod.route_image_delete(_lone_task(), "")[0] == "refuse"
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +199,7 @@ def test_the_router_touches_no_session_and_no_clock():
     be exercised over every shape above without a socket. A router that fetched anything
     could not be tested against the shapes that matter."""
     import inspect
-    src = inspect.getsource(core.route_image_delete)
+    src = inspect.getsource(cloud_delete_mod.route_image_delete)
     for forbidden in ("session", "gql", "requests.", "task_detail_gql"):
         assert forbidden not in src, (
             "route_image_delete reaches for {!r} -- the decision must be pure".format(
@@ -208,7 +210,7 @@ def test_it_never_reads_updated_at():
     """Probed 2026-09-06: a per-image delete does NOT move the task's `updatedAt`. Anything
     keyed on it would silently decide the wrong way."""
     import inspect
-    assert "updatedAt" not in inspect.getsource(core.route_image_delete)
+    assert "updatedAt" not in inspect.getsource(cloud_delete_mod.route_image_delete)
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +250,7 @@ def test_the_plan_reads_the_live_task_and_sends_nothing():
     know which of a batch's members PixAI still has -- and it must send no mutation at all,
     because the dialog it feeds has not been agreed to yet."""
     dbl = _Double(_batch_task(False, True, False, False))
-    plan = core.plan_image_delete(dbl, "TASK-BATCH", "m0")
+    plan = cloud_delete_mod.plan_image_delete(dbl, "TASK-BATCH", "m0")
     assert plan.plan == "per-image"
     assert plan.live_siblings == 2, "the deleted member was counted as a survivor"
     assert dbl.reads and dbl.reads[0] == ("TaskDetail", {"id": "TASK-BATCH"})
@@ -260,7 +262,7 @@ def test_the_plan_reports_what_pixai_already_deleted():
     PixAI already dropped is the only copy left anywhere -- so the plan has to name those
     rows before anything is quarantined."""
     dbl = _Double(_batch_task(True, True, False, True))
-    plan = core.plan_image_delete(dbl, "TASK-BATCH", "m2")
+    plan = cloud_delete_mod.plan_image_delete(dbl, "TASK-BATCH", "m2")
     assert plan.plan == "whole-task"
     assert sorted(plan.keep_media) == ["m0", "m1", "m3"]
 
@@ -268,7 +270,7 @@ def test_the_plan_reports_what_pixai_already_deleted():
 def test_the_plan_carries_the_deleted_stamp_of_an_already_deleted_image():
     """So the caller can mark its own catalog row with the date PixAI dropped it, instead of
     leaving a row that looks live forever."""
-    plan = core.plan_image_delete(_Double(_batch_task(True, False)), "TASK-BATCH", "m0")
+    plan = cloud_delete_mod.plan_image_delete(_Double(_batch_task(True, False)), "TASK-BATCH", "m0")
     assert plan.plan == "refuse"
     assert plan.cloud_deleted_at == DELETED_AT
 
@@ -276,24 +278,24 @@ def test_the_plan_carries_the_deleted_stamp_of_an_already_deleted_image():
 def test_a_read_that_fails_plans_a_refusal_and_sends_nothing(monkeypatch):
     """task_detail_gql fails SOFT to None on a network blip. The delete must come to a stop
     there and say so -- never fall through to a mutation on a task it could not see."""
-    monkeypatch.setattr(core, "task_detail_gql", lambda *a, **k: None)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda *a, **k: None)
     monkeypatch.setattr(core, "READ_ONLY", False)
     dbl = _Double(None)
-    plan = core.delete_image_routed(dbl, "TASK-BATCH", "m0", confirmed_plan="per-image")
+    plan = cloud_delete_mod.delete_image_routed(dbl, "TASK-BATCH", "m0", confirmed_plan="per-image")
     assert plan.plan == "refuse"
     assert "nothing was deleted" in plan.reason.lower()
     assert dbl.sent() == 0, "it deleted something after a failed read"
 
 
-def test_the_per_image_branch_sends_delete_batch_media(monkeypatch):
+def test_the_per_image_branch_sends_the_rest_media_delete(monkeypatch):
+    """3.22 S3-delete (DESIGN_3.22 2.9): the per-image branch is PixAI's REST route, POST
+    /v2/task/{id}/media/{mediaId}/delete, no longer the GraphQL deleteBatchMedia."""
     monkeypatch.setattr(core, "READ_ONLY", False)
     dbl = _Double(_batch_task(False, False, False))
-    plan = core.delete_image_routed(dbl, "TASK-BATCH", "m1", confirmed_plan="per-image")
+    plan = cloud_delete_mod.delete_image_routed(dbl, "TASK-BATCH", "m1", confirmed_plan="per-image")
     assert plan.plan == "per-image"
-    assert len(dbl.mutations) == 1 and not dbl.rest_posts
-    doc, variables = dbl.mutations[0]
-    assert "updateGenerationTask" in doc
-    assert variables["input"] == {"deleteBatchMedia": {"mediaId": "m1"}}
+    assert not dbl.mutations, "the GraphQL per-image mutation was sent"
+    assert dbl.rest_posts == [("/task/TASK-BATCH/media/m1/delete", {})]
 
 
 def test_the_whole_task_branch_sends_the_task_delete(monkeypatch):
@@ -301,7 +303,7 @@ def test_the_whole_task_branch_sends_the_task_delete(monkeypatch):
     deleteBatchMedia here and PixAI answered 403."""
     monkeypatch.setattr(core, "READ_ONLY", False)
     dbl = _Double(_lone_task())
-    plan = core.delete_image_routed(dbl, "TASK-LONE", "solo1", confirmed_plan="whole-task")
+    plan = cloud_delete_mod.delete_image_routed(dbl, "TASK-LONE", "solo1", confirmed_plan="whole-task")
     assert plan.plan == "whole-task"
     assert not dbl.mutations, "the per-image mutation fired anyway"
     assert dbl.rest_posts == [("/task/TASK-LONE/delete", {})]
@@ -313,7 +315,7 @@ def test_a_stale_confirmed_plan_is_refused(monkeypatch):
     user was told would keep three images."""
     monkeypatch.setattr(core, "READ_ONLY", False)
     dbl = _Double(_batch_task(True, False, True, True))     # only m1 is live now
-    plan = core.delete_image_routed(dbl, "TASK-BATCH", "m1", confirmed_plan="per-image")
+    plan = cloud_delete_mod.delete_image_routed(dbl, "TASK-BATCH", "m1", confirmed_plan="per-image")
     assert plan.plan == "refuse"
     assert "changed" in plan.reason.lower(), plan.reason
     assert dbl.sent() == 0, "it deleted on a plan the user never agreed to"
@@ -322,9 +324,9 @@ def test_a_stale_confirmed_plan_is_refused(monkeypatch):
 def test_a_matching_confirmed_plan_goes_through(monkeypatch):
     monkeypatch.setattr(core, "READ_ONLY", False)
     dbl = _Double(_batch_task(False, False))
-    plan = core.delete_image_routed(dbl, "TASK-BATCH", "m0", confirmed_plan="per-image")
+    plan = cloud_delete_mod.delete_image_routed(dbl, "TASK-BATCH", "m0", confirmed_plan="per-image")
     assert plan.plan == "per-image"
-    assert len(dbl.mutations) == 1
+    assert dbl.rest_posts == [("/task/TASK-BATCH/media/m0/delete", {})] and not dbl.mutations
 
 
 @pytest.mark.parametrize("plan", [None, "", "   "], ids=["none", "empty", "blank"])
@@ -334,7 +336,7 @@ def test_a_confirm_without_its_plan_is_refused_before_the_read(monkeypatch, plan
     before anything is read or sent (red team, 2026-11-19)."""
     monkeypatch.setattr(core, "READ_ONLY", False)
     dbl = _Double(_lone_task())
-    got = core.delete_image_routed(dbl, "TASK-LONE", "solo1", confirmed_plan=plan)
+    got = cloud_delete_mod.delete_image_routed(dbl, "TASK-LONE", "solo1", confirmed_plan=plan)
     assert got.plan == "refuse"
-    assert got.reason == core.NO_CONFIRMED_PLAN
+    assert got.reason == cloud_delete_mod.NO_CONFIRMED_PLAN
     assert dbl.reads == [] and dbl.sent() == 0, "it read or deleted without a confirmed plan"

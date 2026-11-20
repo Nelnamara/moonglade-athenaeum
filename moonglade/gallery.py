@@ -37,23 +37,34 @@ from moonglade import account_prefs as _account_prefs
 from moonglade import achievements as _achievements
 from moonglade import assets as moonglade_assets
 from moonglade import branding as _branding
+from moonglade import cards as _cards
+from moonglade import cloud_delete as _cloud_delete
 from moonglade import container as moonglade_container
 from moonglade import contest_sync as _contest_sync
 from moonglade import contest_wins
+from moonglade import contests as _contests
 from moonglade import dupes as _dupes
+from moonglade import gen_cli as _gen_cli
+from moonglade import gen_params as _gen_params
+from moonglade import gen_road as _gen_road
 from moonglade import health as _health
 from moonglade import jobs as _jobs
 from moonglade import living as _living
 from moonglade import media_tools as _media_tools
 from moonglade import mirror as _mirror
+from moonglade import models as _models
 from moonglade import organize as _organize
 from moonglade import paths as _paths
 from moonglade import pixai_client as _pixai_client
+from moonglade import pricing as _pricing
 from moonglade import scan as _scan
 from moonglade import series as _series
 from moonglade import hostcheck as _hostcheck
 from moonglade import settings as _settings
+from moonglade import task_feed as _task_feed
+from moonglade import task_reads as _task_reads
 from moonglade import telemetry as _telemetry
+from moonglade import training as _training
 from moonglade import updater as _updater
 from moonglade import secure_files as _secure_files
 from moonglade import web_sessions as _web_sessions
@@ -186,6 +197,14 @@ CATALOG_FIELDS = [
     "views_prev",      # the sweep before that -- the spike baseline
     "views_at",        # ISO timestamp of the sweep that wrote `views`
     "views_prev_at",   # ISO timestamp of the sweep that wrote `views_prev`
+    # EDIT PRO'S OUTPUT FORMAT (3.22 S5, DESIGN_3.22 5.3): what PixAI made -- the task's own
+    # outputs.outputFormat, else the request's chat.modelConfig.outputFormat -- "svg" or "gif"
+    # (a png edit sends none and is blank, like every ordinary picture). The source rules read
+    # it before the file's extension. A GIF's frame count and frame length come from the
+    # request; blank when it sent none (PixAI's own defaults then ran).
+    "output_format",
+    "frame_count",
+    "frame_duration_ms",
 ]
 
 THUMB_SIZE = (768, 768)
@@ -259,7 +278,10 @@ CREATE TABLE IF NOT EXISTS catalog (
     views             TEXT DEFAULT '',
     views_prev        TEXT DEFAULT '',
     views_at          TEXT DEFAULT '',
-    views_prev_at     TEXT DEFAULT ''
+    views_prev_at     TEXT DEFAULT '',
+    output_format     TEXT DEFAULT '',
+    frame_count       TEXT DEFAULT '',
+    frame_duration_ms TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_created_at ON catalog(created_at);
 CREATE INDEX IF NOT EXISTS idx_model_name ON catalog(model_name);
@@ -412,6 +434,12 @@ _MIGRATIONS = [
     # image's entry in its task's outputs.batch. Per-ROW and permanent, unlike the
     # task-level deleted_remote above, which --reconcile-deleted rewrites on every run.
     "ALTER TABLE catalog ADD COLUMN cloud_deleted_at TEXT DEFAULT ''",
+    # EDIT PRO'S OUTPUT FORMAT (3.22 S5) -- see CATALOG_FIELDS. Blank on every existing row
+    # (a --backfill-full-meta fills an SVG or GIF edit's), and the source rules fall back to
+    # the file's extension, which collect has named .svg / .gif since 3.21.1.
+    "ALTER TABLE catalog ADD COLUMN output_format TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN frame_count TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN frame_duration_ms TEXT DEFAULT ''",
     # ONE-TIME DATA REPAIRS (2026-09-26). A repair that must run ONCE -- not on every new
     # process, which is how often migrate() replays this list -- records its name here and
     # guards its own statement on that name, so each repair is three idempotent statements:
@@ -1295,12 +1323,20 @@ _INLINE_FILE_TYPES = frozenset({
     "audio/aac", "audio/ogg", "audio/flac", "audio/x-flac",
 })
 FILE_RESPONSE_CSP = "sandbox"
+# An SVG (3.22 S5, DESIGN_3.22 5.4) goes out under its real type, image/svg+xml, so an <img src>
+# (or a CSS background-image) can draw it -- an image context never runs SVG script. It is still
+# always a download (an SVG is not on _INLINE_FILE_TYPES), so a direct visit never becomes a
+# page on Moonglade's origin, and this policy is the belt if a browser ignores the disposition:
+# sandboxed, nothing fetched, only its own inline styles. Never shown any other way: no
+# <object>, <embed>, <iframe>, innerHTML, data URL from its text or fetch-then-inject.
+SVG_FILE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'"
 # The library's own picture and clip types, named here rather than asked of the system's
 # type table (on Windows that reads the registry, which can say anything).
 _MEDIA_TYPE_BY_EXT = {
     ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
     ".gif": "image/gif", ".avif": "image/avif", ".mp4": "video/mp4", ".webm": "video/webm",
     ".mov": "video/quicktime", ".m4v": "video/x-m4v",
+    ".svg": "image/svg+xml",           # a download with SVG_FILE_CSP (harden_file_response)
 }
 
 
@@ -1321,12 +1357,14 @@ def _attachment_disposition(name):
 def harden_file_response(resp, filename=None):
     """Stamp a served file's response so it can never run as a page on this origin.
 
-    Always: X-Content-Type-Options: nosniff and Content-Security-Policy: sandbox. And a
-    type that is not a raster picture, a video or a sound goes out as a download
-    (Content-Disposition: attachment), whatever the route asked for. Returns resp."""
+    Always: X-Content-Type-Options: nosniff and Content-Security-Policy: sandbox (an SVG,
+    by its type or its name: the stricter SVG_FILE_CSP). And a type that is not a raster
+    picture, a video or a sound goes out as a download (Content-Disposition: attachment),
+    whatever the route asked for. Returns resp."""
     resp.headers["X-Content-Type-Options"] = "nosniff"
-    resp.headers["Content-Security-Policy"] = FILE_RESPONSE_CSP
     mime = (resp.mimetype or "").lower()
+    svg = mime == "image/svg+xml" or str(filename or "").lower().endswith(".svg")
+    resp.headers["Content-Security-Policy"] = SVG_FILE_CSP if svg else FILE_RESPONSE_CSP
     if mime not in _INLINE_FILE_TYPES:
         if not (resp.headers.get("Content-Disposition") or "").lower().startswith("attachment"):
             resp.headers["Content-Disposition"] = _attachment_disposition(filename)
@@ -1822,8 +1860,11 @@ def _operator_clause(key, value):
 
 def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
                  published_only=False, art_tag="", lora="", media_type="", source="",
-                 collection=""):
-    """Return (where_clause, params) for the common filter set."""
+                 collection="", no_svg=False):
+    """Return (where_clause, params) for the common filter set. `no_svg` leaves SVG rows
+    out (by the recorded output format, then the file's extension): the picture list the
+    create pickers and the Apple TV client read, since tvOS cannot draw one and no create
+    road takes one as a source (3.22 S5)."""
     clauses = ["filename != ''"]
     params  = []
     if collection:
@@ -1889,6 +1930,9 @@ def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
     if date_to:
         clauses.append("SUBSTR(created_at,1,7) <= ?")
         params.append(date_to)
+    if no_svg:
+        clauses.append("COALESCE(output_format,'') != 'svg' "
+                       "AND LOWER(COALESCE(filename,'')) NOT LIKE '%.svg'")
     return " AND ".join(clauses), params
 
 
@@ -2606,8 +2650,9 @@ def curate_restore(db_path, prev):
 def query_catalog(db_path, q="", model="", date_from="", date_to="",
                   sort="newest", page=1, page_size=100, batch="", rating_min=0,
                   published_only=False, art_tag="", lora="", media_type="", source="",
-                  collection="", series=""):
-    """Return (rows, total) with filtering, sorting and pagination done in SQL.
+                  collection="", series="", no_svg=False):
+    """Return (rows, total) with filtering, sorting and pagination done in SQL. `no_svg`
+    leaves SVG rows out (see _build_where).
 
     `series` constrains the result to one dial-in series' members (#34 direction
     B, the ?series=<sid> "open a stack" view): the sid resolves through the series
@@ -2631,7 +2676,7 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
     q, collection = _expand_smart(db_path, q, collection)
     where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
                                  published_only, art_tag, lora, media_type, source,
-                                 collection)
+                                 collection, no_svg=no_svg)
     where, params = _narrow_to_series(db_path, series, where, params)
     order, order_params = _order_sql(sort, collection)
     with catalog(db_path) as con:
@@ -4230,6 +4275,79 @@ def thumbnail_renders(path):
 _PIL_EXTS = None                                  # Pillow's openable extensions, read once
 
 
+# See-through pictures (RGBA/LA/P-with-transparency) used to lose their alpha to a bare
+# convert("RGB") and showed a black box with junk colours. They are flattened onto a dim
+# checkerboard instead (owner's pick, 3.22 walk): 12px squares at the thumbnail's FINAL
+# size, top-left square CHECKER_A. Opaque pictures keep the old convert path untouched.
+CHECKER_A = (46, 49, 72)
+CHECKER_B = (32, 35, 54)
+CHECKER_SQUARE = 12
+# One-time rebuild marker (see build_thumbnails): its presence means every see-through
+# thumbnail already on disk was cut by the checkerboard-aware code.
+CHECKER_MARKER = ".checkerboard-v1"
+
+
+def _see_through_rgba(im):
+    """The picture as RGBA when it has any genuinely see-through pixel, else None.
+    A fully opaque RGBA (or a palette image whose transparent index is unused) is NOT
+    see-through, so it keeps today's exact convert("RGB") path."""
+    if im.mode in ("RGBA", "LA", "PA", "La", "RGBa") or "transparency" in im.info:
+        rgba = im.convert("RGBA")
+        if rgba.getchannel("A").getextrema()[0] < 255:
+            return rgba
+    return None
+
+
+def _checkerboard(size):
+    from PIL import ImageDraw
+    w, h = size
+    board = Image.new("RGB", (w, h), CHECKER_B)
+    draw = ImageDraw.Draw(board)
+    n = CHECKER_SQUARE
+    for ty in range(0, h, n):
+        for tx in range(0, w, n):
+            if ((tx // n) + (ty // n)) % 2 == 0:
+                draw.rectangle([tx, ty, min(tx + n, w) - 1, min(ty + n, h) - 1], fill=CHECKER_A)
+    return board
+
+
+def thumb_rgb(im, size, resample=None):
+    """`im` shrunk to fit `size` as an RGB image ready for a JPEG. Opaque: exactly the old
+    convert-then-thumbnail. See-through: shrunk as RGBA, then pasted (alpha as the mask)
+    onto the checkerboard laid out at the final size."""
+    resample = Image.LANCZOS if resample is None else resample
+    rgba = _see_through_rgba(im)
+    if rgba is None:
+        out = im.convert("RGB")
+        out.thumbnail(size, resample)
+        return out
+    rgba.thumbnail(size, resample)
+    board = _checkerboard(rgba.size)
+    board.paste(rgba.convert("RGB"), (0, 0), rgba.getchannel("A"))
+    return board
+
+
+def _could_be_see_through(im):
+    """Header-only test: the mode or the `transparency` info says the picture MAY have
+    see-through pixels. Reads no pixel data, so an opaque RGB/L original costs one header read."""
+    return im.mode in ("RGBA", "LA", "PA", "La", "RGBa") or "transparency" in im.info
+
+
+def source_is_see_through(img_path):
+    """True when the original file has see-through pixels (a GIF is judged on its first
+    frame, the one make_thumbnail draws). False on any read problem. The header (mode and
+    `transparency` info) is looked at first; the alpha is decoded only for those candidates."""
+    if Image is None:
+        return False
+    try:
+        with Image.open(img_path) as im:
+            if not _could_be_see_through(im):
+                return False                 # opened on frame 0: no n_frames scan, no decode
+            return _see_through_rgba(im) is not None
+    except Exception:
+        return False
+
+
 def make_thumbnail(img_path, thumb_path):
     """Render one gallery thumbnail. ATOMIC: Pillow writes a same-directory temp file and
     the finished JPEG is os.replace()d into position -- the idiom download's own `.part`
@@ -4259,8 +4377,11 @@ def make_thumbnail(img_path, thumb_path):
         # ("*.jpg")) cannot mistake a live temp file for a stale thumbnail.
         tmp = thumb_path.with_name(thumb_path.name + ".tmp-%d" % os.getpid())
         with Image.open(img_path) as im:
-            im = im.convert("RGB")
-            im.thumbnail(THUMB_SIZE, Image.LANCZOS)
+            # A GIF (Edit Pro's animation, 3.22 S5) is drawn from its FIRST frame, a still:
+            # how the grid animates one is the look board's call, never this file's.
+            if getattr(im, "n_frames", 1) > 1:
+                im.seek(0)
+            im = thumb_rgb(im, THUMB_SIZE, Image.LANCZOS)
             im.save(tmp, "JPEG", quality=THUMB_QUALITY)
         # _atomic_replace, not a bare os.replace: on Windows an antivirus or the Search
         # Indexer briefly opens a file the instant it is created, and renaming it then
@@ -4985,7 +5106,8 @@ def probe_duration(path, timeout=None):
     return _media_tools.duration(path, timeout=timeout)
 
 
-def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, workers=8):
+def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, workers=8,
+                     recheck=True):
     """Generate JPEG thumbnails for rows that have a file. CPU-bound (Pillow),
     so a thread pool gives a real multi-core speedup (Pillow releases the GIL
     during decode/encode). workers<=1 runs serially. Each worker writes a distinct
@@ -4995,7 +5117,12 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
     poster made it already when one existed): a poster-less video gets a local
     ffmpeg frame-extract instead of staying blank forever. `force` deliberately
     does NOT overwrite an existing video thumb -- the poster came from the
-    network and can't be regenerated from the local file."""
+    network and can't be regenerated from the local file.
+
+    `recheck` (default True) runs the one-time see-through re-check inline for the batch
+    jobs (--sync, --rebuild-thumbs, after an update). The gallery start passes False so a
+    missing-thumbnail build is all it waits for, and schedules recheck_see_through_thumbnails()
+    to run behind the started server instead."""
     from moonglade import backup as core
     if Image is None:
         print("Warning: Pillow not installed -- thumbnails will not be generated.")
@@ -5003,6 +5130,13 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
     total = 0
     done = 0
     work = []
+    # ONE-TIME REBUILD (3.22 walk): thumbnails cut before the checkerboard existed flattened
+    # see-through pictures to a black box, and "is it built?" is thumb_path.exists(), so they
+    # would never be redone. Until the marker file is written, every already-built IMAGE
+    # thumbnail is re-checked ONCE against its original and only the see-through ones are
+    # recut (opaque thumbnails are left alone). A forced rebuild recuts everything anyway.
+    marker = thumb_dir / CHECKER_MARKER
+    recheck = recheck and not force and not marker.exists()
     for row in rows:
         if not row.get("filename"):
             continue
@@ -5010,15 +5144,23 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
         total += 1
         thumb_path = thumb_dir / "{}.jpg".format(row["media_id"])
         if thumb_path.exists() and (is_vid or not force):
-            done += 1
+            if recheck and not is_vid and thumbnail_renders(row.get("filename")):
+                work.append((row["media_id"], thumb_path, row.get("filename"), is_vid, True))
+            else:
+                done += 1
             continue
         if not is_vid and not thumbnail_renders(row.get("filename")):
             done += 1            # an SVG has no thumbnail by design: skipped, not a failure (L3)
             continue
-        work.append((row["media_id"], thumb_path, row.get("filename"), is_vid))
+        work.append((row["media_id"], thumb_path, row.get("filename"), is_vid, False))
 
     def _one(item):
-        mid, thumb_path, filename, is_vid = item
+        mid, thumb_path, filename, is_vid, only_if_see_through = item
+        if only_if_see_through:
+            src = find_image_file(out_dir, mid, filename)
+            if not src or not source_is_see_through(src):
+                return True              # opaque (or unreadable): the old thumbnail stands
+            return bool(make_thumbnail(src, thumb_path))
         if is_vid:
             vp = Path(out_dir) / (filename or "")
             if not vp.exists():
@@ -5054,8 +5196,79 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
             if _one(it):
                 done += 1
             _tick()
+    if recheck or force:
+        _write_checker_marker(thumb_dir)
     if total and not progress_cb:
         print()
+
+
+def _write_checker_marker(thumb_dir):
+    try:
+        thumb_dir.mkdir(parents=True, exist_ok=True)
+        (thumb_dir / CHECKER_MARKER).write_text(
+            "see-through thumbnails sit on a checkerboard\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def recheck_see_through_thumbnails(rows, out_dir, thumb_dir, workers=2, cancel=None):
+    """The one-time see-through re-check (3.22 walk) as its own pass, for running BEHIND a
+    started gallery. Every already-built image thumbnail is checked against its original
+    (header first, alpha only for candidates) and only see-through ones are recut. The marker
+    is written ONLY when every item was handled; a cancel (`cancel.is_set()`), a worker error
+    or a failed recut leaves no marker, so the pass simply runs again next start. Returns True
+    when the marker was written, False otherwise (including: nothing to do, marker already there)."""
+    marker = thumb_dir / CHECKER_MARKER
+    if Image is None or marker.exists():
+        return False
+    items = []
+    for row in rows:
+        fn = row.get("filename")
+        if not fn or row.get("is_video") == "1" or not thumbnail_renders(fn):
+            continue
+        thumb_path = thumb_dir / "{}.jpg".format(row["media_id"])
+        if thumb_path.exists():
+            items.append((row["media_id"], thumb_path, fn))
+
+    def _one(item):
+        if cancel is not None and cancel.is_set():
+            return False
+        mid, thumb_path, fn = item
+        src = find_image_file(out_dir, mid, fn)
+        if not src or not source_is_see_through(src):
+            return True                  # opaque (or unreadable): the old thumbnail stands
+        return bool(make_thumbnail(src, thumb_path))
+
+    ok = True
+    if workers and workers > 1 and items:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            for res in ex.map(_one, items):
+                ok = ok and res
+    else:
+        for it in items:
+            ok = _one(it) and ok
+    if not ok or (cancel is not None and cancel.is_set()):
+        return False
+    _write_checker_marker(thumb_dir)
+    return True
+
+
+def start_see_through_recheck(rows, out_dir, thumb_dir, workers=2, cancel=None):
+    """Run recheck_see_through_thumbnails() on a daemon thread (the same off-thread startup
+    idiom as _health_prime / _outside_prime), after the server is listening. Returns the thread,
+    or None when the marker says there is nothing to do."""
+    if (thumb_dir / CHECKER_MARKER).exists():
+        return None
+
+    def _run():
+        try:
+            recheck_see_through_thumbnails(rows, out_dir, thumb_dir, workers=workers, cancel=cancel)
+        except Exception:                # noqa: BLE001 -- background polish, never a crash
+            pass
+    th = threading.Thread(target=_run, daemon=True, name="moonglade-thumb-recheck")
+    th.start()
+    return th
 
 
 # ---------------------------------------------------------------------------
@@ -5162,24 +5375,24 @@ def _upscale_const_js():
     from moonglade import backup as core
     return ("<script nonce=\"__CSP_NONCE__\">window.MG_UPSCALE={};window.MG_LORA={};</script>".format(
         json.dumps({
-            "enlargeModels": list(core.ENLARGE_MODELS),
-            "defaultEnlargeModel": core.DEFAULT_ENLARGE_MODEL,
-            "ceiling": core.UPSCALE_PIXEL_CEILING,
+            "enlargeModels": list(_gen_params.ENLARGE_MODELS),
+            "defaultEnlargeModel": _gen_params.DEFAULT_ENLARGE_MODEL,
+            "ceiling": _gen_params.UPSCALE_PIXEL_CEILING,
             # So the panel can upscale an image whose model the catalog never recorded,
             # instead of refusing until one is picked -- PixAI's own dialog has no model
             # control at all. Served rather than retyped, like everything else here. It is
             # a VERSION id, so the panel sends it as version_id; see core for why.
-            "fallbackVersionId": core.UPSCALE_FALLBACK_VERSION_ID,
-            "denoise": {"strength": core.DEFAULT_UPSCALE_DENOISING_STRENGTH,
-                        "steps": core.DEFAULT_UPSCALE_DENOISING_STEPS},
+            "fallbackVersionId": _gen_params.UPSCALE_FALLBACK_VERSION_ID,
+            "denoise": {"strength": _gen_params.DEFAULT_UPSCALE_DENOISING_STRENGTH,
+                        "steps": _gen_params.DEFAULT_UPSCALE_DENOISING_STEPS},
         }, separators=(",", ":")),
         # LoRA weight bounds per base architecture -- DiT allows 0..1.2, the SD family
         # -2..2. One table, served, so the drawer's slider and the builder's clamp cannot
         # drift into offering a weight the architecture rejects.
         json.dumps({
-            "ranges": {k: list(v) for k, v in core.LORA_WEIGHT_RANGES.items()},
-            "fallback": [core.LORA_WEIGHT_MIN, core.LORA_WEIGHT_MAX],
-            "step": core.LORA_WEIGHT_STEP,
+            "ranges": {k: list(v) for k, v in _gen_params.LORA_WEIGHT_RANGES.items()},
+            "fallback": [_gen_params.LORA_WEIGHT_MIN, _gen_params.LORA_WEIGHT_MAX],
+            "step": _gen_params.LORA_WEIGHT_STEP,
         }, separators=(",", ":"))))
 
 
@@ -5884,7 +6097,7 @@ def scene_catalog(core, session, force=False):
         ent = _scenes_cache.get("catalog")
         if not force and ent and (now - ent["at"]) < SCENES_TTL:
             return ent["rows"]
-    rows = core.chat_editing_scenes(session)
+    rows = _gen_road.chat_editing_scenes(session)
     if rows:
         with _scenes_cache_lock:
             _scenes_cache["catalog"] = {"at": time.time(), "rows": rows}
@@ -5978,6 +6191,24 @@ def scene_thumb_url(images):
             return "/api/pixai-cdn/thumb?u=" + _up.quote(url, safe="")
         return url
     return ""
+
+
+def scene_local_art(slug):
+    """True when a curated local picture for this scene exists: bridge/scene_<slug>.webp, loose
+    in the branding tree or packed in the container (the order /branding/<path> serves them).
+    The AI Tools grid asks this before it requests the file, so a scene with no local art goes
+    straight to the catalog's own picture instead of a 404 per tile."""
+    slug = str(slug or "")
+    if not slug or "/" in slug or "\\" in slug or ".." in slug:
+        return False
+    try:
+        coded = _branding._public_rel_to_coded("bridge/scene_{}.webp".format(slug))
+        if (_branding.branding_root() / coded).is_file():
+            return True
+        box = _branding._get_container()
+        return bool(box is not None and box.has(coded))
+    except Exception:
+        return False
 
 
 def scene_row(sc):
@@ -6450,7 +6681,7 @@ def create_app(out_dir: Path):
     _BRIDGE_PRESET_KEY_BY_NAME = {
         n: k for n, k in (
             (str(pp.get("workflow_name") or "").strip(), str(pp.get("key") or "").strip())
-            for pp in getattr(_mb_bridge, "BRIDGE_ENHANCE_PRESETS", ()))
+            for pp in getattr(_gen_params, "BRIDGE_ENHANCE_PRESETS", ()))
         if n and k}
 
     # The asset container's first-run fetch (2026-08-10, moonglade-internal/DECISIONS.md "The
@@ -7350,7 +7581,10 @@ def create_app(out_dir: Path):
                       # drop investigation is a read of /api/watch/status, not a probe.
                       # `last_close` is watch_close_info's dict; the Panel does not draw these.
                       "connected_at": None, "last_close_at": None, "last_close": None,
-                      "last_connection_s": None, "reconnects": 0}
+                      "last_connection_s": None, "reconnects": 0,
+                      # 3.22: the REST task stream's OWN record (moonglade.task_feed). The
+                      # stream never writes the WebSocket's fields above.
+                      "task_stream": _task_feed.new_stream_status()}
 
     # ---- Single-flight collect (per task id, in-process) -------------------------
     # THREE uncoordinated collectors live in this process: the always-on live-mirror
@@ -7412,7 +7646,7 @@ def create_app(out_dir: Path):
                     got = _collected_from_catalog(tid)
                     if got is not None:
                         return got
-                got = core.collect_generation(session, tid, str(out_dir))
+                got = _gen_road.collect_generation(session, tid, str(out_dir))
                 # Seven Candles (gen_streak) + The Long Vigil (active_days): a gen collected
                 # into the archive marks today. Keyed day-lists, idempotent, silent-soft --
                 # telemetry must never break a collect.
@@ -7560,7 +7794,7 @@ def create_app(out_dir: Path):
         So this closes a website row without knowing or caring that it is one."""
         from moonglade import backup as core
         try:
-            term = "failed" if ws_status in core._GEN_FAIL else "done"
+            term = "failed" if ws_status in _task_reads._GEN_FAIL else "done"
             j = next((x for x in _jobs.read_jobs(out_dir)
                       if str(x.get("job_id")) == str(tid)), None)
             if j and j.get("status") not in ("done", "failed"):
@@ -7723,7 +7957,7 @@ def create_app(out_dir: Path):
             # Guarded end-to-end by dev/tests/test_jobs.py's
             # test_api_jobs_endpoint_marks_a_never_started_orphan_stale, which drives the
             # real endpoint rather than the library function.
-            return core.generation_status(box["s"], tid)
+            return _task_reads.generation_status(box["s"], tid)
         try:
             _jobs.resolve_orphan_jobs(out_dir, _status, min_age=min_age)
         except Exception:                          # noqa: BLE001
@@ -7788,10 +8022,15 @@ def create_app(out_dir: Path):
             edges = (conn or {}).get("edges") or []
             missed = []
             nodes = {}
+            unfinished = False
             for edge in edges:
                 node = edge.get("node", edge)
                 tid = str(node.get("id") or "")
-                if not tid or str(node.get("status") or "") not in core._GEN_DONE:
+                _st = str(node.get("status") or "").lower()
+                if _st and _st not in _task_reads._GEN_DONE and _st not in _task_reads._GEN_FAIL \
+                        and _st not in ("cancelled", "canceled"):
+                    unfinished = True
+                if not tid or str(node.get("status") or "") not in _task_reads._GEN_DONE:
                     continue
                 failed_at = _catchup_failed.get(tid)
                 if failed_at is not None and \
@@ -7825,6 +8064,9 @@ def create_app(out_dir: Path):
                     continue
                 missed.append(tid)
                 nodes[tid] = node
+            if unfinished:
+                # An unfinished task: an idle task stream reopens to watch it finish.
+                _task_stream.request_reopen("sweep")
             if not missed:
                 _log.info("live mirror: catch-up after %s -- nothing missed", reason)
                 return True
@@ -8028,18 +8270,32 @@ def create_app(out_dir: Path):
         # while still resolving the Activity row. Every task checked on 2026-07-26
         # reports "completed", so this was not that day's cause, but the asymmetry
         # produces exactly that symptom and is just as invisible.
-        if status in core._GEN_DONE and tid and tid not in _watch_backed:
+        if status in _task_reads._GEN_DONE and tid and tid not in _watch_backed:
             _watch_backed.add(tid)
             _log.info("live mirror: task %s reported %s -- mirroring", tid, status)
             threading.Thread(target=_watch_mirror, args=(tid,), daemon=True).start()
         # Reconcile the Activity log from the SAME event stream, so a job resolves
         # even if the Generate card that was polling /api/task-status is gone.
-        if tid and (status in core._GEN_DONE or status in core._GEN_FAIL):
+        if tid and (status in _task_reads._GEN_DONE or status in _task_reads._GEN_FAIL):
             _reconcile_job(tid, status)
 
     # Test seam (same rationale as mg_watch_mirror / mg_watch_catchup above): the frame
     # handler is only ever called from the WebSocket the suite never opens.
     app.extensions["mg_watch_on_event"] = _watch_on_event
+
+    def _stream_session():
+        """The REST task stream's client: the API key presenting as the website (design 4
+        item 2). Never the Mirror JWT, which is reserved for the create POST."""
+        from moonglade import backup as core
+        return _mirror.present_as_web(core._make_session(None))
+
+    # The stream's frames reach the SAME handler the socket's taskUpdated frames did.
+    _task_stream = _task_feed.TaskStream(
+        make_session=_stream_session,
+        on_task=lambda frame: _watch_on_event({"taskUpdated": frame}),
+        request_catchup=lambda reason: _request_catchup(reason),
+        status=_watch_status["task_stream"], lock=_watch_lock)
+    app.extensions["mg_task_stream"] = _task_stream
 
     def _watch_cycle(state):
         """ONE connection's life: connect, run until it ends, record how it ended, and wait as
@@ -8079,7 +8335,7 @@ def create_app(out_dir: Path):
             # header, so there's nothing else to check here before subscribing.
             session = core._make_session(None)
             auth = session.headers.get("Authorization")
-            asyncio.run(core._watch_events_async(auth, _on, None))
+            asyncio.run(_task_feed._watch_events_async(auth, _on, None))
             close = {"kind": "clean"}
         except core.WatchStaleError as e:
             # core._watch_events_async's own recv() timeout fired: the socket
@@ -8124,7 +8380,7 @@ def create_app(out_dir: Path):
             _log.warning("live mirror: socket went silent (no traffic for %ss) -- "
                          "reconnecting in %ss; the catch-up reads back anything that "
                          "completed during the silence.",
-                         getattr(core, "_WS_STALE_TIMEOUT", "?"), wait)
+                         getattr(_task_feed, "_WS_STALE_TIMEOUT", "?"), wait)
         else:
             _log.warning("live mirror: %s (close %s) after %s -- reconnecting in %ss",
                          err, close.get("code") if close.get("kind") == "closed"
@@ -8146,6 +8402,7 @@ def create_app(out_dir: Path):
         # No separate startup sweep (#60): the first subscribe asks the one sweep worker for it,
         # and it reads after the subscription is live rather than racing it.
         threading.Thread(target=_periodic_catchup, daemon=True).start()
+        threading.Thread(target=_task_stream.run, daemon=True).start()
         state = {"backoff": WATCH_BACKOFF_FIRST, "clock": _time.monotonic,
                  "sleep": _time.sleep}
         while True:
@@ -9676,7 +9933,9 @@ def create_app(out_dir: Path):
         """Live-mirror watcher health: is the push WebSocket connected right now, when
         did it last see an event, how many gens has it mirrored this server run."""
         with _watch_lock:
-            return jsonify(dict(_watch_status))
+            out = dict(_watch_status)
+            out["task_stream"] = dict(_watch_status["task_stream"])
+            return jsonify(out)
 
     @app.route("/api/panel/cancel", methods=["POST"])
     @tier(LOCALHOST)
@@ -9980,7 +10239,7 @@ def create_app(out_dir: Path):
         if not preview and not str(body.get("plan") or "").strip():
             # A confirm carries the plan it confirms. Without one there is nothing to hold
             # the fresh read against, so it is refused here, before any call to PixAI.
-            return jsonify({"error": core.NO_CONFIRMED_PLAN, "plan": "refuse"}), 400
+            return jsonify({"error": _cloud_delete.NO_CONFIRMED_PLAN, "plan": "refuse"}), 400
         try:
             # _make_session takes a REQUIRED positional; every other call site in this
             # file passes None. Omitting it raised TypeError on every click, which the
@@ -9988,9 +10247,9 @@ def create_app(out_dir: Path):
             # looking like a PixAI-side failure.
             _core_session = core._make_session(None)
             if preview:
-                plan = core.plan_image_delete(_core_session, tid, mid)
+                plan = _cloud_delete.plan_image_delete(_core_session, tid, mid)
             else:
-                plan = core.delete_image_routed(_core_session, tid, mid,
+                plan = _cloud_delete.delete_image_routed(_core_session, tid, mid,
                                                 confirmed_plan=body.get("plan") or None)
         except Exception as e:                        # noqa: BLE001
             line = _redact_host_paths(str(e))[:240]
@@ -10140,13 +10399,13 @@ def create_app(out_dir: Path):
         keep = {str(r["media_id"]) for r in rows
                 if str(r.get("cloud_deleted_at") or "").strip()}
         try:
-            task = core.task_detail_gql(session, str(task_id)) if session is not None else None
+            task = _task_reads.task_detail_gql(session, str(task_id)) if session is not None else None
         except Exception:                            # noqa: BLE001 -- fail soft, see above
             task = None
         batch = ((task or {}).get("outputs") or {}).get("batch")
-        for mid in core.deleted_batch_media(batch):
+        for mid in _cloud_delete.deleted_batch_media(batch):
             keep.add(str(mid))
-            stamp = str((core.batch_entry(batch, mid) or {}).get("deletedAt") or "")
+            stamp = str((_cloud_delete.batch_entry(batch, mid) or {}).get("deletedAt") or "")
             if stamp:
                 mark_cloud_deleted(db_path, mid, stamp)
         return keep
@@ -10233,23 +10492,23 @@ def create_app(out_dir: Path):
             if remaining <= 0:
                 return tid, None                     # budget spent: don't start another
             try:
-                task = core.task_detail_gql(session, tid, retries=1, timeout=remaining)
+                task = _task_reads.task_detail_gql(session, tid, retries=1, timeout=remaining)
             except Exception:                        # noqa: BLE001 -- fail soft, see above
                 return tid, None
             if task is None:
                 return tid, None
             batch = (task.get("outputs") or {}).get("batch")
-            gone_ids = {str(m) for m in core.deleted_batch_media(batch) if m}
+            gone_ids = {str(m) for m in _cloud_delete.deleted_batch_media(batch) if m}
             # WRITE IT DOWN, right here, with the same verb the delete's own read uses.
             # See the docstring: this is what stops the delete-time read's failure from
             # taking the rows this preview is about to promise would stay.
             for mid in gone_ids:
-                stamp = str((core.batch_entry(batch, mid) or {}).get("deletedAt") or "")
+                stamp = str((_cloud_delete.batch_entry(batch, mid) or {}).get("deletedAt") or "")
                 if stamp:
                     mark_cloud_deleted(db_path, mid, stamp)
             # The same read already carries the task's published artworks -- no second call --
             # and the task's size on PixAI, which is what the artwork count is capped at.
-            return tid, (gone_ids, core.task_artwork_ids(task),
+            return tid, (gone_ids, _cloud_delete.task_artwork_ids(task),
                          len(batch) if isinstance(batch, list) else 0)
 
         # Every task starts unverified and EARNS its way out, so a task whose worker never
@@ -10507,7 +10766,7 @@ def create_app(out_dir: Path):
                     keep = (_rows_the_bulk_purge_must_keep(session, tid, rows)
                             if purge_local else set())
                     try:
-                        core.delete_task(session, tid)          # cloud delete (irreversible)
+                        _cloud_delete.delete_task(session, tid)          # cloud delete (irreversible)
                         deleted += 1
                     except Exception:                            # noqa: BLE001
                         failed += 1
@@ -11015,6 +11274,16 @@ def create_app(out_dir: Path):
                                            mimetype="image/jpeg")
                 resp.headers["Cache-Control"] = _STRIP_CACHE
                 return harden_file_response(resp, p.name)
+        # An SVG has no server thumbnail by design (DESIGN_3.22 5.3): every grid, picker and
+        # viewer builds /thumbs/<id>.jpg, so for an SVG row this route points the <img> (or CSS
+        # background-image) at the library file route instead, which already serves it under
+        # the 5.4 headers. A redirect, never the SVG's text inlined or a different element.
+        if "/" not in media_id and "\\" not in media_id and ".." not in media_id \
+                and not (Path(str(thumb_dir)) / "{}.jpg".format(media_id)).exists():
+            row = get_row(db_path, media_id)
+            sp = find_image_file(out_dir, media_id, row.get("filename") if row else "")
+            if sp and str(sp).lower().endswith(".svg"):
+                return redirect("/full/{}".format(media_id))
         resp = send_from_directory(str(thumb_dir), "{}.jpg".format(media_id),
                                    max_age=300, mimetype="image/jpeg")
         resp.headers["Cache-Control"] = _THUMB_CACHE
@@ -11572,7 +11841,7 @@ def create_app(out_dir: Path):
                                          cursor=cursor, query=q,
                                          lora_base=(request.args.get("base") or "").strip())
                 if usage == "LORA" and base_type:
-                    payload["results"] = core.annotate_lora_compat(payload["results"], base_type)
+                    payload["results"] = _models.annotate_lora_compat(payload["results"], base_type)
                 payload["read_only"] = _read_only_flag(core)
                 return jsonify(payload)
             session = _mirror.present_as_web(session)
@@ -11580,7 +11849,7 @@ def create_app(out_dir: Path):
                 # Its own operation -- the market connection has no bookmark argument, so this
                 # cannot be folded into the call below. Same row shape, so the grid does not care.
                 def _bookmark_page(after):
-                    return core.model_bookmarks_gql(
+                    return _models.model_bookmarks_gql(
                         session, keyword=q, usage=usage, limit=size, after=after,
                         lora_base_type=server_lora_type)
                 payload = _hunt_by_name(_bookmark_page, q, size) if q else _bookmark_page(cursor or None)
@@ -11588,7 +11857,7 @@ def create_app(out_dir: Path):
                 # "My LoRAs" is NOT a separate operation: it is the ordinary market connection
                 # filtered by the signed-in user's own id, exactly as their MY LORA tab does it.
                 def _mine_page(after):
-                    return core.model_search_market_gql(
+                    return _models.model_search_market_gql(
                         session, keyword=q, category=category, sort=sort, usage=usage,
                         limit=size, after=after,
                         lora_base_type=server_lora_type,
@@ -11599,10 +11868,10 @@ def create_app(out_dir: Path):
             # to fall through to REST, whose own docstring says it "silently ignores market
             # filters". REST survives only for a bare, unfiltered base browse, where its richer
             # rows (description / refCount / official badge) are worth having.
-            elif (usage == "LORA" or category in core.MARKET_CATEGORIES
+            elif (usage == "LORA" or category in _models.MARKET_CATEGORIES
                   or posted or license_ or model_types
                   or (sort and sort not in ("trending", "popular"))):
-                payload = core.model_search_market_gql(
+                payload = _models.model_search_market_gql(
                     session, keyword=q, category=category, sort=sort, usage=usage,
                     limit=size, after=(cursor or None),
                     # The same caller-supplied value that feeds the compat sort/badge
@@ -11611,15 +11880,15 @@ def create_app(out_dir: Path):
                     # any architecture off its whitelist.
                     lora_base_type=server_lora_type,
                     source=source, permitted_use=license_,
-                    time_range=core.posted_at_range(posted),
+                    time_range=_models.posted_at_range(posted),
                     model_types=model_types)
             else:
                 offset = int(cursor) if cursor.isdigit() else 0
-                payload = core.model_search_rest(session, keyword=q, usage=usage,
+                payload = _models.model_search_rest(session, keyword=q, usage=usage,
                                                   size=size, offset=offset)
                 payload["next_cursor"] = str(offset + size) if payload.get("has_more") else ""
             if usage == "LORA" and base_type:
-                payload["results"] = core.annotate_lora_compat(payload["results"], base_type)
+                payload["results"] = _models.annotate_lora_compat(payload["results"], base_type)
             # Session S: every card's ⊕ Save dims under READ_ONLY before any tap (a local check)
             payload["read_only"] = _read_only_flag(core)
             return jsonify(payload)
@@ -11651,7 +11920,7 @@ def create_app(out_dir: Path):
             try:
                 core, session = _gen_session()
                 session = _mirror.present_as_web(session)   # same policy as the search that found it
-                return jsonify({"model_id": core.resolve_model_base_id(session, version_id)})
+                return jsonify({"model_id": _models.resolve_model_base_id(session, version_id)})
             except Exception as e:
                 return jsonify({"error": _redact_host_paths(str(e))[:200], "model_id": ""}), 200
         mid = (request.args.get("model_id") or "").strip()
@@ -11661,7 +11930,7 @@ def create_app(out_dir: Path):
             core, session = _gen_session()
             session = _mirror.present_as_web(session)   # same policy as the search that found it
             if (request.args.get("all") or "").strip() in ("1", "true"):
-                return jsonify({"versions": core.list_model_versions(session, mid)})
+                return jsonify({"versions": _models.list_model_versions(session, mid)})
             # with_profiles: this is a BASE-model resolve whose answer feeds the composer's
             # mode bar, so it is one of the two places that pays the second, version-keyed
             # inference-profiles read (the ?all=1 branch's own is_latest row is the other).
@@ -11670,7 +11939,7 @@ def create_app(out_dir: Path):
             # The same opt-in carries the version's size rule, the false compatibility
             # entries from /features and whether a reference goes out as a context image
             # (core._attach_features, SCOPE_2026-09-26) -- read from the gate's own cache.
-            return jsonify(core.resolve_version_meta(session, mid, with_profiles=True))
+            return jsonify(_models.resolve_version_meta(session, mid, with_profiles=True))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "version_id": ""}), 200
 
@@ -11712,7 +11981,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": "not an image-generation task"}), 400
         try:
             core, session = _gen_session()
-            task = core.task_detail_gql(session, tid, retries=1)
+            task = _task_reads.task_detail_gql(session, tid, retries=1)
             if not task:
                 return jsonify({"error": "couldn't read the task from PixAI"}), 200
             params = task.get("parameters") or {}
@@ -11728,7 +11997,7 @@ def create_app(out_dir: Path):
                     except (TypeError, ValueError):
                         unresolved += 1
                         continue
-                    base = core.resolve_model_base_id(session, str(vid))
+                    base = _models.resolve_model_base_id(session, str(vid))
                     if not base:
                         unresolved += 1
                         continue
@@ -11737,12 +12006,12 @@ def create_app(out_dir: Path):
                         # and a LoRA never renders a mode bar, so asking for it would cost a
                         # second PixAI GET per unique LoRA base for a field this route drops
                         # (red team 2026-09-07).
-                        meta_cache[base] = core.resolve_version_meta(session, base) or {}
+                        meta_cache[base] = _models.resolve_version_meta(session, base) or {}
                     meta = meta_cache[base]
                     lbt = str(meta.get("lora_base_model_type") or "")
                     rows.append({
                         "model_id": base, "version_id": str(vid), "weight": w,
-                        "title": str(core.model_name_gql(session, str(vid)) or "") or base,
+                        "title": str(_models.model_name_gql(session, str(vid)) or "") or base,
                         "preview_url": "",
                         "lora_base_model_type": lbt,
                         "model_type": str(meta.get("model_type") or ""),
@@ -11787,7 +12056,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": "not a video task"}), 400
         try:
             core, session = _gen_session()
-            task = core.task_detail_gql(session, tid, retries=1)
+            task = _task_reads.task_detail_gql(session, tid, retries=1)
             if not task:
                 return jsonify({"error": "couldn't read the task from PixAI"}), 200
             params = task.get("parameters") or {}
@@ -11939,7 +12208,11 @@ def create_app(out_dir: Path):
             db_path, q=q, sort=sort, page=page, page_size=limit,
             collection=(request.args.get("collection") or "").strip(),
             source=(request.args.get("source") or "").strip(),
-            rating_min=rating_min, media_type=media_type)
+            rating_min=rating_min, media_type=media_type,
+            # No SVG on this list (3.22 S5, DESIGN_3.22 5.3): the Apple TV client reads it and
+            # tvOS cannot draw one, and no create surface may take one as a source. In SQL, so
+            # the page and the total stay true.
+            no_svg=True)
         out = []
         for r in rows:
             mid = r.get("media_id")
@@ -12770,7 +13043,7 @@ def create_app(out_dir: Path):
                 credits = None
             cards = 0
             cards_by, expiries = [], []
-            for k in core.list_kaisuukens(session):
+            for k in _cards.list_kaisuukens(session):
                 try:
                     n = int(k.get("count") or 0)
                 except (TypeError, ValueError):
@@ -12871,9 +13144,9 @@ def create_app(out_dir: Path):
         try:
             core, session = _gen_session()
             if request.args.get("all") in ("1", "true", "yes"):
-                return jsonify(core.kaisuuken_type_catalog(session))
+                return jsonify(_cards.kaisuuken_type_catalog(session))
             after = request.args.get("after") or None
-            return jsonify(core.list_kaisuuken_logs(session, first=_acct_count(20), after=after))
+            return jsonify(_cards.list_kaisuuken_logs(session, first=_acct_count(20), after=after))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
@@ -12886,9 +13159,9 @@ def create_app(out_dir: Path):
         try:
             core, session = _gen_session()
             history = request.args.get("history") in ("1", "true", "yes")
-            statuses = core.COUPON_STATUSES_HISTORY if history else core.COUPON_STATUSES_ON_HAND
+            statuses = _cards.COUPON_STATUSES_HISTORY if history else _cards.COUPON_STATUSES_ON_HAND
             after = request.args.get("after") or None
-            return jsonify(core.list_extra_package_boosts(session, statuses=statuses,
+            return jsonify(_cards.list_extra_package_boosts(session, statuses=statuses,
                                                           first=_acct_count(20), after=after))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
@@ -12901,7 +13174,7 @@ def create_app(out_dir: Path):
         try:
             core, session = _gen_session()
             before = request.args.get("before") or None
-            return jsonify(core.list_credit_log(session, last=_acct_count(30),
+            return jsonify(_cards.list_credit_log(session, last=_acct_count(30),
                                                 before=before))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
@@ -13199,9 +13472,15 @@ def create_app(out_dir: Path):
         Soft-fail semantics are unchanged, and a failure is NOT cached: an offline blip
         must not pin an empty board for the next minute and a half."""
         show_all = request.args.get("all") == "1"
+        # The board's Refresh: one full walk that rewrites the settled-row cache.
+        refresh = request.args.get("refresh") == "1"
         try:
             core, session = _gen_session()
-            rows = _contest_sync.contest_board(core, session)
+            if refresh:
+                rows, stale_at = _contest_sync.contest_board(core, session, force=True, full=True), None
+            else:
+                # A cold open answers from the saved list at once and refreshes behind it.
+                rows, stale_at = _contest_sync.contest_board_swr(core, session)
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "contests": []}), 200
         # Both variants come off the ONE snapshot -- `active` is the server's own
@@ -13214,10 +13493,14 @@ def create_app(out_dir: Path):
         if board["truncated"]:
             board["limit"] = int(bm.get("limit") or 0)
             board["total_count"] = int(bm.get("total_count") or 0)
-        return jsonify({"contests": contests,
-                        "official": sum(1 for c in contests if c["type"] == "official"),
-                        "community": sum(1 for c in contests if c["type"] != "official"),
-                        "board": board})
+        out = {"contests": contests,
+               "official": sum(1 for c in contests if c["type"] == "official"),
+               "community": sum(1 for c in contests if c["type"] != "official"),
+               "board": board}
+        if stale_at is not None:
+            out["stale"] = True               # the saved list; a walk is refreshing it
+            out["saved_at"] = stale_at
+        return jsonify(out)
 
     @app.route("/api/contests/qualify")
     @tier(LOGIN)
@@ -13254,7 +13537,7 @@ def create_app(out_dir: Path):
             page = 1
         try:
             core, session = _gen_session()
-            env = core.contest_artworks(session, slug, page=page)
+            env = _contests.contest_artworks(session, slug, page=page)
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200],
                             "entries": [], "total_count": 0, "total_page": 0}), 200
@@ -13289,7 +13572,7 @@ def create_app(out_dir: Path):
         Soft-error-as-200, like every other read on this surface."""
         try:
             core, session = _gen_session()
-            rows = core.contest_winners(session, slug)
+            rows = _contests.contest_winners(session, slug)
             uid = str(_pixai_client._client_of(session).user_id or "")
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "winners": []}), 200
@@ -13354,7 +13637,8 @@ def create_app(out_dir: Path):
         board = {}
         try:
             core, session = _gen_session()
-            for c in _contest_sync.contest_board(core, session) or []:
+            # Titles only: the saved list is good enough, so this never waits on a walk.
+            for c in _contest_sync.contest_board_swr(core, session)[0] or []:
                 if isinstance(c, dict) and c.get("id"):
                     board[str(c["id"])] = c
         except Exception:                       # soft: key-only rows beat an error page
@@ -13452,7 +13736,7 @@ def create_app(out_dir: Path):
         if not contest_id:
             return jsonify({"error": "unknown contest"}), 400
         try:
-            resp = core.contest_enter(session, slug, artwork_id)
+            resp = _contests.contest_enter(session, slug, artwork_id)
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 502
         # A 2xx that says success:false is a refusal wearing a success code. Default True
@@ -13828,7 +14112,7 @@ def create_app(out_dir: Path):
                                                      "board — the artwork was published, "
                                                      "but not entered")
                         else:
-                            resp = core.contest_enter(session, slug, new_art_id)
+                            resp = _contests.contest_enter(session, slug, new_art_id)
                             if isinstance(resp, dict) and not resp.get("success", True):
                                 result["entry_error"] = "the contest refused the entry"
                             else:
@@ -14163,7 +14447,7 @@ def create_app(out_dir: Path):
         base (core.match_training_kaisuuken). Read-only, free."""
         try:
             core, session = _gen_session()
-            return jsonify({"free_trainings": core.training_free_quota(session)})
+            return jsonify({"free_trainings": _training.training_free_quota(session)})
         except Exception as e:
             return jsonify({"free_trainings": 0,
                             "error": _redact_host_paths(str(e))[:200]}), 200
@@ -14183,22 +14467,22 @@ def create_app(out_dir: Path):
         model, which with DiT.3 listed first would be the 100,000-credit base."""
         try:
             core, session = _gen_session()
-            cfg = core.training_config()
-            pause = core.training_pause()
-            return jsonify({"groups": core.list_trainable_base_models(config=cfg),
+            cfg = _training.training_config()
+            pause = _training.training_pause()
+            return jsonify({"groups": _training.list_trainable_base_models(config=cfg),
                             "pricing": cfg["pricing"],
-                            "default_version_id": core.default_training_base(cfg),
+                            "default_version_id": _training.default_training_base(cfg),
                             # Session J: the Recommended tab (6a), Advanced's two bases, the
                             # four goals, PixAI's own estimate at its default length, the set
                             # rule, and its pause switch -- all read here, nothing written
-                            "recommended_arch": core.TRAIN_RECOMMENDED_TYPE,
-                            "advanced_bases": core.advanced_training_bases(cfg),
-                            "goals": [{"value": v, "label": lab} for v, lab in core.TRAIN_GOALS],
-                            "eta": core.training_eta(
-                                core.TRAIN_DEFAULT_OPTIONS["trainingSteps"]),
+                            "recommended_arch": _training.TRAIN_RECOMMENDED_TYPE,
+                            "advanced_bases": _training.advanced_training_bases(cfg),
+                            "goals": [{"value": v, "label": lab} for v, lab in _training.TRAIN_GOALS],
+                            "eta": _training.training_eta(
+                                _training.TRAIN_DEFAULT_OPTIONS["trainingSteps"]),
                             "image_constraints": cfg["image_constraints"],
-                            "min_images": core.TRAIN_MIN_IMAGES,
-                            "max_images": core.TRAIN_MAX_IMAGES,
+                            "min_images": _training.TRAIN_MIN_IMAGES,
+                            "max_images": _training.TRAIN_MAX_IMAGES,
                             "paused": pause is not None,
                             "resumes_at": (pause or {}).get("resumes_at") or ""})
         except Exception as e:
@@ -14254,7 +14538,7 @@ def create_app(out_dir: Path):
         check; spend review, finding 7). Anything else, a failed read included, is a fresh
         set priced and sent in full. Never raises."""
         try:
-            loras = core.list_my_trained_loras(session, pages=5)
+            loras = _training.list_my_trained_loras(session, pages=5)
         except Exception:                               # noqa: BLE001
             return False
         posted = [str(m) for m in (media_ids or [])]
@@ -14342,21 +14626,21 @@ def create_app(out_dir: Path):
         except Exception as e:
             return jsonify({"error": "PixAI session unavailable: %s" % e}), 502
 
-        cfg = core.training_config()
+        cfg = _training.training_config()
         reuse = bool(dataset_task_id) and dataset_task_id.isdigit() and \
             _reuse_ok(core, session, dataset_task_id, media_ids)
         try:
-            tw = core.validate_training(base_model_id, media_ids, title, trigger, category,
+            tw = _training.validate_training(base_model_id, media_ids, title, trigger, category,
                                         training_task_id=dataset_task_id if reuse else "",
                                         config=cfg)
         except Exception as e:
             return jsonify({"error": str(e)}), 400
         unchecked, image_note = [], ""
         if not reuse:
-            rejected, unchecked = core.check_training_images(
+            rejected, unchecked = _training.check_training_images(
                 media_ids, media_dims(db_path, media_ids), cfg["image_constraints"])
             if rejected:
-                return jsonify({"error": core.describe_rejected_training_images(rejected),
+                return jsonify({"error": _training.describe_rejected_training_images(rejected),
                                 "rejected_images": rejected}), 400
             image_note = ("" if not unchecked else
                           "%d image%s could not be checked against PixAI's size rule (this "
@@ -14364,12 +14648,12 @@ def create_app(out_dir: Path):
                               len(unchecked), "" if len(unchecked) == 1 else "s",
                               "its" if len(unchecked) == 1 else "their"))
 
-        free_left = core.training_free_quota(session)
+        free_left = _training.training_free_quota(session)
         free_by_quota = free_left > 0
         # credits, or None -- off `cfg`, the very config the validation above read, so one
         # request can never validate against the live config and price off the snapshot
-        list_price = core.training_price_for_version(base_model_id, cfg)
-        price = core.training_price_tier(base_model_id, "reuse", cfg) if reuse else list_price
+        list_price = _training.training_price_for_version(base_model_id, cfg)
+        price = _training.training_price_tier(base_model_id, "reuse", cfg) if reuse else list_price
         # The training free card (owner ruling 4): checked only when the quota does not
         # already make the run free -- "before a paid run", as SCOPE_2026-09-26 E7 words it.
         # A DELIBERATE DIFFERENCE FROM THE SITE: PixAI's basic trainer runs the card check
@@ -14382,7 +14666,7 @@ def create_app(out_dir: Path):
         card, card_checked = None, True
         if not free_by_quota:
             try:
-                best = core.match_training_kaisuuken(session, base_model_id,
+                best = _training.match_training_kaisuuken(session, base_model_id,
                                                      raise_on_error=True)
             except Exception:                         # noqa: BLE001
                 best, card_checked = None, False
@@ -14390,7 +14674,7 @@ def create_app(out_dir: Path):
             # card_covers() assumes a 1-ticket job is covered: PixAI's own training check
             # keeps only matches with consumeAmount <= total, so it would not attach it
             # either -- and here it would skip the paid acknowledgement on a 25k-100k run.
-            if best and best.get("id") and core.card_covers(best) \
+            if best and best.get("id") and _cards.card_covers(best) \
                     and not best.get("balance_unknown"):
                 card = best
         free_by_card = card is not None
@@ -14424,7 +14708,7 @@ def create_app(out_dir: Path):
                          if card else None),
                 "price": price, "list_price": list_price, "reuse": reuse,
                 "price_reason": reason, "cost_note": cost_note,
-                "eta": core.training_eta(core.TRAIN_DEFAULT_OPTIONS["trainingSteps"]),
+                "eta": _training.training_eta(_training.TRAIN_DEFAULT_OPTIONS["trainingSteps"]),
                 "unchecked_images": unchecked, "image_note": image_note,
             })
         if not _basic_start_lock.acquire(blocking=False):
@@ -14436,7 +14720,7 @@ def create_app(out_dir: Path):
             blocked = train_guard.basic_blocked(key)
             if blocked:
                 return jsonify({"error": blocked}), 409
-            pause = core.training_pause()
+            pause = _training.training_pause()
             if pause is not None:
                 return jsonify({"error": "PixAI has paused new LoRA training runs%s, so nothing "
                                          "was submitted. Runs already training carry on." %
@@ -14471,12 +14755,12 @@ def create_app(out_dir: Path):
                                                  "{:,}".format(price))}), 409
             train_guard.basic_arm(key)
             try:
-                task = core.submit_training(
+                task = _training.submit_training(
                     session, base_model_id, [] if reuse else media_ids, title, trigger,
                     category, training_task_id=dataset_task_id if reuse else "",
                     kaisuuken_id=(card["id"] if free_by_card else ""), config=cfg)
             except Exception as e:
-                if core.definite_refusal(e, codes=core.TRAINING_CODES):
+                if _gen_road.definite_refusal(e, "training"):
                     train_guard.basic_resolve(key, "refused")
                     return jsonify({"error": str(e)}), 502
                 train_guard.basic_resolve(key, "ambiguous")
@@ -14535,7 +14819,7 @@ def create_app(out_dir: Path):
     def _train_refusal(e, status=502):
         from moonglade import backup as core
         if isinstance(e, core.PixAIRestError):
-            payload = {"error": core.training_error_words(e), "code": e.code}
+            payload = {"error": _training.training_error_words(e), "code": e.code}
             ids = e.data.get("mediaIds")
             if isinstance(ids, list):
                 payload["rejected_ids"] = [str(x) for x in ids]
@@ -14550,7 +14834,7 @@ def create_app(out_dir: Path):
         return None
 
     def _pause_refusal(core):
-        pause = core.training_pause()
+        pause = _training.training_pause()
         if pause is None:
             return None
         return jsonify({"error": "PixAI has paused LoRA training%s, so nothing was sent. Runs "
@@ -14599,7 +14883,7 @@ def create_app(out_dir: Path):
         trigger_words, category, base_version_id, media_ids, count, cover}. Read-only."""
         try:
             core, session = _gen_session()
-            loras = core.list_my_trained_loras(session, pages=3)
+            loras = _training.list_my_trained_loras(session, pages=3)
         except Exception as e:                          # noqa: BLE001
             return jsonify({"datasets": [], "error": _redact_host_paths(str(e))[:200]}), 200
         out = []
@@ -14709,17 +14993,17 @@ def create_app(out_dir: Path):
             core, session = _gen_session()
         except Exception as e:                          # noqa: BLE001
             return jsonify({"runs": [], "running": [], "error": str(e)[:200]}), 200
-        cfg = core.training_config()
+        cfg = _training.training_config()
         names = _base_names(cfg)
         rows, details = [], []
         try:
-            for t in core.list_training_in_progress(session, 100):
+            for t in _training.list_training_in_progress(session, 100):
                 rows.append(_run_row_advanced(t, names))
         except Exception as e:                          # noqa: BLE001
             errors.append("advanced runs: " + _redact_host_paths(str(e))[:120])
         loras = []
         try:
-            loras = core.list_my_trained_loras(session, pages=1 if light else 2)
+            loras = _training.list_my_trained_loras(session, pages=1 if light else 2)
         except Exception as e:                          # noqa: BLE001
             errors.append("your LoRAs: " + _redact_host_paths(str(e))[:120])
         by_model = {m["model_id"]: m for m in loras}
@@ -14732,7 +15016,7 @@ def create_app(out_dir: Path):
                     and str((m.get("task") or {}).get("status") or "") == "completed"]
         if not light:
             try:
-                for t in core.list_training_completed(session, 100):
+                for t in _training.list_training_completed(session, 100):
                     if t.get("id"):
                         finished.append(str(t["id"]))
                     r = _run_row_advanced(t, names, done=True)
@@ -14775,7 +15059,7 @@ def create_app(out_dir: Path):
                 details.append(r)
         for r in details:
             try:
-                _apply_detail(r, core.training_task(session, r["id"]))
+                _apply_detail(r, _training.training_task(session, r["id"]))
             except Exception:                           # noqa: BLE001
                 pass
         guarded = train_guard.retried()
@@ -14810,12 +15094,12 @@ def create_app(out_dir: Path):
             return jsonify({"error": "not a training task"}), 400
         try:
             core, session = _gen_session()
-            t = core.training_task(session, tid)
+            t = _training.training_task(session, tid)
         except Exception as e:                          # noqa: BLE001
             return _train_refusal(e)
         if t.get("trainingMode") != "advanced":
             return jsonify({"error": "that run isn't an advanced one"}), 400
-        cfg = core.training_config()
+        cfg = _training.training_config()
         p = t.get("parameters") or {}
         ids = [str(x) for x in (p.get("mediaIds") or [])]
         status = str(t.get("status") or "")
@@ -14826,20 +15110,20 @@ def create_app(out_dir: Path):
                         "base_name": _base_names(cfg).get(str(p.get("baseModelId") or ""), ""),
                         "media_ids": ids},
                "captions": {}, "caption_quote": None, "quote": None,
-               "eta": core.training_eta(core.TRAIN_DEFAULT_OPTIONS["trainingSteps"]),
-               "caption_max": core.TRAIN_CAPTION_MAX, "errors": []}
+               "eta": _training.training_eta(_training.TRAIN_DEFAULT_OPTIONS["trainingSteps"]),
+               "caption_max": _training.TRAIN_CAPTION_MAX, "errors": []}
         if status != "draft":
             try:
-                items = core.training_captions(session, tid)
+                items = _training.training_captions(session, tid)
             except Exception as e:                      # noqa: BLE001
                 items = []
                 out["errors"].append("descriptions: " + _redact_host_paths(str(e))[:120])
             from concurrent.futures import ThreadPoolExecutor
 
             def _texts(it):
-                text = core.fetch_caption_text(it["caption_url"])
+                text = _training.fetch_caption_text(it["caption_url"])
                 machine = text if it["source"] != "user" else \
-                    core.fetch_caption_text(it["machine_url"]) if it["machine_url"] else None
+                    _training.fetch_caption_text(it["machine_url"]) if it["machine_url"] else None
                 return it["media_id"], {"source": it["source"], "text": text,
                                         "machine_text": machine}
             with ThreadPoolExecutor(max_workers=8) as ex:
@@ -14847,12 +15131,12 @@ def create_app(out_dir: Path):
                     out["captions"][mid] = c
         if status in ("draft", "captionReady") and ids:
             try:
-                out["caption_quote"] = core.training_caption_quote(session, tid)
+                out["caption_quote"] = _training.training_caption_quote(session, tid)
             except Exception as e:                      # noqa: BLE001
                 out["errors"].append("describe price: " + _redact_host_paths(str(e))[:120])
         if status == "captionReady":
             try:
-                out["quote"] = core.training_quote(session, tid)
+                out["quote"] = _training.training_quote(session, tid)
             except Exception as e:                      # noqa: BLE001
                 out["errors"].append("price: " + _redact_host_paths(str(e))[:120])
         return jsonify(out)
@@ -14875,7 +15159,7 @@ def create_app(out_dir: Path):
             return refused
         try:
             core_, session = _gen_session()
-            d = core.create_advanced_training_draft(
+            d = _training.create_advanced_training_draft(
                 session, str(body.get("base_model_id") or ""), str(body.get("title") or ""),
                 str(body.get("trigger_words") or ""), str(body.get("category") or ""))
         except core.PixAIError as e:
@@ -14900,11 +15184,11 @@ def create_app(out_dir: Path):
         if not tid.isdigit() or ids is None:
             return jsonify({"error": "which run, and which images?"}), 400
         ids = [str(m) for m in ids if str(m).strip()]
-        cfg = core.training_config()
-        rejected, _unchecked = core.check_training_images(
+        cfg = _training.training_config()
+        rejected, _unchecked = _training.check_training_images(
             ids, media_dims(db_path, ids), cfg["image_constraints"])
         if rejected:
-            return jsonify({"error": core.describe_rejected_training_images(rejected),
+            return jsonify({"error": _training.describe_rejected_training_images(rejected),
                             "rejected_ids": [r["media_id"] for r in rejected]}), 400
         refused = _read_only_refusal(core, "change a LoRA training set")
         if refused:
@@ -14914,7 +15198,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _BUSY}), 409
         try:
             core_, session = _gen_session()
-            saved = core.replace_training_media(session, tid, ids)
+            saved = _training.replace_training_media(session, tid, ids)
         except Exception as e:                          # noqa: BLE001
             return _train_refusal(e)
         finally:
@@ -14935,9 +15219,9 @@ def create_app(out_dir: Path):
         text = str(body.get("text") or "").strip()
         if not tid.isdigit() or not mid.isdigit():
             return jsonify({"error": "which image?"}), 400
-        if not text or len(text) > core.TRAIN_CAPTION_MAX:
+        if not text or len(text) > _training.TRAIN_CAPTION_MAX:
             return jsonify({"error": "A description is 1 to %s characters."
-                                     % "{:,}".format(core.TRAIN_CAPTION_MAX)}), 400
+                                     % "{:,}".format(_training.TRAIN_CAPTION_MAX)}), 400
         refused = _read_only_refusal(core, "edit a LoRA training description")
         if refused:
             return refused
@@ -14946,7 +15230,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _BUSY}), 409
         try:
             core_, session = _gen_session()
-            saved = core.save_training_caption(session, tid, mid, text)
+            saved = _training.save_training_caption(session, tid, mid, text)
         except Exception as e:                          # noqa: BLE001
             return _train_refusal(e)
         finally:
@@ -14986,7 +15270,7 @@ def create_app(out_dir: Path):
                     return refused
             try:
                 core_, session = _gen_session()
-                t = core.training_task(session, tid)
+                t = _training.training_task(session, tid)
             except Exception as e:                      # noqa: BLE001
                 return _train_refusal(e)
             st = str(t.get("status") or "")
@@ -14999,12 +15283,12 @@ def create_app(out_dir: Path):
                                          "now. Nothing was sent." %
                                          ("already describing" if st == "captioning"
                                           else "past that step on")}), 409
-            if n < core.TRAIN_MIN_IMAGES:
+            if n < _training.TRAIN_MIN_IMAGES:
                 return jsonify({"error": "Add at least %d more image%s first. Nothing was sent."
-                                         % (core.TRAIN_MIN_IMAGES - n,
-                                            "" if core.TRAIN_MIN_IMAGES - n == 1 else "s")}), 400
+                                         % (_training.TRAIN_MIN_IMAGES - n,
+                                            "" if _training.TRAIN_MIN_IMAGES - n == 1 else "s")}), 400
             try:
-                q = core.training_caption_quote(session, tid)
+                q = _training.training_caption_quote(session, tid)
             except Exception as e:                      # noqa: BLE001
                 return _train_refusal(e)
             per = (q["total_price"] // q["image_count"]) if q["image_count"] else None
@@ -15019,9 +15303,9 @@ def create_app(out_dir: Path):
                 return _amount_refusal(accepted, q["total_price"], "Describing these images")
             train_guard.paid_arm("caption", tid, st)
             try:
-                status = core.start_training_captions(session, tid)
+                status = _training.start_training_captions(session, tid)
             except Exception as e:                      # noqa: BLE001
-                if core.definite_refusal(e, codes=core.TRAINING_CODES):
+                if _gen_road.definite_refusal(e, "training"):
                     train_guard.paid_resolve("caption", tid, "refused")
                     return _train_refusal(e)
                 train_guard.paid_resolve("caption", tid, "ambiguous")
@@ -15071,7 +15355,7 @@ def create_app(out_dir: Path):
                     return refused
             try:
                 core_, session = _gen_session()
-                t = core.training_task(session, tid)
+                t = _training.training_task(session, tid)
                 if confirming and train_guard.paid_blocked("submit", tid,
                                                            str(t.get("status") or "")):
                     return jsonify({"error": _PAID_MAYBE_REFUSAL % "this run",
@@ -15080,29 +15364,29 @@ def create_app(out_dir: Path):
                     return jsonify({"error": "This run isn't waiting to start (PixAI says: %s). "
                                              "Nothing was sent." % (t.get("status") or "?")}), 409
                 ids = [str(x) for x in ((t.get("parameters") or {}).get("mediaIds") or [])]
-                described = {c["media_id"] for c in core.training_captions(session, tid)}
+                described = {c["media_id"] for c in _training.training_captions(session, tid)}
                 left = [m for m in ids if m not in described]
                 if left:
                     return jsonify({"error": "Describe the %d remaining image%s first. Nothing "
                                              "was sent." % (len(left),
                                                             "" if len(left) == 1 else "s"),
                                     "undescribed": left}), 409
-                price = core.training_quote(session, tid)
+                price = _training.training_quote(session, tid)
             except Exception as e:                      # noqa: BLE001
                 return _train_refusal(e)
-            eta = core.training_eta(core.TRAIN_DEFAULT_OPTIONS["trainingSteps"])
+            eta = _training.training_eta(_training.TRAIN_DEFAULT_OPTIONS["trainingSteps"])
             if not confirming:
                 return jsonify({"preview": True, "price": price, "eta": eta,
                                 "image_count": len(ids), "is_free": price == 0})
             accepted = body.get("accept_credit_cost")
             if price > 0 and not _exact_amount(accepted, price):
                 return _amount_refusal(accepted, price, "This training")
-            before = core.training_free_quota(session)
+            before = _training.training_free_quota(session)
             train_guard.paid_arm("submit", tid, t.get("status"))
             try:
-                status = core.submit_advanced_training(session, tid)
+                status = _training.submit_advanced_training(session, tid)
             except Exception as e:                      # noqa: BLE001
-                if core.definite_refusal(e, codes=core.TRAINING_CODES):
+                if _gen_road.definite_refusal(e, "training"):
                     train_guard.paid_resolve("submit", tid, "refused")
                     return _train_refusal(e)
                 train_guard.paid_resolve("submit", tid, "ambiguous")
@@ -15111,7 +15395,7 @@ def create_app(out_dir: Path):
                                          "started. Check Runs before starting it again.",
                                 "maybe_started": True}), 502
             train_guard.paid_resolve("submit", tid, "done")
-            after = core.training_free_quota(session)
+            after = _training.training_free_quota(session)
         finally:
             lk.release()
         _runs_dirty()
@@ -15155,25 +15439,25 @@ def create_app(out_dir: Path):
                     return refused
             try:
                 core_, session = _gen_session()
-                t = core.training_task(session, tid)
+                t = _training.training_task(session, tid)
                 if t.get("trainingMode") != "advanced" or t.get("status") != "failed":
                     return jsonify({"error": "Only a failed advanced run can be retried. "
                                              "Nothing was sent."}), 409
-                price = core.training_quote(session, tid)
+                price = _training.training_quote(session, tid)
             except Exception as e:                      # noqa: BLE001
                 return _train_refusal(e)
             if not confirming:
                 return jsonify({"preview": True, "price": price, "is_free": price == 0,
-                                "eta": core.training_eta(
-                                    core.TRAIN_DEFAULT_OPTIONS["trainingSteps"])})
+                                "eta": _training.training_eta(
+                                    _training.TRAIN_DEFAULT_OPTIONS["trainingSteps"])})
             accepted = body.get("accept_credit_cost")
             if price > 0 and not _exact_amount(accepted, price):
                 return _amount_refusal(accepted, price, "Retrying this run")
             train_guard.retry_arm(tid)
             try:
-                res = core.retry_training(session, tid)
+                res = _training.retry_training(session, tid)
             except Exception as e:                      # noqa: BLE001
-                if core.definite_refusal(e, codes=core.TRAINING_CODES):
+                if _gen_road.definite_refusal(e, "training"):
                     train_guard.retry_resolve(tid, "refused")
                     return _train_refusal(e)
                 train_guard.retry_resolve(tid, "ambiguous")
@@ -15221,7 +15505,7 @@ def create_app(out_dir: Path):
         try:
             try:
                 core_, session = _gen_session()
-                done = {str(t.get("id")): t for t in core.list_training_completed(session, 100)}
+                done = {str(t.get("id")): t for t in _training.list_training_completed(session, 100)}
             except Exception as e:                      # noqa: BLE001
                 return _train_refusal(e)
             t = done.get(tid)
@@ -15232,7 +15516,7 @@ def create_app(out_dir: Path):
                 return jsonify({"error": "That run is published already. Nothing was "
                                          "sent."}), 409
             try:
-                res = core.publish_training(session, tid, vis, rebate)
+                res = _training.publish_training(session, tid, vis, rebate)
             except Exception as e:                      # noqa: BLE001
                 return _train_refusal(e)
         finally:
@@ -15283,7 +15567,7 @@ def create_app(out_dir: Path):
         try:
             try:
                 core_, session = _gen_session()
-                m = core.generation_model_brief(session, mid)
+                m = _models.generation_model_brief(session, mid)
             except Exception as e:                      # noqa: BLE001
                 return _train_refusal(e)
             me = str(getattr(session, "user_id", "") or core.USER_ID or "")
@@ -16264,6 +16548,10 @@ def create_app(out_dir: Path):
         mid = (request.args.get("media_id") or "").strip()
         if not mid:
             return jsonify({"suggestions": [], "error": "media_id required"}), 400
+        # 3.22 S5: PixAI reads no prompt from an SVG; refused here, before any request.
+        why = _gen_params.source_refusal(_source_format_lookup(mid), "prompt")
+        if why:
+            return jsonify({"suggestions": [], "error": why}), 200
         try:
             core, session = _gen_session()
             return jsonify({"suggestions": core.suggest_prompt(session, mid)})
@@ -16435,13 +16723,15 @@ def create_app(out_dir: Path):
         submit, and NO media resolver: _input_media_id uploads, and /api/price fires on
         every keystroke in the drawer -- resolving here would upload the same file once
         per character. A quote needs the SHAPE, not an upload-kind id."""
-        return core.RequestResolver(
-            model_version=core.model_version_resolver(gsession),
+        return _gen_road.RequestResolver(
+            model_version=_gen_road.model_version_resolver(gsession),
             preset=lambda u, name: _load_presets(u).get(name),
-            gate=core.gate_resolver(gsession),
+            gate=_gen_road.gate_resolver(gsession),
             video_duration=_video_duration_lookup,
-            unlimited=core.unlimited_resolver(gsession),
-            features=core.features_resolver(gsession))
+            unlimited=_gen_road.unlimited_resolver(gsession),
+            features=_models.features_resolver(gsession),
+            edit_caps=_models.edit_caps_resolver(gsession),
+            source_format=_source_format_lookup)
 
     def _submit_resolver(core, gsession):
         """For a SPEND. The price resolver plus the input resolver: a catalog media_id is
@@ -16449,14 +16739,16 @@ def create_app(out_dir: Path):
         (the Loom's video routes resolve their own frames -- see loom_generate). The gate,
         the video-length lookup and the Unlimited Mode check are the SAME ones the quote
         uses."""
-        return core.RequestResolver(
-            model_version=core.model_version_resolver(gsession),
+        return _gen_road.RequestResolver(
+            model_version=_gen_road.model_version_resolver(gsession),
             preset=lambda u, name: _load_presets(u).get(name),
             media_id=lambda v: _input_media_id(core, gsession, v),
-            gate=core.gate_resolver(gsession),
+            gate=_gen_road.gate_resolver(gsession),
             video_duration=_video_duration_lookup,
-            unlimited=core.unlimited_resolver(gsession),
-            features=core.features_resolver(gsession))
+            unlimited=_gen_road.unlimited_resolver(gsession),
+            features=_models.features_resolver(gsession),
+            edit_caps=_models.edit_caps_resolver(gsession),
+            source_format=_source_format_lookup)
 
     def _lane_job_running(core):
         """True while the app's own job log holds an Unlimited Mode task that has not
@@ -16465,11 +16757,24 @@ def create_app(out_dir: Path):
         (SCOPE_2026-09-26_unlimited-mode §8.6). A lane task started on PixAI's own site is
         not in it; PixAI's refusal covers that case, and nothing is spent."""
         try:
-            return any(j.get("lane") == core.UNLIMITED_LANE
+            return any(j.get("lane") == _gen_road.UNLIMITED_LANE
                        and j.get("status") not in _jobs._JOBS_TERMINAL
                        for j in _jobs.read_jobs(out_dir))
         except Exception:
             return False
+
+    def _source_format_lookup(value):
+        """A create source's format, "svg" / "gif" / "" (RequestResolver.source_format, 3.22
+        S5): a catalog id by its row's recorded output_format, then its file's extension;
+        anything else (a data: picture, a name) by its own text. Local, no network."""
+        s = str(value or "").strip()
+        row = None
+        if s.isdigit():
+            try:
+                row = get_row(db_path, s)
+            except Exception:                                # noqa: BLE001 -- no row
+                row = None
+        return _gen_params.source_format(s, row)
 
     _video_len_cache = []   # the one cached lookup for this app (built on first use)
 
@@ -16483,7 +16788,7 @@ def create_app(out_dir: Path):
         the quote, the drawer's spend and the Loom's spend all read one cached answer."""
         from moonglade import backup as core
         if not _video_len_cache:
-            _video_len_cache.append(core.make_video_duration_lookup(out_dir, db_path))
+            _video_len_cache.append(_gen_params.make_video_duration_lookup(out_dir, db_path))
         return _video_len_cache[0](media_id)
 
     _presets_lock = threading.Lock()
@@ -16544,7 +16849,7 @@ def create_app(out_dir: Path):
                 return jsonify({"error": "task_id required"}), 400
             try:
                 core, gsession = _gen_session()
-                task = core.task_detail_gql(gsession, tid) or {}
+                task = _task_reads.task_detail_gql(gsession, tid) or {}
                 params = task.get("parameters") or {}
                 chat = params.get("chat") or {}
                 prompt = chat.get("prompts") or params.get("prompts") or ""
@@ -16862,14 +17167,9 @@ def create_app(out_dir: Path):
     # console line to say so. So that case is refused before anything goes out, in words the
     # drawer shows. A send whose badge showed a PRICE carries nothing and goes out exactly as
     # before (issue #15: a card that covers only part still spends, the full price stated).
-    _QUOTED_FREE_GONE = ("The free card this was priced with is gone (used elsewhere or "
-                         "expired), so sending it would spend credits. Nothing was sent. "
-                         "Check the price again before you send.")
-
-    def _pop_expect_free(body):
-        """The client's 'my badge said FREE' flag, popped so it never reaches build_request,
-        the single-send record or PixAI."""
-        return bool(body.pop("expect_free", False)) if isinstance(body, dict) else False
+    # Since 3.22 (DESIGN_3.22 3.4) the rule itself lives in gen_road; these names call it.
+    _QUOTED_FREE_GONE = _gen_road.QUOTED_FREE_GONE
+    _pop_expect_free = _gen_road.pop_expect_free
 
     def _pop_loom_target(body):
         """The Loom's {board_id, card_id} on a send from one of its tabs (Image, Edit,
@@ -16894,16 +17194,8 @@ def create_app(out_dir: Path):
                         cost=0 if (params or {}).get("kaisuukenId") else None)
 
     def _quoted_free_hooks(core, req, expect_free):
-        """core.submit's before_send for a send quoted FREE: runs after the card step, before
-        the one mutation, and refuses when no card was attached. An Unlimited Mode request is
-        free by the entitlement, never by a card, so it is never held to this."""
-        if not expect_free or req.unlimited:
-            return {}
-
-        def _before_send(params):
-            if not params.get("kaisuukenId"):
-                raise core.LocalRefusal(_QUOTED_FREE_GONE)
-        return {"before_send": _before_send}
+        """submit's before_send for a send quoted FREE: gen_road.quoted_free_hooks (3.22)."""
+        return _gen_road.quoted_free_hooks(req, expect_free)
 
     # THE SINGLE SENDS' REPEAT HOLD (3.21.2, DESIGN_3.22 "Live in master today" L1 and 2.12).
     # Every single send -- /api/generate, /api/edit, /api/enhance, /api/scene, /api/fix and the
@@ -16917,65 +17209,43 @@ def create_app(out_dir: Path):
     # DROPPED only when the send is known to have cost nothing: never reached (refused here, or
     # by a read before it), or refused by PixAI in a way that proves no task exists
     # (core.send_outcome). The Loom's journalled render keeps its own journal and is not held
-    # here; a run (/api/generate/run) has its own run id and states.
-    SEND_REPEAT_S = 10.0
-    SEND_UNCLEAR_S = 60.0
-    _UNCLEAR_SEND = ("PixAI may have started this. It was not sent again; check the Activity "
+    # here; a run (/api/generate/run) has its own run id and states. Since 3.22 (DESIGN_3.22
+    # 3.4) the record and its windows live in gen_road (repeat_claim / repeat_settle); these
+    # closures turn its answer into the route's JSON and keep their wording.
+    SEND_REPEAT_S = _gen_road.REPEAT_SENT_S
+    SEND_UNCLEAR_S = _gen_road.REPEAT_UNCLEAR_S
+    _UNCLEAR_SEND =("PixAI may have started this. It was not sent again; check the Activity "
                      "tray (or pixai.art) before sending it again.")
     _UNCLEAR_HELD = ("The last one may still be starting, so this was not sent. Check the "
                      "Activity tray (or pixai.art) before sending it again.")
     _REPEAT_HELD = ("The same request was asked for a few seconds ago; wait a moment before "
                     "sending it again.")
-    _send_recent = {}                    # key -> (until, state): "sending" | "sent" | "unclear"
-    _send_recent_lock = threading.Lock()
-
     def _send_key(kind, body):
-        """(user, kind, the request as sent, canonical JSON). Never raises."""
-        try:
-            blob = json.dumps(body, sort_keys=True, default=str)
-        except Exception:                                    # noqa: BLE001
-            blob = repr(body)
-        return (str(session.get("user") or ""), str(kind), blob)
+        """(user, kind, the request as sent, canonical JSON): gen_road.repeat_key."""
+        return _gen_road.repeat_key(session.get("user") or "", kind, body)
 
     def _send_claim(key, repeat_msg=None, claim=True):
         """The refusal (a JSON response) for a send that matches a standing record, or None
-        -- with the record now claimed as "sending" when `claim` (it holds for SEND_UNCLEAR_S
-        if this request never settles it). A route checks with claim=False before its first
-        network call, and claims (atomically, so two racing requests cannot both pass)
-        immediately before the send itself. Local, no network."""
-        now = time.monotonic()
-        with _send_recent_lock:
-            for k in [k for k, (until, _s) in _send_recent.items() if now >= until]:
-                del _send_recent[k]
-            held = _send_recent.get(key)
-            if held is None:
-                if claim:
-                    _send_recent[key] = (now + SEND_UNCLEAR_S, "sending")
-                return None
-        if held[1] == "unclear":
+        -- with the record now claimed when `claim` (gen_road.repeat_claim). A route checks
+        with claim=False before its first network call, and claims immediately before the
+        send itself. Local, no network."""
+        held = _gen_road.repeat_claim(key, claim=claim)
+        if held is None:
+            return None
+        if held == "unclear":
             return jsonify({"error": _UNCLEAR_HELD, "state": "may_have_started",
                             "unclear": True, "held": True}), 409
         return jsonify({"error": repeat_msg or _REPEAT_HELD, "held": True}), 409
 
     def _send_settle(key, state):
-        """Settle a claimed record: "sent" keeps it SEND_REPEAT_S, "may_have_started" keeps
-        it SEND_UNCLEAR_S, "not_sent" / "refused" (nothing was made) drop it."""
-        if key is None:
-            return
-        now = time.monotonic()
-        with _send_recent_lock:
-            if state == "sent":
-                _send_recent[key] = (now + SEND_REPEAT_S, "sent")
-            elif state == "may_have_started":
-                _send_recent[key] = (now + SEND_UNCLEAR_S, "unclear")
-            else:
-                _send_recent.pop(key, None)
+        """Settle a claimed record by the send's state (gen_road.repeat_settle)."""
+        _gen_road.repeat_settle(key, state)
 
     def _Reached():
         """This request thread's spend mark (core.spend_watch): `.v` turns True once the one
         spend request is reached. Observation only; nothing extra is passed to the send."""
         from moonglade import backup as core
-        return core.spend_watch()
+        return _gen_road.spend_watch()
 
     def _send_failed(where, exc, reached, params, key, task_id=None):
         """A failed single send's answer. An unknown outcome is said plainly, with PixAI's own
@@ -16996,14 +17266,10 @@ def create_app(out_dir: Path):
                 pass
             return (jsonify({"task_id": task_id}), 200), "", "sent"
         msg = _log_gen_failure(where, exc, params)[:300]
-        try:
-            state = core.send_outcome(exc, bool(reached))
-        except Exception:                                    # noqa: BLE001 -- never "refused"
-            state = "may_have_started" if reached else "not_sent"
-        _send_settle(key, state)
+        state = _gen_road.repeat_settle_failure(key, exc, reached)
         if state == "may_have_started":
             try:
-                detail = _redact_host_paths(core.outcome_reason(exc))[:300]
+                detail = _redact_host_paths(_gen_road.outcome_reason(exc))[:300]
             except Exception:                                # noqa: BLE001
                 detail = msg
             return (jsonify({"error": _UNCLEAR_SEND, "detail": detail, "state": state,
@@ -17018,7 +17284,7 @@ def create_app(out_dir: Path):
         local or LAN).
 
         This route and every create route build their shape through the SAME
-        core.build_request, so the badge quotes the request that will actually submit --
+        gen_road.build_request, so the badge quotes the request that will actually submit --
         it is not a second, price-flavoured road that happens to agree. /api/price is the
         one caller that does NOT pin a mode: it serves every road, so the payload's own
         `mode` picks one.
@@ -17037,7 +17303,7 @@ def create_app(out_dir: Path):
             core, gsession = _gen_session()
             body = request.get_json(silent=True) or {}
             try:
-                req = core.build_request(body, user=user,
+                req = _gen_road.build_request(body, user=user,
                                          is_member=_account_is_member(core, gsession),
                                          resolve=_price_resolver(core, gsession))
             except core.PixAIError as e:
@@ -17053,7 +17319,7 @@ def create_app(out_dir: Path):
                 card_session = _card_session(core, gsession)
             except Exception:                              # noqa: BLE001
                 card_session = gsession
-            return jsonify(core.price(gsession, req, card_session=card_session))
+            return jsonify(_gen_road.price(gsession, req, card_session=card_session))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "cost": None, "free": False}), 200
 
@@ -17096,11 +17362,11 @@ def create_app(out_dir: Path):
             # Unlimited Mode (SCOPE_2026-09-26_unlimited-mode §8.6/§8.9): READ_ONLY refuses
             # FIRST, before the entitlement read and the gate's reads below, as run_generate
             # does -- then one lane task at a time, off the app's own job log.
-            lane = core.asks_unlimited(body)
+            lane = _gen_road.asks_unlimited(body)
             if lane:
-                core._check_read_only(core._SUBMIT_ACTION_DEFAULT)
+                core._check_read_only(_gen_road._SUBMIT_ACTION_DEFAULT)
                 if _lane_job_running(core):
-                    return jsonify({"error": core.UNLIMITED_BUSY}), 400
+                    return jsonify({"error": _gen_road.UNLIMITED_BUSY}), 400
             # Members-only options are dropped for an account PixAI reports as non-member.
             # Handed to the builder (not decided inside it) so the CLI keeps its own path
             # and /api/price passes the identical flag -- the badge must quote the shape
@@ -17111,7 +17377,7 @@ def create_app(out_dir: Path):
             # unpinned {"mode": "I2V"} POST here would otherwise build and pay for a video.
             # `params` is bound for the failure log below, which reads it through
             # locals().get() -- see _log_gen_failure.
-            req = core.build_request(body, mode="image", is_member=_ent["is_member"],
+            req = _gen_road.build_request(body, mode="image", is_member=_ent["is_member"],
                                      resolve=_submit_resolver(core, session))
             params = req.parameters
             # Authoritative model resolution happened inside build_request (see
@@ -17141,14 +17407,14 @@ def create_app(out_dir: Path):
             if held:
                 return held
             held_key = send_key
-            task_id = core.submit(session, req,
+            task_id = _gen_road.submit(session, req,
                                   **_quoted_free_hooks(core, req, expect_free))["task_id"]
             _send_settle(held_key, "sent")
             _record_loom_send(loom_target, task_id, req.parameters, "image")
             if req.unlimited:
                 # The lane mark on the job, written by the server rather than trusted from the
                 # client's own registration, so the one-at-a-time rule above can read it.
-                _log_job(task_id, status="running", type="generate", lane=core.UNLIMITED_LANE,
+                _log_job(task_id, status="running", type="generate", lane=_gen_road.UNLIMITED_LANE,
                          source="web")
             # Session M (NOTES 3/7): the single send's request as built and card-attached (the
             # card step writes kaisuukenId into req.parameters), so Inspect can show it. The
@@ -17293,7 +17559,7 @@ def create_app(out_dir: Path):
         if not add:
             return
         try:
-            feats = core.features_resolver(gsession)(built[0]["req"].model_version_id)
+            feats = _models.features_resolver(gsession)(built[0]["req"].model_version_id)
         except Exception:                                    # noqa: BLE001
             feats = None
         limit = _prompt_limit((feats or {}).get("model_type"))
@@ -17383,7 +17649,7 @@ def create_app(out_dir: Path):
                 jp["no_card"] = True
             label = _cell_label(plan, job)
             try:
-                req = core.build_request(jp, mode="image", is_member=ent["is_member"],
+                req = _gen_road.build_request(jp, mode="image", is_member=ent["is_member"],
                                          resolve=rs)
             except core.PixAIError as e:
                 refusal = rec.refusal_from(e)
@@ -17404,7 +17670,7 @@ def create_app(out_dir: Path):
             # this account can't use Turbo) is applied HERE, at build, so it is quoted and
             # digested; a run job's submit (exact=True) never applies it again, so what is
             # sent is what was quoted.
-            req.parameters = core.priority_for_submit(req.parameters)
+            req.parameters = _gen_road.priority_for_submit(req.parameters)
             built.append({"cell": job["cell"], "job": job, "req": req,
                           "no_card": True if no_card else None})
         if any(b["req"].unlimited for b in built) and len(built) > 1:
@@ -17421,7 +17687,7 @@ def create_app(out_dir: Path):
         # --- the quote (step 9): one price group, a read price, the free cards ---
         queries = []
         for b in built:
-            q = core._task_price_query(gsession, b["req"].parameters)
+            q = _pricing._task_price_query(gsession, b["req"].parameters)
             if not q:
                 raise _RunRefused(_cell_label(plan, b["job"]) + "this request can't be "
                                   "priced, so nothing was sent.")
@@ -17435,7 +17701,7 @@ def create_app(out_dir: Path):
             each, covered = 0, len(built)
             out["unlimited"] = True
         else:
-            cost = core.price_task(gsession, first.parameters)
+            cost = _pricing.price_task(gsession, first.parameters)
             if cost is None:
                 if first.parameters.get("recipeIds"):
                     v = rec.price_verdict(gsession, first.parameters, None) or {}
@@ -17451,7 +17717,7 @@ def create_app(out_dir: Path):
                 card_note = "Free cards don’t cover queued matrix runs."
             elif not first.no_card:
                 try:
-                    best = core.match_kaisuuken(_card_session(core, gsession),
+                    best = _cards.match_kaisuuken(_card_session(core, gsession),
                                                 first.parameters, enrich=True,
                                                 raise_on_error=True)
                 except Exception:                            # noqa: BLE001
@@ -17460,7 +17726,7 @@ def create_app(out_dir: Path):
                 if best:
                     need = max(1, int(best.get("consumeAmount") or 1))
                     held = best.get("total")
-                    if core.card_covers(best):
+                    if _cards.card_covers(best):
                         if len(built) == 1 or held is None:
                             covered = 1
                         else:
@@ -17468,7 +17734,7 @@ def create_app(out_dir: Path):
                     card = {"name": best.get("name") or "", "held": held, "needed": need,
                             "left_after": (int(held) - covered * need) if held is not None
                             else None,
-                            "short": not core.card_covers(best)}
+                            "short": not _cards.card_covers(best)}
                     if covered and first.parameters.get("recipeIds"):
                         card_note = rec.CARD_NOTE
         out.update(each=each, covered=covered, total=each * (len(built) - covered),
@@ -17499,8 +17765,7 @@ def create_app(out_dir: Path):
                     "cell": b["cell"], "prompt": b["job"]["prompt"], "vars": b["job"]["vars"],
                     "seed": b["req"].parameters.get("seed"), "count": b["job"]["batch"],
                     "no_card": bool(b["no_card"]),
-                    "request": {"operation": "createGenerationTask",
-                                "variables": {"parameters": req}},
+                    "request": _gen_road.request_record("image", req),
                     "cli": runs.cli_command(core, req, no_card=bool(b["no_card"]))})
         return out
 
@@ -17560,7 +17825,7 @@ def create_app(out_dir: Path):
         loom_target = _pop_loom_target(body)
         from moonglade import backup as core
         try:
-            core._check_read_only(core._SUBMIT_ACTION_DEFAULT)
+            core._check_read_only(_gen_road._SUBMIT_ACTION_DEFAULT)
         except core.PixAIError as e:
             return jsonify({"error": str(e), "read_only": True}), 200
         run_id = str(body.get("run_id") or "")
@@ -17626,8 +17891,8 @@ def create_app(out_dir: Path):
                 raise _RunRefused("What would be sent changed since you confirmed — nothing "
                                   "was sent.", changed=bad)
             # Step 6, the lane rule read off the app's own job log: one lane task at a time.
-            if core.asks_unlimited(body) and _lane_job_running(core):
-                raise _RunRefused(core.UNLIMITED_BUSY)
+            if _gen_road.asks_unlimited(body) and _lane_job_running(core):
+                raise _RunRefused(_gen_road.UNLIMITED_BUSY)
             # Steps 7-9: entitlements, one build per job, the quote (a single send has none).
             gcore, gsession = _gen_session()
             planned = _run_plan(gcore, gsession, body, user, resolver=_submit_resolver,
@@ -17683,18 +17948,19 @@ def create_app(out_dir: Path):
             def sending(self, cell):
                 store.set_job(run_id, cell, state="sending")
 
-            def sent(self, cell, task_id, request_, card):
+            def sent(self, cell, task_id, request_, card, card_unused=False):
                 b = by_cell[cell]
                 with _run_lock:
                     _run_inflight["done"] = _run_inflight.get("done", 0) + 1
                 # The job event first: the Activity tray and the reel see every task even if
-                # the store write below fails or the tab closed (review F5).
+                # the store write below fails or the tab closed (review F5). `card_unused`
+                # (2.4 rule 7): the create answer already showed a charge on a card job.
                 _log_job(task_id, status="running", type="generate",
                          label="{} {}/{}".format(label_kind, cell + 1, len(built))
                          if len(built) > 1 else "Generated",
                          count=b["job"]["batch"], run=run_id, cell=cell, run_mode=mode,
-                         lane=core.UNLIMITED_LANE if b["req"].unlimited else None,
-                         source="web")
+                         lane=_gen_road.UNLIMITED_LANE if b["req"].unlimited else None,
+                         source="web", card_unused=True if card_unused else None)
                 store.set_job(run_id, cell, state="sent", task_id=task_id,
                               request=_strip_request(request_), card=int(bool(card)))
                 # A run sent from a Loom board is that board's spend, job by job.
@@ -17705,12 +17971,17 @@ def create_app(out_dir: Path):
                 store.set_job(run_id, cell, state=state, error=error,
                               request=_strip_request(request_))
 
+            def card_unused(self, cell, task_id):
+                # 2.4 rule 7: the card job's terminal read showed a charge. The Activity row's
+                # data (the job event); the store's row reads it from card + paid (job_view).
+                _log_job(task_id, card_unused=True)
+
         budget = {"each": each, "total": planned["total"]} if multi else None
         if not multi and expect_free and built and not built[0]["req"].unlimited:
             # A single send its badge called FREE: a confirmed total of 0, so the job is refused
             # before its create if the card step attaches no card -- in a single send's words.
             budget = {"each": 1, "total": 0, "note": _QUOTED_FREE_GONE}
-        res = core.send_run(gsession, [{"cell": b["cell"], "req": b["req"],
+        res = _gen_road.send_run(gsession, [{"cell": b["cell"], "req": b["req"],
                                         "no_card": b["no_card"]} for b in built],
                             hooks=_Hooks(), budget=budget)
         for j in res["jobs"]:
@@ -17794,23 +18065,24 @@ def create_app(out_dir: Path):
                    "template": run.get("template") or "", "vars": job.get("vars") or [],
                    "prompt": job.get("prompt") or "", "state": job.get("state")}
             if isinstance(params, dict):
-                out["request"] = {"operation": "createGenerationTask",
-                                  "variables": {"parameters": params}}
+                out["request"] = _gen_road.request_record("image", params)
                 out["cli"] = runs.cli_command(core, params, no_card=bool(job.get("no_card")))
             return jsonify(out)
         if not get_row_by_task(db_path, tid):
             return jsonify({"error": "not found"}), 404
         try:
             core, gsession = _gen_session()
-            task = core.task_detail_gql(gsession, tid, retries=1)
+            task = _task_reads.task_detail_gql(gsession, tid, retries=1)
         except Exception as e:                               # noqa: BLE001
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
         if not task:
             return jsonify({"error": "couldn't read the task from PixAI"}), 200
         params = _strip_request(task.get("parameters") or {})
         return jsonify({"source": "pixai", "task_id": tid,
-                        "request": {"operation": "createGenerationTask",
-                                    "variables": {"parameters": params}},
+                        "request": _gen_road.request_record(
+                            "edit" if "chat" in params else "video" if (
+                                "i2vPro" in params or "referenceVideo" in params) else "image",
+                            params),
                         "cli": runs.cli_command(core, params)})
 
     def _run_note_paid(tid, paid):
@@ -17828,6 +18100,38 @@ def create_app(out_dir: Path):
             return job.get("expected")
         except Exception:                                    # noqa: BLE001
             return None
+
+    # Task ids sent with a free card on a road the Runs store does not record (an edit, a Loom
+    # send). The store's own `card` column covers /api/generate's single sends and every run.
+    # For the others the note is the task's own job event (`card_sent`), written by the server
+    # at the send the way the Unlimited lane mark is, so it survives a server restart (3.22
+    # review F2 follow-up); the set is this process's copy of it. Read by the terminal check.
+    _card_sent_tasks = set()
+
+    def _note_card_sent(task_id, params):
+        if task_id and isinstance(params, dict) and params.get("kaisuukenId"):
+            _card_sent_tasks.add(str(task_id))
+            _log_job(str(task_id), status="running", type="generate", card_sent=True,
+                     source="web")
+
+    def _card_was_sent(tid):
+        """True when the send behind task `tid` carried a free card (2.4 rule 7): this
+        process's note, the task's job event (`card_sent`, written at the send), else the Runs
+        store's row. Fail-soft: unknown is False."""
+        if str(tid) in _card_sent_tasks:
+            return True
+        try:
+            jobs_by_id, _order, _n = _jobs._reconstruct_jobs(out_dir)
+            if (jobs_by_id.get(str(tid)) or {}).get("card_sent"):
+                return True
+        except Exception:                                    # noqa: BLE001
+            pass
+        try:
+            from moonglade import runs
+            found = runs.RunsStore(out_dir).find_task(tid)
+            return bool(found and found[1].get("card"))
+        except Exception:                                    # noqa: BLE001
+            return False
 
     @app.route("/api/edit", methods=["POST"])
     @tier(LOGIN)
@@ -17854,7 +18158,7 @@ def create_app(out_dir: Path):
             # to the bare name `session` in this function a local (UnboundLocalError on
             # the read above), not a read of Flask's session.
             core, gsession = _gen_session()
-            req = core.build_request(p, mode="edit", user=user,
+            req = _gen_road.build_request(p, mode="edit", user=user,
                                      resolve=_submit_resolver(core, gsession))
             params = req.parameters          # bound for _log_gen_failure's locals().get()
             if params is None:
@@ -17865,9 +18169,10 @@ def create_app(out_dir: Path):
             if held:
                 return held
             held_key = send_key
-            task_id = core.submit(gsession, req,
+            task_id = _gen_road.submit(gsession, req,
                                   **_quoted_free_hooks(core, req, expect_free))["task_id"]
             _send_settle(held_key, "sent")
+            _note_card_sent(task_id, req.parameters)         # 2.4 rule 7's terminal check
             _record_loom_send(loom_target, task_id, req.parameters, "edit")
             # (edits is counted from the catalog's edit rows since 2026-10-02.)
             _telemetry.telem_set_add("tools", "edit", out_dir=out_dir)
@@ -17899,7 +18204,7 @@ def create_app(out_dir: Path):
             return jsonify({"palettes": cached})
         try:
             core, gsession = _gen_session()
-            rows = core.color_palette_presets(gsession)
+            rows = _gen_params.color_palette_presets(gsession)
         except Exception as e:
             return jsonify({"palettes": [], "error": _redact_host_paths(str(e))[:200]})
         for r in rows:
@@ -17942,10 +18247,12 @@ def create_app(out_dir: Path):
         # The cache's generation when this read began: a send or refusal that lands while it
         # runs bumps it, and this read's (older) answer is then never cached.
         gen0 = _enh_price_cache["gen"]
-        # Stored session (no bootstrap) -- as the gate uses -- and only while the Mirror is ON,
-        # like the scene routes: make_mirror_session can renew the token, and nothing may renew
-        # it as a side effect while the owner has the Mirror switched off (#71).
-        s = _mirror.make_mirror_session() if _mirror.mirror_enabled() else None
+        # 3.22 S3-enhance (T-F4, V9): the Mirror's STORED sign-in, only while the Mirror is ON
+        # (pricing.enhance_quote_session: never make_mirror_session, so a quote renews
+        # nothing, #71), and PixAI's own enhance quote, POST /v2/task/enhance/price -- the
+        # same price the badge reads. An enhance never takes a card: no card check runs and
+        # free_card is always False.
+        s = _pricing.enhance_quote_session()
 
         def _row(pr):
             row = {"key": pr.get("key"), "label": pr.get("label"),
@@ -17954,13 +18261,13 @@ def create_app(out_dir: Path):
                    "has_control": bool(pr.get("has_control")), "price": None, "free_card": False}
             if s is not None:
                 try:
-                    params = core.build_panelplugin_parameters(
-                        "1", row["workflow_id"], workflow_name=row["workflow_name"])
-                    row["price"] = core.price_task(s, params)
-                    # card_covers, the one coverage verdict the send reads too (2026-11-18): a
-                    # card that matched but does not cover the job is not "free".
-                    row["free_card"] = core.card_covers(
-                        core.match_kaisuuken(s, params, enrich=True))
+                    # A placeholder source: the quote prices the request SHAPE (verified for
+                    # task-price 2026-08-18). A preset with a control (Change Emotion) needs
+                    # its prompt to be quoted at all, so it has no price until one is picked.
+                    etype = _gen_params.enhance_type_for(row["workflow_name"])
+                    if etype is not None and not row["has_control"]:
+                        row["price"] = _pricing.price_enhance(
+                            s, _gen_params.build_enhance_body("1", etype))
                 except Exception:
                     row["price"] = None
             return row
@@ -17973,11 +18280,11 @@ def create_app(out_dir: Path):
         # (it mutates no shared session state), and this is one small burst per cache-miss.
         if s is not None:
             from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=len(core.BRIDGE_ENHANCE_PRESETS)) as ex:
-                out = list(ex.map(_row, core.BRIDGE_ENHANCE_PRESETS))
+            with ThreadPoolExecutor(max_workers=len(_gen_params.BRIDGE_ENHANCE_PRESETS)) as ex:
+                out = list(ex.map(_row, _gen_params.BRIDGE_ENHANCE_PRESETS))
         else:
-            out = [_row(pr) for pr in core.BRIDGE_ENHANCE_PRESETS]
-        if s is not None and all(r["price"] is not None for r in out) \
+            out = [_row(pr) for pr in _gen_params.BRIDGE_ENHANCE_PRESETS]
+        if s is not None and all(r["price"] is not None for r in out if not r["has_control"]) \
                 and _enh_price_cache["gen"] == gen0:     # cache only a fully-real, current result
             _enh_price_cache["presets"] = out
             _enh_price_cache["at"] = now
@@ -18019,11 +18326,11 @@ def create_app(out_dir: Path):
             core, session = _gen_session()
             # Same road as every other create: build_request resolves the source image,
             # translates the Change-Emotion control and calls build_panelplugin_parameters;
-            # core.submit is the READ_ONLY + free-card choke. A panelplugin task can never
+            # gen_road.submit is the READ_ONLY + free-card choke. A panelplugin task can never
             # be covered by a card (measured 2026-08-18) -- the check simply returns no
             # match -- but it costs nothing to ride the same choke and it is one fewer
             # spend path with a guard of its own to get wrong.
-            req = core.build_request(p, mode="enhance",
+            req = _gen_road.build_request(p, mode="enhance",
                                      resolve=_submit_resolver(core, session))
             params = req.parameters          # bound for _log_gen_failure's locals().get()
             if params is None:
@@ -18037,7 +18344,7 @@ def create_app(out_dir: Path):
             if held:
                 return held
             held_key = send_key
-            task_id = core.submit(session, req,
+            task_id = _gen_road.submit(session, req,
                                   **_quoted_free_hooks(core, req, expect_free))["task_id"]
             _send_settle(held_key, "sent")
             # [BLOCKER] Telemetry is DEFERRED, not fired here: submit_generation returns the id at
@@ -18054,7 +18361,7 @@ def create_app(out_dir: Path):
             _wname = str(p.get("workflow_name") or "").strip()
             _identity = _wname or str(p.get("workflow_id") or "").strip()
             _emo = str(p.get("emotion") or "").strip()
-            _emo_key = _emo if (_emo and _wname == core.ENHANCE_EMOTION_WORKFLOW) else None
+            _emo_key = _emo if (_emo and _wname == _gen_params.ENHANCE_EMOTION_WORKFLOW) else None
             with _enhance_pending_lock:
                 _enhance_pending[str(task_id)] = (_identity, _emo_key)
             # enhance_tools (Blades of Gondolin) + Speak-Friend (bridge_gens) are DEFERRED to
@@ -18094,7 +18401,7 @@ def create_app(out_dir: Path):
             for p in sorted(edir.iterdir()):
                 if p.is_file() and p.suffix.lower() in exts:
                     found[p.stem] = "/branding/bridge/emotion/" + p.name   # loose overrides packed
-        gated = getattr(core, "ENHANCE_EMOTION_MEMBERSHIP", frozenset())
+        gated = getattr(_gen_params, "ENHANCE_EMOTION_MEMBERSHIP", frozenset())
         emotions = [{"key": k, "label": k.replace("-", " ").replace("_", " ").strip().title(),
                      "img": v, "membership": k in gated} for k, v in sorted(found.items())]
         return jsonify({"emotions": emotions})
@@ -18121,7 +18428,10 @@ def create_app(out_dir: Path):
             raw = scene_catalog(core, _mirror.make_mirror_session())
         except Exception as e:
             return jsonify({"error": _log_gen_failure("/api/scenes", e, None)[:200]}), 200
-        return jsonify({"scenes": [scene_row(sc) for sc in raw if sc.get("sceneId")]})
+        rows = [scene_row(sc) for sc in raw if sc.get("sceneId")]
+        for r in rows:
+            r["local_art"] = scene_local_art(r["sceneId"])
+        return jsonify({"scenes": rows})
 
     @app.route("/api/scene", methods=["POST"])
     @tier(LOGIN)
@@ -18140,10 +18450,19 @@ def create_app(out_dir: Path):
         reached = _Reached()
         try:
             p = request.get_json(silent=True) or {}
+            # V9 (3.22): a scene never takes a card, so a send claiming a FREE quote is refused
+            # before anything else, with nothing sent.
+            if _pop_expect_free(p):
+                return jsonify({"error": _gen_road.CARDLESS_FREE, "state": "not_sent"}), 400
             send_key = _send_key("scene", p)
             held = _send_claim(send_key, claim=False)        # 3.21.2 (L1): before any network
             if held:
                 return held
+            # 3.22 S5: an AI tool takes no SVG or GIF (PixAI's rule) -- before any upload.
+            for m in (p.get("media_ids") or p.get("mediaIds") or []):
+                why = _gen_params.source_refusal(_source_format_lookup(m), "tool")
+                if why:
+                    return jsonify({"error": why, "state": "not_sent"}), 400
             core, session = _gen_session()
             scene_id = str(p.get("scene_id") or p.get("sceneId") or "").strip()
             media = [_input_media_id(core, session, str(m).strip())
@@ -18158,9 +18477,14 @@ def create_app(out_dir: Path):
                 return held
             held_key = send_key
             # submit_scene raises when PixAI's answer carries no task id (3.21.2): that is
-            # "may have started", never a success with a null id.
-            task_id = core.submit_scene(
-                _mirror.make_mirror_session(), scene_id, media,
+            # "may have started", never a success with a null id. Its client is the marked
+            # web-jwt one (3.22, DESIGN_3.22 2.5): for_create(require="web-jwt") refuses,
+            # with nothing sent, unless the Mirror is armed and usable, and the door refuses a
+            # scene on any other identity.
+            from moonglade import pixai_client as _pixai_client
+            task_id = _gen_road.submit_scene(
+                _pixai_client._client_of(session).for_create(require="web-jwt"),
+                scene_id, media,
                 preset=str(p.get("preset") or "random"), custom=p.get("custom"),
                 selector_values=(p.get("selector_values") or p.get("selectorValues") or []))
             if not task_id:
@@ -18197,7 +18521,7 @@ def create_app(out_dir: Path):
     # nothing created) -- so a fixed-up retry goes straight through (#93 review 2, F2).
     # Since 3.21.2 this is the single sends' repeat hold (_send_claim, above) keyed on the
     # cleaned fixer body: SEND_REPEAT_S after an accepted Fix, SEND_UNCLEAR_S after an unknown
-    # outcome, dropped only when the Fix is known to have cost nothing (core.send_outcome: never
+    # outcome, dropped only when the Fix is known to have cost nothing (gen_road.send_outcome: never
     # reached, or a definite refusal -- the classifier's rule, so a 408, a 499 or a bare 4xx
     # keeps it, L2).
     _FIX_REPEAT_MSG = ("The same Fix was asked for a few seconds ago; wait a moment before "
@@ -18210,7 +18534,7 @@ def create_app(out_dir: Path):
         never recorded (None, None): it cannot spend, and its own refusal is the answer the
         caller should see."""
         try:
-            body = core.build_fixer_body(str(p.get("source") or "").strip(), p.get("boxes"))
+            body = _gen_params.build_fixer_body(str(p.get("source") or "").strip(), p.get("boxes"))
         except Exception:                  # noqa: BLE001 -- the build refuses it properly below
             return None, None
         key = _send_key("fix", body)
@@ -18229,7 +18553,7 @@ def create_app(out_dir: Path):
         pixel coords. Login required; returns {task_id} for the async poller.
 
         The Fix rides REST, not createGenerationTask: /v2/task/fixer takes {mediaId, boxes},
-        built by core.build_fixer_body -- the builder /api/price's quote uses too, so the
+        built by gen_params.build_fixer_body -- the builder /api/price's quote uses too, so the
         badge and the spend carry the SAME boxes (kind, count, coordinates). The media id is
         the one deliberate difference: this route's resolver uploads the local file first and
         sends the upload-kind id (PixAI refuses an output id as an input here), while the quote
@@ -18240,20 +18564,24 @@ def create_app(out_dir: Path):
         One Fix at a time: an identical submit (same user, picture and boxes) inside
         SEND_REPEAT_S seconds of the last one is refused before any network call -- a
         double tap, or a client retry after a lost response, must not pay twice -- unless
-        that last one is known to have cost nothing (core.send_outcome)."""
+        that last one is known to have cost nothing (gen_road.send_outcome)."""
         fix_key = None
         reached = _Reached()
         try:
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
             loom_target = _pop_loom_target(p)
+            # V9 (3.22): no card ever covers a Fix, so a send claiming a FREE quote is refused
+            # before anything else, with nothing sent.
+            if _pop_expect_free(p):
+                return jsonify({"error": _gen_road.CARDLESS_FREE, "state": "not_sent"}), 400
             # READ_ONLY first: the submit resolver below uploads the local file (a network
             # call), so the refusal has to come before it, not only inside submit_fixer.
-            core._check_read_only(core._SUBMIT_ACTIONS["fix"])
+            core._check_read_only(_gen_road._SUBMIT_ACTIONS["fix"])
             repeat, fix_key = _fix_repeat_refusal(core, p)
             if repeat:
                 return repeat
-            req = core.build_request(p, mode="fix",
+            req = _gen_road.build_request(p, mode="fix",
                                      resolve=_submit_resolver(core, session))
             if not req.media_id:
                 _fix_forget(fix_key)
@@ -18268,7 +18596,7 @@ def create_app(out_dir: Path):
             # raise; a box the cleaner would have dropped is still worth seeing, because
             # "which boxes did we actually ask about" is half the diagnosis.
             fix_params = {"mediaId": req.media_id, "boxes": req.boxes}
-            task_id = core.submit(session, req)["task_id"]
+            task_id = _gen_road.submit(session, req)["task_id"]
             _send_settle(fix_key, "sent")
             _record_loom_send(loom_target, task_id, req.parameters, "fix")
             _telemetry.telem_set_add("tools", "fix", out_dir=out_dir)   # Full Toolbox
@@ -20168,7 +20496,7 @@ __DESIGN_TOKENS__
             send_board = draft_board
         sending_key = (_account_prefs._account_key(user), submit_id) if journalled else None
         try:
-            _core._check_read_only(_core._SUBMIT_ACTION_DEFAULT)
+            _core._check_read_only(_gen_road._SUBMIT_ACTION_DEFAULT)
         except _core.PixAIError as e:
             return jsonify({"error": str(e)[:300]}), 200
         # 3.21.2 (L1): the gallery's own Video tab (no Loom keys) is a single send, held like
@@ -20192,7 +20520,17 @@ __DESIGN_TOKENS__
         # without the reference the card showed.
         unsendable_av = [str(x) for k in ("video_refs", "audio_refs") for x in (p.get(k) or [])
                          if str(x or "").strip() and not str(x).strip().isdigit()]
-        if unsendable:
+        # 3.22 S5: an SVG or a GIF is never a video frame (PixAI's rule), by the catalog's
+        # recorded format, then the extension, or a data: thumbnail's own type -- refused
+        # with the same not_sent journal entry, before resolve_img uploads anything.
+        frame_why = next((w for w in (_gen_params.source_refusal(_source_format_lookup(x),
+                                                                 "video")
+                                      for x in (p.get("images") or []) if str(x or "").strip())
+                          if w), "")
+        if frame_why:
+            unsendable = [frame_why]
+            unsendable_msg = frame_why
+        elif unsendable:
             unsendable_msg = ("One of this shot's pictures can't be sent to PixAI (an imported "
                               "picture). Nothing was sent.")
         elif unsendable_av:
@@ -20246,8 +20584,10 @@ __DESIGN_TOKENS__
         def _before_send(params):
             # Review F13: the confirm skipped because the shot priced FREE; if the card that
             # quote found is gone by now, sending would charge credits nobody confirmed.
-            if expect_free and not params.get("kaisuukenId"):
-                raise _core.LocalRefusal(
+            # The rule is gen_road's (3.22, DESIGN_3.22 3.4); the wording stays the Loom's.
+            if expect_free:
+                _gen_road.refuse_if_quoted_free_gone(
+                    params,
                     "The free card this render was priced with was used elsewhere, so it would "
                     "spend credits. Nothing was sent. Press Render again to see the new price."
                     if journalled else _QUOTED_FREE_GONE)
@@ -20337,11 +20677,12 @@ __DESIGN_TOKENS__
                 # The video-length lookup is the same one /api/price's resolver carries, so
                 # the Loom's submit cannot send a shorter inputVideoDurations than its badge
                 # quoted (2026-09-26).
-                return core.build_request({**p, "images": imgs,
+                return _gen_road.build_request({**p, "images": imgs,
                                            "video_refs": video_ids,
                                            "audio_refs": audio_ids}, mode="video",
-                                          resolve=core.RequestResolver(
-                                              video_duration=_video_duration_lookup))
+                                          resolve=_gen_road.RequestResolver(
+                                              video_duration=_video_duration_lookup,
+                                              source_format=_source_format_lookup))
 
             req = _request_for(image_ids)
             params = req.parameters      # bound for _log_gen_failure's locals().get()
@@ -20352,7 +20693,7 @@ __DESIGN_TOKENS__
                 held_key = video_key
             try:
                 attempt["sent"] = False
-                task_id = core.submit(session_, req, **hooks)["task_id"]
+                task_id = _gen_road.submit(session_, req, **hooks)["task_id"]
             except core.PixAIError as e:
                 # SURVEYED, not guessed. getTaskById across the owner's own video history
                 # (2026-07-26, read-only, no credits) found EVERY i2vPro task carrying an
@@ -20396,7 +20737,7 @@ __DESIGN_TOKENS__
                 # was created and charged -- and it can name invalid_media_id all the same.
                 # Only a definite refusal created nothing; anything else goes to the classifier
                 # below and is journalled may_have_started, never submitted a second time.
-                if not _core.definite_refusal(e):
+                if not _gen_road.definite_refusal(e):
                     raise
                 # Spend review N1: the refused first attempt sent nothing that exists, so from
                 # here "sent" describes the fallback alone. A re-upload that fails below is
@@ -20424,7 +20765,7 @@ __DESIGN_TOKENS__
                 req = _request_for(image_ids)
                 params = req.parameters   # rebound for the failure log below
                 attempt["sent"] = False
-                task_id = core.submit(session_, req, **hooks)["task_id"]
+                task_id = _gen_road.submit(session_, req, **hooks)["task_id"]
             try:                       # Master of the Loom + Storyweaver telemetry
                 mode = str(p.get("mode") or "R2V").upper()
                 if mode in ("I2V", "FLF", "R2V"):
@@ -20434,6 +20775,7 @@ __DESIGN_TOKENS__
             except Exception:
                 pass
             _send_settle(held_key, "sent")
+            _note_card_sent(task_id, req.parameters)         # 2.4 rule 7's terminal check
             _journal(state="submitted", task_id=str(task_id))
             if send_board:
                 # THE SEND RECORD: the one source of the board's "spent" figure. A free card
@@ -20464,7 +20806,7 @@ __DESIGN_TOKENS__
             msg = _log_gen_failure("/api/loom/generate", e, locals().get("params"))[:300]
             if not attempt["sent"]:
                 state = "not_sent"
-            elif getattr(e, "refused", False) or _core.definite_refusal(e):
+            elif getattr(e, "refused", False) or _gen_road.definite_refusal(e):
                 state = "refused"
             else:
                 state = "may_have_started"
@@ -21550,10 +21892,10 @@ __DESIGN_TOKENS__
         /v2/task/wait-time -- see core.queue_wait_estimate); fails soft, because an estimate
         must never turn a status poll into an error."""
         try:
-            params = (core._task_detail_query(session, tid) or {}).get("parameters") or {}
+            params = (_gen_cli._task_detail_query(session, tid) or {}).get("parameters") or {}
             if not isinstance(params, dict):
                 return None
-            return core.queue_wait_estimate(session, params.get("priority"),
+            return _pricing.queue_wait_estimate(session, params.get("priority"),
                                             params.get("modelId"))
         except Exception:                          # noqa: BLE001 -- a nicety, never fatal
             return None
@@ -21715,7 +22057,7 @@ __DESIGN_TOKENS__
             return jsonify({"phase": "failed", "error": "task_id required"}), 400
         try:
             core, session = _gen_session()
-            st = core.generation_status(session, tid)
+            st = _task_reads.generation_status(session, tid)
             if st["phase"] == "done":
                 _forget_gen_phase(tid)
                 got = _collect_single_flight(core, session, tid)
@@ -21727,9 +22069,15 @@ __DESIGN_TOKENS__
                 # makes an unexpected spend visible in the Activity tray afterwards. Passed
                 # through even when 0 -- a card-covered generation really is free, and
                 # "free" must stay distinguishable from "unknown".
+                # 2.4 rule 7 (V3): THE terminal card check -- a send that carried a free card
+                # and completed with a charge is a loud warning (logged inside card_unused) and
+                # rides the done event, the Activity row's data, as card_unused.
+                unused = _task_reads.card_unused(tid, st.get("paid_credit"),
+                                                 _card_was_sent(tid), st.get("phase"))
                 _log_job(tid, status="done", media_ids=got["media_ids"],
                          is_video=got.get("is_video", False),
-                         paid_credit=st.get("paid_credit"))
+                         paid_credit=st.get("paid_credit"),
+                         card_unused=True if unused else None)
                 # TERMINAL SUCCESS with output: the ONLY point an enhance is allowed to count
                 # (deferred from /api/enhance's submit-acceptance). No-op for non-enhance tasks;
                 # swallows its own errors so a post-charge telemetry blip can't fail this poll.
@@ -21743,6 +22091,8 @@ __DESIGN_TOKENS__
                         "is_video": got.get("is_video", False),
                         "duration": dur,
                         "paid_credit": st["paid_credit"]}
+                if unused:
+                    done["card_unused"] = True
                 # Session M (review F14): a run job's charge beside what its confirm expected,
                 # so the dock can mark a mismatch peach. Absent for everything else.
                 expected = _run_note_paid(tid, st.get("paid_credit"))
@@ -21759,7 +22109,7 @@ __DESIGN_TOKENS__
                 # so the tracker and the CLI could say no more than "cancelled", which
                 # reads as though HE cancelled a job that in fact never started.
                 reason = (st.get("reason") or "").strip()
-                detail = core.describe_failure(st.get("status"), reason,
+                detail = _task_reads.describe_failure(st.get("status"), reason,
                                                started=bool(st.get("started")))
                 _log_job(tid, status="failed", error=detail)
                 _loom_journal_finish_task(tid)
@@ -21913,6 +22263,9 @@ __DESIGN_TOKENS__
                  done=body.get("done"), total=body.get("total"), count=_count,
                  run=_run, cell=_cell if _run else None,
                  source=body.get("source") or "web")
+        if (body.get("status") or "running") == "running":
+            # The app just sent a create: an idle task stream reopens to watch it.
+            _task_stream.request_reopen("create")
         return jsonify({"ok": True})
 
     @app.route("/api/jobs/dismiss", methods=["POST"])
@@ -21946,7 +22299,7 @@ __DESIGN_TOKENS__
         picker self-updates the day PixAI opens the connection to us."""
         try:
             core, session = _gen_session()
-            return jsonify({"workflows": core.workflow_catalog(session)})
+            return jsonify({"workflows": _models.workflow_catalog(session)})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "workflows": []}), 200
 
@@ -22099,18 +22452,18 @@ __DESIGN_TOKENS__
         rec = _recipes()
         try:
             core, gsession = _gen_session()
-            feats = core._model_features(gsession, vid)
+            feats = _models._model_features(gsession, vid)
             mtype = (feats or {}).get("model_type") or ""
             capable = bool(mtype) and mtype in rec.model_types(gsession)
             out = {"capable": capable, "model_type": mtype, "version_id": vid,
                    "model_title": str(row.get("model_name") or "")}
             if request.args.get("check") or not capable:
                 return jsonify(out)
-            base = core.resolve_model_base_id(gsession, vid)
+            base = _models.resolve_model_base_id(gsession, vid)
             prompt = str(row.get("prompt_full") or row.get("prompt_preview") or "")
             loras, unresolved = [], 0
             tid = str(row.get("task_id") or "").strip()
-            task = core.task_detail_gql(gsession, tid, retries=1) if tid else None
+            task = _task_reads.task_detail_gql(gsession, tid, retries=1) if tid else None
             params = (task or {}).get("parameters") or {}
             if isinstance(params.get("prompts"), str) and params.get("prompts").strip():
                 prompt = params["prompts"]
@@ -22121,11 +22474,11 @@ __DESIGN_TOKENS__
                 except (TypeError, ValueError):
                     unresolved += 1
                     continue
-                lbase = core.resolve_model_base_id(gsession, str(lvid))
-                rows = core.list_model_versions(gsession, lbase) if lbase else []
+                lbase = _models.resolve_model_base_id(gsession, str(lvid))
+                rows = _models.list_model_versions(gsession, lbase) if lbase else []
                 vrow = next((r for r in rows if r.get("version_id") == str(lvid)), None) or {}
                 loras.append({"version_id": str(lvid), "model_id": lbase, "weight": w,
-                              "title": str(core.model_name_gql(gsession, str(lvid)) or "")
+                              "title": str(_models.model_name_gql(gsession, str(lvid)) or "")
                               or str(lvid),
                               "trigger_words": str(vrow.get("trigger_words") or "")})
             out.update({"model_id": base, "prompt": prompt, "loras": loras,
@@ -22968,7 +23321,9 @@ def main():
         print("Skipping thumbnail build (--skip-thumbs).")
     else:
         print("Building thumbnails (new only — use --rebuild-thumbs to force all)...")
-        build_thumbnails(rows, out_dir, thumb_dir, force=args.rebuild_thumbs)
+        # recheck=False: the gallery must not wait on the one-time see-through re-check (it
+        # opens every original); it is scheduled behind the started server below instead.
+        build_thumbnails(rows, out_dir, thumb_dir, force=args.rebuild_thumbs, recheck=False)
 
     # Secrets at rest (app security review 2026-11-19, finding 5): the copies already on disk
     # are limited to this user's account once per start; every later write does the same.
@@ -23118,6 +23473,9 @@ def main():
     # Look for things outside the app that still name its old files (a scheduled task, a
     # Claude registration, a shortcut): off-thread, for the notice (server_notice).
     _outside_prime()
+    # The one-time see-through thumbnail check, behind the started server, two workers.
+    if not args.skip_thumbs and not args.rebuild_thumbs:
+        start_see_through_recheck(rows, out_dir, thumb_dir)
     clean_stop = False
     interrupted = False
     try:

@@ -126,39 +126,41 @@ def test_force_ignores_the_back_off(tmp_path, monkeypatch):
     assert "smart_collections" in _tables(db)
 
 
-def _one_locked_attempt_s(tmp_path):
-    """How long ONE locked attempt really waits here. sqlite's busy handler sleeps in
-    whole steps on some builds (a second at a time on this Windows Python), so a 0.3 s
-    timeout can wait close to a second: the bound below is measured, not assumed."""
-    db, _ = _fresh_unmigrated(tmp_path / "calibrate")
-    holder = _Holder(db)
-    try:
-        start = time.monotonic()
-        g.migrate(db)
-        return time.monotonic() - start
-    finally:
-        holder.release()
-
-
 def test_threads_queued_behind_a_locked_attempt_do_not_each_wait_a_timeout(tmp_path, monkeypatch):
-    monkeypatch.setattr(g, "MIGRATE_BUSY_TIMEOUT_S", 0.3)
-    (tmp_path / "calibrate").mkdir()
-    one = _one_locked_attempt_s(tmp_path)
+    """One locked attempt's own wait is NOT a stable number: sqlite's busy handler sleeps in
+    coarse steps on this Windows Python, so a 0.3 s timeout waits 0.8 s on an idle machine and
+    0.9 to 2.9 s with the CPU saturated (ci_local runs both pytest halves side by side). The
+    test therefore never compares one run's wait with another's (a calibration sample against a
+    second sample failed at 1.72 s vs 2 x 0.84 s under that load). What it proves is relative,
+    inside the one run: the three threads queued behind the locked attempt finish together with
+    it, instead of each adding a timeout of its own -- a thread that retried would finish at
+    least one MIGRATE_BUSY_TIMEOUT_S after the one before it. The single connection is the
+    structural half of the same proof."""
+    timeout_s = 0.3
+    monkeypatch.setattr(g, "MIGRATE_BUSY_TIMEOUT_S", timeout_s)
     db, key = _fresh_unmigrated(tmp_path)
     holder = _Holder(db)
     seen = _count_connects(monkeypatch, db)
+    finished = []
+
+    def run():
+        g.migrate(db)
+        finished.append(time.monotonic())
+
     try:
-        start = time.monotonic()
-        threads = [threading.Thread(target=g.migrate, args=(db,)) for _ in range(4)]
+        threads = [threading.Thread(target=run) for _ in range(4)]
         for t in threads:
             t.start()
         for t in threads:
             t.join()
-        elapsed = time.monotonic() - start
     finally:
         holder.release()
     assert len(seen) == 1, f"{len(seen)} connections: queued threads retried the migration"
-    assert elapsed < 2 * one, f"four threads took {elapsed:.2f}s; one locked attempt takes {one:.2f}s"
+    assert len(finished) == 4
+    spread = max(finished) - min(finished)
+    assert spread < timeout_s, (
+        f"the four threads finished {spread:.2f}s apart; a queued thread that waited its own "
+        f"{timeout_s}s timeout would be at least that far behind the one before it")
     assert key not in g._MIGRATED
 
 

@@ -23,6 +23,7 @@ import sqlite3
 import pytest
 
 from moonglade import backup as core
+from moonglade import gen_road as gen_road_mod
 from moonglade import gallery as g
 from moonglade.gallery import (
     CATALOG_FIELDS, CurationError, add_to_collection, delete_collection, load_catalog,
@@ -41,9 +42,12 @@ def _no_network(monkeypatch):
     def _boom(*a, **k):
         raise AssertionError("the manual order reached for the network")
     monkeypatch.setattr(socket.socket, "connect", _boom)
-    for name in ("gql", "gql_adhoc", "gql_mutate", "_make_session", "submit", "submit_generation"):
+    for name in ("gql", "gql_adhoc", "gql_mutate", "_make_session"):
         if hasattr(core, name):
             monkeypatch.setattr(core, name, _boom)
+    for name in ("submit", "submit_generation"):  # in gen_road since 3.22
+        if hasattr(gen_road_mod, name):
+            monkeypatch.setattr(gen_road_mod, name, _boom)
 
 
 @pytest.fixture

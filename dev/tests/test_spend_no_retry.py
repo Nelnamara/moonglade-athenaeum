@@ -32,8 +32,14 @@ import pytest
 import requests
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
+from moonglade import gen_cli as gen_cli_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import mirror as mirror_mod
+from moonglade import task_reads as task_reads_mod
+from moonglade import cloud_delete as cloud_delete_mod
+from moonglade import training as training_mod
 
 
 # Every function that fires a credit-spending or account-mutating GraphQL call. When a new
@@ -42,6 +48,8 @@ from moonglade import mirror as mirror_mod
 SPEND_PATHS = ("submit_generation", "run_generate", "run_generate_video",
                "run_reference_video", "run_edit_image", "upload_media",
                "delete_batch_media_gql",
+               # the per-image delete since 3.22 S3-delete: POST /v2/task/{id}/media/{mid}/delete
+               "delete_task_media",
                # The per-image delete's router (2026-09-06): it fires one of the two
                # delete mutations after reading the live task, so it is an
                # account-mutating path in its own right.
@@ -56,12 +64,24 @@ SPEND_PATHS = ("submit_generation", "run_generate", "run_generate_video",
                # draft (createTrainingTask -- a re-POST would make a second draft) and
                # making a LoRA public (upsertGenerationModel -- irreversible).
                "create_advanced_training_draft", "make_model_public",
+               # The advanced training REST spend paths (3.22 S3-training, DESIGN_3.22 2.10):
+               # start, retry, describe and publish a run, each one rest_post on the API key.
+               "submit_advanced_training", "retry_training", "start_training_captions",
+               "publish_training",
                # Artwork mutations: no credits, but they change the public account and
                # a retry would publish twice / delete something already gone.
                "publish_artwork_from_task", "update_artwork", "delete_artwork",
                # Session M's run sender (2026-09-29): up to 24 generations, one after
                # another, each through submit() -> submit_generation(exact=True).
                "send_run")
+
+# Where each spend path lives: backup, or the split module it moved to (3.22, phase 5).
+_HOMES = (core, cloud_delete_mod, gen_road_mod, gen_cli_mod, training_mod)
+
+
+def _spend_path(name):
+    return next((getattr(m, name) for m in _HOMES if hasattr(m, name)), None)
+
 
 # A real call, not a mention: the comments in these functions name gql_adhoc on purpose
 # ("gql_mutate, never gql_adhoc") and must not trip the check.
@@ -119,15 +139,32 @@ def gql_calls(monkeypatch):
 
 
 @pytest.fixture
+def door_calls(monkeypatch):
+    """Record every create that reached THE create door (PixAIClient.create, 3.22), through
+    the real core._create delegate (conftest blocks it), and answer each with a task id. The
+    door itself -- one POST, no retries argument, no loop -- is pinned in
+    test_create_door.py; this records that a spend path reached it once per job."""
+    from tests.conftest import _REAL_CREATE
+    calls = []
+
+    def _create(self, kind, body):
+        calls.append(SimpleNamespace(kind=kind, body=body))
+        return {"id": "T{}".format(len(calls))}
+    monkeypatch.setattr(core, "_create", _REAL_CREATE)
+    monkeypatch.setattr(pixai_client_mod.PixAIClient, "create", _create)
+    return calls
+
+
+@pytest.fixture
 def cli_stubs(mock_session, monkeypatch):
     """The minimum needed to drive a CLI runner as far as its submit: a session, no free
     card (the spend-time check is a live REST call), and no polling."""
     monkeypatch.setattr(core, "_make_session", lambda token: mock_session)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "_poll_task_status", lambda *a, **k: None)
-    monkeypatch.setattr(core, "task_detail_gql", lambda *a, **k: {})
-    monkeypatch.setattr(core, "_maybe_dump_params", lambda *a, **k: None)
-    monkeypatch.setattr(core, "_download_video_task", lambda *a, **k: [])
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(task_reads_mod, "_poll_task_status", lambda *a, **k: None)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda *a, **k: {})
+    monkeypatch.setattr(gen_cli_mod, "_maybe_dump_params", lambda *a, **k: None)
+    monkeypatch.setattr(gen_cli_mod, "_download_video_task", lambda *a, **k: [])
     return mock_session
 
 
@@ -208,7 +245,7 @@ class TestGqlAdhocDefault:
         monkeypatch.setattr(core.time, "sleep", lambda s: None)
         mock_session.post.side_effect = requests.ConnectionError("connection dropped")
         with pytest.raises(requests.RequestException):
-            core.gql_adhoc(mock_session, core._GEN_MUTATION, {"parameters": {}})
+            core.gql_adhoc(mock_session, gen_road_mod._GEN_MUTATION, {"parameters": {}})
         assert mock_session.post.call_count == 1, \
             "a createGenerationTask was POSTed more than once -- that is a second charge"
 
@@ -246,39 +283,47 @@ class TestGqlAdhocDefault:
 # ---------------------------------------------------------------------------
 
 class TestSpendingPathsAreSingleAttempt:
-    def test_submit_generation(self, mock_session, gql_calls):
-        core.submit_generation(mock_session, {"prompts": "a cat"})
-        _assert_single_attempt(gql_calls, core._GEN_MUTATION)
+    def test_submit_generation(self, mock_session, gql_calls, door_calls):
+        """An image create rides the create door since 3.22 S3-image: one call, no GraphQL
+        mutation at all."""
+        gen_road_mod.submit_generation(mock_session, {"prompts": "a cat"})
+        assert [c.kind for c in door_calls] == ["image"]
+        assert not [c for c in gql_calls if c.verb == "mutate"]
 
-    def test_send_run(self, mock_session, gql_calls, monkeypatch):
-        """Session M's run sender: N jobs, N mutations, each single-attempt through the one
-        verb that offers no retries (submit -> submit_generation(exact=True) -> gql_mutate)."""
-        monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    def test_send_run(self, mock_session, gql_calls, door_calls, monkeypatch):
+        """Session M's run sender: N jobs, N creates, each through the one door that offers no
+        retries (submit -> submit_generation(exact=True) -> core._create, 3.22)."""
+        monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
         hooks = SimpleNamespace(sending=lambda cell: None, sent=lambda *a: None,
                                 failed=lambda *a: None)
-        jobs = [{"cell": k, "req": core.GenerationRequest(mode="image",
+        jobs = [{"cell": k, "req": gen_road_mod.GenerationRequest(mode="image",
                                                           parameters={"prompts": p}),
                  "no_card": None} for k, p in enumerate(("a cat", "a dog"))]
-        res = core.send_run(mock_session, jobs, hooks=hooks, gap_s=0)
+        res = gen_road_mod.send_run(mock_session, jobs, hooks=hooks, gap_s=0)
         assert res["status"] == "sent"
-        _assert_single_attempt(gql_calls, core._GEN_MUTATION)
-        assert len(gql_calls) == 2
+        assert [c.kind for c in door_calls] == ["image", "image"]
+        assert not [c for c in gql_calls if c.verb == "mutate"]
 
-    def test_run_generate(self, tmp_path, cli_stubs, gql_calls):
-        _drive(core.run_generate, _cli_args(tmp_path))
-        _assert_single_attempt(gql_calls, core._GEN_MUTATION)
+    def test_run_generate(self, tmp_path, cli_stubs, gql_calls, door_calls):
+        _drive(gen_cli_mod.run_generate, _cli_args(tmp_path))
+        assert [c.kind for c in door_calls] == ["image"]
+        assert not [c for c in gql_calls if c.verb == "mutate"]
 
     def test_run_generate_video(self, tmp_path, cli_stubs, gql_calls):
-        _drive(core.run_generate_video, _cli_args(tmp_path, image="mid1"))
-        _assert_single_attempt(gql_calls, core._GEN_MUTATION)
+        _drive(gen_cli_mod.run_generate_video, _cli_args(tmp_path, image="mid1"))
+        _assert_single_attempt(gql_calls, gen_road_mod._GEN_MUTATION)
 
     def test_run_reference_video(self, tmp_path, cli_stubs, gql_calls):
-        _drive(core.run_reference_video, _cli_args(tmp_path, ref_image=["mid1"]))
-        _assert_single_attempt(gql_calls, core._GEN_MUTATION)
+        _drive(gen_cli_mod.run_reference_video, _cli_args(tmp_path, ref_image=["mid1"]))
+        _assert_single_attempt(gql_calls, gen_road_mod._GEN_MUTATION)
 
-    def test_run_edit_image(self, tmp_path, cli_stubs, gql_calls):
-        _drive(core.run_edit_image, _cli_args(tmp_path, edit_src=["mid1"]))
-        _assert_single_attempt(gql_calls, core._GEN_MUTATION)
+    def test_run_edit_image(self, tmp_path, cli_stubs, gql_calls, door_calls):
+        """The edit runner rides the create door since 3.22 S3-edit: one create, no GraphQL
+        mutation."""
+        _drive(gen_cli_mod.run_edit_image, _cli_args(
+            tmp_path, edit_src=["mid1"], params_json='{"chat": {"prompts": "x", "mediaId": "1"}}'))
+        assert [c.kind for c in door_calls] == ["edit"]
+        assert not [c for c in gql_calls if c.verb == "mutate"]
 
     def test_upload_media(self, tmp_path, mock_session, gql_calls, monkeypatch):
         """An upload costs no credits, but it still mutates the account: re-registering
@@ -294,16 +339,16 @@ class TestSpendingPathsAreSingleAttempt:
     def test_delete_batch_media(self, mock_session, gql_calls):
         """Already single-attempt before this pass -- pinned here too so the whole rule
         lives in one place, not split across two files."""
-        core.delete_batch_media_gql(mock_session, "T1", "M1")
-        _assert_single_attempt(gql_calls, core._DELETE_BATCH_MEDIA_MUT)
+        cloud_delete_mod.delete_batch_media_gql(mock_session, "T1", "M1")
+        _assert_single_attempt(gql_calls, cloud_delete_mod._DELETE_BATCH_MEDIA_MUT)
 
     def test_submit_training(self, mock_session, gql_calls, monkeypatch):
         """LoRA training spends real credits once the free-training quota is gone; a re-POST
         after a lost response would start (and pay for) a SECOND training. validate_training
         is stubbed so the test exercises the submit, not the (separately-tested) form rules."""
-        monkeypatch.setattr(core, "validate_training", lambda *a, **k: ["trigger"])
-        core.submit_training(mock_session, "base1", ["m1"], "Title", "trig", "style")
-        _assert_single_attempt(gql_calls, core._CREATE_TRAINING)
+        monkeypatch.setattr(training_mod, "validate_training", lambda *a, **k: ["trigger"])
+        training_mod.submit_training(mock_session, "base1", ["m1"], "Title", "trig", "style")
+        _assert_single_attempt(gql_calls, training_mod._CREATE_TRAINING)
 
     def test_publish_artwork_from_task(self, mock_session, gql_calls):
         """No credits, but a re-POST after a lost response publishes the artwork twice."""
@@ -330,7 +375,7 @@ class TestNoSpendPathReachesPastTheHelper:
 
     @pytest.mark.parametrize("name", SPEND_PATHS)
     def test_no_spend_path_calls_gql_adhoc_directly(self, name):
-        src = inspect.getsource(getattr(core, name))
+        src = inspect.getsource(_spend_path(name))
         assert not _CALLS_GQL_ADHOC.search(src), (
             "{}() calls gql_adhoc() directly -- a spending path must call gql_mutate(), "
             "which cannot be given a retry count. gql_adhoc's mutation-aware default "
@@ -340,7 +385,7 @@ class TestNoSpendPathReachesPastTheHelper:
     def test_every_declared_spend_path_exists(self):
         """A renamed-away entry in SPEND_PATHS would silently stop guarding anything."""
         for name in SPEND_PATHS:
-            assert callable(getattr(core, name, None)), \
+            assert callable(_spend_path(name)), \
                 "SPEND_PATHS names {}, which no longer exists".format(name)
 
 
@@ -352,13 +397,12 @@ class TestRestSpendPathsAreSingleAttempt:
     would silently make a Fix submit, a claim, and a contest entry double-fire. (The contest
     entry's single POST is pinned in dev/tests/test_contest.py::TestContestEnterIsGuarded.)"""
 
-    def test_submit_fixer_posts_once(self, mock_session, monkeypatch):
-        posts = []
-        monkeypatch.setattr(core, "_rest_post",
-                            lambda s, p, b, **k: posts.append(p) or {"id": "T1"})
+    def test_submit_fixer_posts_once(self, mock_session, door_calls, monkeypatch):
+        """The Fix rides the create door since 3.22 S3-fix: one create, kind "fix"."""
+        monkeypatch.setattr(core, "_rest_post", lambda *a, **k: pytest.fail("rest_post spend"))
         boxes = [{"x": 0, "y": 0, "width": 10, "height": 10, "tag": "hand"}]
-        assert core.submit_fixer(mock_session, "mid1", boxes) == "T1"
-        assert posts == ["/task/fixer"]
+        assert gen_road_mod.submit_fixer(mock_session, "mid1", boxes) == "T1"
+        assert [c.kind for c in door_calls] == ["fix"]
 
     def test_the_routed_image_delete_has_no_retry_loop(self):
         """The per-image delete's WHOLE-TASK branch calls delete_task, which makes one
@@ -369,8 +413,8 @@ class TestRestSpendPathsAreSingleAttempt:
 
         Parsed rather than string-scanned, so prose in the docstrings ("for it", "wait for")
         cannot make this pass or fail by accident."""
-        for fn, name in ((core.delete_image_routed, "delete_image_routed"),
-                         (core.delete_task, "delete_task")):
+        for fn, name in ((cloud_delete_mod.delete_image_routed, "delete_image_routed"),
+                         (cloud_delete_mod.delete_task, "delete_task")):
             tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
             loops = [n for n in ast.walk(tree)
                      if isinstance(n, (ast.For, ast.AsyncFor, ast.While))]
@@ -386,7 +430,7 @@ class TestRestSpendPathsAreSingleAttempt:
                 "{} grew a loop around a destructive delete -- it must fire once".format(name))
         # ONE send in delete_task: a single rest_post call, and no raw session verb at all.
         # (`answer.get("success")` reads the parsed reply; it is not a send.)
-        tree = ast.parse(textwrap.dedent(inspect.getsource(core.delete_task)))
+        tree = ast.parse(textwrap.dedent(inspect.getsource(cloud_delete_mod.delete_task)))
         sends = [n.func.attr for n in ast.walk(tree)
                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
                  and n.func.attr in ("rest_post", "post", "get", "put", "patch", "delete",
@@ -498,7 +542,7 @@ class TestWritesNeverFollowRedirects:
     def test_a_3xx_on_a_mutation_is_an_error_after_one_post(self, status):
         s = _Kw(status=status, body={"data": {"createGenerationTask": {"id": "T1"}}})
         with pytest.raises(core.PixAIError, match="nothing was re-sent"):
-            core.gql_mutate(s, core._GEN_MUTATION, {"parameters": {}})
+            core.gql_mutate(s, gen_road_mod._GEN_MUTATION, {"parameters": {}})
         assert len(s.calls) == 1
 
     def test_the_renewal_refuses_to_follow(self):

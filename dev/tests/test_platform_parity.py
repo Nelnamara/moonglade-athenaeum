@@ -14,7 +14,11 @@ REAL `{"profiles": [...]}` shape and the real parse. All network is mocked at `_
 import pytest
 
 from moonglade import backup as core
+from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import mirror as mirror_mod
+from moonglade import models as models_mod
+from moonglade import pricing as pricing_mod
 
 
 def _dit_profiles(default="lite"):
@@ -30,10 +34,10 @@ def _dit_profiles(default="lite"):
 def test_gate_dit_auto_fills_the_flagged_default_and_drops_steps_cfg(monkeypatch):
     # default row is "pro" (a DiT.3-like model) -> proves the gate READS the model's default,
     # it does not synthesize "lite".
-    monkeypatch.setattr(core, "_model_profiles", lambda s, vid: _dit_profiles(default="pro"))
+    monkeypatch.setattr(models_mod, "_model_profiles", lambda s, vid: _dit_profiles(default="pro"))
     params = {"modelId": "DIT1", "prompts": "a cat", "samplingSteps": 28, "cfgScale": 5,
               "samplingMethod": "Euler a", "clipSkip": 2, "width": 768, "height": 1280}
-    gated = core._gate_params_for_model(object(), params)
+    gated = models_mod._gate_params_for_model(object(), params)
     assert gated["inferenceProfile"] == "pro"          # the model's REAL flagged default
     for k in ("samplingSteps", "cfgScale", "samplingMethod", "clipSkip"):
         assert k not in gated
@@ -46,17 +50,17 @@ def test_gate_dit_auto_with_no_default_row_leaves_profile_absent(monkeypatch):
     # server's own default, which keeps quote == charge (review finding 3).
     rows = [{"profileName": "lite", "profileFlag": None},
             {"profileName": "pro", "profileFlag": None}]
-    monkeypatch.setattr(core, "_model_profiles", lambda s, vid: rows)
+    monkeypatch.setattr(models_mod, "_model_profiles", lambda s, vid: rows)
     params = {"modelId": "DIT1", "samplingSteps": 28, "cfgScale": 5}
-    gated = core._gate_params_for_model(object(), params)
+    gated = models_mod._gate_params_for_model(object(), params)
     assert "inferenceProfile" not in gated             # absent -> server picks its default
     assert "samplingSteps" not in gated and "cfgScale" not in gated
 
 
 def test_gate_dit_keeps_an_explicitly_chosen_profile(monkeypatch):
-    monkeypatch.setattr(core, "_model_profiles", lambda s, vid: _dit_profiles(default="lite"))
+    monkeypatch.setattr(models_mod, "_model_profiles", lambda s, vid: _dit_profiles(default="lite"))
     params = {"modelId": "DIT1", "inferenceProfile": "ultra", "samplingSteps": 28, "cfgScale": 5}
-    gated = core._gate_params_for_model(object(), params)
+    gated = models_mod._gate_params_for_model(object(), params)
     assert gated["inferenceProfile"] == "ultra"        # user's choice preserved
     assert "samplingSteps" not in gated and "cfgScale" not in gated
 
@@ -64,9 +68,9 @@ def test_gate_dit_keeps_an_explicitly_chosen_profile(monkeypatch):
 # --- (b) SDXL (profiles == [], a definitive 200): steps/cfg kept, no profile ---
 
 def test_gate_sdxl_empty_profiles_keeps_steps_cfg_and_strips_profile(monkeypatch):
-    monkeypatch.setattr(core, "_model_profiles", lambda s, vid: [])
+    monkeypatch.setattr(models_mod, "_model_profiles", lambda s, vid: [])
     params = {"modelId": "SDXL1", "inferenceProfile": "ultra", "samplingSteps": 28, "cfgScale": 5}
-    gated = core._gate_params_for_model(object(), params)
+    gated = models_mod._gate_params_for_model(object(), params)
     assert gated["samplingSteps"] == 28 and gated["cfgScale"] == 5
     # SDXL rejects pro/ultra -- the non-auto profile is stripped before it can be rejected
     assert "inferenceProfile" not in gated
@@ -82,7 +86,7 @@ def test_price_and_submit_apply_identical_gating(monkeypatch):
     "lite"), so this also proves the gate reads the model's true default."""
     monkeypatch.setattr(core, "_check_read_only", lambda *a, **k: None)
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
-    monkeypatch.setattr(core, "priority_for_submit", lambda p: p)
+    monkeypatch.setattr(gen_road_mod, "priority_for_submit", lambda p: p)
 
     priced = {}
 
@@ -98,14 +102,14 @@ def test_price_and_submit_apply_identical_gating(monkeypatch):
     monkeypatch.setattr(core, "_rest_get", fake_rest_get)
 
     submitted = {}
-    monkeypatch.setattr(core, "gql_mutate",
-                        lambda s, q, v=None: (submitted.update(v["parameters"]),
-                                              {"createGenerationTask": {"id": "T1"}})[1])
+    # an image create rides the create door since 3.22 S3-image
+    monkeypatch.setattr(core, "_create",
+                        lambda s, kind, v: (submitted.update(v), {"id": "T1"})[1])
 
     base = {"modelId": "DIT3VER", "prompts": "a cat", "samplingSteps": 28, "cfgScale": 5,
             "samplingMethod": "Euler a", "width": 768, "height": 1280, "priority": 1000}
-    assert core.submit_generation(object(), dict(base)) == "T1"
-    core.price_task(object(), dict(base))
+    assert gen_road_mod.submit_generation(object(), dict(base)) == "T1"
+    pricing_mod.price_task(object(), dict(base))
 
     # DiT-auto now carries the model's REAL default profile ("pro"), on BOTH paths
     assert submitted.get("inferenceProfile") == "pro"
@@ -118,10 +122,10 @@ def test_price_and_submit_apply_identical_gating(monkeypatch):
 
 def test_gate_is_deterministic_for_the_same_inputs(monkeypatch):
     """Same params + same profile set -> byte-identical gated shape, whichever path calls it."""
-    monkeypatch.setattr(core, "_model_profiles", lambda s, vid: _dit_profiles(default="standard"))
+    monkeypatch.setattr(models_mod, "_model_profiles", lambda s, vid: _dit_profiles(default="standard"))
     base = {"modelId": "DIT1", "prompts": "x", "samplingSteps": 20, "cfgScale": 6}
-    a = core._gate_params_for_model(object(), dict(base))
-    b = core._gate_params_for_model(object(), dict(base))
+    a = models_mod._gate_params_for_model(object(), dict(base))
+    b = models_mod._gate_params_for_model(object(), dict(base))
     assert a == b and a["inferenceProfile"] == "standard"
 
 
@@ -129,9 +133,9 @@ def test_gate_is_deterministic_for_the_same_inputs(monkeypatch):
 
 def test_gate_fail_soft_when_profiles_unknown(monkeypatch):
     # _model_profiles returns None on any lookup failure -> gate must leave params UNCHANGED.
-    monkeypatch.setattr(core, "_model_profiles", lambda s, vid: None)
+    monkeypatch.setattr(models_mod, "_model_profiles", lambda s, vid: None)
     params = {"modelId": "M", "inferenceProfile": "ultra", "samplingSteps": 28, "cfgScale": 5}
-    gated = core._gate_params_for_model(object(), params)
+    gated = models_mod._gate_params_for_model(object(), params)
     assert gated is params                             # unchanged, SAME object
     assert gated["samplingSteps"] == 28 and gated["inferenceProfile"] == "ultra"
 
@@ -139,24 +143,24 @@ def test_gate_fail_soft_when_profiles_unknown(monkeypatch):
 def test_gate_fail_soft_when_lookup_raises(monkeypatch):
     def boom(s, vid):
         raise core.PixAIError("profiles blew up")
-    monkeypatch.setattr(core, "_model_profiles", boom)
+    monkeypatch.setattr(models_mod, "_model_profiles", boom)
     params = {"modelId": "M", "inferenceProfile": "ultra", "samplingSteps": 28}
-    assert core._gate_params_for_model(object(), params) is params
+    assert models_mod._gate_params_for_model(object(), params) is params
 
 
 def test_gate_noop_without_a_model_id():
     params = {"prompts": "x", "samplingSteps": 28}
-    assert core._gate_params_for_model(object(), params) is params
+    assert models_mod._gate_params_for_model(object(), params) is params
 
 
 def test_gate_leaves_a_video_submit_untouched(monkeypatch):
     """Video/edit/enhance also flow through submit_generation. A video submit carries a
     TOP-LEVEL modelId (a video model), so the gate must skip it -- never look up profiles for
     it, never add an image inferenceProfile to it."""
-    monkeypatch.setattr(core, "_model_profiles",
+    monkeypatch.setattr(models_mod, "_model_profiles",
                         lambda s, vid: pytest.fail("gate must not look up profiles for video"))
-    vparams = core.build_video_parameters("motion", media_id="1", mode="professional")
-    assert core._gate_params_for_model(object(), vparams) is vparams
+    vparams = gen_params_mod.build_video_parameters("motion", media_id="1", mode="professional")
+    assert models_mod._gate_params_for_model(object(), vparams) is vparams
 
 
 # --- _model_profiles: reads the `profiles` key, [] for SDXL, None on failure, memoized ---
@@ -165,24 +169,24 @@ def test_model_profiles_reads_the_profiles_key(monkeypatch):
     monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: {"profiles": [
         {"profileName": "lite", "profileFlag": "default"},
         {"profileName": "pro", "profileFlag": None}]})
-    prof = core._model_profiles(object(), "V1")
+    prof = models_mod._model_profiles(object(), "V1")
     assert [r["profileName"] for r in prof] == ["lite", "pro"]
 
 
 def test_model_profiles_sdxl_returns_empty_list(monkeypatch):
     # SDXL answers 200 with an empty profiles array -- a DEFINITIVE "no profiles", not a miss.
     monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: {"profiles": []})
-    assert core._model_profiles(object(), "SDXL") == []
+    assert models_mod._model_profiles(object(), "SDXL") == []
 
 
 def test_model_profiles_none_on_failure(monkeypatch):
     def boom(s, path, **k):
         raise core.PixAIError("404 -- version-keyed /versions would 404 here too")
     monkeypatch.setattr(core, "_rest_get", boom)
-    assert core._model_profiles(object(), "V1") is None
+    assert models_mod._model_profiles(object(), "V1") is None
     # a 200 whose body is not a dict-with-a-profiles-list is also "couldn't determine" -> None
     monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: {"unexpected": True})
-    assert core._model_profiles(object(), "V2") is None
+    assert models_mod._model_profiles(object(), "V2") is None
 
 
 def test_model_profiles_caches_by_version_across_sessions(monkeypatch):
@@ -196,6 +200,6 @@ def test_model_profiles_caches_by_version_across_sessions(monkeypatch):
         n["gets"] += 1
         return {"profiles": [{"profileName": "lite", "profileFlag": "default"}]}
     monkeypatch.setattr(core, "_rest_get", fake_rest_get)
-    a = core._model_profiles(object(), "V1")           # session A
-    b = core._model_profiles(object(), "V1")           # session B -- a DIFFERENT object
+    a = models_mod._model_profiles(object(), "V1")           # session A
+    b = models_mod._model_profiles(object(), "V1")           # session B -- a DIFFERENT object
     assert a == b and n["gets"] == 1                   # cached across sessions -> one GET

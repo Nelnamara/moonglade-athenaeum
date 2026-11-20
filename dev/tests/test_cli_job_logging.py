@@ -14,6 +14,7 @@ import sys
 import pytest
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import jobs as jobs_mod
 
 
@@ -238,8 +239,10 @@ def test_generate_failure_logs_a_failed_cli_job_and_still_raises(monkeypatch, tm
     # gets (no key in CI, and conftest forces _cfg empty locally too), so execution reaches
     # the registered refusal rather than dying at "No API key found" and logging THAT as
     # the error.
-    pixai.fail("createGenerationTask", core.PixAIError("rejected"))
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    pixai.fail("/task/create", core.PixAIError("rejected"))     # the create door (3.22)
+    # The builder's own body passes the create door's wire guard (naturalPrompts rides under
+    # `extra`), so the registered refusal is what answers.
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(sys, "argv",
                         ["prog", "--generate", "--prompt", "p", "--confirm",
                          "--out", str(tmp_path)])

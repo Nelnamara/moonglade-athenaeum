@@ -28,11 +28,15 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gallery as g
+from moonglade import gen_cli as gen_cli_mod
+from moonglade import gen_params as gen_params_mod
+from moonglade import models as models_mod
 from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.conftest import login_test_client
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import media_tools as media_tools_mod
+from moonglade import task_reads as task_reads_mod
 
 
 # --------------------------------------------------------------------------------------
@@ -199,6 +203,7 @@ FM = {
     "priority": "1500", "render_seconds": "12.5", "backend": "pdr",
     "started_at": "S", "ended_at": "E", "updated_at": "U", "retry_count": "1",
     "moderation": "PASS", "video_mode": "professional", "video_model": "v3.0.2",
+    "output_format": "gif", "frame_count": "9", "frame_duration_ms": "200",   # 3.22 S5
     "source_media_id": "src-1", "derive_kind": "edit",
 }
 RESULT = {"createdAt": CREATED, "paidCredit": 42, "outputs": {"mediaId": "m-golden"},
@@ -263,7 +268,7 @@ def _stub_image_task(monkeypatch, out, mid="m-golden", seed="424242"):
     path = _stub_file(out, "old.png", "images")
     monkeypatch.setattr(core, "download", lambda s, url, stem: ("skip", path))
     monkeypatch.setattr(core, "resolve_media", lambda s, m: ("https://x/i.png", dict(INFO)))
-    monkeypatch.setattr(core, "_task_image_media", lambda outputs: [(mid, seed)])
+    monkeypatch.setattr(gen_cli_mod, "_task_image_media", lambda outputs: [(mid, seed)])
     monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(FM))
     monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, r: None)
     monkeypatch.setattr(core, "_resolved_model_name", lambda s, fm, m: MODEL_NAME)
@@ -274,7 +279,7 @@ def _stub_image_task(monkeypatch, out, mid="m-golden", seed="424242"):
 
 def test_image_task_row_is_identical_to_the_old_builder(tmp_path, monkeypatch):
     path = _stub_image_task(monkeypatch, tmp_path)
-    core._download_image_task(object(), dict(RESULT), TASK_ID, tmp_path, _Args(),
+    gen_cli_mod._download_image_task(object(), dict(RESULT), TASK_ID, tmp_path, _Args(),
                               prompt="a moonlit elf")
     _same(_row(tmp_path / "catalog.db", "m-golden"),
           _old_download_image_task(TASK_ID, "m-golden", "424242", path, tmp_path,
@@ -285,7 +290,7 @@ def test_image_task_row_is_identical_to_the_old_builder(tmp_path, monkeypatch):
 def test_image_task_carries_local_fields(tmp_path, monkeypatch):
     _seed_local(tmp_path / "catalog.db", "m-golden")
     _stub_image_task(monkeypatch, tmp_path)
-    core._download_image_task(object(), dict(RESULT), TASK_ID, tmp_path, _Args(),
+    gen_cli_mod._download_image_task(object(), dict(RESULT), TASK_ID, tmp_path, _Args(),
                               prompt="a moonlit elf")
     row = _row(tmp_path / "catalog.db", "m-golden")
     assert {f: row[f] for f in LOCAL} == LOCAL
@@ -329,12 +334,12 @@ def test_video_task_row_is_identical_to_the_old_builder(tmp_path, monkeypatch):
     test. _old_download_video_task stays verbatim (it is the golden's record of c4546f7)."""
     path, result = _stub_video_task(monkeypatch, tmp_path)
     sent = {"model": "i2v-pro", "negativePrompts": "blurry", "duration": 9}
-    core._download_video_task(object(), result, TASK_ID, tmp_path, _Args(),
+    gen_cli_mod._download_video_task(object(), result, TASK_ID, tmp_path, _Args(),
                               {"i2vPro": dict(sent)})
     want = _old_download_video_task(TASK_ID, VOUT, path, tmp_path, "https://x/v.mp4",
                                     result, "a moonlit elf", sent, VSHARED, VDETAIL, FM)
     want.update(model_id=FM["video_model"],                          # V7: the task's engine
-                model_name=core.VIDEO_MODELS[FM["video_model"]]["label"])   # ruling 3
+                model_name=gen_params_mod.VIDEO_MODELS[FM["video_model"]]["label"])   # ruling 3
     _same(_row(tmp_path / "catalog.db", "v-golden"), want)
 
 
@@ -344,13 +349,13 @@ def test_video_task_row_with_a_numeric_task_modelid_files_the_id_and_its_title(t
     top-level modelId: model_id is that id and model_name is its version title. Everything
     else is still the old builder's row."""
     path, result = _stub_video_task(monkeypatch, tmp_path)
-    own = core.video_model_id(FM["video_model"])
+    own = gen_params_mod.video_model_id(FM["video_model"])
     fm = dict(FM, model_id=own)
     monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(fm))
-    monkeypatch.setattr(core, "model_name_gql",
+    monkeypatch.setattr(models_mod, "model_name_gql",
                         lambda s, mid, **k: {own: "V3.0 Lite v3.0.2"}.get(mid, mid))
     sent = {"model": "i2v-pro", "negativePrompts": "blurry", "duration": 9}
-    core._download_video_task(object(), result, TASK_ID, tmp_path, _Args(),
+    gen_cli_mod._download_video_task(object(), result, TASK_ID, tmp_path, _Args(),
                               {"i2vPro": dict(sent)})
     want = _old_download_video_task(TASK_ID, VOUT, path, tmp_path, "https://x/v.mp4",
                                     result, "a moonlit elf", sent, VSHARED, VDETAIL, fm)
@@ -361,7 +366,7 @@ def test_video_task_row_with_a_numeric_task_modelid_files_the_id_and_its_title(t
 def test_video_task_carries_local_fields(tmp_path, monkeypatch):
     _seed_local(tmp_path / "catalog.db", "v-golden")
     _, result = _stub_video_task(monkeypatch, tmp_path)
-    core._download_video_task(object(), result, TASK_ID, tmp_path, _Args(), {})
+    gen_cli_mod._download_video_task(object(), result, TASK_ID, tmp_path, _Args(), {})
     row = _row(tmp_path / "catalog.db", "v-golden")
     assert {f: row[f] for f in LOCAL} == LOCAL
     # ...and the pass's own values win over the carried row's: the seeded filename is
@@ -378,11 +383,11 @@ GEN_PARAMS = {"modelId": "V-SUBMITTED", "prompts": "a moonlit elf", "width": 512
 
 def _stub_generate(monkeypatch, out):
     path = _stub_file(out, "old.png", "images")
-    monkeypatch.setattr(core, "_gen_parameters", lambda a: dict(GEN_PARAMS))
+    monkeypatch.setattr(gen_params_mod, "_gen_parameters", lambda a: dict(GEN_PARAMS))
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, t: dict(RESULT))
-    monkeypatch.setattr(core, "_maybe_dump_params", lambda a, r: None)
-    monkeypatch.setattr(core, "_task_image_media", lambda outputs: [("m-golden", "424242")])
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: dict(RESULT))
+    monkeypatch.setattr(gen_cli_mod, "_maybe_dump_params", lambda a, r: None)
+    monkeypatch.setattr(gen_cli_mod, "_task_image_media", lambda outputs: [("m-golden", "424242")])
     monkeypatch.setattr(core, "video_outputs", lambda r: ([], {}))
     monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(FM))
     monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, r: None)
@@ -408,7 +413,7 @@ def test_generate_row_is_identical_to_the_old_builder(tmp_path, monkeypatch):
     path = _stub_generate(monkeypatch, tmp_path)
     args = _Args()
     args.out = str(tmp_path)
-    core.run_generate(args)
+    gen_cli_mod.run_generate(args)
     _same(_row(tmp_path / "catalog.db", "m-golden"),
           _old_generate(TASK_ID, "m-golden", path, tmp_path, "https://x/i.png", RESULT,
                         FM["prompt_full"], {"m-golden": "424242"}, FM, GEN_PARAMS, INFO,
@@ -422,7 +427,7 @@ def test_generate_carries_local_fields(tmp_path, monkeypatch):
     _stub_generate(monkeypatch, tmp_path)
     args = _Args()
     args.out = str(tmp_path)
-    core.run_generate(args)
+    gen_cli_mod.run_generate(args)
     row = _row(tmp_path / "catalog.db", "m-golden")
     assert {f: row[f] for f in LOCAL} == LOCAL
 
@@ -437,11 +442,11 @@ EDIT_MODEL_NAME = "Edit Pro"
 
 def _stub_edit(monkeypatch, out):
     path = _stub_file(out, "old.png", "images")
-    monkeypatch.setattr(core, "_edit_config_from_args", lambda a: dict(EDIT_CFG))
+    monkeypatch.setattr(gen_params_mod, "_edit_config_from_args", lambda a: dict(EDIT_CFG))
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, t: dict(RESULT))
-    monkeypatch.setattr(core, "_maybe_dump_params", lambda a, r: None)
-    monkeypatch.setattr(core, "_task_image_media", lambda outputs: [("m-golden", "424242")])
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: dict(RESULT))
+    monkeypatch.setattr(gen_cli_mod, "_maybe_dump_params", lambda a, r: None)
+    monkeypatch.setattr(gen_cli_mod, "_task_image_media", lambda outputs: [("m-golden", "424242")])
     monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(FM))
     monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, r: None)
     monkeypatch.setattr(core, "_edit_model_label", lambda s, fm, m: EDIT_MODEL_NAME)
@@ -455,7 +460,7 @@ def test_edit_row_is_identical_to_the_old_builder(tmp_path, monkeypatch):
     path = _stub_edit(monkeypatch, tmp_path)
     args = _Args()
     args.out = str(tmp_path)
-    core.run_edit_image(args)
+    gen_cli_mod.run_edit_image(args)
     # `params` is {} on the recovery path, so chat is {} and the model id comes off fm.
     _same(_row(tmp_path / "catalog.db", "m-golden"),
           _old_edit_image(TASK_ID, "m-golden", path, tmp_path, "https://x/i.png", RESULT,
@@ -469,7 +474,7 @@ def test_edit_carries_local_fields(tmp_path, monkeypatch):
     _stub_edit(monkeypatch, tmp_path)
     args = _Args()
     args.out = str(tmp_path)
-    core.run_edit_image(args)
+    gen_cli_mod.run_edit_image(args)
     row = _row(tmp_path / "catalog.db", "m-golden")
     assert {f: row[f] for f in LOCAL} == LOCAL
 
@@ -498,7 +503,7 @@ def _stub_sync_videos(monkeypatch, out):
                         lambda s: types.SimpleNamespace(user_id="u1"))
     monkeypatch.setattr(core, "gql", lambda s, v: {})
     monkeypatch.setattr(core, "find_connection", _find_connection)
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, t: task)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: task)
     monkeypatch.setattr(core, "video_outputs", lambda r: ([dict(VOUT)], dict(VSHARED)))
     monkeypatch.setattr(core, "media_file_gql", lambda s, m: {"fileUrl": "https://x/v.mp4"})
     monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(FM))

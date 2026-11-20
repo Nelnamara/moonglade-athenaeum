@@ -13,9 +13,12 @@ rebuilt and written anyway.
 """
 from moonglade import backup as core
 from moonglade import gallery as g
+from moonglade import gen_cli as gen_cli_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade.gallery import CATALOG_FIELDS, create_app, load_catalog, save_catalog
 
 from tests.conftest import login_test_client
+from moonglade import task_reads as task_reads_mod
 
 
 def _row(**kw):
@@ -51,13 +54,13 @@ def test_the_very_first_collect_has_no_catalog_to_snapshot(tmp_path, monkeypatch
     folder there is no table yet. Nothing local to carry is an empty map, not a crash."""
     _stub_download(monkeypatch, tmp_path, name="first.png")
     monkeypatch.setattr(core, "resolve_media", lambda s, mid: ("https://x/i.png", {}))
-    monkeypatch.setattr(core, "_task_image_media", lambda outputs: [("m0", "1")])
+    monkeypatch.setattr(gen_cli_mod, "_task_image_media", lambda outputs: [("m0", "1")])
     monkeypatch.setattr(core, "extract_full_meta", lambda r: {})
     monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, r: None)
     monkeypatch.setattr(g, "make_thumbnail", lambda *a, **k: None)
     assert not (tmp_path / "catalog.db").exists()
 
-    core._download_image_task(object(), {"outputs": {"x": 1}}, "t0", tmp_path, _Args(),
+    gen_cli_mod._download_image_task(object(), {"outputs": {"x": 1}}, "t0", tmp_path, _Args(),
                               prompt="the first one")
 
     assert [r["media_id"] for r in load_catalog(tmp_path / "catalog.db")] == ["m0"]
@@ -80,8 +83,8 @@ def test_a_second_poll_of_a_done_task_does_not_collect_again(tmp_path, monkeypat
         calls["n"] += 1
         return {"media_ids": ["m1"], "saved": 1, "is_video": False}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "collect_generation", _collect)
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(gen_road_mod, "collect_generation", _collect)
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, t: {"phase": "done", "paid_credit": 0})
     # the task's media is ALREADY catalogued, with local curation on it
     cli = _client(tmp_path, [_row(media_id="m1", task_id="t1", filename="images/a.png",
@@ -105,8 +108,8 @@ def test_an_uncollected_done_task_still_collects(tmp_path, monkeypatch):
         calls["n"] += 1
         return {"media_ids": ["mX"], "saved": 1, "is_video": False}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "collect_generation", _collect)
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(gen_road_mod, "collect_generation", _collect)
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, t: {"phase": "done", "paid_credit": 0})
     cli = _client(tmp_path, [])
     d = cli.get("/api/task-status", query_string={"task_id": "t-new"}).get_json()

@@ -16,6 +16,8 @@ create mutations, not off a stub of the function under test."""
 import pytest
 
 from moonglade import backup as core
+from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from tests.conftest import login_client
 
 V = "1983308862240288769"
@@ -35,11 +37,12 @@ def gen(tmp_path, monkeypatch, pixai):
             return {"kaisuukens": []}
         return [{"id": V, "modelId": "M1"}]
     monkeypatch.setattr(core, "_rest_get", _rest_get)
-    monkeypatch.setattr(core, "_gen_parameters",
-                        lambda args: {"modelId": args.model, "prompt": "a cat", "width": 512,
+    monkeypatch.setattr(gen_params_mod, "_gen_parameters",
+                        lambda args: {"modelId": args.model, "prompts": "a cat", "width": 512,
                                       "height": 512})
     monkeypatch.setattr(core.time, "sleep", lambda s: None)
     pixai.on("createGenerationTask", {"createGenerationTask": {"id": "task-1"}})
+    pixai.on("/task/create", {"id": "task-1"})        # the create door (3.22 S3-image)
     return {"cli": login_client(tmp_path), "pixai": pixai}
 
 
@@ -50,7 +53,19 @@ def _body(**extra):
 
 
 def _created(g):
-    return g["pixai"].calls_for("createGenerationTask")
+    """Every create that went out, on whichever road its kind rides (3.22)."""
+    return [c for c in g["pixai"].calls
+            if (c.verb == "mutate" and c.op == "createGenerationTask") or c.verb == "create"]
+
+
+def _creates(g):
+    return len(_created(g))
+
+
+def _sent(g):
+    """The parameters each create carried."""
+    return [c.body["parameters"] if c.verb == "create" else c.variables["parameters"]
+            for c in _created(g)]
 
 
 def test_quoted_free_card_gone_is_refused_and_nothing_is_created(gen):
@@ -59,7 +74,7 @@ def test_quoted_free_card_gone_is_refused_and_nothing_is_created(gen):
     d = r.get_json()
     assert r.status_code == 200 and not d.get("task_id")
     assert "free card" in d["error"] and "Nothing was sent" in d["error"]
-    assert gen["pixai"].mutations("createGenerationTask") == 0
+    assert _creates(gen) == 0
     assert _created(gen) == []
     # The card step did run (the refusal is about ITS answer, not a skipped check).
     assert gen["pixai"].calls_for("/kaisuuken/check")
@@ -69,8 +84,8 @@ def test_quoted_free_card_present_sends_with_the_card(gen):
     gen["pixai"].on("/kaisuuken/check", _CARD)
     d = gen["cli"].post("/api/generate", json=_body(expect_free=True)).get_json()
     assert d.get("task_id") == "task-1", d
-    assert gen["pixai"].mutations("createGenerationTask") == 1
-    sent = _created(gen)[0].variables["parameters"]
+    assert _creates(gen) == 1
+    sent = _sent(gen)[0]
     assert sent["kaisuukenId"] == CARD_ID
     assert "expect_free" not in sent
 
@@ -81,8 +96,8 @@ def test_a_priced_quote_sends_and_spends_as_before(gen):
     gen["pixai"].on("/kaisuuken/check", _NO_CARD)
     d = gen["cli"].post("/api/generate", json=_body()).get_json()
     assert d.get("task_id") == "task-1", d
-    assert gen["pixai"].mutations("createGenerationTask") == 1
-    assert "kaisuukenId" not in _created(gen)[0].variables["parameters"]
+    assert _creates(gen) == 1
+    assert "kaisuukenId" not in _sent(gen)[0]
 
 
 def test_a_short_card_on_a_free_quote_is_refused(gen):
@@ -93,7 +108,7 @@ def test_a_short_card_on_a_free_quote_is_refused(gen):
     gen["pixai"].on("/kaisuuken/check", short)
     d = gen["cli"].post("/api/generate", json=_body(expect_free=True)).get_json()
     assert "free card" in d["error"]
-    assert gen["pixai"].mutations("createGenerationTask") == 0
+    assert _creates(gen) == 0
 
 
 # ---- the other single-send routes carry the same guard -----------------------------------
@@ -108,7 +123,6 @@ class _Req:
 
 @pytest.mark.parametrize("route,mode,body", [
     ("/api/edit", "edit", {"source": "1", "instruction": "make it night"}),
-    ("/api/enhance", "enhance", {"source": "1", "workflow_id": "42"}),
 ])
 def test_edit_and_ai_presets_refuse_a_free_quote_whose_card_is_gone(gen, monkeypatch, route, mode, body):
     from moonglade import mirror as _mirror
@@ -116,12 +130,12 @@ def test_edit_and_ai_presets_refuse_a_free_quote_whose_card_is_gone(gen, monkeyp
     monkeypatch.setattr(_mirror, "make_mirror_session", lambda *a, **k: gen["pixai"])
     monkeypatch.setattr(_mirror, "_session_for_create", lambda s: s)
     seen = []
-    monkeypatch.setattr(core, "build_request",
+    monkeypatch.setattr(gen_road_mod, "build_request",
                         lambda payload, *a, **k: seen.append(dict(payload)) or _Req(mode))
     gen["pixai"].on("/kaisuuken/check", _NO_CARD)
     d = gen["cli"].post(route, json=dict(body, expect_free=True)).get_json()
     assert "free card" in d["error"], d
-    assert gen["pixai"].mutations("createGenerationTask") == 0
+    assert _creates(gen) == 0
     assert "expect_free" not in seen[0], "the flag is the route's, never the builder's"
     # The same send without the flag (a priced badge) goes out.
     d = gen["cli"].post(route, json=body).get_json()
@@ -135,7 +149,7 @@ def test_the_gallery_video_tab_refuses_a_free_quote_whose_card_is_gone(gen, monk
     body = {"mode": "I2V", "prompt": "x", "images": ["733917871331404290"], "duration": 5}
     d = gen["cli"].post("/api/loom/generate", json=dict(body, expect_free=True)).get_json()
     assert "free card" in d["error"], d
-    assert gen["pixai"].mutations("createGenerationTask") == 0
+    assert _creates(gen) == 0
 
 
 def test_an_unlimited_mode_request_is_never_held_to_a_card(gen, monkeypatch):
@@ -143,9 +157,32 @@ def test_an_unlimited_mode_request_is_never_held_to_a_card(gen, monkeypatch):
     for it even if a client sent expect_free (the badge's unlimited quote is free: true)."""
     req = _Req("edit")
     req.unlimited = True
-    monkeypatch.setattr(core, "build_request", lambda payload, *a, **k: req)
+    monkeypatch.setattr(gen_road_mod, "build_request", lambda payload, *a, **k: req)
     d = gen["cli"].post("/api/edit", json={"source": "1", "instruction": "x",
                                            "expect_free": True}).get_json()
     assert d.get("task_id") == "task-1", d
-    assert gen["pixai"].mutations("createGenerationTask") == 1
+    assert _creates(gen) == 1
     assert gen["pixai"].calls_for("/kaisuuken/check") == [], "a lane request is never card-checked"
+
+
+@pytest.mark.parametrize("route,body", [
+    ("/api/enhance", {"source": "1", "workflow_id": "42"}),
+    ("/api/scene", {"scene_id": "s1", "media_ids": ["1"]}),
+    ("/api/fix", {"source": "1", "boxes": [{"x": 1, "y": 1, "width": 5, "height": 5,
+                                            "tag": "face"}]}),
+])
+def test_a_cardless_send_claiming_a_free_quote_is_refused_with_nothing_sent(gen, monkeypatch,
+                                                                          route, body):
+    """3.22 (V9): an AI preset, an AI Tools scene and a Fix never take a free card, so their
+    quotes are never FREE, and a send that claims one is refused before anything goes out."""
+    from moonglade import mirror as _mirror
+    monkeypatch.setattr(_mirror, "mirror_enabled", lambda: True)
+    monkeypatch.setattr(_mirror, "make_mirror_session", lambda *a, **k: gen["pixai"])
+    sent = []
+    for fn in ("submit_enhance", "submit_scene", "submit_fixer"):
+        monkeypatch.setattr(gen_road_mod, fn, lambda *a, **k: sent.append(a) or "t")
+    monkeypatch.setattr(gen_road_mod, "build_request", lambda payload, *a, **k: _Req("enhance"))
+    d = gen["cli"].post(route, json=dict(body, expect_free=True)).get_json()
+    assert "never uses a free card" in d["error"] and d["state"] == "not_sent", d
+    assert sent == [] and _creates(gen) == 0
+    assert gen["pixai"].calls_for("/kaisuuken/check") == []

@@ -12,6 +12,7 @@ import pytest
 import requests
 
 from moonglade import backup as core
+from moonglade import models as models_mod
 from moonglade import recipes as rec
 from tests.conftest import login_client
 
@@ -540,7 +541,7 @@ def test_old_bookmarks_merge_only_what_saved_does_not_hold(monkeypatch):
                          "o2"),
                     "o2": ([_old_row("1873306400000000010", "Kurone Ink", "MMDIT26B_MODEL")], None)})
     monkeypatch.setattr(core, "_rest_get", f.get)
-    monkeypatch.setattr(core, "model_bookmarks_gql", old)
+    monkeypatch.setattr(models_mod, "model_bookmarks_gql", old)
     out = rec.model_old_bookmarks(object(), object(), OWNER, "lora")
     assert [r["title"] for r in out["rows"]] == ["Moth", "Kurone Ink"]
     assert all(r["old"] is True for r in out["rows"]) and out["partial"] is False
@@ -549,14 +550,14 @@ def test_old_bookmarks_merge_only_what_saved_does_not_hold(monkeypatch):
     assert [c[0] for c in old.calls] == ["LORA", "LORA"] and old.calls[0][1] == 50
     # read once: a second open within the hour costs nothing
     monkeypatch.setattr(core, "_rest_get", _boom)
-    monkeypatch.setattr(core, "model_bookmarks_gql", _boom)
+    monkeypatch.setattr(models_mod, "model_bookmarks_gql", _boom)
     assert rec.model_old_bookmarks(object(), object(), OWNER, "lora")["rows"] == out["rows"]
 
 
 def test_saving_an_old_row_takes_it_out_of_the_merge(monkeypatch):
     f = _Reads(pages={(DEFAULT_ID, ""): ([], None)})
     monkeypatch.setattr(core, "_rest_get", f.get)
-    monkeypatch.setattr(core, "model_bookmarks_gql",
+    monkeypatch.setattr(models_mod, "model_bookmarks_gql",
                         _OldList({"": ([_old_row(LORA_ID, "Glasswing")], None)}))
     assert [r["model_id"] for r in rec.model_old_bookmarks(object(), object(), OWNER, "lora")["rows"]] \
         == [LORA_ID]
@@ -572,7 +573,7 @@ def test_an_unfinished_walk_merges_nothing_rather_than_guess(monkeypatch):
     monkeypatch.setattr(rec, "_OLD_WALK_PAGES", 2)
     f = _Reads(pages={(DEFAULT_ID, ""): ([], "c2"), (DEFAULT_ID, "c2"): ([], "c3")})
     monkeypatch.setattr(core, "_rest_get", f.get)
-    monkeypatch.setattr(core, "model_bookmarks_gql",
+    monkeypatch.setattr(models_mod, "model_bookmarks_gql",
                         _OldList({"": ([_old_row("1873306400000000009", "Moth")], None)}))
     assert rec.model_old_bookmarks(object(), object(), OWNER, "lora") == {"rows": [],
                                                                          "partial": True}
@@ -583,7 +584,7 @@ def test_the_model_picker_merges_no_chat_or_video_rows(monkeypatch):
     monkeypatch.setattr(core, "_rest_get", f.get)
     rows = [dict(_old_row("1873306400000000011", "Chatty"), type="CHAT"),
             dict(_old_row("1873306400000000012", "Haze Mix"), type="SDXL_MODEL")]
-    monkeypatch.setattr(core, "model_bookmarks_gql", _OldList({"": (rows, None)}))
+    monkeypatch.setattr(models_mod, "model_bookmarks_gql", _OldList({"": (rows, None)}))
     out = rec.model_old_bookmarks(object(), object(), OWNER, "base")
     assert [r["title"] for r in out["rows"]] == ["Haze Mix"]
 
@@ -592,7 +593,7 @@ def test_the_old_route_reads_the_merge(tmp_path, monkeypatch):
     cli, _ = _logged_in(tmp_path, monkeypatch)
     f = _Reads(pages={(DEFAULT_ID, ""): ([], None)})
     monkeypatch.setattr(core, "_rest_get", f.get)
-    monkeypatch.setattr(core, "model_bookmarks_gql",
+    monkeypatch.setattr(models_mod, "model_bookmarks_gql",
                         _OldList({"": ([_old_row(LORA_ID, "Glasswing")], None)}))
     d = cli.get("/api/model-saved/old?kind=lora").get_json()
     assert [r["model_id"] for r in d["rows"]] == [LORA_ID] and d["partial"] is False
@@ -604,7 +605,7 @@ def test_the_picker_search_says_whether_read_only_is_on(tmp_path, monkeypatch):
     cli, _ = _logged_in(tmp_path, monkeypatch)
     f = _Reads(pages={(DEFAULT_ID, ""): ([_item(ITEM_1, _model(LORA_ID, "Glasswing"))], None)})
     monkeypatch.setattr(core, "_rest_get", f.get)
-    monkeypatch.setattr(core, "model_search_market_gql",
+    monkeypatch.setattr(models_mod, "model_search_market_gql",
                         lambda *a, **k: {"results": [], "has_more": False, "next_cursor": ""})
     for url in ("/api/model-search?kind=lora&size=24&q=&src=market&sort=trending",
                 "/api/model-search?kind=lora&size=24&q=&src=saved&set=" + DEFAULT_ID):
@@ -620,7 +621,7 @@ def test_an_old_row_saved_then_taken_out_of_saved_is_old_again(monkeypatch):
     it back out of Saved puts it back (it is still in the old list and no longer in Saved)."""
     f = _Reads(pages={(DEFAULT_ID, ""): ([], None)})
     monkeypatch.setattr(core, "_rest_get", f.get)
-    monkeypatch.setattr(core, "model_bookmarks_gql",
+    monkeypatch.setattr(models_mod, "model_bookmarks_gql",
                         _OldList({"": ([_old_row(LORA_ID, "Glasswing")], None)}))
     assert len(rec.model_old_bookmarks(object(), object(), OWNER, "lora")["rows"]) == 1
     w = _Writes(_selector(True, ITEM_1))

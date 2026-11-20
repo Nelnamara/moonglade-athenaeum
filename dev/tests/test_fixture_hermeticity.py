@@ -36,8 +36,10 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from moonglade import gen_road as gen_road_mod
 from moonglade import telemetry as telemetry_mod
 from moonglade import branding as branding_mod
+from moonglade import task_reads as task_reads_mod
 
 _HARNESS = Path(__file__).resolve().parent / "test_render_harness.py"
 
@@ -203,13 +205,13 @@ def _collect_at_three(root, monkeypatch):
                                               "created_at": stamp}
     save_catalog(root / "catalog.db", [])
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, tid: {"phase": "done", "paid_credit": 0})
 
     def _collect(session, tid, out, **k):
         save_catalog(root / "catalog.db", [row])
         return {"media_ids": ["H1"], "saved": 1, "is_video": False}
-    monkeypatch.setattr(core, "collect_generation", _collect)
+    monkeypatch.setattr(gen_road_mod, "collect_generation", _collect)
     monkeypatch.setattr(telemetry_mod, "_utc_now", lambda: (made + _dt.timedelta(minutes=10))
                         .astimezone(_dt.timezone.utc))
     cli = login_client(root)

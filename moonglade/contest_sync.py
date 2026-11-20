@@ -14,6 +14,7 @@ import threading
 import time
 
 from moonglade import contest_wins
+from moonglade import contests as _contests
 from moonglade import pixai_client as _pixai_client
 from moonglade import series as _series
 from moonglade import telemetry as _telemetry
@@ -34,11 +35,15 @@ from moonglade import telemetry as _telemetry
 # surface that mounts a contest list shares one answer rather than each paying its own
 # round trip on open.
 CONTESTS_TTL = 90.0
-_contests_cache = {}
-_contests_cache_lock = threading.Lock()
+# A FORCED full walk (the board's refresh button: up to 100 pages) runs at most once per this
+# many seconds; inside the window a forced call is served from the memo, not refused.
+CONTESTS_FORCE_COOLDOWN_S = 300.0
+_contests_cache = {}                 # "board": the memo; "forced_at": when the last forced walk ended
+_contests_cache_lock = threading.Lock()   # guards the memo only -- never held across a walk
+_contests_walk_lock = threading.Lock()    # single-flight: one walk at a time, the rest wait on it
 
 
-def contest_board(core, session, force=False):
+def contest_board(core, session, force=False, full=False):
     """The WHOLE contest board, memoized for CONTESTS_TTL -- and the one read every
     consumer goes through.
 
@@ -54,16 +59,79 @@ def contest_board(core, session, force=False):
     One snapshot, read the full depth (list_contests' own default), filtered by whoever
     needs less. Costs no more upstream than the single widest read did, and every caller
     now agrees about what exists."""
-    now = time.time()
+    asked = time.time()
     with _contests_cache_lock:
         ent = _contests_cache.get("board")
-        if not force and ent and (now - ent["at"]) < CONTESTS_TTL:
+        if ent and not force and (asked - ent["at"]) < CONTESTS_TTL:
             return ent["rows"]
-    meta = {}
-    rows = core.list_contests(session, active_only=False, meta=meta)
+        if (force and ent
+                and (asked - _contests_cache.get("forced_at", 0.0)) < CONTESTS_FORCE_COOLDOWN_S):
+            return ent["rows"]                       # walked fully a moment ago: the memo
+    # One walk at a time: whoever needs one queues here, and the one that gets in walks. The
+    # memo lock is NOT held across the walk, so readers of the memo are never blocked by it.
+    with _contests_walk_lock:
+        with _contests_cache_lock:
+            ent = _contests_cache.get("board")
+            if ent and ent["at"] >= asked:
+                return ent["rows"]                   # a walk finished while we waited: share it
+            if (force and ent
+                    and (time.time() - _contests_cache.get("forced_at", 0.0))
+                    < CONTESTS_FORCE_COOLDOWN_S):
+                return ent["rows"]
+        meta = {}
+        rows = _contests.list_contests(session, active_only=False, meta=meta,
+                                       cache_path=_contests.contest_cache_path(), full=full)
+        done = time.time()
+        with _contests_cache_lock:
+            _contests_cache["board"] = {"at": done, "rows": rows, "meta": meta}
+            if force:
+                _contests_cache["forced_at"] = done
+        return rows
+
+
+_contests_bg = {"running": False}          # a background refresh walk is in flight (memo lock)
+
+
+def contest_board_swr(core, session):
+    """The board for a cold open, stale-while-revalidate -> (rows, saved_at).
+
+    `saved_at` is None for a current answer (the memo, or a walk this call waited for). When
+    the 90 s memo has nothing current but there are rows to show -- the expired memo's, else
+    the on-disk board cache's -- those rows are answered AT ONCE with the time they were
+    saved, and one walk is started on a background thread. The walk is contest_board's own, so
+    it queues on the same single-flight lock (never two walks) and its result lands in the
+    memo for the next ask. No rows anywhere (no cache file): behave as contest_board does and
+    wait for the walk."""
+    asked = time.time()
     with _contests_cache_lock:
-        _contests_cache["board"] = {"at": time.time(), "rows": rows, "meta": meta}
-    return rows
+        ent = _contests_cache.get("board")
+        if ent and (asked - ent["at"]) < CONTESTS_TTL:
+            return ent["rows"], None
+        have = (ent["rows"], ent["at"]) if ent else None
+    if have is None:
+        have = _contests.cached_board(_contests.contest_cache_path())
+    if have is None:
+        return contest_board(core, session), None
+    with _contests_cache_lock:
+        start = not _contests_bg["running"]
+        _contests_bg["running"] = True
+    if start:
+        def _go():
+            try:
+                contest_board(core, session)
+            except Exception as e:                            # noqa: BLE001 -- the next poll retries
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "contest board: background refresh failed: %s", type(e).__name__)
+            finally:
+                with _contests_cache_lock:
+                    _contests_bg["running"] = False
+        try:
+            threading.Thread(target=_go, daemon=True).start()
+        except Exception:                                     # noqa: BLE001
+            with _contests_cache_lock:
+                _contests_bg["running"] = False
+    return have
 
 
 def contest_board_meta():
@@ -169,7 +237,7 @@ def _contest_detection_sync(out_dir, force=False):
                 slug = str(c.get("slug") or "")
                 if not cid or not slug:
                     continue
-                for row in core.contest_my_entries(session, slug, uid) or []:
+                for row in _contests.contest_my_entries(session, slug, uid) or []:
                     # MIGRATION, deliberate and narrow. Before 2026-09-03 this keyed by the
                     # ENTRY id when the artwork id was nested (and therefore stripped), so
                     # an old store can hold "cid:<entry id>" for a piece now keyed
@@ -382,7 +450,7 @@ def contest_win_pass(out_dir, now=None, pause=None):
         try:
             if not slug:
                 raise ValueError("no slug known for this contest")
-            rows = core.contest_winners(session, slug)          # one GET, nothing else
+            rows = _contests.contest_winners(session, slug)          # one GET, nothing else
         except Exception as e:                                # noqa: BLE001
             out["errors"] += 1
             log.warning("contest win check: one contest failed: %s: %s", type(e).__name__,
@@ -509,7 +577,7 @@ def contest_win_check(out_dir, body, now=None):
         uid = str(_pixai_client._client_of(session).user_id or "")
         if not uid:
             raise ValueError("no account id resolved")
-        rows = core.contest_winners(session, slug)              # one GET, nothing else
+        rows = _contests.contest_winners(session, slug)              # one GET, nothing else
     except Exception as e:                                    # noqa: BLE001
         return _say("failed", entry, cid=cid, slug=slug,
                     detail=_redact_host_paths_cli(out_dir, str(e))[:200])

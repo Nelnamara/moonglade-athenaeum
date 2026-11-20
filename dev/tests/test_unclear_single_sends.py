@@ -23,10 +23,15 @@ import pytest
 import requests
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import gallery as g
+from moonglade import gen_cli as gen_cli_mod
+from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import mirror as mirror_mod
+from moonglade import models as models_mod
 from moonglade import pixai_client as pc
-from tests.conftest import _REAL_REST_GET, _REAL_REST_POST, login_client
+from tests.conftest import _REAL_CREATE, _REAL_REST_GET, _REAL_REST_POST, login_client
 
 V = "1983308862240288769"
 
@@ -113,20 +118,32 @@ def rig(tmp_path, monkeypatch):
     # PixAIClient, which is the transport under test
     monkeypatch.setattr(core, "_rest_post", _REAL_REST_POST)
     monkeypatch.setattr(core, "_rest_get", _REAL_REST_GET)
-    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(core, "_create", _REAL_CREATE)          # the create door (3.22)
+    # The Mirror is armed: a create rides its web sign-in, the identity the door requires for
+    # a scene or an enhance (3.22, DESIGN_3.22 2.5) -- the same mocked wire underneath.
+    web = pc.PixAIClient(wire, auth_kind="web-jwt")
+    web._create_chosen = True
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: web)
     monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
-    monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: client)
-    monkeypatch.setattr(core, "build_request", lambda payload, *a, mode=None, **k: _req_for(mode, payload))
-    monkeypatch.setattr(core, "_gate_params_for_model", lambda s, p: p)
+    monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: web)
+    monkeypatch.setattr(gen_road_mod, "build_request", lambda payload, *a, mode=None, **k: _req_for(mode, payload))
+    monkeypatch.setattr(models_mod, "_gate_params_for_model", lambda s, p: p)
     monkeypatch.setattr(core, "upload_media", lambda *a, **k: pytest.fail("no upload here"))
     monkeypatch.setattr(core.time, "sleep", lambda s: None)
     clock = [1000.0]
     monkeypatch.setattr(g.time, "monotonic", lambda: clock[0])
-    return {"cli": login_client(tmp_path), "wire": wire, "clock": clock}
+    return {"cli": login_client(tmp_path), "wire": wire, "clock": clock, "web": web}
 
 
 def _req_for(mode, payload):
     r = _Req(mode or "image")
+    if mode == "edit":
+        # an edit is a chat block (the create door refuses an edit without one, V10)
+        r.parameters = {"chat": {"prompts": "make it night", "mediaId": "1", "mediaIds": ["1"],
+                                 "modelId": V}}
+    if mode == "enhance":
+        # an enhance is the REST route's {enhanceType, mediaId} (3.22 S3-enhance)
+        r.parameters = {"enhanceType": "background-remover", "mediaId": "1"}
     if mode == "fix":
         r.parameters = {"mediaId": "700", "boxes": payload.get("boxes")}
         r.media_id, r.boxes = "700", payload.get("boxes")
@@ -149,7 +166,29 @@ ROUTES = {
 }
 
 
+# Each route's create kind (gen_road.CREATE_ROAD's key). A kind on the create door answers in
+# REST's shapes: a task {"id"}, an oRPC refusal, a 2xx with no id; the GraphQL kinds keep theirs.
+KIND = {"generate": "image", "edit": "edit", "enhance": "enhance", "scene": "scene",
+        "fix": "fix", "video": "video"}
+
+
+def _on_door(kind):
+    return gen_road_mod.CREATE_ROAD[KIND[kind]] in ("rest", "rest_post")
+
+
+def _route(kind):
+    route, body, ok = ROUTES[kind]
+    if _on_door(kind) and kind != "fix":
+        ok = lambda: _Resp(200, {"id": "task-1"})        # noqa: E731
+    return route, body, ok
+
+
 def _answer_for(kind, outcome):
+    if _on_door(kind) and kind != "fix":
+        if outcome == "no-id":
+            return _Resp(200, {})
+        if outcome == "refused":
+            return _Resp(403, {"code": "INSUFFICIENT_BALANCE"})
     if kind == "scene" and outcome == "no-id":
         return _Resp(200, {"data": {"createChatEditingSceneTask": None}})
     if kind == "fix":
@@ -165,7 +204,7 @@ def _answer_for(kind, outcome):
 @pytest.mark.parametrize("kind", sorted(ROUTES))
 @pytest.mark.parametrize("outcome", sorted(UNKNOWN))
 def test_an_unknown_outcome_says_may_have_started_and_holds_the_same_send(rig, kind, outcome):
-    route, body, _ok = ROUTES[kind]
+    route, body, _ok = _route(kind)
     rig["wire"].answer = _answer_for(kind, outcome)
     r = rig["cli"].post(route, json=body)
     d = r.get_json()
@@ -182,7 +221,7 @@ def test_an_unknown_outcome_says_may_have_started_and_holds_the_same_send(rig, k
     assert "may still be starting" in a["error"]
     assert len(rig["wire"].creates()) == sent, "the held send sent nothing"
     # a different send is not held
-    rig["wire"].answer = ROUTES[kind][2]()
+    rig["wire"].answer = _route(kind)[2]()
     other = dict(body, prompt="a dog") if kind != "fix" else {"source": "700",
                                                                 "boxes": [dict(FACE, x=9)]}
     assert rig["cli"].post(route, json=other).get_json().get("task_id")
@@ -193,7 +232,7 @@ def test_an_unknown_outcome_says_may_have_started_and_holds_the_same_send(rig, k
 
 @pytest.mark.parametrize("kind", sorted(ROUTES))
 def test_a_definite_refusal_drops_the_record(rig, kind):
-    route, body, ok = ROUTES[kind]
+    route, body, ok = _route(kind)
     rig["wire"].answer = _answer_for(kind, "refused")
     d = rig["cli"].post(route, json=body).get_json()
     assert d["state"] == "refused" and not d.get("unclear"), d
@@ -204,7 +243,7 @@ def test_a_definite_refusal_drops_the_record(rig, kind):
 
 @pytest.mark.parametrize("kind", sorted(ROUTES))
 def test_a_success_keeps_the_record_for_the_double_tap_window(rig, kind):
-    route, body, ok = ROUTES[kind]
+    route, body, ok = _route(kind)
     rig["wire"].answer = ok()
     assert rig["cli"].post(route, json=body).get_json().get("task_id")
     again = rig["cli"].post(route, json=body)
@@ -220,7 +259,7 @@ def test_a_success_keeps_the_record_for_the_double_tap_window(rig, kind):
 def test_the_record_is_claimed_before_the_send(rig, kind):
     """A second identical send that arrives WHILE the first is still out (another tab, a
     retry the browser made) is refused, and only one create goes."""
-    route, body, ok = ROUTES[kind]
+    route, body, ok = _route(kind)
     inner = {}
 
     def answer(url, sent):
@@ -235,14 +274,14 @@ def test_the_record_is_claimed_before_the_send(rig, kind):
 
 @pytest.mark.parametrize("kind", ["generate", "edit", "enhance", "video"])
 def test_a_failure_before_the_send_is_not_sent_and_drops_the_record(rig, monkeypatch, kind):
-    route, body, ok = ROUTES[kind]
+    route, body, ok = _route(kind)
     calls = []
 
     def mirror(s):
         calls.append(1)
         if len(calls) == 1:
             raise core.PixAIError("Mirror mode is on but no mirror session is available")
-        return s
+        return rig["web"]                     # the armed Mirror's client once it is back
     monkeypatch.setattr(mirror_mod, "_session_for_create", mirror)
     d = rig["cli"].post(route, json=body).get_json()
     assert d["state"] == "not_sent" and not d.get("unclear"), d
@@ -255,12 +294,14 @@ def test_submit_scene_never_returns_a_missing_task_id(monkeypatch):
     """The coordinator's finding: submit_scene answered None for an id-less answer, so
     /api/scene said task_id null and AI Tools re-armed. It raises now, after the send."""
     wire = Wire()
-    wire.answer = _Resp(200, {"data": {"createChatEditingSceneTask": None}})
+    monkeypatch.setattr(core, "_create", _REAL_CREATE)
+    wire.answer = _Resp(200, {})              # the create door's answer with no task id (3.22)
     seen = []
-    with pytest.raises(core.PixAIError) as ei:
-        core.submit_scene(pc.PixAIClient(wire), "s1", ["1"], on_send=seen.append)
+    with pytest.raises(core.CreateOutcomeUnknown) as ei:
+        gen_road_mod.submit_scene(pc.PixAIClient(wire, auth_kind="web-jwt"), "s1", ["1"],
+                                  on_send=seen.append)
     assert seen, "the send was reached"
-    assert core.send_outcome(ei.value, True) == "may_have_started"
+    assert gen_road_mod.send_outcome(ei.value, True) == "may_have_started"
     assert len(wire.posts) == 1
 
 
@@ -285,9 +326,9 @@ def test_cli_send_once_says_may_have_started_for_an_unknown_outcome():
     for exc in (requests.ReadTimeout("slow"), requests.HTTPError("502"),
                 core.PixAIError("no task id returned: {}"),
                 core.PixAIRestError("x", 408, {"code": "BAD_REQUEST"})):
-        with pytest.raises(core.SendOutcomeUnclear) as ei:
-            core._cli_send_once(lambda: (_ for _ in ()).throw(exc))
-        assert str(ei.value).startswith(core.CLI_UNCLEAR)
+        with pytest.raises(gen_road_mod.SendOutcomeUnclear) as ei:
+            gen_road_mod._cli_send_once(lambda: (_ for _ in ()).throw(exc))
+        assert str(ei.value).startswith(gen_road_mod.CLI_UNCLEAR)
         assert ei.value.__cause__ is exc
         assert not isinstance(ei.value, core.PixAIError)
 
@@ -295,24 +336,24 @@ def test_cli_send_once_says_may_have_started_for_an_unknown_outcome():
 def test_cli_send_once_passes_a_refusal_and_an_unreached_failure_through():
     refusal = core.graphql_error("not enough credits", code="INSUFFICIENT_BALANCE")
     with pytest.raises(core.PixAIError) as ei:
-        core._cli_send_once(lambda: (_ for _ in ()).throw(refusal))
+        gen_road_mod._cli_send_once(lambda: (_ for _ in ()).throw(refusal))
     assert ei.value is refusal
     with pytest.raises(requests.ReadTimeout):
-        core._cli_send_once(lambda: (_ for _ in ()).throw(requests.ReadTimeout("x")),
+        gen_road_mod._cli_send_once(lambda: (_ for _ in ()).throw(requests.ReadTimeout("x")),
                             reached=lambda: False)
 
 
 def test_cli_create_once_reads_a_lost_answer_as_unclear_over_the_real_transport():
     wire = Wire()
     wire.answer = requests.ReadTimeout("read timed out")
-    with pytest.raises(core.SendOutcomeUnclear):
-        core._cli_create_once(pc.PixAIClient(wire), {"modelId": V})
+    with pytest.raises(gen_road_mod.SendOutcomeUnclear):
+        gen_road_mod._cli_create_once(pc.PixAIClient(wire), {"modelId": V})
     assert len(wire.posts) == 1, "single attempt"
     wire.answer = _Resp(200, {"data": {"createGenerationTask": None}})
-    with pytest.raises(core.SendOutcomeUnclear):
-        core._cli_create_once(pc.PixAIClient(wire), {"modelId": V})
+    with pytest.raises(gen_road_mod.SendOutcomeUnclear):
+        gen_road_mod._cli_create_once(pc.PixAIClient(wire), {"modelId": V})
     wire.answer = _created("t9")
-    assert core._cli_create_once(pc.PixAIClient(wire), {"modelId": V}) == "t9"
+    assert gen_road_mod._cli_create_once(pc.PixAIClient(wire), {"modelId": V}) == "t9"
 
 
 @pytest.mark.parametrize("runner", ["run_generate_video", "run_reference_video", "run_edit_image"])
@@ -321,9 +362,11 @@ def test_each_cli_runner_sends_through_the_unclear_wrapper(runner):
     and run_generate through _cli_send_once (source pin: the wrapper is what turns a lost
     answer into the honest sentence)."""
     import inspect
-    src = inspect.getsource(getattr(core, runner))
-    assert "_cli_create_once(" in src and "gql_mutate(" not in src
-    assert "_cli_send_once(" in inspect.getsource(core.run_generate)
+    src = inspect.getsource(getattr(gen_cli_mod, runner))        # the runners: gen_cli since 3.22
+    # the video runners keep _cli_create_once (GraphQL); the edit runner rides the create door
+    # through _cli_door_once since 3.22 S3-edit -- both turn a lost answer into the sentence
+    assert ("_cli_create_once(" in src or "_cli_door_once(" in src) and "gql_mutate(" not in src
+    assert "_cli_send_once(" in inspect.getsource(gen_cli_mod.run_generate)
 
 
 def test_run_generate_exits_with_the_honest_sentence(tmp_path, monkeypatch, capsys):
@@ -333,17 +376,18 @@ def test_run_generate_exits_with_the_honest_sentence(tmp_path, monkeypatch, caps
     wire.answer = requests.ReadTimeout("read timed out")
     client = pc.PixAIClient(wire)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: client)
+    monkeypatch.setattr(core, "_create", _REAL_CREATE)
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
-    monkeypatch.setattr(core, "_gate_image_params", lambda s, p: (p, []))
-    monkeypatch.setattr(core, "_gate_params_for_model", lambda s, p: p)
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "_gen_parameters", lambda args: {"modelId": V, "prompts": "x"})
+    monkeypatch.setattr(models_mod, "_gate_image_params", lambda s, p: (p, []))
+    monkeypatch.setattr(models_mod, "_gate_params_for_model", lambda s, p: p)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(gen_params_mod, "_gen_parameters", lambda args: {"modelId": V, "prompts": "x"})
     import argparse
     args = argparse.Namespace(out=str(tmp_path), confirm=True, task_id="", token=None,
                               poll_timeout=1)
-    with pytest.raises(core.SendOutcomeUnclear) as ei:
-        core.run_generate(args)
-    assert core.CLI_UNCLEAR in str(ei.value)
+    with pytest.raises(gen_road_mod.SendOutcomeUnclear) as ei:
+        gen_cli_mod.run_generate(args)
+    assert gen_road_mod.CLI_UNCLEAR in str(ei.value)
     assert len(wire.creates()) == 1
 
 
@@ -352,4 +396,5 @@ def test_main_exits_non_zero_with_the_sentence():
     PixAIError (source pin: running main() needs a whole library)."""
     import inspect
     src = inspect.getsource(core.main)
-    assert "except (PixAIError, SendOutcomeUnclear) as e:\n        sys.exit(str(e))" in src
+    # (SendOutcomeUnclear is in moonglade/gen_road.py since 3.22)
+    assert "except (PixAIError, _gen_road.SendOutcomeUnclear) as e:\n        sys.exit(str(e))" in src

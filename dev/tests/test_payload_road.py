@@ -19,17 +19,21 @@ BEFORE any of them is reachable.
 import pytest
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
+from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import mirror as mirror_mod
+from moonglade import models as models_mod
+from moonglade import pricing as pricing_mod
 
 
 # --- the table ---------------------------------------------------------------
 # One row per mode build_request supports. `payload` is a complete, buildable request;
 # `missing` is the same road with the one thing it cannot do without taken away.
 #
-#   priceable  -- False only for enhance: a panelplugin task is priced by its workflow id,
-#                 which is deliberately NOT in _PRICE_SCALARS, so pricing the workflow-less
-#                 shape that survives the allowlist returns a confident WRONG number. No
-#                 number is the honest answer, and price() must not reach the endpoint.
+#   priceable  -- every road is priced since 3.22 S3-enhance: an enhance on PixAI's own
+#                 enhance quote (price_enhance, POST /v2/task/enhance/price), off the very
+#                 {enhanceType, mediaId} body the submit sends.
 #   mutation   -- the ONE call this road's submit makes.
 MODES = [
     ("image", {"version_id": "V1", "prompt": "a moonwell", "width": 512, "height": 512},
@@ -41,8 +45,9 @@ MODES = [
      {"mode": "fix"}, "pick an image to fix", True, "submit_fixer"),
     ("video", {"mode": "I2V", "images": ["77"], "prompt": "a slow pan", "duration": 5},
      {"mode": "I2V", "images": []}, "pick a source image", True, "submit_generation"),
-    ("enhance", {"mode": "enhance", "source": "55", "workflow_id": "1794855217667308480"},
-     {"mode": "enhance"}, "pick an image first", False, "submit_generation"),
+    ("enhance", {"mode": "enhance", "source": "55",
+                 "workflow_name": "mymusise/39a2c67c:unet-0.1.3.2"},
+     {"mode": "enhance"}, "pick an image first", True, "submit_enhance"),
 ]
 _IDS = [row[0] for row in MODES]
 
@@ -69,16 +74,26 @@ def road(monkeypatch):
     seen = {"priced": [], "matched": [], "submitted": [], "fixed": []}
 
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
-    monkeypatch.setattr(core, "price_task",
+    monkeypatch.setattr(pricing_mod, "price_task",
                         lambda s, params: seen["priced"].append(params) or 1200)
-    monkeypatch.setattr(core, "match_kaisuuken",
+    monkeypatch.setattr(cards_mod, "match_kaisuuken",
                         lambda s, params, **k: seen["matched"].append(params) or dict(CARD))
-    monkeypatch.setattr(core, "submit_generation",
-                        lambda s, params: seen["submitted"].append(params) or "task-1")
-    monkeypatch.setattr(core, "submit_fixer",
+    monkeypatch.setattr(gen_road_mod, "submit_generation",
+                        lambda s, params, **_kw: seen["submitted"].append(params) or "task-1")
+    monkeypatch.setattr(gen_road_mod, "submit_fixer",
                         lambda s, mid, boxes: seen["fixed"].append((mid, boxes)) or "task-2")
+    # 3.22 S3-enhance: an enhance is quoted on PixAI's enhance price route (on the Mirror's
+    # stored sign-in) and sent through submit_enhance; its type comes from the live config.
+    monkeypatch.setattr(pricing_mod, "enhance_quote_session", lambda: object())
+    monkeypatch.setattr(pricing_mod, "price_enhance",
+                        lambda s, body: seen["priced"].append(body) or 1000)
+    monkeypatch.setattr(gen_road_mod, "submit_enhance",
+                        lambda s, body, **_kw: seen["submitted"].append(body) or "task-3")
+    monkeypatch.setattr(core, "_cached_config", lambda key, **k: {"imageEnhancementPlugins": {
+        "background-remover": {"workflowName": "mymusise/39a2c67c"}}} if key == "constants"
+        else None)
     # A Fix is priced on PixAI's own Fix price route (#93), off the submit body itself.
-    monkeypatch.setattr(core, "price_fixer",
+    monkeypatch.setattr(pricing_mod, "price_fixer",
                         lambda s, body: seen["priced"].append(body)
                         or {"cost": 1200, "original": None})
     # _apply_kaisuuken is deliberately NOT stubbed: attaching the card is the one legal
@@ -88,7 +103,7 @@ def road(monkeypatch):
 
 
 def _build(payload):
-    return core.build_request(payload, resolve=core.RequestResolver())
+    return gen_road_mod.build_request(payload, resolve=gen_road_mod.RequestResolver())
 
 
 # --- (a) one object, quoted and spent ----------------------------------------
@@ -105,8 +120,8 @@ def test_price_and_submit_read_the_same_parameters_object(
     req = _build(payload)
     assert req.parameters is not None, "the table's payload should be buildable"
 
-    quoted = core.price(sess, req)
-    core.submit(sess, req)
+    quoted = gen_road_mod.price(sess, req)
+    gen_road_mod.submit(sess, req)
 
     if mutation == "submit_fixer":
         # A Fix rides REST: POST /v2/task/fixer takes {mediaId, boxes}, and since #93 the
@@ -118,7 +133,7 @@ def test_price_and_submit_read_the_same_parameters_object(
         priced, = road["priced"]
         assert priced is req.parameters
         assert set(priced) == {"mediaId", "boxes"}
-        assert priced == core.build_fixer_body(sent_media, sent_boxes), (
+        assert priced == gen_params_mod.build_fixer_body(sent_media, sent_boxes), (
             "the body submit_fixer builds from what it was handed is not the priced body")
         assert priced["boxes"][0]["tag"] == "hand"
         return
@@ -144,8 +159,8 @@ def test_the_card_is_the_only_thing_submit_adds_to_the_quoted_shape(
     sess = FakeSession()
     req = _build(payload)
     before = dict(req.parameters)
-    core.price(sess, req)
-    core.submit(sess, req)
+    gen_road_mod.price(sess, req)
+    gen_road_mod.submit(sess, req)
     after = dict(req.parameters)
     after.pop("kaisuukenId", None)
     assert after == before, "{}: the submit shape drifted from the quoted shape".format(mode)
@@ -158,13 +173,13 @@ def test_a_covering_card_is_attached_on_submit_and_reported_by_price():
     seen = {}
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(mirror_mod, "_session_for_create", lambda s: s)
-        mp.setattr(core, "price_task", lambda s, params: 1200)
-        mp.setattr(core, "match_kaisuuken", lambda s, params, **k: dict(CARD))
-        mp.setattr(core, "submit_generation",
-                   lambda s, params: seen.update(params=params) or "t")
+        mp.setattr(pricing_mod, "price_task", lambda s, params: 1200)
+        mp.setattr(cards_mod, "match_kaisuuken", lambda s, params, **k: dict(CARD))
+        mp.setattr(gen_road_mod, "submit_generation",
+                   lambda s, params, **_kw: seen.update(params=params) or "t")
         req = _build({"version_id": "V1", "prompt": "x"})
-        quoted = core.price(sess, req)
-        core.submit(sess, req)
+        quoted = gen_road_mod.price(sess, req)
+        gen_road_mod.submit(sess, req)
     assert quoted["free"] is True and quoted["cards_held"] == 3
     assert seen["params"]["kaisuukenId"] == "card-1"
 
@@ -178,13 +193,13 @@ def test_price_says_paid_when_the_card_is_short_and_submit_attaches_nothing():
     seen = {}
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(mirror_mod, "_session_for_create", lambda s: s)
-        mp.setattr(core, "price_task", lambda s, params: 27500)
-        mp.setattr(core, "match_kaisuuken", lambda s, params, **k: dict(short))
-        mp.setattr(core, "submit_generation",
-                   lambda s, params: seen.update(params=params) or "t")
+        mp.setattr(pricing_mod, "price_task", lambda s, params: 27500)
+        mp.setattr(cards_mod, "match_kaisuuken", lambda s, params, **k: dict(short))
+        mp.setattr(gen_road_mod, "submit_generation",
+                   lambda s, params, **_kw: seen.update(params=params) or "t")
         req = _build({"mode": "R2V", "images": ["77"], "prompt": "x"})
-        quoted = core.price(sess, req)
-        core.submit(sess, req)
+        quoted = gen_road_mod.price(sess, req)
+        gen_road_mod.submit(sess, req)
     assert quoted["free"] is False and quoted["card_short"] is True
     assert quoted["cards_needed"] == 3 and quoted["cards_held"] == 1
     assert "kaisuukenId" not in seen["params"]
@@ -208,13 +223,18 @@ def test_submit_refuses_under_read_only_before_any_network_call(
 
     req = _build(payload)
     monkeypatch.setattr(core, "READ_ONLY", True)
-    for fn in ("match_kaisuuken", "_apply_kaisuuken", "price_task", "price_fixer",
-               "submit_generation", "submit_fixer", "gql_mutate", "_rest_post"):
+    for fn in ("gql_mutate", "_rest_post"):
         monkeypatch.setattr(core, fn, tripwire(fn))
+    for fn in ("submit_generation", "submit_fixer"):  # in gen_road since 3.22
+        monkeypatch.setattr(gen_road_mod, fn, tripwire(fn))
+    for fn in ("match_kaisuuken", "_apply_kaisuuken"):          # in cards since 3.22
+        monkeypatch.setattr(cards_mod, fn, tripwire(fn))
+    for fn in ("price_task", "price_fixer"):                     # in pricing since 3.22
+        monkeypatch.setattr(pricing_mod, fn, tripwire(fn))
     monkeypatch.setattr(mirror_mod, "_session_for_create", tripwire("_session_for_create"))
 
     with pytest.raises(core.PixAIError) as err:
-        core.submit(FakeSession(), req)
+        gen_road_mod.submit(FakeSession(), req)
     assert "READ_ONLY" in str(err.value)
 
 
@@ -224,7 +244,7 @@ def test_price_is_read_only_and_never_reaches_a_mutation(road):
     sess = FakeSession()
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(core, "READ_ONLY", True)
-        quoted = core.price(sess, _build({"version_id": "V1", "prompt": "x"}))
+        quoted = gen_road_mod.price(sess, _build({"version_id": "V1", "prompt": "x"}))
     assert quoted["cost"] == 1200
     assert not road["submitted"] and not road["fixed"]
 
@@ -244,8 +264,8 @@ def test_fix_forces_no_card_whatever_the_payload_asks(asked, road):
     req = _build(payload)
     assert req.no_card is True
 
-    quoted = core.price(FakeSession(), req)
-    core.submit(FakeSession(), req)
+    quoted = gen_road_mod.price(FakeSession(), req)
+    gen_road_mod.submit(FakeSession(), req)
     assert not road["matched"], "the card check must never run for a Fix"
     assert quoted["free"] is False and quoted["card_name"] is None
     assert quoted["cost"] == 1200
@@ -262,7 +282,7 @@ def test_a_missing_input_yields_a_note_and_no_price(mode, _p, missing, note, _pr
     req = _build(missing)
     assert req.parameters is None
     assert req.note == note
-    assert core.price(FakeSession(), req) == {"cost": None, "free": False, "note": note}
+    assert gen_road_mod.price(FakeSession(), req) == {"cost": None, "free": False, "note": note}
     assert not road["priced"] and not road["matched"]
 
 
@@ -272,23 +292,23 @@ def test_submit_refuses_a_request_that_could_not_be_built(mode, _p, missing, not
     """The same request that could not be quoted cannot be spent either -- there is no
     second road to a shape, so an incomplete payload has nothing to submit."""
     with pytest.raises(core.PixAIError):
-        core.submit(FakeSession(), _build(missing))
+        gen_road_mod.submit(FakeSession(), _build(missing))
     assert not road["submitted"] and not road["fixed"]
 
 
-def test_enhance_is_never_priced_even_though_its_shape_is_real(road):
-    """[MAJOR] An enhance/panelplugin task HAS a real submit shape, and it still must not
-    be quoted: it is priced by its workflow id, deliberately absent from _PRICE_SCALARS,
-    so price_task would quote the workflow-less remainder and be confidently wrong.
-    `price_note` is how one road carries 'this shape is real but unpriceable' without a
-    second road appearing to hold it."""
-    req = _build({"mode": "enhance", "source": "55", "workflow_id": "1794855217667308480"})
-    assert req.parameters is not None and req.price_note
-    quoted = core.price(FakeSession(), req)
-    assert quoted["cost"] is None and quoted["free"] is False
-    assert not road["priced"], "enhance must not reach the pricing endpoint"
-    core.submit(FakeSession(), req)
-    assert road["submitted"] == [req.parameters]
+def test_enhance_is_priced_only_by_the_enhance_quote_and_never_card_checked(road):
+    """3.22 S3-enhance (T-F4, V9): an enhance is quoted by PixAI's own enhance price route off
+    the {enhanceType, mediaId} body it sends -- never by /v2/task-price (which priced the
+    panelplugin shape wrongly) and never with a card check: it is never FREE."""
+    req = _build({"mode": "enhance", "source": "55",
+                  "workflow_name": "mymusise/39a2c67c:unet-0.1.3.2"})
+    assert req.parameters == {"enhanceType": "background-remover", "mediaId": "55"}
+    assert not req.price_note
+    quoted = gen_road_mod.price(FakeSession(), req)
+    assert quoted["cost"] == 1000 and quoted["free"] is False
+    assert road["priced"] == [req.parameters] and not road["matched"]
+    gen_road_mod.submit(FakeSession(), req)
+    assert road["submitted"] == [req.parameters] and not road["matched"]
 
 
 # --- the model resolve is one rule, not two ----------------------------------
@@ -299,21 +319,21 @@ def test_a_stale_client_version_resolves_identically_for_price_and_submit(monkey
     validated the client's version_id against the model's real version list. Two rules is a
     badge quoting one model while the submit sends another. One rule now, so the same
     payload resolves to the same modelId on both surfaces."""
-    monkeypatch.setattr(core, "list_model_versions",
+    monkeypatch.setattr(models_mod, "list_model_versions",
                         lambda s, mid: [{"version_id": "V-LATEST"}, {"version_id": "V-OLD"}])
-    resolve = core.RequestResolver(model_version=core.model_version_resolver(FakeSession()))
+    resolve = gen_road_mod.RequestResolver(model_version=gen_road_mod.model_version_resolver(FakeSession()))
     stale = {"model_id": "M1", "version_id": "V-FROM-ANOTHER-MODEL", "prompt": "x"}
     chosen = {"model_id": "M1", "version_id": "V-OLD", "prompt": "x"}
 
     # A version_id that is not one of M1's own falls back to the newest...
-    assert core.build_request(stale, resolve=resolve).parameters["modelId"] == "V-LATEST"
+    assert gen_road_mod.build_request(stale, resolve=resolve).parameters["modelId"] == "V-LATEST"
     # ...and one that IS gets honored (the version picker is a real choice).
-    assert core.build_request(chosen, resolve=resolve).parameters["modelId"] == "V-OLD"
+    assert gen_road_mod.build_request(chosen, resolve=resolve).parameters["modelId"] == "V-OLD"
     # The Loom's image body carries mode="auto" (the inferenceProfile, not a road name) --
     # the old price-side condition skipped its resolve entirely on that, which is how the
     # badge came back "pick a model" for a job /api/generate would happily have submitted.
     loom = {"model_id": "M1", "version_id": "", "prompt": "x", "mode": "auto"}
-    assert core.build_request(loom, resolve=resolve).parameters["modelId"] == "V-LATEST"
+    assert gen_road_mod.build_request(loom, resolve=resolve).parameters["modelId"] == "V-LATEST"
 
 
 def test_the_road_is_pinned_by_the_caller_so_a_payload_cannot_switch_it(road):
@@ -323,8 +343,8 @@ def test_the_road_is_pinned_by_the_caller_so_a_payload_cannot_switch_it(road):
     it always did) instead of building and PAYING FOR a video. /api/price is the one caller
     that legitimately reads the road off the payload."""
     payload = {"mode": "I2V", "images": ["77"], "version_id": "V1", "prompt": "x"}
-    assert core.build_request(payload).mode == "video"                  # /api/price
-    pinned = core.build_request(payload, mode="image")                  # /api/generate
+    assert gen_road_mod.build_request(payload).mode == "video"                  # /api/price
+    pinned = gen_road_mod.build_request(payload, mode="image")                  # /api/generate
     assert pinned.mode == "image"
     assert pinned.parameters["inferenceProfile"] == "i2v"   # lowercased by _gen_parameters
     assert "i2vPro" not in pinned.parameters
@@ -345,8 +365,8 @@ def _changing_gate(params):
 
 
 def _gated_build(payload):
-    return core.build_request(payload, mode="image",
-                              resolve=core.RequestResolver(gate=_changing_gate))
+    return gen_road_mod.build_request(payload, mode="image",
+                              resolve=gen_road_mod.RequestResolver(gate=_changing_gate))
 
 
 GATED_IMAGE = {"version_id": "V1", "prompt": "a moonwell", "width": 768, "height": 432}
@@ -358,8 +378,8 @@ def test_a_gate_that_changes_the_dict_still_prices_and_submits_one_object(road):
     sess = FakeSession()
     req = _gated_build(GATED_IMAGE)
     assert (req.parameters["width"], req.parameters["height"]) == (912, 512)
-    quoted = core.price(sess, req)
-    core.submit(sess, req)
+    quoted = gen_road_mod.price(sess, req)
+    gen_road_mod.submit(sess, req)
     priced, = road["priced"]
     submitted, = road["submitted"]
     assert priced is submitted is req.parameters
@@ -371,8 +391,8 @@ def test_with_a_changing_gate_the_card_is_still_the_only_difference(road):
     sess = FakeSession()
     req = _gated_build(GATED_IMAGE)
     before = dict(req.parameters)
-    core.price(sess, req)
-    core.submit(sess, req)
+    gen_road_mod.price(sess, req)
+    gen_road_mod.submit(sess, req)
     after = dict(req.parameters)
     after.pop("kaisuukenId", None)
     assert after == before
@@ -381,7 +401,7 @@ def test_with_a_changing_gate_the_card_is_still_the_only_difference(road):
 def test_price_carries_no_receipt_key_when_nothing_was_changed(road):
     """A key on every answer is a key clients learn to ignore -- the same rule
     /api/generate's response follows."""
-    quoted = core.price(FakeSession(), _build({"version_id": "V1", "prompt": "x"}))
+    quoted = gen_road_mod.price(FakeSession(), _build({"version_id": "V1", "prompt": "x"}))
     assert "adjusted" not in quoted
 
 
@@ -399,8 +419,8 @@ def _lane_check(params, version_id):
 
 
 def _lane_build(payload, **rs):
-    return core.build_request(dict(payload, unlimited=True), mode="image",
-                              resolve=core.RequestResolver(
+    return gen_road_mod.build_request(dict(payload, unlimited=True), mode="image",
+                              resolve=gen_road_mod.RequestResolver(
                                   gate=lambda p: (p, []), unlimited=_lane_check, **rs))
 
 
@@ -408,14 +428,14 @@ def test_a_lane_request_is_quoted_and_sent_as_one_object_with_no_card_anywhere(r
                                                                               monkeypatch):
     def _no_card_step(*a, **k):
         raise AssertionError("a lane spend reached the free-card step")
-    monkeypatch.setattr(core, "_apply_kaisuuken", _no_card_step)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", _no_card_step)
     sess = FakeSession()
     req = _lane_build(GATED_IMAGE)
     assert req.unlimited is True and req.parameters["lane"] == "infinite"
-    quoted = core.price(sess, req)
+    quoted = gen_road_mod.price(sess, req)
     assert quoted == {"cost": 0, "free": True, "unlimited": True, "list_cost": 1200}
     assert road["matched"] == [], "a lane quote reached the card match"
-    core.submit(sess, req, no_card=False)             # no_card cannot put the card back
+    gen_road_mod.submit(sess, req, no_card=False)             # no_card cannot put the card back
     priced, = road["priced"]
     submitted, = road["submitted"]
     assert priced is submitted is req.parameters
@@ -425,8 +445,8 @@ def test_a_lane_request_is_quoted_and_sent_as_one_object_with_no_card_anywhere(r
 def test_a_resolver_without_the_lane_check_refuses_a_lane_request(road):
     """§8.10: a road that cannot read the entitlement never builds a lane request -- and
     never quietly builds the ordinary paid one in its place."""
-    for rs in (core.RequestResolver(gate=lambda p: (p, [])), core.RequestResolver()):
+    for rs in (gen_road_mod.RequestResolver(gate=lambda p: (p, [])), gen_road_mod.RequestResolver()):
         with pytest.raises(core.PixAIError) as err:
-            core.build_request(dict(GATED_IMAGE, unlimited=True), mode="image", resolve=rs)
+            gen_road_mod.build_request(dict(GATED_IMAGE, unlimited=True), mode="image", resolve=rs)
         assert "can't be checked on this road" in str(err.value)
     assert road["priced"] == road["submitted"] == road["matched"] == []

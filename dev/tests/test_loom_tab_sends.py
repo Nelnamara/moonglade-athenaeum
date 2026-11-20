@@ -12,13 +12,18 @@ media id is not a send.
 No network: the `pixai` fake and test_generate_runs' counting rig."""
 import threading
 
+import pytest
+
 from moonglade import backup as core
+from moonglade import cards as cards_mod
+from moonglade import gen_road as gen_road_mod
+from moonglade import pricing as pricing_mod
 from moonglade.gallery import save_catalog, CATALOG_FIELDS
 from tests.conftest import _TEST_PASSWORD, _TEST_USERNAME, _do_login
 from tests.test_generate_runs import CARD as RUN_CARD
 from tests.test_generate_runs import cli, rig, run  # noqa: F401  (fixtures + helper)
 from tests.test_single_send_quoted_free import (  # noqa: F401  (fixture + helpers)
-    _CARD, _NO_CARD, _Req, _body, gen)
+    _CARD, _NO_CARD, _Req, _body, _sent, gen)
 
 TARGET = {"board_id": "b1", "card_id": "c1"}
 
@@ -34,13 +39,13 @@ def test_an_image_tab_send_covered_by_a_card_is_the_boards_and_costs_zero(gen):
     d = gen["cli"].post("/api/generate", json=dict(_body(), loom_target=TARGET)).get_json()
     assert d.get("task_id") == "task-1", d
     assert _sends(gen["cli"]) == [{"task_id": "task-1", "card": "c1", "kind": "image", "cost": 0}]
-    sent = gen["pixai"].calls_for("createGenerationTask")[0].variables["parameters"]
+    sent = _sent(gen)[0]
     assert "loom_target" not in sent, "the board's key never reaches PixAI"
 
 
 def test_an_edit_tab_send_reads_its_charge_off_the_catalog(gen, monkeypatch, tmp_path):
     gen["pixai"].on("/kaisuuken/check", _NO_CARD)
-    monkeypatch.setattr(core, "build_request", lambda payload, *a, **k: _Req("edit"))
+    monkeypatch.setattr(gen_road_mod, "build_request", lambda payload, *a, **k: _Req("edit"))
     d = gen["cli"].post("/api/edit", json={"source": "1", "instruction": "night",
                                            "loom_target": TARGET}).get_json()
     assert d.get("task_id") == "task-1", d
@@ -54,8 +59,8 @@ def test_an_edit_tab_send_reads_its_charge_off_the_catalog(gen, monkeypatch, tmp
 def test_a_fix_from_the_loom_is_the_boards_spend(gen, monkeypatch):
     req = _Req("fix")
     req.media_id, req.boxes = "1", [{"tag": "face", "x": 1, "y": 1, "w": 5, "h": 5}]
-    monkeypatch.setattr(core, "build_request", lambda payload, *a, **k: req)
-    monkeypatch.setattr(core, "submit_fixer", lambda session, media_id, boxes: "task-f")
+    monkeypatch.setattr(gen_road_mod, "build_request", lambda payload, *a, **k: req)
+    monkeypatch.setattr(gen_road_mod, "submit_fixer", lambda session, media_id, boxes: "task-f")
     d = gen["cli"].post("/api/fix", json={"source": "1", "boxes": req.boxes,
                                           "loom_target": TARGET}).get_json()
     assert d.get("task_id") == "task-f", d
@@ -96,42 +101,55 @@ def _armed(monkeypatch, fake):
     monkeypatch.setattr(_mirror, "mirror_enabled", lambda: True)
     monkeypatch.setattr(_mirror, "make_mirror_session", lambda *a, **k: fake)
     monkeypatch.setattr(_mirror, "_session_for_create", lambda s: fake)
-    monkeypatch.setattr(core, "build_request", lambda payload, *a, **k: _Req("enhance"))
+    monkeypatch.setattr(gen_road_mod, "build_request", lambda payload, *a, **k: _Req("enhance"))
+
+
+
+def _enhance_config(monkeypatch):
+    """3.22 S3-enhance: the presets price on PixAI's enhance quote, their type read off the live
+    config, answered here for every pinned preset; and an enhance sends through submit_enhance."""
+    plugins = {t: {"workflowName": wn} for t, wn in (
+        ("handfix", "mymusise/hand-fix"), ("face-detailer", "kyo/face-detailer"),
+        ("emotion", "kyo/emotionlab"), ("background-remover", "mymusise/39a2c67c"),
+        ("image-to-lineart", "pixai-official/image-to-lineart"),
+        ("sketch-coloring", "pixai-official/sketch-coloring-workflow"))}
+    monkeypatch.setattr(core, "_cached_config", lambda key, **k: {
+        "imageEnhancementPlugins": plugins} if key == "constants" else None)
+    monkeypatch.setattr(pricing_mod, "enhance_quote_session", lambda: object())
+    monkeypatch.setattr(gen_road_mod, "submit_enhance", lambda *a, **k: "task-1")
 
 
 def test_a_presets_read_overtaken_by_a_send_is_not_cached(gen, monkeypatch):
     _armed(monkeypatch, gen["pixai"])
-    gen["pixai"].on("/kaisuuken/check", _CARD)
+    _enhance_config(monkeypatch)
     other = _do_login(gen["cli"].application.test_client(), _TEST_USERNAME, _TEST_PASSWORD)
-    fired, lock = {"n": 0}, threading.Lock()
+    fired, lock, asked = {"n": 0}, threading.Lock(), []
 
-    def _price(s, params):
+    def _price(s, body):
         # While the first presets read is pricing, a send lands from another tab.
+        asked.append(body["enhanceType"])
         with lock:
             if fired["n"] == 0:
                 fired["n"] = 1
                 r = other.post("/api/enhance", json={"source": "1", "workflow_id": "42"})
                 assert r.get_json().get("task_id"), r.get_json()
         return 1500
-    monkeypatch.setattr(core, "price_task", _price)
+    monkeypatch.setattr(pricing_mod, "price_enhance", _price)
     first = gen["cli"].get("/api/enhance/presets").get_json()["presets"]
-    assert all(r["free_card"] for r in first), "the read answers what it saw"
-    # The card is gone now; the overtaken answer must not have been cached.
-    gen["pixai"].on("/kaisuuken/check", _NO_CARD)
-    again = gen["cli"].get("/api/enhance/presets").get_json()["presets"]
-    assert not any(r["free_card"] for r in again)
-
-
-def test_presets_check_cards_the_way_the_send_does(gen, monkeypatch):
-    _armed(monkeypatch, gen["pixai"])
-    monkeypatch.setattr(core, "price_task", lambda s, params: 1500)
-    seen = []
-    real = core.match_kaisuuken
-
-    def _match(session, params, *a, **k):
-        seen.append(k.get("enrich"))
-        return real(session, params, *a, **k)
-    monkeypatch.setattr(core, "match_kaisuuken", _match)
-    gen["pixai"].on("/kaisuuken/check", _CARD)
+    assert any(r["price"] == 1500 for r in first), "the read answers what it saw"
+    n = len(asked)
+    # The overtaken answer was not cached: the next read asks PixAI again.
     gen["cli"].get("/api/enhance/presets")
-    assert seen and all(e is True for e in seen)
+    assert len(asked) > n
+
+
+def test_presets_never_check_a_card_and_are_never_free(gen, monkeypatch):
+    """3.22 S3-enhance (V9, T-F4): no free card covers an enhance, so the presets run no card
+    check at all and free_card is always False."""
+    _armed(monkeypatch, gen["pixai"])
+    _enhance_config(monkeypatch)
+    monkeypatch.setattr(pricing_mod, "price_enhance", lambda s, body: 1500)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken",
+                        lambda *a, **k: pytest.fail("a preset was card-checked"))
+    rows = gen["cli"].get("/api/enhance/presets").get_json()["presets"]
+    assert rows and not any(r["free_card"] for r in rows)

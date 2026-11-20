@@ -33,13 +33,18 @@ import pytest
 import requests
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import gallery as moonglade_gallery
+from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
+from moonglade import pricing as pricing_mod
 from moonglade import recipes as moonglade_recipes
 from moonglade import runs
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_client, login_test_client
 from moonglade import jobs as jobs_mod
+from moonglade import task_reads as task_reads_mod
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 VECTORS = json.load(open(os.path.join(HERE, "fixtures", "template_vectors.json"), encoding="utf-8"))
@@ -109,6 +114,17 @@ def rig(monkeypatch):
                 return {"createGenerationTask": {"id": got}}
         return {"createGenerationTask": {"id": str(9000 + len(r.mutations))}}
 
+    def create(session, kind, body):
+        # The create door (3.22 S3-image): a run's image jobs ride it, recorded with the
+        # GraphQL road's mutations so a test counts sends the same way on either road.
+        params = dict(body or {})
+        r.mutations.append(params)
+        if r.on_mutate is not None:
+            got = r.on_mutate(len(r.mutations) - 1, params)
+            if got is not None:
+                return {"id": got}
+        return {"id": str(9000 + len(r.mutations))}
+
     def gql_adhoc(*a, **k):
         r.calls.append("gql_adhoc")
         raise core.PixAIError("no ad-hoc GraphQL in these tests")
@@ -117,12 +133,13 @@ def rig(monkeypatch):
     monkeypatch.setattr(core, "_rest_get", rest_get)
     monkeypatch.setattr(core, "_rest_post", rest_post)
     monkeypatch.setattr(core, "account_info", account_info)
-    monkeypatch.setattr(core, "price_task", price_task)
-    monkeypatch.setattr(core, "match_kaisuuken", match)
+    monkeypatch.setattr(pricing_mod, "price_task", price_task)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", match)
     monkeypatch.setattr(core, "gql_mutate", gql_mutate)
+    monkeypatch.setattr(core, "_create", create)
     monkeypatch.setattr(core, "gql_adhoc", gql_adhoc)
-    monkeypatch.setattr(core, "_bump_card_use", lambda params: None)
-    monkeypatch.setattr(core, "RUN_SEND_GAP_S", 0)
+    monkeypatch.setattr(cards_mod, "_bump_card_use", lambda params: None)
+    monkeypatch.setattr(gen_road_mod, "RUN_SEND_GAP_S", 0)
     monkeypatch.setattr(core, "READ_ONLY", False)
     monkeypatch.setattr(core, "_read_only_now", lambda: False)
     monkeypatch.setattr(moonglade_recipes, "batch", lambda s, ids: (_ for _ in ()).throw(
@@ -589,7 +606,15 @@ def test_matrix_cells_go_out_without_a_card_in_order(cli, rig):
     assert d["axes"][-1]["values"] == ["x", "y", "z"]
 
 
-def test_random_jobs_carry_a_card_for_the_covered_ones(cli, rig):
+def _cards_prove_free(monkeypatch):
+    """Each card job's terminal read (2.4 rule 7) shows it ended free. Without it the rig's
+    blocked REST read holds the run (3.22 review F3: an unread card counts as charged)."""
+    monkeypatch.setattr(task_reads_mod, "generation_status",
+                        lambda s, t: {"phase": "done", "paid_credit": 0, "status": "completed"})
+
+
+def test_random_jobs_carry_a_card_for_the_covered_ones(cli, rig, monkeypatch):
+    _cards_prove_free(monkeypatch)
     rig.cards = [dict(CARD, total=2)]                 # the plan's check
     p = plan(cli, prompt="{a|b} x", count=3).get_json()
     assert p["covered"] == 2 and p["total"] == 1600
@@ -601,7 +626,8 @@ def test_random_jobs_carry_a_card_for_the_covered_ones(cli, rig):
     assert [j["expected"] for j in d["jobs"]] == [0, 0, 1600]
 
 
-def test_a_card_gone_stops_the_run_before_it_costs_more_than_confirmed(cli, rig):
+def test_a_card_gone_stops_the_run_before_it_costs_more_than_confirmed(cli, rig, monkeypatch):
+    _cards_prove_free(monkeypatch)
     rig.cards = [dict(CARD, total=2)]
     p = plan(cli, prompt="{a|b} x", count=3).get_json()
     rig.cards = [dict(CARD, total=2), dict(CARD, total=2)]   # the quote, job 1; then none
@@ -739,15 +765,15 @@ def test_the_lock_is_install_wide_a_second_login_is_refused_mid_send(tmp_path, r
 
 def test_the_in_flight_mark_is_released_after_an_exception(cli, rig, monkeypatch):
     p = plan(cli, prompt="{a|b} x", count=2).get_json()
-    real = core.send_run
+    real = gen_road_mod.send_run
 
     def boom(*a, **k):
         raise RuntimeError("unexpected")
-    monkeypatch.setattr(core, "send_run", boom)
+    monkeypatch.setattr(gen_road_mod, "send_run", boom)
     with pytest.raises(RuntimeError):
         cli.application.config["PROPAGATE_EXCEPTIONS"] = True
         run(cli, run_id="e" * 32, ack=ack_of(p), prompt="{a|b} x", count=2)
-    monkeypatch.setattr(core, "send_run", real)
+    monkeypatch.setattr(gen_road_mod, "send_run", real)
     d = run(cli, run_id="f" * 32, ack=ack_of(p), prompt="{a|b} x", count=2).get_json()
     assert d["status"] == "sent"
 
@@ -788,7 +814,7 @@ def test_the_inspector_falls_back_to_pixai_only_for_a_library_task_with_no_recor
     assert cli.get("/api/generate/request/424242").status_code == 404
     save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "M1", "task_id": "424242", "filename": "2025-01/a.png"}])
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid, retries=None: {
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid, retries=None: {
         "parameters": {"prompts": "x", "modelId": "V1", "authToken": "SECRET"}})
     d = cli.get("/api/generate/request/424242").get_json()
     assert d["source"] == "pixai"
@@ -928,30 +954,30 @@ def test_more_than_one_price_group_is_refused(cli, rig, monkeypatch):
     def varying(session, params):
         seen["n"] += 1
         return {"width": seen["n"]}
-    monkeypatch.setattr(core, "_task_price_query", varying)
+    monkeypatch.setattr(pricing_mod, "_task_price_query", varying)
     d = plan(cli, prompt="{a|b} x", count=2).get_json()
     assert "don't all cost the same" in d["error"]
 
 
 def test_unlimited_mode_takes_one_task_at_a_time(cli, rig, monkeypatch, tmp_path):
-    monkeypatch.setattr(core, "unlimited_resolver", lambda s: (
-        lambda params, vid: dict(params, lane=core.UNLIMITED_LANE)))
+    monkeypatch.setattr(gen_road_mod, "unlimited_resolver", lambda s: (
+        lambda params, vid: dict(params, lane=gen_road_mod.UNLIMITED_LANE)))
     d = plan(cli, prompt="{a|b} x", count=2, unlimited=True).get_json()
     assert "one picture at a time" in d["error"]
     jobs_mod.append_job_event(tmp_path, "5555", status="running", type="generate",
-                          lane=core.UNLIMITED_LANE)
+                          lane=gen_road_mod.UNLIMITED_LANE)
     d = run(cli, prompt="{a|b} x", count=1, unlimited=True).get_json()
-    assert d["error"] == core.UNLIMITED_BUSY
+    assert d["error"] == gen_road_mod.UNLIMITED_BUSY
     assert rig.mutations == []
 
 
 def test_a_lane_single_is_logged_with_its_lane(cli, rig, monkeypatch, tmp_path):
-    monkeypatch.setattr(core, "unlimited_resolver", lambda s: (
-        lambda params, vid: dict(params, lane=core.UNLIMITED_LANE)))
+    monkeypatch.setattr(gen_road_mod, "unlimited_resolver", lambda s: (
+        lambda params, vid: dict(params, lane=gen_road_mod.UNLIMITED_LANE)))
     d = run(cli, prompt="{a|b} x", count=1, unlimited=True).get_json()
     assert d["status"] == "sent"
     job = [j for j in jobs_mod.read_jobs(tmp_path) if j["job_id"] == d["jobs"][0]["task_id"]][0]
-    assert job["lane"] == core.UNLIMITED_LANE
+    assert job["lane"] == gen_road_mod.UNLIMITED_LANE
 
 
 def test_task_status_reports_the_expected_charge_beside_the_paid_one(cli, rig, monkeypatch, tmp_path):
@@ -961,13 +987,39 @@ def test_task_status_reports_the_expected_charge_beside_the_paid_one(cli, rig, m
     rig.cards = [dict(CARD, total=1)]
     d = run(cli, ack=ack_of(p), prompt="{a|b} x", count=2).get_json()
     tid = d["jobs"][0]["task_id"]
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, t: {"phase": "done", "paid_credit": 1600, "status": "completed"})
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, t, out, **k: {"media_ids": ["OUT1"], "saved": 1, "is_video": False})
     st = cli.get("/api/task-status", query_string={"task_id": tid}).get_json()
     assert st["expected_credit"] == 0 and st["paid_credit"] == 1600
     assert runs.RunsStore(tmp_path).get(d["run_id"])["jobs"][0]["paid"] == 1600
+
+
+def test_task_status_says_a_card_that_went_unused(cli, rig, monkeypatch, tmp_path):
+    """3.22 review F2 (DESIGN_3.22 2.4 rule 7, T-V3): a card job that completed with a charge
+    -- PixAI ignored the card -- is said at the terminal read: on the answer, on the done job
+    event (the Activity row's data) and on the run's job row. A paid job without a card is not."""
+    rig.cards = [dict(CARD, total=1)]
+    p = plan(cli, prompt="{a|b} x", count=2).get_json()
+    rig.cards = [dict(CARD, total=1), dict(CARD, total=1)]   # the run's quote, job 1; then none
+    _cards_prove_free(monkeypatch)                    # the run's own read before job 2
+    d = run(cli, ack=ack_of(p), prompt="{a|b} x", count=2).get_json()
+    card_tid, paid_tid = d["jobs"][0]["task_id"], d["jobs"][1]["task_id"]
+    assert d["jobs"][0]["card"] is True and d["jobs"][1]["card"] is False
+    monkeypatch.setattr(task_reads_mod, "generation_status",
+                        lambda s, t: {"phase": "done", "paid_credit": 1600, "status": "completed"})
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
+                        lambda s, t, out, **k: {"media_ids": ["OUT1"], "saved": 1, "is_video": False})
+    st = cli.get("/api/task-status", query_string={"task_id": card_tid}).get_json()
+    assert st["card_unused"] is True
+    other = cli.get("/api/task-status", query_string={"task_id": paid_tid}).get_json()
+    assert "card_unused" not in other
+    events = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}
+    assert events[card_tid]["card_unused"] is True and "card_unused" not in events[paid_tid]
+    rows = runs.RunsStore(tmp_path).get(d["run_id"])["jobs"]
+    assert runs.job_view(rows[0]).get("card_unused") is True
+    assert "card_unused" not in runs.job_view(rows[1])
 
 
 # ---------------------------------------------------------------------------------------
@@ -1008,8 +1060,8 @@ def test_a_cell_the_recipes_would_take_over_the_prompt_budget_is_named(cli, rig,
 # ---------------------------------------------------------------------------------------
 
 def test_submit_without_hooks_sends_the_same_request_as_before(rig):
-    req = core.build_request(dict(BASE, count=1), mode="image")
-    core.submit(object(), req)
+    req = gen_road_mod.build_request(dict(BASE, count=1), mode="image")
+    gen_road_mod.submit(object(), req)
     assert rig.mutations[0] == req.parameters
 
 
@@ -1023,20 +1075,29 @@ def test_on_send_sees_a_copy_of_every_attempt_and_cannot_alter_or_block_it(rig):
 
     def refuse_profile(i, params):
         if i == 0:
-            raise core.graphql_error('[{"message": "bad inferenceProfile"}]', code="BAD_REQUEST")
+            raise _profile_refusal()
     rig.on_mutate = refuse_profile
-    core.submit_generation(object(), {"prompts": "a", "modelId": "V", "inferenceProfile": "pro"},
+    gen_road_mod.submit_generation(object(), {"prompts": "a", "modelId": "V", "inferenceProfile": "pro"},
                            on_send=spy)
     assert len(rig.mutations) == 2 and len(seen) == 2          # the resubmit is observed too
     assert rig.mutations[0]["prompts"] == "a" and rig.mutations[1]["prompts"] == "a"
     assert "inferenceProfile" not in rig.mutations[1]
 
 
+# PixAI's REST refusal of a profile, as the create door raises it (3.22 S3-image): BAD_REQUEST with
+# an issue path naming inferenceProfile, the structure the profile drop reads (DESIGN_3.22 2.7).
+def _profile_refusal():
+    return core.PixAIRestError("REST POST /task/create -> 400: bad inferenceProfile", status=400,
+                               body={"code": "BAD_REQUEST", "message": "bad inferenceProfile",
+                                     "data": {"issues": [{"path": ["parameters",
+                                                                    "inferenceProfile"]}]}})
+
+
 @pytest.mark.parametrize("params,error", [
-    ({"prompts": "a", "inferenceProfile": "pro"},
-     'GraphQL error: [{"message": "bad inferenceProfile", "extensions": {"code": "BAD_REQUEST"}}]'),
-    ({"prompts": "a", "priority": core.PRIORITY_TURBO},
-     'GraphQL error: [{"message": "REQUIRE_MEMBERSHIP", "code": 40300047}]'),
+    ({"prompts": "a", "inferenceProfile": "pro"}, _profile_refusal),
+    ({"prompts": "a", "priority": gen_params_mod.PRIORITY_TURBO},
+     lambda: core.PixAIRestError("REST POST /task/create -> 403", status=403,
+                                 body={"code": "REQUIRE_MEMBERSHIP", "message": "members"})),
 ], ids=["profile-drop", "turbo-to-low"])
 def test_exact_turns_off_both_resubmits(rig, monkeypatch, params, error):
     """Review S5 (F6): BOTH refusal-only resubmits are real paths without exact=True -- the
@@ -1045,15 +1106,15 @@ def test_exact_turns_off_both_resubmits(rig, monkeypatch, params, error):
     monkeypatch.setitem(core._turbo_refused, "seen", False)
 
     def refuse(i, p):
-        raise core.graphql_error(error[len("GraphQL error: "):])
+        raise error()
     rig.on_mutate = refuse
     with pytest.raises(core.PixAIError):
-        core.submit_generation(object(), dict(params))
+        gen_road_mod.submit_generation(object(), dict(params))
     assert len(rig.mutations) == 2, "without exact the resubmit fires (the path is real)"
     del rig.mutations[:]
     monkeypatch.setitem(core._turbo_refused, "seen", False)
     with pytest.raises(core.PixAIError):
-        core.submit_generation(object(), dict(params), exact=True)
+        gen_road_mod.submit_generation(object(), dict(params), exact=True)
     assert len(rig.mutations) == 1
     assert rig.mutations[0] == params
 
@@ -1062,20 +1123,20 @@ def test_exact_never_rewrites_the_priority_it_was_quoted_with(rig, monkeypatch):
     """Review N1: a run job goes out with the priority it was quoted and digested with; the
     Turbo -> Low downgrade is applied at the run's build, never again at its submit."""
     monkeypatch.setitem(core._turbo_refused, "seen", True)
-    core.submit_generation(object(), {"prompts": "a", "priority": core.PRIORITY_TURBO}, exact=True)
-    assert rig.mutations[0]["priority"] == core.PRIORITY_TURBO
-    core.submit_generation(object(), {"prompts": "a", "priority": core.PRIORITY_TURBO})
-    assert rig.mutations[1]["priority"] == core.PRIORITY_LOW, "a single send keeps today's rule"
+    gen_road_mod.submit_generation(object(), {"prompts": "a", "priority": gen_params_mod.PRIORITY_TURBO}, exact=True)
+    assert rig.mutations[0]["priority"] == gen_params_mod.PRIORITY_TURBO
+    gen_road_mod.submit_generation(object(), {"prompts": "a", "priority": gen_params_mod.PRIORITY_TURBO})
+    assert rig.mutations[1]["priority"] == gen_params_mod.PRIORITY_LOW, "a single send keeps today's rule"
 
 
 def test_a_known_turbo_refusal_is_quoted_digested_and_sent_as_low(cli, rig, monkeypatch):
     monkeypatch.setitem(core._turbo_refused, "seen", True)
     p = plan(cli, prompt="{a|b} x", count=2).get_json()
     assert {c["request"]["variables"]["parameters"]["priority"] for c in p["cells"]} \
-        == {core.PRIORITY_LOW}
+        == {gen_params_mod.PRIORITY_LOW}
     d = run(cli, ack=ack_of(p), prompt="{a|b} x", count=2).get_json()
     assert d["status"] == "sent"
-    assert [m["priority"] for m in rig.mutations] == [core.PRIORITY_LOW] * 2
+    assert [m["priority"] for m in rig.mutations] == [gen_params_mod.PRIORITY_LOW] * 2
 
 
 class _NoHooks(object):
@@ -1101,23 +1162,23 @@ def test_a_lane_graphql_error_is_refused_only_when_it_is_definite(rig, data, sta
         e.graphql_data = data
         raise e
     rig.on_mutate = answer
-    req = core.GenerationRequest(mode="image", unlimited=True, parameters={
-        "prompts": "a", "modelId": "V", "lane": core.UNLIMITED_LANE})
-    res = core.send_run(object(), [{"cell": 0, "req": req, "no_card": None}], hooks=_NoHooks())
+    req = gen_road_mod.GenerationRequest(mode="image", unlimited=True, parameters={
+        "prompts": "a", "modelId": "V", "lane": gen_road_mod.UNLIMITED_LANE})
+    res = gen_road_mod.send_run(object(), [{"cell": 0, "req": req, "no_card": None}], hooks=_NoHooks())
     assert res["jobs"][0]["state"] == state
     assert len(rig.mutations) == 1
 
 
 def test_before_send_runs_after_the_card_and_can_stop_the_send(rig):
     rig.card_default = CARD
-    req = core.build_request(dict(BASE, count=1), mode="image")
+    req = gen_road_mod.build_request(dict(BASE, count=1), mode="image")
     seen = []
 
     def stop(params):
         seen.append(params.get("kaisuukenId"))
         raise core.LocalRefusal("over budget")
     with pytest.raises(core.LocalRefusal):
-        core.submit(object(), req, before_send=stop)
+        gen_road_mod.submit(object(), req, before_send=stop)
     assert seen == ["K1"] and rig.mutations == []
 
 
@@ -1153,7 +1214,7 @@ def _posix_argv(command):
 
 
 def _web_params(**kw):
-    req = core.build_request(dict(BASE, **kw), mode="image")
+    req = gen_road_mod.build_request(dict(BASE, **kw), mode="image")
     return dict(req.parameters)
 
 
@@ -1177,7 +1238,7 @@ def test_the_flag_command_rebuilds_the_same_parameters(cli_parser, kw):
     out = runs.cli_command(core, params, shell="posix")
     assert out["form"] == "flags", out
     ns = cli_parser.parse_args(_posix_argv(out["command"]))
-    assert core._gen_parameters(ns) == params
+    assert gen_params_mod._gen_parameters(ns) == params
     for dest, value in runs._CLI_DEFAULTS.items():
         if dest in ("priority",):
             continue
@@ -1189,7 +1250,7 @@ def test_the_cli_defaults_are_the_parsers_own(cli_parser):
     ns = cli_parser.parse_args(["--generate"])
     for dest, value in runs._CLI_DEFAULTS.items():
         if dest == "priority":
-            assert ns.priority == core.PRIORITY_TURBO
+            assert ns.priority == gen_params_mod.PRIORITY_TURBO
             continue
         if dest == "count":
             # --batch-size shares dest="count" with the top-level --count switch, so its
@@ -1276,4 +1337,4 @@ def test_the_powershell_command_survives_real_windows_powershell(tmp_path, cli_p
                        capture_output=True, stdin=subprocess.DEVNULL)
         argv = json.loads(dump.read_text(encoding="utf-8"))
         ns = cli_parser.parse_args(argv)
-        assert core._gen_parameters(ns) == params, (out["command"], argv)
+        assert gen_params_mod._gen_parameters(ns) == params, (out["command"], argv)

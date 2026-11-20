@@ -23,7 +23,9 @@ import pytest
 import requests
 
 from moonglade import backup as core
+from moonglade import gen_road as gen_road_mod
 from moonglade import paths
+from moonglade import training as training_mod
 from moonglade.gallery import CATALOG_FIELDS, TrainGuard, create_app, save_catalog
 from tests.conftest import login_test_client
 from moonglade import pixai_client as pixai_client_mod
@@ -61,13 +63,13 @@ def _task(tid="700", status="captionReady", n=12, mode="advanced", progress=None
 # ---------------------------------------------------------------- core writers
 
 @pytest.mark.parametrize("call", [
-    lambda s: core.create_advanced_training_draft(s, T3, "n", TRIGGER, "character"),
-    lambda s: core.replace_training_media(s, "7", ["1"]),
-    lambda s: core.start_training_captions(s, "7"),
-    lambda s: core.save_training_caption(s, "7", "1", "text"),
-    lambda s: core.submit_advanced_training(s, "7"),
-    lambda s: core.retry_training(s, "7"),
-    lambda s: core.publish_training(s, "7", "private", "decline"),
+    lambda s: training_mod.create_advanced_training_draft(s, T3, "n", TRIGGER, "character"),
+    lambda s: training_mod.replace_training_media(s, "7", ["1"]),
+    lambda s: training_mod.start_training_captions(s, "7"),
+    lambda s: training_mod.save_training_caption(s, "7", "1", "text"),
+    lambda s: training_mod.submit_advanced_training(s, "7"),
+    lambda s: training_mod.retry_training(s, "7"),
+    lambda s: training_mod.publish_training(s, "7", "private", "decline"),
     lambda s: core.make_model_public(s, "7"),
     lambda s: core.join_lora_rebates(s, "7"),
 ])
@@ -81,7 +83,7 @@ def test_every_training_writer_checks_read_only_before_the_network(call, pixai, 
 
 def test_the_advanced_draft_is_the_sites_own_call(pixai):
     pixai.on("createTrainingTask", {"createTrainingTask": {"id": "4242", "refId": None}})
-    out = core.create_advanced_training_draft(pixai, T3, "  Priestess set ", "Moonlit Night ELF druid,, in the grove",
+    out = training_mod.create_advanced_training_draft(pixai, T3, "  Priestess set ", "Moonlit Night ELF druid,, in the grove",
                                               "clothing")
     assert out == {"id": "4242"}
     (call,) = pixai.calls_for("createTrainingTask")
@@ -93,11 +95,11 @@ def test_the_advanced_draft_is_the_sites_own_call(pixai):
 
 
 def test_advanced_offers_tsubaki3_and_tsubaki2_only(pixai):
-    assert [b["version_id"] for b in core.advanced_training_bases()] == [T3, T2]
+    assert [b["version_id"] for b in training_mod.advanced_training_bases()] == [T3, T2]
     with pytest.raises(core.PixAIError, match="Tsubaki"):
-        core.create_advanced_training_draft(pixai, SDXL, "n", TRIGGER, "character")
+        training_mod.create_advanced_training_draft(pixai, SDXL, "n", TRIGGER, "character")
     with pytest.raises(core.PixAIError, match="at least 30"):
-        core.create_advanced_training_draft(pixai, T3, "n", "too short", "character")
+        training_mod.create_advanced_training_draft(pixai, T3, "n", "too short", "character")
     assert pixai.calls == []
 
 
@@ -105,7 +107,7 @@ def test_the_start_sends_pixais_default_options_verbatim(pixai):
     """Spend review, findings 3 and 4: PixAI's page sends its defaults (its controls are inert)
     and its quote takes no length, so exactly that body goes, whatever a client asks."""
     pixai.on("/training-task/77/submit", {"trainingTaskId": "77", "status": "waiting"})
-    assert core.submit_advanced_training(pixai, "77") == "waiting"
+    assert training_mod.submit_advanced_training(pixai, "77") == "waiting"
     (call,) = pixai.calls_for("/training-task/77/submit")
     assert call.body == {"trainingOptions": {"trainingSteps": 325, "learningRate": 0.0006,
                                              "rank": 64, "gradAccum": 2}}
@@ -113,37 +115,37 @@ def test_the_start_sends_pixais_default_options_verbatim(pixai):
 
 def test_a_description_is_1000_characters_at_most(pixai):
     pixai.on("PUT /training-task/7/captions/55", {"mediaId": "55"})
-    assert core.save_training_caption(pixai, "7", "55", "  a " + "x" * 996) == "a " + "x" * 996
+    assert training_mod.save_training_caption(pixai, "7", "55", "  a " + "x" * 996) == "a " + "x" * 996
     with pytest.raises(core.PixAIError, match="1000 characters"):
-        core.save_training_caption(pixai, "7", "55", "y" * 1001)
+        training_mod.save_training_caption(pixai, "7", "55", "y" * 1001)
     with pytest.raises(core.PixAIError, match="empty"):
-        core.save_training_caption(pixai, "7", "55", "   ")
+        training_mod.save_training_caption(pixai, "7", "55", "   ")
     (call,) = [c for c in pixai.calls if c.verb == "rest_put"]
     assert call.body == {"text": "a " + "x" * 996}
 
 
 def test_publish_refuses_rebates_on_a_private_lora_before_sending(pixai):
     with pytest.raises(core.PixAIError, match="public"):
-        core.publish_training(pixai, "7", "private", "join")
+        training_mod.publish_training(pixai, "7", "private", "join")
     assert pixai.calls == []
     pixai.on("/training-task/7/publish", {"trainingTaskId": "7", "modelId": "m1", "versionId": "v1"})
-    assert core.publish_training(pixai, "7", "public", "join") == {"model_id": "m1", "version_id": "v1"}
+    assert training_mod.publish_training(pixai, "7", "public", "join") == {"model_id": "m1", "version_id": "v1"}
     assert pixai.calls_for("/training-task/7/publish")[0].body == {"visibility": "public",
                                                                    "loraRebate": "join"}
 
 
 def test_the_eta_is_pixais_own_formula():
-    assert core.training_eta(325) == {"min": 27, "max": 35}
-    assert core.training_eta(50) == {"min": 4, "max": 5}
+    assert training_mod.training_eta(325) == {"min": 27, "max": 35}
+    assert training_mod.training_eta(50) == {"min": 4, "max": 5}
 
 
 def test_a_refusal_and_an_unclear_failure_are_told_apart():
-    assert core.definite_refusal(core.PixAIRestError("x", 403, {"code": "INSUFFICIENT_BALANCE"}))
-    assert core.definite_refusal(core.graphql_error('[{"message": "no"}]', code="FORBIDDEN"))
-    assert not core.definite_refusal(core.PixAIRestError("x", 502, {}))
-    assert not core.definite_refusal(requests.ReadTimeout("slow"))
-    assert not core.definite_refusal(requests.ConnectionError("dropped"))
-    assert not core.definite_refusal(core.PixAIError("HTTP 200 non-JSON response"))
+    assert gen_road_mod.definite_refusal(core.PixAIRestError("x", 403, {"code": "INSUFFICIENT_BALANCE"}))
+    assert gen_road_mod.definite_refusal(core.graphql_error('[{"message": "no"}]', code="FORBIDDEN"))
+    assert not gen_road_mod.definite_refusal(core.PixAIRestError("x", 502, {}))
+    assert not gen_road_mod.definite_refusal(requests.ReadTimeout("slow"))
+    assert not gen_road_mod.definite_refusal(requests.ConnectionError("dropped"))
+    assert not gen_road_mod.definite_refusal(core.PixAIError("HTTP 200 non-JSON response"))
 
 
 class _Resp:
@@ -185,14 +187,14 @@ def test_the_one_rest_error_serves_the_training_refusals_and_the_recipe_code():
         e = ei.value
         assert e.status == e.http_status == 403 and e.body == body
         assert e.code == "INSUFFICIENT_BALANCE" and e.data == {"mediaIds": ["5"]}
-        assert core.definite_refusal(e)
-        assert core.training_error_words(e).startswith("there aren't enough credits")
+        assert gen_road_mod.definite_refusal(e)
+        assert training_mod.training_error_words(e).startswith("there aren't enough credits")
     client = pixai_client_mod.PixAIClient(_Sess(_Resp(502, "<html>bad gateway</html>")))
     with pytest.raises(core.PixAIRestError) as ei:
         client.rest_put("/training-task/1/media", {})
     assert ei.value.body is None and ei.value.code == "" and ei.value.data == {}
-    assert not core.definite_refusal(ei.value)
-    assert core.training_error_words(ei.value).startswith("REST PUT /training-task/1/media -> 502")
+    assert not gen_road_mod.definite_refusal(ei.value)
+    assert training_mod.training_error_words(ei.value).startswith("REST PUT /training-task/1/media -> 502")
 
 
 # ------------------------------------------------------------ the draft route
@@ -204,7 +206,7 @@ def test_the_draft_route_needs_csrf_and_refuses_read_only_before_anything(tmp_pa
             "category": "character"}
     assert post("/api/train/advanced/draft", body, csrf_ok=False).status_code == 400
     reads = []
-    monkeypatch.setattr(core, "training_pause", lambda: reads.append("pause"))
+    monkeypatch.setattr(training_mod, "training_pause", lambda: reads.append("pause"))
     monkeypatch.setattr(core, "_check_read_only",
                         lambda what: (_ for _ in ()).throw(core.PixAIError("READ_ONLY")))
     r = post("/api/train/advanced/draft", body)
@@ -216,10 +218,10 @@ def test_the_draft_route_creates_one_draft_and_a_pause_creates_none(tmp_path, pi
     _, post = _app(tmp_path)
     body = {"base_model_id": T3, "title": "Priestess set", "trigger_words": TRIGGER,
             "category": "character"}
-    monkeypatch.setattr(core, "training_pause", lambda: {"resumes_at": ""})
+    monkeypatch.setattr(training_mod, "training_pause", lambda: {"resumes_at": ""})
     r = post("/api/train/advanced/draft", body)
     assert r.status_code == 409 and pixai.mutations() == 0
-    monkeypatch.setattr(core, "training_pause", lambda: None)
+    monkeypatch.setattr(training_mod, "training_pause", lambda: None)
     pixai.on("createTrainingTask", {"createTrainingTask": {"id": "4242"}})
     assert post("/api/train/advanced/draft", body).get_json() == {"id": "4242"}
     assert pixai.mutations("createTrainingTask") == 1
@@ -238,7 +240,7 @@ def test_opening_a_draft_only_reads(tmp_path, pixai, monkeypatch):
     pixai.on("/training-task/700/price", {"price": 100000})
     texts = {"https://c/900": "night elf, moonwell", "https://c/901u": "my words",
              "https://c/901m": "machine words"}
-    monkeypatch.setattr(core, "fetch_caption_text", lambda url, limit=0: texts.get(url))
+    monkeypatch.setattr(training_mod, "fetch_caption_text", lambda url, limit=0: texts.get(url))
     d = cli.get("/api/train/advanced/700").get_json()
     assert d["task"]["media_ids"] == ["900", "901"] and d["quote"] == 100000
     assert d["captions"]["900"] == {"source": "machine", "text": "night elf, moonwell",
@@ -300,13 +302,13 @@ def test_a_paid_confirm_is_refused_while_another_holds_the_run(tmp_path, pixai, 
     _, post = _app(tmp_path)
     _describe_fake(pixai, total=1800)
     started, release = threading.Event(), threading.Event()
-    real = core.start_training_captions
+    real = training_mod.start_training_captions
 
     def slow(session, tid):
         started.set()
         release.wait(5)
         return real(session, tid)
-    monkeypatch.setattr(core, "start_training_captions", slow)
+    monkeypatch.setattr(training_mod, "start_training_captions", slow)
     out = {}
     t = threading.Thread(target=lambda: out.setdefault("a", post(
         "/api/train/advanced/700/caption", {"confirm": True, "accept_credit_cost": 1800})))
@@ -604,8 +606,8 @@ def test_datasets_are_finished_basic_runs_only(tmp_path, pixai):
 
 def _basic_client(tmp_path, monkeypatch, pixai, quota=0):
     _, post = _app(tmp_path)
-    monkeypatch.setattr(core, "training_free_quota", lambda s: quota)
-    monkeypatch.setattr(core, "match_training_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(training_mod, "training_free_quota", lambda s: quota)
+    monkeypatch.setattr(training_mod, "match_training_kaisuuken", lambda *a, **k: None)
     pixai.on("createTrainingTask", {"createTrainingTask": {"id": "trn1", "refId": "m7"}})
     return post
 
@@ -678,7 +680,7 @@ def test_an_unclear_basic_failure_says_it_may_have_started_and_blocks_a_resend(
     r = post("/api/train/submit", body)
     assert r.status_code == 409 and "may have gone through" in r.get_json()["error"]
     _, post2 = _app(tmp_path)                                   # a restart keeps it
-    monkeypatch.setattr(core, "training_free_quota", lambda s: 0)
+    monkeypatch.setattr(training_mod, "training_free_quota", lambda s: 0)
     assert post2("/api/train/submit", body).status_code == 409
     assert pixai.mutations("createTrainingTask") == 1
 
@@ -698,13 +700,13 @@ def test_two_basic_confirms_at_once_send_one(tmp_path, monkeypatch, pixai):
     post = _basic_client(tmp_path, monkeypatch, pixai)
     _loras(pixai, [])
     started, release = threading.Event(), threading.Event()
-    real = core.submit_training
+    real = training_mod.submit_training
 
     def slow(*a, **k):
         started.set()
         release.wait(5)
         return real(*a, **k)
-    monkeypatch.setattr(core, "submit_training", slow)
+    monkeypatch.setattr(training_mod, "submit_training", slow)
     body = dict(_BASIC, dataset_task_id="", confirm=True, accept_credit_cost=100000)
     out = {}
     t = threading.Thread(target=lambda: out.setdefault("a", post("/api/train/submit", body)))
@@ -800,10 +802,10 @@ def test_a_graphql_answer_with_data_and_errors_is_not_a_definite_refusal():
     partial = _graphql_error({"data": {"createTrainingTask": {"id": "trn9"}},
                               "errors": [{"message": "a nested field failed"}]})
     assert partial.graphql_data == {"createTrainingTask": {"id": "trn9"}}
-    assert not core.definite_refusal(partial)
+    assert not gen_road_mod.definite_refusal(partial)
     for data in ({"createTrainingTask": None}, None):
         refused = _graphql_error({"data": data, "errors": [{"message": "nope", "extensions": {"code": "FORBIDDEN"}}]})
-        assert core.definite_refusal(refused)
+        assert gen_road_mod.definite_refusal(refused)
 
 
 def test_a_partial_basic_success_keeps_the_double_start_guard(tmp_path, monkeypatch, pixai):
@@ -850,16 +852,16 @@ def test_a_basic_refusal_before_the_network_is_definite_and_says_nothing_started
 def test_submit_training_validates_against_the_callers_config(pixai, monkeypatch):
     """F4: the route's config, not a re-read, so the confirm validates what was priced; a
     validation refusal is a LocalRefusal and sends nothing."""
-    cfg = core.training_config()
-    monkeypatch.setattr(core, "training_config",
+    cfg = training_mod.training_config()
+    monkeypatch.setattr(training_mod, "training_config",
                         lambda: (_ for _ in ()).throw(AssertionError("re-read the config")))
     pixai.on("createTrainingTask", {"createTrainingTask": {"id": "trn1"}})
     session = core._make_session()
-    out = core.submit_training(session, T3, _REUSED, "Tania v2", TRIGGER, "character",
+    out = training_mod.submit_training(session, T3, _REUSED, "Tania v2", TRIGGER, "character",
                                config=cfg)
     assert out == {"id": "trn1"}
     with pytest.raises(core.LocalRefusal):
-        core.submit_training(session, T3, _REUSED, "Tania v2", "short", "character",
+        training_mod.submit_training(session, T3, _REUSED, "Tania v2", "short", "character",
                              config=cfg)
     assert pixai.mutations("createTrainingTask") == 1
 
@@ -948,10 +950,27 @@ def test_a_training_routes_own_refusal_leaves_retry_free(tmp_path, pixai, code, 
 
 
 def test_the_training_table_is_the_harvested_one_and_never_the_create_table():
-    assert core.TRAINING_CODES - core.PIXAI_REJECTED_CODES == {
+    assert gen_road_mod.TRAINING_CODES - gen_road_mod.PIXAI_REJECTED_CODES == {
         "UNAUTHORIZED", "NOT_FOUND", "CONFLICT", "TRAINING_IMAGE_REJECTED",
         "TRAINING_DATASET_TOO_SMALL", "MODEL_PUBLISH_CONFLICT", "LORA_REBATE_REQUIRES_PUBLIC"}
     for code in ("CONFLICT", "NOT_FOUND", "TRAINING_DATASET_TOO_SMALL"):
         exc = core.PixAIRestError("x", 409, {"code": code})
-        assert core.definite_refusal(exc, codes=core.TRAINING_CODES)
-        assert not core.definite_refusal(exc), "a training code read with the create table"
+        assert gen_road_mod.definite_refusal(exc, codes=gen_road_mod.TRAINING_CODES)
+        assert not gen_road_mod.definite_refusal(exc), "a training code read with the create table"
+
+def test_the_training_guards_read_the_training_family_by_name():
+    """3.22 S3-training (DESIGN_3.22 2.6, V5): the four paid training guards read
+    definite_refusal(e, "training") -- OUTCOME_FAMILIES' table by name -- and that is the
+    harvested TRAINING_CODES, never the create table. A training code read in family "create"
+    is unknown; read in "training" it is a refusal, so a clear refusal never holds Start."""
+    assert gen_road_mod.OUTCOME_FAMILIES["training"] is gen_road_mod.TRAINING_CODES
+    for code in sorted(gen_road_mod.TRAINING_CODES):
+        exc = core.PixAIRestError("x", 400, {"code": code})
+        assert gen_road_mod.classify_outcome(exc, "training") == "refused", code
+    for code in ("TRAINING_IMAGE_REJECTED", "TRAINING_DATASET_TOO_SMALL", "CONFLICT",
+                 "MODEL_PUBLISH_CONFLICT", "LORA_REBATE_REQUIRES_PUBLIC", "NOT_FOUND"):
+        exc = core.PixAIRestError("x", 400, {"code": code})
+        assert gen_road_mod.classify_outcome(exc, "create") == "unknown", code
+    # an unknown outcome stays unknown in the training family too
+    assert gen_road_mod.classify_outcome(core.PixAIRestError("x", 408, {"code": "CONFLICT"}),
+                                         "training") == "unknown"

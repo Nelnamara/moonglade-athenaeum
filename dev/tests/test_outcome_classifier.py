@@ -10,7 +10,9 @@ import pytest
 import requests
 
 from moonglade import backup as core
+from moonglade import gen_road as gen_road_mod
 from moonglade import pixai_client as pc
+from moonglade import models as models_mod
 
 DECLARED_OUTSIDE = ["FILE_NOT_FOUND", "NOT_FOUND", "LORA_NUM_EXCEEDED", "MODEL_LORA_INCOMPATIBLE",
                     "IMAGE_SIZE_NOT_ALLOWED", "INPUT_IMAGE_TOO_LARGE", "NSFW_DETECTED",
@@ -24,59 +26,59 @@ def _rest(status, body):
 
 
 def test_definite_codes_are_pixais_twenty_and_three_pre_submit_codes():
-    assert len(core.PIXAI_REJECTED_CODES) == 20
-    assert core.DEFINITE_CODES - core.PIXAI_REJECTED_CODES == {
+    assert len(gen_road_mod.PIXAI_REJECTED_CODES) == 20
+    assert gen_road_mod.DEFINITE_CODES - gen_road_mod.PIXAI_REJECTED_CODES == {
         "UNAUTHORIZED", "VALIDATION_ERROR", "INFINITE_MODE_NOT_ELIGIBLE"}
 
 
-@pytest.mark.parametrize("code", sorted(core.DEFINITE_CODES))
+@pytest.mark.parametrize("code", sorted(gen_road_mod.DEFINITE_CODES))
 def test_each_definite_code_reads_refused(code):
-    assert core.classify_outcome(_rest(403, {"code": code})) == "refused"
-    assert core.definite_refusal(_rest(400, {"code": code, "data": {}}))
+    assert gen_road_mod.classify_outcome(_rest(403, {"code": code})) == "refused"
+    assert gen_road_mod.definite_refusal(_rest(400, {"code": code, "data": {}}))
 
 
 @pytest.mark.parametrize("code", DECLARED_OUTSIDE)
 def test_each_declared_code_outside_the_list_reads_unknown(code):
-    assert core.classify_outcome(_rest(400, {"code": code})) == "unknown"
-    assert not core.definite_refusal(_rest(404, {"code": code}))
+    assert gen_road_mod.classify_outcome(_rest(400, {"code": code})) == "unknown"
+    assert not gen_road_mod.definite_refusal(_rest(404, {"code": code}))
 
 
 @pytest.mark.parametrize("status", [408, 499])
 @pytest.mark.parametrize("code", ["INSUFFICIENT_BALANCE", "BAD_REQUEST", "UNAUTHORIZED"])
 def test_408_and_499_are_unknown_even_with_a_well_formed_body(status, code):
-    assert core.classify_outcome(_rest(status, {"code": code})) == "unknown"
+    assert gen_road_mod.classify_outcome(_rest(status, {"code": code})) == "unknown"
 
 
 @pytest.mark.parametrize("body", [None, "<html>Forbidden</html>", {}, {"code": ""},
                                   {"code": 40300010}, {"message": "INSUFFICIENT_BALANCE"},
                                   ["INSUFFICIENT_BALANCE"]])
 def test_a_bare_or_unrecognised_4xx_body_is_unknown(body):
-    assert core.classify_outcome(_rest(403, body)) == "unknown"
+    assert gen_road_mod.classify_outcome(_rest(403, body)) == "unknown"
 
 
 @pytest.mark.parametrize("status", [301, 307, 500, 502, 503, None, "x"])
 def test_redirects_server_errors_and_no_status_are_unknown(status):
-    assert core.classify_outcome(_rest(status, {"code": "INSUFFICIENT_BALANCE"})) == "unknown"
+    assert gen_road_mod.classify_outcome(_rest(status, {"code": "INSUFFICIENT_BALANCE"})) == "unknown"
 
 
 def test_any_code_is_only_for_the_inbox_and_still_excludes_408_499_and_bare():
-    assert core.definite_refusal(_rest(409, {"code": "ALREADY_CLAIMED"}), codes=core.ANY_PIXAI_CODE)
-    assert not core.definite_refusal(_rest(409, {"code": "ALREADY_CLAIMED"}))
-    assert not core.definite_refusal(_rest(408, {"code": "X"}), codes=core.ANY_PIXAI_CODE)
-    assert not core.definite_refusal(_rest(403, None), codes=core.ANY_PIXAI_CODE)
+    assert gen_road_mod.definite_refusal(_rest(409, {"code": "ALREADY_CLAIMED"}), codes=gen_road_mod.ANY_PIXAI_CODE)
+    assert not gen_road_mod.definite_refusal(_rest(409, {"code": "ALREADY_CLAIMED"}))
+    assert not gen_road_mod.definite_refusal(_rest(408, {"code": "X"}), codes=gen_road_mod.ANY_PIXAI_CODE)
+    assert not gen_road_mod.definite_refusal(_rest(403, None), codes=gen_road_mod.ANY_PIXAI_CODE)
 
 
 def test_local_auth_and_graphql_are_read_by_type():
-    assert core.classify_outcome(core.LocalRefusal("READ_ONLY")) == "local"
-    assert core.classify_outcome(core.PixAIAuthError("401 Unauthorized")) == "refused"
-    assert core.classify_outcome(core.graphql_error("no", code="INSUFFICIENT_BALANCE")) == "refused"
-    assert core.classify_outcome(core.graphql_error([{"message": "no"}])) == "unknown"   # no code
+    assert gen_road_mod.classify_outcome(core.LocalRefusal("READ_ONLY")) == "local"
+    assert gen_road_mod.classify_outcome(core.PixAIAuthError("401 Unauthorized")) == "refused"
+    assert gen_road_mod.classify_outcome(core.graphql_error("no", code="INSUFFICIENT_BALANCE")) == "refused"
+    assert gen_road_mod.classify_outcome(core.graphql_error([{"message": "no"}])) == "unknown"   # no code
     partial = core.graphql_error([{"message": "late"}], {"createGenerationTask": {"id": "1"}})
-    assert core.classify_outcome(partial) == "unknown"
+    assert gen_road_mod.classify_outcome(partial) == "unknown"
     for exc in (requests.ReadTimeout("x"), requests.ConnectionError("x"),
                 requests.HTTPError("502"), core.PixAIError("no task id returned: {}"),
                 ValueError("x")):
-        assert core.classify_outcome(exc) == "unknown"
+        assert gen_road_mod.classify_outcome(exc) == "unknown"
 
 
 @pytest.mark.parametrize("text", [
@@ -87,8 +89,8 @@ def test_local_auth_and_graphql_are_read_by_type():
 def test_message_text_never_decides(text):
     """A plain PixAIError whose words match the old prefixes is not a refusal: only the
     structured fields the transport sets are read."""
-    assert core.classify_outcome(core.PixAIError(text)) == "unknown"
-    assert core.send_outcome(core.PixAIError(text), True) == "may_have_started"
+    assert gen_road_mod.classify_outcome(core.PixAIError(text)) == "unknown"
+    assert gen_road_mod.send_outcome(core.PixAIError(text), True) == "may_have_started"
 
 
 def test_the_real_transport_raises_the_typed_errors():
@@ -113,19 +115,19 @@ def test_the_real_transport_raises_the_typed_errors():
         pc.PixAIClient(_S(_R(200, {"errors": [{"message": "no", "extensions": {"code": "FORBIDDEN"}}], "data": None}))).mutate(
             "mutation { x }", {})
     assert ei.value.graphql_errors == [{"message": "no", "extensions": {"code": "FORBIDDEN"}}]
-    assert core.definite_refusal(ei.value)
+    assert gen_road_mod.definite_refusal(ei.value)
     with pytest.raises(core.PixAIRestError) as ei:
         pc.PixAIClient(_S(_R(408, {"code": "BAD_REQUEST"}))).rest_post("/x", {})
-    assert not core.definite_refusal(ei.value)
+    assert not gen_road_mod.definite_refusal(ei.value)
 
 
 def test_send_outcome():
-    assert core.send_outcome(requests.ReadTimeout("x"), False) == "not_sent"
-    assert core.send_outcome(requests.ReadTimeout("x"), True) == "may_have_started"
-    assert core.send_outcome(_rest(403, {"code": "INSUFFICIENT_BALANCE"}), True) == "refused"
+    assert gen_road_mod.send_outcome(requests.ReadTimeout("x"), False) == "not_sent"
+    assert gen_road_mod.send_outcome(requests.ReadTimeout("x"), True) == "may_have_started"
+    assert gen_road_mod.send_outcome(_rest(403, {"code": "INSUFFICIENT_BALANCE"}), True) == "refused"
     e = core.PixAIError("PixAI refused the ultra profile")
     e.refused = True
-    assert core.send_outcome(e, True) == "refused"
+    assert gen_road_mod.send_outcome(e, True) == "refused"
 
 
 # ---------------------------------------------------------------------------
@@ -137,15 +139,17 @@ def test_the_lane_branch_reads_the_graphql_attributes_not_the_prefix(monkeypatch
     words; a plain PixAIError shaped like one is passed on as it came (unknown)."""
     monkeypatch.setattr(core, "_check_read_only", lambda *a: None)
     monkeypatch.setattr(core._mirror, "_session_for_create", lambda s: s)
-    monkeypatch.setattr(core, "_gate_params_for_model", lambda s, p: p)
+    monkeypatch.setattr(models_mod, "_gate_params_for_model", lambda s, p: p)
     lane = {"modelId": "1", "prompts": "x", "lane": "infinite"}
-    fake_text = core.PixAIError('GraphQL error: [{"message": "no"}]')
-    monkeypatch.setattr(core, "gql_mutate", lambda *a, **k: (_ for _ in ()).throw(fake_text))
+    # (the lane rides the create door since 3.22 S3-image; the rule is the same on it)
+    fake_text = core.PixAIError('GraphQL error: [{"message": "no"}] INFINITE_MODE_NOT_ELIGIBLE')
+    monkeypatch.setattr(core, "_create", lambda *a, **k: (_ for _ in ()).throw(fake_text))
     with pytest.raises(core.PixAIError) as ei:
-        core.submit_generation(object(), dict(lane))
+        gen_road_mod.submit_generation(object(), dict(lane))
     assert ei.value is fake_text and not getattr(ei.value, "refused", False)
-    real = core.graphql_error("no", code="INFINITE_MODE_NOT_ELIGIBLE")
-    monkeypatch.setattr(core, "gql_mutate", lambda *a, **k: (_ for _ in ()).throw(real))
+    real = core.PixAIRestError("REST POST /task/create -> 400", status=400,
+                               body={"code": "INFINITE_MODE_NOT_ELIGIBLE", "message": "no"})
+    monkeypatch.setattr(core, "_create", lambda *a, **k: (_ for _ in ()).throw(real))
     with pytest.raises(core.PixAIError) as ei:
-        core.submit_generation(object(), dict(lane))
+        gen_road_mod.submit_generation(object(), dict(lane))
     assert ei.value.refused is True

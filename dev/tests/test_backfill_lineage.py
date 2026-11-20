@@ -15,6 +15,7 @@ import pytest
 from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
 
 from moonglade import backup as core
+from moonglade import task_reads as task_reads_mod
 
 
 def _args(tmp_path):
@@ -35,7 +36,7 @@ def _seed(tmp_path, task_ids):
 
 def _run(monkeypatch, tmp_path, detail_fn):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "task_detail_gql", lambda session, tid: detail_fn(tid))
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda session, tid: detail_fn(tid))
     core.run_backfill_lineage(_args(tmp_path))
     return {r["task_id"]: r for r in load_catalog(tmp_path / "catalog.db")}
 
@@ -62,7 +63,7 @@ def test_errored_task_is_not_stamped_checked_and_retries_next_run(monkeypatch, t
         return {"task": {"parameters": {"image": {"mediaId": "src9"}},
                          "taskType": "edit"}}
 
-    monkeypatch.setattr(core, "task_detail_gql", lambda session, tid: detail2(tid))
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda session, tid: detail2(tid))
     core.run_backfill_lineage(_args(tmp_path))
     assert fetched == ["t_boom"]                      # t_ok was NOT refetched
     by_task = {r["task_id"]: r for r in load_catalog(tmp_path / "catalog.db")}

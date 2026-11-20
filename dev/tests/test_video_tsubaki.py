@@ -12,9 +12,16 @@ from types import SimpleNamespace
 import pytest
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import gallery as g
+from moonglade import gen_cli as gen_cli_mod
+from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
+from moonglade import models as models_mod
+from moonglade import pricing as pricing_mod
 from moonglade.gallery import CATALOG_FIELDS, save_catalog, load_catalog
 from moonglade import media_tools as media_tools_mod
+from moonglade import task_reads as task_reads_mod
 
 TBKV = ("tbkv1.0", "tbkv1.0.1")
 TBKV_IDS = {"tbkv1.0": "2042030623542642408", "tbkv1.0.1": "2054378086834851904"}
@@ -29,16 +36,16 @@ def _row(**kw):
 # =============================================================================
 def test_both_tsubaki_engines_are_in_the_roster_with_their_wire_ids():
     for name, vid in TBKV_IDS.items():
-        assert core.video_model_id(name) == vid
-    assert core.VIDEO_MODELS["tbkv1.0.1"]["label"] == "Tsubaki Video"
-    assert core.VIDEO_MODELS["tbkv1.0"]["label"] == "Tsubaki Video Flash"
-    assert core.DEFAULT_VIDEO_MODEL == "v4.0.1", "the app's default engine stays v4.0.1"
+        assert gen_params_mod.video_model_id(name) == vid
+    assert gen_params_mod.VIDEO_MODELS["tbkv1.0.1"]["label"] == "Tsubaki Video"
+    assert gen_params_mod.VIDEO_MODELS["tbkv1.0"]["label"] == "Tsubaki Video Flash"
+    assert gen_params_mod.DEFAULT_VIDEO_MODEL == "v4.0.1", "the app's default engine stays v4.0.1"
 
 
 def test_gallery_repair_table_matches_the_roster():
     """The catalog repair keeps its own name->id copy (the gallery cannot import the backup
     module at load time). It must be exactly VIDEO_MODELS' engines that publish an id."""
-    want = {n: m["model_id"] for n, m in core.VIDEO_MODELS.items() if m["model_id"]}
+    want = {n: m["model_id"] for n, m in gen_params_mod.VIDEO_MODELS.items() if m["model_id"]}
     assert g._VIDEO_NAME_TO_ID == want
 
 
@@ -47,18 +54,18 @@ def test_gallery_repair_table_matches_the_roster():
 # =============================================================================
 @pytest.mark.parametrize("model", TBKV + ("v4.0", "v3.2"))
 def test_reference_path_sends_the_engines_own_id(model):
-    p = core.build_shot_video_params("R2V", "@image1", image_ids=["1"], model=model)
-    assert p["modelId"] == core.video_model_id(model)
+    p = gen_params_mod.build_shot_video_params("R2V", "@image1", image_ids=["1"], model=model)
+    assert p["modelId"] == gen_params_mod.video_model_id(model)
 
 
 def test_the_default_engine_is_byte_identical():
-    p = core.build_shot_video_params("R2V", "@image1", image_ids=["1"], model="v4.0.1")
-    assert p["modelId"] == core.REFVIDEO_MODEL_ID == "2003969750675682808"
+    p = gen_params_mod.build_shot_video_params("R2V", "@image1", image_ids=["1"], model="v4.0.1")
+    assert p["modelId"] == gen_params_mod.REFVIDEO_MODEL_ID == "2003969750675682808"
 
 
 def test_an_engine_with_no_id_omits_the_key_on_both_paths():
-    r = core.build_shot_video_params("R2V", "@image1", image_ids=["1"], model="v9.9-new")
-    i = core.build_shot_video_params("I2V", "x", image_ids=["1"], model="v9.9-new")
+    r = gen_params_mod.build_shot_video_params("R2V", "@image1", image_ids=["1"], model="v9.9-new")
+    i = gen_params_mod.build_shot_video_params("I2V", "x", image_ids=["1"], model="v9.9-new")
     assert "modelId" not in r and "modelId" not in i
 
 
@@ -68,22 +75,22 @@ def test_tbkv_i2v_goes_out_in_the_sites_name_only_shape(model):
     top-level modelId stays at today's behaviour -- omitted -- on both i2vPro shots, even when
     a caller passes one (review V-R7). The reference path still sends tbkv's own id (V2)."""
     for shot, imgs in (("I2V", ["1"]), ("FLF", ["1", "2"])):
-        assert "modelId" not in core.build_shot_video_params(shot, "x", image_ids=imgs,
+        assert "modelId" not in gen_params_mod.build_shot_video_params(shot, "x", image_ids=imgs,
                                                               model=model)
-    assert "modelId" not in core.build_video_parameters("x", "1", model=model,
+    assert "modelId" not in gen_params_mod.build_video_parameters("x", "1", model=model,
                                                         model_id=TBKV_IDS[model])
-    assert core.build_shot_video_params("R2V", "@image1", image_ids=["1"],
+    assert gen_params_mod.build_shot_video_params("R2V", "@image1", image_ids=["1"],
                                         model=model)["modelId"] == TBKV_IDS[model]
     # the existing engines keep the id their card match needs
-    assert core.build_shot_video_params("I2V", "x", image_ids=["1"],
+    assert gen_params_mod.build_shot_video_params("I2V", "x", image_ids=["1"],
                                         model="v4.0.1")["modelId"] == "2003969750675682808"
 
 
 def test_cli_reference_video_preview_sends_the_chosen_engines_id(tmp_path, capsys):
-    core.run_reference_video(_refvid_args(tmp_path, video_model="v4.0"))
+    gen_cli_mod.run_reference_video(_refvid_args(tmp_path, video_model="v4.0"))
     out = capsys.readouterr().out
     assert '"modelId": "2003968021137101826"' in out
-    assert core.REFVIDEO_MODEL_ID not in out
+    assert gen_params_mod.REFVIDEO_MODEL_ID not in out
 
 
 # =============================================================================
@@ -91,10 +98,10 @@ def test_cli_reference_video_preview_sends_the_chosen_engines_id(tmp_path, capsy
 # =============================================================================
 @pytest.mark.parametrize("model", TBKV)
 def test_tbkv_renders_15s_and_carries_audio_on_both_paths(model):
-    i = core.build_shot_video_params("I2V", "x", image_ids=["1"], model=model, duration=15,
+    i = gen_params_mod.build_shot_video_params("I2V", "x", image_ids=["1"], model=model, duration=15,
                                      generate_audio=True, audio_language="english")["i2vPro"]
     assert i["duration"] == "15" and i["generateAudio"] is True and i["audioLanguage"] == "english"
-    r = core.build_shot_video_params("R2V", "@image1", image_ids=["1"], model=model,
+    r = gen_params_mod.build_shot_video_params("R2V", "@image1", image_ids=["1"], model=model,
                                      duration=15, generate_audio=True,
                                      audio_language="english")["referenceVideo"]
     assert r["duration"] == 15 and r["generateAudio"] is True and r["audioLanguage"] == "english"
@@ -102,32 +109,32 @@ def test_tbkv_renders_15s_and_carries_audio_on_both_paths(model):
 
 @pytest.mark.parametrize("model", TBKV)
 def test_six_seconds_snaps_to_five_on_tbkv_only(model):
-    assert core._snap_video_duration(6, model) == 5
-    assert core.build_shot_video_params("I2V", "x", image_ids=["1"], model=model,
+    assert gen_params_mod._snap_video_duration(6, model) == 5
+    assert gen_params_mod.build_shot_video_params("I2V", "x", image_ids=["1"], model=model,
                                          duration=6)["i2vPro"]["duration"] == "5"
-    assert core.build_shot_video_params("R2V", "@image1", image_ids=["1"], model=model,
+    assert gen_params_mod.build_shot_video_params("R2V", "@image1", image_ids=["1"], model=model,
                                          duration=6)["referenceVideo"]["duration"] == 5
     a = SimpleNamespace(prompt="p", image="55", tail="", duration=6, model="",
                         video_model=model, vmode="basic", audio=False,
                         audio_language="english", negative="", video_prompt_helper=False,
                         params_json="")
-    assert core._gen_video_parameters(a)["i2vPro"]["duration"] == "5"
+    assert gen_params_mod._gen_video_parameters(a)["i2vPro"]["duration"] == "5"
 
 
 def test_six_seconds_is_unchanged_on_the_existing_engines():
     """The 6 s stop of the existing engines is NOT touched by this branch (pinned by
     test_video_gen.py and test_doc_truth_residuals.py too)."""
     for model in ("v4.0.1", "v4.0", "v3.2", "v3.0.2"):
-        assert core._snap_video_duration(6, model) == 6, model
-    assert core.build_shot_video_params("I2V", "x", image_ids=["1"], model="v4.0.1",
+        assert gen_params_mod._snap_video_duration(6, model) == 6, model
+    assert gen_params_mod.build_shot_video_params("I2V", "x", image_ids=["1"], model="v4.0.1",
                                          duration=6)["i2vPro"]["duration"] == "6"
-    assert core.VIDEO_DURATIONS == (5, 6, 10, 15)
-    assert core.video_model_durations("v4.0.1") == core.VIDEO_DURATIONS
-    assert core.video_model_durations("tbkv1.0.1") == (5, 10, 15)
+    assert gen_params_mod.VIDEO_DURATIONS == (5, 6, 10, 15)
+    assert gen_params_mod.video_model_durations("v4.0.1") == gen_params_mod.VIDEO_DURATIONS
+    assert gen_params_mod.video_model_durations("tbkv1.0.1") == (5, 10, 15)
 
 
 def test_cli_reference_video_preview_snaps_six_to_five_on_tbkv(tmp_path, capsys):
-    core.run_reference_video(_refvid_args(tmp_path, video_model="tbkv1.0.1", duration=6))
+    gen_cli_mod.run_reference_video(_refvid_args(tmp_path, video_model="tbkv1.0.1", duration=6))
     assert '"duration": 5,' in capsys.readouterr().out
 
 
@@ -136,7 +143,7 @@ def test_build_request_says_when_the_engine_snaps_the_length():
     snaps on the client first, so this is the receipt for a Remix-built or hand-rolled
     payload. A length the engine takes says nothing, and v4.0.1 keeps its 6 s stop."""
     def req(model, d, shot="I2V"):
-        return core.build_request({"mode": shot, "images": ["1"], "prompt": "x",
+        return gen_road_mod.build_request({"mode": shot, "images": ["1"], "prompt": "x",
                                    "video_model": model, "duration": d}, mode="video")
     r = req("tbkv1.0.1", 6)
     assert r.parameters["i2vPro"]["duration"] == "5"
@@ -149,7 +156,7 @@ def test_build_request_says_when_the_engine_snaps_the_length():
     assert (e["used"], e["why"]) == (10, "this engine takes 5/6/10 s")
     for model, d in (("tbkv1.0.1", 10), ("tbkv1.0.1", 15), ("v4.0.1", 6), ("v4.0.1", "15")):
         assert req(model, d).adjusted == [], (model, d)
-    assert core.build_request({"mode": "I2V", "images": ["1"], "prompt": "x"},
+    assert gen_road_mod.build_request({"mode": "I2V", "images": ["1"], "prompt": "x"},
                               mode="video").adjusted == []          # no duration: the 5 default
 
 
@@ -159,7 +166,7 @@ def test_build_request_says_when_the_engine_snaps_the_length():
 def _rv(**kw):
     base = dict(image_media_ids=["1"], model="tbkv1.0.1")
     base.update(kw)
-    return core.build_reference_video_parameters("@image1", **base)["referenceVideo"]
+    return gen_params_mod.build_reference_video_parameters("@image1", **base)["referenceVideo"]
 
 
 def test_ratio_is_sent_for_tbkv_on_the_reference_path():
@@ -183,7 +190,7 @@ def test_an_unknown_ratio_is_refused_at_build_time():
 
 
 def test_the_ratio_set_is_the_sites_nine():
-    assert core.VIDEO_RATIOS == ("adaptive", "1:1", "2:3", "3:2", "3:4", "4:3",
+    assert gen_params_mod.VIDEO_RATIOS == ("adaptive", "1:1", "2:3", "3:2", "3:4", "4:3",
                                  "9:16", "16:9", "21:9")
 
 
@@ -192,13 +199,13 @@ def test_video_ratio_flag_reaches_the_cli_preview(monkeypatch, tmp_path, capsys)
     # A scoped context, never monkeypatch.undo(): undo would also lift conftest's autouse
     # network blocks for the rest of this test.
     with monkeypatch.context() as m:
-        m.setattr(core, "run_reference_video", lambda a: captured.setdefault("args", a))
+        m.setattr(gen_cli_mod, "run_reference_video", lambda a: captured.setdefault("args", a))
         m.setattr("sys.argv", ["prog", "--reference-video", "--ref-image", "1",
                                "--video-model", "tbkv1.0.1", "--video-ratio", "21:9",
                                "--out", str(tmp_path)])
         core.main()
     assert captured["args"].video_ratio == "21:9"
-    core.run_reference_video(_refvid_args(tmp_path, video_model="tbkv1.0.1", video_ratio="21:9"))
+    gen_cli_mod.run_reference_video(_refvid_args(tmp_path, video_model="tbkv1.0.1", video_ratio="21:9"))
     assert '"ratio": "21:9"' in capsys.readouterr().out
 
 
@@ -210,7 +217,7 @@ def test_video_ratio_flag_refuses_a_value_pixai_does_not_take(monkeypatch, tmp_p
 
 
 def test_video_ratio_on_a_non_tbkv_engine_says_it_is_not_sent(tmp_path, capsys):
-    core.run_reference_video(_refvid_args(tmp_path, video_model="v4.0.1", video_ratio="16:9"))
+    gen_cli_mod.run_reference_video(_refvid_args(tmp_path, video_model="v4.0.1", video_ratio="16:9"))
     out = capsys.readouterr().out
     assert '"ratio"' not in out and "only sent to the Tsubaki video engines" in out
 
@@ -220,22 +227,22 @@ def test_video_ratio_on_a_non_tbkv_engine_says_it_is_not_sent(tmp_path, capsys):
 # =============================================================================
 def test_input_video_durations_keep_order_and_are_all_or_nothing():
     lens = {"9": 10.04166698455811, "8": 3.5}
-    assert core.input_video_durations(["9", "8"], lens.get) == ([10.04166698455811, 3.5], False)
-    assert core.input_video_durations(["8", "9"], lens.get) == ([3.5, 10.04166698455811], False)
+    assert gen_params_mod.input_video_durations(["9", "8"], lens.get) == ([10.04166698455811, 3.5], False)
+    assert gen_params_mod.input_video_durations(["8", "9"], lens.get) == ([3.5, 10.04166698455811], False)
     # one unknown -> the whole list goes back to [], never a partial list
-    assert core.input_video_durations(["9", "7"], lens.get) == ([], True)
+    assert gen_params_mod.input_video_durations(["9", "7"], lens.get) == ([], True)
     # zero / negative is not a length
-    assert core.input_video_durations(["9"], {"9": 0}.get) == ([], True)
+    assert gen_params_mod.input_video_durations(["9"], {"9": 0}.get) == ([], True)
     # no video refs -> nothing to say
-    assert core.input_video_durations([], lens.get) == ([], False)
+    assert gen_params_mod.input_video_durations([], lens.get) == ([], False)
     # no lookup at all -> today's list, flagged
-    assert core.input_video_durations(["9"], None) == ([], True)
+    assert gen_params_mod.input_video_durations(["9"], None) == ([], True)
 
 
 def test_build_request_fills_input_lengths_through_the_resolver():
     lens = {"9": 10.04166698455811, "8": 21.5}
-    rs = core.RequestResolver(video_duration=lens.get)
-    req = core.build_request({"mode": "R2V", "images": [], "video_refs": ["9", "8"],
+    rs = gen_road_mod.RequestResolver(video_duration=lens.get)
+    req = gen_road_mod.build_request({"mode": "R2V", "images": [], "video_refs": ["9", "8"],
                               "prompt": "@video1 @video2", "duration": 5},
                              mode="video", resolve=rs)
     rv = req.parameters["referenceVideo"]
@@ -245,13 +252,13 @@ def test_build_request_fills_input_lengths_through_the_resolver():
 
 
 def test_an_unknown_length_sends_the_empty_list_and_a_receipt():
-    rs = core.RequestResolver(video_duration={"9": 10.0}.get)
-    req = core.build_request({"mode": "R2V", "video_refs": ["9", "8"], "prompt": "x"},
+    rs = gen_road_mod.RequestResolver(video_duration={"9": 10.0}.get)
+    req = gen_road_mod.build_request({"mode": "R2V", "video_refs": ["9", "8"], "prompt": "x"},
                              mode="video", resolve=rs)
     assert req.parameters["referenceVideo"]["inputVideoDurations"] == []
     (entry,) = req.adjusted
     assert entry["field"] == "inputVideoDurations" and entry["used"] == []
-    assert entry["why"] == core.INPUT_VIDEO_UNKNOWN_WHY
+    assert entry["why"] == gen_params_mod.INPUT_VIDEO_UNKNOWN_WHY
     # never described as the higher (or the honest) price: it can be either
     assert "higher" not in entry["why"] and "honest" not in entry["why"]
 
@@ -259,8 +266,8 @@ def test_an_unknown_length_sends_the_empty_list_and_a_receipt():
 def test_an_i2v_shot_never_reads_or_reports_input_lengths():
     def boom(mid):
         raise AssertionError("an i2vPro shot has no referenceVideo to fill")
-    req = core.build_request({"mode": "I2V", "images": ["1"], "video_refs": ["9"], "prompt": "x"},
-                             mode="video", resolve=core.RequestResolver(video_duration=boom))
+    req = gen_road_mod.build_request({"mode": "I2V", "images": ["1"], "video_refs": ["9"], "prompt": "x"},
+                             mode="video", resolve=gen_road_mod.RequestResolver(video_duration=boom))
     assert "i2vPro" in req.parameters and req.adjusted == []
 
 
@@ -299,8 +306,8 @@ def test_a_true_length_can_raise_the_quote_above_the_empty_list_and_can_lower_it
         rv = params["referenceVideo"]
         sent_lengths[rv["referenceVideoMediaIds"][0]] = list(rv["inputVideoDurations"])
         return _site_price_task(session, params)
-    monkeypatch.setattr(core, "price_task", _price)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(pricing_mod, "price_task", _price)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
     cli = login_test_client(g.create_app(tmp_path))
 
     def quote(vid):
@@ -333,7 +340,7 @@ def test_lookup_measures_the_local_file_first_then_the_catalog_then_none(tmp_pat
             _row(media_id="700000000000000002", is_video="1", video_duration="5",
                  filename="videos/missing_700000000000000002.mp4")]
     save_catalog(tmp_path / "catalog.db", rows)
-    look = core.make_video_duration_lookup(tmp_path)
+    look = gen_params_mod.make_video_duration_lookup(tmp_path)
     assert look("700000000000000001") == 10.04166698455811          # the file, unrounded
     assert look("700000000000000002") == 5.0                        # no file -> catalog
     assert look("700000000000000003") is None                       # neither
@@ -350,11 +357,11 @@ def test_price_and_loom_submit_send_byte_identical_reference_blocks(tmp_path, mo
     vid = "766390091666197254"
     save_catalog(tmp_path / "catalog.db", [_video_file(tmp_path, vid)])
     priced, sent = {}, {}
-    monkeypatch.setattr(core, "price_task", lambda s, params: priced.update(params) or 105000)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "submit_generation",
-                        lambda s, params: sent.update(params) or "task-rv")
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: priced.update(params) or 105000)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(gen_road_mod, "submit_generation",
+                        lambda s, params, **_kw: sent.update(params) or "task-rv")
     cli = login_test_client(g.create_app(tmp_path))
     body = {"mode": "R2V", "images": [], "video_refs": [vid], "prompt": "@video1",
             "duration": 15, "video_model": "v4.0.1", "quality": "professional",
@@ -375,8 +382,8 @@ def test_a_missing_local_file_with_no_catalog_length_prices_the_empty_list(tmp_p
     save_catalog(tmp_path / "catalog.db", [_row(media_id=vid, is_video="1",
                                                 filename="videos/gone_%s.mp4" % vid)])
     priced = {}
-    monkeypatch.setattr(core, "price_task", lambda s, params: priced.update(params) or 126000)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: priced.update(params) or 126000)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
     cli = login_test_client(g.create_app(tmp_path))
     d = cli.post("/api/price", json={"mode": "R2V", "video_refs": [vid], "prompt": "@video1",
                                      "duration": 15}).get_json()
@@ -388,16 +395,16 @@ def test_cli_reference_video_measures_a_catalog_ref_against_out(tmp_path, monkey
     monkeypatch.setattr(media_tools_mod, "duration", lambda p, **k: 12.25)
     vid = "766390091666197256"
     save_catalog(tmp_path / "catalog.db", [_video_file(tmp_path, vid)])
-    core.run_reference_video(_refvid_args(tmp_path, ref_image=None, ref_video=[vid]))
+    gen_cli_mod.run_reference_video(_refvid_args(tmp_path, ref_image=None, ref_video=[vid]))
     out = capsys.readouterr().out
     assert '"inputVideoDurations": [\n        12.25\n      ]' in out
 
 
 def test_cli_reference_video_says_when_a_length_is_unknown(tmp_path, monkeypatch, capsys):
-    core.run_reference_video(_refvid_args(tmp_path, ref_image=None,
+    gen_cli_mod.run_reference_video(_refvid_args(tmp_path, ref_image=None,
                                           ref_video=["766390091666197257"]))
     out = capsys.readouterr().out
-    assert '"inputVideoDurations": []' in out and core.INPUT_VIDEO_UNKNOWN_WHY in out
+    assert '"inputVideoDurations": []' in out and gen_params_mod.INPUT_VIDEO_UNKNOWN_WHY in out
 
 
 # =============================================================================
@@ -405,7 +412,7 @@ def test_cli_reference_video_says_when_a_length_is_unknown(tmp_path, monkeypatch
 # =============================================================================
 @pytest.mark.parametrize("model", TBKV)
 def test_tbkv_i2v_block_carries_only_the_sites_fields(model):
-    p = core.build_shot_video_params("FLF", "x", image_ids=["1", "2"], model=model,
+    p = gen_params_mod.build_shot_video_params("FLF", "x", image_ids=["1", "2"], model=model,
                                      negative="blurry", camera_movement="zoom",
                                      generate_audio=True, use_prompt_helper=True)
     assert set(p["i2vPro"]) == {"model", "mediaId", "usePromptsHelper", "prompts", "mode",
@@ -413,20 +420,20 @@ def test_tbkv_i2v_block_carries_only_the_sites_fields(model):
 
 
 def test_negative_and_camera_still_reach_the_existing_engines():
-    i = core.build_shot_video_params("I2V", "x", image_ids=["1"], model="v4.0.1",
+    i = gen_params_mod.build_shot_video_params("I2V", "x", image_ids=["1"], model="v4.0.1",
                                      negative="blurry", camera_movement="zoom")["i2vPro"]
     assert i["negativePrompts"] == "blurry" and i["cameraMovement"] == "zoom"
 
 
 def test_build_request_says_what_tbkv_did_not_take():
-    req = core.build_request({"mode": "I2V", "images": ["1"], "prompt": "x",
+    req = gen_road_mod.build_request({"mode": "I2V", "images": ["1"], "prompt": "x",
                               "video_model": "tbkv1.0.1", "negative": "blurry",
                               "camera_movement": "pan"}, mode="video")
     assert {e["field"] for e in req.adjusted} == {"negativePrompts", "cameraMovement"}
     assert all(e["used"] is None for e in req.adjusted)
     assert "negativePrompts" not in req.parameters["i2vPro"]
     # an "unset" camera and an empty negative are nothing to report
-    quiet = core.build_request({"mode": "I2V", "images": ["1"], "prompt": "x",
+    quiet = gen_road_mod.build_request({"mode": "I2V", "images": ["1"], "prompt": "x",
                                 "video_model": "tbkv1.0.1", "camera_movement": "unset"},
                                mode="video")
     assert quiet.adjusted == []
@@ -435,7 +442,7 @@ def test_build_request_says_what_tbkv_did_not_take():
 def test_cli_generate_video_says_what_tbkv_does_not_send(tmp_path, capsys):
     """The CLI i2v road's receipts (review f-V-F5 / V-R4): a negative, a camera move and a
     --video-ratio that --generate-video drops are named under the preview, never silent."""
-    core.run_generate_video(_i2v_args(tmp_path, video_model="tbkv1.0.1", negative="blurry",
+    gen_cli_mod.run_generate_video(_i2v_args(tmp_path, video_model="tbkv1.0.1", negative="blurry",
                                       camera_movement="pan", video_ratio="16:9"))
     out = capsys.readouterr().out
     assert "note: negative prompt not used by Tsubaki Video (not sent)." in out
@@ -445,7 +452,7 @@ def test_cli_generate_video_says_what_tbkv_does_not_send(tmp_path, capsys):
 
 
 def test_cli_generate_video_prints_no_note_where_everything_is_sent(tmp_path, capsys):
-    core.run_generate_video(_i2v_args(tmp_path, video_model="v4.0.1", negative="blurry",
+    gen_cli_mod.run_generate_video(_i2v_args(tmp_path, video_model="v4.0.1", negative="blurry",
                                       camera_movement="pan"))
     out = capsys.readouterr().out
     assert "note: " not in out
@@ -464,9 +471,9 @@ def test_cli_generate_video_names_the_drops_before_a_confirmed_submit(tmp_path, 
 
     def _no_submit(*a, **k):
         raise _Stop()
-    monkeypatch.setattr(core, "_apply_kaisuuken", _no_submit)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", _no_submit)
     with pytest.raises(_Stop):
-        core.run_generate_video(_i2v_args(tmp_path, video_model="tbkv1.0", negative="blurry",
+        gen_cli_mod.run_generate_video(_i2v_args(tmp_path, video_model="tbkv1.0", negative="blurry",
                                           confirm=True))
     assert "note: negative prompt not used by Tsubaki Video Flash (not sent)." in \
         capsys.readouterr().out
@@ -475,17 +482,17 @@ def test_cli_generate_video_names_the_drops_before_a_confirmed_submit(tmp_path, 
 @pytest.mark.parametrize("model", TBKV)
 def test_video_references_are_refused_on_tbkv(model):
     with pytest.raises(core.PixAIError, match="takes no video references"):
-        core.build_shot_video_params("R2V", "@image1 @video1", image_ids=["1"],
+        gen_params_mod.build_shot_video_params("R2V", "@image1 @video1", image_ids=["1"],
                                      video_ids=["9"], model=model)
     # images + audio are fine
-    p = core.build_shot_video_params("R2V", "@image1 @audio1", image_ids=["1"],
+    p = gen_params_mod.build_shot_video_params("R2V", "@image1 @audio1", image_ids=["1"],
                                      audio_ids=["7"], model=model)
     assert p["referenceVideo"]["referenceAudioMediaIds"] == ["7"]
 
 
 def test_the_badge_shows_the_video_ref_refusal_as_its_note(tmp_path, monkeypatch, pixai):
     from tests.conftest import login_test_client
-    monkeypatch.setattr(core, "price_task", lambda *a: pytest.fail("a refusal is not priced"))
+    monkeypatch.setattr(pricing_mod, "price_task", lambda *a: pytest.fail("a refusal is not priced"))
     save_catalog(tmp_path / "catalog.db", [_row(media_id="1", filename="a_1.png")])
     cli = login_test_client(g.create_app(tmp_path))
     d = cli.post("/api/price", json={"mode": "R2V", "images": ["1"], "video_refs": ["9"],
@@ -497,7 +504,7 @@ def test_cli_refuses_video_refs_on_tbkv_before_any_upload(tmp_path, monkeypatch)
     monkeypatch.setattr(core, "upload_media",
                         lambda *a, **k: pytest.fail("refused before any upload"))
     with pytest.raises(core.PixAIError, match="takes no video references"):
-        core.run_reference_video(_refvid_args(tmp_path, video_model="tbkv1.0.1",
+        gen_cli_mod.run_reference_video(_refvid_args(tmp_path, video_model="tbkv1.0.1",
                                               ref_video=["9"], confirm=True))
 
 
@@ -540,9 +547,9 @@ def _collect(tmp_path, monkeypatch, task, names=None):
     monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
     monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
     looked = []
-    monkeypatch.setattr(core, "model_name_gql",
+    monkeypatch.setattr(models_mod, "model_name_gql",
                         lambda s, mid, **k: looked.append(mid) or (names or {}).get(mid, mid))
-    core._download_video_task(object(), task, "T-v", tmp_path,
+    gen_cli_mod._download_video_task(object(), task, "T-v", tmp_path,
                               SimpleNamespace(name_length=60), task["parameters"])
     return {r["media_id"]: r for r in load_catalog(tmp_path / "catalog.db")}, looked
 
@@ -637,7 +644,7 @@ def _recover_i2v(tmp_path, monkeypatch, task, lookup=None):
     v4.0.1, and the row must still be filed from the recovered task."""
     from pathlib import Path
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, t, **k: task)
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t, **k: task)
     monkeypatch.setattr(core, "media_file_gql", lambda s, m: {"fileUrl": "https://x/v.mp4"})
 
     def _dl(session, url, stem, **kw):
@@ -650,8 +657,8 @@ def _recover_i2v(tmp_path, monkeypatch, task, lookup=None):
 
     def _no_title(s, mid, **k):
         raise core.PixAIError("lookup failed")
-    monkeypatch.setattr(core, "model_name_gql", lookup or _no_title)
-    got = core.run_generate_video(_i2v_args(tmp_path, task_id="T-v", image=""))
+    monkeypatch.setattr(models_mod, "model_name_gql", lookup or _no_title)
+    got = gen_cli_mod.run_generate_video(_i2v_args(tmp_path, task_id="T-v", image=""))
     assert got["submitted"] is True and got["videos"] == 1
     return {r["media_id"]: r for r in load_catalog(tmp_path / "catalog.db")}["780000000000000001"]
 
@@ -733,7 +740,7 @@ def test_video_task_params_route_reports_the_sources_ratio(tmp_path, monkeypatch
     from tests.conftest import login_test_client
     save_catalog(tmp_path / "catalog.db", [_row(media_id="780000000000000001", task_id="T-v",
                                                 is_video="1", filename="videos/v.mp4")])
-    monkeypatch.setattr(core, "task_detail_gql",
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql",
                         lambda s, t, **k: _vtask(_RV_TBKV, TBKV_IDS["tbkv1.0"]))
     cli = login_test_client(g.create_app(tmp_path))
     d = cli.get("/api/video-task-params/T-v").get_json()
@@ -776,7 +783,7 @@ def _web(**kw):
     body = {"mode": "R2V", "images": ["1"], "prompt": "@image1", "video_model": "tbkv1.0.1",
             "duration": 5}
     body.update(kw)
-    return core.build_request(body, mode="video")
+    return gen_road_mod.build_request(body, mode="video")
 
 
 def test_the_web_road_sends_the_ratio_for_tbkv_multi_reference():
@@ -826,9 +833,9 @@ def test_the_quote_and_the_submit_carry_the_same_ratio(tmp_path, monkeypatch):
     from tests.conftest import login_client
     seen = {}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(priced=params) or 21000)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "submit",
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(priced=params) or 21000)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(gen_road_mod, "submit",
                         lambda s, req, **k: seen.update(sent=req.parameters) or {"task_id": "v1"})
     cli = login_client(tmp_path)
     body = {"mode": "R2V", "images": ["1"], "prompt": "@image1", "video_model": "tbkv1.0.1",

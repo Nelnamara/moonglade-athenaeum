@@ -43,11 +43,15 @@ import requests
 
 from moonglade import backup as core
 from moonglade import gallery as g
+from moonglade import gen_cli as gen_cli_mod
+from moonglade import models as models_mod
 from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.fake_pixai import FakePixAI, UnregisteredOperation, operation_name
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import media_tools as media_tools_mod
+from moonglade import task_reads as task_reads_mod
+from moonglade import cloud_delete as cloud_delete_mod
 
 REPO = Path(__file__).resolve().parents[2]
 RECORDED = json.loads((Path(__file__).resolve().parent / "fixtures" /
@@ -56,8 +60,8 @@ TASKS = RECORDED["tasks"]
 MODELS = RECORDED["models"]
 KINDS = sorted(TASKS)
 
-TASK_DETAIL = operation_name(core._TASK_DETAIL_DOC)        # what the fake keys it by
-MODEL_VERSION = operation_name(core._MODEL_VERSION_DOC)
+TASK_DETAIL = operation_name(task_reads_mod._TASK_DETAIL_DOC)        # what the fake keys it by
+MODEL_VERSION = operation_name(models_mod._MODEL_VERSION_DOC)
 
 # The fixed part of task_detail_gql's sentence (the task id and PixAI's error sit in front).
 SENTENCE = ("Nothing was spent and nothing is lost -- this call only READS a task, so the "
@@ -152,7 +156,7 @@ def fresh_model_caches():
     """model_name_gql and _resolve_model_preset memoise into module-level default dicts, and
     other tests use the same public version ids: start these tests empty, put them back
     after."""
-    caches = [core.model_name_gql.__defaults__[0], core._resolve_model_preset.__defaults__[0]]
+    caches = [models_mod.model_name_gql.__defaults__[0], core._resolve_model_preset.__defaults__[0]]
     kept = [dict(c) for c in caches]
     for c in caches:
         c.clear()
@@ -167,7 +171,7 @@ def fresh_model_caches():
 # =====================================================================================
 
 def test_the_task_document_is_the_query_the_probe_validated():
-    doc = " ".join(core._TASK_DETAIL_DOC.split())
+    doc = " ".join(task_reads_mod._TASK_DETAIL_DOC.split())
     assert doc == RECORDED["documents"]["TaskDetail"]
     assert pixai_client_mod._is_mutation_document(doc) is False
     assert TASK_DETAIL == "TaskDetail"
@@ -177,7 +181,7 @@ def test_the_task_document_is_the_query_the_probe_validated():
 def test_the_task_document_selects_every_key_the_saved_answer_carried(kind):
     """The saved request's answer is the reference: every top-level key it carried (bar
     __typename, which nothing reads) is selected, and nothing else."""
-    selected = _top_fields(core._TASK_DETAIL_DOC, "task")
+    selected = _top_fields(task_reads_mod._TASK_DETAIL_DOC, "task")
     assert len(selected) == len(set(selected))
     assert set(selected) == set(_saved(kind)) - {"__typename"}
     # and PixAI answered the document with the saved answer, less __typename (the probe)
@@ -185,7 +189,7 @@ def test_the_task_document_selects_every_key_the_saved_answer_carried(kind):
 
 
 def test_the_model_document_is_the_query_the_probe_validated():
-    doc = " ".join(core._MODEL_VERSION_DOC.split())
+    doc = " ".join(models_mod._MODEL_VERSION_DOC.split())
     assert doc == RECORDED["documents"]["ModelVersion"]
     assert pixai_client_mod._is_mutation_document(doc) is False
     assert MODEL_VERSION == "ModelVersion"
@@ -195,8 +199,8 @@ def test_the_model_document_is_the_query_the_probe_validated():
 def test_neither_document_keys_like_the_generation_poll():
     """The poll's own small document is anonymous and keys by its root field, `task`; both
     detail documents are named, so the fake can never hand one's answer to the other."""
-    assert operation_name(core._GEN_STATUS) == "task"
-    assert len({operation_name(core._GEN_STATUS), TASK_DETAIL, MODEL_VERSION}) == 3
+    assert operation_name(task_reads_mod._GEN_STATUS) == "task"
+    assert len({operation_name(task_reads_mod._GEN_STATUS), TASK_DETAIL, MODEL_VERSION}) == 3
 
 
 # =====================================================================================
@@ -207,40 +211,40 @@ def test_a_task_read_is_one_post_of_the_full_document_never_a_saved_get():
     """The mutation proof for the task road: with task_detail_gql back on the saved
     request, the GET below raises and this fails."""
     s = _Session(_Response({"data": {"task": _document("lone")}}))
-    task = core.task_detail_gql(pixai_client_mod.PixAIClient(s), "T1")
+    task = task_reads_mod.task_detail_gql(pixai_client_mod.PixAIClient(s), "T1")
     assert task == _document("lone")
     [post] = s.posts
     assert post.url == core.API_URL
-    assert post.json == {"query": core._TASK_DETAIL_DOC, "variables": {"id": "T1"}}
+    assert post.json == {"query": task_reads_mod._TASK_DETAIL_DOC, "variables": {"id": "T1"}}
     assert post.timeout == 60                                  # task_detail_gql's default
 
 
 def test_through_the_fake_it_is_a_query_of_the_named_document(pixai):
     pixai.on(TASK_DETAIL, {"task": _document("batch")})
-    assert core.task_detail_gql(pixai, 1934) == _document("batch")
+    assert task_reads_mod.task_detail_gql(pixai, 1934) == _document("batch")
     [call] = pixai.calls
     assert (call.verb, call.op, call.variables) == ("query", "TaskDetail", {"id": "1934"})
-    assert call.document == core._TASK_DETAIL_DOC
+    assert call.document == task_reads_mod._TASK_DETAIL_DOC
     assert (call.retries, call.timeout) == (3, 60)
 
 
 def test_the_timeout_reaches_every_attempt(no_backoff):
     """The delete preview hands its remaining budget down; every attempt gets it."""
     s = _Session(requests.ConnectionError("reset"), _Response({"data": {"task": {"id": "T1"}}}))
-    assert core.task_detail_gql(pixai_client_mod.PixAIClient(s), "T1", retries=1,
+    assert task_reads_mod.task_detail_gql(pixai_client_mod.PixAIClient(s), "T1", retries=1,
                                 timeout=2.5) == {"id": "T1"}
     assert [p.timeout for p in s.posts] == [2.5, 2.5]
 
 
 def test_the_delete_preview_s_budget_reaches_the_read(pixai):
     pixai.on(TASK_DETAIL, {"task": {"id": "T1"}})
-    core.task_detail_gql(pixai, "T1", retries=1, timeout=0.75)
+    task_reads_mod.task_detail_gql(pixai, "T1", retries=1, timeout=0.75)
     assert (pixai.calls[0].retries, pixai.calls[0].timeout) == (1, 0.75)
 
 
 def test_a_5xx_is_asked_three_more_times_then_fails_soft(no_backoff, capsys):
     s = _Session(_Response({"message": "bad gateway"}, status=502))
-    assert core.task_detail_gql(pixai_client_mod.PixAIClient(s), "T5") is None
+    assert task_reads_mod.task_detail_gql(pixai_client_mod.PixAIClient(s), "T5") is None
     assert len(s.posts) == 4                                  # the original + 3 retries
     out = capsys.readouterr().out
     assert "could not read task T5 back from PixAI" in out and SENTENCE in out
@@ -248,7 +252,7 @@ def test_a_5xx_is_asked_three_more_times_then_fails_soft(no_backoff, capsys):
 
 def test_a_5xx_that_passes_is_read_on_the_retry(no_backoff):
     s = _Session(_Response({}, status=503), _Response({"data": {"task": {"id": "T5"}}}))
-    assert core.task_detail_gql(pixai_client_mod.PixAIClient(s), "T5") == {"id": "T5"}
+    assert task_reads_mod.task_detail_gql(pixai_client_mod.PixAIClient(s), "T5") == {"id": "T5"}
     assert len(s.posts) == 2
 
 
@@ -259,7 +263,7 @@ def test_a_5xx_that_passes_is_read_on_the_retry(no_backoff):
 ], ids=["graphql-refusal", "401", "network"])
 def test_a_failed_read_is_none_with_the_sentence_never_a_raise(pixai, capsys, error):
     pixai.fail(TASK_DETAIL, error)
-    assert core.task_detail_gql(pixai, "T6") is None
+    assert task_reads_mod.task_detail_gql(pixai, "T6") is None
     out = capsys.readouterr().out
     assert "could not read task T6 back from PixAI" in out and SENTENCE in out
 
@@ -267,7 +271,7 @@ def test_a_failed_read_is_none_with_the_sentence_never_a_raise(pixai, capsys, er
 def test_a_graphql_refusal_on_the_wire_is_not_retried_and_fails_soft(capsys):
     s = _Session(_Response({"errors": [{"message": "Cannot query field \"x\" on \"Task\"."}],
                             "data": None}))
-    assert core.task_detail_gql(pixai_client_mod.PixAIClient(s), "T7") is None
+    assert task_reads_mod.task_detail_gql(pixai_client_mod.PixAIClient(s), "T7") is None
     assert len(s.posts) == 1
     assert SENTENCE in capsys.readouterr().out
 
@@ -278,7 +282,7 @@ def test_an_answer_that_is_not_graphql_is_a_failed_read_not_a_task(status, capsy
     from the ad-hoc POST as {}. The saved road raised on it, and so does this one: None, with
     the sentence."""
     s = _Session(_Response({"message": "Forbidden"}, status=status))
-    assert core.task_detail_gql(pixai_client_mod.PixAIClient(s), "T8") is None
+    assert task_reads_mod.task_detail_gql(pixai_client_mod.PixAIClient(s), "T8") is None
     assert len(s.posts) == 1
     out = capsys.readouterr().out
     assert "no task in it" in out and SENTENCE in out
@@ -287,13 +291,13 @@ def test_an_answer_that_is_not_graphql_is_a_failed_read_not_a_task(status, capsy
 def test_a_task_pixai_does_not_have_is_none_without_the_sentence(pixai, capsys):
     """`task: null` is PixAI's answer, not a failed read."""
     pixai.on(TASK_DETAIL, {"task": None})
-    assert core.task_detail_gql(pixai, "T9") is None
+    assert task_reads_mod.task_detail_gql(pixai, "T9") is None
     assert SENTENCE not in capsys.readouterr().out
 
 
 def test_an_unregistered_read_is_never_swallowed_into_none():
     with pytest.raises(UnregisteredOperation, match="TaskDetail"):
-        core.task_detail_gql(FakePixAI(), "T9")
+        task_reads_mod.task_detail_gql(FakePixAI(), "T9")
 
 
 # =====================================================================================
@@ -304,7 +308,7 @@ def test_an_unregistered_read_is_never_swallowed_into_none():
 def test_extract_full_meta_reads_the_document_answer_as_it_read_the_saved_one(pixai, kind):
     doc, saved = _document(kind), _saved(kind)
     pixai.on(TASK_DETAIL, {"task": doc})
-    task = core.task_detail_gql(pixai, doc["id"])
+    task = task_reads_mod.task_detail_gql(pixai, doc["id"])
     assert core.extract_full_meta(task) == core.extract_full_meta(saved)
     assert core.extract_full_meta(task)["paid_credit"] == str(saved["paidCredit"])
 
@@ -313,15 +317,15 @@ def test_extract_full_meta_reads_the_document_answer_as_it_read_the_saved_one(pi
 def test_every_other_reader_of_a_task_reads_it_the_same(pixai, kind):
     doc, saved = _document(kind), _saved(kind)
     pixai.on(TASK_DETAIL, {"task": doc})
-    task = core.task_detail_gql(pixai, doc["id"])
+    task = task_reads_mod.task_detail_gql(pixai, doc["id"])
     for reader in (core.video_outputs, core.source_media_of_task, core.fixer_block,
-                   core.task_artwork_ids, core._paid_credit_str):
+                   cloud_delete_mod.task_artwork_ids, core._paid_credit_str):
         assert reader(task) == reader(saved), reader.__name__
-    assert core._task_image_media(task["outputs"]) == core._task_image_media(saved["outputs"])
+    assert gen_cli_mod._task_image_media(task["outputs"]) == gen_cli_mod._task_image_media(saved["outputs"])
     assert core._prompt_helper_label(task["parameters"], task) == \
         core._prompt_helper_label(saved["parameters"], saved)
     for mid in {doc["mediaId"], *(b["mediaId"] for b in doc["outputs"].get("batch") or [])}:
-        assert core._image_delete_plan(task, mid) == core._image_delete_plan(saved, mid)
+        assert cloud_delete_mod._image_delete_plan(task, mid) == cloud_delete_mod._image_delete_plan(saved, mid)
 
 
 def test_the_recorded_answers_exercise_what_the_readers_read():
@@ -333,7 +337,7 @@ def test_the_recorded_answers_exercise_what_the_readers_read():
     assert (fm["i2v"]["derive_kind"], fm["i2v"]["video_model"]) == ("video", "v4.0.1")
     assert fm["edit"]["derive_kind"] == "edit" and fm["edit"]["model_name"] == "Edit Pro"
     assert core.video_outputs(_document("video2"))[0][0]["poster_media_id"]
-    assert core.task_artwork_ids(_document("published")) == tuple(
+    assert cloud_delete_mod.task_artwork_ids(_document("published")) == tuple(
         _document("published")["artworkIds"]) != ()
     assert len(_document("batch")["outputs"]["batch"]) == 4
 
@@ -346,7 +350,7 @@ def test_a_fix_reads_the_same_through_the_document(pixai):
     doc["parameters"]["chat"]["fixer"] = copy.deepcopy(fixer)
     saved["parameters"]["chat"]["fixer"] = copy.deepcopy(fixer)
     pixai.on(TASK_DETAIL, {"task": doc})
-    task = core.task_detail_gql(pixai, doc["id"])
+    task = task_reads_mod.task_detail_gql(pixai, doc["id"])
     assert core.fixer_block(task) == fixer == core.fixer_block(saved)
     assert core.extract_full_meta(task) == core.extract_full_meta(saved)
 
@@ -362,7 +366,7 @@ def test_the_delete_plan_routes_the_recorded_batch_per_image(pixai):
     doc = _document("batch")
     member = doc["outputs"]["batch"][0]["mediaId"]
     pixai.on(TASK_DETAIL, {"task": doc})
-    plan = core.plan_image_delete(pixai, doc["id"], member)
+    plan = cloud_delete_mod.plan_image_delete(pixai, doc["id"], member)
     assert plan.plan == "per-image" and plan.live_siblings == 3
     assert [c.verb for c in pixai.calls] == ["query"] and pixai.mutations() == 0
     assert pixai.calls[0].variables == {"id": doc["id"]}
@@ -372,7 +376,7 @@ def test_the_delete_plan_routes_the_last_live_member_whole_task(pixai):
     doc = _batch_with_deleted(1, 2, 3)
     member = doc["outputs"]["batch"][0]["mediaId"]
     pixai.on(TASK_DETAIL, {"task": doc})
-    plan = core.plan_image_delete(pixai, doc["id"], member)
+    plan = cloud_delete_mod.plan_image_delete(pixai, doc["id"], member)
     assert plan.plan == "whole-task" and plan.live_siblings == 0
     assert sorted(plan.keep_media) == sorted(
         b["mediaId"] for b in doc["outputs"]["batch"][1:])
@@ -382,12 +386,12 @@ def test_the_delete_plan_routes_the_last_live_member_whole_task(pixai):
 def test_the_delete_plan_routes_the_recorded_lone_image_whole_task(pixai):
     doc = _document("lone")
     pixai.on(TASK_DETAIL, {"task": doc})
-    assert core.plan_image_delete(pixai, doc["id"], doc["mediaId"]).plan == "whole-task"
+    assert cloud_delete_mod.plan_image_delete(pixai, doc["id"], doc["mediaId"]).plan == "whole-task"
 
 
 def test_a_failed_read_plans_a_refusal(pixai):
     pixai.fail(TASK_DETAIL, requests.ConnectionError("reset"))
-    plan = core.plan_image_delete(pixai, "T1", "m1")
+    plan = cloud_delete_mod.plan_image_delete(pixai, "T1", "m1")
     assert plan.plan == "refuse" and pixai.mutations() == 0
 
 
@@ -471,9 +475,9 @@ def test_a_model_read_is_one_post_of_the_full_document_never_a_saved_get(fresh_m
     the GET below raises, the lookup is a failure, and the name is not this one."""
     t = MODELS["tsubaki"]
     s = _Session(_Response({"data": t["document"]}))
-    assert core.model_name_gql(pixai_client_mod.PixAIClient(s), t["version_id"]) == "Tsubaki.2 v1"
+    assert models_mod.model_name_gql(pixai_client_mod.PixAIClient(s), t["version_id"]) == "Tsubaki.2 v1"
     [post] = s.posts
-    assert post.json == {"query": core._MODEL_VERSION_DOC,
+    assert post.json == {"query": models_mod._MODEL_VERSION_DOC,
                          "variables": {"id": t["version_id"]}}
 
 
@@ -482,8 +486,8 @@ def test_each_recorded_model_reads_as_the_saved_request_read_it(pixai, kind,
                                                                 fresh_model_caches):
     m = MODELS[kind]
     pixai.on(MODEL_VERSION, m["document"])
-    assert core.model_name_gql(pixai, m["version_id"], strict=True) == m["name"]
-    assert core.resolve_model_base_id(pixai, m["version_id"]) == \
+    assert models_mod.model_name_gql(pixai, m["version_id"], strict=True) == m["name"]
+    assert models_mod.resolve_model_base_id(pixai, m["version_id"]) == \
         m["document"]["generationModelVersion"]["model"]["id"]
     assert [(c.op, c.variables, c.retries) for c in pixai.calls] == [
         (MODEL_VERSION, {"id": m["version_id"]}, 0)] * 2
@@ -522,25 +526,25 @@ def test_a_lookup_that_answered_nothing_is_a_failure_memoised_as_one(body, what,
     vid = "918273645591000001"
     s = _Session(_Response(body))
     client = pixai_client_mod.PixAIClient(s)
-    assert core.model_name_gql(client, vid) == vid, what        # a soft caller: the label
-    assert fresh_model_caches[vid] is core._MODEL_LOOKUP_FAILED, what
+    assert models_mod.model_name_gql(client, vid) == vid, what        # a soft caller: the label
+    assert fresh_model_caches[vid] is models_mod._MODEL_LOOKUP_FAILED, what
     with pytest.raises(core.PixAIError, match="failed earlier this run"):
-        core.model_name_gql(client, vid, strict=True)
+        models_mod.model_name_gql(client, vid, strict=True)
     assert len(s.posts) == 1                                    # memoised, not re-asked
 
 
 def test_strict_raises_on_a_failed_lookup(fresh_model_caches):
     s = _Session(_Response({"errors": [{"message": "nope"}], "data": None}))
     with pytest.raises(core.PixAIError, match="lookup failed"):
-        core.model_name_gql(pixai_client_mod.PixAIClient(s), "918273645591000002", strict=True)
+        models_mod.model_name_gql(pixai_client_mod.PixAIClient(s), "918273645591000002", strict=True)
 
 
 def test_a_network_error_is_a_failure_asked_once(fresh_model_caches):
     s = _Session(requests.ConnectionError("reset"))
     vid = "918273645591000003"
     with pytest.raises(core.PixAIError, match="lookup failed"):
-        core.model_name_gql(pixai_client_mod.PixAIClient(s), vid, strict=True)
-    assert len(s.posts) == 1 and fresh_model_caches[vid] is core._MODEL_LOOKUP_FAILED
+        models_mod.model_name_gql(pixai_client_mod.PixAIClient(s), vid, strict=True)
+    assert len(s.posts) == 1 and fresh_model_caches[vid] is models_mod._MODEL_LOOKUP_FAILED
 
 
 def test_an_unknown_version_is_the_removed_answer_not_a_failure(pixai, fresh_model_caches):
@@ -549,15 +553,15 @@ def test_an_unknown_version_is_the_removed_answer_not_a_failure(pixai, fresh_mod
     u = MODELS["unknown"]
     assert u["document"] == {"generationModelVersion": None}
     pixai.on(MODEL_VERSION, u["document"])
-    assert core.model_name_gql(pixai, u["version_id"], strict=True) == u["version_id"]
+    assert models_mod.model_name_gql(pixai, u["version_id"], strict=True) == u["version_id"]
     assert fresh_model_caches[u["version_id"]] == u["version_id"]
 
 
 def test_the_cache_answers_a_repeat_without_asking(pixai, fresh_model_caches):
     t = MODELS["tsubaki"]
     pixai.on(MODEL_VERSION, t["document"])
-    assert core.model_name_gql(pixai, t["version_id"]) == "Tsubaki.2 v1"
-    assert core.model_name_gql(pixai, t["version_id"], strict=True) == "Tsubaki.2 v1"
+    assert models_mod.model_name_gql(pixai, t["version_id"]) == "Tsubaki.2 v1"
+    assert models_mod.model_name_gql(pixai, t["version_id"], strict=True) == "Tsubaki.2 v1"
     assert len(pixai.calls) == 1
 
 
@@ -593,15 +597,15 @@ def test_the_reuse_reader_and_the_preset_fail_soft(pixai, answer, fresh_model_ca
         pixai.fail(MODEL_VERSION, answer)
     else:
         pixai.on(MODEL_VERSION, answer)
-    assert core.resolve_model_base_id(pixai, "918273645591000006") == ""
+    assert models_mod.resolve_model_base_id(pixai, "918273645591000006") == ""
     assert core._resolve_model_preset(pixai, "918273645591000007") in (
         {}, {"steps": "", "sampler": "", "cfg_scale": ""})
     assert not core._resolve_model_preset(pixai, "918273645591000007").get("steps")
 
 
 @pytest.mark.parametrize("read", [
-    lambda c: core.model_name_gql(c, "918273645591000008"),
-    lambda c: core.resolve_model_base_id(c, "918273645591000009"),
+    lambda c: models_mod.model_name_gql(c, "918273645591000008"),
+    lambda c: models_mod.resolve_model_base_id(c, "918273645591000009"),
     lambda c: core._resolve_model_preset(c, "918273645591000010"),
 ], ids=["model_name_gql", "resolve_model_base_id", "_resolve_model_preset"])
 def test_each_model_reader_asks_once_on_a_5xx(read, fresh_model_caches, no_backoff):
@@ -627,7 +631,7 @@ def test_the_retired_saved_requests_leave_nothing_behind():
         assert not hits, "{} still names a retired saved request: {}".format(module.name, hits)
     example = (REPO / "config.example.json").read_text(encoding="utf-8")
     assert "TASK_DETAIL_HASH" not in example and "MODEL_DETAIL_HASH" not in example
-    for reader in (core.task_detail_gql, core._model_version_gql, core.model_name_gql,
-                   core.resolve_model_base_id, core._resolve_model_preset,
-                   core._task_detail_query):
+    for reader in (task_reads_mod.task_detail_gql, models_mod._model_version_gql, models_mod.model_name_gql,
+                   models_mod.resolve_model_base_id, core._resolve_model_preset,
+                   gen_cli_mod._task_detail_query):
         assert ".persisted(" not in inspect.getsource(reader), reader.__name__

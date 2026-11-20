@@ -30,10 +30,17 @@ from types import SimpleNamespace
 import pytest
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
+from moonglade import gen_cli as gen_cli_mod
+from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
+from moonglade import models as models_mod
+from moonglade import pricing as pricing_mod
 
 from tests.conftest import login_client
 from moonglade import jobs as jobs_mod
 from moonglade import mirror as mirror_mod
+from moonglade import task_reads as task_reads_mod
 
 ROOT = Path(__file__).resolve().parents[2]
 NODE = shutil.which("node")
@@ -134,14 +141,14 @@ def rest(monkeypatch):
 
 
 def gate(params):
-    return core._gate_image_params(object(), params)
+    return models_mod._gate_image_params(object(), params)
 
 
 def img(vid, **kw):
     """A plain app-built image submit, as _gen_parameters shapes it."""
     p = {"prompts": "<prompt>", "naturalPrompts": "<prompt>", "modelId": vid,
          "width": 1024, "height": 1024, "samplingSteps": 25, "cfgScale": 7.0,
-         "batchSize": 1, "priority": core.PRIORITY_TURBO,
+         "batchSize": 1, "priority": gen_params_mod.PRIORITY_TURBO,
          "promptHelper": {"withStage": True, "userWantToEnable": True,
                           "forcePromptHelperDetectionSide": "server"}}
     p.update(kw)
@@ -219,23 +226,23 @@ def test_on_grid_sizes_never_move_and_768x432_becomes_912x512_with_a_receipt(res
 def test_the_dit_step_table_and_step_aligned_bounds():
     for t in ("DIT7_MODEL", "DIT7B_MODEL", "MMDIT26A_MODEL", "MMDIT26B_MODEL",
               "USER_DIT26A_MODEL", "USER_DIT26B_MODEL"):
-        assert core._size_rule(t)["step"] == 16, t
+        assert models_mod._size_rule(t)["step"] == 16, t
     for t in ("SDXL_MODEL", "SD_V1_MODEL", "DIT9_MODEL", ""):
-        assert core._size_rule(t)["step"] == 8, t
+        assert models_mod._size_rule(t)["step"] == 8, t
     # the UNION of the ranges, aligned inward to the step
-    assert core._size_rule("MMDIT26B_MODEL", [(500, 2500, 510, 2490), (512, 1800, 512, 1800)]) \
+    assert models_mod._size_rule("MMDIT26B_MODEL", [(500, 2500, 510, 2490), (512, 1800, 512, 1800)]) \
         == {"step": 16, "lo": 512, "hi": 2496}
-    assert core._size_rule("MMDIT26B_MODEL", [(512, 2496, 512, 2496)]) == T3_RULE
+    assert models_mod._size_rule("MMDIT26B_MODEL", [(512, 2496, 512, 2496)]) == T3_RULE
     # no ranges -> today's 64..4096, on the step
-    assert core._size_rule("MMDIT26A_MODEL", None) == {"step": 16, "lo": 64, "hi": 4096}
-    assert core._size_rule("SDXL_MODEL", []) == {"step": 8, "lo": 64, "hi": 4096}
+    assert models_mod._size_rule("MMDIT26A_MODEL", None) == {"step": 16, "lo": 64, "hi": 4096}
+    assert models_mod._size_rule("SDXL_MODEL", []) == {"step": 8, "lo": 64, "hi": 4096}
     # a published restrictions step wins (the drawer's rule; none is published today)
-    assert core._size_rule("SDXL_MODEL", None, {"width": {"step": 32}})["step"] == 32
+    assert models_mod._size_rule("SDXL_MODEL", None, {"width": {"step": 32}})["step"] == 32
     # rounding is half-UP, never Python's half-to-even: 680 -> 688, 1016 -> 1024
-    assert core._snap_size(1024, 680, T3_RULE) == (1024, 688)
-    assert core._snap_size(1016, 1016, {"step": 16, "lo": 64, "hi": 4096}) == (1024, 1024)
+    assert models_mod._snap_size(1024, 680, T3_RULE) == (1024, 688)
+    assert models_mod._snap_size(1016, 1016, {"step": 16, "lo": 64, "hi": 4096}) == (1024, 1024)
     # the long side wins when both bounds cannot hold (a 6:1 frame)
-    assert core._snap_size(3072, 512, T3_RULE) == (2496, 512)
+    assert models_mod._snap_size(3072, 512, T3_RULE) == (2496, 512)
 
 
 def test_a_dit_version_without_a_size_config_answer_snaps_to_the_step_only(rest):
@@ -291,7 +298,7 @@ def test_js_and_python_give_identical_results_for_all_32_presets(rest, tmp_path)
         if row["label"] != "custom":
             r = dict(ASPECTS)[row["label"]]
             assert tuple(row["raw"]) == drawer_raw(r, row["size"]), row
-        assert tuple(row["snapped"]) == core._snap_size(*row["raw"], T3_RULE), row
+        assert tuple(row["snapped"]) == models_mod._snap_size(*row["raw"], T3_RULE), row
         # ...and the gate, handed the drawer's own /8 output, sends exactly that
         out, _adj = gate(img(T3, width=row["raw"][0], height=row["raw"][1]))
         assert [out["width"], out["height"]] == row["snapped"], row
@@ -371,7 +378,7 @@ def test_the_upscale_road_passes_untouched_on_mmdit26a_and_b(vid, method, rest):
     snapped, stripped or turned into a context image -- G3 there would bill a new Tsubaki.3
     generation for an Upscale click. The 2026-08-25 profile branch still applies."""
     p = {"modelId": vid, "prompts": "", "mediaId": "M1", "strength": 0.55,
-         "width": 1000, "height": 1000, "batchSize": 1, "priority": core.PRIORITY_TURBO,
+         "width": 1000, "height": 1000, "batchSize": 1, "priority": gen_params_mod.PRIORITY_TURBO,
          method: 1.5}
     if method == "upscale":
         p.update(upscaleDenoisingStrength=0.6, upscaleDenoisingSteps=25, upscaleSampler="")
@@ -386,11 +393,11 @@ def test_the_upscale_road_passes_untouched_on_mmdit26a_and_b(vid, method, rest):
 
 
 def test_the_upscale_panel_payload_rides_the_road_untouched(rest):
-    req = core.build_request({"version_id": T3, "prompt": "", "ref_media_id": "M1",
+    req = gen_road_mod.build_request({"version_id": T3, "prompt": "", "ref_media_id": "M1",
                               "ref_strength": 0.55, "enlarge": 2, "width": 1000,
                               "height": 1000},
-                             mode="image", resolve=core.RequestResolver(
-                                 gate=core.gate_resolver(object())))
+                             mode="image", resolve=gen_road_mod.RequestResolver(
+                                 gate=gen_road_mod.gate_resolver(object())))
     p = req.parameters
     assert p["mediaId"] == "M1" and p["enlarge"] == 2.0 and "contextImages" not in p
     assert req.adjusted == []
@@ -415,9 +422,9 @@ def test_an_upscale_whose_ratio_the_build_drops_is_refused_not_billed_as_a_new_g
         _road(hires)
     # ...and the CLI, before anything is priced or submitted
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: pytest.fail("card check"))
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: pytest.fail("card check"))
     with pytest.raises(core.PixAIError) as err:
-        core.run_generate(_cli_args(tmp_path, ref_media_id="M1", enlarge=ratio, width=size,
+        gen_cli_mod.run_generate(_cli_args(tmp_path, ref_media_id="M1", enlarge=ratio, width=size,
                                     height=size, face_fix=False, confirm=False))
     assert "No upscale is possible" in str(err.value)
 
@@ -443,7 +450,7 @@ def test_img2img_plus_hires_on_a_dit_model_rides_the_upscale_road_as_the_spec_re
     then wins over G2's never-Hires-or-Face-Fix rule, and over G1 and G10 too. The code
     follows the spec literally until the owner rules which one wins."""
     p = {"modelId": T2, "prompts": "<prompt>", "mediaId": "M1", "strength": 0.5,
-         "width": 1000, "height": 1000, "batchSize": 1, "priority": core.PRIORITY_TURBO,
+         "width": 1000, "height": 1000, "batchSize": 1, "priority": gen_params_mod.PRIORITY_TURBO,
          "enableADetailer": True, "upscale": 1.5, "upscaleDenoisingStrength": 0.6,
          "upscaleDenoisingSteps": 25, "upscaleSampler": ""}
     out, adjusted = gate(p)
@@ -457,8 +464,8 @@ def test_img2img_plus_hires_on_a_dit_model_rides_the_upscale_road_as_the_spec_re
 # =============================================================================
 
 def _road(payload, **kw):
-    return core.build_request(payload, mode="image", resolve=core.RequestResolver(
-        gate=core.gate_resolver(object())), **kw)
+    return gen_road_mod.build_request(payload, mode="image", resolve=gen_road_mod.RequestResolver(
+        gate=gen_road_mod.gate_resolver(object())), **kw)
 
 
 @pytest.mark.parametrize("vid", [T3, FLASH])
@@ -526,11 +533,11 @@ def test_a_reference_plus_a_lora_on_tsubaki3_is_refused_never_trimmed(rest):
         _road(payload)
     assert str(err.value) == "Tsubaki.3 can't combine a reference image with LoRAs — remove one"
     # the backstop inside price_task fails soft (no price), never raises
-    args = core._gen_args_from_web_payload(payload)
+    args = gen_road_mod._gen_args_from_web_payload(payload)
     args.model = T3
-    raw = core._gen_parameters(args)
+    raw = gen_params_mod._gen_parameters(args)
     assert raw["mediaId"] == "M1" and raw["lora"] == {"L1": 0.7}
-    assert core.price_task(object(), raw) is None
+    assert pricing_mod.price_task(object(), raw) is None
 
 
 def test_the_reference_plus_lora_refusal_covers_every_form_on_mmdit26b(rest):
@@ -563,8 +570,8 @@ def test_the_reference_plus_lora_refusal_covers_every_form_on_mmdit26b(rest):
 
 def test_context_images_are_priced(rest):
     """_PRICE_NESTED carries contextImages (live quote: 5,100 for one, 6,000 for two)."""
-    assert "contextImages" in core._PRICE_NESTED
-    core.price_task(object(), {"modelId": T3, "contextImages": ["A", "B"],
+    assert "contextImages" in pricing_mod._PRICE_NESTED
+    pricing_mod.price_task(object(), {"modelId": T3, "contextImages": ["A", "B"],
                                "inferenceProfile": "pro", "width": 1632, "height": 912,
                                "promptHelper": {"creativity": "medium",
                                                 "forcePromptHelperDetectionSide": "server"}})
@@ -611,6 +618,29 @@ def test_prompt_helper_is_idempotent_and_other_architectures_keep_the_legacy_sha
     legacy, _ = gate(img(T2))
     assert legacy["promptHelper"]["userWantToEnable"] is True
     assert "creativity" not in legacy["promptHelper"]
+
+
+def test_the_builders_own_extra_shape_gates_as_before_and_is_idempotent(rest):
+    """_gen_parameters writes naturalPrompts under `extra` on every image (the REST create
+    schema has no top-level key). On MMDIT26B the gate keeps it there when the helper is on,
+    drops it when off, and re-gates its own answer to the same object; on MMDIT26A the extra
+    rides through untouched."""
+    def built(vid, **payload):
+        args = gen_road_mod._gen_args_from_web_payload(dict({"prompt": "<prompt>"}, **payload))
+        args.model = vid
+        return gen_params_mod._gen_parameters(args)
+    raw = built(T3)
+    assert raw["extra"] == {"naturalPrompts": "<prompt>"} and "naturalPrompts" not in raw
+    on, _ = gate(raw)
+    assert on["extra"] == {"naturalPrompts": "<prompt>"} and "naturalPrompts" not in on
+    assert on["promptHelper"]["creativity"] == "medium"
+    again, adjusted = gate(on)
+    assert again is on and adjusted == []
+    off, _ = gate(built(T3, prompt_helper="0"))
+    assert "extra" not in off and "naturalPrompts" not in off
+    assert gate(off)[0] is off
+    t2, _ = gate(built(T2))
+    assert t2["extra"] == {"naturalPrompts": "<prompt>"} and "naturalPrompts" not in t2
 
 
 # =============================================================================
@@ -669,7 +699,7 @@ def test_the_gate_is_idempotent_on_the_twelve_tsubaki3_wire_shapes(rest):
         g2, a2 = gate(g1)
         assert g2 is g1 and a2 == []
         # the backstop form hands the already-gated dict straight back too
-        assert core._gate_params_for_model(object(), g1) is g1
+        assert models_mod._gate_params_for_model(object(), g1) is g1
     # the site's own shapes are already in the site's form: untouched, same object
     for p in sites:
         out, adjusted = gate(p)
@@ -692,25 +722,25 @@ CARD = {"id": "card-1", "name": "Tsubaki.3", "total": 3, "consumeAmount": 1,
 
 def test_price_and_submit_card_match_and_send_the_gated_dict(rest, monkeypatch):
     matched, sent = [], []
-    monkeypatch.setattr(core, "match_kaisuuken",
+    monkeypatch.setattr(cards_mod, "match_kaisuuken",
                         lambda s, params, **k: matched.append(params) or dict(CARD))
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
-    monkeypatch.setattr(core, "gql_mutate",
-                        lambda s, q, v=None: sent.append(v["parameters"])
-                        or {"createGenerationTask": {"id": "T1"}})
+    monkeypatch.setattr(core, "_create",
+                        lambda s, kind, v: sent.append(v)
+                        or {"id": "T1"})
     req = _road({"version_id": T3, "prompt": "<prompt>", "ref_media_id": "M1",
                  "width": 768, "height": 432})
     gated = req.parameters
     assert gated["contextImages"] == ["M1"] and (gated["width"], gated["height"]) == (912, 512)
 
-    quoted = core.price(object(), req)
+    quoted = gen_road_mod.price(object(), req)
     assert matched[0] is gated                       # the badge's card verdict: gated dict
     assert quoted["free"] is True and quoted["cost"] == 4000
     assert rest.priced[-1]["contextImages"] == json.dumps(["M1"])
     assert rest.priced[-1]["width"] == 912
     assert {a["field"] for a in quoted["adjusted"]} >= {"width", "height"}
 
-    assert core.submit(object(), req) == {"task_id": "T1"}
+    assert gen_road_mod.submit(object(), req) == {"task_id": "T1"}
     assert matched[1] is gated                       # the spend's card check: same object
     assert sent[0] is gated                          # ...and the backstop sent it as-is
     assert gated["kaisuukenId"] == "card-1"
@@ -719,7 +749,7 @@ def test_price_and_submit_card_match_and_send_the_gated_dict(rest, monkeypatch):
 def _cli_args(tmp_path, **kw):
     base = dict(out=str(tmp_path), params_json="", prompt="<prompt>", negative="",
                 model=T3, width=768, height=432, steps=25, cfg=7.0, count=1, seed=None,
-                priority=core.PRIORITY_TURBO, mode="auto", prompt_helper=True, lora=None,
+                priority=gen_params_mod.PRIORITY_TURBO, mode="auto", prompt_helper=True, lora=None,
                 ref_media_id="", ref_strength=0.55, enlarge=None, upscale=None,
                 upscale_denoising_strength=None, upscale_denoising_steps=None,
                 face_fix=True, quality_tag="", kaisuuken_id="", no_card=False,
@@ -736,16 +766,16 @@ def test_run_generate_card_matches_and_submits_the_gated_dict(rest, monkeypatch,
     matched, sent = [], []
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
-    monkeypatch.setattr(core, "match_kaisuuken",
+    monkeypatch.setattr(cards_mod, "match_kaisuuken",
                         lambda s, params, **k: matched.append(params) or dict(CARD))
-    monkeypatch.setattr(core, "submit_generation",
-                        lambda s, params: sent.append(params) or "T1")
+    monkeypatch.setattr(gen_road_mod, "submit_generation",
+                        lambda s, params, **_kw: sent.append(params) or "T1")
 
     def stop(*a, **k):
         raise _Stop()
-    monkeypatch.setattr(core, "_poll_task_status", stop)
+    monkeypatch.setattr(task_reads_mod, "_poll_task_status", stop)
     with pytest.raises(_Stop):
-        core.run_generate(_cli_args(tmp_path))
+        gen_cli_mod.run_generate(_cli_args(tmp_path))
     assert sent[0] is matched[0]
     assert (sent[0]["width"], sent[0]["height"]) == (912, 512)
     assert "enableADetailer" not in sent[0]
@@ -756,9 +786,9 @@ def test_run_generate_preview_prints_and_card_checks_the_gated_dict(rest, monkey
                                                                      tmp_path, capsys):
     matched = []
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "match_kaisuuken",
+    monkeypatch.setattr(cards_mod, "match_kaisuuken",
                         lambda s, params, **k: matched.append(params) or None)
-    assert core.run_generate(_cli_args(tmp_path, confirm=False)) == {"submitted": False}
+    assert gen_cli_mod.run_generate(_cli_args(tmp_path, confirm=False)) == {"submitted": False}
     out = capsys.readouterr().out
     shown = json.loads(out.split("===\n", 1)[1].split("\n  adjusted:", 1)[0])["parameters"]
     assert (shown["width"], shown["height"]) == (912, 512)
@@ -781,7 +811,7 @@ def test_run_generate_confirm_refuses_read_only_before_the_gates_pixai_reads(ext
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "READ_ONLY", True)
     with pytest.raises(core.PixAIError) as err:
-        core.run_generate(_cli_args(tmp_path, **extra))
+        gen_cli_mod.run_generate(_cli_args(tmp_path, **extra))
     assert "READ_ONLY" in str(err.value)
 
 
@@ -790,7 +820,7 @@ def test_run_generate_confirm_refuses_read_only_before_the_gates_pixai_reads(ext
 # =============================================================================
 
 def test_quality_tag_cases_on_the_version_row():
-    row = lambda extra: core._version_row_to_meta({"id": "V", "modelType": "SDXL_MODEL",
+    row = lambda extra: models_mod._version_row_to_meta({"id": "V", "modelType": "SDXL_MODEL",
                                                    "extra": extra})
     assert row({"qualityTags": [{"prefix": "", "suffix": "<suffix>"}]})["quality_tag"] == \
         {"prefix": "", "suffix": "<suffix>"}
@@ -800,38 +830,38 @@ def test_quality_tag_cases_on_the_version_row():
     assert row({"qualityTags": []})["quality_tag"] is None
     assert row({})["quality_tag"] is None
     assert row({"qualityTags": "junk"})["quality_tag"] is None
-    assert core._empty_version_meta()["quality_tag"] is None
+    assert models_mod._empty_version_meta()["quality_tag"] is None
 
 
 def _with_row(row):
-    return core.RequestResolver(model_version=lambda mid, vid: row)
+    return gen_road_mod.RequestResolver(model_version=lambda mid, vid: row)
 
 
 def test_the_quality_tag_booster_sends_the_versions_own_tag():
     base = {"model_id": "M1", "version_id": "V", "prompt": "<prompt>",
             "quality_tag": "Masterpiece"}
     tagged = {"version_id": "V", "quality_tag": {"prefix": "", "suffix": "<suffix>"}}
-    req = core.build_request(base, mode="image", resolve=_with_row(tagged))
+    req = gen_road_mod.build_request(base, mode="image", resolve=_with_row(tagged))
     assert req.parameters["qualityTag"] == {"prefix": "", "suffix": "<suffix>"}
     assert req.adjusted == []
     # a row that answered with no tag (Tsubaki.3, Flash): nothing sent, and said so
     untagged = {"version_id": "V", "quality_tag": None}
-    req = core.build_request(base, mode="image", resolve=_with_row(untagged))
+    req = gen_road_mod.build_request(base, mode="image", resolve=_with_row(untagged))
     assert "qualityTag" not in req.parameters
     assert req.adjusted == [{"field": "qualityTag", "asked": "Masterpiece", "used": None,
                              "why": "this model version publishes no quality tag"}]
     # no row (the resolver answered a bare id): today's literal prefix
-    req = core.build_request(base, mode="image", resolve=_with_row("V"))
+    req = gen_road_mod.build_request(base, mode="image", resolve=_with_row("V"))
     assert req.parameters["qualityTag"] == {"prefix": "Masterpiece"}
     # the members-only rule is unchanged
-    req = core.build_request(base, mode="image", resolve=_with_row(tagged), is_member=False)
+    req = gen_road_mod.build_request(base, mode="image", resolve=_with_row(tagged), is_member=False)
     assert "qualityTag" not in req.parameters
 
 
 def test_routed_negative_prompts_prefill_on_mmdit26b_only():
     routed = {"default": "<routed-default>", "contextImage": "<routed-context>"}
     extra = {"negativePrompts": "<legacy>", "routedNegativePrompts": routed}
-    meta = lambda mt, ex: core._version_row_to_meta({"id": "V", "modelType": mt, "extra": ex})
+    meta = lambda mt, ex: models_mod._version_row_to_meta({"id": "V", "modelType": mt, "extra": ex})
     assert meta("MMDIT26B_MODEL", extra)["negative_prompt"] == "<routed-default>"
     assert meta("MMDIT26A_MODEL", extra)["negative_prompt"] == "<legacy>"
     # both keys, both strings <= 4096, or the legacy field stands
@@ -845,8 +875,8 @@ def test_a_hidden_profile_is_filtered_only_from_the_drawers_list(monkeypatch):
     rows = [{"profileName": "secret", "profileFlag": "hidden"},
             {"profileName": "pro", "profileFlag": "default"},
             {"profileName": "ultra", "profileFlag": "membershipOnly"}]
-    monkeypatch.setattr(core, "_model_profiles", lambda s, vid: rows)
-    meta = core._attach_profiles(object(), {"version_id": "V"})
+    monkeypatch.setattr(models_mod, "_model_profiles", lambda s, vid: rows)
+    meta = models_mod._attach_profiles(object(), {"version_id": "V"})
     assert meta["profiles"] == ["pro", "ultra"]
     # the gate keeps the full list: its default fill is unchanged, and a hidden profile a
     # CLI or Remix sends is not refused
@@ -861,9 +891,9 @@ def test_a_hidden_profile_is_filtered_only_from_the_drawers_list(monkeypatch):
 # =============================================================================
 
 def test_attach_features_merges_only_false_and_never_overwrites(rest):
-    meta = core._version_row_to_meta({"id": FLASH, "modelType": "MMDIT26B_MODEL", "extra": {
+    meta = models_mod._version_row_to_meta({"id": FLASH, "modelType": "MMDIT26B_MODEL", "extra": {
         "compatibility": {"styleKey": True, "negativePrompt": False, "upscale": True}}})
-    core._attach_features(object(), meta)
+    models_mod._attach_features(object(), meta)
     c = meta["compatibility"]
     assert c["negativePrompt"] is False and c["enableADetailer"] is False
     assert c["upscale"] is True                  # an explicit extra value is never overwritten
@@ -874,16 +904,16 @@ def test_attach_features_merges_only_false_and_never_overwrites(rest):
 
 
 def test_attach_features_model_type_rule_and_unknowns(rest):
-    meta = core._version_row_to_meta({"id": T2, "modelType": "MMDIT26A_MODEL", "extra": {}})
-    core._attach_features(object(), meta)
+    meta = models_mod._version_row_to_meta({"id": T2, "modelType": "MMDIT26A_MODEL", "extra": {}})
+    models_mod._attach_features(object(), meta)
     assert meta["compatibility"] == {"enableADetailer": False, "upscale": False}
     assert meta["context_images"] is False
-    blind = core._version_row_to_meta({"id": BLIND, "modelType": "SDXL_MODEL", "extra": {}})
-    core._attach_features(object(), blind)
+    blind = models_mod._version_row_to_meta({"id": BLIND, "modelType": "SDXL_MODEL", "extra": {}})
+    models_mod._attach_features(object(), blind)
     assert blind["compatibility"] == {} and blind["context_images"] is None
     assert blind["size_rule"] is None                # today's drawer rule, as the gate does
-    sdxl = core._version_row_to_meta({"id": SDXL, "modelType": "SDXL_MODEL", "extra": {}})
-    core._attach_features(object(), sdxl)
+    sdxl = models_mod._version_row_to_meta({"id": SDXL, "modelType": "SDXL_MODEL", "extra": {}})
+    models_mod._attach_features(object(), sdxl)
     assert sdxl["size_rule"] == {"step": 8, "lo": 64, "hi": 4096}
 
 
@@ -894,9 +924,9 @@ def test_attach_features_takes_the_architecture_from_features_only(rest):
     modelType -- what it shows stays what is sent."""
     rest.models["V-DOWN"] = {"features": core.PixAIError("503"), "size-config": SIZE_CONFIG,
                              "inference-profiles": T3_PROFILES}
-    meta = core._version_row_to_meta({"id": "V-DOWN", "modelType": "MMDIT26A_MODEL",
+    meta = models_mod._version_row_to_meta({"id": "V-DOWN", "modelType": "MMDIT26A_MODEL",
                                       "extra": {}})
-    core._attach_features(object(), meta)
+    models_mod._attach_features(object(), meta)
     assert meta["compatibility"] == {}
     assert meta["size_rule"] is None and meta["context_images"] is None
     assert not [c for c in rest.calls if c.endswith("/size-config")]
@@ -928,9 +958,9 @@ def test_the_drawers_all_versions_read_carries_the_rule_features_and_compat(rest
             assert [c for c in rest.calls if c.endswith(suffix)] == \
                 ["/generation-model/" + T3 + suffix], suffix
 
-    check(core.list_model_versions(object(), "M"))
+    check(models_mod.list_model_versions(object(), "M"))
     # ...and through the route the drawer actually calls (fresh caches, fresh call log)
-    for cache in (core._features_cache, core._size_config_cache, core._profile_cache):
+    for cache in (models_mod._features_cache, models_mod._size_config_cache, models_mod._profile_cache):
         cache.clear()
     rest.calls.clear()
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
@@ -944,10 +974,10 @@ def test_the_drawers_all_versions_read_carries_the_rule_features_and_compat(rest
 # =============================================================================
 
 def test_user_dit26b_joins_the_dit_tables():
-    assert core.lora_weight_range("USER_DIT26B_MODEL") == (0.0, 1.2)
-    assert "USER_DIT26B_MODEL" in core.LORA_BASE_MODEL_TYPES
-    assert "USER_DIT26B_MODEL" in core.DIT_SIZE_STEP_TYPES
-    assert "USER_DIT26B_MODEL" in core.NO_HIRES_FACEFIX_TYPES
+    assert gen_params_mod.lora_weight_range("USER_DIT26B_MODEL") == (0.0, 1.2)
+    assert "USER_DIT26B_MODEL" in models_mod.LORA_BASE_MODEL_TYPES
+    assert "USER_DIT26B_MODEL" in models_mod.DIT_SIZE_STEP_TYPES
+    assert "USER_DIT26B_MODEL" in models_mod.NO_HIRES_FACEFIX_TYPES
 
 
 def test_lora_weights_are_clamped_to_the_architectures_range(rest):
@@ -978,7 +1008,7 @@ def test_api_price_returns_adjusted_for_a_flash_negative(tmp_path, monkeypatch):
     fake = FakeRest(price=950)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "_rest_get", fake)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
     cli = login_client(tmp_path)
     d = cli.post("/api/price", json={"version_id": FLASH, "prompt": "<prompt>",
                                      "negative": "<negative>", "width": 1024,
@@ -1001,28 +1031,28 @@ def test_api_price_returns_adjusted_for_a_flash_negative(tmp_path, monkeypatch):
 
 def test_gate_caches_fill_during_a_test(rest):
     gate(img(T3))
-    assert T3 in core._features_cache and T3 in core._size_config_cache
+    assert T3 in models_mod._features_cache and T3 in models_mod._size_config_cache
 
 
 def test_gate_caches_start_empty_in_every_test():
     """Order-independent (review F10/R3): true when run alone, and after the test above it
     still catches a missing conftest clear."""
-    assert core._features_cache == {} and core._size_config_cache == {}
+    assert models_mod._features_cache == {} and models_mod._size_config_cache == {}
 
 
 def test_the_conftest_fixture_clears_both_caches_before_and_after_the_test():
     from tests import conftest
     fixture = getattr(conftest._clear_gate_caches, "__wrapped__", conftest._clear_gate_caches)
     gen = fixture()
-    core._features_cache["X"] = (0, {})
-    core._size_config_cache["X"] = (0, [])
+    models_mod._features_cache["X"] = (0, {})
+    models_mod._size_config_cache["X"] = (0, [])
     next(gen)                                        # the setup half
-    assert core._features_cache == {} and core._size_config_cache == {}
-    core._features_cache["Y"] = (0, {})
-    core._size_config_cache["Y"] = (0, [])
+    assert models_mod._features_cache == {} and models_mod._size_config_cache == {}
+    models_mod._features_cache["Y"] = (0, {})
+    models_mod._size_config_cache["Y"] = (0, [])
     with pytest.raises(StopIteration):
         next(gen)                                    # the teardown half
-    assert core._features_cache == {} and core._size_config_cache == {}
+    assert models_mod._features_cache == {} and models_mod._size_config_cache == {}
 
 
 # =============================================================================
@@ -1075,10 +1105,10 @@ def lane(monkeypatch):
 
 
 def lane_road(payload, **kw):
-    return core.build_request(dict(payload, unlimited=True), mode="image",
-                              resolve=core.RequestResolver(
-                                  gate=core.gate_resolver(object()),
-                                  unlimited=core.unlimited_resolver(object())), **kw)
+    return gen_road_mod.build_request(dict(payload, unlimited=True), mode="image",
+                              resolve=gen_road_mod.RequestResolver(
+                                  gate=gen_road_mod.gate_resolver(object()),
+                                  unlimited=gen_road_mod.unlimited_resolver(object())), **kw)
 
 
 # The owner's own site run 2060699017312381800, rebuilt with placeholders: Pro, 768 x 1280,
@@ -1095,7 +1125,7 @@ def _no_card(monkeypatch):
     def _trip(*a, **k):
         calls.append(a)
         raise AssertionError("a lane request reached the card check")
-    monkeypatch.setattr(core, "match_kaisuuken", _trip)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", _trip)
     return calls
 
 
@@ -1160,11 +1190,11 @@ def test_the_lane_needs_the_gated_shape_and_a_road_that_can_check_it(lane):
     with pytest.raises(core.PixAIError) as err:
         lane_road(LANE_OK)
     assert "Couldn't read this model's settings" in str(err.value)
-    for rs in (core.RequestResolver(gate=core.gate_resolver(object())),
-               core.RequestResolver(unlimited=core.unlimited_resolver(object())),
+    for rs in (gen_road_mod.RequestResolver(gate=gen_road_mod.gate_resolver(object())),
+               gen_road_mod.RequestResolver(unlimited=gen_road_mod.unlimited_resolver(object())),
                None):
         with pytest.raises(core.PixAIError) as err:
-            core.build_request(dict(LANE_OK, unlimited=True), mode="image", resolve=rs)
+            gen_road_mod.build_request(dict(LANE_OK, unlimited=True), mode="image", resolve=rs)
         assert "can't be checked on this road" in str(err.value)
 
 
@@ -1175,14 +1205,14 @@ def test_the_lane_needs_the_gated_shape_and_a_road_that_can_check_it(lane):
 ])
 def test_the_lane_asked_for_on_another_road_is_refused_not_ignored(payload, lane):
     with pytest.raises(core.PixAIError) as err:
-        core.build_request(dict(payload, unlimited=True))
+        gen_road_mod.build_request(dict(payload, unlimited=True))
     assert "Tsubaki.3 image generation only" in str(err.value)
 
 
 def test_price_answers_a_lane_request_free_with_no_card_check(lane, monkeypatch):
     calls = _no_card(monkeypatch)
     req = lane_road(LANE_OK)
-    quoted = core.price(object(), req)
+    quoted = gen_road_mod.price(object(), req)
     assert quoted == {"cost": 0, "free": True, "unlimited": True, "list_cost": 4000}
     assert calls == []
     # the list price is the paid equivalent: the lane itself is not a priced field
@@ -1193,21 +1223,19 @@ def test_submit_sends_the_lane_once_with_no_card_whatever_no_card_says(lane, mon
     calls = _no_card(monkeypatch)
     sent = []
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
-    monkeypatch.setattr(core, "gql_mutate",
-                        lambda s, q, v=None: sent.append(v["parameters"])
-                        or {"createGenerationTask": {"id": "T9"}})
+    monkeypatch.setattr(core, "_create",
+                        lambda s, kind, v: sent.append(v)
+                        or {"id": "T9"})
     req = lane_road(LANE_OK)
-    assert core.submit(object(), req, no_card=False) == {"task_id": "T9"}
+    assert gen_road_mod.submit(object(), req, no_card=False) == {"task_id": "T9"}
     assert calls == [] and len(sent) == 1
     assert sent[0]["lane"] == "infinite"
     assert "kaisuukenId" not in sent[0] and "priority" not in sent[0]
 
 
 @pytest.mark.parametrize("refusal", [
-    'GraphQL error: [{"message": "unknown inferenceProfile \\"pro\\"", '
-    '"extensions": {"code": "INFINITE_MODE_NOT_ELIGIBLE"}}]',
-    'GraphQL error: [{"message": "Only member can use turbo mode", '
-    '"extensions": {"code": "REQUIRE_MEMBERSHIP"}}]',
+    ("INFINITE_MODE_NOT_ELIGIBLE", 'unknown inferenceProfile "pro"'),
+    ("REQUIRE_MEMBERSHIP", "Only member can use turbo mode"),
 ])
 def test_a_refused_lane_request_is_never_resubmitted_as_anything_else(refusal, monkeypatch):
     """§8.2: neither automatic resubmit fires on a lane request -- not the inferenceProfile
@@ -1215,18 +1243,22 @@ def test_a_refused_lane_request_is_never_resubmitted_as_anything_else(refusal, m
     _turbo_refused). One mutation; PixAI's refusal in plain words."""
     sent = []
 
-    def _refuse(s, q, v=None):
-        sent.append(dict(v["parameters"]))
-        raise core.graphql_error(refusal[len("GraphQL error: "):])   # as the transport raises it
+    def _refuse(s, kind, v):
+        # PixAI's REST refusal, as the create door raises it (3.22 S3-image): the code in the
+        # oRPC body, the words in its message.
+        sent.append(dict(v))
+        code, message = refusal
+        raise core.PixAIRestError("REST POST /task/create -> 400", status=400,
+                                  body={"code": code, "message": message})
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
-    monkeypatch.setattr(core, "_gate_params_for_model", lambda s, p: p)
-    monkeypatch.setattr(core, "gql_mutate", _refuse)
+    monkeypatch.setattr(models_mod, "_gate_params_for_model", lambda s, p: p)
+    monkeypatch.setattr(core, "_create", _refuse)
     monkeypatch.setitem(core._turbo_refused, "seen", False)
     # a CLI --params-json shape: lane AND the app's Turbo, which only the web road strips
     params = {"prompts": "<prompt>", "modelId": T3, "inferenceProfile": "pro",
-              "priority": core.PRIORITY_TURBO, "lane": "infinite"}
+              "priority": gen_params_mod.PRIORITY_TURBO, "lane": "infinite"}
     with pytest.raises(core.PixAIError) as err:
-        core.submit_generation(object(), params)
+        gen_road_mod.submit_generation(object(), params)
     assert str(err.value).startswith(REFUSED)
     assert len(sent) == 1 and sent[0]["inferenceProfile"] == "pro"
     assert core._turbo_refused["seen"] is False
@@ -1240,22 +1272,23 @@ def test_any_params_carrying_the_lane_never_touch_a_card(monkeypatch, capsys):
     calls = _no_card(monkeypatch)
     args = SimpleNamespace(kaisuuken_id="", no_card=False)
     params = {"modelId": T3, "lane": "infinite"}
-    assert core._apply_kaisuuken(object(), params, args) == ""
+    assert cards_mod._apply_kaisuuken(object(), params, args) == ""
     assert "kaisuukenId" not in params and calls == []
     for bad_params, bad_args in (({"modelId": T3, "lane": "infinite", "kaisuukenId": "c"}, args),
                                  (params, SimpleNamespace(kaisuuken_id="c", no_card=False))):
         with pytest.raises(core.PixAIError) as err:
-            core._apply_kaisuuken(object(), dict(bad_params), bad_args)
+            cards_mod._apply_kaisuuken(object(), dict(bad_params), bad_args)
         assert "never uses a free card" in str(err.value)
 
     def _no_mutation(*a, **k):
         raise AssertionError("a lane request carrying a card reached the mutation")
     monkeypatch.setattr(core, "gql_mutate", _no_mutation)
+    monkeypatch.setattr(core, "_create", _no_mutation)
     with pytest.raises(core.PixAIError):
-        core.submit_generation(object(), {"modelId": T3, "lane": "infinite",
+        gen_road_mod.submit_generation(object(), {"modelId": T3, "lane": "infinite",
                                           "kaisuukenId": "c"})
     # ...and the CLI preview quotes it without a card check either
-    core._preview_card_note(SimpleNamespace(no_card=False, kaisuuken_id="", token=None),
+    cards_mod._preview_card_note(SimpleNamespace(no_card=False, kaisuuken_id="", token=None),
                             params)
     assert "no free card is checked" in capsys.readouterr().out and calls == []
 
@@ -1264,43 +1297,43 @@ def test_status_is_owned_only_before_its_expiry_checked_on_every_call(lane):
     import datetime
     lane.grants[T3] = {"owned": True, "expiresAt": "2026-10-25T00:00:00Z"}
     at = datetime.datetime(2026, 9, 26, 12, tzinfo=datetime.timezone.utc).timestamp()
-    st = core.infinite_mode_status(object(), T3, now=at)
+    st = gen_road_mod.infinite_mode_status(object(), T3, now=at)
     assert st == {"owned": True, "expires_at": "2026-10-25T00:00:00Z", "days_left": 29}
     # the RAW answer is cached; the verdict is not -- a second look after the expiry needs no
     # new read and says not owned (§8.8: nothing goes out after the grant ends)
     late = datetime.datetime(2026, 10, 25, 0, 0, 1, tzinfo=datetime.timezone.utc).timestamp()
-    assert core.infinite_mode_status(object(), T3, now=late)["owned"] is False
+    assert gen_road_mod.infinite_mode_status(object(), T3, now=late)["owned"] is False
     assert len([c for c in lane.calls if LANE_PATH.match(c)]) == 1
     # owned without an expiry, or a body with no boolean `owned`, is not a grant
-    core._unlimited_cache.clear()
+    gen_road_mod._unlimited_cache.clear()
     lane.grants[T3] = {"owned": True, "expiresAt": None}
-    assert core.infinite_mode_status(object(), T3)["owned"] is False
-    core._unlimited_cache.clear()
+    assert gen_road_mod.infinite_mode_status(object(), T3)["owned"] is False
+    gen_road_mod._unlimited_cache.clear()
     lane.grants[T3] = {"owned": "yes"}
-    assert core.infinite_mode_status(object(), T3) is None
+    assert gen_road_mod.infinite_mode_status(object(), T3) is None
 
 
 def test_status_cache_keeps_success_five_minutes_and_a_failure_one(lane):
     def reads():
         return len([c for c in lane.calls if LANE_PATH.match(c)])
     key = (T3, "key")
-    assert core.infinite_mode_status(object(), T3)["owned"] is True
-    at, raw = core._unlimited_cache[key]
-    core._unlimited_cache[key] = (at - 299, raw)
-    core.infinite_mode_status(object(), T3)
+    assert gen_road_mod.infinite_mode_status(object(), T3)["owned"] is True
+    at, raw = gen_road_mod._unlimited_cache[key]
+    gen_road_mod._unlimited_cache[key] = (at - 299, raw)
+    gen_road_mod.infinite_mode_status(object(), T3)
     assert reads() == 1
-    core._unlimited_cache[key] = (at - 301, raw)
-    core.infinite_mode_status(object(), T3)
+    gen_road_mod._unlimited_cache[key] = (at - 301, raw)
+    gen_road_mod.infinite_mode_status(object(), T3)
     assert reads() == 2
     lane.grants[T3] = core.PixAIError("503")
-    core._unlimited_cache.clear()
-    assert core.infinite_mode_status(object(), T3) is None
-    at, raw = core._unlimited_cache[key]
+    gen_road_mod._unlimited_cache.clear()
+    assert gen_road_mod.infinite_mode_status(object(), T3) is None
+    at, raw = gen_road_mod._unlimited_cache[key]
     assert raw is None
-    core._unlimited_cache[key] = (at - 59, None)
-    assert core.infinite_mode_status(object(), T3) is None and reads() == 3
-    core._unlimited_cache[key] = (at - 61, None)
-    core.infinite_mode_status(object(), T3)
+    gen_road_mod._unlimited_cache[key] = (at - 59, None)
+    assert gen_road_mod.infinite_mode_status(object(), T3) is None and reads() == 3
+    gen_road_mod._unlimited_cache[key] = (at - 61, None)
+    gen_road_mod.infinite_mode_status(object(), T3)
     assert reads() == 4
 
 
@@ -1309,41 +1342,41 @@ def test_status_is_read_and_cached_under_the_identity_that_creates(lane, monkeyp
     identity -- off the stored token, never refreshed by a read -- and cached apart from the
     API key's."""
     mirror = object()
-    assert core.infinite_mode_status("api-session", T3)["owned"] is True
+    assert gen_road_mod.infinite_mode_status("api-session", T3)["owned"] is True
     monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
     monkeypatch.setattr(mirror_mod, "load_mirror_state", lambda: {"jwt": "<jwt>"})
     monkeypatch.setattr(mirror_mod, "_jwt_usable", lambda jwt: jwt == "<jwt>")
     monkeypatch.setattr(mirror_mod, "_mirror_session_from", lambda jwt: mirror)
     monkeypatch.setattr(mirror_mod, "make_mirror_session",
                         lambda *a, **k: pytest.fail("a status read must not refresh the token"))
-    assert core.infinite_mode_status("api-session", T3)["owned"] is True
+    assert gen_road_mod.infinite_mode_status("api-session", T3)["owned"] is True
     assert lane.sessions == ["api-session", mirror]
-    assert set(core._unlimited_cache) == {(T3, "key"), (T3, "mirror")}
+    assert set(gen_road_mod._unlimited_cache) == {(T3, "key"), (T3, "mirror")}
     # an unusable stored token is a failed read, not an API-key fallback
-    core._unlimited_cache.clear()
+    gen_road_mod._unlimited_cache.clear()
     monkeypatch.setattr(mirror_mod, "_jwt_usable", lambda jwt: False)
-    assert core.infinite_mode_status("api-session", T3) is None
+    assert gen_road_mod.infinite_mode_status("api-session", T3) is None
     assert len(lane.sessions) == 2
 
 
 def test_the_drawers_version_meta_offers_the_lane_on_tsubaki3_only(lane):
-    meta = core._version_row_to_meta({"id": T3, "modelType": "MMDIT26B_MODEL", "extra": {}})
-    core._attach_unlimited(object(), core._attach_features(object(), meta))
+    meta = models_mod._version_row_to_meta({"id": T3, "modelType": "MMDIT26B_MODEL", "extra": {}})
+    models_mod._attach_unlimited(object(), models_mod._attach_features(object(), meta))
     u = meta["unlimited"]
     assert u["owned"] is True and u["days_left"] == 30
     assert u["size"] == {"max_area": 1800 * 1800, "max_side": 1792,
                          "ranges": [[512, 2496, 512, 2496], [512, 2200, 512, 2200],
                                     [512, 1800, 512, 1800]]}
-    flash = core._version_row_to_meta({"id": FLASH, "modelType": "MMDIT26B_MODEL",
+    flash = models_mod._version_row_to_meta({"id": FLASH, "modelType": "MMDIT26B_MODEL",
                                        "extra": {}})
-    core._attach_unlimited(object(), core._attach_features(object(), flash))
+    models_mod._attach_unlimited(object(), models_mod._attach_features(object(), flash))
     assert flash["unlimited"] is None
     assert [c for c in lane.calls if LANE_PATH.match(c)] == [
         "/generation-model-version/%s/infinite-mode" % T3]
     lane.grants[T3] = core.PixAIError("503")
-    core._unlimited_cache.clear()
-    assert core._attach_unlimited(object(), dict(meta))["unlimited"] is None
-    assert core._empty_version_meta()["unlimited"] is None
+    gen_road_mod._unlimited_cache.clear()
+    assert models_mod._attach_unlimited(object(), dict(meta))["unlimited"] is None
+    assert models_mod._empty_version_meta()["unlimited"] is None
 
 
 def test_the_drawers_all_versions_read_carries_the_status_on_the_latest_row(lane, monkeypatch,
@@ -1375,9 +1408,11 @@ def test_api_generate_refuses_a_lane_request_under_read_only_before_any_read(mon
         def _boom(*a, **k):
             raise AssertionError("PixAI was reached before READ_ONLY: " + name)
         return _boom
-    for fn in ("_rest_get", "_rest_post", "account_info", "match_kaisuuken", "gql_mutate",
-               "gql_adhoc"):
+    for fn in ("_rest_get", "_rest_post", "account_info", "gql_mutate", "gql_adhoc",
+               "_create"):
         monkeypatch.setattr(core, fn, tripwire(fn))
+    for fn in ("match_kaisuuken",):                              # in cards since 3.22
+        monkeypatch.setattr(cards_mod, fn, tripwire(fn))
     monkeypatch.setattr(core, "READ_ONLY", True)
     d = cli.post("/api/generate", json=dict(LANE_OK, unlimited=True)).get_json()
     assert "READ_ONLY" in d["error"]
@@ -1393,13 +1428,13 @@ def test_api_generate_runs_one_lane_task_at_a_time_off_its_own_job_log(monkeypat
     calls = _no_card(monkeypatch)
     sent = []
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
-    monkeypatch.setattr(core, "gql_mutate",
-                        lambda s, q, v=None: sent.append(v["parameters"])
-                        or {"createGenerationTask": {"id": "4242"}})
+    monkeypatch.setattr(core, "_create",
+                        lambda s, kind, v: sent.append(v)
+                        or {"id": "4242"})
     jobs_mod.append_job_event(tmp_path, "4141", status="running", type="generate",
                           lane="infinite")
     r = cli.post("/api/generate", json=dict(LANE_OK, unlimited=True))
-    assert r.get_json() == {"error": core.UNLIMITED_BUSY} and sent == []
+    assert r.get_json() == {"error": gen_road_mod.UNLIMITED_BUSY} and sent == []
     # once that task has finished, the next one goes out
     jobs_mod.append_job_event(tmp_path, "4141", status="done")
     d = cli.post("/api/generate", json=dict(LANE_OK, unlimited=True)).get_json()
@@ -1412,7 +1447,7 @@ def test_api_generate_runs_one_lane_task_at_a_time_off_its_own_job_log(monkeypat
     later = g.time.monotonic() + 11
     monkeypatch.setattr(g.time, "monotonic", lambda: later)
     r = cli.post("/api/generate", json=dict(LANE_OK, unlimited=True))
-    assert r.get_json() == {"error": core.UNLIMITED_BUSY} and len(sent) == 1
+    assert r.get_json() == {"error": gen_road_mod.UNLIMITED_BUSY} and len(sent) == 1
 
 
 def test_no_code_path_requests_the_claim_route():

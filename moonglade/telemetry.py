@@ -11,11 +11,13 @@ state) are imported inside each function that uses them, never at the top, so im
 module never imports the gallery.
 """
 import json
+import logging
 import os
 import sqlite3
 import threading
 
 from moonglade import contest_wins
+from moonglade import gen_params as _gen_params
 from moonglade import paths as _paths
 
 # ---------------------------------------------------------------------------
@@ -81,13 +83,20 @@ def _save_telemetry(out_dir, data):
     """Atomic write (tmp + os.replace, the same idiom as download's .part) so a
     reader can never see a half-written file -- a torn read would fail-soft to
     empty defaults and the next mutate would persist that wipe."""
+    tmp = None
     try:
         p = _telemetry_path(out_dir)
         tmp = p.with_name(p.name + ".tmp-%d" % os.getpid())
         tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
         os.replace(tmp, p)
-    except OSError:
-        pass
+    except OSError as e:
+        logging.getLogger(__name__).warning(
+            "telemetry: could not save telemetry.json (%s); this update is lost", e)
+        if tmp is not None:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
 
 
 def _telem_file_lock(out_dir):
@@ -396,13 +405,13 @@ def telemetry_metrics(out_dir, telem=None):
     try:
         from moonglade import backup as _core
         _non_emotion = set()
-        for pp in getattr(_core, "BRIDGE_ENHANCE_PRESETS", ()):
+        for pp in getattr(_gen_params, "BRIDGE_ENHANCE_PRESETS", ()):
             _k = str(pp.get("key") or "").strip()
             if _k and _k != "emotion":
                 _non_emotion.add(_k)
         _tools = sets.get("enhance_tools")
         _tools = set(_tools) if isinstance(_tools, list) else set()
-        _universe = len(getattr(_core, "ENHANCE_EMOTION_PROMPTS", ()) or ())
+        _universe = len(getattr(_gen_params, "ENHANCE_EMOTION_PROMPTS", ()) or ())
         _emotion_done = _universe > 0 and _card("enhance_emotions") >= _universe
         m["enhance_tools_complete"] = len(_tools & _non_emotion) + (1 if _emotion_done else 0)
     except Exception:

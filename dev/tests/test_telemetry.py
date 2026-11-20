@@ -9,7 +9,11 @@ from pathlib import Path
 
 import pytest
 
+from moonglade import cards as cards_mod
 from moonglade import gallery as g
+from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
+from moonglade import training as training_mod
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import STARFALL_EVENT, ach_event, ach_nonce, login_client, login_test_client, _SEALED_DONOR
@@ -17,6 +21,7 @@ from moonglade import mirror as mirror_mod
 from moonglade import telemetry as telemetry_mod
 from moonglade import achievements as achievements_mod
 from moonglade import branding as branding_mod
+from moonglade import task_reads as task_reads_mod
 
 # The roster is sealed in the container (built from the private donor), not in source.
 # Gate ONLY the tests that assert sealed roster/skin/criteria CONTENT -- NOT the whole
@@ -354,28 +359,39 @@ def test_ach_event_debounces_a_double_fire(tmp_path):
     assert telemetry_mod.telemetry_metrics(tmp_path)["konami_triggered"] == 1
 
 
-def test_ach_debounce_window_is_narrower_than_a_hand(tmp_path):
+def test_ach_debounce_window_is_narrower_than_a_hand(tmp_path, monkeypatch):
     """The window is a wall-clock gap and can tell nothing else apart, so its WIDTH is the
-    whole claim the comments make. Real time, deliberately: two taps 200ms apart are two
-    taps and must both count; 50ms apart is one gesture fired twice and counts once.
+    whole claim the comments make. Two taps 200ms apart are two taps and must both count;
+    50ms apart is one gesture fired twice and counts once.
+
+    The gaps are on a FAKE clock handed to the debounce, not slept. The debounce stamps an
+    event BEFORE its handler's own work (the telemetry bump: lockfile, read, temp write,
+    os.replace), so on real time the 50ms gap was 50ms plus everything c's handler and d's
+    routing took, and under parallel workers that passed 150ms and d was not debounced
+    (KeyError on d["debounced"], seen once under xdist). The gap is the claim; the
+    machine's speed is not.
 
     It shipped at 400ms on 2026-09-07 and this is what that cost -- an ordinary phone
     tap-rate of ~3/sec landed every second tap inside the window, so the second of every
     pair of real taps was thrown away, while three separate comments said separate clicks
     were never touched. 150ms is over a double-fired DOM event and under a hand."""
+    clock = {"t": time.time()}   # real epoch: the sweep prunes stamps by it
+    real = g._ach_debounced
+    monkeypatch.setattr(g, "_ach_debounced",
+                        lambda sid, event, now=None: real(sid, event, now=clock["t"]))
     cli = login_client(tmp_path)
     n = ach_nonce(cli)
     a = cli.post("/api/ach-event", json={"event": "docs", "nonce": n}).get_json()
     assert a["ok"] is True and not a.get("debounced")
-    time.sleep(0.2)                                  # two separate taps at ~5/sec
+    clock["t"] += 0.2                                # two separate taps at ~5/sec
     b = cli.post("/api/ach-event", json={"event": "docs", "nonce": a["next_nonce"]}
                  ).get_json()
     assert b.get("debounced") is not True, "a real second tap must not be swallowed"
-    time.sleep(0.2)                                  # clear the window again
+    clock["t"] += 0.2                                # clear the window again
     c = cli.post("/api/ach-event", json={"event": "docs", "nonce": b["next_nonce"]}
                  ).get_json()
     assert c.get("debounced") is not True
-    time.sleep(0.05)                                 # the second half of ONE click
+    clock["t"] += 0.05                               # the second half of ONE click
     d = cli.post("/api/ach-event", json={"event": "docs", "nonce": c["next_nonce"]}
                  ).get_json()
     assert d["debounced"] is True
@@ -622,8 +638,18 @@ def _arm_mirror_bridge(monkeypatch, core):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
     monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "submit_generation", lambda *a, **k: "T-ENH-9")
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(gen_road_mod, "submit_generation", lambda *a, **k: "T-ENH-9")
+    # 3.22 S3-enhance: an enhance is sent by submit_enhance, its type read off PixAI's live
+    # config (constants.imageEnhancementPlugins), answered here for every pinned preset.
+    monkeypatch.setattr(gen_road_mod, "submit_enhance", lambda *a, **k: "T-ENH-9")
+    plugins = {t: {"workflowName": wn} for t, wn in (
+        ("handfix", "mymusise/hand-fix"), ("face-detailer", "kyo/face-detailer"),
+        ("emotion", "kyo/emotionlab"), ("background-remover", "mymusise/39a2c67c"),
+        ("image-to-lineart", "pixai-official/image-to-lineart"),
+        ("sketch-coloring", "pixai-official/sketch-coloring-workflow"))}
+    monkeypatch.setattr(core, "_cached_config", lambda key, **k: {
+        "imageEnhancementPlugins": plugins} if key == "constants" else None)
 
 
 def test_enhance_tools_complete(tmp_path, monkeypatch):
@@ -636,8 +662,8 @@ def test_enhance_tools_complete(tmp_path, monkeypatch):
     _arm_mirror_bridge(monkeypatch, core)
     save_catalog(tmp_path / "catalog.db", [])
     cli = login_client(tmp_path)
-    monkeypatch.setattr(core, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(task_reads_mod, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, t, out, **k: {"media_ids": ["OUT1"], "saved": 1, "is_video": False})
     # unique task id per submit so each terminal poll fires its own deferred record
     _seq = {"n": 0}
@@ -645,7 +671,7 @@ def test_enhance_tools_complete(tmp_path, monkeypatch):
     def _submit(*a, **k):
         _seq["n"] += 1
         return f"T-ENH-{_seq['n']}"
-    monkeypatch.setattr(core, "submit_generation", _submit)
+    monkeypatch.setattr(gen_road_mod, "submit_enhance", _submit)
 
     # Each use is a separate press, past the single sends' double-tap window (3.21.2), so a
     # repeated preset is a second use rather than a held repeat.
@@ -658,7 +684,7 @@ def test_enhance_tools_complete(tmp_path, monkeypatch):
         assert r.status_code == 200
         cli.get("/api/task-status", query_string={"task_id": r.get_json()["task_id"]})
 
-    presets = {p["key"]: p["workflow_name"] for p in core.BRIDGE_ENHANCE_PRESETS}
+    presets = {p["key"]: p["workflow_name"] for p in gen_params_mod.BRIDGE_ENHANCE_PRESETS}
     non_emotion = [k for k in presets if k != "emotion"]
     assert len(non_emotion) == 5                                   # the roster's "SIX tools" minus emotion
 
@@ -675,8 +701,8 @@ def test_enhance_tools_complete(tmp_path, monkeypatch):
     assert telemetry_mod.telemetry_metrics(tmp_path)["enhance_tools_complete"] == 5
 
     # the emotion tool with a PARTIAL emotion set stays at 5 (emotion incomplete)
-    emo_wf = core.ENHANCE_EMOTION_WORKFLOW
-    emo_keys = list(core.ENHANCE_EMOTION_PROMPTS.keys())
+    emo_wf = gen_params_mod.ENHANCE_EMOTION_WORKFLOW
+    emo_keys = list(gen_params_mod.ENHANCE_EMOTION_PROMPTS.keys())
     for ek in emo_keys[:-1]:
         _run_enhance(source="src-emo", workflow_name=emo_wf, emotion=ek)
     assert telemetry_mod.telemetry_metrics(tmp_path)["enhance_tools_complete"] == 5
@@ -699,15 +725,15 @@ def test_scene_and_gen_daymark_hooks_fire_on_terminal_success(tmp_path, monkeypa
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
     monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "submit_scene", lambda *a, **k: "T-SCENE-1")
+    monkeypatch.setattr(gen_road_mod, "submit_scene", lambda *a, **k: "T-SCENE-1")
     save_catalog(tmp_path / "catalog.db", [])
     cli = login_client(tmp_path)
     r = cli.post("/api/scene", json={"scene_id": "the-sun", "media_ids": ["srcABC"]})
     assert r.get_json().get("task_id") == "T-SCENE-1"
     assert telemetry_mod.telemetry_metrics(tmp_path)["scenes_used"] == 0          # deferred: nothing at submit
-    monkeypatch.setattr(core, "generation_status",
+    monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, tid: {"phase": "done", "paid_credit": 0})
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: {"media_ids": ["OUT1"], "saved": 1, "is_video": False})
     cli.get("/api/task-status", query_string={"task_id": "T-SCENE-1"})
     assert telemetry_mod.telemetry_metrics(tmp_path)["scenes_used"] == 1
@@ -732,8 +758,8 @@ def test_a_regular_mirror_gen_is_not_a_bridge_tool(tmp_path, monkeypatch):
     a bridge gen and the metric measured traffic instead of tool use."""
     from moonglade import backup as core
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(task_reads_mod, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, t, out, **k: {"media_ids": ["OUT1"], "saved": 1, "is_video": False})
     save_catalog(tmp_path / "catalog.db", [])
     cli = login_client(tmp_path)
@@ -753,12 +779,12 @@ def test_an_enhance_terminal_counts_as_a_bridge_tool(tmp_path, monkeypatch):
     re-poll cannot inflate it."""
     from moonglade import backup as core
     _arm_mirror_bridge(monkeypatch, core)
-    monkeypatch.setattr(core, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(task_reads_mod, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, t, out, **k: {"media_ids": ["OUT1"], "saved": 1, "is_video": False})
     save_catalog(tmp_path / "catalog.db", [])
     cli = login_client(tmp_path)
-    preset = core.BRIDGE_ENHANCE_PRESETS[0]["workflow_name"]
+    preset = gen_params_mod.BRIDGE_ENHANCE_PRESETS[0]["workflow_name"]
     r = cli.post("/api/enhance", json={"source": "src1", "workflow_name": preset})
     assert r.status_code == 200
     tid = r.get_json()["task_id"]
@@ -791,12 +817,12 @@ def test_a_train_submit_alone_counts_no_lora_trained(tmp_path, monkeypatch):
     validate/quota/submit stubbing shape test_panel already uses."""
     from moonglade import backup as core
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "validate_training", lambda *a, **k: "nel druid")
-    monkeypatch.setattr(core, "training_free_quota", lambda s: 9)
+    monkeypatch.setattr(training_mod, "validate_training", lambda *a, **k: "nel druid")
+    monkeypatch.setattr(training_mod, "training_free_quota", lambda s: 9)
     # (v, config=None): the route prices off the config object it validated with (review fix
     # 2026-09-26, SCOPE_2026-09-26 E7), so the stub takes that second argument too.
-    monkeypatch.setattr(core, "training_price_for_version", lambda v, config=None: None)
-    monkeypatch.setattr(core, "submit_training", lambda *a, **k: {"id": "trn1", "refId": "model9"})
+    monkeypatch.setattr(training_mod, "training_price_for_version", lambda v, config=None: None)
+    monkeypatch.setattr(training_mod, "submit_training", lambda *a, **k: {"id": "trn1", "refId": "model9"})
     save_catalog(tmp_path / "catalog.db", [])
     cli = login_client(tmp_path)
     csrf = cli.get("/api/panel/summary").get_json()["csrf"]
@@ -807,3 +833,18 @@ def test_a_train_submit_alone_counts_no_lora_trained(tmp_path, monkeypatch):
     d = cli.post("/api/train/submit", json=body).get_json()
     assert d.get("submitted") is True
     assert telemetry_mod.telemetry_metrics(tmp_path)["loras_trained"] == 0
+
+
+def test_save_telemetry_failure_is_logged_and_leaves_no_tmp(tmp_path, monkeypatch, caplog):
+    """3.22 review: a failed telemetry write stays non-fatal but warns, and the
+    .tmp-<pid> file it staged is removed."""
+    import logging
+
+    def boom(src, dst):
+        raise OSError("disk says no")
+
+    monkeypatch.setattr(telemetry_mod.os, "replace", boom)
+    with caplog.at_level(logging.WARNING, logger="moonglade.telemetry"):
+        telemetry_mod._save_telemetry(tmp_path, {"counters": {}})
+    assert any("could not save telemetry" in r.getMessage() for r in caplog.records)
+    assert not list(tmp_path.rglob("*.tmp-*")), "the staged temp file was left behind"

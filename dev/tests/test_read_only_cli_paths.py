@@ -32,6 +32,9 @@ from types import SimpleNamespace
 import pytest
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
+from moonglade import gen_cli as gen_cli_mod
+from moonglade import task_reads as task_reads_mod
 
 
 def _args(tmp_path, **extra):
@@ -46,7 +49,7 @@ class TestRunGenerateReadOnly:
         monkeypatch.setattr(core, "READ_ONLY", True)
         monkeypatch.setattr(core, "_make_session", lambda token: mock_session)
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.run_generate(_args(tmp_path))
+            gen_cli_mod.run_generate(_args(tmp_path))
         mock_session.post.assert_not_called()
 
     def test_allowed_when_not_read_only(self, tmp_path, mock_session, mocker, monkeypatch):
@@ -65,15 +68,17 @@ class TestRunGenerateReadOnly:
         # auto-match directly (no card) rather than let it hit conftest's blocked
         # _rest_post, which _apply_kaisuuken now correctly treats as a real failure
         # and aborts on (see match_kaisuuken/_apply_kaisuuken, fail-open fix).
-        monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+        monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
         resp = mocker.MagicMock()
         resp.status_code = 200
-        resp.json.return_value = {"data": {"createGenerationTask": {"id": "t1"}}}
+        resp.json.return_value = {"id": "t1"}         # the create door's answer (3.22 S3-image)
         mock_session.post.return_value = resp
-        monkeypatch.setattr(core, "_poll_task_status", lambda *a, **k: None)
-        monkeypatch.setattr(core, "task_detail_gql", lambda *a, **k: {"outputs": {"mediaId": "m1"}})
-        monkeypatch.setattr(core, "_download_image_task", lambda *a, **k: [])
-        core.run_generate(_args(tmp_path))
+        from tests.conftest import _REAL_CREATE
+        monkeypatch.setattr(core, "_create", _REAL_CREATE)
+        monkeypatch.setattr(task_reads_mod, "_poll_task_status", lambda *a, **k: None)
+        monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda *a, **k: {"outputs": {"mediaId": "m1"}})
+        monkeypatch.setattr(gen_cli_mod, "_download_image_task", lambda *a, **k: [])
+        gen_cli_mod.run_generate(_args(tmp_path))
         mock_session.post.assert_called()
 
 
@@ -82,7 +87,7 @@ class TestRunGenerateVideoReadOnly:
         monkeypatch.setattr(core, "READ_ONLY", True)
         monkeypatch.setattr(core, "_make_session", lambda token: mock_session)
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.run_generate_video(_args(tmp_path, image="mid1"))
+            gen_cli_mod.run_generate_video(_args(tmp_path, image="mid1"))
         mock_session.post.assert_not_called()
 
 
@@ -91,7 +96,7 @@ class TestRunReferenceVideoReadOnly:
         monkeypatch.setattr(core, "READ_ONLY", True)
         monkeypatch.setattr(core, "_make_session", lambda token: mock_session)
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.run_reference_video(_args(tmp_path))
+            gen_cli_mod.run_reference_video(_args(tmp_path))
         mock_session.post.assert_not_called()
 
     def test_blocked_before_resolving_local_refs(self, tmp_path, mock_session, monkeypatch):
@@ -103,7 +108,7 @@ class TestRunReferenceVideoReadOnly:
         local_file = tmp_path / "ref.png"
         local_file.write_bytes(b"\x89PNG\r\n")
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.run_reference_video(_args(tmp_path, params_json="",
+            gen_cli_mod.run_reference_video(_args(tmp_path, params_json="",
                                             ref_image=[str(local_file)]))
         mock_session.post.assert_not_called()
 
@@ -120,7 +125,7 @@ class TestRunEditImageReadOnly:
         monkeypatch.setattr(core, "READ_ONLY", True)
         monkeypatch.setattr(core, "_make_session", lambda token: mock_session)
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.run_edit_image(_args(tmp_path))
+            gen_cli_mod.run_edit_image(_args(tmp_path))
         mock_session.post.assert_not_called()
 
     def test_blocked_before_uploading_local_source(self, tmp_path, mock_session, monkeypatch):
@@ -129,7 +134,7 @@ class TestRunEditImageReadOnly:
         local_file = tmp_path / "src.png"
         local_file.write_bytes(b"\x89PNG\r\n")
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.run_edit_image(_args(tmp_path, params_json="", edit_src=[str(local_file)]))
+            gen_cli_mod.run_edit_image(_args(tmp_path, params_json="", edit_src=[str(local_file)]))
         mock_session.post.assert_not_called()
 
 
@@ -141,9 +146,9 @@ class TestReadOnlyStillAllowsFreeTaskRecovery:
     def test_generate_video_recovery_not_blocked(self, tmp_path, mock_session, monkeypatch):
         monkeypatch.setattr(core, "READ_ONLY", True)
         monkeypatch.setattr(core, "_make_session", lambda token: mock_session)
-        monkeypatch.setattr(core, "task_detail_gql", lambda *a, **k: {})
-        monkeypatch.setattr(core, "_maybe_dump_params", lambda *a, **k: None)
-        monkeypatch.setattr(core, "_download_video_task", lambda *a, **k: [])
+        monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda *a, **k: {})
+        monkeypatch.setattr(gen_cli_mod, "_maybe_dump_params", lambda *a, **k: None)
+        monkeypatch.setattr(gen_cli_mod, "_download_video_task", lambda *a, **k: [])
         # No PixAIError -- recovery must proceed even with READ_ONLY set.
-        core.run_generate_video(_args(tmp_path, task_id="existing123", image=""))
+        gen_cli_mod.run_generate_video(_args(tmp_path, task_id="existing123", image=""))
         mock_session.post.assert_not_called()  # recovery is a GET-shaped read, not a POST

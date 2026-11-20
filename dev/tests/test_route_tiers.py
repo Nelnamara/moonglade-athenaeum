@@ -73,6 +73,8 @@ import pytest
 
 from moonglade import gallery as moonglade_gallery
 from moonglade import backup as core
+from moonglade import gen_road as gen_road_mod
+from moonglade import cloud_delete as cloud_delete_mod
 from moonglade.gallery import (
     LOCALHOST,
     LOGIN,
@@ -554,9 +556,12 @@ def armed(monkeypatch):
     for name in ("Popen", "run", "call", "check_output", "check_call"):
         monkeypatch.setattr(subprocess, name, blocked("subprocess." + name),
                             raising=False)
-    for name in ("gql_adhoc", "submit_generation", "submit_fixer",
-                 "delete_task", "claim_reward"):
+    for name in ("gql_adhoc", "claim_reward"):
         monkeypatch.setattr(core, name, blocked("core." + name), raising=False)
+    for name in ("submit_generation", "submit_fixer"):  # in gen_road since 3.22
+        monkeypatch.setattr(gen_road_mod, name, blocked("core." + name), raising=False)
+    for name in ("delete_task",):                         # in cloud_delete since 3.22
+        monkeypatch.setattr(cloud_delete_mod, name, blocked("core." + name), raising=False)
     import requests
     monkeypatch.setattr(requests.Session, "request", blocked("outbound HTTP"),
                         raising=False)

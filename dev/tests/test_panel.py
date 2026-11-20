@@ -5,6 +5,7 @@ import re
 from moonglade import gallery as g
 from moonglade import backup as core
 from moonglade import paths
+from moonglade import training as training_mod
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_test_client, login_existing_client
@@ -1244,18 +1245,18 @@ def _train_setup(tmp_path, monkeypatch, free_quota=9):
     save_catalog(tmp_path / "catalog.db", [_row(media_id="1", filename="a_1.png")])
     calls = []
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "training_free_quota", lambda s: free_quota)
+    monkeypatch.setattr(training_mod, "training_free_quota", lambda s: free_quota)
     # No training free card by default (owner ruling 4, SCOPE_2026-09-26 E7: the route now
     # checks for one whenever the quota does not cover the run). Stubbed here on purpose --
     # conftest's REST block would otherwise make the confirm's card check FAIL, which
     # refuses the submit. dev/tests/test_training_parity.py covers the card itself.
-    monkeypatch.setattr(core, "match_training_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(training_mod, "match_training_kaisuuken", lambda *a, **k: None)
 
     def _submit(session, *a, **kw):
         calls.append(("submit", a, kw))
         return {"id": "trn1", "refId": "model9"}
 
-    monkeypatch.setattr(core, "submit_training", _submit)
+    monkeypatch.setattr(training_mod, "submit_training", _submit)
     return login_test_client(create_app(tmp_path)), calls
 
 
@@ -1332,19 +1333,19 @@ def test_train_submit_requires_csrf(tmp_path, monkeypatch):
 
 
 def test_trigger_words_normalize_to_pixais_rules():
-    assert core.normalize_trigger_words("  nel   druid  ") == "nel druid"
-    assert core.normalize_trigger_words(None) == ""
+    assert training_mod.normalize_trigger_words("  nel   druid  ") == "nel druid"
+    assert training_mod.normalize_trigger_words(None) == ""
 
 def test_list_trainable_base_models_is_the_curated_snapshot_grouped_by_arch():
     """The picker's data contract: PixAI's curated base list (captured snapshot, NOT the
     public model catalog -- the owner caught the first build pulling the general feed),
     grouped by architecture with the friendly labels and each model's VERSION id."""
-    groups = core.list_trainable_base_models()
+    groups = training_mod.list_trainable_base_models()
     labels = [g["label"] for g in groups]
     # DiT.3 is offered ON PURPOSE since SCOPE_2026-09-26 E7 (probe T06): PixAI's own training
     # config lists Tsubaki.3 (MMDIT26B) at 100,000 credits, so the snapshot fallback does too.
     assert labels == ["DiT.3", "DiT.2", "DiT.1", "SDXL", "SD 1.5"]
-    assert core.training_price_for_version("2024383379556065549") == 100000   # Tsubaki.3
+    assert training_mod.training_price_for_version("2024383379556065549") == 100000   # Tsubaki.3
     sdxl = next(g for g in groups if g["label"] == "SDXL")
     titles = [m["title"] for m in sdxl["models"]]
     assert "Illustrious-v1.0" in titles and "NoobAI XL" in titles   # the real curated set
@@ -1354,9 +1355,9 @@ def test_list_trainable_base_models_is_the_curated_snapshot_grouped_by_arch():
     assert il["version_id"] == "1844843519625072849"     # the VERSION id, submit-ready
     assert il["cover"].startswith("https://images-ng.pixai.art/")
     # DiT.2 is the priciest; SD 1.5 the cheapest -- real captured pricing
-    assert core.training_price_for_version("1983308862240288769") == 100000   # Tsubaki.2 (DiT.2)
-    assert core.training_price_for_version("1648918127446573124") == 25000    # Moonbeam (SD 1.5)
-    assert core.training_price_for_version("not-a-real-version") is None
+    assert training_mod.training_price_for_version("1983308862240288769") == 100000   # Tsubaki.2 (DiT.2)
+    assert training_mod.training_price_for_version("1648918127446573124") == 25000    # Moonbeam (SD 1.5)
+    assert training_mod.training_price_for_version("not-a-real-version") is None
 
 # --- Lineage (2026-08-06): batch siblings (task_id) + derivation chain (source_media_id).
 

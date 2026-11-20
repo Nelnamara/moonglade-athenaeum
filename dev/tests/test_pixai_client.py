@@ -26,9 +26,11 @@ import pytest
 import requests
 
 from moonglade import backup as core
+from moonglade import models as models_mod
 from tests.fake_pixai import FakePixAI, UnregisteredOperation, operation_name
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import mirror as mirror_mod
+from moonglade import task_reads as task_reads_mod
 
 
 class FakeResponse:
@@ -247,7 +249,9 @@ class TestTheDetailReadsRideTheClient:
 
     @pytest.mark.parametrize("name", DOCUMENT_READERS)
     def test_a_detail_read_rides_the_document_and_speaks_no_http_itself(self, name):
-        src = inspect.getsource(getattr(core, name))
+        # task_reads_mod holds the task detail read, models_mod the model readers, since 3.22
+        home = next(m for m in (core, task_reads_mod, models_mod) if hasattr(m, name))
+        src = inspect.getsource(getattr(home, name))
         assert "gql_adhoc(" in src or "_model_version_gql(" in src, \
             "{} no longer reads its document".format(name)
         assert ".persisted(" not in src, "{} rides a saved request again".format(name)
@@ -263,29 +267,29 @@ class TestTheDetailReadsRideTheClient:
         return s.calls[0][2]
 
     def test_task_detail_gql_wire(self):
-        kw = self._post(lambda c: core.task_detail_gql(c, "T7"), {"task": {"id": "T7"}})
-        assert kw["json"] == {"query": core._TASK_DETAIL_DOC, "variables": {"id": "T7"}}
+        kw = self._post(lambda c: task_reads_mod.task_detail_gql(c, "T7"), {"task": {"id": "T7"}})
+        assert kw["json"] == {"query": task_reads_mod._TASK_DETAIL_DOC, "variables": {"id": "T7"}}
         assert kw["timeout"] == 60                     # task_detail_gql's own default
 
     def test_model_name_gql_wire(self):
         kw = self._post(
-            lambda c: core.model_name_gql(c, "wire-model-id-0001"),
+            lambda c: models_mod.model_name_gql(c, "wire-model-id-0001"),
             {"generationModelVersion": {"name": "v1", "model": {"title": "T"}}})
-        assert kw["json"] == {"query": core._MODEL_VERSION_DOC,
+        assert kw["json"] == {"query": models_mod._MODEL_VERSION_DOC,
                               "variables": {"id": "wire-model-id-0001"}}
 
     def test_resolve_model_base_id_wire(self):
         kw = self._post(
-            lambda c: core.resolve_model_base_id(c, "V-wire-1"),
+            lambda c: models_mod.resolve_model_base_id(c, "V-wire-1"),
             {"generationModelVersion": {"model": {"id": "B1"}}})
-        assert kw["json"] == {"query": core._MODEL_VERSION_DOC,
+        assert kw["json"] == {"query": models_mod._MODEL_VERSION_DOC,
                               "variables": {"id": "V-wire-1"}}
 
     def test_resolve_model_preset_wire(self):
         kw = self._post(
             lambda c: core._resolve_model_preset(c, "V-preset-wire-1"),
             {"generationModelVersion": {"extra": {}}})
-        assert kw["json"] == {"query": core._MODEL_VERSION_DOC,
+        assert kw["json"] == {"query": models_mod._MODEL_VERSION_DOC,
                               "variables": {"id": "V-preset-wire-1"}}
 
     # -- FakePixAI is the second adapter on this same road -------------------------------
@@ -295,7 +299,7 @@ class TestTheDetailReadsRideTheClient:
         quietly swallow it into a None."""
         fake = FakePixAI()
         with pytest.raises(UnregisteredOperation, match="TaskDetail"):
-            core.task_detail_gql(fake, "T9")
+            task_reads_mod.task_detail_gql(fake, "T9")
 
 
 # ---------------------------------------------------------------------------
@@ -372,11 +376,17 @@ class TestRetryPolicy:
 # ---------------------------------------------------------------------------
 
 class TestForCreate:
-    def test_mirror_off_is_the_same_client(self, monkeypatch):
+    def test_mirror_off_is_the_same_credential_marked_for_this_send(self, monkeypatch):
+        """3.22 (DESIGN_3.22 2.5, V8): the answer is a MARKED client over the same session
+        and identity, never the caller's long-lived client itself -- marking that one would
+        pin every later send to the key even after the Mirror is switched on."""
         monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: False)
         c = pixai_client_mod.PixAIClient(RecordingSession())
-        assert c.for_create() is c
-        assert c.for_create().auth_kind == "api-key"
+        made = c.for_create()
+        assert made is not c and made.session is c.session
+        assert made.auth_kind == "api-key" and made._create_chosen is True
+        assert c._create_chosen is False
+        assert made.for_create() is made                  # chosen once per send
 
     def test_mirror_on_returns_a_web_jwt_client_over_the_mirror_session(self, monkeypatch):
         mirror = RecordingSession()
@@ -403,7 +413,7 @@ class TestForCreate:
         monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: False)
         c = pixai_client_mod.PixAIClient(RecordingSession())
         assert mirror_mod._session_for_create(c) is c
-        assert c.for_create() is mirror_mod._session_for_create(c)
+        assert c.for_create().session is mirror_mod._session_for_create(c).session
 
 
 # ---------------------------------------------------------------------------
@@ -411,7 +421,7 @@ class TestForCreate:
 # ---------------------------------------------------------------------------
 
 class TestFakePixAISatisfiesTheSameInterface:
-    VERBS = ("query", "mutate", "rest_get", "rest_post", "for_create")
+    VERBS = ("query", "mutate", "rest_get", "rest_post", "for_create", "create")
 
     @pytest.mark.parametrize("verb", VERBS)
     def test_the_fake_offers_the_same_verb_with_the_same_signature(self, verb):

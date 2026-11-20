@@ -8,7 +8,13 @@ import os
 from pathlib import Path
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
+from moonglade import contests as contests_mod
+from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
+from moonglade import models as models_mod
 from moonglade import paths
+from moonglade import pricing as pricing_mod
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 from moonglade.account_prefs import _account_key
 
@@ -19,6 +25,7 @@ from moonglade import jobs as jobs_mod
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import media_tools as media_tools_mod
 from moonglade import living as living_mod
+from moonglade import task_reads as task_reads_mod
 
 
 def _row(**kw):
@@ -202,9 +209,9 @@ def test_model_search_lora_always_uses_graphql_even_without_market_filters(tmp_p
     model_search_market_gql (GraphQL), regardless of category/sort. Base-model search
     (kind=base) is UNCHANGED -- REST by default, GraphQL only for category/Newest."""
     calls = {"rest": 0, "gql": 0}
-    monkeypatch.setattr(core, "model_search_rest",
+    monkeypatch.setattr(models_mod, "model_search_rest",
                         lambda *a, **k: calls.__setitem__("rest", calls["rest"] + 1) or {"results": [], "has_more": False})
-    monkeypatch.setattr(core, "model_search_market_gql",
+    monkeypatch.setattr(models_mod, "model_search_market_gql",
                         lambda *a, **k: calls.__setitem__("gql", calls["gql"] + 1) or {"results": [], "has_more": False})
     cli = _authed_client(tmp_path, [])
     # plain keyword LoRA search, no category, no sort=newest -- would have hit REST before this pass
@@ -230,10 +237,10 @@ def test_base_filters_never_fall_through_to_the_backend_that_ignores_them(tmp_pa
     worth keeping and there is nothing to ignore.
     """
     calls = {"rest": 0, "gql": 0}
-    monkeypatch.setattr(core, "model_search_rest",
+    monkeypatch.setattr(models_mod, "model_search_rest",
                         lambda *a, **k: calls.__setitem__("rest", calls["rest"] + 1)
                         or {"results": [], "has_more": False})
-    monkeypatch.setattr(core, "model_search_market_gql",
+    monkeypatch.setattr(models_mod, "model_search_market_gql",
                         lambda *a, **k: calls.__setitem__("gql", calls["gql"] + 1)
                         or {"results": [], "has_more": False})
     cli = _authed_client(tmp_path, [])
@@ -262,30 +269,30 @@ def test_market_sorts_are_the_four_pixai_actually_has(monkeypatch):
     A wrong feed does not error -- it returns a differently-ordered list that looks plausible --
     so these are pinned rather than trusted to stay right.
     """
-    assert core.market_sort("trending") == ("trending", "")
-    assert core.market_sort("liked") == ("meilisearch", "-markInfo.likedCount")
-    assert core.market_sort("used") == ("meilisearch", "-markInfo.refCount")
-    assert core.market_sort("newest") == ("latest", "-createdAt")
+    assert models_mod.market_sort("trending") == ("trending", "")
+    assert models_mod.market_sort("liked") == ("meilisearch", "-markInfo.likedCount")
+    assert models_mod.market_sort("used") == ("meilisearch", "-markInfo.refCount")
+    assert models_mod.market_sort("newest") == ("latest", "-createdAt")
 
     # markInfo.refCount is the "uses" figure printed on their cards -- the same field identified
     # earlier as the number on a card -- so Most Used is genuinely most-used, not liked again.
-    assert core.market_sort("used")[1] != core.market_sort("liked")[1]
+    assert models_mod.market_sort("used")[1] != models_mod.market_sort("liked")[1]
 
     # The old two-button vocabulary keeps working, so an older client does not lose its sort.
-    assert core.market_sort("popular") == core.market_sort("trending")
-    assert core.market_sort("") == core.market_sort("trending")
+    assert models_mod.market_sort("popular") == models_mod.market_sort("trending")
+    assert models_mod.market_sort("") == models_mod.market_sort("trending")
     # Anything unrecognised falls back instead of building a broken query.
-    assert core.market_sort("nonsense; DROP TABLE") == core.market_sort("trending")
+    assert models_mod.market_sort("nonsense; DROP TABLE") == models_mod.market_sort("trending")
 
 
 def test_model_search_base_type_annotates_lora_results_only(tmp_path, monkeypatch, pixai):
     """base_type= (the caller's already-resolved selected base model_type) threads into
     annotate_lora_compat for kind=lora only -- a base-model search has nothing to
     compat-sort against, so it ignores the param entirely even if sent."""
-    monkeypatch.setattr(core, "model_search_market_gql",
+    monkeypatch.setattr(models_mod, "model_search_market_gql",
                         lambda *a, **k: {"results": [{"model_id": "1", "lora_base_model_type": "SDXL_MODEL"}],
                                           "has_more": False})
-    monkeypatch.setattr(core, "model_search_rest",
+    monkeypatch.setattr(models_mod, "model_search_rest",
                         lambda *a, **k: {"results": [{"model_id": "9"}], "has_more": False})
     cli = _authed_client(tmp_path, [])
     d = cli.get("/api/model-search?kind=lora&base_type=SDXL_MODEL").get_json()
@@ -304,10 +311,10 @@ def test_model_search_threads_base_type_into_the_server_side_filter(tmp_path, mo
     app had never used -- the reason a DiT.2 user's LoRA browse came back 24-of-24 SD 1.5.
     One caller-supplied value, reused at every layer rather than a second parameter."""
     gql = []
-    monkeypatch.setattr(core, "model_search_market_gql", lambda *a, **k: (
+    monkeypatch.setattr(models_mod, "model_search_market_gql", lambda *a, **k: (
         gql.append(k) or {"results": [{"model_id": "1", "lora_base_model_type": "MMDIT26A_MODEL"}],
                           "has_more": False, "next_cursor": ""}))
-    monkeypatch.setattr(core, "model_search_rest",
+    monkeypatch.setattr(models_mod, "model_search_rest",
                         lambda *a, **k: {"results": [{"model_id": "9"}], "has_more": False})
     cli = _authed_client(tmp_path, [])
 
@@ -341,10 +348,10 @@ def test_a_keyword_search_does_not_send_the_server_side_base_filter(tmp_path, mo
     server_side_filter above still pins that), which is the 2026-07-24 ruling refined, not
     reversed."""
     gql, bmk = [], []
-    monkeypatch.setattr(core, "model_search_market_gql", lambda *a, **k: (
+    monkeypatch.setattr(models_mod, "model_search_market_gql", lambda *a, **k: (
         gql.append(k) or {"results": [{"model_id": "1", "lora_base_model_type": "SDXL_MODEL"}],
                           "has_more": False, "next_cursor": ""}))
-    monkeypatch.setattr(core, "model_bookmarks_gql", lambda *a, **k: (
+    monkeypatch.setattr(models_mod, "model_bookmarks_gql", lambda *a, **k: (
         bmk.append(k) or {"results": [], "has_more": False, "next_cursor": ""}))
     cli = _authed_client(tmp_path, [])
 
@@ -375,10 +382,10 @@ def test_model_search_threads_cursor_to_whichever_path_is_in_use(tmp_path, monke
     literal cursor string, passed through as `after=`. REST: a plain base-10 offset,
     computed here (not inside model_search_rest, which only knows a raw int offset)."""
     gql_calls = []
-    monkeypatch.setattr(core, "model_search_market_gql", lambda *a, **k: (
+    monkeypatch.setattr(models_mod, "model_search_market_gql", lambda *a, **k: (
         gql_calls.append(k) or {"results": [], "has_more": True, "next_cursor": "GQL_NEXT"}))
     rest_calls = []
-    monkeypatch.setattr(core, "model_search_rest", lambda *a, **k: (
+    monkeypatch.setattr(models_mod, "model_search_rest", lambda *a, **k: (
         rest_calls.append(k) or {"results": [], "has_more": True}))
     cli = _authed_client(tmp_path, [])
 
@@ -403,7 +410,7 @@ def test_model_search_threads_cursor_to_whichever_path_is_in_use(tmp_path, monke
     # has_more False -> next_cursor must be empty, on EITHER path, regardless of what the
     # underlying offset math would otherwise compute -- never hand back a cursor that
     # would page a client past the real end of the list.
-    monkeypatch.setattr(core, "model_search_rest", lambda *a, **k: {"results": [], "has_more": False})
+    monkeypatch.setattr(models_mod, "model_search_rest", lambda *a, **k: {"results": [], "has_more": False})
     d3 = cli.get("/api/model-search?kind=base&cursor=24").get_json()
     assert d3["next_cursor"] == ""
 
@@ -472,9 +479,9 @@ def test_tag_suggest_route_returns_tags(tmp_path, monkeypatch, pixai):
 def test_price_route_video_mode(tmp_path, monkeypatch, pixai):
     """Video payloads price through build_shot_video_params + report the card count."""
     seen = {}
-    monkeypatch.setattr(core, "price_task",
+    monkeypatch.setattr(pricing_mod, "price_task",
                         lambda s, params: seen.update(params=params) or 27500)
-    monkeypatch.setattr(core, "match_kaisuuken",
+    monkeypatch.setattr(cards_mod, "match_kaisuuken",
                         lambda s, params, enrich=False: {"id": "c1", "total": 9, "expiresAt": 1})
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
@@ -493,14 +500,14 @@ def test_price_route_free_only_when_the_card_covers_the_whole_job(tmp_path, monk
     nothing and charges the full price, so the badge must never say FREE for it. The route
     also reports the ticket accounting (cards_needed / cards_held / card_short) the badge
     renders honestly, and keeps `cards` (= held) for the existing "(N left)" wording."""
-    monkeypatch.setattr(core, "price_task", lambda s, params: 27500)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: 27500)
     body = {"mode": "I2V", "images": ["55"], "prompt": "pan", "duration": 15,
             "video_model": "v3.2"}
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
 
     # Covered: holds 9, needs 3 -> free, and the counts ride along.
-    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: {
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, enrich=False: {
         "id": "c1", "total": 9, "consumeAmount": 3, "covered": True,
         "name": "Video Pro", "expiresAt": "2027-01-01T00:00:00Z"})
     d = cli.post("/api/price", json=body).get_json()
@@ -510,7 +517,7 @@ def test_price_route_free_only_when_the_card_covers_the_whole_job(tmp_path, monk
 
     # Short: holds 2, needs 3 -> NOT free (bool(best) would have said it was), card_short
     # flagged, full price still reported so the badge can say "costs the full ~27,500".
-    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: {
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, enrich=False: {
         "id": "c1", "total": 2, "consumeAmount": 3, "covered": False,
         "name": "Video Pro", "expiresAt": "2027-01-01T00:00:00Z"})
     d = cli.post("/api/price", json=body).get_json()
@@ -520,7 +527,7 @@ def test_price_route_free_only_when_the_card_covers_the_whole_job(tmp_path, monk
     assert d["cost"] == 27500
 
     # No card at all: not free AND not short -- short means "matched but under-funded" only.
-    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, enrich=False: None)
     d = cli.post("/api/price", json=body).get_json()
     assert d["free"] is False and d["card_short"] is False
     assert d["cards"] is None and d["cards_held"] is None and d["cards_needed"] is None
@@ -533,9 +540,9 @@ def test_price_route_reads_generate_audio_key_too(tmp_path, monkeypatch, pixai):
     the actual generation correctly included it (a real, if smaller, mismatch fixed alongside
     wiring audio into the Loom for the first time)."""
     seen = {}
-    monkeypatch.setattr(core, "price_task",
+    monkeypatch.setattr(pricing_mod, "price_task",
                         lambda s, params: seen.update(params=params) or 27500)
-    monkeypatch.setattr(core, "match_kaisuuken",
+    monkeypatch.setattr(cards_mod, "match_kaisuuken",
                         lambda s, params, enrich=False: {"id": "c1", "total": 9, "expiresAt": 1})
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
@@ -551,7 +558,7 @@ def test_price_route_reads_generate_audio_key_too(tmp_path, monkeypatch, pixai):
 def test_price_route_video_needs_an_image(tmp_path, monkeypatch, pixai):
     def boom(*a, **k):
         raise AssertionError("no pricing without a source image")
-    monkeypatch.setattr(core, "price_task", boom)
+    monkeypatch.setattr(pricing_mod, "price_task", boom)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/price", json={"mode": "R2V", "images": []}).get_json()
@@ -563,7 +570,7 @@ def test_price_route_i2v_still_needs_an_image_even_with_video_refs(tmp_path, mon
     # for those two modes, only for R2V (which the multi-parity build made a genuine option).
     def boom(*a, **k):
         raise AssertionError("no pricing without a source frame")
-    monkeypatch.setattr(core, "price_task", boom)
+    monkeypatch.setattr(pricing_mod, "price_task", boom)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/price", json={"mode": "I2V", "images": [], "video_refs": ["9"]}).get_json()
@@ -576,8 +583,8 @@ def test_price_route_r2v_prices_video_only_multiref(tmp_path, monkeypatch, pixai
     failed pricing with 'pick a source image' even though the submit itself would have
     worked. R2V must accept ANY reference kind alone."""
     seen = {}
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(params=params) or 27500)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(params=params) or 27500)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/price", json={"mode": "R2V", "images": [], "video_refs": ["9"],
@@ -594,8 +601,8 @@ def test_price_route_r2v_prices_video_only_multiref(tmp_path, monkeypatch, pixai
 
 def test_price_route_threads_negative_and_channel(tmp_path, monkeypatch, pixai):
     seen = {}
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(params=params) or 27500)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(params=params) or 27500)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     cli.post("/api/price", json={"mode": "I2V", "images": ["55"], "negative": "blurry",
@@ -620,7 +627,7 @@ def test_account_route_sums_cards_and_coverage(tmp_path, monkeypatch, pixai):
     _account_reads(pixai)
     monkeypatch.setattr(core, "account_info", lambda s: {
         "quotaAmount": 330990, "tasks": {"totalCount": 4}, "followerCount": 30, "followingCount": 4})
-    monkeypatch.setattr(core, "list_kaisuukens",
+    monkeypatch.setattr(cards_mod, "list_kaisuukens",
                         lambda s: [{"count": 16}, {"count": 34}, {"count": None}])
     # 2 distinct local tasks (tA on two media, tB) out of 4 on the server -> 50% coverage
     cli = _authed_client(tmp_path, [
@@ -1017,24 +1024,24 @@ def test_gen_reference_image_passthrough():
                         priority=500, mode="auto", seed=None, lora=[],
                         prompt_helper=True, kaisuuken_id="",
                         ref_media_id="739707411648019153", ref_strength=0.55)
-    p = core._gen_parameters(a)
+    p = gen_params_mod._gen_parameters(a)
     assert p["mediaId"] == "739707411648019153" and p["strength"] == 0.55
     a.ref_media_id = ""
-    p2 = core._gen_parameters(a)
+    p2 = gen_params_mod._gen_parameters(a)
     assert "mediaId" not in p2 and "strength" not in p2   # absent when no ref
 
 
 def test_edit_scene_id_passthrough():
     """Capture #13 (task 2030050946353349700): a Toolbox preset = the normal chat
     block + a canned prompt + top-level sceneId."""
-    p = core.build_chat_edit_parameters("canned prompt", ["55"],
+    p = gen_params_mod.build_chat_edit_parameters("canned prompt", ["55"],
                                         scene_id="character-card")
     assert p["sceneId"] == "character-card" and p["chat"]["prompts"] == "canned prompt"
-    assert "sceneId" not in core.build_chat_edit_parameters("x", ["55"])
+    assert "sceneId" not in gen_params_mod.build_chat_edit_parameters("x", ["55"])
 
 
 def test_presets_import_and_use(tmp_path, monkeypatch, pixai):
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid: {
         "parameters": {"sceneId": "character-card",
                        "chat": {"prompts": "BIG CANNED PROMPT",
                                 "modelId": "1948514378441961474"}}})
@@ -1047,8 +1054,8 @@ def test_presets_import_and_use(tmp_path, monkeypatch, pixai):
     assert "prompt" not in lst["character-card"]          # GET never leaks the prompt body
     # price path uses the banked preset: canned prompt + sceneId + its model
     seen = {}
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(p=params) or 8000)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli.post("/api/price", json={"mode": "edit", "source": "55",
                                  "preset": "character-card"})
     assert seen["p"]["sceneId"] == "character-card"
@@ -1062,7 +1069,7 @@ def test_one_account_cannot_see_or_clobber_anothers_presets(tmp_path, monkeypatc
     could read AND wholesale-overwrite every other account's imported presets."""
     from moonglade.gallery import create_app
     from tests.conftest import login_test_client
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid: {
         "parameters": {"sceneId": "alice-scene",
                        "chat": {"prompts": "ALICE PROMPT", "modelId": "1"}}})
     app = create_app(tmp_path)
@@ -1075,7 +1082,7 @@ def test_one_account_cannot_see_or_clobber_anothers_presets(tmp_path, monkeypatc
     assert bob.get("/api/presets").get_json()["presets"] == {}, (
         "bob can see alice's presets -- the store is not per-account")
 
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid: {
         "parameters": {"sceneId": "bob-scene",
                        "chat": {"prompts": "BOB PROMPT", "modelId": "2"}}})
     bob.post("/api/presets", json=with_csrf(bob, {"task_id": "222"}))
@@ -1091,7 +1098,7 @@ def test_presets_are_independent_for_accounts_differing_only_by_case(tmp_path, m
     read/save clobbers Nel's."""
     from moonglade.gallery import create_app
     from tests.conftest import login_test_client
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid: {
         "parameters": {"sceneId": "upper-scene",
                        "chat": {"prompts": "UPPER PROMPT", "modelId": "1"}}})
     app = create_app(tmp_path)
@@ -1103,7 +1110,7 @@ def test_presets_are_independent_for_accounts_differing_only_by_case(tmp_path, m
     assert lower.get("/api/presets").get_json()["presets"] == {}, (
         "nel can see Nel's presets -- case-differing usernames collide on disk")
 
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid: {
         "parameters": {"sceneId": "lower-scene",
                        "chat": {"prompts": "LOWER PROMPT", "modelId": "2"}}})
     lower.post("/api/presets", json=with_csrf(lower, {"task_id": "222"}))
@@ -1118,7 +1125,7 @@ def test_the_legacy_shared_presets_are_given_to_each_login_by_the_move(tmp_path,
     old shared toolbox_presets.json (D:'s is live) into every login with no file of its own,
     then deletes it; the app reads only the login's own file."""
     from moonglade import migrate
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid: {
         "parameters": {"sceneId": "new-scene",
                        "chat": {"prompts": "NEW PROMPT", "modelId": "3"}}})
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
@@ -1162,7 +1169,7 @@ def test_redaction_does_not_over_redact_when_out_dir_is_a_relative_path(tmp_path
 
     def boom(*a, **k):
         raise RuntimeError("retry in 0.5s. version 2.1.0. see release notes.")
-    monkeypatch.setattr(core, "list_contests", boom)
+    monkeypatch.setattr(contests_mod, "list_contests", boom)
 
     r = cli.get("/api/contests")
     body = r.get_data(as_text=True)
@@ -1218,7 +1225,7 @@ def test_redaction_covers_a_second_independent_call_site(tmp_path, monkeypatch, 
 
     def boom(*a, **k):
         raise RuntimeError("upstream call failed, see {}\\log.txt".format(tmp_path))
-    monkeypatch.setattr(core, "list_contests", boom)
+    monkeypatch.setattr(contests_mod, "list_contests", boom)
 
     r = cli.get("/api/contests")
     body = r.get_data(as_text=True)
@@ -1282,7 +1289,7 @@ def test_redaction_still_does_not_eat_ordinary_messages(tmp_path, monkeypatch, p
 
     def boom(*a, **k):
         raise RuntimeError("upstream said: retry in 0.5s (attempt 2 of 3)")
-    monkeypatch.setattr(core, "list_contests", boom)
+    monkeypatch.setattr(contests_mod, "list_contests", boom)
 
     body = cli.get("/api/contests").get_data(as_text=True)
     assert "<host-path>" not in body, "redacted an ordinary message: " + body[:300]
@@ -1345,7 +1352,7 @@ _CONTEST_PAGES = {
 def test_list_contests_normalizes_and_pages(pixai):
     pixai.on("/contest/list", lambda call: _CONTEST_PAGES[call.params["page"]])
     # active_only walks BOTH pages (a running contest hides on page 2) and keeps only 'running'
-    active = core.list_contests(pixai, active_only=True)
+    active = contests_mod.list_contests(pixai, active_only=True)
     assert [c["id"] for c in active] == ["1", "2", "4"]      # the 'ended' one dropped, page-2 kept
     seen = [(c.path, c.params.get("page")) for c in pixai.calls]
     assert ("/contest/list", 2) in seen                      # paged through
@@ -1355,7 +1362,7 @@ def test_list_contests_normalizes_and_pages(pixai):
     assert c0["cover_url"] == "https://api.pixai.art/v1/media/M1/thumbnail"
     assert c0["prize_amount"] == 29000000
     # all -> the ended one is included
-    allc = core.list_contests(pixai, active_only=False)
+    allc = contests_mod.list_contests(pixai, active_only=False)
     assert any(c["id"] == "3" and c["active"] is False for c in allc)
 
 
@@ -1365,7 +1372,7 @@ def test_list_contests_carries_the_whole_brief_and_the_entry_requirements(pixai)
     used to be sliced to 600 chars -- a cut that can sever a **bold** run or a link and
     hand the renderer half a construct."""
     pixai.on("/contest/list", lambda call: _CONTEST_PAGES[call.params["page"]])
-    rows = {c["id"]: c for c in core.list_contests(pixai, active_only=False)}
+    rows = {c["id"]: c for c in contests_mod.list_contests(pixai, active_only=False)}
     c1 = rows["1"]
     # WHOLE, not sliced -- and still English-first off the {en, ja, ...} bundle.
     assert c1["description"] == _LONG_BRIEF
@@ -1397,7 +1404,7 @@ def test_rule_ids_reach_the_browser_as_strings_with_every_digit(pixai):
                                      {"type": "required_widget_ids", "widget_ids": [big]}]}],
                  "page": 1, "pageSize": 50, "totalPage": 1, "totalCount": 1}}
     pixai.on("/contest/list", lambda call: pages[call.params["page"]])
-    rules = core.list_contests(pixai)[0]["rules"]
+    rules = contests_mod.list_contests(pixai)[0]["rules"]
     assert rules[0]["recipe_ids"] == ["2049376847228801627", "77"]
     assert rules[1]["model_ids"] == ["12"]
     assert rules[2]["widget_ids"] == ["2049376847228801627"]
@@ -1567,12 +1574,12 @@ def test_branding_absent_is_404(tmp_path):
 def test_edit_model_id_and_quality_omit():
     """The Edit-model registry maps picker keys to the right model ids, and
     build_chat_edit_parameters omits 'quality' when empty (Reference Pro has no quality)."""
-    assert core.edit_model_id("edit-pro") == core.EDIT_PRO_MODEL_ID
-    assert core.edit_model_id("reference-pro") == "1948514378441961474"
-    assert core.edit_model_id("nope") == "" and core.edit_model_id("") == ""
-    ref = core.build_chat_edit_parameters("x", ["10"], quality="")     # ref-pro: no quality knob
+    assert gen_params_mod.edit_model_id("edit-pro") == gen_params_mod.EDIT_PRO_MODEL_ID
+    assert gen_params_mod.edit_model_id("reference-pro") == "1948514378441961474"
+    assert gen_params_mod.edit_model_id("nope") == "" and gen_params_mod.edit_model_id("") == ""
+    ref = gen_params_mod.build_chat_edit_parameters("x", ["10"], quality="")     # ref-pro: no quality knob
     assert "quality" not in ref["chat"]["modelConfig"]
-    ep = core.build_chat_edit_parameters("x", ["10"], quality="high")
+    ep = gen_params_mod.build_chat_edit_parameters("x", ["10"], quality="high")
     assert ep["chat"]["modelConfig"]["quality"] == "high"
 
 
@@ -1580,8 +1587,8 @@ def test_edit_price_uses_selected_model(tmp_path, monkeypatch, pixai):
     """The Edit card's model picker drives the submitted modelId + valid option set:
     Reference Pro -> model 1948..., 4K/21:9, no quality; Edit Pro -> Edit Pro model + quality."""
     seen = {}
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(p=params) or 8000)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli.post("/api/price", json={"mode": "edit", "edit_model": "reference-pro", "source": "55",
                                  "resolution": "4K", "quality": "", "aspect": "21:9"})
@@ -1593,28 +1600,28 @@ def test_edit_price_uses_selected_model(tmp_path, monkeypatch, pixai):
     cli.post("/api/price", json={"mode": "edit", "edit_model": "edit-pro", "source": "55",
                                  "resolution": "2K", "quality": "high", "aspect": "1:1"})
     chat = seen["p"]["chat"]
-    assert chat["modelId"] == core.EDIT_PRO_MODEL_ID and chat["modelConfig"]["quality"] == "high"
+    assert chat["modelId"] == gen_params_mod.EDIT_PRO_MODEL_ID and chat["modelConfig"]["quality"] == "high"
 
 
 def test_clamp_edit_config_snaps_to_model_caps():
     """Backend guard (fixes the skeptic-found preset bug): any resolution/quality/aspect that
     the resolved model doesn't support is snapped to a valid one — no path sends an invalid knob."""
     # Reference Pro: no quality knob + 1K unsupported -> quality dropped, resolution -> 2K default
-    assert core.clamp_edit_config("1948514378441961474", "1K", "medium", "21:9") == ("2K", "", "21:9")
+    assert gen_params_mod.clamp_edit_config("1948514378441961474", "1K", "medium", "21:9") == ("2K", "", "21:9")
     # Edit Pro: 4K unsupported -> 1K default; valid quality kept; unknown aspect -> default.
     # The default moved 3:4 -> 3:5 ON PURPOSE (SCOPE_2026-09-26 E2): Edit Pro's own
     # extra.chatEditing publishes defaultAspectRatio "3:5" and adds 3:5 / 5:3.
-    assert core.clamp_edit_config(core.EDIT_PRO_MODEL_ID, "4K", "high", "nope") == ("1K", "high", "3:5")
+    assert gen_params_mod.clamp_edit_config(gen_params_mod.EDIT_PRO_MODEL_ID, "4K", "high", "nope") == ("1K", "high", "3:5")
     # unknown model -> pass through untouched
-    assert core.clamp_edit_config("999", "8K", "ultra", "5:1") == ("8K", "ultra", "5:1")
+    assert gen_params_mod.clamp_edit_config("999", "8K", "ultra", "5:1") == ("8K", "ultra", "5:1")
 
 
 def test_edit_price_clamps_invalid_knobs(tmp_path, monkeypatch, pixai):
     """End-to-end: Reference Pro sent with Edit-Pro-style knobs (the preset-mismatch case) is
     clamped server-side to valid values before the params ever reach PixAI."""
     seen = {}
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(p=params) or 8000)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli.post("/api/price", json={"mode": "edit", "edit_model": "reference-pro", "source": "55",
                                  "resolution": "1K", "quality": "medium", "aspect": "3:4"})
@@ -1626,8 +1633,8 @@ def test_edit_multi_reference_sources(tmp_path, monkeypatch, pixai):
     """Multi-image references: the Edit card sends sources[] -> chat.mediaIds carries them all
     (primary first), capped to the model's ref limit; falls back to [source] when absent."""
     seen = {}
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(p=params) or 8000)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli.post("/api/price", json={"mode": "edit", "edit_model": "edit-pro", "source": "100",
                                  "sources": ["100", "200", "300"], "resolution": "1K",
@@ -1746,8 +1753,8 @@ def test_price_enhance_mode_returns_no_cost(tmp_path, monkeypatch, pixai):
     no misleading price is shown. (Adding the workflow-id scalar needs a live measurement first
     -- a separately authorized step.)"""
     seen = {}
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(p=params) or 8000)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     r = cli.post("/api/price", json={"mode": "enhance", "source": "55",
                                      "workflow_id": "1794855217667308480"})
@@ -1764,7 +1771,7 @@ def test_import_task_by_id(tmp_path, monkeypatch, pixai):
     route. It is deliberately LOGIN, not localhost: recovering your own finished media
     spends nothing."""
     called = {}
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: called.update(tid=tid) or {"saved": 1, "media_ids": ["m1"], "is_video": False})
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli = login_existing_client(cli)
@@ -1794,7 +1801,7 @@ def test_import_task_closes_the_original_orphaned_job_entry(tmp_path, monkeypatc
     (which, for a web-submitted generate job, IS the numeric task id), so the Activity
     card kept spinning on the orphan forever even after the real media had landed.
     Recovering the same task id an orphan is keyed on must close that original entry."""
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: {"saved": 1, "media_ids": ["m1"], "is_video": False})
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli = login_existing_client(cli)
@@ -1835,7 +1842,7 @@ def test_import_task_leaves_a_dismissed_orphan_alone(tmp_path, monkeypatch, pixa
     """If the owner already dismissed the orphaned entry by hand, a later recovery must
     not resurrect it with a new event -- dismiss is an explicit user action and stays
     respected, same as every other job in the log."""
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: {"saved": 1, "media_ids": ["m1"], "is_video": False})
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli = login_existing_client(cli)
@@ -1858,7 +1865,7 @@ def test_account_surfaces_cards_claim_and_subscription(tmp_path, monkeypatch, pi
     before reaching cards_by, so the tooltip could never say "Model Card" vs "Video Card"."""
     monkeypatch.setattr(core, "account_info", lambda s: {
         "quotaAmount": 140, "subscription": {"endAt": "2026-07-27T00:00:00Z", "cancelAtPeriodEnd": True}})
-    monkeypatch.setattr(core, "list_kaisuukens", lambda s: [
+    monkeypatch.setattr(cards_mod, "list_kaisuukens", lambda s: [
         {"name": "Edit Pro Only", "count": 17, "expires": "2026-07-17T20:11:09Z", "category": "Model Card"},
         {"name": "Reference Pro Only", "count": 5, "expires": "2026-07-17T20:11:09Z", "category": "Model Card"}])
     monkeypatch.setattr(core, "list_claims", lambda s: [
@@ -1879,7 +1886,7 @@ def test_account_cards_by_category_defaults_empty_when_absent(tmp_path, monkeypa
     defaults to '' rather than None, so the JS tooltip's `k.category ? ... : ''` check is
     always comparing against a string, never null."""
     monkeypatch.setattr(core, "account_info", lambda s: {"quotaAmount": 140})
-    monkeypatch.setattr(core, "list_kaisuukens", lambda s: [
+    monkeypatch.setattr(cards_mod, "list_kaisuukens", lambda s: [
         {"name": "Legacy Card", "count": 1, "expires": ""}])
     monkeypatch.setattr(core, "list_claims", lambda s: [])
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
@@ -2001,14 +2008,14 @@ def test_price_route_prices_the_loom_image_edit_and_reference_bodies(tmp_path, m
     Bites: revert any of confirmSpend's price bodies to a mismatched key and the matching
     cost assertion drops from 1200 to None."""
     seen = {}
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(params=params) or 1200)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)  # no free card
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(params=params) or 1200)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, enrich=False: None)  # no free card
     # The Loom Image picker emits model_id only (no version_id); /api/price resolves it to a
     # version the same way /api/generate does -- literally the same way now, through
     # core.model_version_resolver, so this pins list_model_versions (the validating resolve
     # /api/generate always used) rather than the weaker rows[0] resolve_version_meta the
     # price route used to run on its own. Stubbed so the test needs no network.
-    monkeypatch.setattr(core, "list_model_versions",
+    monkeypatch.setattr(models_mod, "list_model_versions",
                         lambda s, mid: [{"version_id": "ver_" + str(mid)}])
     cli = _authed_client(tmp_path, [_row(media_id="99", filename="b_99.png",
                                          created_at="2025-01-01T00:00:00")])
@@ -2064,7 +2071,7 @@ def test_bookmark_tab_search_keeps_only_rows_that_carry_the_words(tmp_path, monk
     def fake_bookmarks(session, keyword="", usage="MODEL", limit=24, after=None, lora_base_type=""):
         calls.append(after)
         return pages[after]
-    monkeypatch.setattr(core, "model_bookmarks_gql", fake_bookmarks)
+    monkeypatch.setattr(models_mod, "model_bookmarks_gql", fake_bookmarks)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     cli = login_client(tmp_path)
     d = cli.get("/api/model-search?kind=lora&size=24&q=eyes&src=bookmark").get_json()
@@ -2079,7 +2086,7 @@ def test_mine_tab_search_walks_the_authors_own_list_and_matches_every_word(tmp_p
     def fake_market(session, keyword="", category="", sort="", usage="MODEL", limit=24, after=None, **kw):
         assert kw.get("author_id") is not None, "the Mine tab is the market connection filtered by author"
         return pages[after]
-    monkeypatch.setattr(core, "model_search_market_gql", fake_market)
+    monkeypatch.setattr(models_mod, "model_search_market_gql", fake_market)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
 
     class _C:
@@ -2096,7 +2103,7 @@ def test_bookmark_tab_without_a_keyword_is_one_plain_page(tmp_path, monkeypatch)
     def fake_bookmarks(session, keyword="", usage="MODEL", limit=24, after=None, lora_base_type=""):
         calls.append(after)
         return _hunt_pages()[None]
-    monkeypatch.setattr(core, "model_bookmarks_gql", fake_bookmarks)
+    monkeypatch.setattr(models_mod, "model_bookmarks_gql", fake_bookmarks)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     cli = login_client(tmp_path)
     d = cli.get("/api/model-search?kind=lora&size=24&q=&src=bookmark").get_json()

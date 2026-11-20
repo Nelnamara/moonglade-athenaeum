@@ -16,6 +16,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gallery as mg
+from moonglade import gen_road as gen_road_mod
 
 from tests.fake_pixai import FakePixAI, operation_name
 
@@ -77,7 +78,7 @@ def _sweep_app(monkeypatch, tmp_path, fake):
         present.add("M_new")
         return {"saved": 1}
 
-    monkeypatch.setattr(core, "collect_generation", collect)
+    monkeypatch.setattr(gen_road_mod, "collect_generation", collect)
     return app.extensions["mg_watch_catchup"], collected
 
 

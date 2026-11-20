@@ -5,6 +5,21 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import pixai_client as pixai_client_mod
+from moonglade import task_reads as task_reads_mod
+from moonglade import cloud_delete as cloud_delete_mod
+
+
+def _status_answers(monkeypatch, task):
+    """The status read rides GET /v2/task/{id} since 3.22 S3-poll: REST answers the status,
+    startedAt and the charge (paidQuota); GraphQL task(id) still answers the failure reason.
+    `task` is the GraphQL task shape these tests were written against."""
+    from moonglade import backup as _core
+    t = task if isinstance(task, dict) else {}
+    rest = {"status": t.get("status"), "startedAt": t.get("startedAt"),
+            "paidQuota": t.get("paidCredit"), "outputs": {"mediaIds": [], "mediaUrls": []}}
+    monkeypatch.setattr(_core, "_rest_get",
+                        lambda s, path, params=None, **k: dict(rest, id=path.rsplit("/", 1)[-1]))
+    monkeypatch.setattr(_core, "gql_adhoc", lambda *a, **k: {"task": task})
 
 
 def _one_poll_then_timeout(monkeypatch, task):
@@ -14,40 +29,39 @@ def _one_poll_then_timeout(monkeypatch, task):
     is a different case from 'observed it queued and unstarted' and must not be conflated
     (see _never_dispatched). The fake clock yields start, one in-loop check, then a value
     past the deadline. Nothing sleeps."""
-    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": task})
+    _status_answers(monkeypatch, task)
     monkeypatch.setattr(core.time, "sleep", lambda *_a, **_k: None)
     ticks = iter([0, 0])
     monkeypatch.setattr(core.time, "time", lambda: next(ticks, 10_000))
 
 
 def test_poll_returns_paid_credit_and_prints_cost(monkeypatch, capsys):
-    monkeypatch.setattr(core, "gql_adhoc",
-                        lambda *a, **k: {"task": {"status": "completed", "paidCredit": 27500}})
-    paid = core._poll_task_status(object(), "t1", 300, label="video", fail_noun="video generation")
+    _status_answers(monkeypatch, {"status": "completed", "paidCredit": 27500})
+    paid = task_reads_mod._poll_task_status(object(), "t1", 300, label="video", fail_noun="video generation")
     assert paid == 27500
     assert "actual cost: 27,500 credits" in capsys.readouterr().out
 
 
 def test_poll_completed_without_cost_returns_none(monkeypatch, capsys):
-    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {"status": "succeeded"}})
-    paid = core._poll_task_status(object(), "t2", 300, label="generate", fail_noun="generation")
+    _status_answers(monkeypatch, {"status": "succeeded"})
+    paid = task_reads_mod._poll_task_status(object(), "t2", 300, label="generate", fail_noun="generation")
     assert paid is None
     assert "actual cost" not in capsys.readouterr().out
 
 
 def test_poll_raises_on_failure_with_noun(monkeypatch):
-    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {"status": "failed"}})
+    _status_answers(monkeypatch, {"status": "failed"})
     with pytest.raises(core.PixAIError) as e:
-        core._poll_task_status(object(), "t3", 300, label="edit", fail_noun="edit")
+        task_reads_mod._poll_task_status(object(), "t3", 300, label="edit", fail_noun="edit")
     assert "edit ended with status: failed" in str(e.value)
 
 
 def test_poll_raises_on_timeout(monkeypatch):
     """Timeout must NOT read as task failure: the task keeps running on PixAI, so the
     message says so and gives the free --task-id recovery path."""
-    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {"status": "running"}})
+    _status_answers(monkeypatch, {"status": "running"})
     with pytest.raises(core.PixAIError) as e:
-        core._poll_task_status(object(), "t4", 0, label="generate", fail_noun="generation")
+        task_reads_mod._poll_task_status(object(), "t4", 0, label="generate", fail_noun="generation")
     msg = str(e.value)
     assert "STILL RUNNING" in msg and "--task-id t4" in msg
 
@@ -58,18 +72,18 @@ def test_status_query_asks_for_startedAt_and_outputs():
     """The two fields that tell a never-dispatched task apart from a running one, and
     carry PixAI's own cancellation reason. Without them in the query, every guard below
     is dead code that can only ever see status."""
-    assert "startedAt" in core._GEN_STATUS, "_GEN_STATUS must select startedAt"
-    assert "outputs" in core._GEN_STATUS, "_GEN_STATUS must select outputs"
+    assert "startedAt" in task_reads_mod._GEN_STATUS, "_GEN_STATUS must select startedAt"
+    assert "outputs" in task_reads_mod._GEN_STATUS, "_GEN_STATUS must select outputs"
 
 
 def test_poll_cancelled_surfaces_pixai_own_reason(monkeypatch):
     """PixAI reaps an undispatched task with outputs={"reason": "waiting timeout"}. The
     owner hit this five times across four days and never once saw that string -- the
     error said only 'cancelled', which reads like HE cancelled something."""
-    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {
-        "status": "cancelled", "startedAt": None, "outputs": {"reason": "waiting timeout"}}})
+    _status_answers(monkeypatch, {
+        "status": "cancelled", "startedAt": None, "outputs": {"reason": "waiting timeout"}})
     with pytest.raises(core.PixAIError) as e:
-        core._poll_task_status(object(), "t5", 300, label="enhance", fail_noun="enhance")
+        task_reads_mod._poll_task_status(object(), "t5", 300, label="enhance", fail_noun="enhance")
     msg = str(e.value)
     assert "waiting timeout" in msg, "PixAI's own reason must reach the user: " + msg
 
@@ -81,7 +95,7 @@ def test_poll_timeout_on_never_started_task_does_not_claim_it_is_running(monkeyp
     what let five failures pass unnoticed across four days."""
     _one_poll_then_timeout(monkeypatch, {"status": "waiting", "startedAt": None})
     with pytest.raises(core.PixAIError) as e:
-        core._poll_task_status(object(), "t6", 60, label="enhance", fail_noun="enhance")
+        task_reads_mod._poll_task_status(object(), "t6", 60, label="enhance", fail_noun="enhance")
     msg = str(e.value)
     assert "STILL RUNNING" not in msg, "claimed a never-started task is running: " + msg
     assert "never started" in msg.lower(), "must say it was never dispatched: " + msg
@@ -94,7 +108,7 @@ def test_poll_timeout_on_a_genuinely_running_task_still_says_running(monkeypatch
     _one_poll_then_timeout(monkeypatch, {"status": "running",
                                         "startedAt": "2026-07-25T05:00:00.000Z"})
     with pytest.raises(core.PixAIError) as e:
-        core._poll_task_status(object(), "t7", 60, label="generate", fail_noun="generation")
+        task_reads_mod._poll_task_status(object(), "t7", 60, label="generate", fail_noun="generation")
     msg = str(e.value)
     assert "STILL RUNNING" in msg and "--task-id t7" in msg
 
@@ -105,9 +119,9 @@ def test_poll_timeout_without_ever_observing_the_task_stays_reassuring(monkeypat
     recover-it-free message rather than confidently declaring a task dead it never looked
     at. This is the same class of error as the message the fix above removes, so it gets
     its own guard."""
-    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {"status": "running"}})
+    _status_answers(monkeypatch, {"status": "running"})
     with pytest.raises(core.PixAIError) as e:
-        core._poll_task_status(object(), "t8", 0, label="generate", fail_noun="generation")
+        task_reads_mod._poll_task_status(object(), "t8", 0, label="generate", fail_noun="generation")
     msg = str(e.value)
     assert "STILL RUNNING" in msg and "never started" not in msg.lower()
 
@@ -128,21 +142,21 @@ def test_failure_reason_is_read_from_every_key_pixai_actually_uses(monkeypatch):
     outs = {"finish_reason": "ERROR", "modelResponse": [],
             "failureMessage": "Provider refused to answer",
             "failure_reason": "PROVIDER_REFUSE_ANSWER"}
-    got = core._task_failure_reason(outs)
+    got = task_reads_mod._task_failure_reason(outs)
     assert got, "no reason extracted from a payload that plainly contains one"
     assert "refused" in got.lower(), "did not surface the human message: {!r}".format(got)
 
     # the cancelled-task shape must keep working
-    assert core._task_failure_reason({"reason": "waiting timeout"}) == "waiting timeout"
+    assert task_reads_mod._task_failure_reason({"reason": "waiting timeout"}) == "waiting timeout"
     # and a genuinely empty payload stays empty rather than inventing something
-    assert core._task_failure_reason({"mediaIds": [], "mediaUrls": []}) == ""
-    assert core._task_failure_reason(None) == ""
+    assert task_reads_mod._task_failure_reason({"mediaIds": [], "mediaUrls": []}) == ""
+    assert task_reads_mod._task_failure_reason(None) == ""
 
 
 def test_a_content_refusal_tells_the_user_what_to_do_about_it(monkeypatch):
     """PROVIDER_REFUSE_ANSWER is the moderator declining the content. That is not a bug to
     debug, it is a prompt to reword -- and saying so turns a dead end into a next step."""
-    msg = core.describe_failure("failed", "Provider refused to answer", started=True)
+    msg = task_reads_mod.describe_failure("failed", "Provider refused to answer", started=True)
     assert "refused" in msg.lower()
     low = msg.lower()
     assert "word" in low or "prompt" in low, \
@@ -151,11 +165,11 @@ def test_a_content_refusal_tells_the_user_what_to_do_about_it(monkeypatch):
 
 def test_generation_status_surfaces_a_provider_refusal(monkeypatch):
     """End of the chain: the status dict every caller reads must carry it."""
-    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {
+    _status_answers(monkeypatch, {
         "status": "failed", "startedAt": "2026-07-25T15:44:53Z",
         "outputs": {"failureMessage": "Provider refused to answer",
-                    "failure_reason": "PROVIDER_REFUSE_ANSWER"}}})
-    st = core.generation_status(object(), "t9")
+                    "failure_reason": "PROVIDER_REFUSE_ANSWER"}})
+    st = task_reads_mod.generation_status(object(), "t9")
     assert st["phase"] == "failed"
     assert "refused" in (st.get("reason") or "").lower(), \
         "generation_status dropped the refusal: {!r}".format(st)
@@ -205,7 +219,7 @@ def test_delete_one_image_sends_the_right_mutation(monkeypatch):
     monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post",
                         lambda s, q, v=None, retries=3: seen.update(q=q, v=v or {}) or
                         {"updateGenerationTask": {"id": "T1"}})
-    core.delete_batch_media_gql(object(), "T1", "M9")
+    cloud_delete_mod.delete_batch_media_gql(object(), "T1", "M9")
     # (That this destructive mutation is never retried -- retries == 0 at the loop -- is held
     # by dev/tests/test_spend_no_retry.py::TestSpendingPathsAreSingleAttempt::test_delete_batch_media
     # and, over the real transport, dev/tests/test_delete_image.py::test_the_cloud_delete_is_single_attempt.)
@@ -227,7 +241,7 @@ def test_delete_one_image_honors_read_only(monkeypatch):
     called = []
     monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: called.append(1))
     with pytest.raises(core.PixAIError):
-        core.delete_batch_media_gql(object(), "T1", "M9")
+        cloud_delete_mod.delete_batch_media_gql(object(), "T1", "M9")
     assert not called, "the network call fired despite READ_ONLY"
 
 
@@ -237,4 +251,4 @@ def test_delete_one_image_requires_both_ids(monkeypatch):
     monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {})
     for tid, mid in (("", "M9"), ("T1", ""), ("", "")):
         with pytest.raises(core.PixAIError):
-            core.delete_batch_media_gql(object(), tid, mid)
+            cloud_delete_mod.delete_batch_media_gql(object(), tid, mid)

@@ -7,7 +7,12 @@ from types import SimpleNamespace
 import pytest
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
+from moonglade import gen_cli as gen_cli_mod
+from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import media_tools as media_tools_mod
+from moonglade import task_reads as task_reads_mod
 
 
 def test_build_video_parameters_matches_real_submit():
@@ -15,7 +20,7 @@ def test_build_video_parameters_matches_real_submit():
     # top-level modelId (REQUIRED -- resolved from the .model name) + i2vPro block + privacy
     # flags. Omitting modelId was the "video card won't tap" bug. The new-gen platform
     # (2026-08-25) added a top-level `channel` string alongside `isPrivate` -- both are sent.
-    p = core.build_video_parameters(
+    p = gen_params_mod.build_video_parameters(
         "", media_id="738340964113285867", model="v4.0.1",
         tail_media_id="738340489931639723", duration=5, mode="professional",
         generate_audio=True,
@@ -42,12 +47,12 @@ def test_build_video_parameters_matches_real_submit():
 
 
 def test_single_source_image_omits_tail():
-    p = core.build_video_parameters("motion", media_id="100")
+    p = gen_params_mod.build_video_parameters("motion", media_id="100")
     i2v = p["i2vPro"]
     assert p["channel"] == "normal" and p["isPrivate"] is False   # new-gen switch + legacy
     assert i2v["mediaId"] == "100"
     assert "tailMediaId" not in i2v                 # no tail => single-source i2v
-    assert i2v["model"] == core.DEFAULT_VIDEO_MODEL
+    assert i2v["model"] == gen_params_mod.DEFAULT_VIDEO_MODEL
     assert p["modelId"] == "2003969750675682808"    # DEFAULT (v4.0.1) resolved to its numeric id
 
 
@@ -56,16 +61,16 @@ def test_gen_video_parameters_from_args():
                         model="", video_model="", vmode="basic", audio=False,
                         audio_language="english", negative="",
                         video_prompt_helper=False, params_json="")
-    p = core._gen_video_parameters(a)
+    p = gen_params_mod._gen_video_parameters(a)
     i2v = p["i2vPro"]
     assert i2v["mediaId"] == "55" and i2v["tailMediaId"] == "56"
     assert i2v["duration"] == "10" and i2v["mode"] == "basic"
-    assert i2v["model"] == core.DEFAULT_VIDEO_MODEL   # empty model -> default
+    assert i2v["model"] == gen_params_mod.DEFAULT_VIDEO_MODEL   # empty model -> default
 
 
 def test_params_json_override():
     a = SimpleNamespace(params_json='{"type":"x"}')
-    assert core._gen_video_parameters(a) == {"type": "x"}
+    assert gen_params_mod._gen_video_parameters(a) == {"type": "x"}
 
 
 def test_gen_video_parameters_snaps_duration():
@@ -77,7 +82,7 @@ def test_gen_video_parameters_snaps_duration():
                         model="", video_model="", vmode="basic", audio=False,
                         audio_language="english", negative="",
                         video_prompt_helper=False, params_json="")
-    p = core._gen_video_parameters(a)
+    p = gen_params_mod._gen_video_parameters(a)
     assert p["i2vPro"]["duration"] == "6"
 
 
@@ -92,52 +97,52 @@ def _video_args(tmp_path, **kw):
 
 def test_generate_video_previews_without_confirm(tmp_path):
     # No --confirm => preview only, no network, spends nothing.
-    res = core.run_generate_video(_video_args(tmp_path))
+    res = gen_cli_mod.run_generate_video(_video_args(tmp_path))
     assert res == {"submitted": False}
 
 
 def test_generate_video_requires_a_source_image(tmp_path):
     import pytest
     with pytest.raises(core.PixAIError):
-        core.run_generate_video(_video_args(tmp_path, image=""))
+        gen_cli_mod.run_generate_video(_video_args(tmp_path, image=""))
 
 
 # ---- banked enums: camera movement + channel (2026-07-02) ----
 
 def test_camera_movement_included_when_set():
-    p = core.build_video_parameters("p", media_id="1", camera_movement="zoom")
+    p = gen_params_mod.build_video_parameters("p", media_id="1", camera_movement="zoom")
     assert p["i2vPro"]["cameraMovement"] == "zoom"
 
 
 def test_camera_movement_omitted_by_default_and_on_unset():
-    assert "cameraMovement" not in core.build_video_parameters("p", media_id="1")["i2vPro"]
-    assert "cameraMovement" not in core.build_video_parameters(
+    assert "cameraMovement" not in gen_params_mod.build_video_parameters("p", media_id="1")["i2vPro"]
+    assert "cameraMovement" not in gen_params_mod.build_video_parameters(
         "p", media_id="1", camera_movement="unset")["i2vPro"]
 
 
 def test_is_private_sets_the_channel_and_legacy_flag():
     # New-gen platform (2026-08-25): visibility is now the top-level `channel` string, sent
     # ALONGSIDE the legacy `isPrivate` boolean (server honors whichever -> no privacy regress).
-    priv = core.build_video_parameters("p", media_id="1", is_private=True)
+    priv = gen_params_mod.build_video_parameters("p", media_id="1", is_private=True)
     assert priv["channel"] == "private" and priv["isPrivate"] is True
 
 
 def test_shot_params_carry_correct_modelid():
     # i2v: the numeric modelId must ride along, resolved per model (was missing entirely --
     # PixAI logged "Unknown or removed model" and no card matched without it).
-    assert core.build_shot_video_params(
+    assert gen_params_mod.build_shot_video_params(
         "I2V", "x", image_ids=["1"], model="v4.0.1")["modelId"] == "2003969750675682808"
-    assert core.build_shot_video_params(
+    assert gen_params_mod.build_shot_video_params(
         "I2V", "x", image_ids=["1"], model="v4.0")["modelId"] == "2003968021137101826"
     # R2V: the reference path no longer hardcodes the Lite id -- full V4.0 gets the full id.
-    assert core.build_shot_video_params(
+    assert gen_params_mod.build_shot_video_params(
         "R2V", "@image1", image_ids=["1"], model="v4.0")["modelId"] == "2003968021137101826"
 
 
 # ---- --dump-params: bank any submit shape off a recovered task ----
 
 def test_dump_params_prints_full_shape_when_flagged(capsys):
-    core._maybe_dump_params(SimpleNamespace(dump_params=True),
+    gen_cli_mod._maybe_dump_params(SimpleNamespace(dump_params=True),
                             {"parameters": {"i2vPro": {"model": "v4.0.1"},
                                             "multiRefResource": {"imageMediaIds": ["1"]}}})
     out = capsys.readouterr().out
@@ -145,7 +150,7 @@ def test_dump_params_prints_full_shape_when_flagged(capsys):
 
 
 def test_dump_params_silent_by_default(capsys):
-    core._maybe_dump_params(SimpleNamespace(dump_params=False), {"parameters": {"x": 1}})
+    gen_cli_mod._maybe_dump_params(SimpleNamespace(dump_params=False), {"parameters": {"x": 1}})
     assert capsys.readouterr().out == ""
 
 
@@ -155,7 +160,7 @@ def test_dump_params_also_prints_the_task_status(capsys):
     one moment someone recovers a task specifically because something looked wrong, this
     told them nothing about the outcome. A real task carries status alongside parameters
     in the same getTaskById response; this must not require a second round trip."""
-    core._maybe_dump_params(SimpleNamespace(dump_params=True),
+    gen_cli_mod._maybe_dump_params(SimpleNamespace(dump_params=True),
                             {"parameters": {"x": 1}, "status": "Failed"})
     out = capsys.readouterr().out
     assert "task status: Failed" in out
@@ -164,7 +169,7 @@ def test_dump_params_also_prints_the_task_status(capsys):
 def test_dump_params_omits_the_status_line_when_absent(capsys):
     """Must not print 'task status: None' or similar -- silence is correct when the
     response genuinely carries no status field."""
-    core._maybe_dump_params(SimpleNamespace(dump_params=True), {"parameters": {"x": 1}})
+    gen_cli_mod._maybe_dump_params(SimpleNamespace(dump_params=True), {"parameters": {"x": 1}})
     out = capsys.readouterr().out
     assert "task status" not in out
 
@@ -173,13 +178,13 @@ def test_dump_params_omits_the_status_line_when_absent(capsys):
 
 class TestOutputsOrRaise:
     def test_does_not_raise_when_something_was_found(self):
-        core._outputs_or_raise({"status": "done"}, found=["media1"], empty_message="unused")
+        gen_cli_mod._outputs_or_raise({"status": "done"}, found=["media1"], empty_message="unused")
 
     def test_genuinely_empty_completed_task_keeps_the_original_message(self):
         """The case this message was always right about -- e.g. a silently
         content-filtered task that PixAI still reports as 'done'. Must not change."""
         with pytest.raises(core.EmptyOutputsError, match="task completed but no media"):
-            core._outputs_or_raise({"status": "done"}, found=[],
+            gen_cli_mod._outputs_or_raise({"status": "done"}, found=[],
                                    empty_message="task completed but no media ids found")
 
     def test_missing_status_keeps_the_original_message(self):
@@ -187,7 +192,7 @@ class TestOutputsOrRaise:
         (or the field is empty) must fall back to the original wording, not silently
         claim a failure that was never reported."""
         with pytest.raises(core.EmptyOutputsError, match="task completed but no media"):
-            core._outputs_or_raise({}, found=[],
+            gen_cli_mod._outputs_or_raise({}, found=[],
                                    empty_message="task completed but no media ids found")
 
     @pytest.mark.parametrize("raw_status", ["failed", "Failed", "ERROR", "cancelled",
@@ -199,7 +204,7 @@ class TestOutputsOrRaise:
         moonglade_backup.py's own generation_status() lowercases before comparing
         against this same _GEN_FAIL tuple."""
         with pytest.raises(core.EmptyOutputsError) as exc:
-            core._outputs_or_raise({"status": raw_status}, found=[],
+            gen_cli_mod._outputs_or_raise({"status": raw_status}, found=[],
                                    empty_message="task completed but no media ids found")
         msg = str(exc.value)
         assert "completed" not in msg, "still claims the task completed"
@@ -213,7 +218,7 @@ class TestOutputsOrRaise:
         response (wait vs. investigate) from what the situation calls for. A
         non-terminal status now says the task is still going and to come back."""
         with pytest.raises(core.EmptyOutputsError) as exc:
-            core._outputs_or_raise({"status": raw_status}, found=[],
+            gen_cli_mod._outputs_or_raise({"status": raw_status}, found=[],
                                    empty_message="task completed but no media ids found")
         msg = str(exc.value)
         assert "completed" not in msg
@@ -224,7 +229,7 @@ class TestOutputsOrRaise:
 # ---- referenceVideo (multi-image/video/audio) -- pinned to the real submit (2026-07-02) ----
 
 def test_build_reference_video_matches_real_submit():
-    p = core.build_reference_video_parameters(
+    p = gen_params_mod.build_reference_video_parameters(
         "make @image1 dance", image_media_ids=["10", "20"],
         model="v4.0.1", duration=15, mode="professional",
         generate_audio=True, audio_language="english")
@@ -238,12 +243,12 @@ def test_build_reference_video_matches_real_submit():
     # modelId is now the model's OWN id (video_model_id), no longer a v4.0.1 default applied
     # to every engine -- which is still exactly REFVIDEO_MODEL_ID for the v4.0.1 submit this
     # test pins, so the default engine's wire is byte-identical.
-    assert p["modelId"] == core.video_model_id("v4.0.1") == core.REFVIDEO_MODEL_ID
+    assert p["modelId"] == gen_params_mod.video_model_id("v4.0.1") == gen_params_mod.REFVIDEO_MODEL_ID
     assert "referenceVideo" in p and "i2vPro" not in p   # distinct from i2v
 
 
 def test_reference_video_refs_private_and_card():
-    p = core.build_reference_video_parameters(
+    p = gen_params_mod.build_reference_video_parameters(
         "x", image_media_ids=["1"], video_media_ids=["v1"], audio_media_ids=["a1"],
         is_private=True, kaisuuken_id="card9")
     rv = p["referenceVideo"]
@@ -272,7 +277,7 @@ def test_reference_video_previews_without_confirm(tmp_path, monkeypatch, pixai):
     itself rides."""
     monkeypatch.setattr(core, "upload_media",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("no upload in preview")))
-    assert core.run_reference_video(_refvid_args(tmp_path)) == {"submitted": False}
+    assert gen_cli_mod.run_reference_video(_refvid_args(tmp_path)) == {"submitted": False}
     assert pixai.mutations() == 0
     assert not [c for c in pixai.calls if c.verb in ("query", "mutate", "persisted")]
 
@@ -280,14 +285,14 @@ def test_reference_video_previews_without_confirm(tmp_path, monkeypatch, pixai):
 def test_reference_video_requires_a_ref(tmp_path):
     import pytest
     with pytest.raises(core.PixAIError):
-        core.run_reference_video(_refvid_args(tmp_path, ref_image=None))
+        gen_cli_mod.run_reference_video(_refvid_args(tmp_path, ref_image=None))
 
 
 def test_reference_video_preview_snaps_duration(tmp_path, capsys):
     """B9's twin on the reference-video CLI path: --duration 7 has no matching allowed
     PixAI length (5/6/10/15) and must snap to the nearest (6), not submit verbatim --
     the exact bug already fixed for the Loom's build_shot_video_params, now missing here."""
-    core.run_reference_video(_refvid_args(tmp_path, duration=7))
+    gen_cli_mod.run_reference_video(_refvid_args(tmp_path, duration=7))
     out = capsys.readouterr().out
     assert '"duration": 6,' in out
 
@@ -297,8 +302,8 @@ def test_reference_video_builder_default_matches_i2v_sibling():
     agree with its i2v sibling (build_video_parameters, default 5) -- it used to be 15,
     a real 3x cost divergence (1 V4.0 card at 5s vs 3 at 15s) baked into the source."""
     import inspect
-    assert inspect.signature(core.build_video_parameters).parameters["duration"].default == 5
-    assert inspect.signature(core.build_reference_video_parameters).parameters["duration"].default == 5
+    assert inspect.signature(gen_params_mod.build_video_parameters).parameters["duration"].default == 5
+    assert inspect.signature(gen_params_mod.build_reference_video_parameters).parameters["duration"].default == 5
 
 
 def test_reference_video_argparse_default_is_5(monkeypatch, tmp_path):
@@ -307,7 +312,7 @@ def test_reference_video_argparse_default_is_5(monkeypatch, tmp_path):
     via core.main() rather than re-derived, so a future edit to the add_argument() call
     itself is what this test is pinned against."""
     captured = {}
-    monkeypatch.setattr(core, "run_reference_video", lambda a: captured.setdefault("args", a))
+    monkeypatch.setattr(gen_cli_mod, "run_reference_video", lambda a: captured.setdefault("args", a))
     monkeypatch.setattr("sys.argv", ["prog", "--reference-video", "--ref-image", "1",
                                      "--out", str(tmp_path)])
     core.main()
@@ -318,32 +323,32 @@ def test_reference_video_falls_back_to_5_not_15(tmp_path, capsys):
     """B10: run_reference_video's own call-site fallback (`getattr(args, "duration", ...)
     or ...`) must land on 5 for a falsy or wholly-missing --duration -- not the old,
     inconsistent 15 -- so no other duration-default drift exists for r2v."""
-    core.run_reference_video(_refvid_args(tmp_path, duration=0))
+    gen_cli_mod.run_reference_video(_refvid_args(tmp_path, duration=0))
     assert '"duration": 5,' in capsys.readouterr().out
 
     args = _refvid_args(tmp_path)
     del args.duration
-    core.run_reference_video(args)
+    gen_cli_mod.run_reference_video(args)
     assert '"duration": 5,' in capsys.readouterr().out
 
 
 # ---- shot -> video params (the PixAI provider adapter for the Loom) ----
 
 def test_snap_video_duration():
-    assert core._snap_video_duration(4) == 5
-    assert core._snap_video_duration(12) == 10
-    assert core._snap_video_duration(15) == 15
-    assert core._snap_video_duration("bad") == 5
+    assert gen_params_mod._snap_video_duration(4) == 5
+    assert gen_params_mod._snap_video_duration(12) == 10
+    assert gen_params_mod._snap_video_duration(15) == 15
+    assert gen_params_mod._snap_video_duration("bad") == 5
 
 
 def test_build_shot_video_params_needs_refs():
     import pytest
     with pytest.raises(core.PixAIError):
-        core.build_shot_video_params("R2V", "x")
+        gen_params_mod.build_shot_video_params("R2V", "x")
 
 
 def test_build_shot_video_params_model_and_audio_passthrough():
-    p = core.build_shot_video_params("I2V", "sing", image_ids=["1"], duration=5,
+    p = gen_params_mod.build_shot_video_params("I2V", "sing", image_ids=["1"], duration=5,
                                      model="v3.2", generate_audio=True,
                                      audio_language="japanese", camera_movement="zoom",
                                      quality="basic")
@@ -351,50 +356,50 @@ def test_build_shot_video_params_model_and_audio_passthrough():
     assert i2v["model"] == "v3.2" and i2v["generateAudio"] is True
     assert i2v["audioLanguage"] == "japanese"
     assert i2v["cameraMovement"] == "zoom" and i2v["mode"] == "basic"
-    r = core.build_shot_video_params("R2V", "@image1", image_ids=["1"], model="v4.0")
+    r = gen_params_mod.build_shot_video_params("R2V", "@image1", image_ids=["1"], model="v4.0")
     assert r["referenceVideo"]["model"] == "v4.0"
     # empty model falls back to the default on every path
-    d = core.build_shot_video_params("I2V", "x", image_ids=["1"], model="")
-    assert d["i2vPro"]["model"] == core.DEFAULT_VIDEO_MODEL
+    d = gen_params_mod.build_shot_video_params("I2V", "x", image_ids=["1"], model="")
+    assert d["i2vPro"]["model"] == gen_params_mod.DEFAULT_VIDEO_MODEL
 
 
 def test_build_shot_video_params_negative_and_channel():
     # negative + is_private reach i2vPro (I2V/FLF) -- both fields exist on that submit shape.
-    p = core.build_shot_video_params("I2V", "x", image_ids=["1"], negative="blurry, watermark",
+    p = gen_params_mod.build_shot_video_params("I2V", "x", image_ids=["1"], negative="blurry, watermark",
                                      is_private=True)
     assert p["i2vPro"]["negativePrompts"] == "blurry, watermark"
     # is_private threads through the adapter to BOTH the new channel string and legacy bool.
     assert p["channel"] == "private" and p["isPrivate"] is True
-    f = core.build_shot_video_params("FLF", "x", image_ids=["1", "2"], negative="extra fingers")
+    f = gen_params_mod.build_shot_video_params("FLF", "x", image_ids=["1", "2"], negative="extra fingers")
     assert f["i2vPro"]["negativePrompts"] == "extra fingers"
     # default is_private stays False (today's de-facto Normal-channel behavior, unchanged)
-    default = core.build_shot_video_params("I2V", "x", image_ids=["1"])
+    default = gen_params_mod.build_shot_video_params("I2V", "x", image_ids=["1"])
     assert default["channel"] == "normal" and default["isPrivate"] is False
 
 
 def test_build_shot_video_params_r2v_channel_but_no_negative_field():
     # referenceVideo DOES carry the channel string + legacy isPrivate...
-    r = core.build_shot_video_params("R2V", "@image1", image_ids=["1"], is_private=True)
+    r = gen_params_mod.build_shot_video_params("R2V", "@image1", image_ids=["1"], is_private=True)
     assert r["channel"] == "private" and r["isPrivate"] is True
     # ...but has no negativePrompts field at all -- a genuine PixAI API gap (the captured
     # referenceVideo submit shape has never had one), not a bug: negative is silently
     # dropped for R2V rather than invented into a field PixAI doesn't accept.
-    r2 = core.build_shot_video_params("R2V", "@image1", image_ids=["1"], negative="blurry")
+    r2 = gen_params_mod.build_shot_video_params("R2V", "@image1", image_ids=["1"], negative="blurry")
     assert "negativePrompts" not in r2["referenceVideo"]
 
 
 def test_build_shot_video_params_r2v_video_and_audio_ids_flow_through():
-    p = core.build_shot_video_params("R2V", "@video1 @audio1", video_ids=["9"], audio_ids=["7"])
+    p = gen_params_mod.build_shot_video_params("R2V", "@video1 @audio1", video_ids=["9"], audio_ids=["7"])
     rv = p["referenceVideo"]
     assert rv["referenceVideoMediaIds"] == ["9"] and rv["referenceAudioMediaIds"] == ["7"]
     assert rv["referenceImageMediaIds"] == []
 
 
 def test_collect_generation_detects_video(monkeypatch, tmp_path):
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, t: {"outputs": {"videos": [{"mediaId": "V9"}]}})
+    monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: {"outputs": {"videos": [{"mediaId": "V9"}]}})
     monkeypatch.setattr(core, "video_outputs", lambda r: ([{"video_media_id": "V9"}], {"prompt": "p"}))
-    monkeypatch.setattr(core, "_download_video_task", lambda *a, **k: ["/V9.mp4"])
-    got = core.collect_generation(object(), "T", str(tmp_path))
+    monkeypatch.setattr(gen_cli_mod, "_download_video_task", lambda *a, **k: ["/V9.mp4"])
+    got = gen_road_mod.collect_generation(object(), "T", str(tmp_path))
     assert got["is_video"] is True and got["media_ids"] == ["V9"] and got["saved"] == 1
 
 
@@ -418,7 +423,7 @@ def test_download_video_task_posterless_makes_ffmpeg_thumb(monkeypatch, tmp_path
         calls.append((str(video_path), str(thumb_path))); Path(thumb_path).write_bytes(b"jpg"); return True
     monkeypatch.setattr(media_tools_mod, "video_poster_thumb", _fake_vpt)
 
-    core._download_video_task(object(), {}, "T1", tmp_path, SimpleNamespace(name_length=60), {})
+    gen_cli_mod._download_video_task(object(), {}, "T1", tmp_path, SimpleNamespace(name_length=60), {})
 
     assert len(calls) == 1, "ffmpeg first-frame fallback should fire exactly once for a poster-less video"
     assert calls[0][1].endswith("V1.jpg")
@@ -444,7 +449,7 @@ def test_download_video_task_with_poster_skips_ffmpeg(monkeypatch, tmp_path):
 
     called = []
     monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: called.append(1))
-    core._download_video_task(object(), {}, "T2", tmp_path, SimpleNamespace(name_length=60), {})
+    gen_cli_mod._download_video_task(object(), {}, "T2", tmp_path, SimpleNamespace(name_length=60), {})
     assert called == [], "poster present -> ffmpeg fallback should be skipped"
     assert (tmp_path / "gallery" / "thumbs" / "V2.jpg").exists()
 
@@ -479,9 +484,9 @@ def test_gallery_catalog_ref_passes_through_then_uploads_on_invalid_media_id(tmp
     uploaded, submitted = [], {}
     monkeypatch.setattr(core, "upload_media",
                         lambda session, path, **k: uploaded.append(str(path)) or "999000111222")
-    monkeypatch.setattr(core, "submit_generation",
-                        lambda session, params: submitted.update(params) or "task-1")
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(gen_road_mod, "submit_generation",
+                        lambda session, params, **_kw: submitted.update(params) or "task-1")
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
 
     # UPDATED 2026-07-26. i2v now sends the catalog id FIRST, because uploading a copy is what
     # drags the frame through PixAI's content scanner and got an NSFW 403 on work their own site
@@ -490,13 +495,13 @@ def test_gallery_catalog_ref_passes_through_then_uploads_on_invalid_media_id(tmp
     # Simulated by rejecting the first submit the way PixAI did in July.
     calls = []
 
-    def _submit(session, params):
+    def _submit(session, params, **_kw):
         calls.append(params.get("i2vPro", {}).get("mediaId"))
         if len(calls) == 1:
             raise core.graphql_error("invalid_media_id", code="BAD_REQUEST")
         submitted.update(params)
         return "task-1"
-    monkeypatch.setattr(core, "submit_generation", _submit)
+    monkeypatch.setattr(gen_road_mod, "submit_generation", _submit)
 
     cli = login_test_client(create_app(tmp_path))
     r = cli.post("/api/loom/generate", json={
@@ -528,9 +533,9 @@ def test_gallery_r2v_catalog_ids_pass_through_without_upload(tmp_path, monkeypat
     calls, submitted = [], {}
     monkeypatch.setattr(core, "upload_media",
                         lambda session, path, **k: calls.append(1) or "777")
-    monkeypatch.setattr(core, "submit_generation",
-                        lambda session, params: submitted.update(params) or "t")
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(gen_road_mod, "submit_generation",
+                        lambda session, params, **_kw: submitted.update(params) or "t")
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
 
     cli = login_test_client(create_app(tmp_path))
     r = cli.post("/api/loom/generate", json={
@@ -570,10 +575,10 @@ def test_fix_and_edit_upload_the_catalog_reference(tmp_path, monkeypatch, pixai)
     seen = {}
 
     monkeypatch.setattr(core, "upload_media", lambda s, path, **k: "999000111222")
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "submit_generation",
-                        lambda s, params: seen.update(params=params) or "t1")
-    monkeypatch.setattr(core, "submit_fixer",
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(gen_road_mod, "submit_generation",
+                        lambda s, params, **_kw: seen.update(params=params) or "t1")
+    monkeypatch.setattr(gen_road_mod, "submit_fixer",
                         lambda s, src, boxes: seen.update(fix_src=src) or "t2")
 
     cli = login_test_client(create_app(tmp_path))
@@ -659,7 +664,7 @@ def test_download_video_task_catalogs_video_even_if_poster_fails(monkeypatch, tm
     monkeypatch.setattr(core, "save_catalog_over_snapshot",
                         lambda db, rows, snapshot: saved.extend(rows))
 
-    core._download_video_task(object(), {}, "T7", tmp_path, SimpleNamespace(name_length=60), {})
+    gen_cli_mod._download_video_task(object(), {}, "T7", tmp_path, SimpleNamespace(name_length=60), {})
     assert any(r.get("media_id") == "V7" and r.get("is_video") == "1" for r in saved), \
         "the finished video must be cataloged even when the poster thumbnail fails"
 
@@ -674,10 +679,10 @@ def test_local_video_reference_uploads_as_VIDEO(monkeypatch):
     seen = []
     monkeypatch.setattr(core, "upload_media",
                         lambda s, p, mt="IMAGE": seen.append(mt) or "up-1")
-    monkeypatch.setattr(core, "_is_local_source", lambda s: str(s).startswith("/local"))
+    monkeypatch.setattr(gen_params_mod, "_is_local_source", lambda s: str(s).startswith("/local"))
 
-    assert core._resolve_refs(object(), ["/local/a.png"], "IMAGE") == ["up-1"]
-    assert core._resolve_refs(object(), ["/local/b.mp4"], "VIDEO") == ["up-1"]
+    assert gen_cli_mod._resolve_refs(object(), ["/local/a.png"], "IMAGE") == ["up-1"]
+    assert gen_cli_mod._resolve_refs(object(), ["/local/b.mp4"], "VIDEO") == ["up-1"]
     assert seen == ["IMAGE", "VIDEO"], \
         "local refs uploaded as {} -- a local video must register as VIDEO".format(seen)
 
@@ -689,12 +694,12 @@ def test_local_audio_reference_is_refused_not_mislabelled():
     media_id and a baffling downstream failure. Refuse it with a usable message
     instead. A bare media_id still passes straight through."""
     with pytest.raises(core.PixAIError) as e:
-        core._resolve_refs(object(), [__file__], None)
+        gen_cli_mod._resolve_refs(object(), [__file__], None)
     msg = str(e.value)
     assert "--ref-video" in msg, "the error must name the workaround, not just say no"
 
     # an existing media_id is untouched -- only the local-file case is refused
-    assert core._resolve_refs(object(), ["746928310596368107"], None) == \
+    assert gen_cli_mod._resolve_refs(object(), ["746928310596368107"], None) == \
         ["746928310596368107"]
 
 
@@ -710,32 +715,32 @@ def test_15s_snaps_down_for_models_that_cannot_render_it():
     instant decline with no explanation. Found while diagnosing a V3.0 Lite failure on
     2026-07-26 (which turned out to be a different cause; this one was sitting right beside it)."""
     for model in ("v3.0.2", "v3.0", "v3.2", "v3.0.1", "v2.7"):
-        assert core._snap_video_duration(15, model) == 10, model
-        assert core._snap_video_duration(14, model) == 10, model     # snaps to 15, then capped
+        assert gen_params_mod._snap_video_duration(15, model) == 10, model
+        assert gen_params_mod._snap_video_duration(14, model) == 10, model     # snaps to 15, then capped
 
 
 def test_15s_is_allowed_for_the_v4_family():
-    for model in core.VIDEO_15S_MODELS:
-        assert core._snap_video_duration(15, model) == 15, model
+    for model in gen_params_mod.VIDEO_15S_MODELS:
+        assert gen_params_mod._snap_video_duration(15, model) == 15, model
     # Widened ON PURPOSE (SCOPE_2026-09-26 V3): both Tsubaki engines render 15 s -- the
     # owner's two tbkv tasks are 15 s on the wire, and their panel offers 5/10/15.
-    assert set(core.VIDEO_15S_MODELS) == {"v4.0", "v4.0.1", "tbkv1.0", "tbkv1.0.1"}
+    assert set(gen_params_mod.VIDEO_15S_MODELS) == {"v4.0", "v4.0.1", "tbkv1.0", "tbkv1.0.1"}
 
 
 def test_snap_without_a_model_keeps_the_original_behaviour():
     """The CLI preview path and the pre-existing tests call this model-blind. Adding the gate
     must not change what they get -- the restriction only applies when a model is named."""
-    assert core._snap_video_duration(15) == 15
-    assert core._snap_video_duration(15, "") == 15
+    assert gen_params_mod._snap_video_duration(15) == 15
+    assert gen_params_mod._snap_video_duration(15, "") == 15
 
 
 def test_the_shot_builder_applies_the_gate():
     """End to end through the builder the Loom and the gallery drawer both use, since that is
     where a real 15s request arrives."""
-    p3 = core.build_shot_video_params("I2V", "x", image_ids=["1"], duration=15, model="v3.0.2")
+    p3 = gen_params_mod.build_shot_video_params("I2V", "x", image_ids=["1"], duration=15, model="v3.0.2")
     assert p3["i2vPro"]["duration"] == "10"
 
-    p4 = core.build_shot_video_params("I2V", "x", image_ids=["1"], duration=15, model="v4.0.1")
+    p4 = gen_params_mod.build_shot_video_params("I2V", "x", image_ids=["1"], duration=15, model="v4.0.1")
     assert p4["i2vPro"]["duration"] == "15"
 
 
@@ -764,11 +769,11 @@ def test_a_failed_generation_is_logged_with_its_params(tmp_path, monkeypatch, ca
         "media_id": "555", "filename": "2025-01/a_555.png", "created_at": "2026-06-18T05:24:56Z"}])
 
     monkeypatch.setattr(core, "upload_media", lambda session, path, **k: "777")
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
 
-    def boom(session, params):
+    def boom(session, params, **_kw):
         raise core.PixAIError('unknown mode "professional" for i2vPro')
-    monkeypatch.setattr(core, "submit_generation", boom)
+    monkeypatch.setattr(gen_road_mod, "submit_generation", boom)
 
     cli = login_test_client(create_app(tmp_path))
     with caplog.at_level(logging.ERROR):
@@ -803,12 +808,12 @@ def test_the_failure_log_never_breaks_the_error_path(tmp_path, monkeypatch, pixa
             raise RuntimeError("even repr fails")
 
     monkeypatch.setattr(core, "upload_media", lambda session, path, **k: "777")
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
 
-    def boom(session, params):
+    def boom(session, params, **_kw):
         params["poison"] = Unserialisable()
         raise core.PixAIError("the real failure")
-    monkeypatch.setattr(core, "submit_generation", boom)
+    monkeypatch.setattr(gen_road_mod, "submit_generation", boom)
 
     cli = login_test_client(create_app(tmp_path))
     r = cli.post("/api/loom/generate", json={
@@ -833,16 +838,16 @@ def test_audio_fields_only_go_to_models_that_take_them():
     Widened ON PURPOSE (SCOPE_2026-09-26 V3): measured, not guessed -- both of the owner's
     tbkv tasks carry generateAudio true + audioLanguage english, and the tbkv panel has an
     audio language."""
-    assert set(core.VIDEO_AUDIO_MODELS) == {"v3.2", "v4.0", "v4.0.1", "tbkv1.0", "tbkv1.0.1"}
+    assert set(gen_params_mod.VIDEO_AUDIO_MODELS) == {"v3.2", "v4.0", "v4.0.1", "tbkv1.0", "tbkv1.0.1"}
 
-    for model in core.VIDEO_AUDIO_MODELS:
-        i2v = core.build_video_parameters("x", "1", model=model, generate_audio=True,
+    for model in gen_params_mod.VIDEO_AUDIO_MODELS:
+        i2v = gen_params_mod.build_video_parameters("x", "1", model=model, generate_audio=True,
                                          audio_language="japanese")["i2vPro"]
         assert i2v["generateAudio"] is True, model
         assert i2v["audioLanguage"] == "japanese", model
 
     for model in ("v3.0.2", "v2.7", "v3.0.1", "v3.0"):
-        i2v = core.build_video_parameters("x", "1", model=model, generate_audio=True,
+        i2v = gen_params_mod.build_video_parameters("x", "1", model=model, generate_audio=True,
                                           audio_language="english")["i2vPro"]
         assert "generateAudio" not in i2v, model + " must omit generateAudio entirely"
         assert "audioLanguage" not in i2v, model + " must omit audioLanguage entirely"
@@ -855,13 +860,13 @@ def test_video_prompt_over_the_limit_is_caught_before_submitting():
     instead of spending a round trip on a cryptic maxLength error."""
     long_prompt = "x" * 2500
     with pytest.raises(core.PixAIError) as e:
-        core.build_shot_video_params("I2V", long_prompt, image_ids=["1"], model="v4.0.1")
+        gen_params_mod.build_shot_video_params("I2V", long_prompt, image_ids=["1"], model="v4.0.1")
     msg = str(e.value)
     assert "2,500" in msg and "2,000" in msg, msg    # actual length AND the limit
     assert "500" in msg                              # how much to cut
     assert "nothing was created or charged" in msg
 
-    ok = core.build_shot_video_params("I2V", "x" * 2000, image_ids=["1"], model="v4.0.1")
+    ok = gen_params_mod.build_shot_video_params("I2V", "x" * 2000, image_ids=["1"], model="v4.0.1")
     assert ok["i2vPro"]["prompts"] == "x" * 2000     # exactly at the limit is fine
 
 
@@ -909,9 +914,9 @@ def test_mode_can_never_ride_absent_on_the_video_spend_path():
     no future caller can 'omit it to be safe' into a triple-price submit."""
     for bad in (None, "", "auto", "pro"):
         with pytest.raises(ValueError):
-            core.build_video_parameters("p", media_id="1", model="v4.0.1", mode=bad)
+            gen_params_mod.build_video_parameters("p", media_id="1", model="v4.0.1", mode=bad)
     for good in ("basic", "professional"):
-        p = core.build_video_parameters("p", media_id="1", model="v4.0.1", mode=good)
+        p = gen_params_mod.build_video_parameters("p", media_id="1", model="v4.0.1", mode=good)
         assert p["i2vPro"]["mode"] == good
 
 def test_r2v_invalid_reference_image_media_id_falls_back_to_upload(tmp_path, monkeypatch, pixai):
@@ -925,15 +930,15 @@ def test_r2v_invalid_reference_image_media_id_falls_back_to_upload(tmp_path, mon
     calls, uploaded, submitted = [], [], {}
     monkeypatch.setattr(core, "upload_media",
                         lambda session, path, **k: uploaded.append(str(path)) or "999000111222")
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
 
-    def _submit(session, params):
+    def _submit(session, params, **_kw):
         calls.append(list(params.get("referenceVideo", {}).get("referenceImageMediaIds") or []))
         if len(calls) == 1:
             raise core.graphql_error("invalid_reference_image_media_id", code="BAD_REQUEST")
         submitted.update(params)
         return "task-r2v"
-    monkeypatch.setattr(core, "submit_generation", _submit)
+    monkeypatch.setattr(gen_road_mod, "submit_generation", _submit)
 
     cli = login_test_client(create_app(tmp_path))
     r = cli.post("/api/loom/generate", json={
@@ -960,15 +965,15 @@ def test_r2v_fallback_keeps_first_pass_uploads_for_mixed_shots(tmp_path, monkeyp
         n[0] += 1
         return "UP%d" % n[0]
     monkeypatch.setattr(core, "upload_media", _upload)
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
 
-    def _submit(session, params):
+    def _submit(session, params, **_kw):
         calls.append(list(params.get("referenceVideo", {}).get("referenceImageMediaIds") or []))
         if len(calls) == 1:
             raise core.graphql_error("invalid_reference_image_media_id", code="BAD_REQUEST")
         submitted.update(params)
         return "task-mixed"
-    monkeypatch.setattr(core, "submit_generation", _submit)
+    monkeypatch.setattr(gen_road_mod, "submit_generation", _submit)
 
     cli = login_test_client(create_app(tmp_path))
     r = cli.post("/api/loom/generate", json={
@@ -990,11 +995,11 @@ def test_loom_generate_both_submits_rejected_is_exactly_two_posts_then_error(tmp
     mid = _seed_one(tmp_path)
     calls = []
     monkeypatch.setattr(core, "upload_media", lambda session, path, **k: "999000111222")
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
-    def _submit(session, params):
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
+    def _submit(session, params, **_kw):
         calls.append(1)
         raise core.graphql_error("invalid_reference_image_media_id", code="BAD_REQUEST")
-    monkeypatch.setattr(core, "submit_generation", _submit)
+    monkeypatch.setattr(gen_road_mod, "submit_generation", _submit)
     cli = login_test_client(create_app(tmp_path))
     r = cli.post("/api/loom/generate", json={"mode": "R2V", "prompt": "x", "images": [mid], "duration": 5})
     assert len(calls) == 2, "expected exactly two submits (try + one retry), got %d" % len(calls)
@@ -1012,11 +1017,11 @@ def test_loom_generate_lost_response_never_retries(tmp_path, monkeypatch, pixai)
     mid = _seed_one(tmp_path)
     calls, uploaded = [], []
     monkeypatch.setattr(core, "upload_media", lambda session, path, **k: uploaded.append(1) or "x")
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
-    def _submit(session, params):
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
+    def _submit(session, params, **_kw):
         calls.append(1)
         raise requests.ReadTimeout("read timed out")
-    monkeypatch.setattr(core, "submit_generation", _submit)
+    monkeypatch.setattr(gen_road_mod, "submit_generation", _submit)
     cli = login_test_client(create_app(tmp_path))
     r = cli.post("/api/loom/generate", json={"mode": "R2V", "prompt": "x", "images": [mid], "duration": 5})
     assert len(calls) == 1, "a lost response must NEVER be retried (double-spend), got %d submits" % len(calls)

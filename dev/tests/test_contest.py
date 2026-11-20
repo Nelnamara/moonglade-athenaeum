@@ -22,6 +22,7 @@ import threading
 import pytest
 
 from moonglade import backup as core
+from moonglade import contests as contests_mod
 from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
@@ -79,20 +80,20 @@ class TestContestRestVerbs:
         pixai.on("/contest/s1/artwork/u-test",
                  [{"id": "e1", "authorId": "u-test", "mediaId": "m1", "title": "T",
                    "contest": {"id": "c1", "slug": "s1"}}])
-        assert core.contest_my_entries(pixai, "s1", "u-test") == [
+        assert contests_mod.contest_my_entries(pixai, "s1", "u-test") == [
             {"id": "e1", "authorId": "u-test", "mediaId": "m1", "title": "T"}]
         pixai.on("/contest/s2/artwork/u-test", {"data": [{"id": "e2"}], "totalPage": 1})
-        assert core.contest_my_entries(pixai, "s2", "u-test") == [{"id": "e2"}]
-        assert core.contest_my_entries(pixai, "s2", "u-test") is not None
+        assert contests_mod.contest_my_entries(pixai, "s2", "u-test") == [{"id": "e2"}]
+        assert contests_mod.contest_my_entries(pixai, "s2", "u-test") is not None
 
     def test_winners_is_empty_while_running_and_keeps_the_rank_field(self, pixai):
         """A running contest answers with an empty array rather than an error -- "not
         decided yet", not "call failed". Whatever upstream calls the rank field rides
         along untouched, since its name was never verified."""
         pixai.on("/contest/s1/winners", [])
-        assert core.contest_winners(pixai, "s1") == []
+        assert contests_mod.contest_winners(pixai, "s1") == []
         pixai.on("/contest/s2/winners", [{"id": "a1", "authorId": "u-9", "rank": 2}])
-        assert core.contest_winners(pixai, "s2") == [
+        assert contests_mod.contest_winners(pixai, "s2") == [
             {"id": "a1", "authorId": "u-9", "rank": 2}]
 
     def test_read_verbs_raise_upward(self, pixai):
@@ -101,16 +102,16 @@ class TestContestRestVerbs:
         pixai.fail("/contest/s1/winners", core.PixAIError("REST GET /contest -> 500"))
         pixai.fail("/contest/s1/artwork/u-test", core.PixAIError("REST GET /contest -> 500"))
         with pytest.raises(core.PixAIError):
-            core.contest_winners(pixai, "s1")
+            contests_mod.contest_winners(pixai, "s1")
         with pytest.raises(core.PixAIError):
-            core.contest_my_entries(pixai, "s1", "u-test")
+            contests_mod.contest_my_entries(pixai, "s1", "u-test")
 
     def test_artworks_pages_newest_first_and_keeps_the_envelope(self, pixai):
         pixai.on("/contest/s1/artwork", lambda call: {
             "data": [{"id": "a1", "authorName": "@someone", "mediaId": "m1",
                       "contest": {"id": "c1"}}],
             "page": call.params["page"], "totalPage": 4, "totalCount": 77})
-        env = core.contest_artworks(pixai, "s1", page=2)
+        env = contests_mod.contest_artworks(pixai, "s1", page=2)
         assert env["data"] == [{"id": "a1", "authorName": "@someone", "mediaId": "m1"}]
         assert (env["page"], env["totalPage"], env["totalCount"]) == (2, 4, 77)
         assert pixai.calls_for("/contest/s1/artwork")[0].params == {"page": 2, "sort": "newest"}
@@ -118,7 +119,7 @@ class TestContestRestVerbs:
     def test_artworks_tolerates_a_bare_array(self, pixai):
         """No invented totals: an array answer counts what actually came back."""
         pixai.on("/contest/s2/artwork", [{"id": "a1"}, {"id": "a2"}])
-        env = core.contest_artworks(pixai, "s2")
+        env = contests_mod.contest_artworks(pixai, "s2")
         assert env["data"] == [{"id": "a1"}, {"id": "a2"}]
         assert (env["totalCount"], env["page"], env["totalPage"]) == (2, 1, 1)
 
@@ -133,7 +134,7 @@ class TestContestEnterIsGuarded:
         monkeypatch.setattr(core, "_check_read_only", lambda action: order.append("guard"))
         monkeypatch.setattr(core, "_rest_post",
                             lambda s, p, b, **k: order.append(("post", p, b)) or {"success": True})
-        assert core.contest_enter(mock_session, "slug1", 42) == {"success": True}
+        assert contests_mod.contest_enter(mock_session, "slug1", 42) == {"success": True}
         assert order[0] == "guard", "the guard must run first, not merely somewhere"
         assert order[1] == ("post", "/contest/slug1/artwork", {"artworkId": "42"})
         assert len(order) == 2, "one POST, no retry loop -- a re-POST would enter twice"
@@ -141,7 +142,7 @@ class TestContestEnterIsGuarded:
     def test_read_only_refuses_before_any_network(self, mock_session, monkeypatch):
         monkeypatch.setattr(core, "READ_ONLY", True)
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.contest_enter(mock_session, "slug1", "art1")
+            contests_mod.contest_enter(mock_session, "slug1", "art1")
         mock_session.post.assert_not_called()
 
 
@@ -151,14 +152,14 @@ def _board(monkeypatch, rows=None):
     """The live board the route resolves the contest id against, and the session it reads
     it with. Default: one running contest, slug s1, id c1."""
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "list_contests",
+    monkeypatch.setattr(contests_mod, "list_contests",
                         lambda s, **k: [{"id": "c1", "slug": "s1", "active": True}]
                         if rows is None else rows)
 
 
 def test_enter_route_requires_csrf(tmp_path, monkeypatch):
     calls = []
-    monkeypatch.setattr(core, "contest_enter",
+    monkeypatch.setattr(contests_mod, "contest_enter",
                         lambda *a, **k: calls.append(a) or {"success": True})
     _board(monkeypatch)
     cli = _client(tmp_path)
@@ -173,10 +174,10 @@ def test_enter_route_previews_without_touching_the_network(tmp_path, monkeypatch
     board read. `spends_credits` is None: the entry fee is unmeasured, and False on a screen
     read before an irreversible action would be a promise the code cannot keep."""
     calls = []
-    monkeypatch.setattr(core, "contest_enter",
+    monkeypatch.setattr(contests_mod, "contest_enter",
                         lambda *a, **k: calls.append(("enter",)) or {"success": True})
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "list_contests",
+    monkeypatch.setattr(contests_mod, "list_contests",
                         lambda s, **k: calls.append(("board",)) or [])
     cli = _client(tmp_path)
     d = cli.post("/api/contest/enter", json={"slug": "s1", "artwork_id": "a1",
@@ -198,7 +199,7 @@ def test_enter_route_confirm_enters_once_then_dedupes(tmp_path, monkeypatch):
     so a client-supplied id could otherwise inflate the count with nothing able to correct
     it."""
     calls = []
-    monkeypatch.setattr(core, "contest_enter",
+    monkeypatch.setattr(contests_mod, "contest_enter",
                         lambda s, slug, aid: calls.append((slug, aid)) or {"success": True})
     _board(monkeypatch)
     cli = _client(tmp_path)
@@ -218,7 +219,7 @@ def test_enter_route_confirm_enters_once_then_dedupes(tmp_path, monkeypatch):
 
 def test_enter_route_refuses_a_slug_that_is_not_on_the_board(tmp_path, monkeypatch):
     calls = []
-    monkeypatch.setattr(core, "contest_enter",
+    monkeypatch.setattr(contests_mod, "contest_enter",
                         lambda *a, **k: calls.append(a) or {"success": True})
     _board(monkeypatch)
     cli = _client(tmp_path)
@@ -233,7 +234,7 @@ def test_enter_route_refuses_a_slug_that_is_not_on_the_board(tmp_path, monkeypat
 def test_enter_route_core_failure_is_502_and_records_nothing(tmp_path, monkeypatch):
     def _boom(*a, **k):
         raise core.PixAIError("NOT_ELIGIBLE")
-    monkeypatch.setattr(core, "contest_enter", _boom)
+    monkeypatch.setattr(contests_mod, "contest_enter", _boom)
     _board(monkeypatch)
     cli = _client(tmp_path)
     r = cli.post("/api/contest/enter",
@@ -246,7 +247,7 @@ def test_enter_route_core_failure_is_502_and_records_nothing(tmp_path, monkeypat
 def test_enter_route_treats_an_unsuccessful_response_as_a_refusal(tmp_path, monkeypatch):
     """A 2xx carrying success:false is a refusal wearing a success code -- it must not
     record an entry that never happened."""
-    monkeypatch.setattr(core, "contest_enter", lambda *a, **k: {"success": False})
+    monkeypatch.setattr(contests_mod, "contest_enter", lambda *a, **k: {"success": False})
     _board(monkeypatch)
     cli = _client(tmp_path)
     r = cli.post("/api/contest/enter",
@@ -345,14 +346,14 @@ def test_sweep_records_entries_and_reads_no_winners(tmp_path, monkeypatch, pixai
     row carrying this account's authorId records nothing here."""
     seen = []
     _no_pause(monkeypatch)
-    monkeypatch.setattr(core, "list_contests", lambda s, **k: [
+    monkeypatch.setattr(contests_mod, "list_contests", lambda s, **k: [
         _contest("c1", "s1", active=True),
         _contest("c2", "s2", result_at=_iso(1)),
     ])
-    monkeypatch.setattr(core, "contest_my_entries",
+    monkeypatch.setattr(contests_mod, "contest_my_entries",
                         lambda s, slug, uid: seen.append(("entries", slug, uid))
                         or [{"id": "e-" + slug}])
-    monkeypatch.setattr(core, "contest_winners",
+    monkeypatch.setattr(contests_mod, "contest_winners",
                         lambda s, slug: pytest.fail("the entry sweep must not read winners"))
     assert contest_sync_mod._contest_detection_sync(tmp_path) is True
     m = telemetry_mod.telemetry_metrics(tmp_path)
@@ -370,15 +371,15 @@ def test_sweep_skips_contests_outside_the_window(tmp_path, monkeypatch, pixai):
     and falling back to "poll everything" would be a request storm for nothing."""
     seen = []
     _no_pause(monkeypatch)
-    monkeypatch.setattr(core, "list_contests", lambda s, **k: [
+    monkeypatch.setattr(contests_mod, "list_contests", lambda s, **k: [
         _contest("c1", "s1", result_at=_iso(contest_sync_mod._CONTEST_SYNC_RECENT_DAYS + 10)),
         _contest("c2", "s2"),                                   # ended, no dates at all
         _contest("c3", "s3", end_at="not-a-date"),
         _contest("c4", "s4", end_at=_iso(1)),                   # ended, but recently
     ])
-    monkeypatch.setattr(core, "contest_my_entries",
+    monkeypatch.setattr(contests_mod, "contest_my_entries",
                         lambda s, slug, uid: seen.append(slug) or [{"id": "e-" + slug}])
-    monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
+    monkeypatch.setattr(contests_mod, "contest_winners", lambda s, slug: [])
     contest_sync_mod._contest_detection_sync(tmp_path)
     assert seen == ["s4"]
     assert telemetry_mod.telemetry_metrics(tmp_path)["contest_entries"] == 1
@@ -386,7 +387,7 @@ def test_sweep_skips_contests_outside_the_window(tmp_path, monkeypatch, pixai):
 
 def test_sweep_survives_one_bad_contest(tmp_path, monkeypatch, pixai):
     _no_pause(monkeypatch)
-    monkeypatch.setattr(core, "list_contests", lambda s, **k: [
+    monkeypatch.setattr(contests_mod, "list_contests", lambda s, **k: [
         _contest("c1", "s1", active=True), _contest("c2", "s2", active=True),
         _contest("c3", "s3", active=True)])
 
@@ -394,8 +395,8 @@ def test_sweep_survives_one_bad_contest(tmp_path, monkeypatch, pixai):
         if slug == "s2":
             raise core.PixAIError("REST GET /contest -> 500")
         return [{"id": "e-" + slug}]
-    monkeypatch.setattr(core, "contest_my_entries", _my_entries)
-    monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
+    monkeypatch.setattr(contests_mod, "contest_my_entries", _my_entries)
+    monkeypatch.setattr(contests_mod, "contest_winners", lambda s, slug: [])
     contest_sync_mod._contest_detection_sync(tmp_path)
     assert telemetry_mod.telemetry_metrics(tmp_path)["contest_entries"] == 2   # the sweep carried on
 
@@ -405,14 +406,14 @@ def test_sweep_prefers_the_explicit_artwork_field(tmp_path, monkeypatch, pixai):
     field wins and the row id is only the fallback -- keying on the wrong one would count a
     different thing under the same name."""
     _no_pause(monkeypatch)
-    monkeypatch.setattr(core, "list_contests",
+    monkeypatch.setattr(contests_mod, "list_contests",
                         lambda s, **k: [_contest("c1", "s1", active=True)])
-    monkeypatch.setattr(core, "contest_my_entries", lambda s, slug, uid: [
+    monkeypatch.setattr(contests_mod, "contest_my_entries", lambda s, slug, uid: [
         {"id": "row-1", "artworkId": "art-1"},      # both present -> the artwork one
         {"id": "row-2"},                            # only the row id -> the fallback
         {"artworkId": ""},                          # nothing usable -> skipped
     ])
-    monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
+    monkeypatch.setattr(contests_mod, "contest_winners", lambda s, slug: [])
     contest_sync_mod._contest_detection_sync(tmp_path)
     assert sorted(_entry_keys(tmp_path)) == ["c1:art-1", "c1:row-2"]
 
@@ -422,11 +423,11 @@ def test_sweep_force_ignores_the_recent_window(tmp_path, monkeypatch, pixai):
     window would have skipped must not be what hides it."""
     seen = []
     _no_pause(monkeypatch)
-    monkeypatch.setattr(core, "list_contests", lambda s, **k: [
+    monkeypatch.setattr(contests_mod, "list_contests", lambda s, **k: [
         _contest("c1", "s1", result_at=_iso(contest_sync_mod._CONTEST_SYNC_RECENT_DAYS + 10))])
-    monkeypatch.setattr(core, "contest_my_entries",
+    monkeypatch.setattr(contests_mod, "contest_my_entries",
                         lambda s, slug, uid: seen.append(slug) or [{"artworkId": "a1"}])
-    monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
+    monkeypatch.setattr(contests_mod, "contest_winners", lambda s, slug: [])
     contest_sync_mod._contest_detection_sync(tmp_path)                       # windowed: not looked at
     assert seen == []
     contest_sync_mod._contest_detection_sync(tmp_path, force=True)           # forced: looked at
@@ -440,12 +441,12 @@ def test_sweep_cap_never_drops_a_running_contest(tmp_path, monkeypatch, pixai):
     seen = []
     _no_pause(monkeypatch)
     monkeypatch.setattr(contest_sync_mod, "_CONTEST_SYNC_MAX", 1)
-    monkeypatch.setattr(core, "list_contests", lambda s, **k: (
+    monkeypatch.setattr(contests_mod, "list_contests", lambda s, **k: (
         [_contest("a%d" % i, "run%d" % i, active=True) for i in range(4)]
         + [_contest("e%d" % i, "end%d" % i, end_at=_iso(1)) for i in range(3)]))
-    monkeypatch.setattr(core, "contest_my_entries",
+    monkeypatch.setattr(contests_mod, "contest_my_entries",
                         lambda s, slug, uid: seen.append(slug) or [])
-    monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
+    monkeypatch.setattr(contests_mod, "contest_winners", lambda s, slug: [])
     contest_sync_mod._contest_detection_sync(tmp_path)
     assert [s for s in seen if s.startswith("run")] == ["run0", "run1", "run2", "run3"]
     assert len([s for s in seen if s.startswith("end")]) == 1
@@ -459,7 +460,7 @@ def test_sweep_never_raises_and_reports_it_gave_up(tmp_path, monkeypatch, pixai)
 
     def _boom(*a, **k):
         raise core.PixAIError("the board is unreachable")
-    monkeypatch.setattr(core, "list_contests", _boom)
+    monkeypatch.setattr(contests_mod, "list_contests", _boom)
     assert contest_sync_mod._contest_detection_sync(tmp_path) is False       # no exception escapes
     assert telemetry_mod.telemetry_metrics(tmp_path)["contest_entries"] == 0
 
@@ -468,7 +469,7 @@ def test_sweep_without_an_account_id_does_nothing(tmp_path, monkeypatch, pixai):
     seen = []
     _no_pause(monkeypatch)
     pixai.user_id = ""
-    monkeypatch.setattr(core, "list_contests",
+    monkeypatch.setattr(contests_mod, "list_contests",
                         lambda s, **k: seen.append("board") or [])
     contest_sync_mod._contest_detection_sync(tmp_path)
     assert not seen                                    # nothing to look up, so nothing asked
@@ -484,11 +485,11 @@ def test_sync_route_reports_one_count_and_never_the_win(tmp_path, monkeypatch, p
     sweep is run inline here and the counts are read afterwards."""
     _no_pause(monkeypatch)
     monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": 0.0})
-    monkeypatch.setattr(core, "list_contests",
+    monkeypatch.setattr(contests_mod, "list_contests",
                         lambda s, **k: [_contest("c1", "s1", result_at=_iso(1))])
-    monkeypatch.setattr(core, "contest_my_entries",
+    monkeypatch.setattr(contests_mod, "contest_my_entries",
                         lambda s, slug, uid: [{"artworkId": "e1"}, {"artworkId": "e2"}])
-    monkeypatch.setattr(core, "contest_winners",
+    monkeypatch.setattr(contests_mod, "contest_winners",
                         lambda s, slug: pytest.fail("the entry sweep must not read winners"))
     cli = _client(tmp_path)
     real = g.threading.Thread
@@ -513,7 +514,7 @@ def test_sync_route_answers_even_when_the_sweep_gives_up(tmp_path, monkeypatch, 
 
     def _boom(*a, **k):
         raise core.PixAIError("the board is unreachable")
-    monkeypatch.setattr(core, "list_contests", _boom)
+    monkeypatch.setattr(contests_mod, "list_contests", _boom)
     cli = _client(tmp_path)
     real = g.threading.Thread
     monkeypatch.setattr(g.threading, "Thread",
@@ -633,13 +634,13 @@ def test_mine_is_telemetry_derived_with_one_board_read(tmp_path, monkeypatch, pi
     a page of the board, for titles and dates. Re-polling PixAI per contest is the
     detection sweep's job; a tab that did it would fire N calls on open."""
     seen = []
-    monkeypatch.setattr(core, "list_contests",
+    monkeypatch.setattr(contests_mod, "list_contests",
                         lambda s, **k: seen.append(k) or [
                             {"id": "c1", "slug": "s1", "title": "First", "type": "official",
                              "end_at": "2026-08-18", "result_at": "2026-09-08",
                              "active": True, "url": "https://pixai.art/en/contest/s1"}])
-    for name in ("contest_my_entries", "contest_winners"):
-        monkeypatch.setattr(core, name, lambda *a, **k: pytest.fail(
+    for name in ("contest_my_entries", "contest_winners"):      # in contests since 3.22
+        monkeypatch.setattr(contests_mod, name, lambda *a, **k: pytest.fail(
             "the My-entries tab must not poll PixAI per contest"))
     _seed_entries(tmp_path, ["c1:aw1", "c1:aw2", "c2:aw9", "c3:aw7"], wins=["c2"])
     # c2 carries only the OLD sweep's flat win key (believed, never verified); c3 carries a
@@ -675,7 +676,7 @@ def test_mine_soft_fails_to_key_only_rows(tmp_path, monkeypatch, pixai):
     """Knowing you have entries somewhere beats an error page."""
     def _boom(*a, **k):
         raise core.PixAIError("the board is unreachable")
-    monkeypatch.setattr(core, "list_contests", _boom)
+    monkeypatch.setattr(contests_mod, "list_contests", _boom)
     _seed_entries(tmp_path, ["c1:aw1"])
     cli = _client(tmp_path)
     d = cli.get("/api/contest/mine").get_json()
@@ -684,7 +685,7 @@ def test_mine_soft_fails_to_key_only_rows(tmp_path, monkeypatch, pixai):
 
 
 def test_mine_is_empty_before_any_entry(tmp_path, monkeypatch, pixai):
-    monkeypatch.setattr(core, "list_contests", lambda s, **k: [])
+    monkeypatch.setattr(contests_mod, "list_contests", lambda s, **k: [])
     cli = _client(tmp_path)
     d = cli.get("/api/contest/mine").get_json()
     assert d["contests"] == [] and d["total_entries"] == 0
@@ -730,14 +731,14 @@ def _enter_stubs(monkeypatch, board=None, fail=None, success=True):
     """The board the id->slug translation reads, and a recording contest_enter."""
     calls = []
     rows = [{"id": "c7", "slug": "ice-pop", "title": "Ice Pop"}] if board is None else board
-    monkeypatch.setattr(core, "list_contests", lambda s, **k: rows)
+    monkeypatch.setattr(contests_mod, "list_contests", lambda s, **k: rows)
 
     def _enter(session, slug, artwork_id):
         calls.append((slug, artwork_id))
         if fail:
             raise fail
         return {"success": success}
-    monkeypatch.setattr(core, "contest_enter", _enter)
+    monkeypatch.setattr(contests_mod, "contest_enter", _enter)
     return calls
 
 
@@ -779,7 +780,7 @@ def test_an_unresolvable_contest_id_is_reported_not_a_crash(tmp_path, monkeypatc
 def test_a_board_read_failure_is_reported_not_a_crash(tmp_path, monkeypatch):
     seen = _kick_recorder(monkeypatch)
     _enter_stubs(monkeypatch)
-    monkeypatch.setattr(core, "list_contests",
+    monkeypatch.setattr(contests_mod, "list_contests",
                         lambda s, **k: (_ for _ in ()).throw(core.PixAIError("board down")))
     cli = _publish_client(tmp_path, monkeypatch)
     d = _publish(cli, challenge="c7").get_json()
@@ -849,29 +850,29 @@ def test_the_board_is_read_to_its_own_last_page_at_the_sweeps_pace(pixai, monkey
     board = _paged_board(7)
     pixai.on("/contest/list", lambda call: board[call.params["page"]])
     naps = record_own_sleeps(monkeypatch)           # never another thread's sleep
-    rows = core.list_contests(pixai, active_only=False)
+    rows = contests_mod.list_contests(pixai, active_only=False)
     assert [r["id"] for r in rows] == [str(p) for p in range(1, 8)]
     assert [c.params["page"] for c in pixai.calls] == list(range(1, 8))
     assert naps == [0.35] * 6                      # between pages, never before the first
-    assert core._CONTEST_MAX_PAGES == 20
+    assert contests_mod._CONTEST_MAX_PAGES == 100
 
 
 def test_a_one_page_board_is_one_read_and_no_pause(pixai, monkeypatch):
     board = _paged_board(1)
     pixai.on("/contest/list", lambda call: board[call.params["page"]])
     naps = record_own_sleeps(monkeypatch)           # never another thread's sleep
-    assert len(core.list_contests(pixai)) == 1
+    assert len(contests_mod.list_contests(pixai)) == 1
     assert len(pixai.calls) == 1 and naps == []
 
 
 def test_the_ceiling_stops_a_runaway_board_and_says_so(pixai, monkeypatch, caplog):
-    board = _paged_board(25)
+    board = _paged_board(105)
     pixai.on("/contest/list", lambda call: board[call.params["page"]])
     monkeypatch.setattr(core.time, "sleep", lambda s: None)
     with caplog.at_level("WARNING"):
-        rows = core.list_contests(pixai)
-    assert len(rows) == 20 and len(pixai.calls) == 20
-    assert any("20-page ceiling" in r.getMessage() and "25 pages" in r.getMessage()
+        rows = contests_mod.list_contests(pixai)
+    assert len(rows) == 100 and len(pixai.calls) == 100
+    assert any("100-page ceiling" in r.getMessage() and "105 pages" in r.getMessage()
                for r in caplog.records)
 
 
@@ -880,22 +881,22 @@ def test_totalpage_ending_the_walk_logs_nothing(pixai, monkeypatch, caplog):
     pixai.on("/contest/list", lambda call: board[call.params["page"]])
     monkeypatch.setattr(core.time, "sleep", lambda s: None)
     with caplog.at_level("WARNING"):
-        core.list_contests(pixai)
+        contests_mod.list_contests(pixai)
     assert not [r for r in caplog.records if "ceiling" in r.getMessage()]
 
 def test_the_ceiling_is_reported_to_the_caller(pixai, monkeypatch):
     """The walk used to tell only the log. `meta` carries it out: the caller (and so the
     Contests screens) learns the board was cut and by how much."""
-    board = _paged_board(25)
+    board = _paged_board(105)
     pixai.on("/contest/list", lambda call: board[call.params["page"]])
     monkeypatch.setattr(core.time, "sleep", lambda s: None)
     meta = {}
-    rows = core.list_contests(pixai, meta=meta)
-    assert isinstance(rows, list) and len(rows) == 20
+    rows = contests_mod.list_contests(pixai, meta=meta)
+    assert isinstance(rows, list) and len(rows) == 100
     assert meta["truncated"] is True
-    assert meta["limit"] == 1000
-    assert meta["total_count"] == 25 * 50
-    assert meta["pages_read"] == 20 and meta["total_page"] == 25
+    assert meta["limit"] == 5000
+    assert meta["total_count"] == 105 * 50
+    assert meta["pages_read"] == 100 and meta["total_page"] == 105
 
 
 def test_a_board_that_ends_by_its_own_totalpage_is_not_truncated(pixai, monkeypatch):
@@ -903,24 +904,24 @@ def test_a_board_that_ends_by_its_own_totalpage_is_not_truncated(pixai, monkeypa
     pixai.on("/contest/list", lambda call: board[call.params["page"]])
     monkeypatch.setattr(core.time, "sleep", lambda s: None)
     meta = {}
-    core.list_contests(pixai, meta=meta)
+    contests_mod.list_contests(pixai, meta=meta)
     assert meta["truncated"] is False and meta["pages_read"] == 3
 
 
 def test_a_board_of_exactly_the_ceiling_is_not_truncated(pixai, monkeypatch):
-    """20 pages read, and totalPage says 20: the walk ended by the board, not the ceiling."""
-    board = _paged_board(20)
+    """100 pages read, and totalPage says 100: the walk ended by the board, not the ceiling."""
+    board = _paged_board(100)
     pixai.on("/contest/list", lambda call: board[call.params["page"]])
     monkeypatch.setattr(core.time, "sleep", lambda s: None)
     meta = {}
-    rows = core.list_contests(pixai, meta=meta)
-    assert len(rows) == 20 and meta["truncated"] is False
+    rows = contests_mod.list_contests(pixai, meta=meta)
+    assert len(rows) == 100 and meta["truncated"] is False
 
 
 def test_one_page_over_the_ceiling_is_truncated(pixai, monkeypatch):
-    board = _paged_board(21)
+    board = _paged_board(101)
     pixai.on("/contest/list", lambda call: board[call.params["page"]])
     monkeypatch.setattr(core.time, "sleep", lambda s: None)
     meta = {}
-    core.list_contests(pixai, meta=meta)
-    assert meta["truncated"] is True and meta["total_page"] == 21
+    contests_mod.list_contests(pixai, meta=meta)
+    assert meta["truncated"] is True and meta["total_page"] == 101

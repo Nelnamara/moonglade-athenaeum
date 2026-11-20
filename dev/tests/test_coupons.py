@@ -5,6 +5,7 @@ Pure/mocked -- no live network (conftest blocks _rest_get/_rest_post), no spend.
 from types import SimpleNamespace
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 
 
 # ---- list_extra_package_boosts: GET /v2/extra-package-boosts, soft-fail ----
@@ -27,7 +28,7 @@ def test_list_extra_package_boosts_normalizes_real_shape(monkeypatch):
         ], "pageInfo": {"hasNextPage": False, "endCursor": None}}
 
     monkeypatch.setattr(core, "_rest_get", fake_get)
-    result = core.list_extra_package_boosts(object())
+    result = cards_mod.list_extra_package_boosts(object())
     assert seen["path"] == "/extra-package-boosts"
     assert result["has_next"] is False
     row = result["coupons"][0]
@@ -46,7 +47,7 @@ def test_list_extra_package_boosts_uses_bracket_status_params(monkeypatch):
         return {"data": [], "pageInfo": {}}
 
     monkeypatch.setattr(core, "_rest_get", fake_get)
-    core.list_extra_package_boosts(object(), statuses=("redeemed", "expired"), first=50)
+    cards_mod.list_extra_package_boosts(object(), statuses=("redeemed", "expired"), first=50)
     assert seen["params"] == {"first": 50, "status[0]": "redeemed", "status[1]": "expired"}
 
 
@@ -63,24 +64,24 @@ def test_list_extra_package_boosts_defaults_to_on_hand(monkeypatch):
         return {"data": [], "pageInfo": {}}
 
     monkeypatch.setattr(core, "_rest_get", fake_get)
-    core.list_extra_package_boosts(object())
+    cards_mod.list_extra_package_boosts(object())
     assert seen["params"] == {"first": 50, "status[0]": "available", "status[1]": "locked"}
-    assert core.COUPON_STATUSES_ON_HAND == ("available", "locked")
-    assert core.COUPON_STATUSES_HISTORY == ("redeemed", "expired")
+    assert cards_mod.COUPON_STATUSES_ON_HAND == ("available", "locked")
+    assert cards_mod.COUPON_STATUSES_HISTORY == ("redeemed", "expired")
 
 
 def test_list_extra_package_boosts_fails_soft(monkeypatch):
     def boom(*a, **k):
         raise core.PixAIError("network down")
     monkeypatch.setattr(core, "_rest_get", boom)
-    assert core.list_extra_package_boosts(object()) == {
+    assert cards_mod.list_extra_package_boosts(object()) == {
         "coupons": [], "has_next": False, "end_cursor": None}
 
 
 # ---- run_coupons display (list_extra_package_boosts stubbed) ----
 
 def test_run_coupons_empty(monkeypatch, capsys, pixai):
-    monkeypatch.setattr(core, "list_extra_package_boosts", lambda s, **k: {
+    monkeypatch.setattr(cards_mod, "list_extra_package_boosts", lambda s, **k: {
         "coupons": [], "has_next": False, "end_cursor": None})
     assert core.run_coupons(SimpleNamespace(token=None, coupons_history=False)) == {
         "coupons": 0}
@@ -94,14 +95,14 @@ def test_run_coupons_history_flag_switches_statuses(monkeypatch, capsys, pixai):
         seen["statuses"] = statuses
         return {"coupons": [], "has_next": False, "end_cursor": None}
 
-    monkeypatch.setattr(core, "list_extra_package_boosts", fake_list)
+    monkeypatch.setattr(cards_mod, "list_extra_package_boosts", fake_list)
     core.run_coupons(SimpleNamespace(token=None, coupons_history=True))
-    assert seen["statuses"] == core.COUPON_STATUSES_HISTORY
+    assert seen["statuses"] == cards_mod.COUPON_STATUSES_HISTORY
     assert "No past coupons found" in capsys.readouterr().out
 
 
 def test_run_coupons_lists(monkeypatch, capsys, pixai):
-    monkeypatch.setattr(core, "list_extra_package_boosts", lambda s, **k: {
+    monkeypatch.setattr(cards_mod, "list_extra_package_boosts", lambda s, **k: {
         "coupons": [
             {"code": "SUMMER50", "boost_percent": 50, "status": "redeemed",
              "issued_by": "event", "note": "", "locked_for_order_id": "order-1",

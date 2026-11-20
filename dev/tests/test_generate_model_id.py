@@ -12,6 +12,10 @@ one of model_id's own real versions (validated server-side against core.list_mod
 -- never trusted blind), and falls back to the newest exactly like before otherwise. No
 network, no spend (everything mocked)."""
 from moonglade import backup as core
+from moonglade import cards as cards_mod
+from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
+from moonglade import models as models_mod
 
 from tests.conftest import login_client
 
@@ -22,12 +26,12 @@ def test_generate_reresolves_current_version_over_stale_client_version(tmp_path,
 
     # resolve_version_meta(model_id) -> RESOLVED, via its single /versions REST call
     monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: [{"id": RESOLVED, "modelId": "M1"}])
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     seen = {}
-    monkeypatch.setattr(core, "_gen_parameters",
+    monkeypatch.setattr(gen_params_mod, "_gen_parameters",
                         lambda args: seen.update(model=args.model) or {"modelId": args.model})
-    monkeypatch.setattr(core, "submit_generation",
-                        lambda s, params: seen.update(submitted=params) or "task123")
+    monkeypatch.setattr(gen_road_mod, "submit_generation",
+                        lambda s, params, **_kw: seen.update(submitted=params) or "task123")
 
     client = login_client(tmp_path)
     r = client.post("/api/generate", json={"model_id": "M1", "version_id": STALE, "prompt": "a cat"})
@@ -40,10 +44,10 @@ def test_generate_reresolves_current_version_over_stale_client_version(tmp_path,
 
 def test_generate_without_model_id_uses_client_version(tmp_path, monkeypatch, pixai):
     """Backward compat: with no model_id sent, the client's version_id is used as-is."""
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     seen = {}
-    monkeypatch.setattr(core, "_gen_parameters", lambda args: seen.update(model=args.model) or {})
-    monkeypatch.setattr(core, "submit_generation", lambda s, params: "t")
+    monkeypatch.setattr(gen_params_mod, "_gen_parameters", lambda args: seen.update(model=args.model) or {})
+    monkeypatch.setattr(gen_road_mod, "submit_generation", lambda s, params, **_kw: "t")
 
     client = login_client(tmp_path)
     r = client.post("/api/generate", json={"version_id": "V-DIRECT", "prompt": "x"})
@@ -59,12 +63,12 @@ def test_generate_honors_an_explicitly_chosen_non_latest_version(tmp_path, monke
         {"id": LATEST, "modelType": "SDXL_MODEL"},
         {"id": CHOSEN, "modelType": "SDXL_MODEL"},
     ])
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     seen = {}
-    monkeypatch.setattr(core, "_gen_parameters",
+    monkeypatch.setattr(gen_params_mod, "_gen_parameters",
                         lambda args: seen.update(model=args.model) or {"modelId": args.model})
-    monkeypatch.setattr(core, "submit_generation",
-                        lambda s, params: seen.update(submitted=params) or "task123")
+    monkeypatch.setattr(gen_road_mod, "submit_generation",
+                        lambda s, params, **_kw: seen.update(submitted=params) or "task123")
 
     client = login_client(tmp_path)
     r = client.post("/api/generate", json={"model_id": "M1", "version_id": CHOSEN, "prompt": "a cat"})
@@ -78,10 +82,10 @@ def test_generate_falls_back_to_latest_when_model_has_no_versions_at_all(tmp_pat
     invent a version_id; args.model is left as whatever the client originally sent (matches
     the pre-problem-4 fallback, which also left args.model untouched when resolution failed)."""
     monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: [])
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     seen = {}
-    monkeypatch.setattr(core, "_gen_parameters", lambda args: seen.update(model=args.model) or {})
-    monkeypatch.setattr(core, "submit_generation", lambda s, params: "task123")
+    monkeypatch.setattr(gen_params_mod, "_gen_parameters", lambda args: seen.update(model=args.model) or {})
+    monkeypatch.setattr(gen_road_mod, "submit_generation", lambda s, params, **_kw: "task123")
 
     client = login_client(tmp_path)
     r = client.post("/api/generate", json={"model_id": "M1", "version_id": "V-WHATEVER", "prompt": "x"})
@@ -116,7 +120,7 @@ def test_model_version_version_id_param_reverse_resolves_the_base_model(tmp_path
     """/api/model-version?version_id=X (2026-08-02): the Runs reel's reuse-prefill reverse
     lookup -- a run's catalog model_id is a VERSION id, and this is how prefillFromRun turns
     it back into the base model id applyModelRow's own version-listing flow expects."""
-    monkeypatch.setattr(core, "resolve_model_base_id", lambda s, vid: "BASE-M1" if vid == "V1" else "")
+    monkeypatch.setattr(models_mod, "resolve_model_base_id", lambda s, vid: "BASE-M1" if vid == "V1" else "")
     client = login_client(tmp_path)
     r = client.get("/api/model-version?version_id=V1")
     assert r.status_code == 200, r.data

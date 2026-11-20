@@ -21,6 +21,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gallery as g
+from moonglade import gen_params as gen_params_mod
 
 TBKV_ID = "2054378086834851904"          # tbkv1.0.1's own numeric id (test_video_tsubaki.TBKV_IDS)
 PRICE = 21000
@@ -124,7 +125,7 @@ def test_a_multi_reference_shot_carries_its_engine_on_the_reference_road(rig, mo
     got = _price_then_render(rig, _shot("R2V", video_model=model))
     _same_request(got)
     assert got.sent["referenceVideo"]["model"] == model
-    assert got.sent["modelId"] == core.video_model_id(model)
+    assert got.sent["modelId"] == gen_params_mod.video_model_id(model)
 
 
 def test_two_engines_do_not_collapse_into_one_request(rig):
@@ -142,7 +143,7 @@ def test_two_engines_do_not_collapse_into_one_request(rig):
 def test_the_default_engine_is_pinned():
     """A changed default engine is a decision with a price attached, never a drift. The Loom's
     engineOf() reads the same constant (loom/test/video-roster-parity.test.js)."""
-    assert core.DEFAULT_VIDEO_MODEL == "v4.0.1"
+    assert gen_params_mod.DEFAULT_VIDEO_MODEL == "v4.0.1"
 
 
 @pytest.mark.parametrize("named", [None, "", "   "], ids=["absent", "blank", "spaces"])
@@ -154,7 +155,7 @@ def test_a_body_naming_no_engine_is_priced_and_sent_on_the_default(rig, mode, na
     got = _price_then_render(rig, body)
     _same_request(got)
     assert _block(got.sent)["model"] == "v4.0.1"
-    assert got.sent["modelId"] == core.REFVIDEO_MODEL_ID == "2003969750675682808"
+    assert got.sent["modelId"] == gen_params_mod.REFVIDEO_MODEL_ID == "2003969750675682808"
 
 
 def test_naming_the_default_is_the_same_request_as_naming_nothing(rig):
