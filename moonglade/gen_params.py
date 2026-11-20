@@ -2033,6 +2033,29 @@ def to_wire(kind, params):
     return rest_wire(kind, params)
 
 
+def preview_wire(kind, params):
+    """The create door's final wire step, run on a PREVIEW (3.22 review F10): rest_wire, the
+    {"parameters": P} wrapper, one JSON round trip and check_wire -- exactly what
+    PixAIClient.create checks before it sends -- so a preview refuses what --confirm would
+    refuse (a --dump-params shape from before 3.22 with a top-level naturalPrompts, say),
+    instead of printing it as sendable. Sends nothing. A kind the create door does not carry
+    (video, reference video) is left alone. Raises LocalRefusal; returns None."""
+    import json
+    from moonglade.gen_road import CREATE_ROAD
+    from moonglade.pixai_client import CREATE_WRAPPED_KINDS
+    if CREATE_ROAD.get(kind) != "rest":
+        return
+    inner = rest_wire(kind, params)
+    final = {"parameters": inner} if kind in CREATE_WRAPPED_KINDS else inner
+    try:
+        final = json.loads(json.dumps(final, ensure_ascii=False))
+    except (TypeError, ValueError):
+        from moonglade.backup import LocalRefusal
+        raise LocalRefusal("This request holds a value that can't be sent as JSON, so "
+                           "nothing was sent.")
+    check_wire(kind, final)
+
+
 def _wire_walk(spec, value, path, misses):
     if spec == _SCALAR:
         if isinstance(value, (dict, list)):

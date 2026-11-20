@@ -484,6 +484,44 @@ def test_a_modelstyle_mixing_union_branches_is_refused_unsent(door, style, why):
     assert wire.posts == []
 
 
+def _preview_args(tmp_path, params):
+    return SimpleNamespace(out=str(tmp_path), params_json=json.dumps(params), task_id="",
+                           confirm=False, token=None, prompt="", kaisuuken_id="", no_card=False)
+
+
+def test_a_dump_params_shape_is_refused_in_the_preview_as_at_confirm(tmp_path, monkeypatch,
+                                                                       capsys):
+    """3.22 review F10: a pre-3.22 task's --dump-params shape carries a top-level naturalPrompts.
+    The preview runs the wire guard too, so it shows the refusal --confirm would give, and no
+    "re-run with --confirm" line."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: (_ for _ in ()).throw(
+        core.PixAIError("offline")))
+    monkeypatch.setattr(gen_params, "_gen_parameters",
+                        lambda args: dict(IMAGE_P, naturalPrompts="a cat"))
+    with pytest.raises(core.LocalRefusal, match="naturalPrompts"):
+        gen_cli.run_generate(_preview_args(tmp_path, {}))
+    assert "Re-run with --confirm" not in capsys.readouterr().out
+
+
+def test_a_clean_shape_still_previews(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: (_ for _ in ()).throw(
+        core.PixAIError("offline")))
+    monkeypatch.setattr(gen_params, "_gen_parameters", lambda args: dict(IMAGE_P))
+    monkeypatch.setattr(cards_mod, "_preview_card_note", lambda a, p: None)
+    assert gen_cli.run_generate(_preview_args(tmp_path, {})) == {"submitted": False}
+    assert "Re-run with --confirm" in capsys.readouterr().out
+
+
+def test_an_edit_preview_runs_the_wire_guard_too(tmp_path, monkeypatch):
+    bad = {"chat": dict(EDIT_CHAT, layerDecomposition=True)}
+    args = SimpleNamespace(out=str(tmp_path), params_json=json.dumps(bad), task_id="",
+                           confirm=False, token=None, prompt="", edit_src=[], kaisuuken_id="",
+                           no_card=False, edit_preset="", model="", resolution="",
+                           aspect_ratio="", quality="")
+    with pytest.raises(core.LocalRefusal, match="layerDecomposition"):
+        gen_cli.run_edit_image(args)
+
+
 def test_the_video_builders_never_carry_the_image_extra():
     """The naturalPrompts move is the image builder's alone: the GraphQL video and
     reference-video bodies keep their recorded bytes (the fixture test above) and carry

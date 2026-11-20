@@ -170,6 +170,9 @@ def run_generate(args):
         params = _gen_params.to_wire("image", params)
 
     if not existing_task and not getattr(args, "confirm", False):
+        # 3.22 review F10: the door's own wire guard, so the preview refuses what --confirm
+        # would (an old --dump-params shape's top-level naturalPrompts) instead of showing it.
+        _gen_params.preview_wire("image", params)
         print("=== PixAI task.createTask, POST /v2/task/create (PREVIEW -- no credits spent) ===")
         print(json.dumps({"parameters": params}, indent=2))
         _print_gate_receipt(adjusted, gated=session is not None)
@@ -1029,6 +1032,7 @@ def run_edit_image(args):
                 quality=cfg["quality"], kaisuuken_id=cfg["kaisuuken_id"])
         # V12 (DESIGN_3.22 2.3): the wire step before the preview and the card check.
         params = _gen_params.to_wire("edit", params)
+        _gen_params.preview_wire("edit", params)         # 3.22 review F10: as the door checks
         print(json.dumps({"parameters": params}, indent=2))
         _cards._preview_card_note(args, params)
         print("\nThis would SPEND PixAI credits (unless free above). "
