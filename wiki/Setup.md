@@ -1,5 +1,16 @@
 # Setup
 
+## Start here
+
+**You need a PixAI membership.** The API key this app runs on comes with a membership; a free PixAI account cannot get one, and without a key nothing here works.
+
+1. **Download** the zip from the [latest Release](https://github.com/Nelnamara/moonglade-athenaeum/releases/latest) and unzip it somewhere you will keep it.
+2. **Double-click `Install Moonglade.cmd`.** It sets up Python and everything else for you. If Windows asks "Do you want to run this file?", choose Run.
+3. **Paste your API key** when Moonglade asks for it.
+4. **Open the gallery.** The installer opens it for you; after that, double-click `Moonglade Launcher.pyw`.
+
+Stuck? Read the rest of this page before asking; most questions are answered there.
+
 ## 1. Install
 
 **On Windows, first time?** Double-click **Install Moonglade** (`Install Moonglade.cmd`) in the app's folder, once. It looks for Python 3.10 or newer and, if the PC has none, installs Python 3.13 for your account only (it uses winget and needs no administrator; if winget is missing it opens python.org and tells you what to tick). Then it installs the packages and opens Moonglade in your browser. For a downloaded folder Windows may ask "Do you want to run this file?"; choose Run. After that, double-click **Moonglade Launcher** whenever you want Moonglade, and skip the rest of this section. `Install Moonglade.cmd --check` only reports what it found and what it would do, and installs nothing. The setup file does not run from a network share (`\\server\share`); copy the folder to the PC first.
@@ -26,7 +37,7 @@ it, and `python -m pip` installs for the `python` you typed.
 | `truststore` | fixes HTTPS cert errors behind corporate proxies / AV (`requirements.txt` installs it on Python 3.10+) |
 | `numpy` | the "more like this" picture search (`moonglade/similar.py`) |
 | `zeroconf` | the Bonjour name on your network, so devices can find Moonglade (the app runs without it, just not announced) |
-| `cryptography` (**not** in `requirements.txt` — `pip install cryptography` separately) | optional — only for the gallery's `--https` mode |
+| `cryptography` | the gallery's HTTPS certificate for your other devices ([Using HTTPS](Gallery#using-https)); without it they reach Moonglade over plain `http://` |
 | `ffmpeg` (on PATH) | optional — posters for backed-up/imported videos; required for The Loom's video export, last-frame splice, re-anchor and music bed, and it cuts the frames the Loom's continuity ribbon shows |
 | `pytest`, `pytest-mock`, `pytest-cov`, `pytest-xdist` | dev only — running the test suite (`requirements-dev.txt`, which includes `requirements.txt`) |
 

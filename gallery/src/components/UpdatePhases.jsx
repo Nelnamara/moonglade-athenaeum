@@ -30,6 +30,7 @@ export const UPD_PHASE_HINT = {
 /* The plain account of what "Update now" will do to a server you are using -- shown before
    the confirm on both surfaces, from one list so the two can never drift apart. */
 export const UPDATE_WHAT = [
+  "Your catalog is copied first, a dated file beside catalog.db (the last three are kept).",
   "The update is pulled atomically — if it can't apply cleanly, nothing changes.",
   "Dependencies are installed only if they changed in this release.",
   "The server restarts. This tab reloads itself when it is back.",
@@ -45,6 +46,14 @@ export function UpdateRefusal({ refusal }) {
       <span className="mgcp-updrefusal-note">{UPD_PHASE_HINT[refusal.kind]}</span>
     </div>
   );
+}
+
+/* The meter's stops per phase count: the three-phase list's are the handoff's; the
+   four-phase one (the catalog backup first) spreads the same travel over one more stop. */
+const METER_STOPS = { 3: [8, 38, 72, 100], 4: [8, 30, 54, 78, 100] };
+function meterWidth(done, n) {
+  const stops = METER_STOPS[n] || METER_STOPS[3];
+  return stops[Math.min(done, stops.length - 1)];
 }
 
 export default function UpdatePhases({ steps, phase }) {
@@ -69,7 +78,7 @@ export default function UpdatePhases({ steps, phase }) {
       {/* The meter is the phase count, not a clock: it can only move when a phase
           really finishes. CSS eases the width change so it reads as motion. */}
       <div className="mgcp-updmeter">
-        <i style={{ width: [8, 38, 72, 100][doneCount] + "%" }} />
+        <i style={{ width: meterWidth(doneCount, (steps || []).length) + "%" }} />
       </div>
       <div className="mgcp-updhold">
         {phase === "done" ? "Done · reloading into the new version"

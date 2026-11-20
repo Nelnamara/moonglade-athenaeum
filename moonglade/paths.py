@@ -16,6 +16,10 @@ version kept things.
     local\\                   local_dir(): this PC's machinery.
       settings.json          settings_path(): everything the app writes (moonglade.settings).
       mirror_session.json    local_path(MIRROR_SESSION_NAME): the Mirror's rotating sign-in.
+      tls_cert.pem, tls_key.pem   local_path(TLS_CERT_NAME / TLS_KEY_NAME): the home-network
+                             server certificate and its key (moonglade.tls).
+      tls_ca_cert.pem, tls_ca_key.pem   the small authority that signs it (moonglade.tls).
+      signed_out_sessions.json   local_path(SIGNED_OUT_SESSIONS_NAME): sessions Log Out ended.
       moonglade.mgpack       local_path(PACK_NAME), and its .version marker.
       icons\\                 icons_dir(): the shortcut .ico files. NOT a cache: a shortcut
                              points here, so clearing a cache never blanks its icon.
@@ -86,6 +90,16 @@ def token_paths():
 LOCAL_DIRNAME = "local"
 SETTINGS_NAME = "settings.json"
 MIRROR_SESSION_NAME = "mirror_session.json"
+# The home-network certificate (moonglade.tls): made once, reused on every start. The key is a
+# secret (moonglade.secure_files); the certificate is public.
+TLS_CERT_NAME = "tls_cert.pem"
+TLS_KEY_NAME = "tls_key.pem"
+# The small certificate authority that signs that server certificate: a device that installs
+# its certificate once stops warning. The key is a secret; the certificate is public.
+TLS_CA_CERT_NAME = "tls_ca_cert.pem"
+TLS_CA_KEY_NAME = "tls_ca_key.pem"
+# Signed-out sessions (Log Out), kept until their cookie would have aged out anyway.
+SIGNED_OUT_SESSIONS_NAME = "signed_out_sessions.json"
 PACK_NAME = "moonglade.mgpack"
 ICONS_DIRNAME = "icons"
 BANNERS_DIRNAME = "banners"

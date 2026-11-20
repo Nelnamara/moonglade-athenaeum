@@ -2239,7 +2239,7 @@ ${"=".repeat(48)}
       if (!keys.has(k)) keys.set(k, { rev: void 0, busy: null, next: null });
       return keys.get(k);
     };
-    const settle = (waiters, res) => waiters.forEach((w) => w(res));
+    const settle2 = (waiters, res) => waiters.forEach((w) => w(res));
     const pump = (k) => {
       const s = slot(k);
       if (s.busy || !s.next) return;
@@ -2255,12 +2255,12 @@ ${"=".repeat(48)}
           res = { failed: true, error: e };
         }
         if (res.ok && res.rev != null) s.rev = res.rev;
-        settle(job.waiters, res);
+        settle2(job.waiters, res);
         s.busy = null;
         if (res.conflict && s.next) {
           const stale = s.next;
           s.next = null;
-          settle(stale.waiters, res);
+          settle2(stale.waiters, res);
         }
         pump(k);
       })();
@@ -3925,11 +3925,11 @@ ${"=".repeat(48)}
   }
   async function request(path, init) {
     const { timeoutMs, timeoutMessage, ...rest } = init || {};
-    let ctl = null, timer2 = 0;
+    let ctl = null, timer3 = 0;
     if (timeoutMs > 0 && typeof AbortController !== "undefined") {
       ctl = new AbortController();
       if (!rest.signal) rest.signal = ctl.signal;
-      timer2 = setTimeout(() => ctl.abort(), timeoutMs);
+      timer3 = setTimeout(() => ctl.abort(), timeoutMs);
     }
     let r;
     try {
@@ -3940,7 +3940,7 @@ ${"=".repeat(48)}
       }
       return { error: "network error: " + (e && e.message ? e.message : "unreachable") };
     } finally {
-      if (timer2) clearTimeout(timer2);
+      if (timer3) clearTimeout(timer3);
     }
     if (rest.method === "HEAD") return { size: r.ok ? Number(r.headers.get("Content-Length")) || 0 : 0 };
     let d = null;
@@ -4411,7 +4411,7 @@ ${"=".repeat(48)}
       } catch {
       }
     }, [tile]);
-    const schedule3 = useCallback(() => {
+    const schedule4 = useCallback(() => {
       clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         if (coreRef.current) coreRef.current.setFilters(fRef.current);
@@ -4494,7 +4494,7 @@ ${"=".repeat(48)}
           value: q,
           onChange: (e) => {
             setQ(e.target.value);
-            schedule3();
+            schedule4();
           }
         }
       ), /* @__PURE__ */ react_global_shim_default.createElement(
@@ -4514,23 +4514,23 @@ ${"=".repeat(48)}
           value: collection,
           onChange: (e) => {
             setCollection(e.target.value);
-            schedule3();
+            schedule4();
           }
         },
         /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "" }, "All collections"),
         collections.map((c) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: c, value: c }, c))
       ), showType && /* @__PURE__ */ react_global_shim_default.createElement("select", { "data-f": "type", value: type, onChange: (e) => {
         setType(e.target.value);
-        schedule3();
+        schedule4();
       } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "all" }, "Image + video"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "image" }, "Images"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "video" }, "Videos")), showSource && /* @__PURE__ */ react_global_shim_default.createElement("select", { "data-f": "source", value: source, onChange: (e) => {
         setSource(e.target.value);
-        schedule3();
+        schedule4();
       } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "" }, "Any source"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "api" }, "Generated (AI)"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "local" }, "Imported local")), /* @__PURE__ */ react_global_shim_default.createElement("select", { "data-f": "rating", value: rating, onChange: (e) => {
         setRating(+e.target.value);
-        schedule3();
+        schedule4();
       } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "0" }, "Any rating"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "1" }, "\u2605+"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "2" }, "\u2605\u2605+"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "3" }, "\u2605\u2605\u2605+"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "4" }, "\u2605\u2605\u2605\u2605+"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "5" }, "\u2605\u2605\u2605\u2605\u2605")), /* @__PURE__ */ react_global_shim_default.createElement("select", { "data-f": "sort", value: sort, onChange: (e) => {
         setSort(e.target.value);
-        schedule3();
+        schedule4();
       } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "newest" }, "Newest first"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "oldest" }, "Oldest first")), showUpload && /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement(
         "button",
         {
@@ -6510,7 +6510,7 @@ ${"=".repeat(48)}
   // ../gallery/src/gen/priceRequest.js
   async function requestPrice(payload, { timeoutMs = PRICE_FETCH_TIMEOUT_MS, signal } = {}) {
     const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
-    const timer2 = ctrl && timeoutMs > 0 ? setTimeout(() => ctrl.abort(), timeoutMs) : 0;
+    const timer3 = ctrl && timeoutMs > 0 ? setTimeout(() => ctrl.abort(), timeoutMs) : 0;
     let unlink = null;
     if (ctrl && signal) {
       if (signal.aborted) ctrl.abort();
@@ -6531,7 +6531,7 @@ ${"=".repeat(48)}
     } catch {
       return { failed: true };
     } finally {
-      if (timer2) clearTimeout(timer2);
+      if (timer3) clearTimeout(timer3);
       if (unlink) unlink();
     }
   }
@@ -6548,15 +6548,15 @@ ${"=".repeat(48)}
     skipRef.current = skipKeys;
     enabledRef.current = enabled;
     const seq3 = useRef(0);
-    const timer2 = useRef(0);
+    const timer3 = useRef(0);
     const ctrl = useRef(null);
     const put2 = useCallback((v) => {
       live.current = v;
       setVerdict(v);
     }, []);
     const stop = useCallback(() => {
-      clearTimeout(timer2.current);
-      timer2.current = 0;
+      clearTimeout(timer3.current);
+      timer3.current = 0;
       seq3.current++;
       if (ctrl.current) {
         try {
@@ -6609,8 +6609,8 @@ ${"=".repeat(48)}
       if (badge && badge.setChecking) badge.setChecking();
       put2(scheduled());
       seq3.current++;
-      clearTimeout(timer2.current);
-      timer2.current = setTimeout(fire, PRICE_DEBOUNCE_MS);
+      clearTimeout(timer3.current);
+      timer3.current = setTimeout(fire, PRICE_DEBOUNCE_MS);
     }, [costRef, fire, put2]);
     useEffect(() => {
       if (!enabled) {
@@ -6629,8 +6629,66 @@ ${"=".repeat(48)}
     };
   }
 
+  // ../gallery/src/gen/sendHold.js
+  var SEND_HOLD_MS = 6e4;
+  var UNCLEAR_SEND_MSG = "PixAI may have started this. It was not sent again; check the Activity tray (or pixai.art) before sending it again.";
+  var HELD_SEND_MSG = "The last one may still be starting, so this was not sent. Check the Activity tray (or pixai.art) before sending it again.";
+  function unclearText(d) {
+    if (d && d.held) return d.error || HELD_SEND_MSG;
+    const detail = d && typeof d.detail === "string" ? d.detail.trim() : "";
+    return detail ? UNCLEAR_SEND_MSG + " PixAI's answer: " + detail : UNCLEAR_SEND_MSG;
+  }
+  function isUnclearAnswer(d) {
+    return !!d && (d.unclear === true || d.state === "may_have_started");
+  }
+  function sendKey(route, body) {
+    const norm = (v) => {
+      if (Array.isArray(v)) return v.map(norm);
+      if (v && typeof v === "object") {
+        const out = {};
+        for (const k of Object.keys(v).sort()) out[k] = norm(v[k]);
+        return out;
+      }
+      return v;
+    };
+    let blob;
+    try {
+      blob = JSON.stringify(norm(body));
+    } catch {
+      blob = String(body);
+    }
+    return String(route) + " " + blob;
+  }
+  function makeSendHolds(now2 = () => Date.now(), ms = SEND_HOLD_MS) {
+    const until = /* @__PURE__ */ new Map();
+    return {
+      hold(key) {
+        until.set(key, now2() + ms);
+      },
+      held(key) {
+        const t = until.get(key);
+        if (t == null) return false;
+        if (now2() >= t) {
+          until.delete(key);
+          return false;
+        }
+        return true;
+      },
+      release(key) {
+        until.delete(key);
+      }
+    };
+  }
+  var sendHolds = makeSendHolds();
+
   // ../gallery/src/gen/submitTask.js
-  async function submitTask(route, payload, { label, emit: emit7, count, onPhase, onAnswer, quote }) {
+  async function submitTask(route, payload, { label, emit: emit7, count, onPhase, onAnswer, quote, holds = sendHolds }) {
+    const journalled = !!(payload && payload.submit_id);
+    const key = journalled ? null : sendKey(route, payload);
+    if (key && holds.held(key)) {
+      emit7({ kind: "err", text: HELD_SEND_MSG });
+      return null;
+    }
     let d, status = 0;
     try {
       const r = await fetch(route, {
@@ -6641,6 +6699,7 @@ ${"=".repeat(48)}
       status = r.status;
       d = await r.json();
     } catch {
+      if (key) holds.hold(key);
       if (onAnswer) onAnswer({ threw: true });
       emit7({
         kind: "err",
@@ -6649,6 +6708,11 @@ ${"=".repeat(48)}
       return null;
     }
     if (onAnswer) onAnswer({ threw: false, status, body: d });
+    if (!journalled && isUnclearAnswer(d)) {
+      holds.hold(key);
+      emit7({ kind: "err", text: unclearText(d) });
+      return null;
+    }
     if (d.error || !d.task_id) {
       emit7({ kind: "err", text: friendlyGenErr3(d.error || "Submit failed.") });
       return null;
@@ -7987,9 +8051,21 @@ ${"=".repeat(48)}
     return { title, msg: addsToGallery(j) ? "Added to your gallery." : "" };
   }
 
+  // ../gallery/src/notify/trackerRows.js
+  function inTracker(j) {
+    if (!j || typeof j !== "object") return false;
+    if (j.scheduled) return false;
+    if (j.type === "panel") return PANEL_ADDS_ART.has(j.action);
+    return true;
+  }
+  function trackerRows(rows) {
+    return (rows || []).filter(inTracker);
+  }
+
   // ../gallery/src/notify/jobsStore.js
   var LSK = "mg_jobs_open";
   var jobs = [];
+  var allRunning = 0;
   var open = false;
   var started = false;
   var timer = null;
@@ -8003,9 +8079,6 @@ ${"=".repeat(48)}
     subs4.add(fn);
     fn({ jobs, open });
     return () => subs4.delete(fn);
-  }
-  function runningCount() {
-    return jobs.filter((j) => (j.status || "running") === "running").length;
   }
   function readOpen() {
     try {
@@ -8104,14 +8177,15 @@ ${"=".repeat(48)}
         } catch {
         }
       });
-      jobs = rows;
+      allRunning = rows.filter((j) => (j.status || "running") === "running").length;
+      jobs = trackerRows(rows);
       emit4();
     }).catch(() => {
     });
   }
   function schedule() {
     if (timer) clearTimeout(timer);
-    const busy = runningCount() > 0;
+    const busy = allRunning > 0;
     timer = setTimeout(() => {
       if (document.hidden) {
         schedule();
@@ -8222,6 +8296,105 @@ ${"=".repeat(48)}
   }
   if (typeof document !== "undefined" && document.addEventListener) {
     document.addEventListener("visibilitychange", wakePending);
+  }
+
+  // ../gallery/src/lib/trainWatchCore.js
+  var LIVE = /* @__PURE__ */ new Set(["running", "waiting"]);
+  function liveRuns(d) {
+    const out = /* @__PURE__ */ new Map();
+    if (!d || typeof d !== "object") return out;
+    for (const r of [...d.running || [], ...d.runs || []]) {
+      if (r && r.id && LIVE.has(r.status)) out.set(String(r.id), String(r.title || ""));
+    }
+    return out;
+  }
+  function ended(watched2, live) {
+    return [...(watched2 || /* @__PURE__ */ new Map()).keys()].filter((id) => !live.has(id));
+  }
+  function finishNotice(row, title) {
+    if (!row || typeof row !== "object") return null;
+    const name = String(row.title || title || "Your LoRA");
+    if (row.status === "done") {
+      return { kind: "ok", title: "Training finished", msg: name + " is ready \u2014 Train \u203A Runs has it." };
+    }
+    if (row.status === "failed") {
+      return {
+        kind: "err",
+        sticky: true,
+        title: name + " \u2014 training failed",
+        msg: row.reason ? String(row.reason) : "Train \u203A Runs says what happened."
+      };
+    }
+    return null;
+  }
+
+  // ../gallery/src/notify/trainWatch.js
+  var SEEN_KEY2 = "mg_train_announced";
+  var POLL_MS2 = 6e4;
+  var BOOT_DELAY_MS = 3e4;
+  var watched = /* @__PURE__ */ new Map();
+  var timer2 = null;
+  var started2 = false;
+  function announced() {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(SEEN_KEY2) || "[]"));
+    } catch {
+      return /* @__PURE__ */ new Set();
+    }
+  }
+  function markAnnounced(id) {
+    try {
+      const ids = [...announced(), id].slice(-50);
+      localStorage.setItem(SEEN_KEY2, JSON.stringify(ids));
+    } catch {
+    }
+  }
+  function schedule2() {
+    if (timer2 || watched.size === 0) return;
+    timer2 = setTimeout(() => {
+      timer2 = null;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        schedule2();
+        return;
+      }
+      apiGet("/api/train/runs?running=1").then((d) => {
+        if (d && !d.error) noteTrainRuns(d);
+        schedule2();
+      });
+    }, POLL_MS2);
+  }
+  function settle(ids) {
+    apiGet("/api/train/runs").then((d) => {
+      if (!d || d.error) return;
+      const rows = new Map((d.runs || []).map((r) => [String(r.id), r]));
+      for (const id of ids) {
+        const title = watched.get(id);
+        const row = rows.get(id);
+        if (row && (row.status === "running" || row.status === "waiting")) continue;
+        watched.delete(id);
+        const n = finishNotice(row, title);
+        if (!n || announced().has(id)) continue;
+        markAnnounced(id);
+        show(n);
+      }
+    });
+  }
+  function noteTrainRuns(d) {
+    if (!d || d.error) return;
+    const live = liveRuns(d);
+    const gone = ended(watched, live);
+    for (const [id, title] of live) watched.set(id, title);
+    if (gone.length) settle(gone);
+    schedule2();
+  }
+  function startTrainWatch() {
+    if (started2 || typeof window === "undefined") return;
+    started2 = true;
+    setTimeout(() => {
+      apiGet("/api/train/runs?running=1").then((d) => {
+        if (d && !d.error) noteTrainRuns(d);
+      });
+    }, BOOT_DELAY_MS);
   }
 
   // ../gallery/src/notify/badgeArt.js
@@ -8360,13 +8533,13 @@ ${"=".repeat(48)}
   function _toMoment(host2, a) {
     whenClear(() => {
       beginBespokeMoment();
-      let ended;
+      let ended2;
       try {
-        ended = Promise.resolve(host2(a));
+        ended2 = Promise.resolve(host2(a));
       } catch {
-        ended = Promise.resolve();
+        ended2 = Promise.resolve();
       }
-      ended.then(() => endBespokeMoment(), () => endBespokeMoment());
+      ended2.then(() => endBespokeMoment(), () => endBespokeMoment());
     });
   }
   function _flushClear() {
@@ -9011,12 +9184,12 @@ ${"=".repeat(48)}
   }
 
   // ../gallery/src/notify/spikeStore.js
-  var SEEN_KEY2 = "mg_spike_announced";
+  var SEEN_KEY3 = "mg_spike_announced";
   var memSeen = "";
   var asked = false;
   function readStored() {
     try {
-      return localStorage.getItem(SEEN_KEY2) || "";
+      return localStorage.getItem(SEEN_KEY3) || "";
     } catch {
       return "";
     }
@@ -9024,13 +9197,13 @@ ${"=".repeat(48)}
   function markSeen(at) {
     memSeen = at;
     try {
-      localStorage.setItem(SEEN_KEY2, at);
+      localStorage.setItem(SEEN_KEY3, at);
     } catch {
     }
   }
   if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
     window.addEventListener("storage", (e) => {
-      if (!e || e.key !== SEEN_KEY2) return;
+      if (!e || e.key !== SEEN_KEY3) return;
       const v = String(e.newValue || "");
       if (v && v > memSeen) memSeen = v;
     });
@@ -9288,7 +9461,7 @@ ${"=".repeat(48)}
   function startClock(now2) {
     return { phase: "lead", t0: now2, T: 0, holdBase: 0, holdAt: 0 };
   }
-  function stepClock(s, { now: now2, videoTime = 0, ended = false, clipEnd = CLIP_DUR, total }) {
+  function stepClock(s, { now: now2, videoTime = 0, ended: ended2 = false, clipEnd = CLIP_DUR, total }) {
     const out = { ...s, play: false, pause: false, seekTo: null, done: false };
     if (s.phase === "lead") {
       const T = (now2 - s.t0) / 1e3;
@@ -9303,7 +9476,7 @@ ${"=".repeat(48)}
     }
     if (s.phase === "clip") {
       out.T = Math.max(s.T, videoTime + LEAD);
-      if (ended || videoTime >= clipEnd - 0.1) {
+      if (ended2 || videoTime >= clipEnd - 0.1) {
         out.phase = "hold";
         out.holdBase = out.T;
         out.holdAt = now2;
@@ -10033,7 +10206,7 @@ ${"=".repeat(48)}
         }
       });
     };
-    const settle = (next) => {
+    const settle2 = (next) => {
       if (doneRef.current || frozenRef.current) return;
       wallAtRef.current = performance.now();
       setMode(next);
@@ -10042,7 +10215,7 @@ ${"=".repeat(48)}
     };
     const fallBack = () => {
       if (modeRef.current !== "loading" || frozenRef.current) return;
-      settle("fallback");
+      settle2("fallback");
     };
     useEffect(() => {
       attachMoment(id, () => finishRef.current("skipped"));
@@ -10074,11 +10247,11 @@ ${"=".repeat(48)}
       if (reduced) {
         const ct = clipTime(STILL[kind].still(cues), clipEndOf(v.duration));
         if (!needsSeek(v.currentTime, ct)) {
-          settle("still");
+          settle2("still");
           return;
         }
         once(v, "seeked").then(() => {
-          if (modeRef.current === "loading") settle("still");
+          if (modeRef.current === "loading") settle2("still");
         });
         v.currentTime = ct;
         return;
@@ -10116,7 +10289,7 @@ ${"=".repeat(48)}
               v.muted = true;
               setNeedsSound(true);
               v.play().catch(() => {
-                settle("fallback");
+                settle2("fallback");
               });
             });
           }
@@ -10127,7 +10300,7 @@ ${"=".repeat(48)}
         lastNow = now2;
         lastT = s.T;
         if (stalled > LOAD_CEILING_MS) {
-          settle("fallback");
+          settle2("fallback");
           return;
         }
         setT(s.T);
@@ -10328,6 +10501,7 @@ ${"=".repeat(48)}
       syncLegacyUnleash(prefs, storage);
     }
     start();
+    startTrainWatch();
     check();
     const boot = typeof window !== "undefined" && window.MG_BOOT || {};
     claimReceipt(boot.build_stamp || "");
@@ -10357,7 +10531,7 @@ ${"=".repeat(48)}
         break;
       }
     }
-    schedule2();
+    schedule3();
   }
   function sync() {
     const want = stack.length;
@@ -10372,7 +10546,7 @@ ${"=".repeat(48)}
       window.history.go(-drop);
     }
   }
-  function schedule2() {
+  function schedule3() {
     if (scheduled2) return;
     scheduled2 = true;
     Promise.resolve().then(() => {
@@ -10393,11 +10567,11 @@ ${"=".repeat(48)}
       }
       const entry = { close: () => closeRef.current(), closing: false };
       stack.push(entry);
-      schedule2();
+      schedule3();
       return () => {
         const i = stack.indexOf(entry);
         if (i >= 0) stack.splice(i, 1);
-        schedule2();
+        schedule3();
       };
     }, [open2]);
   }
@@ -10697,9 +10871,13 @@ ${"=".repeat(48)}
     if (brandingUnlocked) return pages || [];
     return (pages || []).filter((p) => !HIDDEN_UNTIL_UNLOCK.test(p.title) && !HIDDEN_UNTIL_UNLOCK.test(p.slug)).map((p) => ({ ...p, headings: (p.headings || []).filter((h) => !HIDDEN_UNTIL_UNLOCK.test(h.text)) }));
   }
+  function fullVersion(v) {
+    const s = typeof v === "string" ? v.trim() : "";
+    return /^\d+\.\d+$/.test(s) ? s + ".0" : s;
+  }
   function whatsNewPlan({ seen: seen2, display, kind, hasLibrary }) {
     if (!display) return { show: false, mark: false };
-    if (seen2 === display) return { show: false, mark: false };
+    if (fullVersion(seen2) === fullVersion(display)) return { show: false, mark: false };
     if (seen2 === void 0 || seen2 === null || seen2 === "") {
       if (!hasLibrary) return { show: false, mark: true };
     }
@@ -11961,12 +12139,12 @@ ${"=".repeat(48)}
   }
 
   // ../gallery/src/help/whatsNew.js
-  var SEEN_KEY3 = "seen.whatsnew";
-  var POLL_MS2 = 500;
+  var SEEN_KEY4 = "seen.whatsnew";
+  var POLL_MS3 = 500;
   var QUIET_POLLS = 3;
   var GIVE_UP_MS = 5 * 60 * 1e3;
   var NEL2 = "/branding/mascots/gen_nel.png";
-  var started2 = false;
+  var started3 = false;
   function whenCelebrationsSettle(fn) {
     const t0 = Date.now();
     let quiet = 0;
@@ -11983,30 +12161,30 @@ ${"=".repeat(48)}
         fn();
         return;
       }
-      setTimeout(tick, POLL_MS2);
+      setTimeout(tick, POLL_MS3);
     };
-    setTimeout(tick, POLL_MS2);
+    setTimeout(tick, POLL_MS3);
   }
   function startWhatsNew(boot) {
-    if (started2) return;
-    started2 = true;
+    if (started3) return;
+    started3 = true;
     const store = accountPrefs();
     Promise.all([store.ensureLoaded(), loadAbout()]).then(([ok, about2]) => {
       if (!ok || !about2 || about2.error || !about2.display_version) return;
       const stats = boot && boot.stats || {};
       const plan = whatsNewPlan({
-        seen: store.get(SEEN_KEY3, void 0),
+        seen: store.get(SEEN_KEY4, void 0),
         display: about2.display_version,
         kind: about2.kind,
         hasLibrary: (Number(stats.images) || 0) + (Number(stats.videos) || 0) > 0
       });
       if (!plan.show) {
-        if (plan.mark) store.set(SEEN_KEY3, about2.display_version);
+        if (plan.mark) store.set(SEEN_KEY4, about2.display_version);
         return;
       }
       whenCelebrationsSettle(() => {
-        if (store.get(SEEN_KEY3, void 0) === about2.display_version) return;
-        store.set(SEEN_KEY3, about2.display_version);
+        if (fullVersion(store.get(SEEN_KEY4, void 0)) === fullVersion(about2.display_version)) return;
+        store.set(SEEN_KEY4, about2.display_version);
         retireReceiptToast();
         show({
           kind: "whatsnew",
@@ -12116,17 +12294,17 @@ ${"=".repeat(48)}
         setUp(false);
         return void 0;
       }
-      let raf = 0, timer2 = 0, last2 = 0;
+      let raf = 0, timer3 = 0, last2 = 0;
       const run = () => {
         raf = 0;
         last2 = Date.now();
         setUp(layerOverSurface(guide.steps));
       };
       const kick = () => {
-        if (raf || timer2) return;
+        if (raf || timer3) return;
         const wait = LAYER_CHECK_MS - (Date.now() - last2);
-        if (wait > 0) timer2 = setTimeout(() => {
-          timer2 = 0;
+        if (wait > 0) timer3 = setTimeout(() => {
+          timer3 = 0;
           raf = requestAnimationFrame(run);
         }, wait);
         else raf = requestAnimationFrame(run);
@@ -12148,7 +12326,7 @@ ${"=".repeat(48)}
       return () => {
         if (mo) mo.disconnect();
         cancelAnimationFrame(raf);
-        clearTimeout(timer2);
+        clearTimeout(timer3);
         clearInterval(poll2);
       };
     }, [guide, watch]);
@@ -21672,6 +21850,11 @@ Generate anyway?`)) return { go: false };
       }
       const asked2 = buildImgGenBody(imgModel, imgLoras, imgAdv, prompt);
       if (imgSendRoute(asked2) === "run") return genImageRun(entry, asked2);
+      const holdKey = sendKey("loom-image", asked2);
+      if (sendHolds.held(holdKey)) {
+        setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: HELD_SEND_MSG } }));
+        return;
+      }
       const body = buildImgGenBody(imgModel, imgLoras, imgAdv, prompt);
       const ok = await confirmSpend(body, `Generate a reference image for ${c.title || "this shot"}?`);
       if (!ok) return;
@@ -21683,6 +21866,11 @@ Generate anyway?`)) return { go: false };
           body: JSON.stringify({ ...quotedSendBody(body, ok.quote), ...loomTargetOf(c.id) })
         });
         const d = await r.json();
+        if (isUnclearAnswer(d)) {
+          sendHolds.hold(holdKey);
+          setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: unclearText(d) } }));
+          return;
+        }
         if (d.error || !d.task_id) {
           setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: d.error ? friendlyGenErr2(d.error) : "submit failed" } }));
           return;
@@ -21691,7 +21879,8 @@ Generate anyway?`)) return { go: false };
         setGenImgState((s) => ({ ...s, [c.id]: { phase: "running", msg: "Generating\u2026" } }));
         pollImg(c.id, d.task_id);
       } catch {
-        setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } }));
+        sendHolds.hold(holdKey);
+        setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: UNCLEAR_SEND_MSG } }));
       }
     };
     const routeImg = (entry, target, sourceId) => {
@@ -21708,6 +21897,11 @@ Generate anyway?`)) return { go: false };
     const runGen = async (setState, cardId, endpoint, body, quoteBody, label, jobLabel) => {
       const ok = quoteBody ? await confirmSpend(quoteBody, label) : { quote: null };
       if (!ok) return;
+      const holdKey = sendKey("loom-tab " + endpoint, body);
+      if (sendHolds.held(holdKey)) {
+        setState((s) => ({ ...s, [cardId]: { phase: "error", msg: HELD_SEND_MSG } }));
+        return;
+      }
       setState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting\u2026" } }));
       const poll2 = (tid) => pollTaskWithCeiling(tid, setState, cardId);
       try {
@@ -21717,6 +21911,11 @@ Generate anyway?`)) return { go: false };
           body: JSON.stringify({ ...quotedSendBody(body, ok.quote), ...loomTargetOf(cardId) })
         });
         const d = await r.json();
+        if (isUnclearAnswer(d)) {
+          sendHolds.hold(holdKey);
+          setState((s) => ({ ...s, [cardId]: { phase: "error", msg: unclearText(d) } }));
+          return;
+        }
         if (d.error || !d.task_id) {
           setState((s) => ({ ...s, [cardId]: { phase: "error", msg: d.error ? friendlyGenErr2(d.error) : "submit failed" } }));
           return;
@@ -21725,7 +21924,8 @@ Generate anyway?`)) return { go: false };
         setState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Generating\u2026" } }));
         poll2(d.task_id);
       } catch {
-        setState((s) => ({ ...s, [cardId]: { phase: "error", msg: "network error" } }));
+        sendHolds.hold(holdKey);
+        setState((s) => ({ ...s, [cardId]: { phase: "error", msg: UNCLEAR_SEND_MSG } }));
       }
     };
     const routeGen = (state2, setState, entry, target, sourceId) => {
@@ -21787,6 +21987,7 @@ Generate anyway?`)) return { go: false };
         "Reference \xD7" + refs.length + " \xB7 " + entry.code + " \xB7 " + (c.title || "untitled")
       );
     };
+    const FIX_HOLD_ROUTE = "loom-tab /api/fix";
     const fixInFlight = useRef2(/* @__PURE__ */ new Set());
     const genFix = async (entry, scaledBoxes) => {
       const c = entry.c;
@@ -21800,6 +22001,10 @@ Generate anyway?`)) return { go: false };
         return;
       }
       if (fixInFlight.current.has(c.id)) return;
+      if (sendHolds.held(sendKey(FIX_HOLD_ROUTE, { source: src, boxes: scaledBoxes }))) {
+        setGenFixState((s) => ({ ...s, [c.id]: { phase: "error", msg: HELD_SEND_MSG } }));
+        return;
+      }
       fixInFlight.current.add(c.id);
       const prior = genFixState[c.id];
       const restore = () => setGenFixState((s) => {

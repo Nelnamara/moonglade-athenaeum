@@ -2,8 +2,8 @@
 moonglade/updater.py
 ====================
 The auto-updater: the release check against GitHub (numeric version tuples, real vX.Y.Z tags
-only), the hourly announcement tick, and the one-click apply (git pull, a requirements install
-when they changed, a restart). Notify and apply, never silent. Moved verbatim out of
+only), the hourly announcement tick, and the one-click apply (a fast-forward to the announced release
+tag, a requirements install when they changed, a restart). Notify and apply, never silent. Moved verbatim out of
 moonglade/gallery.py in the 3.21.0 split (phase 2).
 
 The one name it needs from the gallery (the Windows no-console-window flag) is imported from
@@ -49,7 +49,7 @@ UPDATE_FETCH_TIMEOUT = 60        # the apply route's pre-check fetch: it happens
                                  # default -- a stalled network must not hold the browser
 _VERSION_TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 _update_cache = {"at": 0.0, "payload": None, "ttl": UPDATE_CHECK_TTL}
-_update_state = {"phase": "idle", "error": "", "at": 0.0}
+_update_state = {"phase": "idle", "error": "", "at": 0.0, "backup": ""}
 _update_lock = threading.Lock()
 
 
@@ -275,6 +275,73 @@ def _set_update_state(phase, error=""):
         _update_state.update(phase=phase, error=error, at=time.time())
 
 
+# ---------------------------------------------------------------------------
+# The catalog backup before every update (owner, 2026-11-18: "We used to do this when the
+# catalog was a csv...."). An update can carry a schema step that runs at the next start, and
+# the catalog is the one file in the library that cannot be fetched again from PixAI (ratings,
+# collections, notes). So before the pull, a dated copy is made beside it and the last few are
+# kept. The copy goes through SQLite's online backup API, never a file copy: the server (and a
+# Panel job) may be writing the database at that moment, and a byte copy of a live database
+# with its -wal beside it can be a torn file that opens as corrupt.
+# ---------------------------------------------------------------------------
+CATALOG_BACKUP_KEEP = 3
+CATALOG_BACKUP_PREFIX = "catalog-before-update-"
+_CATALOG_BACKUP_RE = re.compile(r"^catalog-before-update-\d{4}-\d{2}-\d{2}-\d{6}\.db$")
+
+
+def catalog_backups(db_path):
+    """This library's update backups, oldest first (only files with our exact name shape)."""
+    from pathlib import Path
+    folder = Path(db_path).parent
+    try:
+        names = sorted(n.name for n in folder.iterdir()
+                       if n.is_file() and _CATALOG_BACKUP_RE.match(n.name))
+    except OSError:
+        return []
+    return [folder / n for n in names]
+
+
+def backup_catalog(db_path, keep=CATALOG_BACKUP_KEEP, now=None):
+    """Copy the catalog at `db_path` to `catalog-before-update-YYYY-MM-DD-HHMMSS.db` beside it
+    through SQLite's backup API, then delete all but the newest `keep` such copies. Returns the
+    new file's name, or "" when there is no catalog yet (nothing to keep). Raises on a failed
+    copy, and the half-written temp is removed -- the update must not go ahead on a backup
+    that did not happen."""
+    import os
+    import sqlite3
+    from pathlib import Path
+    db = Path(db_path)
+    if not db.is_file():
+        return ""
+    stamp = time.strftime("%Y-%m-%d-%H%M%S",
+                          time.localtime(now if now is not None else time.time()))
+    final = db.with_name(CATALOG_BACKUP_PREFIX + stamp + ".db")
+    tmp = final.with_name(final.name + ".partial")
+    try:
+        src = sqlite3.connect(str(db))
+        try:
+            dst = sqlite3.connect(str(tmp))
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
+        finally:
+            src.close()
+        os.replace(str(tmp), str(final))
+    except BaseException:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+    for old in catalog_backups(db)[:-max(1, int(keep))]:
+        try:
+            old.unlink()
+        except OSError:
+            pass                                 # an old copy we cannot delete is only clutter
+    return final.name
+
+
 def _requirements_changed(old_head, new_head):
     """Did requirements.txt move between these two commits? The pip step is skipped
     otherwise -- a dependency install is slow, and running one on every code update
@@ -307,22 +374,61 @@ def split_porcelain(dirty):
     return tracked, untracked
 
 
-def incoming_paths():
+def announced_release():
+    """The release tag the update modal offered (vX.Y.Z), or "" when none is known. Read from
+    what the last check already found -- the standing announcement, else the cached check --
+    and NEVER fetched here: the apply moves to exactly the release that was announced, so
+    "what was offered" and "what ran" are the same thing (app security review 2026-11-19,
+    finding 10)."""
+    for p in ((_update_notice.get("payload") or {}), (_update_cache.get("payload") or {})):
+        tag = str(p.get("latest") or "")
+        if p.get("behind") and _VERSION_TAG_RE.match(tag):
+            return tag
+    return ""
+
+
+def release_commit(tag):
+    """(commit sha, "") for release tag `tag` in this checkout, or (None, why-not).
+
+    Only a real vX.Y.Z tag is ever looked up (nothing else reaches a git command line). The
+    tag usually arrives with the fetch (git follows tags on the branch it fetches); when it
+    did not, it is fetched by its own exact name once."""
+    if not _VERSION_TAG_RE.match(str(tag or "")):
+        return None, "not a release tag: %r" % (str(tag or "")[:40],)
+    ref = "refs/tags/%s^{commit}" % tag
+    rc, out = _git(["rev-parse", "--verify", "--quiet", ref])
+    if rc != 0 or not out.strip():
+        rc, fout = _git(["fetch", "--quiet", "origin",
+                         "refs/tags/%s:refs/tags/%s" % (tag, tag)], timeout=UPDATE_FETCH_TIMEOUT)
+        if rc != 0:
+            return None, fout or ("the release tag %s isn't on GitHub" % tag)
+        rc, out = _git(["rev-parse", "--verify", "--quiet", ref])
+        if rc != 0 or not out.strip():
+            return None, "the release tag %s isn't in this checkout" % tag
+    return out.strip().splitlines()[-1].strip(), ""
+
+
+def incoming_paths(tag=None):
     """The paths the pending update would write: (set, "") or (None, why-not).
 
-    Measured against the SAME ref `git pull --ff-only` will merge -- the branch's
-    configured upstream, `@{u}` -- and only after FETCHING it, because an un-fetched
-    remote-tracking ref is a picture of whenever this checkout last looked. Reading a
-    stale one would answer "nothing is incoming" and make the untracked check below
+    Measured against the SAME commit the apply will move to -- release tag `tag`'s commit
+    (run_update), or the branch's upstream `@{u}` when no tag is named -- and only after
+    FETCHING, because an un-fetched ref is a picture of whenever this checkout last looked.
+    Reading a stale one would answer "nothing is incoming" and make the untracked check below
     silently permissive; a pre-check that exists to give a better answer than git's own
     error has to be right about what is actually in the way.
 
-    The fetch writes nothing but remote-tracking refs -- precisely what the pull is about
-    to do anyway, one round trip earlier -- so it cannot change this install."""
+    The fetch writes nothing but remote-tracking refs and tags -- precisely what the apply is
+    about to fetch anyway, one round trip earlier -- so it cannot change this install."""
     rc, out = _git(["fetch", "--quiet"], timeout=UPDATE_FETCH_TIMEOUT)
     if rc != 0:
         return None, out
-    rc, out = _git(["diff", "--name-only", "HEAD..@{u}"])
+    target = "@{u}"
+    if tag:
+        target, why = release_commit(tag)
+        if target is None:
+            return None, why
+    rc, out = _git(["diff", "--name-only", "HEAD.." + target])
     if rc != 0:
         return None, out
     return {p.strip() for p in out.splitlines() if p.strip()}, ""
@@ -354,15 +460,24 @@ def untracked_in_the_way(untracked, incoming):
     return hits
 
 
-def run_update(restart_fn, pip_fn=None, log_fn=None):
-    """Pull, install deps if they moved, then restart. Runs on its own thread, OFF the
-    panel-job slot, so the restart it asks for is not refused by the job it is itself.
+def run_update(restart_fn, tag, pip_fn=None, log_fn=None, backup_fn=None):
+    """Back up the catalog, move to release `tag`, install deps if they moved, then restart. Runs on its own
+    thread, OFF the panel-job slot, so the restart it asks for is not refused by the job it
+    is itself.
+
+    THE TARGET IS THE ANNOUNCED RELEASE TAG (app security review 2026-11-19, finding 10),
+    not master's head: fetch, resolve the tag to its commit (release_commit), then
+    `git merge --ff-only <that commit>` -- fast-forward ONLY, so a checkout on master behind
+    the tag moves exactly to the tagged commit, and one whose history does not lead to it
+    (a local commit, a rewritten branch) is refused by git with nothing changed. Master may
+    then sit behind origin/master by whatever was merged after the tag; the next update
+    fast-forwards from there the same way, and a plain `git pull` still works.
 
     Every failure stops the sequence and records the tool's own words verbatim -- a git
     or pip failure is the one thing the person watching actually needs to read, and
     paraphrasing it would cost them the fix.
 
-    A FAILED PULL changes nothing: --ff-only either fast-forwards or refuses. A FAILED
+    A FAILED MOVE changes nothing: --ff-only either fast-forwards or refuses. A FAILED
     PIP is the dangerous one, and it ROLLS BACK: the tree was verified free of TRACKED
     edits before the pull (the apply route refuses those), and `reset --hard` does not
     touch untracked files, so `git reset --hard <old head>` loses nothing and returns the
@@ -372,6 +487,10 @@ def run_update(restart_fn, pip_fn=None, log_fn=None):
     "Try again" would have found the pull already applied, seen no requirements diff
     against the new HEAD, skipped pip entirely and declared success on a broken install.
     The rollback is what makes retry mean retry.
+
+    FIRST, before anything is pulled, `backup_fn` copies the catalog (backup_catalog). A
+    backup that fails stops the update with nothing changed: the copy is the reason it is
+    safe to go on.
 
     Both outcomes are also written to the activity log (jobs.jsonl), which is the only
     part of this that survives the restart the success path is about to trigger."""
@@ -383,12 +502,36 @@ def run_update(restart_fn, pip_fn=None, log_fn=None):
         except Exception:                        # noqa: BLE001 -- logging never breaks the job
             pass
 
+    if backup_fn is not None:
+        _set_update_state("backup")
+        try:
+            name = backup_fn() or ""
+        except Exception as e:                   # noqa: BLE001
+            msg = ("couldn't back up the catalog before updating, so nothing was changed: "
+                   "%s: %s" % (type(e).__name__, str(e)[:300]))
+            _set_update_state("failed", msg)
+            _record("failed", msg)
+            return False
+        with _update_lock:
+            _update_state["backup"] = name
     rc, head_out = _git(["rev-parse", "HEAD"])
     old_head = head_out.strip() if rc == 0 else ""
     _set_update_state("pulling")
-    rc, out = _git(["pull", "--ff-only"])
+    rc, out = _git(["fetch", "--quiet"], timeout=UPDATE_FETCH_TIMEOUT)
     if rc != 0:
-        msg = "git pull failed:\n" + out[:600]
+        msg = "git fetch failed:\n" + out[:600]
+        _set_update_state("failed", msg)
+        _record("failed", msg)
+        return False
+    commit, why = release_commit(tag)
+    if commit is None:
+        msg = "couldn't find release %s:\n%s" % (str(tag)[:40], why[:600])
+        _set_update_state("failed", msg)
+        _record("failed", msg)
+        return False
+    rc, out = _git(["merge", "--ff-only", commit])
+    if rc != 0:
+        msg = "git couldn't move this checkout to %s:\n%s" % (tag, out[:600])
         _set_update_state("failed", msg)
         _record("failed", msg)
         return False

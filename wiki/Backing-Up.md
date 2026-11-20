@@ -184,7 +184,7 @@ their own, with no listing re-walk.
 
 That split is how the app schedules it. The Control Panel's **View counts** row is a weekly
 `--views-only` run, on by default; every *unattended* run of the metadata refresh passes
-`--no-views`; and the fifteen-minute published-artwork sweep never reads a view count at
+`--no-views`; and the published-artwork sweep never reads a view count at
 all. Clicking **Sync published-artwork metadata** yourself still reads them, because that is
 you asking. With `READ_ONLY` set in `config.json` the view read is skipped everywhere — it
 changes a number on your PixAI account, so it sits behind the same switch as publishing and
@@ -266,7 +266,7 @@ Organizing never breaks the gallery — file lookup is by `media_id`, so images 
 live in any subfolder. (This is also why [Collections](Collections) survive
 Organize.)
 
-`--undo-organize` reverts the last `--organize` run.
+`--undo-organize` reverts the last `--organize` run. A file it cannot move back (one open in another program, or one whose old place already holds another file) stays in the manifest, so running it again finishes the job.
 
 ## Duplicate audit & dedup
 
@@ -280,7 +280,7 @@ python -m moonglade --verify-dupes          # confirm quarantine is safe to dele
 `--verify-dupes` is read-only — unless you add `--restore-orphans`, which moves any
 quarantined file whose keeper no longer exists back into `images/`.
 
-Two modifiers: `--dedup-delete` (with `--dedup --apply`) deletes the redundant copies outright instead of moving them to `_duplicates/`; `--no-content` (with `--audit`/`--dedup`) skips the slower content-hash pass and does only the fast same-`media_id` location dedup.
+Two modifiers: `--dedup-delete` (with `--dedup --apply`) deletes the redundant copies outright instead of moving them to `_duplicates/`. It keeps the copy that opens as a picture (the larger one when both do), and deletes another copy only when it is the same picture or is damaged; any other copy stays where it is and is listed. `--no-content` (with `--audit`/`--dedup`) skips the slower content-hash pass and does only the fast same-`media_id` location dedup.
 
 ## Curation backup
 

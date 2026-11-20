@@ -34,7 +34,9 @@ def client(tmp_path):
 
 
 def _scripts(html):
-    return re.findall(r"<script>(.*?)</script>", html, flags=re.S)
+    # An inline block carries its CSP nonce attribute since 2026-11-19 (gallery.py's
+    # CSP_PAGE_POLICY); a <script src=...> is a file, not an embedded block.
+    return re.findall(r'<script(?:\s+nonce="[^"]*")?>(.*?)</script>', html, flags=re.S)
 
 
 @pytest.mark.skipif(NODE is None, reason="node not installed")

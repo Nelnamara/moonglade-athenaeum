@@ -631,7 +631,7 @@ def test_a_graphql_refusal_stops_the_rest_and_is_never_retried(cli, rig):
 
     def refuse(i, params):
         if i == 2:
-            raise core.PixAIError('GraphQL error: [{"message": "moderation blocked"}]')
+            raise core.graphql_error('[{"message": "moderation blocked"}]', code="NSFW_PROMPTS_DETECTED")
     rig.on_mutate = refuse
     d = run(cli, ack=ack_of(p), prompt="{a|b|c|d} x", count=4).get_json()
     assert len(rig.mutations) == 3
@@ -656,7 +656,7 @@ def test_an_inference_profile_refusal_in_a_run_is_one_mutation(cli, rig):
     p = plan(cli, prompt="{a|b} x", count=2, mode="pro").get_json()
 
     def refuse(i, params):
-        raise core.PixAIError('GraphQL error: [{"message": "invalid inferenceProfile"}]')
+        raise core.graphql_error('[{"message": "invalid inferenceProfile"}]', code="BAD_REQUEST")
     rig.on_mutate = refuse
     d = run(cli, ack=ack_of(p), prompt="{a|b} x", count=2, mode="pro").get_json()
     assert len(rig.mutations) == 1
@@ -1023,7 +1023,7 @@ def test_on_send_sees_a_copy_of_every_attempt_and_cannot_alter_or_block_it(rig):
 
     def refuse_profile(i, params):
         if i == 0:
-            raise core.PixAIError('GraphQL error: [{"message": "bad inferenceProfile"}]')
+            raise core.graphql_error('[{"message": "bad inferenceProfile"}]', code="BAD_REQUEST")
     rig.on_mutate = refuse_profile
     core.submit_generation(object(), {"prompts": "a", "modelId": "V", "inferenceProfile": "pro"},
                            on_send=spy)
@@ -1034,7 +1034,7 @@ def test_on_send_sees_a_copy_of_every_attempt_and_cannot_alter_or_block_it(rig):
 
 @pytest.mark.parametrize("params,error", [
     ({"prompts": "a", "inferenceProfile": "pro"},
-     'GraphQL error: [{"message": "bad inferenceProfile"}]'),
+     'GraphQL error: [{"message": "bad inferenceProfile", "extensions": {"code": "BAD_REQUEST"}}]'),
     ({"prompts": "a", "priority": core.PRIORITY_TURBO},
      'GraphQL error: [{"message": "REQUIRE_MEMBERSHIP", "code": 40300047}]'),
 ], ids=["profile-drop", "turbo-to-low"])
@@ -1045,7 +1045,7 @@ def test_exact_turns_off_both_resubmits(rig, monkeypatch, params, error):
     monkeypatch.setitem(core._turbo_refused, "seen", False)
 
     def refuse(i, p):
-        raise core.PixAIError(error)
+        raise core.graphql_error(error[len("GraphQL error: "):])
     rig.on_mutate = refuse
     with pytest.raises(core.PixAIError):
         core.submit_generation(object(), dict(params))
@@ -1097,7 +1097,7 @@ def test_a_lane_graphql_error_is_refused_only_when_it_is_definite(rig, data, sta
     definite_refusal() says so; a partial success (the mutation's data came back beside the
     errors) may have made -- and charged for -- the task, so it reads may_have_started."""
     def answer(i, params):
-        e = core.PixAIError('GraphQL error: [{"message": "late"}]')
+        e = core.graphql_error('[{"message": "late"}]', code="FORBIDDEN")
         e.graphql_data = data
         raise e
     rig.on_mutate = answer

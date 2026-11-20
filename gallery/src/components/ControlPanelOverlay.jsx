@@ -11,7 +11,7 @@ import useScrollLock from "../hooks/useScrollLock.js";
 import AccountSubOverlay from "./AccountSubOverlay.jsx";
 import BonjourCard from "./BonjourCard.jsx";
 import { isBlurOff, setBlurOff, applyBlurClass } from "../lib/blurPref.js";
-import { lastRanAt } from "../lib/livingRow.js";
+import { autoSync, lastRanAt } from "../lib/livingRow.js";
 import { PAIRINGS, DEFAULT_PAIRING_ID, pairingById, readPairing, setPairing } from "../lib/fonts.js";
 import JobResultBox from "./JobResultBox.jsx";
 import Icon from "../icons/Icons.jsx";
@@ -123,7 +123,9 @@ function fmtNextRun(row) {
 }
 /* What the cadence selector offers, per job. The staleness backstop gets NO selector: sixty
    days is the owner's floor under a job that has no incremental form, not a dial. */
-const SWEEP_CADENCES = [[300, "5 min"], [900, "15 min"], [1800, "30 min"], [3600, "1 hour"]];
+const SWEEP_CADENCES = [[300, "5 min"], [900, "15 min"], [1800, "30 min"], [3600, "1 hour"],
+                        [3 * 3600, "3 hours"], [6 * 3600, "6 hours"], [12 * 3600, "12 hours"],
+                        [86400, "1 day"]];
 const JOB_CADENCES = [[3600, "1 hour"], [3 * 3600, "3 hours"], [6 * 3600, "6 hours"],
                       [12 * 3600, "12 hours"], [86400, "1 day"], [7 * 86400, "1 week"]];
 
@@ -145,8 +147,11 @@ function ledgerResult(j) {
    drags the link to the bookmarks bar and clicks it on a signed-in pixai.art tab, which hands
    that tab's sign-in to this Moonglade's /mirror/connect page. The link is the old Connect
    button's own chip (.mgbr-connect), in its place. See moonglade/mirror.py's helpers + the
-   submit-path invariants. */
-function MirrorTile() {
+   submit-path invariants.
+   Disconnect (2026-11-19, app security review finding 7): a text control in the session block,
+   on the home network (the route is LOGIN plus a home-network check, the reach of Connect from PixAI), shown while a sign-in is stored.
+   It deletes the stored sign-in, stops its renewal and turns the switch off. */
+function MirrorTile({ isLocal, csrf, homeNet }) {
   const [st, setSt] = useState(null);      // {enabled, connected, days_left} — null until loaded
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -189,6 +194,26 @@ function MirrorTile() {
     if (d && d.error) { setMsg(errLine(d.error)); return; }
     await refresh();                        // reflect the real persisted flag
   };
+  const disconnect = async () => {
+    if (!st || busy) return;
+    setBusy(true); setMsg("");
+    const d = await apiPost("/api/mirror/disconnect", { csrf: csrf || "" });
+    setBusy(false);
+    if (d && d.error) { setMsg(errLine(d.error)); if (!d.ok) return; }
+    else setMsg("Disconnected. Moonglade no longer keeps or renews that PixAI sign-in; to end it on PixAI too, sign it out on pixai.art's sessions page.");
+    await refresh();
+  };
+  // One-click Connect: the server reads this PC's Chrome/Edge/Brave pixai.art sign-in and stores
+  // it only when it is the API key's own account.
+  const connect = async () => {
+    if (busy) return;
+    setBusy(true); setMsg("Reading this machine's browser session…");
+    const d = await apiPost("/api/mirror/connect", { csrf: csrf || "" });
+    setBusy(false);
+    if (!d || !d.ok) { setMsg(errLine((d && d.error) || "couldn't connect")); return; }
+    setMsg("Connected.");
+    await refresh();                        // re-read real status (enabled + connected + days)
+  };
   // Clicked here rather than dragged: it would run on this page, not on pixai.art.
   const bookmarkClick = (e) => {
     e.preventDefault();
@@ -218,6 +243,8 @@ function MirrorTile() {
   else if (renewal === "failed") { ringMod = "low"; sessionSub = "Couldn't renew — " + daysLeft + ". Retrying."; }
   else if (renewal === "paused") { ringMod = "low"; sessionSub = "Renewal is paused while READ_ONLY is on — " + daysLeft + "."; }
   else { ringMod = "healthy"; sessionSub = "Healthy — renews itself while the app runs."; }
+  const MIRROR_TIP = "Signs in to pixai.art as you, so what you make here also lands in your PixAI web library and PixAI's one-click AI Tools work";
+  const statusTip = armed ? "Armed: the mirror is on, so AI Tools and the one-click presets are available" : "Off: AI Tools and the one-click presets stay hidden until you turn the mirror on";
   const ringOffset = armed ? (C * (1 - frac)).toFixed(1) : C;
 
   return (
@@ -227,8 +254,10 @@ function MirrorTile() {
         <div className="mgbr-head">
           <div className="mgbr-glyph"><span>M</span><i className="mgbr-dot" /></div>
           <div className="mgbr-titlewrap">
-            <div className="mgbr-title">Mirror to PixAI</div>
-            <div className="mgbr-status">{armed ? "Armed · tier live" : "Off · tier hidden"}</div>
+            <div className="mgbr-title"
+              data-tip={MIRROR_TIP} role="note" aria-label={"Mirror to PixAI. " + MIRROR_TIP}>Mirror to PixAI</div>
+            <div className="mgbr-status"
+              data-tip={statusTip} role="note" aria-label={(armed ? "Armed · tier live. " : "Off · tier hidden. ") + statusTip}>{armed ? "Armed · tier live" : "Off · tier hidden"}</div>
           </div>
           <button type="button" className={"mgbr-pill" + (armed ? " on" : "")} onClick={toggle}
             disabled={busy || !st} title="Arm or disarm the mirror" aria-pressed={armed}><i /></button>
@@ -246,12 +275,19 @@ function MirrorTile() {
           <div className="mgbr-session">
             <div className="mgbr-session-lbl">Web session</div>
             <div className={"mgbr-session-sub " + ringMod}>{sessionSub}</div>
+            {homeNet && st && st.connected && (
+              <button type="button" className="mgcp-useraction" onClick={disconnect} disabled={busy}
+                title="Forget the stored PixAI sign-in and stop renewing it">Disconnect</button>
+            )}
           </div>
         </div>
 
         <div className="mgbr-connectrow">
           <a ref={bookmarkRef} className={"mgbr-connect" + (armed ? " armed" : "")} draggable="true"
             onClick={bookmarkClick} title="Drag to your bookmarks bar">Connect from PixAI</a>
+          <button type="button" className={"mgbr-connect" + (armed ? " armed" : "")}
+            onClick={connect} disabled={busy}
+            title="Read the pixai.art sign-in from this PC's Chrome, Edge or Brave">↻ Connect</button>
           <div className="mgbr-jwtnote">Drag the <b>Connect from PixAI</b> button on the left up to your browser's bookmarks bar. Then open pixai.art, signed in, and click that bookmark.</div>
         </div>
         {msg && <div className={"mgbr-msg" + (lineIsErr(msg) ? " err" : "")}><MsgLine m={msg} /></div>}
@@ -813,10 +849,16 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                               ) : (
                                 <>last run <b>—</b><br /></>
                               )}
-                              {schedule && (
-                                <>auto <b className={schedule.enabled ? "ok" : ""}>{schedule.enabled ? "on" : "off"}</b>
-                                  {" — every "}<b>{schedule.interval_hours || 6} hours</b> · safe jobs only</>
-                              )}
+                              {/* ONE TRUTH (2026-11-18): this line used to read the legacy
+                                  standing order alone ("auto off · every 6 hours") while the
+                                  Runs-itself row above said Sync was on. autoSync() asks the
+                                  same question the scheduler does: who runs Sync, how often. */}
+                              {schedule && (() => {
+                                const a = autoSync(schedule);
+                                return a.on
+                                  ? <>auto <b className="ok">on</b>{" — every "}<b>{a.every}</b>{a.by ? " · " + a.by : ""}</>
+                                  : <>auto <b>off</b>{" — Sync runs only when you press it"}</>;
+                              })()}
                             </div>
                           </div>
 
@@ -1074,7 +1116,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                       <button type="button" className="mgcp-smallchip">Open…</button>
                     </div>
 
-                    <MirrorTile />
+                    <MirrorTile isLocal={isLocal} csrf={summary.csrf} homeNet={!!summary.home_network} />
 
                     <div className="mgcp-tile mgcp-tile3">
                       <div className="mgcp-mkick">Catalog &amp; files</div>
@@ -2058,6 +2100,23 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
     if (!d.error) { setPwNew(""); setPwCurrent(""); }
   };
 
+  /* Sign out all devices (2026-11-19, app security review finding 6): the route Log Out already
+     uses, with scope "everywhere" -- every cookie for this account stops working, this one
+     included, so it ends like Log Out does: caches purged, then the sign-in page. */
+  const [allOutBusy, setAllOutBusy] = useState(false);
+  const signOutEverywhere = async () => {
+    if (allOutBusy) return;
+    setAllOutBusy(true);
+    const d = await apiPost("/api/logout", { csrf: summary.csrf || "", scope: "everywhere" });
+    if (d && d.error) { setAllOutBusy(false); setPwMsg(errLine(d.error)); return; }
+    const go = () => { window.location.href = "/login"; };
+    if ("caches" in window) {
+      caches.keys().then((ks) => Promise.all(ks.map((k) => caches.delete(k)))).catch(() => {}).then(go);
+    } else {
+      go();
+    }
+  };
+
   const resetOtherPassword = async (username) => {
     if (resetBusy || !resetNew) return;
     setResetBusy(true); setResetMsg("");
@@ -2085,6 +2144,13 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
               <div className="mgcp-userrow">
                 <b>{u.username}</b>
                 {u.username === summary.current_username && <span>(you)</span>}
+                {u.username === summary.current_username && (
+                  <button type="button" className="mgcp-useraction" disabled={allOutBusy}
+                    title="Signs this account out on every device, this one included"
+                    onClick={signOutEverywhere}>
+                    {allOutBusy ? "signing out…" : "sign out all devices"}
+                  </button>
+                )}
                 {u.username !== summary.current_username && (
                   <>
                     {isLocal && (

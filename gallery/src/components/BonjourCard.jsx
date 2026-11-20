@@ -118,6 +118,20 @@ export default function BonjourCard({ isLocal }) {
         </>
       ) : null}
 
+      {/* HTTPS on the home network (2026-11-19): this PC's certificate authority, as text and a
+          link in this card -- its fingerprint to check a device's warning or install against. */}
+      {st.tls && st.tls !== "off" && st.tls_fingerprint ? (
+        <div className="mgcp-tilenote">
+          Other devices open Moonglade at https://. Until a device has this PC's certificate
+          installed, its browser warns. To stop the warning, open{" "}
+          <a href="/moonglade-ca.crt">this PC's certificate</a> on the device and install it once;
+          before you trust it, check that its SHA-256 fingerprint matches this one, read here on
+          this PC: <code style={{ wordBreak: "break-all" }}>{st.tls_fingerprint}</code>
+        </div>
+      ) : st.lan_bind && st.tls_problem ? (
+        <div className="mgcp-tilenote">Not encrypted on the network: {st.tls_problem}</div>
+      ) : null}
+
       {isLocal ? (
         <div className="mgcp-bjform">
           <div className="mgcp-bjrow">
@@ -152,8 +166,8 @@ export default function BonjourCard({ isLocal }) {
             {msg ? <span className="mgcp-tilenote">{msg}</span> : null}
           </div>
           <div className="mgcp-tilenote">
-            Changing Reach or Port restarts the server. Another device's traffic is encrypted only at
-            an https:// address, which the --https switch turns on (Help › The Gallery › Using HTTPS).
+            Changing Reach or Port restarts the server. With Reach on LAN, other devices use an
+            encrypted https:// address while this PC keeps http:// (Help › The Gallery › Using HTTPS).
             An iPad home-screen app is a later add.
           </div>
         </div>

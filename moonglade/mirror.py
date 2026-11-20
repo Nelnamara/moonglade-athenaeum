@@ -1,7 +1,7 @@
 """
 moonglade/mirror.py
 ===================
-The website mirror: the JWT helpers, the Connect from PixAI check that stores its sign-in, the
+The website mirror: the JWT helpers, the localStorage (LevelDB) reader that bootstraps it, the
 session renewal and its record, the stored mirror state, the web-identity session, the
 create-session choke (`_session_for_create`) and `--mirror-check`. Moved verbatim out of
 moonglade/backup.py in the 3.21.0 split (phase 3), with the mirror constants that sat with the
@@ -27,6 +27,7 @@ except ImportError:
     sys.exit("Missing dependency. Run:  pip install requests")
 
 from moonglade import paths as _paths
+from moonglade import secure_files as _secure
 # The Mirror renews its website session the way pixai.art does: POST /v2/auth/refresh-token, no body
 # (the GET recorded on 2026-08-17 answers 404 today). PixAI's contract (09-26 bundle): "Requires an
 # existing session (bearer token or session cookie). The token is returned in the body and also written
@@ -53,6 +54,12 @@ MIRROR_REFRESH_WHEN_DAYS_LEFT = 6
 # itself (one Connect stored, or one stored before #71) has no known start, so its ring
 # is drawn out of max(seconds left, this) -- see mirror_token_span.
 MIRROR_TOKEN_LIFE_S = 7 * 86400
+# The localStorage key the pixai.art frontend keeps the live JWT under (confirmed on a
+# logged-in tab 2026-08-15). localStorage is NOT app-bound(v20)-encrypted the way modern
+# Chrome cookies are, so reading THIS is how the mirror bootstraps on a current Chrome
+# where the cookie store can't be decrypted. Note the trailing ":token" is exact -- the
+# sibling ":intercom-user-jwt" key must never be mistaken for it.
+LOCALSTORAGE_JWT_KEY = b"https://api.pixai.art:token"
 # The mirror must file generations as the WEB client so PixAI applies the website's content
 # policy, not the stricter mobile-app (Apple-compliance) one. Confirmed 2026-08-15: the same
 # account + prompt succeeds on pixai.art (task 2045416767743558052) but 403s "against PixAI's
@@ -84,15 +91,15 @@ MIRROR_WEB_ORIGIN = "https://pixai.art"
 # keeping the token where an outside program can read it (~10 Nov 2026), the way in is the
 # Control Panel's "Connect from PixAI" bookmark: clicked on a signed-in pixai.art tab, it hands
 # the tab's own sign-in to this server's /mirror/connect page, which checks it with
-# accept_site_token before storing it. That is the ONLY way a sign-in gets in. The old Connect
-# (POST /api/mirror/connect, and --mirror-check's fallback) read whatever pixai.art token a
-# local browser profile held, with no check that it was the API key's account; it found
-# nothing on a current pixai.art and was removed on 2026-11-18 (red team, cross-account risk).
+# accept_site_token before storing it. The one-click Connect (POST /api/mirror/connect) is the
+# other way in: it reads the sign-in from this PC's Chrome/Edge/Brave (read_browser_jwt) and
+# stores it through the same accept_site_token, so it too is held to the API key's account.
 #
 # SAFETY: only touched when the mirror toggle is ON (pure API-key mode never calls
 # these). The credential never leaves this machine and is never printed, logged, or
 # committed (same rule as PIXAI_API_KEY); diagnostics report only non-secret
-# derivatives (expiry date, days-left, ok/None).
+# derivatives (expiry date, days-left, ok/None). The live "read the real browser +
+# first renewal" step self-verifies at runtime on the owner's machine.
 # ===========================================================================
 def _b64url_decode(seg):
     """Decode one base64url JWT segment, tolerant of missing padding."""
@@ -140,6 +147,387 @@ def mirror_needs_refresh(token, now=None, threshold_days=MIRROR_REFRESH_WHEN_DAY
         return True
     now = time.time() if now is None else now
     return exp - now <= threshold_days * 86400
+
+
+# --- localStorage JWT reader ------------------------------------------------------
+# Modern Chrome (>=127) wraps the cookie store in app-bound "v20" encryption a normal
+# user process can't decrypt, so a cookie read comes back empty there (the app no longer
+# reads cookies at all). The pixai.art frontend keeps the live JWT in localStorage, and
+# localStorage's on-disk store (Local Storage/leveldb) is NOT app-bound-encrypted -- so we
+# read the JWT straight out of it. That's the whole reason "Connect" can work on a current
+# Chrome without a paste. The Bearer JWT alone authenticates the mirror (create rides
+# Authorization: Bearer; the renewal, POST /v2/auth/refresh-token, renews off the Bearer),
+# so no cookie is needed.
+#
+# We parse leveldb properly (a minimal pure-Python reader -- no C dep, no third-party
+# library). A raw byte-scan is NOT enough: an established profile compacts its writes into
+# .ldb SSTables whose keys are PREFIX-COMPRESSED (the literal "https://api.pixai.art:token"
+# never appears contiguously) and whose data blocks are usually SNAPPY-COMPRESSED (the JWT
+# bytes aren't even there in the clear). So we reconstruct real key->value pairs from both
+# the .ldb SSTables and the .log write-ahead log, match the exact localStorage key, and
+# validate the decoded token's issuer is "pixai" before trusting it. The freshest (max
+# `exp`) wins across every file/profile. Read-only; NEVER raises, NEVER logs a value.
+def _read_file_shared(path):
+    """Read a file Chrome may hold open. Direct read first (Chromium opens leveldb files
+    share-read on Windows); on failure, copy to temp and read the copy. b'' on failure,
+    never raises."""
+    import shutil
+    import tempfile
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except OSError:
+        pass
+    tmp = os.path.join(tempfile.gettempdir(),
+                       "mg_ls_%d_%s_%s" % (os.getpid(), secrets.token_hex(4),
+                                           os.path.basename(path)))
+    try:
+        shutil.copy2(path, tmp)
+        with open(tmp, "rb") as f:
+            return f.read()
+    except OSError:
+        return b""
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def _lvarint(buf, pos):
+    """Decode a leveldb base-128 varint at buf[pos:]. Returns (value, next_pos). Raises
+    IndexError if it runs off the end (callers treat that as a malformed block)."""
+    result = 0
+    shift = 0
+    while True:
+        b = buf[pos]
+        pos += 1
+        result |= (b & 0x7F) << shift
+        if not (b & 0x80):
+            return result, pos
+        shift += 7
+        if shift > 63:
+            raise ValueError("varint too long")
+
+
+def _snappy_decompress(data):
+    """Pure-Python Snappy block decompression (the codec leveldb uses for SSTable blocks).
+    Returns the decompressed bytes, or None on malformed input. No dependency."""
+    try:
+        expect, pos = _lvarint(data, 0)
+        out = bytearray()
+        n = len(data)
+        while pos < n:
+            tag = data[pos]
+            pos += 1
+            kind = tag & 0x03
+            if kind == 0:                       # literal
+                length = tag >> 2
+                if length >= 60:
+                    nbytes = length - 59        # 60->1 .. 63->4 extra length bytes
+                    length = 0
+                    for i in range(nbytes):
+                        length |= data[pos + i] << (8 * i)
+                    pos += nbytes
+                length += 1
+                out += data[pos:pos + length]
+                pos += length
+            else:
+                if kind == 1:                   # copy, 1-byte offset
+                    length = 4 + ((tag >> 2) & 0x07)
+                    offset = ((tag >> 5) << 8) | data[pos]
+                    pos += 1
+                elif kind == 2:                 # copy, 2-byte offset
+                    length = 1 + (tag >> 2)
+                    offset = data[pos] | (data[pos + 1] << 8)
+                    pos += 2
+                else:                           # kind == 3, copy, 4-byte offset
+                    length = 1 + (tag >> 2)
+                    offset = (data[pos] | (data[pos + 1] << 8)
+                              | (data[pos + 2] << 16) | (data[pos + 3] << 24))
+                    pos += 4
+                if offset <= 0 or offset > len(out):
+                    return None
+                start = len(out) - offset
+                for i in range(length):         # byte-by-byte: copies may overlap
+                    out.append(out[start + i])
+        return bytes(out) if len(out) == expect else None
+    except (IndexError, ValueError):
+        return None
+
+
+def _lvldb_decompress_block(data, offset, size):
+    """The block at [offset, offset+size), decompressed per its 1-byte compression-type
+    trailer (0 none, 1 snappy, 2 zlib, 4 zstd). None if unreadable/unknown."""
+    if offset < 0 or offset + size + 1 > len(data):
+        return None
+    raw = data[offset:offset + size]
+    comp = data[offset + size]
+    if comp == 0:
+        return raw
+    if comp == 1:
+        return _snappy_decompress(raw)
+    if comp == 2:
+        try:
+            import zlib
+            return zlib.decompress(raw)
+        except Exception:
+            return None
+    if comp == 4:
+        try:
+            from compression import zstd        # Python 3.14+ stdlib
+            return zstd.decompress(raw)
+        except Exception:
+            try:
+                import zstandard                 # optional third-party fallback
+                return zstandard.ZstdDecompressor().decompress(raw)
+            except Exception:
+                return None
+    return None
+
+
+def _lvldb_block_pairs(block):
+    """Yield (key, value) from one decompressed leveldb block, undoing prefix compression.
+    The block ends with a restart array: [restart offsets...][num_restarts as uint32 LE].
+    A malformed block yields nothing rather than raising."""
+    n = len(block)
+    if n < 4:
+        return
+    try:
+        num_restarts = int.from_bytes(block[n - 4:n], "little")
+        entries_end = n - 4 - num_restarts * 4
+        if entries_end < 0:
+            return
+        pos = 0
+        last_key = b""
+        while pos < entries_end:
+            shared, pos = _lvarint(block, pos)
+            non_shared, pos = _lvarint(block, pos)
+            value_len, pos = _lvarint(block, pos)
+            key = last_key[:shared] + block[pos:pos + non_shared]
+            pos += non_shared
+            value = block[pos:pos + value_len]
+            pos += value_len
+            last_key = key
+            yield key, value
+    except (IndexError, ValueError):
+        return
+
+
+_LVLDB_SSTABLE_MAGIC = 0xDB4775248B80FB57
+
+
+def _lvldb_sstable_entries(data):
+    """Yield (user_key, value, seq, is_deletion) from a leveldb .ldb SSTable. Reads the footer
+    -> index block -> each data block (decompressing as needed) -> prefix-decoded entries. The
+    8-byte internal-key trailer encodes (seq<<8 | type) little-endian; type 0 is a deletion
+    tombstone. Yields nothing on any structural surprise (never raises)."""
+    n = len(data)
+    if n < 48:
+        return
+    try:
+        footer = data[n - 48:n]
+        if int.from_bytes(footer[40:48], "little") != _LVLDB_SSTABLE_MAGIC:
+            return
+        p = 0
+        _, p = _lvarint(footer, p)                # metaindex handle offset (skip)
+        _, p = _lvarint(footer, p)                # metaindex handle size   (skip)
+        idx_off, p = _lvarint(footer, p)
+        idx_size, p = _lvarint(footer, p)
+    except (IndexError, ValueError):
+        return
+    index_block = _lvldb_decompress_block(data, idx_off, idx_size)
+    if index_block is None:
+        return
+    for _sep, handle in _lvldb_block_pairs(index_block):
+        try:
+            b_off, hp = _lvarint(handle, 0)
+            b_size, _hp = _lvarint(handle, hp)
+        except (IndexError, ValueError):
+            continue
+        blk = _lvldb_decompress_block(data, b_off, b_size)
+        if blk is None:
+            continue
+        for key, value in _lvldb_block_pairs(blk):
+            if len(key) >= 8:                    # internal-key trailer = seq<<8 | type
+                trailer = int.from_bytes(key[-8:], "little")
+                yield key[:-8], value, trailer >> 8, (trailer & 0xFF) == 0
+
+
+def _lvldb_log_entries(data):
+    """Yield (key, value, seq, is_deletion) from a leveldb .log write-ahead log. Each
+    WriteBatch header carries the sequence number of its first entry; entry i has seq = base+i.
+    Reassembles physical record fragments across 32 KiB blocks. Deletions are yielded as
+    tombstones (empty value, is_deletion=True) so a later logout can suppress an earlier PUT.
+    Yields nothing on malformed input (never raises)."""
+    BLOCK = 32768
+    n = len(data)
+    pos = 0
+    frag = b""
+    try:
+        while pos + 7 <= n:
+            block_left = BLOCK - (pos % BLOCK)
+            if block_left < 7:                   # zero-padded block trailer -> next block
+                pos += block_left
+                continue
+            length = data[pos + 4] | (data[pos + 5] << 8)
+            rtype = data[pos + 6]
+            pos += 7
+            chunk = data[pos:pos + length]
+            pos += length                        # ALWAYS consume the payload, even for a
+            if rtype == 0 or length == 0:        # zero/padding record -- else a kZeroType
+                continue                         # record with a payload desyncs every record
+            if rtype == 1:                       # FULL
+                rec = chunk
+            elif rtype == 2:                     # FIRST
+                frag = chunk
+                continue
+            elif rtype == 3:                     # MIDDLE
+                frag += chunk
+                continue
+            elif rtype == 4:                     # LAST
+                rec = frag + chunk
+                frag = b""
+            else:
+                frag = b""
+                continue
+            # WriteBatch: header seq(8)+count(4)=12, then entries; entry i has seq base+i
+            if len(rec) < 12:
+                continue
+            base_seq = int.from_bytes(rec[0:8], "little")
+            rp = 12
+            rn = len(rec)
+            idx = 0
+            while rp < rn:
+                tag = rec[rp]
+                rp += 1
+                if tag == 1:                     # kTypeValue: key, value
+                    klen, rp = _lvarint(rec, rp)
+                    key = rec[rp:rp + klen]
+                    rp += klen
+                    vlen, rp = _lvarint(rec, rp)
+                    value = rec[rp:rp + vlen]
+                    rp += vlen
+                    yield key, value, base_seq + idx, False
+                    idx += 1
+                elif tag == 0:                   # kTypeDeletion: key only
+                    klen, rp = _lvarint(rec, rp)
+                    key = rec[rp:rp + klen]
+                    rp += klen
+                    yield key, b"", base_seq + idx, True
+                    idx += 1
+                else:
+                    break                        # unknown tag -> stop this batch
+    except (IndexError, ValueError):
+        return
+
+
+def _lvldb_value_to_jwt(value):
+    """A Chromium localStorage value (encoding byte + payload) -> JWT string, or ''. 0x00 is
+    UTF-16LE, 0x01 is Latin-1 (a JWT is ASCII, so ours is 0x01)."""
+    if not value:
+        return ""
+    enc, body = value[0], value[1:]
+    try:
+        if enc == 0:
+            s = body.decode("utf-16-le", "ignore")
+        elif enc == 1:
+            s = body.decode("latin-1", "ignore")
+        else:
+            s = value.decode("latin-1", "ignore")
+    except Exception:
+        return ""
+    s = s.strip()
+    return s if s.startswith("eyJ") and s.count(".") == 2 else ""
+
+
+def _pick_pixai_token(entries):
+    """THE pixai.art auth token from ONE profile's leveldb entries, honoring leveldb's own
+    last-writer-wins-by-sequence semantics. `entries` are (user_key, value, seq, is_deletion)
+    tuples from that profile's .ldb + .log (which share one sequence space). Among entries for
+    the token key (ends with LOCALSTORAGE_JWT_KEY, contains 'pixai'), the HIGHEST sequence
+    number is the live state: if it's a deletion tombstone (logout) -> '' (not a stale token);
+    otherwise decode it and require iss=='pixai' (the definitive guard -- the Local Storage
+    store is shared across every origin, so unrelated JWTs live beside it). Returns '' if none.
+    Sequence numbers are unique per write, so ties are effectively impossible; if two values
+    tie (bottom-level seq-zeroing), the later `exp` wins, and any tombstone at the top wins."""
+    best_seq = -1
+    deleted_at_top = False
+    values_at_top = []                           # (exp, jwt) for value entries at best_seq
+    for key, value, seq, is_del in entries:
+        if b"pixai" not in key or not key.endswith(LOCALSTORAGE_JWT_KEY):
+            continue
+        if seq > best_seq:
+            best_seq = seq
+            deleted_at_top = False
+            values_at_top = []
+        if seq == best_seq:
+            if is_del:
+                deleted_at_top = True
+            else:
+                jwt = _lvldb_value_to_jwt(value)
+                if jwt and jwt_claims(jwt).get("iss") == "pixai":
+                    exp = jwt_expiry(jwt)
+                    values_at_top.append((exp if exp is not None else -1, jwt))
+    if best_seq < 0 or deleted_at_top or not values_at_top:
+        return ""
+    values_at_top.sort()
+    return values_at_top[-1][1]                   # freshest value at the top sequence
+
+
+def read_browser_jwt(browsers=("chrome", "edge", "brave")):
+    """The live pixai.art JWT read from a local browser's localStorage, across ALL profiles
+    (Default, Profile N, ...) of the given Chromium browsers. Each profile is resolved on its
+    own sequence space (a logout tombstone there suppresses that profile's older token); the
+    freshest LIVE token (max `exp`) across profiles wins. Returns '' if none. This is what lets
+    'Connect' bootstrap the mirror on a current Chrome whose cookie store is
+    app-bound-encrypted. NEVER raises, NEVER logs the value."""
+    la = os.environ.get("LOCALAPPDATA", "")
+    roots = {
+        "chrome": os.path.join(la, r"Google\Chrome\User Data"),
+        "edge": os.path.join(la, r"Microsoft\Edge\User Data"),
+        "brave": os.path.join(la, r"BraveSoftware\Brave-Browser\User Data"),
+    }
+
+    def _profile_entries(ldb):
+        try:
+            files = os.listdir(ldb)
+        except OSError:
+            return
+        for fn in files:
+            path = os.path.join(ldb, fn)
+            if fn.endswith(".ldb"):
+                blob = _read_file_shared(path)
+                if blob:
+                    yield from _lvldb_sstable_entries(blob)
+            elif fn.endswith(".log"):
+                blob = _read_file_shared(path)
+                if blob:
+                    yield from _lvldb_log_entries(blob)
+
+    candidates = []
+    for name in browsers:
+        udir = roots.get(name)
+        if not udir or not os.path.isdir(udir):
+            continue
+        try:
+            profiles = os.listdir(udir)
+        except OSError:
+            continue
+        for prof in profiles:
+            ldb = os.path.join(udir, prof, "Local Storage", "leveldb")
+            if not os.path.isdir(ldb):
+                continue
+            tok = _pick_pixai_token(_profile_entries(ldb))   # per-profile, tombstone-aware
+            if tok:
+                candidates.append(tok)
+
+    best, best_exp = "", -1                       # freshest live token across profiles
+    for j in candidates:
+        e = jwt_expiry(j)
+        if e is not None and e > best_exp:
+            best, best_exp = j, e
+    return best
 
 
 def _is_api_key(token):
@@ -284,9 +672,10 @@ _refresh_last = {"reason": ""}
 
 # --- Mirror session state: a dedicated git-ignored store (NOT config.json) --------
 # Single-flight lock: serializes the refresh->persist critical section so two threads can't
-# both fire the renewal and race their writes. The no-network fast path runs OUTSIDE the lock
-# so a Connect can't block every Generate -- an earlier version held the lock across a slow
-# local scan plus a 30 s POST (adversarial review 2026-08-15). The gallery serves threaded=True.
+# both fire the renewal and race their writes. The SLOW work (the leveldb/localStorage
+# browser read and the no-network fast path) runs OUTSIDE the lock so a Connect can't block
+# every Generate -- an earlier version held the lock across a ~12 s scan plus a 30 s POST
+# (adversarial review 2026-08-15). The gallery serves threaded=True.
 _mirror_lock = threading.Lock()
 # THE RENEWAL RECORD (#71) -- one home for everything about renewing, shared by the create
 # path (make_mirror_session), a press of Connect, and the background tick (mirror_renew_tick):
@@ -352,7 +741,7 @@ def save_mirror_state(state):
     this token, set ONLY by a successful renewal. It is what the Control Panel's ring measures
     the token's life from, because `iat` never moves off the original sign-in. Saving the SAME
     token without one keeps the stored one (run_mirror_check re-saves an unchanged token on a
-    failed renewal); saving a DIFFERENT token without one -- Connect from PixAI -- drops it."""
+    failed renewal); saving a DIFFERENT token without one -- a browser read -- drops it."""
     jwt = state.get("jwt", "")
     minted = state.get("minted_at")
     if minted is None:
@@ -369,9 +758,10 @@ def save_mirror_state(state):
     # temp per write + atomic replace makes concurrent saves last-writer-wins, never corrupt.
     tmp = p.with_name(p.name + ".tmp-{}-{}".format(os.getpid(), secrets.token_hex(6)))
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(record, f, indent=2)
+        # Secrets at rest (review 2026-11-19, #5): owner-only while empty, then written.
+        _secure.write_private(tmp, json.dumps(record, indent=2))
         os.replace(tmp, p)
+        _secure.restrict_to_owner(p)
         return True
     except OSError:
         try:
@@ -380,6 +770,26 @@ def save_mirror_state(state):
         except OSError:
             pass
         return False
+
+
+def disconnect_mirror():
+    """Forget the stored PixAI sign-in (the Mirror tile's Disconnect, app security review
+    2026-11-19 finding 7): delete local/mirror_session.json and clear the renewal state, so
+    nothing renews it again. Under _mirror_lock, the lock every renewal and every Connect saves
+    under, so a renewal in flight either finishes first (and its fresh token is then deleted)
+    or finds no token. Returns True when no stored sign-in is left. Never raises, never logs a
+    value. PixAI itself still honours the sign-in until it expires or is ended on PixAI's own
+    sessions page; this only makes Moonglade let go of it."""
+    with _mirror_lock:
+        p = _mirror_state_path()
+        try:
+            p.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return False
+        _mirror_renewal_reset()
+    return True
 
 
 def mirror_enabled():
@@ -394,7 +804,7 @@ def mirror_enabled():
 def _jwt_usable(jwt):
     """True only when the JWT is present, parseable, and not expired (days_left >= 0). This
     is the gate for 'can the mirror actually submit with this' -- distinct from merely
-    'a JWT string exists', which once let an expired stored token block its own replacement."""
+    'a JWT string exists', which is what let an expired stored token block a browser re-read."""
     if not jwt:
         return False
     left = jwt_days_left(jwt)
@@ -460,8 +870,8 @@ def mirror_token_span(state, now=None):
     """(seconds left, seconds in the token's life) for the Control Panel's ring, or
     (None, None) with no parseable token. Offline; neither number reveals the token.
 
-    The life is exp - minted_at for a token the app renewed itself. A token stored by
-    Connect from PixAI (or stored before #71) has no known start -- `iat` stays at the original
+    The life is exp - minted_at for a token the app renewed itself. A token read from the
+    browser on Connect (or stored before #71) has no known start -- `iat` stays at the original
     sign-in through every renewal (PROBE 2026-10-02), so exp - iat grows without bound -- and
     is drawn out of max(left, MIRROR_TOKEN_LIFE_S). Never shorter than what is left, so the ring
     never draws past full."""
@@ -534,8 +944,12 @@ def make_mirror_session(user_initiated=False):
     refuse and spend nothing, never an API-key fallback (review F5).
 
     JWT-only, and built via _mirror_session_from (NOT _make_session): the API-key path's
-    precondition/USER_ID-resolution must not run over the website token (review). The stored
-    token is the only source: it gets in through Connect from PixAI (accept_site_token) alone.
+    precondition/USER_ID-resolution must not run over the website token (review).
+
+    It never reads a browser. A sign-in gets in only through accept_site_token -- Connect from
+    PixAI, and the one-click Connect's browser read (POST /api/mirror/connect) -- which checks
+    it is the API key's own account first (invariant #7). The 3.20 browser read in here saved
+    a token with no such check, so it is not restored (security review, 2026-11-19).
 
     `user_initiated`: its renewal tries once even inside a failure backoff (#71).
 
@@ -854,10 +1268,10 @@ def run_mirror_check(args):
 #     after the renewal. A sign-in handed over by Connect from PixAI is the token alone (the
 #     tab's cookies never leave the browser), and accept_site_token stores it only when its
 #     `sub` is the account the API key resolves to -- a tab signed in as anyone else is
-#     refused, so the bookmark can never move the Mirror to a second identity. It is the ONLY way
-#     a sign-in is stored: the old browser read (POST /api/mirror/connect and --mirror-check's
-#     fallback), which kept whatever pixai.art token a local profile held with no account
-#     check, was removed on 2026-11-18, and --mirror-check now renews the stored token only.
+#     refused, so the bookmark can never move the Mirror to a second identity. The one-click
+#     Connect (the browser read, POST /api/mirror/connect) is held to the same check: its token
+#     goes through accept_site_token, never a direct save. --mirror-check renews the stored
+#     token only, and never reads a browser.
 #     Every renewal is held to the stored token's `sub`. The
 #     same-session cookie read the 2026-08-17 ruling allows is not built: #92's B0 check (2026-10-28) found no installed profile's pixai.art cookies
 #     readable -- the running browser holds the Cookies file locked (Chrome and Edge Default;

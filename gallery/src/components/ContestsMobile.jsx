@@ -57,7 +57,7 @@ export default function ContestsMobile({ onEnter, entriesEpoch = 0 }) {
   const ct = useContests({ mine: true });
   const { d, err, contests, official, community, featured, restOfficial,
           dateRange, daysLeft, mineRows, mineErr, entriesFor, enteredCount,
-          syncing, reloadMine } = ct;
+          syncing, reloadMine, qualifyFor } = ct;
   const [view, setView] = useState("board");     // "board" | "mine"
   const [detail, setDetail] = useState(null);
   // E4 "Record a win" as a sheet (Small Calls Handoff L3: "the same link at the foot of My
@@ -127,6 +127,7 @@ export default function ContestsMobile({ onEnter, entriesEpoch = 0 }) {
             <span className="cmb-entered-inline"><Icon name="entered" />entered ×{enteredCount(c)} · </span>
           ) : ""}{closes(c)}
         </span>
+        {qualifyFor(c) ? <span className="cmb-cardmeta">{qualifyFor(c)}</span> : null}
         {extra}
       </div>
     </button>
@@ -220,6 +221,7 @@ export default function ContestsMobile({ onEnter, entriesEpoch = 0 }) {
                   {featured.prize_amount > 0 ? "◆ " + fmt(featured.prize_amount) + " CR · " : ""}
                   {closes(featured)}
                 </span>
+                {qualifyFor(featured) ? <span className="cmb-herometa">{qualifyFor(featured)}</span> : null}
               </span>
             </button>
           )}

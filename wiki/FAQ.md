@@ -43,12 +43,12 @@ Nothing phones home.
 
 **Can I run it on my phone/tablet?**
 Yes — in the Control Panel's **LAN discovery** card set **Reach** to **LAN** and save (the server
-restarts), then open the address the card shows on your device, or scan its QR. By default that
-address is plain `http://`, so what you type and your session cross your network unencrypted. To
-encrypt it, turn on the `--https` switch: `pip install cryptography`, stop Moonglade, add
-`"launch_args": ["--https"]` to `local\settings.json` beside the launcher, and start it again;
-the card then shows the `https://` address. The browser warns about the self-signed
-certificate; see [The Gallery → Using HTTPS](Gallery#using-https). [Select mode](Collections) is touch-friendly.
+restarts), then open the address the card shows on your device, or scan its QR. That address is
+`https://`, so what you type and your session cross your network encrypted. The browser warns
+about the certificate, because Moonglade made it itself. To stop the warning, install this PC's
+certificate on the device once, from the link on the card, after checking that its SHA-256
+fingerprint matches the one the card shows on the PC; see [The Gallery → Using
+HTTPS](Gallery#using-https). [Select mode](Collections) is touch-friendly.
 
 Right after you sign in on a phone browser that can add the app to its Home Screen, a thin line under
 the gallery's buttons says **Add to Home Screen for full screen ›**. On an iPhone, in Safari, tapping it
@@ -99,9 +99,9 @@ setting the API key, the library folder, or the launcher icon; importing local f
 / `--import-local`); and changing the account roster — adding an account, removing someone
 *else's*, or resetting someone else's password.
 
-Still use a trusted network: the app is served over plain HTTP unless you turn on `--https`
-([Using HTTPS](Gallery#using-https)), and a signed-in session on a shared network can spend
-your credits.
+Still use a trusted network: other devices reach Moonglade over `https://` ([Using
+HTTPS](Gallery#using-https)), but a signed-in session on a shared network can spend your
+credits.
 
 **How do I add another person, or get back in if I'm locked out?**
 
@@ -146,15 +146,16 @@ new release about once an hour, and when one turns up a strip appears across the
 in the app you are. **Update** opens the update window; or **open the Control Panel** (it re-checks on the spot) and the About row
 at the bottom of its sidebar carries a gold dot: *"About Moonglade · ● 3.7.3 available"*. Click it and **About**
 opens leading with *"v3.7.3 is out"* and **View the update ›**; that opens the confirm, which
-tells you what will happen — the update is pulled atomically, dependencies install
+tells you what will happen — your catalog is copied first (a dated file beside
+`catalog.db`, the last three kept), the update is pulled atomically, dependencies install
 only if they changed, the server restarts, and the tab reloads itself.
 Nothing is applied until you press **Update now**; there is no silent update, ever. The app
 notices releases by itself; it never installs one by itself.
 
-Press it and that same window turns into the progress of the update — **pull**, then
-**applying files**, then **restart** — ticking each one off as it really finishes, with how
+Press it and that same window turns into the progress of the update — **back up the
+catalog**, then **pull**, then **applying files**, then **restart** — ticking each one off as it really finishes, with how
 long it took. The restart is the one step nobody can watch (the server is away), so it
-shows what your machine's last restart took. When the third tick lands the window closes
+shows what your machine's last restart took. When the last tick lands the window closes
 itself and the version at the foot of the sidebar is the new one. If the update is refused
 or fails, the refusal appears in the same window in place of the progress bar rather than
 as a message you might miss.
@@ -177,6 +178,13 @@ rather than touching it.
 **By hand**, always available: `git pull`, then **restart the gallery server** so it loads
 the new code (Stop/Restart, or relaunch `Moonglade Launcher.pyw`) and hard-refresh the browser —
 see [Troubleshooting](Troubleshooting).
+
+**What do Mirror to PixAI, Armed, Tier 1, Vigil, Folio, The Loom and AI Tools mean?**
+One line each in the [Glossary](Glossary). Short version: the **Mirror** signs in to pixai.art as you, so
+what you make here also lands in your PixAI web library and PixAI's one-click **AI Tools** work
+(**Armed** is that switch on; **Tier 1** marks a tool PixAI keeps behind its first membership tier);
+**The Loom** plans a video shot by shot; the **Folio** is the shelf of badges and points you earn by
+using the app; the **Vigil** counts the days in a row you made something.
 
 **Something broke after a PixAI change.**
 See [Troubleshooting](Troubleshooting): update to the latest release first, or open an

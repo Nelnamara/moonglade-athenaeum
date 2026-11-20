@@ -10,6 +10,7 @@ them, never at the top, so importing this module never imports the engine.
 """
 import csv
 import sys
+import threading
 import time
 from collections import defaultdict, Counter
 
@@ -37,6 +38,34 @@ _BUCKET_PRIORITY = {"batches": 0, "month": 1, "images": 2, "other": 3}
 # one copy. This alias keeps the private name every caller (and
 # dev/tests/test_library_scan.py's `organize_mod._bucket_of` assertion) already uses.
 _bucket_of = bucket_of
+
+
+_STRICT_DECODE = threading.Lock()
+
+
+def _opens_as_image(path):
+    """True when the file decodes as a whole image, False when it does not (truncated,
+    corrupt, not an image at all), None when Pillow is missing and nobody can tell.
+    A full decode (load()), the strictest check Pillow offers, so a file that opens here
+    is one the gallery can show."""
+    try:
+        from PIL import Image, ImageFile
+    except ImportError:
+        return None
+    # Strict for this one decode. moonglade/similar.py turns Pillow's process-wide
+    # LOAD_TRUNCATED_IMAGES on at import, and with it a truncated PNG or JPEG "opens", padded
+    # with grey: in any process that has imported it, a damaged copy would pass as whole.
+    with _STRICT_DECODE:
+        was = ImageFile.LOAD_TRUNCATED_IMAGES
+        ImageFile.LOAD_TRUNCATED_IMAGES = False
+        try:
+            with Image.open(path) as im:
+                im.load()
+            return True
+        except Exception:      # noqa: BLE001 -- any failure to decode means "damaged"
+            return False
+        finally:
+            ImageFile.LOAD_TRUNCATED_IMAGES = was
 
 
 def _scan_media_files(out_dir):
@@ -106,14 +135,21 @@ def audit_collection(out_dir, content=True, progress=None):
                                           len(str(it[1]))))
 
     # ---- Class A: same media_id across >1 distinct bucket -------------------
+    # These copies share a NAME, not necessarily bytes, so the folder alone cannot pick the
+    # keeper: a truncated download in a month folder used to outrank the whole image in
+    # images/, and --dedup-delete then deleted the whole one (red team, 2026-11-19). A copy
+    # that opens as an image beats one that does not, then the larger copy, then the folder.
     class_a = []
     for mid, items in by_mid.items():
         buckets = {b for (_, _, b, _) in items}
         if len(items) > 1 and len(buckets) > 1:
-            keeper = _keeper(items, lambda it: it[2])
+            opens = {it[0]: _opens_as_image(it[0]) for it in items}
+            keeper = min(items, key=lambda it: (opens[it[0]] is False, -it[3],
+                                                _BUCKET_PRIORITY.get(it[2], 9),
+                                                len(str(it[1]))))
             losers = [it for it in items if it[0] != keeper[0]]
             class_a.append({"media_id": mid, "files": items,
-                            "keeper": keeper, "losers": losers})
+                            "keeper": keeper, "losers": losers, "opens": opens})
 
     # ---- Class B: identical bytes, different media_id -----------------------
     class_b = []
@@ -234,10 +270,40 @@ def cmd_audit(args, out):
     return rep
 
 
+def _delete_unsafe(loser, keeper, opens):
+    """Why a same-media_id copy must NOT be deleted in favour of `keeper`, or '' when it may.
+
+    Quarantine is undoable and is checked afterwards by verify_quarantine; Delete is neither,
+    so it is checked here, before anything is unlinked. A loser may go when it is the same
+    bytes as the keeper, when the keeper opens as an image and the loser does not (a damaged
+    copy beside a whole one), or when both open and show the same pixels. Anything else --
+    a keeper that does not open, two different pictures under one id, no way to tell --
+    keeps the file."""
+    from moonglade.backup import _same_bytes, _same_pixels
+    if _same_bytes(loser, keeper):
+        return ""
+    k_ok, l_ok = opens.get(keeper), opens.get(loser)
+    if k_ok is True and l_ok is False:
+        return ""
+    if k_ok is not True:
+        return "the copy that would be kept does not open as an image"
+    if _same_pixels(loser, keeper) is True:
+        return ""
+    return "not the same picture as the copy kept"
+
+
+def _held_note(held):
+    if not held:
+        return ""
+    return " Kept {:,} cop{} that {} not the same as the one kept.".format(
+        len(held), "y" if len(held) == 1 else "ies", "is" if len(held) == 1 else "are")
+
+
 def cmd_dedup(args, out, db_path):
     """Act on the audit: move redundant copies to _duplicates/ (default) or delete
-    them (--dedup-delete). Keeps the most-organized copy. Dry-run by default.
-    Reconciles catalog.db with what's left on disk afterward."""
+    them (--dedup-delete). Keeps the copy that opens as an image, then the larger, then
+    the most-organized; a Delete removes only a copy proven redundant (_delete_unsafe).
+    Dry-run by default. Reconciles catalog.db with what's left on disk afterward."""
     from moonglade.backup import _ensure_db, PixAIError
     # Dedup is filesystem-truth: it does not need a catalog to run. Reconcile is
     # a bonus, applied only if a catalog exists.
@@ -252,8 +318,15 @@ def cmd_dedup(args, out, db_path):
 
     rep = audit_collection(out, content=content, progress=getattr(args, "progress", None))
     losers = []  # (rel_path, abs_path, what it is a copy of -- the Great Sweep's key)
+    held = []    # (rel_path, why) -- a Delete that would not be safe; the file stays
+    reclaim = rep["totals"]["reclaimable_bytes"]
     for g in rep["class_a"]:
         for (p, rel, b, sz) in g["losers"]:
+            why = _delete_unsafe(p, g["keeper"][0], g.get("opens", {})) if delete else ""
+            if why:
+                held.append((rel, why))
+                reclaim -= sz
+                continue
             losers.append((rel, p, "dup-media:%s" % g["media_id"]))
     for g in rep["class_b"]:
         for (p, rel, b, sz, mid) in g["losers"]:
@@ -261,7 +334,15 @@ def cmd_dedup(args, out, db_path):
 
     action = "DELETE" if delete else "quarantine to _duplicates/"
     print("\nDedup plan: {:,} redundant files to {} ({})".format(
-        len(losers), action, _fmt_bytes(rep["totals"]["reclaimable_bytes"])))
+        len(losers), action, _fmt_bytes(reclaim)))
+    if held:
+        print("Kept, not deleted ({:,}): a copy that is not the same picture as the one kept "
+              "is never deleted. Run --dedup (quarantine) and --verify-dupes to look at them."
+              .format(len(held)))
+        for rel, why in held[:8]:
+            print("  {} ({})".format(rel, why))
+        if len(held) > 8:
+            print("  ... and {:,} more".format(len(held) - 8))
     for rel, _, _ in losers[:8]:
         print("  {}".format(rel))
     if len(losers) > 8:
@@ -269,11 +350,13 @@ def cmd_dedup(args, out, db_path):
 
     if not apply:
         print("\nDry run -- nothing changed. Re-run with --apply to perform it.")
-        if not losers:
+        if not losers and held:
+            _result("Nothing would be deleted.{} Nothing deleted yet.".format(_held_note(held)))
+        elif not losers:
             _result("No duplicates found. Nothing changed.")
         elif delete:
-            _result("{} would be deleted ({}). Nothing deleted yet.".format(
-                _files(len(losers)), _fmt_bytes(rep["totals"]["reclaimable_bytes"])))
+            _result("{} would be deleted ({}).{} Nothing deleted yet.".format(
+                _files(len(losers)), _fmt_bytes(reclaim), _held_note(held)))
         else:
             _result("{} would move to _duplicates/ ({}). Nothing moved yet.".format(
                 _files(len(losers)), _fmt_bytes(rep["totals"]["reclaimable_bytes"])))
@@ -338,12 +421,15 @@ def cmd_dedup(args, out, db_path):
         else:
             print("All quarantined files confirmed redundant -- _duplicates/ is safe "
                   "to delete to reclaim the space.")
-    if not losers:
+    if not losers and held:
+        _result("Nothing deleted.{}".format(_held_note(held)))
+    elif not losers:
         _result("No duplicates found. Nothing changed.")
     elif delete:
-        _result("Deleted {:,} duplicate file{}.{}".format(
+        _result("Deleted {:,} duplicate file{}.{}{}".format(
             removed, "" if removed == 1 else "s",
-            " {:,} could not be deleted.".format(failed) if failed else ""))
+            " {:,} could not be deleted.".format(failed) if failed else "",
+            _held_note(held)))
     else:
         _result("Moved {:,} file{} to _duplicates/.{}".format(
             moved, "" if moved == 1 else "s",
@@ -497,6 +583,13 @@ def reconcile_catalog_with_disk(out_dir, db_path):
 ORGANIZE_MANIFEST = "organize_manifest.csv"
 
 
+def _record_move(mw, mf, out, old, new, ts):
+    """One manifest row, flushed at once so an interrupted run still leaves it undoable."""
+    mw.writerow([str(old.relative_to(out)).replace("\\", "/"),
+                 str(new.relative_to(out)).replace("\\", "/"), ts])
+    mf.flush()
+
+
 def cmd_organize(args, out, img_dir, db_path):
     """Normalize PixAI images into YYYY-MM/ month folders with descriptive,
     readable filenames (prompt_taskid_mediaid) -- one flat scheme, NO batch
@@ -581,6 +674,7 @@ def cmd_organize(args, out, img_dir, db_path):
     _prog = getattr(args, "progress", None)
 
     for n, (src, dst, mid, row) in enumerate(plan):
+        moved_now = False                  # did THIS file move in this run (manifest row)?
         dst.parent.mkdir(parents=True, exist_ok=True)
         if dst.exists() and dst.resolve() != src.resolve():
             # Target already holds this media. Byte-identical -> drop the redundant
@@ -597,18 +691,31 @@ def cmd_organize(args, out, img_dir, db_path):
         else:
             try:
                 src.replace(dst)
-                mw.writerow([str(src.relative_to(out)).replace("\\", "/"),
-                             str(dst.relative_to(out)).replace("\\", "/"), ts])
-                mf.flush()
                 moved += 1
+                moved_now = True
                 final = dst
                 catalog_updates[mid] = final.name
             except OSError as e:
                 print("  move failed {} ({})".format(src.name, e))
                 continue
+            if not args.convert:
+                _record_move(mw, mf, out, src, dst, ts)
         if args.convert:
-            final, note = convert_image(final, args.convert, args.jpeg_quality,
-                                        args.jpeg_bg, keep_original=args.keep_webp)
+            try:
+                final, note = convert_image(final, args.convert, args.jpeg_quality,
+                                            args.jpeg_bg, keep_original=args.keep_webp)
+            except BaseException:
+                if moved_now:
+                    _record_move(mw, mf, out, src, dst, ts)   # the move still stands
+                raise
+            if moved_now:
+                # Record where the file really ended up. A conversion that replaces the
+                # file renames it, and the manifest used to keep the pre-conversion name,
+                # so Undo found nothing there and the move could never be undone.
+                if dst.exists() or not final.exists():
+                    _record_move(mw, mf, out, src, dst, ts)   # original kept or not converted
+                else:
+                    _record_move(mw, mf, out, src.with_suffix(final.suffix), final, ts)
             if note == "pillow-missing":
                 raise PixAIError("--convert needs Pillow:  pip install pillow")
             if note == "ok":
@@ -695,7 +802,8 @@ def cmd_organize(args, out, img_dir, db_path):
 def cmd_undo_organize(args, out):
     """Reverse the moves recorded in organize_manifest.csv (newest run first):
     each new_path is moved back to its old_path. Safe (skips already-reverted),
-    then clears the manifest. Lets a re-normalize be undone if you don't like it."""
+    then clears the manifest of what it applied (a move it could not undo stays for the
+    next run). Lets a re-normalize be undone if you don't like it."""
     from moonglade.backup import _ensure_db
     db_path = _ensure_db(out)
     manifest_path = _paths.decisions_path(out, ORGANIZE_MANIFEST)
@@ -711,6 +819,7 @@ def cmd_undo_organize(args, out):
         print("\nDry run -- nothing moved.")
         return
     reverted = miss = 0
+    failed = []                            # rows Undo could not apply: kept for the next Undo
     for r in reversed(rows):               # undo newest first
         new_p, old_p = out / r["new_path"], out / r["old_path"]
         if old_p.exists() and not new_p.exists():
@@ -718,14 +827,33 @@ def cmd_undo_organize(args, out):
         if not new_p.exists():
             miss += 1
             continue
+        if old_p.exists():
+            # Something already sits at the old place. Moving over it would destroy it.
+            print("  not moved back {} (a file is already at {})".format(
+                r["new_path"], r["old_path"]))
+            failed.append(r)
+            continue
         old_p.parent.mkdir(parents=True, exist_ok=True)
         try:
             new_p.replace(old_p)
             reverted += 1
         except OSError as e:
             print("  revert failed {} ({})".format(new_p, e))
+            failed.append(r)
     # The gallery resolves files by media id (find_files_for_media_id matches both
     # naming layouts), so restored files still resolve without rewriting the
-    # catalog. Clear the manifest now that it's been applied.
+    # catalog. The manifest is cleared only of what was applied: a move that could not be
+    # undone stays in it, so the next Undo tries it again. Before 2026-11-19 the whole
+    # manifest was deleted even when reverts failed, and those moves could never be undone.
+    if failed:
+        failed.reverse()                   # back to the order they were made in
+        with open(manifest_path, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["old_path", "new_path", "ts"])
+            for r in failed:
+                w.writerow([r["old_path"], r["new_path"], r.get("ts", "")])
+        print("Reverted {} file(s); {} already gone; {} could not be moved back and stay in "
+              "the manifest -- run --undo-organize again.".format(reverted, miss, len(failed)))
+        return
     manifest_path.unlink()
     print("Reverted {} file(s); {} already gone. Manifest cleared.".format(reverted, miss))

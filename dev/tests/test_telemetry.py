@@ -647,7 +647,13 @@ def test_enhance_tools_complete(tmp_path, monkeypatch):
         return f"T-ENH-{_seq['n']}"
     monkeypatch.setattr(core, "submit_generation", _submit)
 
+    # Each use is a separate press, past the single sends' double-tap window (3.21.2), so a
+    # repeated preset is a second use rather than a held repeat.
+    clock = [1000.0]
+    monkeypatch.setattr(g.time, "monotonic", lambda: clock[0])
+
     def _run_enhance(**payload):
+        clock[0] += 11
         r = cli.post("/api/enhance", json=payload)
         assert r.status_code == 200
         cli.get("/api/task-status", query_string={"task_id": r.get_json()["task_id"]})

@@ -92,6 +92,13 @@ def _all_live():
     return _live_task(("a", False), ("b", False), ("c", False))
 
 
+def _confirmed(cli, media_id):
+    """A confirm body the way the dialog sends it: the plan its preview showed."""
+    shown = cli.post("/api/delete-image", json={"media_id": media_id, "confirm": False})
+    return {"media_id": media_id, "confirm": True,
+            "plan": (shown.get_json() or {}).get("plan") or "refuse"}
+
+
 def test_it_deletes_only_the_named_image_and_leaves_its_siblings(tmp_path, monkeypatch):
     """The whole point. The task-level delete takes every image of a batch; this must take
     exactly one and leave the rest of the task alone, on PixAI and in the catalog.
@@ -107,7 +114,7 @@ def test_it_deletes_only_the_named_image_and_leaves_its_siblings(tmp_path, monke
         (tmp_path / f).write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
 
-    d = cli.post("/api/delete-image", json={"media_id": "b", "confirm": True}).get_json()
+    d = cli.post("/api/delete-image", json=_confirmed(cli, "b")).get_json()
     assert d.get("ok") is True
     assert seen == {"task": "T1", "media": "b"}, "the wrong image (or task) was deleted"
 
@@ -133,7 +140,7 @@ def test_a_failed_cloud_delete_leaves_the_local_copy_alone(tmp_path, monkeypatch
     (tmp_path / "b.png").write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
 
-    d = cli.post("/api/delete-image", json={"media_id": "b", "confirm": True}).get_json()
+    d = cli.post("/api/delete-image", json=_confirmed(cli, "b")).get_json()
     assert "500" in (d.get("error") or "")
     assert (tmp_path / "b.png").exists(), "the local file was purged despite the cloud failing"
     with sqlite3.connect(str(tmp_path / "catalog.db")) as con:
@@ -158,7 +165,7 @@ def test_a_failed_local_purge_comes_back_as_an_error_body(tmp_path, monkeypatch)
 
     monkeypatch.setattr(pathlib.Path, "replace", _cross_device)
 
-    r = cli.post("/api/delete-image", json={"media_id": "b", "confirm": True})
+    r = cli.post("/api/delete-image", json=_confirmed(cli, "b"))
     assert r.status_code == 200, "a local-purge failure escaped as a raw server error"
     d = r.get_json()
     assert d.get("ok") is not True and d.get("error"), (
@@ -333,7 +340,7 @@ def test_a_confirmed_delete_writes_one_activity_row(tmp_path, monkeypatch):
     cli = _cli(tmp_path, _batch(tmp_path))
 
     assert cli.post("/api/delete-image",
-                    json={"media_id": "b", "confirm": True}).get_json().get("ok") is True
+                    json=_confirmed(cli, "b")).get_json().get("ok") is True
 
     rows = _delete_jobs(tmp_path)
     assert len(rows) == 1, "the tracker got {} rows for one delete".format(len(rows))
@@ -356,7 +363,7 @@ def test_a_whole_task_delete_says_so_on_its_row(tmp_path, monkeypatch):
     cli = _cli(tmp_path, _batch(tmp_path))
 
     assert cli.post("/api/delete-image",
-                    json={"media_id": "b", "confirm": True}).get_json().get("ok") is True
+                    json=_confirmed(cli, "b")).get_json().get("ok") is True
     j = _delete_jobs(tmp_path)[0]
     assert j["status"] == "done"
     assert j["label"] == "Deleted the whole generation from PixAI (last image)", j["label"]
@@ -387,7 +394,7 @@ def test_a_refused_delete_is_logged_as_a_failure_that_names_the_refusal(tmp_path
     (tmp_path / "b.png").write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
 
-    d = cli.post("/api/delete-image", json={"media_id": "b", "confirm": True}).get_json()
+    d = cli.post("/api/delete-image", json=_confirmed(cli, "b")).get_json()
     assert "already deleted" in (d.get("error") or "").lower(), d
 
     j = _delete_jobs(tmp_path)[0]
@@ -410,7 +417,7 @@ def test_a_cloud_delete_that_errors_is_logged_as_a_failure(tmp_path, monkeypatch
     (tmp_path / "b.png").write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
 
-    cli.post("/api/delete-image", json={"media_id": "b", "confirm": True})
+    cli.post("/api/delete-image", json=_confirmed(cli, "b"))
     j = _delete_jobs(tmp_path)[0]
     assert j["status"] == "failed" and "500" in (j.get("error") or ""), j
     assert j["label"] == "PixAI delete failed", j["label"]
@@ -429,7 +436,7 @@ def test_a_lone_image_uses_the_whole_task_mutation(tmp_path, monkeypatch):
     (tmp_path / "b.png").write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
 
-    d = cli.post("/api/delete-image", json={"media_id": "b", "confirm": True}).get_json()
+    d = cli.post("/api/delete-image", json=_confirmed(cli, "b")).get_json()
     assert d.get("ok") is True, d
     assert fired == {"task": "T1"}
     assert (tmp_path / "_deleted" / "b.png").exists()
@@ -445,7 +452,7 @@ def test_a_read_that_fails_deletes_nothing(tmp_path, monkeypatch):
     (tmp_path / "b.png").write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
 
-    d = cli.post("/api/delete-image", json={"media_id": "b", "confirm": True}).get_json()
+    d = cli.post("/api/delete-image", json=_confirmed(cli, "b")).get_json()
     assert d.get("ok") is not True
     assert "nothing was deleted" in (d.get("error") or "").lower(), d
     assert (tmp_path / "b.png").exists()
@@ -463,7 +470,7 @@ def test_an_image_pixai_already_deleted_says_so_and_marks_the_row(tmp_path, monk
     (tmp_path / "b.png").write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
 
-    d = cli.post("/api/delete-image", json={"media_id": "b", "confirm": True}).get_json()
+    d = cli.post("/api/delete-image", json=_confirmed(cli, "b")).get_json()
     assert "already deleted" in (d.get("error") or "").lower(), d
     assert (tmp_path / "b.png").exists(), "it quarantined the only copy left"
     with sqlite3.connect(str(tmp_path / "catalog.db")) as con:
@@ -514,7 +521,7 @@ def test_a_video_clip_is_refused_rather_than_guessed_at(tmp_path, monkeypatch):
     (tmp_path / "b.png").write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
 
-    d = cli.post("/api/delete-image", json={"media_id": "b", "confirm": True}).get_json()
+    d = cli.post("/api/delete-image", json=_confirmed(cli, "b")).get_json()
     assert "video" in (d.get("error") or "").lower(), d
     assert (tmp_path / "b.png").exists()
 
@@ -533,6 +540,25 @@ def test_it_refuses_without_the_confirm_flag(tmp_path, monkeypatch):
     assert called == [], "it deleted without confirmation"
 
 
+@pytest.mark.parametrize("extra", [{}, {"plan": ""}, {"plan": None}], ids=["absent", "empty", "null"])
+def test_a_confirm_without_the_plan_it_confirms_is_refused(tmp_path, monkeypatch, extra):
+    """`confirm: true` with no plan used to skip the "plan changed" refusal and delete what
+    the fresh read said -- for a last-live image, the whole generation. Refused before any
+    session or read (red team, 2026-11-19)."""
+    def _no_session(token_val):
+        raise AssertionError("a session was opened for a confirm with no plan")
+
+    monkeypatch.setattr(core, "_make_session", _no_session)
+    (tmp_path / "b.png").write_bytes(b"x")
+    cli = _cli(tmp_path, _batch(tmp_path))
+    r = cli.post("/api/delete-image", json={"media_id": "b", "confirm": True, **extra})
+    assert r.status_code == 400
+    assert r.get_json()["error"] == core.NO_CONFIRMED_PLAN
+    assert (tmp_path / "b.png").exists()
+    with sqlite3.connect(str(tmp_path / "catalog.db")) as con:
+        assert con.execute("SELECT COUNT(*) FROM catalog WHERE media_id='b'").fetchone()[0] == 1
+
+
 def test_an_imported_file_says_so_instead_of_erroring(tmp_path, monkeypatch):
     """A local import has no PixAI task behind it, so there is nothing on their side to
     delete. Naming the control that DOES apply beats surfacing a mutation error about a
@@ -542,7 +568,7 @@ def test_an_imported_file_says_so_instead_of_erroring(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "delete_batch_media_gql",
                         lambda s, t, m: called.append((t, m)))
     cli = _cli(tmp_path, _batch(tmp_path))
-    d = cli.post("/api/delete-image", json={"media_id": "z", "confirm": True}).get_json()
+    d = cli.post("/api/delete-image", json=_confirmed(cli, "z")).get_json()
     assert "imported" in (d.get("error") or "").lower()
     assert called == [], "it tried to delete an image PixAI never had"
 
@@ -559,7 +585,8 @@ def test_read_only_still_blocks_it(tmp_path, monkeypatch):
                         lambda *a, **k: pytest.fail("READ_ONLY did not stop the mutation"))
     (tmp_path / "b.png").write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
-    d = cli.post("/api/delete-image", json={"media_id": "b", "confirm": True}).get_json()
+    d = cli.post("/api/delete-image",
+                 json={"media_id": "b", "confirm": True, "plan": "per-image"}).get_json()
     # The READ_ONLY message specifically -- "an error came back" would also pass if the
     # route had failed for some unrelated reason and the guard were switched off entirely.
     assert "READ_ONLY" in (d.get("error") or ""), (

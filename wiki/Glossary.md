@@ -10,13 +10,17 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
   opens from the Control Panel's version stamp, from **Control → About Moonglade** on a phone,
   and as the last page of the guide. See [Control Panel](Control-Panel#updates-and-about).
 - **AI Tools** — the **✦ AI Tools** catalog in the gallery header: PixAI's one-click workflow tools,
-  one card each. The entry only appears once **Mirror to PixAI** is armed.
+  one card each. The entry only appears once **Mirror to PixAI** is armed. Hover the entry's name for
+  the one-line version.
 - **the art pack** — the file the app's own art ships in, `moonglade.mgpack`, in the `local`
   folder beside the program (3.19 and earlier kept it beside the program itself; the app moves
   it by itself). Before pack v7 it was `moonglade.dat`; the app renames an old one by itself the
   next time it starts. On Windows, Explorer lists its type as *Moonglade art pack*, with the
   app's icon (set for your own Windows account only). Also called the container, or just the
   pack.
+- **Armed · tier live** — what the **Mirror to PixAI** tile in the Control Panel says while the mirror
+  is on: the AI Tools catalog and the one-click presets are available. **Off · tier hidden** is the
+  same tile with the mirror off, when they stay out of sight.
 - **anchor** — where a Loom shot's spliced opening frame came from: the shot and the take before
   it. When that shot changes take, the card says **anchor changed** (with a warning icon) and offers **Re-anchor** or
   **Keep**. See [The Loom](The-Loom#re-anchor).
@@ -86,8 +90,9 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
   [Generating](Generating#several-at-once-variables-random-and-matrix--and-the-one-confirm).
 - **the mark** — the small emblem beside the title, picked in the Control Panel: from the
   Control Panel's Identity strip.
-- **Mirror to PixAI** — the Maintenance switch that files what you make here out to your pixai.art
-  web library. It runs the opposite way from Live Mirror.
+- **Mirror to PixAI** — the Maintenance switch that signs in to pixai.art as you, so what you make here
+  also lands in your pixai.art web library and PixAI's one-click **AI Tools** work. It runs the
+  opposite way from Live Mirror.
 - **My Art** — the **My Art** destination in the row under the banner: how your published works
   are doing — views, likes and comments.
 - **Nel** — the Athenaeum's archivist and mascot: the face on the welcome cards, About and the
@@ -163,6 +168,8 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
   [Generating](Generating#several-at-once-variables-random-and-matrix--and-the-one-confirm).
 - **the viewer** — the phone's picture screen: the big image with its **placard** (catalog number,
   date and the batch's other pictures) and its button row underneath.
+- **Tier 1** — the badge on an AI Tools card for a tool PixAI keeps behind its first membership tier;
+  **Free** is every other tool. The catalog's **Free** and **Tier 1** buttons filter by it.
 - **the Vigil** — the count of days in a row you have made something, shown in the Folio's header
   and, if you switch it on, in the app header. See
   [The Folio of Honors](Folio-of-Honors#for-completionists).

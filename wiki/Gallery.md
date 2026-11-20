@@ -10,7 +10,7 @@ for prune / reconcile (see [Deleting & Sync](Deleting)).
 ```bash
 python -m moonglade.gallery                          # http://127.0.0.1:5000
 python -m moonglade.gallery --port 5757
-python -m moonglade.gallery --host 0.0.0.0 --https   # LAN, encrypted
+python -m moonglade.gallery --host 0.0.0.0           # LAN: other devices use https://
 python -m moonglade.gallery --rebuild-thumbs         # regenerate thumbnails
 ```
 
@@ -22,7 +22,7 @@ disabled — **`Moonglade Launcher.pyw`** is the everyday launch. All of the ser
 | `--out` | the library folder set in the Control Panel, else `pixai_backup` | the backup folder that holds `catalog.db`. Typing it always wins over the saved setting, for that start only. A run that names its own library never moves one, and refuses a library still in an older layout |
 | `--port` | `5000` | the port to listen on — or the port saved on the Control Panel's **LAN discovery** card (it lives in `local\settings.json`). Typing it always wins |
 | `--host` | `127.0.0.1` | the address to listen on — or the saved one (also in `local\settings.json`). `0.0.0.0` lets other devices on your network in. Typing it always wins |
-| `--https` | off | serve over HTTPS, so everything between a device and Moonglade is encrypted: your Moonglade password and session, and the PixAI sign-in the **Connect from PixAI** bookmark hands over. The certificate is self-signed and made fresh each time the server starts, so browsers warn about it, and the warning can come back after a restart. Needs the `cryptography` package (`pip install cryptography`); without it the server says so and serves plain HTTP. It does not make an iPad or phone home-screen app work: that needs a certificate your devices trust, a later add. See [Using HTTPS](#using-https) |
+| `--https` | off | use HTTPS on **this PC too**. Other devices on your network always get HTTPS once Moonglade listens there (see [Using HTTPS](#using-https)); this switch adds the PC's own `https://localhost:<port>` and stops answering plain `http://` there. Same certificate either way |
 | `--allow-port-reuse` | off | start even if something is already listening on the port. Off on purpose: Windows lets a **second** server share a port that is already serving, and requests then land on either one at random |
 | `--rebuild-thumbs` | off | regenerate every thumbnail, including the ones that already exist |
 | `--skip-thumbs` | off | don't build catalog thumbnails at start-up — a fast boot; missing ones show *no preview* until they are built. Thumbnails for new generations are still made |
@@ -31,19 +31,51 @@ disabled — **`Moonglade Launcher.pyw`** is the everyday launch. All of the ser
 
 ## Using HTTPS
 
-Moonglade serves plain `http://` by default. On the machine running it that is fine; across your
-home network it means your Moonglade password, your session and the Mirror's PixAI sign-in (the
-**Connect from PixAI** bookmark) travel unencrypted. To encrypt them:
+On the PC running Moonglade, the address stays `http://localhost:<port>`: that traffic never leaves
+the PC. Once Moonglade listens on your home network (**Reach: LAN** on the Control Panel's **LAN
+discovery** card, or `--host 0.0.0.0`), **every other device uses `https://`**, at the same address
+and port: your Moonglade password, your session and the Mirror's PixAI sign-in (the **Connect from
+PixAI** bookmark) cross the network encrypted. A device that opens the old `http://` address is sent
+to the `https://` one.
 
-1. `pip install cryptography` once.
-2. Stop Moonglade, open `local\settings.json` beside the launcher, and add the switch to its
-   launch list: `"launch_args": ["--https"]`. Start Moonglade again with **`Moonglade Launcher`**.
-3. Open the gallery at `https://` instead of `http://` (same address and port). The browser warns
-   that the certificate is not trusted, because Moonglade made it itself; accept it to go on. The
-   certificate is new each time the server starts, so the warning can come back after a restart.
+**The certificate warning, and how to stop it.** Moonglade makes its own small certificate
+authority, called **Moonglade (this PC)**, the first time it needs one, and keeps it in `local\`
+beside the launcher. It signs the certificate Moonglade answers with. No browser trusts an
+authority it has never seen, so until a device has it installed, that device's browser warns.
 
-Everything is encrypted only when you reach Moonglade at its `https://` address. A certificate
-your devices trust without a warning, and the iPad home-screen app it would allow, are a later add.
+**Install it once on each device to stop the warning.** On the device, open the **LAN discovery**
+card's link to *this PC's certificate* (or `https://<the address>/moonglade-ca.crt`) and install it:
+
+- **iPhone or iPad:** allow the download, then **Settings → Profile Downloaded → Install**, then
+  **Settings → General → About → Certificate Trust Settings** and turn on full trust for
+  *Moonglade (this PC)*.
+- **Mac:** open the downloaded file in **Keychain Access**, then open *Moonglade (this PC)* there
+  and set **Trust → When using this certificate** to **Always Trust**.
+- **Android:** **Settings → Security → Encryption & credentials → Install a certificate → CA
+  certificate**, then pick the downloaded file. (The exact menu names differ between phones.)
+
+**Check it before you trust it.** The card on the PC shows the authority's **SHA-256 fingerprint**
+(pairs of letters and digits separated by colons). The device shows the same fingerprint in the
+certificate's details while you install it. Install it only if the two match, reading the PC's
+copy on the PC itself; if they don't, stop: something between that device and your PC is
+answering in Moonglade's place.
+
+The authority can only vouch for this PC: it is limited to `localhost`, `.local` names, this PC's
+own name and home-network addresses, so even its key could not vouch for any website.
+
+A device you don't install it on can still go past the warning (Safari calls it visiting the
+website anyway, Chrome **Advanced → Proceed**) after the same fingerprint check against the
+authority in the warning's certificate details. That warning comes back whenever Moonglade renews
+the certificate it answers with: when your router gives the PC a new address, or about every two
+years. On a device with the authority installed, renewals pass without a word.
+
+Making the certificates needs the `cryptography` package, which `requirements.txt` installs.
+Without it, or if the certificate can't be made (a full or read-only drive, for one), Moonglade says
+so at start-up and on the LAN card and serves plain `http://`; other devices' traffic is then
+unencrypted, and **Connect from PixAI** works only on the PC itself.
+
+`--https` (see the table above) also puts the PC's own address on HTTPS. An iPad home-screen app is
+a later add.
 
 ## The header
 
@@ -55,6 +87,11 @@ the right with your account (inbox, gift box, credits, **?**). On an upright 11-
 row is one line when it is quiet (an iPad mini is narrower and takes two); a pinned goal, a claim waiting or a job running sends the end of it to one more
 line, with your account still at the right. Along the banner:
 
+- **Backed up** — the share of your PixAI generations that are in this library. Hover it, or
+  tap it, and a line says what is missing and what fixes it: generations still to fetch (**Sync
+  now** fetches them), and how many failed or were cancelled on PixAI — those never made a
+  picture, so nothing can back them up, and they are not counted. Generations you deleted on
+  PixAI are kept here and not counted either. It reaches 100% only when nothing is missing.
 - **?** — opens the [guide](Home#help-inside-the-app) on this page (the **?** key does the same from
   anywhere outside a text field). The first time you open the gallery, a **Welcome to the stacks**
   card offers a short tour.
@@ -203,6 +240,17 @@ bar first. Open the gallery from the serving machine's own `localhost` address a
 restriction lifts. (Earlier builds showed a **LAN session** chip naming what was hidden;
 the current shell does not.)
 
+### Which names it answers to
+
+**Moonglade answers only to its own names.** It serves a page asked for by an address
+(`localhost`, `127.0.0.1`, the PC's network address such as `http://192.168.1.20:5000`), by
+this PC's name (bare or with `.local`) or by the Bonjour name it advertises. Any other name gets
+*Misdirected request* (421) before anything else happens: that is what stops a web page on some
+other site pointing its own name at your PC and talking to Moonglade from inside your browser.
+If you reach it through a name of your own — a router's `pc.lan`, a reverse proxy — add that
+name to an `allowed_hosts` list in `local\settings.json` (for example
+`"allowed_hosts": ["pc.lan"]`); it takes effect on the next page you open.
+
 ## Help, About and the first-run guide
 
 The round **?** in the header (or the **?** key) opens the Guide: these pages, inside the app.
@@ -271,10 +319,16 @@ rating:>=3 aes:>6                three-plus stars AND aesthetic score above 6
 width:>1000 height:>1000         big renders only (likes: steps: cfg: duration: work too)
 created:2026-07                  July 2026; created:2026 for the year, created:2026-07-04 for a day
 created:<2026                    strictly before 2026 (>, >=, <= also work)
+created:2026Q3                   a quarter (Q1 to Q4); >=, >, <, <= work on a quarter too
+created:2026-08..2026-10         an inclusive range, each end a year, month, day or quarter
+created:2026-09-15..  ..2026Q2   a range open at one end
+created:>=2026-09-15             from a day on (a day, a month or a year, with >, >=, <, <=)
 video:1 nsfw:0                   videos, SFW only (published: too; 1/0, true/false, yes/no)
 collection:"Elf Portraits"       exact collection name, same as the dropdown
 source:api                       online / api / local / deleted, same as the dropdown
 tag:elf lora:detail sampler:euler title:grove batch:B1 filename:mp4
+lora:detail>0.7  lora:*>=0.5     a LoRA's weight: >, >=, <, <=, = (a name, or * for any LoRA)
+lora:"Moon Style"<1              quote a name that has spaces
 task:900000001  media:100000003  exact ids (a bare long number still works as before)
 keeper  reject                   your own mark on a picture (see Collections & curation)
 tag:pose-study                   your own tag; tag: also still reads PixAI's published tags
@@ -287,6 +341,15 @@ ar:3:2  ar:9:16  ar:1.91:1       a shape, within 3% of that ratio
 ar:>2  ar:<0.5                   wider than 2:1 / narrower than 1:2 (width divided by height)
 type:image  type:video  type:loom   which kind: the Loom's own renders are their own kind
 ```
+
+**Numbers and ranges.** `lora:detail` alone is a substring of the LoRA list, as it always was. Put a
+comparison after the name and it reads the weight instead: `lora:detail>0.7` finds a picture whose Detail
+LoRA ran above 0.7 (the name and the weight come from the same LoRA, so two LoRAs cannot trade parts),
+and `lora:*>=0.5` means any LoRA at 0.5 or more.
+
+**Rating many at once.** Tick the pictures you want, then press **1–5** to rate them all (**0** clears);
+the bar that appears over a selection has the same five stars, plus tag, keeper, reject and
+add-to-collection. See [Collections & curation](Collections#rating-keys).
 
 `tag:` reads two stores: PixAI's published art tags (a substring, as it always did) and your own
 personal tags (a whole tag). `art_tags:` keeps the PixAI-only reading. Your marks, tags and notes
@@ -324,6 +387,23 @@ that one image, so your library holds the only copy anywhere. Its detail page sa
 under **More details**. **Videos play
 right in the lightbox** (and on the detail page), so you can browse a mixed grid of
 images and videos with the arrow keys without leaving the overlay.
+
+### Searching from the command line
+
+The same search, without opening the gallery. It reads your local catalog only and never touches the
+network:
+
+```bash
+python -m moonglade --search "elf lora:detail>0.7 created:2026Q3"   # one line per match
+python -m moonglade --search "model:tsubaki" --limit 200            # default is 50; 0 shows all
+python -m moonglade --search "rating:>=4" --json                    # the matches as JSON
+python -m moonglade --search "rating:>=4" --export-csv picks.csv    # every match, as a CSV
+```
+
+Each line is the media id, the date, the model, the rating and the start of the prompt. `--export-csv`
+writes the same columns as the gallery's **Export view**; on its own it exports the whole catalog.
+`python -m moonglade --help` groups the commands under Backup, Library, Create, Account, Maintenance
+and Search.
 
 ### Session stacks
 

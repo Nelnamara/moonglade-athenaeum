@@ -50,3 +50,36 @@ export function ruleLine(r) {
   const key = Object.keys(rule).find((k) => /_ids$/.test(k) && Array.isArray(rule[k]));
   return { kind, ids: key ? rule[key] : [], href: () => null };
 }
+
+/* THE CARD'S "HAVE YOU USED IT" LINE (2026-11-18). `statuses` is one contest's answer from
+   /api/contests/qualify: per rule {kind, need, used, unknown} (moonglade/contest_qualify.py
+   says what "used" can mean -- a picture in this library made with that model or LoRA, any
+   version). An unknown is never written as "not used": a model whose versions could not be
+   read says "couldn't check", and a recipe -- recipes are not recorded per picture -- says so.
+   Returns the line, or null when the contest requires nothing. */
+const plural = (kind, n) => (n === 1 ? kind : kind + "s");
+
+export function qualifyLine(statuses) {
+  const parts = [];
+  for (const s of Array.isArray(statuses) ? statuses : []) {
+    if (!s || typeof s !== "object") continue;
+    const need = Number(s.need) || 0;
+    const used = Number(s.used) || 0;
+    const unknown = Number(s.unknown) || 0;
+    const kind = typeof s.kind === "string" && s.kind ? s.kind : "item";
+    if (need <= 0) continue;
+    const label = "Required " + plural(kind, need) + ": ";
+    if (kind === "recipe" || kind === "item") {
+      parts.push(label + "not recorded here");
+    } else if (used >= need) {
+      parts.push(label + (need === 1 ? "used ✓" : "all " + need + " used ✓"));
+    } else if (unknown > 0 && used === 0) {
+      parts.push(label + "couldn't check");
+    } else if (used === 0) {
+      parts.push(label + "not used yet");
+    } else {
+      parts.push(label + used + " of " + need + " used" + (unknown ? ", " + unknown + " unchecked" : ""));
+    }
+  }
+  return parts.length ? parts.join(" · ") : null;
+}

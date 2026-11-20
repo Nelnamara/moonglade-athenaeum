@@ -7,6 +7,9 @@ websockets   # --watch / --watch-backup, and the web gallery's auto-starting liv
 
 # gallery server
 flask
+# The gallery's HTTPS certificate for other devices on the home network (moonglade/tls.py): made
+# once with this package. Without it the server says so and serves plain HTTP.
+cryptography
 
 # mDNS/Bonjour LAN discovery (the Control Panel Bonjour chip). The app runs without it (no broadcast),
 # but the launcher installs it with the rest of this file.

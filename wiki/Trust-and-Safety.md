@@ -79,11 +79,11 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   it belongs to the same PixAI account as your API key. It is stored on the server machine;
   the tile shows how many days it has left, never the credential itself. If you click the
   bookmark on another device on your home network, the sign-in travels from that device to
-  the server **encrypted only when you reach Moonglade over `https://`**. Moonglade serves
-  plain `http://` unless you turn on its `--https` switch (see
-  [The Gallery](Gallery#running-it-from-a-terminal)), and over plain `http://` the sign-in
-  travels **unencrypted**, the same way your Moonglade login does. It is never accepted
-  from outside your home network.
+  the server **encrypted, always**: from another device Moonglade takes it only over its
+  `https://` address and refuses it over plain `http://` (see
+  [The Gallery → Using HTTPS](Gallery#using-https)). It is never accepted from outside your
+  home network. **Disconnect** on the tile (from any device on your home network) makes Moonglade forget it and stop renewing it;
+  pixai.art's own sessions page is where the sign-in itself is ended.
   And it's a hard switch, not a preference: when
   mirroring is on and the session isn't usable, the submit **refuses and spends nothing** —
   it never quietly falls back to your API key and files the piece somewhere you didn't
@@ -101,6 +101,11 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   started* and is never re-sent, a training run that may have started can't be started again
   for a while, and a Loom render that the page lost touch with stays held until you check
   Activity yourself.
+- **Answer a web page that borrowed your PC's address.** A page on another site can point a
+  name of its own at your PC (DNS rebinding) and try to talk to Moonglade from inside your
+  browser — on a fresh install with no account yet, that could have reached the first-account
+  form. Moonglade answers only to its own names and addresses and refuses every other name
+  before anything runs ([The Gallery](Gallery#which-names-it-answers-to)).
 - **Be reached by anyone who hasn't signed in.** As of **v2.0.0** the gallery is default-deny:
   every route except the login page itself requires an account, and that applies on the
   machine running the server exactly as it does over the network. Nothing is browsable
@@ -109,12 +114,21 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   still be cleared locally), and the static pieces the login page needs to render: your
   branding art and the web-app manifest, none of which carries any library content. Sessions
   are signed cookies over scrypt-hashed passwords,
-  rate-limited per address. Over the network, your password and that cookie are encrypted
-  only when you reach Moonglade over `https://`: plain `http://` is the default, and the
-  `--https` switch ([The Gallery](Gallery#running-it-from-a-terminal)) turns encryption on. **Log Out** signs out the device you pressed it on and nothing
-  else — your other devices stay signed in. If a device is lost, or you think a session was
-  captured, **change your password** in **Control Panel → Accounts → Manage…**: that signs out every other
-  device on your account at once and keeps the one you changed it from. (Nothing that merely
+  rate-limited per address. Every other device on your network reaches Moonglade over
+  `https://`, so your password and that cookie cross the network encrypted, and the cookie is
+  marked so a browser never sends it over plain `http://`; only the server machine's own
+  `http://localhost`, which never leaves it, stays plain
+  ([The Gallery → Using HTTPS](Gallery#using-https)). A device's browser warns about the
+  certificate until you install this PC's certificate on it once; check its fingerprint against
+  the one the Control Panel's **LAN discovery** card shows before you install it or go on. That
+  certificate can only vouch for this PC's own names and home-network addresses, never for a
+  website. A sign-in lasts at most 30
+  days, however often it is used. **Log Out** signs out the device you pressed it on and
+  nothing else — your other devices stay signed in — and it ends that session on the server
+  too, so a copy of its cookie stops working with it. If a device is lost, or you think a
+  session was captured, press **sign out all devices** beside your name in **Control Panel →
+  Accounts → Manage…**, or **change your password** there: either signs out every other
+  device on your account at once. (Nothing that merely
   *links* to the sign-out address can sign anyone out — it only answers the button's own
   request.) **Log Out also clears anything your browser
   cached locally** — installing this as an app (see [FAQ](FAQ)) keeps a copy of images you've
@@ -187,6 +201,27 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
 
 - **Send your credentials anywhere but PixAI's own API.** `config.json` (your API key) and
   the git-ignored `private/` notes never leave your machine and are never logged or uploaded.
+  On the machine itself, the files that hold a secret — `config.json` (the API key, the
+  sign-in key and the account passwords' hashes), `local\mirror_session.json` (the Mirror's
+  PixAI sign-in) and `local\tls_key.pem` (the network certificate's key) — are readable by
+  your own Windows account only (and the system), set every time Moonglade writes them and
+  once at each start. Another Windows account on the same PC cannot read them. Keeping the
+  app under your own user folder still matters: the program files themselves keep the
+  folder's permissions.
+- **Act on a request another web page sent.** Anything that changes something — a save, a
+  delete, a spend, a stop — is refused unless it comes from one of Moonglade's own pages, at
+  the address you opened. A page from another website cannot, and neither can a page served
+  from another port on the same PC (another program's web page, a second Moonglade): the
+  browser says where each request came from, and Moonglade checks it before anything else.
+  Moonglade's own pages also refuse to be shown inside another page, and run only their own
+  scripts.
+- **Take files without limit.** One upload or import is capped, and a zip is unpacked only
+  up to a size and a file count, counted as it is written; past either, it is refused with a
+  sentence saying so and nothing in it is imported.
+- **Update to anything but the release it announced.** The Control Panel's one-click
+  **Update** moves the install to exactly the release it offered you (its tag), and only by
+  a fast-forward from where it is; a checkout that has its own changes is refused and left
+  as it was.
 
 ## The `READ_ONLY` flag
 

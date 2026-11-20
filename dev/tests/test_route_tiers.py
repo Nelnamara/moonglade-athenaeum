@@ -165,6 +165,7 @@ TIER_SNAPSHOT = [
     "/api/contest/mine [GET] LOGIN",
     "/api/contest/sync [POST] LOGIN",
     "/api/contests [GET] LOGIN",
+    "/api/contests/qualify [GET] LOGIN",
     "/api/curate [POST] LOGIN",
     "/api/curate/restore [POST] LOGIN",
     "/api/delete-image [POST] LOCALHOST",
@@ -244,7 +245,9 @@ TIER_SNAPSHOT = [
     "/api/loom/submit-abandon [POST] LOGIN",
     "/api/loom/submit-status [GET] LOGIN",
     "/api/loom/video-duration [GET] LOGIN",
+    "/api/mirror/connect [POST] LOGIN",
     "/api/mirror/connect-token [POST] LOGIN",
+    "/api/mirror/disconnect [POST] LOGIN",
     "/api/mirror/enable [POST] LOCALHOST",
     "/api/mirror/status [GET] LOGIN",
     "/api/model-saved/old [GET] LOGIN",
@@ -366,6 +369,7 @@ TIER_SNAPSHOT = [
     "/loom/dist/<path:fname> [GET] LOGIN",
     "/loom/vendor/<path:fname> [GET] LOGIN",
     "/mirror/connect [GET] LOGIN",
+    "/moonglade-ca.crt [GET] PUBLIC",
     "/next/assets/<path:fname> [GET] PUBLIC",
     "/static/<path:filename> [GET] LOGIN",
     "/thumbs/<media_id>.jpg [GET] LOGIN",
@@ -392,6 +396,9 @@ PUBLIC_EXPECTED_STATUS = {
     ("api_logout", "POST"): {200},  # anonymous: authorized is False, csrf is never checked
     ("next_assets", "GET"): {404}, # missing bundle file 404s; it must never redirect to /login
     ("branding", "GET"): {404},    # missing art 404s; it must never redirect to /login
+    # This PC's certificate authority: public by nature (every handshake hands it out), fetched
+    # by a device before it signs in. No HTTPS in a test app, so it 404s -- never a redirect.
+    ("moonglade_ca_certificate", "GET"): {404},
 }
 
 # A few routes only reach a meaningful decision with a meaningful payload.

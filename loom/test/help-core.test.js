@@ -207,6 +207,12 @@ describe("what's new", () => {
     assert.deepEqual(whatsNewPlan({ seen: "3.15", display: "3.15", kind: "minor", hasLibrary: true }),
       { show: false, mark: false });
   });
+  test("an account that stored the old x.y form is not re-told about x.y.0 (2026-11-18)", () => {
+    assert.deepEqual(whatsNewPlan({ seen: "3.21", display: "3.21.0", kind: "minor", hasLibrary: true }),
+      { show: false, mark: false });
+    assert.equal(whatsNewPlan({ seen: "3.21", display: "3.21.1", kind: "patch", hasLibrary: true }).show, true);
+    assert.equal(whatsNewPlan({ seen: "3.2", display: "3.21.0", kind: "minor", hasLibrary: true }).show, true);
+  });
   test("a brand-new account is noted, not told it was updated", () => {
     assert.deepEqual(whatsNewPlan({ seen: undefined, display: "3.15", kind: "minor", hasLibrary: false }),
       { show: false, mark: true });

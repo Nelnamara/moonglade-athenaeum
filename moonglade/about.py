@@ -93,13 +93,15 @@ def md_plain(text):
 
 
 def display_version(version):
-    """What the guide prints for a version: x.y for a .0 release, x.y.z for a patch --
-    the same string `seen.whatsnew` stores, so 3.14 -> 3.14.1 is a change and 3.14.0
-    -> 3.14 is not."""
+    """What the guide prints for a version: always the full x.y.z, the same string the
+    build stamp and the Panel's About rows print (one version format everywhere,
+    2026-11-18; before that a .0 release printed as x.y). It is also what `seen.whatsnew`
+    stores; an account that stored the old x.y form is read as x.y.0 (helpCore.js
+    whatsNewPlan), so the change never re-announces a release."""
     v = _updater.version_tuple(version)
     if not v:
         return str(version or "")
-    return "%d.%d" % v[:2] if v[2] == 0 else "%d.%d.%d" % v
+    return "%d.%d.%d" % v
 
 
 def release_kind(version):

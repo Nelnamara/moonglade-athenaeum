@@ -177,9 +177,10 @@ def test_about_reads_the_running_versions_entry_not_the_newest(tmp_path):
 
 
 def test_release_size_and_display_version():
-    assert (about_mod.display_version("3.15.0"), about_mod.release_kind("3.15.0")) == ("3.15", "minor")
+    # one version format everywhere (2026-11-18): a .0 release prints in full too
+    assert (about_mod.display_version("3.15.0"), about_mod.release_kind("3.15.0")) == ("3.15.0", "minor")
     assert (about_mod.display_version("3.15.2"), about_mod.release_kind("3.15.2")) == ("3.15.2", "patch")
-    assert (about_mod.display_version("4.0.0"), about_mod.release_kind("4.0.0")) == ("4.0", "major")
+    assert (about_mod.display_version("4.0.0"), about_mod.release_kind("4.0.0")) == ("4.0.0", "major")
 
 
 def test_the_pack_version_reads_the_installed_marker(tmp_path):

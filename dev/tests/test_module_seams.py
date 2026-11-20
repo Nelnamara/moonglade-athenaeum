@@ -119,8 +119,11 @@ SEAMS = {
         "_video_faststart_attempt", "video_faststart"]},
     "moonglade.mirror": {"from": "moonglade.backup", "names": [
         "MIRROR_REFRESH_PATH", "MIRROR_REFRESH_WHEN_DAYS_LEFT", "MIRROR_TOKEN_LIFE_S",
-        "MIRROR_WEB_USER_AGENT", "MIRROR_WEB_ORIGIN", "_b64url_decode",
-        "jwt_claims", "jwt_expiry", "jwt_days_left", "mirror_needs_refresh", "_is_api_key",
+        "LOCALSTORAGE_JWT_KEY", "MIRROR_WEB_USER_AGENT", "MIRROR_WEB_ORIGIN", "_b64url_decode",
+        "jwt_claims", "jwt_expiry", "jwt_days_left", "mirror_needs_refresh", "_read_file_shared",
+        "_lvarint", "_snappy_decompress", "_lvldb_decompress_block", "_lvldb_block_pairs",
+        "_LVLDB_SSTABLE_MAGIC", "_lvldb_sstable_entries", "_lvldb_log_entries",
+        "_lvldb_value_to_jwt", "_pick_pixai_token", "read_browser_jwt", "_is_api_key",
         "_renewal_headers", "_fresh_pixai_token", "refresh_jwt", "_drop_cookies", "_refresh_last",
         "_mirror_lock", "_MIRROR_REFRESH_COOLDOWN", "MIRROR_RENEW_BACKOFF_CAP_S",
         "MIRROR_RENEW_FLOOR_S", "MIRROR_RENEW_TICK_S", "_mirror_renewal", "_mirror_renewal_reset",
@@ -254,6 +257,7 @@ SOURCE_READERS = {
     "tests/test_read_only.py": ("moonglade.backup",),
     "tests/test_module_seams.py": ("moonglade.backup", "moonglade.gallery"),   # every module
     "tests/test_rest_delete_and_renewal.py": ("moonglade.backup", "moonglade.gallery"),
+    "tests/test_security_review_fixes.py": ("moonglade.gallery",),
     "tests/test_server_stop_record.py": ("moonglade.gallery",),
     "tests/test_settings_store.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_setup_prepare.py": ("moonglade.backup", "moonglade.gallery"),
@@ -263,6 +267,7 @@ SOURCE_READERS = {
     "tests/test_training_advanced.py": ("moonglade.backup",),
     "tests/test_training_parity.py": ("moonglade.backup",),
     "tests/test_tsubaki3_image_gate.py": ("moonglade.backup", "moonglade.gallery"),
+    "tests/test_unclear_single_sends.py": ("moonglade.backup",),
     "tests/test_updater.py": ("moonglade.gallery",),
     "tests/test_video_tsubaki.py": ("moonglade.backup",),
     "tests/test_watch.py": ("moonglade.gallery",),
@@ -803,6 +808,25 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_telemetry.py', 'moonglade.pixai_client'),
     ('tests/test_telemetry.py', 'moonglade.media_tools'),
     ('tests/test_telemetry.py', 'moonglade.mirror'),
+    # 2026-11-19 security review: it reads gallery.py for main()'s startup secrets sweep and
+    # three upload routes' named caps -- names that live in gallery.py itself, none moved.
+    ('tests/test_security_review_fixes.py', 'moonglade.about'),
+    ('tests/test_security_review_fixes.py', 'moonglade.account_prefs'),
+    ('tests/test_security_review_fixes.py', 'moonglade.achievements'),
+    ('tests/test_security_review_fixes.py', 'moonglade.branding'),
+    ('tests/test_security_review_fixes.py', 'moonglade.contest_sync'),
+    ('tests/test_security_review_fixes.py', 'moonglade.dupes'),
+    ('tests/test_security_review_fixes.py', 'moonglade.health'),
+    ('tests/test_security_review_fixes.py', 'moonglade.living'),
+    ('tests/test_security_review_fixes.py', 'moonglade.scan'),
+    ('tests/test_security_review_fixes.py', 'moonglade.series'),
+    ('tests/test_security_review_fixes.py', 'moonglade.telemetry'),
+    ('tests/test_security_review_fixes.py', 'moonglade.updater'),
+    # 3.21.2 (L1): test_unclear_single_sends reads the CLI runners' and main()'s own source
+    # (run_generate*, run_reference_video, run_edit_image, main), which stayed in backup;
+    # nothing it reads moved to pixai_client or mirror.
+    ('tests/test_unclear_single_sends.py', 'moonglade.pixai_client'),
+    ('tests/test_unclear_single_sends.py', 'moonglade.mirror'),
 }
 
 

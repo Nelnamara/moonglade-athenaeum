@@ -35,7 +35,7 @@ QUICK START
   python -m moonglade --max 40           # small test first
 """
 
-__version__ = "3.21.1"
+__version__ = "3.21.2"
 
 import argparse
 import base64
@@ -62,9 +62,15 @@ from moonglade import mirror as _mirror
 from moonglade import organize as _organize
 from moonglade import paths as _paths
 from moonglade import pixai_client as _pixai_client
+from moonglade import secure_files as _secure_files
 from moonglade import telemetry as _telemetry
 from moonglade.gallery import (CATALOG_FIELDS, init_db, migrate, load_catalog,
+                            query_catalog, catalog_csv_text,
                             save_catalog, _db_is_empty, rows_for_media_ids,
+                            # A save of rows built from an earlier read: re-reads the
+                            # current rows in the write transaction so an edit made
+                            # meanwhile is never undone (2026-11-19).
+                            save_catalog_over_snapshot,
                             # The row-level artwork write (see run_sync_artworks): one
                             # narrow UPDATE of the eleven PixAI-owned columns, keyed by
                             # media_id -- imported the same way its whole-table siblings
@@ -137,6 +143,37 @@ class LocalRefusal(PixAIError):
     Nothing reached PixAI, so a spend guard treats it as a definite refusal
     (definite_refusal) and never tells the user a run "may have started" (waves 2+3 review,
     F4). Still a PixAIError, so every existing catch site is unchanged."""
+
+
+class PixAIAuthError(PixAIError):
+    """PixAI answered 401 on the GraphQL road (or a write that names it): the credential was
+    refused before anything ran. Typed so a spend guard reads it by type, never by its
+    message's "401 " prefix (DESIGN_3.22 2.6). Still a PixAIError with the same message."""
+
+
+def graphql_error(errors, data=None, code=None):
+    """The exception the GraphQL transport raises for an answer carrying `errors`: a PixAIError
+    whose message is "GraphQL error: <errors>" (500 characters), with the whole list on
+    `graphql_errors` and the answer's `data` on `graphql_data`. `errors` may be a list of
+    error dicts, or text -- a JSON list, else one error of that message -- for a caller (or a
+    test) that only has words; `code` puts PixAI's code where its site reads one
+    (`extensions.exception.name`) on a text error. The spend classifier reads the
+    attributes, never the message."""
+    if isinstance(errors, str):
+        try:
+            parsed = json.loads(errors)
+        except ValueError:
+            parsed = None
+        errors = parsed if isinstance(parsed, list) else [{"message": errors}]
+    elif not isinstance(errors, list):
+        errors = [{"message": str(errors)}]
+    if code:
+        errors = [dict(e, extensions={"exception": {"name": code}}) if isinstance(e, dict)
+                  and "extensions" not in e else e for e in errors]
+    err = PixAIError("GraphQL error: " + json.dumps(errors)[:500])
+    err.graphql_errors = errors
+    err.graphql_data = data
+    return err
 
 
 class PixAIRestError(PixAIError):
@@ -328,13 +365,15 @@ def _save_config(cfg):
     data = json.dumps(cfg, indent=2)          # serialize BEFORE touching disk
     tmp = path.with_name(path.name + ".tmp-{}".format(os.getpid()))
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(data)
-            f.flush()
-            os.fsync(f.fileno())
+        # Secrets at rest (app security review 2026-11-19, finding 5): the API key, the
+        # session signing key and the account hashes are this user's alone. The temp file is
+        # made owner-only while still EMPTY, before the secrets are written into it, so no copy
+        # of them ever sits readable; the result is restricted again after the replace.
+        _secure_files.write_private(tmp, data)
         for attempt in range(5):
             try:
                 os.replace(tmp, path)
+                _secure_files.restrict_to_owner(path)
                 return
             except PermissionError:
                 # Windows only: an AV scanner or indexer can transiently hold the
@@ -1438,7 +1477,10 @@ def _same_pixels(a, b):
             if ia.size != ib.size:
                 return False
             ra, rb = ia.convert("RGBA"), ib.convert("RGBA")
-            return ImageChops.difference(ra, rb).getbbox() is None
+            # Every band's extremes, not getbbox(): on an RGBA image getbbox() looks at
+            # the alpha band only (Pillow 10+), so any two opaque pictures "matched" and a
+            # different picture under the same id passed as a metadata-only copy.
+            return all(hi == 0 for _lo, hi in ImageChops.difference(ra, rb).getextrema())
     except Exception:
         return None
 
@@ -2238,8 +2280,8 @@ def delete_task(session, task_id):
         raise PixAIError(_ssl_help())
     except PixAIRestError as e:
         if e.status == 401:
-            raise PixAIError("401 Unauthorized -- PixAI refused the API key; task {} was not "
-                             "deleted.".format(tid))
+            raise PixAIAuthError("401 Unauthorized -- PixAI refused the API key; task {} was "
+                                 "not deleted.".format(tid))
         if e.status == 403:
             raise PixAIError("PixAI says task {} is not yours to delete (403); nothing was "
                              "deleted.".format(tid))
@@ -2324,6 +2366,10 @@ def plan_image_delete(session, task_id, media_id):
     return _image_delete_plan(task_detail_gql(session, str(task_id or "").strip()), media_id)
 
 
+NO_CONFIRMED_PLAN = ("This delete did not say which delete you agreed to, so nothing was "
+                     "deleted. Open the delete dialog again and confirm from there.")
+
+
 def delete_image_routed(session, task_id, media_id, confirmed_plan=None):
     """Delete ONE image from PixAI through whichever mutation PixAI accepts for it.
 
@@ -2337,9 +2383,12 @@ def delete_image_routed(session, task_id, media_id, confirmed_plan=None):
          too, but checking here means a read-only install makes NO network call at all for
          a delete, rather than quietly reading and then refusing.
       2. Read and route (`plan_image_delete`). A refusal returns here with nothing sent.
-      3. `confirmed_plan`, when given, is the plan the user was shown. If the fresh route
+      3. `confirmed_plan` is the plan the user was shown, and it is REQUIRED: a delete
+         with no plan is refused before the read, with nothing sent. If the fresh route
          disagrees, the task changed underneath the dialog and this refuses rather than
-         doing something the user did not agree to.
+         doing something the user did not agree to. (Until 2026-11-19 a missing plan
+         skipped that comparison, so a confirm without one deleted whatever the fresh
+         read said, a whole generation included.)
       4. Fire exactly one branch. No loop wraps either call: a destructive mutation
          re-sent after a lost response can fire again against a task that has already
          changed (dev/tests/test_delete_routing.py pins this structurally, and
@@ -2347,10 +2396,14 @@ def delete_image_routed(session, task_id, media_id, confirmed_plan=None):
     """
     _check_read_only("delete an image from your PixAI account")
     task_id, media_id = str(task_id or "").strip(), str(media_id or "").strip()
+    confirmed_plan = str(confirmed_plan or "").strip()
+    if not confirmed_plan:
+        return ImageDeletePlan(
+            "refuse", NO_CONFIRMED_PLAN, 0, [], "", [])
     plan = plan_image_delete(session, task_id, media_id)
     if plan.plan == "refuse":
         return plan
-    if confirmed_plan and str(confirmed_plan) != plan.plan:
+    if confirmed_plan != plan.plan:
         return ImageDeletePlan(
             "refuse",
             "What this delete would do changed while the dialog was open, so nothing was "
@@ -4123,8 +4176,13 @@ def carry_local_fields(row, known):
         wiped exactly the fields listed above; a finished generation polled twice was
         enough to do it. Four of the seven builders still had no carry at all until the
         helper gave them one.
-      * run_download's page saves and its backfill pass, which build their rows from
-        the feed rather than through build_catalog_row and so still apply it directly.
+      * run_download's page saves, which build their rows from the feed rather than
+        through build_catalog_row; `save_catalog_over_snapshot` applies the same rule.
+
+    `known` is a snapshot, so it goes stale while a writer works: every writer that
+    carries saves through `save_catalog_over_snapshot`, which merges over the rows as they
+    are at write time and never writes back a row deleted meanwhile (2026-11-19: a Sync
+    undid ratings, collections and deletes made in the gallery while it ran).
     """
     base = dict(known.get(row.get("media_id", ""), {}))
     for k, v in row.items():
@@ -4352,11 +4410,13 @@ def _make_session(token_val, resolve_user=True):
         "apollo-require-preflight": "true",
         "x-apollo-operation-name": OPERATION_NAME,
     })
-    # Auto-resolve the user id from the API key when it isn't pinned in config.
+    # Auto-resolve the user id from the API key when it isn't pinned in config. Asked through
+    # the client, so a key PixAI refuses still resolves on the Mirror sign-in (a read).
     if not USER_ID and resolve_user:
         if have_api_key:
             try:
-                USER_ID = resolve_user_id(session)
+                USER_ID = resolve_user_id(
+                    _pixai_client.PixAIClient(session, auth_kind="api-key", read_fallback=True))
                 vlog("resolved USER_ID from API key: {}".format(USER_ID))
             except Exception as e:
                 raise PixAIError(
@@ -4369,7 +4429,8 @@ def _make_session(token_val, resolve_user=True):
     # Hand the resolved account id to the client so `client.user_id` carries it directly.
     # The module global stays as the config seed / resolution home and the client's own
     # `or USER_ID` fallback, but business logic now reads the id off the client, not here.
-    return _pixai_client.PixAIClient(session, auth_kind="api-key", user_id=USER_ID)
+    return _pixai_client.PixAIClient(session, auth_kind="api-key", user_id=USER_ID,
+                                     read_fallback=True)
 
 
 def run_probe(args):
@@ -5016,7 +5077,7 @@ def run_sync_videos(args):
             elif item == "missing":
                 missing += 1
     if new_rows:
-        save_catalog(db_path, new_rows)   # the carry already happened in build_catalog_row
+        save_catalog_over_snapshot(db_path, new_rows, known)   # carried in build_catalog_row; merged over the rows as they are NOW
     print("Videos saved/present: {}{}.".format(
         ok, " | {} had no resolvable file url".format(missing) if missing else ""))
     return {"i2v_tasks": len(i2v_nodes), "videos": ok}
@@ -5226,7 +5287,7 @@ def run_import_local(args):
         vlog("imported {} ({})".format(rel, "video" if is_vid else "image"))
 
     if rows:
-        save_catalog(db_path, rows)
+        save_catalog_over_snapshot(db_path, rows, known)
     print("Imported {} new local file(s){}; {} already cataloged.".format(
         made, " (copied into the backup)" if external else "", skipped))
     # Anything imported before content-addressing came in still carries its original
@@ -5846,6 +5907,17 @@ def _params_video_models(params):
             if isinstance(blk, dict) and blk.get("model"):
                 out.append(blk["model"])
     return out
+
+
+def check_params_retired(params, now=None):
+    """Refuse a `parameters` object that names a retired video engine, whoever built it.
+
+    The builders check the engine they are handed, but a raw `--params-json` never passes
+    through a builder, and the three CLI create roads (--generate-video, --reference-video,
+    --edit-image) send their mutation directly rather than through submit_generation. Each
+    calls this as soon as it has its parameters, before any network call (2026-11-19)."""
+    for _vm in _params_video_models(params):
+        check_video_model_retired(_vm, now)
 
 
 def video_model_id(name):
@@ -6549,13 +6621,15 @@ def chat_editing_scenes(session):
     return d.get("chatEditingScenes") or []
 
 
-def submit_scene(session, scene_id, media_ids, preset="random", custom=None, selector_values=None):
+def submit_scene(session, scene_id, media_ids, preset="random", custom=None, selector_values=None,
+                 on_send=None):
     """Submit a chat-editing scene task (createChatEditingSceneTask) -> task id. The generate
     half of the Bridge AI-Tools tier. SPENDS, so it goes through gql_mutate (SINGLE attempt, no
     retry -- a re-POST after a lost response pays twice) and MUST run on the mirror JWT; the
     caller passes _check_read_only first at the route choke, exactly like /api/enhance ->
     submit_generation. `preset` is a preset key, "random", or "custom" (with `custom` text);
-    `selector_values` is [{id, value}] for the scene's selectors (e.g. aspect-ratio)."""
+    `selector_values` is [{id, value}] for the scene's selectors (e.g. aspect-ratio).
+    `on_send(input)` is called immediately before the mutation (observation only)."""
     _check_read_only("submit chat-editing scene")
     inp = {"sceneId": str(scene_id),
            "mediaIds": [str(m) for m in (media_ids or []) if m],
@@ -6565,8 +6639,14 @@ def submit_scene(session, scene_id, media_ids, preset="random", custom=None, sel
     if selector_values:
         inp["selectorValues"] = [{"id": str(s["id"]), "value": s["value"]}
                                  for s in selector_values if s.get("id")]
+    _observe_send(on_send, inp)
     d = gql_mutate(session, _SCENE_SUBMIT_M, {"input": inp})
-    return ((d or {}).get("createChatEditingSceneTask") or {}).get("id")
+    tid = ((d or {}).get("createChatEditingSceneTask") or {}).get("id")
+    if not tid:
+        # An answer with no task id is not a success and not a refusal: the task may exist
+        # (3.21.2). Raised AFTER the send, so every caller reads it "may have started".
+        raise PixAIError("scene: no task id returned: " + json.dumps(d)[:200])
+    return str(tid)
 
 
 def _gen_video_parameters(args):
@@ -7177,7 +7257,12 @@ def run_generate(args):
         _check_read_only("submit a generation (spends credits)")
         print("Submitting generation task...")
         _apply_kaisuuken(session, params, args)
-        task_id = submit_generation(session, params)
+        # 3.21.2 (L1): an answer that cannot show whether the task was made says so in plain
+        # words and exits non-zero -- never a raw transport error that reads like "nothing
+        # happened, try again". `reached` is submit_generation's own mark just before the send.
+        reached = spend_watch()
+        task_id = _cli_send_once(lambda: submit_generation(session, params),
+                                 reached=lambda: reached.v)
         print("  task id:", task_id)
 
         _poll_task_status(session, task_id, getattr(args, "poll_timeout", 300),
@@ -7304,7 +7389,7 @@ def run_generate(args):
         saved.append(str(path))
 
     if rows:
-        save_catalog(db_path, rows)
+        save_catalog_over_snapshot(db_path, rows, known)
 
     videos = []
     if vouts:
@@ -7489,7 +7574,7 @@ def _download_video_task(session, result, task_id, out, args, params):
         rows.append(full)
         saved.append(str(path))
     if rows:
-        save_catalog(db_path, rows)
+        save_catalog_over_snapshot(db_path, rows, known)
     return saved
 
 
@@ -7645,7 +7730,7 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
         make_thumbnail(path, thumb_dir / "{}.jpg".format(mid))
         saved.append(str(path))
     if rows:
-        save_catalog(db_path, rows)
+        save_catalog_over_snapshot(db_path, rows, known)
     return saved
 
 
@@ -8728,8 +8813,7 @@ def submit_generation(session, params, *, on_send=None, exact=False):
     for, and the Turbo fallback would also flip the process-wide _turbo_refused. It goes out
     once; PixAI's refusal comes back in plain words. It never carries a card."""
     _check_read_only("submit a generation (spends credits)")
-    for _vm in _params_video_models(params):
-        check_video_model_retired(_vm)       # before any network call: no spend, no round-trip
+    check_params_retired(params)             # before any network call: no spend, no round-trip
     lane = is_lane_request(params)
     if lane and params.get("kaisuukenId"):
         raise PixAIError(_UNLIMITED_NO_CARD)
@@ -8763,6 +8847,7 @@ def submit_generation(session, params, *, on_send=None, exact=False):
     listed, members_only = _profile_listing(session, params)
 
     def _send(p):
+        _mark_spend_reached()                                # 3.21.2: this thread's spend mark
         if on_send is not None:
             try:
                 on_send(copy.deepcopy(p))
@@ -8782,7 +8867,9 @@ def submit_generation(session, params, *, on_send=None, exact=False):
             # anything else -- a partial success (the mutation's data came back beside the
             # errors, review N2), a timeout -- is passed on as it came, because it does not
             # prove that and must read may_have_started, never refused.
-            if definite_refusal(e) and str(e).startswith("GraphQL error"):
+            # Keyed on the type and the transport's structured `errors` (classify_outcome's
+            # rule), never on the message text (DESIGN_3.22 2.6, L2).
+            if definite_refusal(e) and getattr(e, "graphql_errors", None):
                 refused = PixAIError(_UNLIMITED_REFUSED + ": " + _graphql_reason(e))
                 refused.graphql_data = getattr(e, "graphql_data", None)
                 refused.refused = True       # a definite refusal, for a run's job state
@@ -8964,21 +9051,67 @@ def price_fixer(session, body):
         return None
 
 
-def submit_fixer(session, media_id, boxes):
+# THE SPEND MARK (3.21.2, L1). A caller that must tell "never reached the send" from "sent,
+# answer unclear" -- a web single send, a CLI runner -- takes a fresh mark for its thread with
+# spend_watch(); each create marks it immediately before its one spend request
+# (_mark_spend_reached: submit_generation's send, submit_fixer, submit_scene). Thread-local,
+# because a request's send runs on the request's own thread; observation only, it changes
+# nothing that is sent.
+_SPEND_WATCH = threading.local()
+
+
+class _SpendMark:
+    __slots__ = ("v",)
+
+    def __init__(self):
+        self.v = False
+
+
+def spend_watch():
+    """A fresh spend mark for this thread: `.v` turns True once a create in this thread
+    reaches its spend request. Replaces any earlier mark of the thread."""
+    mark = _SpendMark()
+    _SPEND_WATCH.mark = mark
+    return mark
+
+
+def _mark_spend_reached():
+    mark = getattr(_SPEND_WATCH, "mark", None)
+    if mark is not None:
+        mark.v = True
+
+
+def _observe_send(on_send, payload):
+    """Mark this thread's spend as reached, and tell an `on_send` observer what is about to go
+    out (a deep copy). Observation only: an exception inside the observer is swallowed, so a
+    recorder can never block or alter a spend."""
+    _mark_spend_reached()
+    if on_send is None:
+        return
+    try:
+        on_send(copy.deepcopy(payload))
+    except Exception:                                        # noqa: BLE001
+        pass
+
+
+def submit_fixer(session, media_id, boxes, on_send=None):
     """Submit a hand/face fixer task via POST /v2/task/fixer -> task id (poll it like any
     generation). `boxes` = [{x, y, width, height, tag}] in ORIGINAL-image pixel coords, tag
     'hand' | 'face' (<=20), all ONE kind. Builds a mask from the boxes and repairs those
     regions. Raises.
 
     READ_ONLY first, then build_fixer_body -- so a body with no usable box, or with two kinds
-    PixAI would refuse, is refused here before any network call. Never sends cusPrompts."""
+    PixAI would refuse, is refused here before any network call. Never sends cusPrompts.
+    `on_send(body)` is called immediately before the one POST (observation only)."""
     _check_read_only("submit a hand/face fix (spends credits)")
     body = build_fixer_body(media_id, boxes)
     # The fixer IS a credit-spending create, so it rides the mirror JWT session when the
     # toggle is on (review F1: the choke belongs at "a create", not only at gql_mutate sites).
     # Create-only -- the caller polls/collects on its own API-key session (F6); pass-through
     # when the mirror is off; refuses before spend if the mirror is on but unavailable (F5).
-    data = _rest_post(_mirror._session_for_create(session), "/task/fixer", body) or {}
+    create_session = _mirror._session_for_create(session)
+    _observe_send(on_send, body)
+    data = _rest_post(create_session, "/task/fixer", body) or {}
     tid = data.get("id")
     if not tid:
         raise PixAIError("fixer: no task id returned: " + json.dumps(data)[:200])
@@ -9849,7 +9982,11 @@ def submit(session, req, *, no_card=None, before_send=None, on_send=None, exact=
         # this cannot do without is the two inputs that body is built from.
         if not req.media_id or not req.boxes:
             raise PixAIError(req.note or "nothing to submit")
-        return {"task_id": submit_fixer(session, req.media_id, req.boxes)}
+        # `on_send` (a run's) is told just before the one POST, as on the generation road, so
+        # a caller knows whether the spend was reached (3.21.2, L1). Observation only; passed
+        # only when asked for, so a default Fix calls submit_fixer exactly as before.
+        return {"task_id": submit_fixer(session, req.media_id, req.boxes,
+                                        **({"on_send": on_send} if on_send is not None else {}))}
     if req.parameters is None:
         raise PixAIError(req.note or "nothing to submit")
     if req.unlimited:
@@ -10154,6 +10291,8 @@ def run_generate_video(args):
     if not existing_task and not (getattr(args, "image", "") or "").strip():
         raise PixAIError("--generate-video needs --image <media_id> (a catalog image to animate).")
     params = _gen_video_parameters(args)
+    if not existing_task:
+        check_params_retired(params)      # a raw --params-json skips the builder's check
 
     if not existing_task and not getattr(args, "confirm", False):
         i2v = params.get("i2vPro") or {}
@@ -10194,10 +10333,7 @@ def run_generate_video(args):
         # (expensive) video and a second charge -- see gql_mutate's docstring.
         # _session_for_create: the CREATE rides the mirror JWT when the toggle is on
         # (else pass-through); download below stays on the API-key `session` (F6).
-        created = gql_mutate(_mirror._session_for_create(session), _GEN_MUTATION, {"parameters": params})
-        task_id = (created.get("createGenerationTask") or {}).get("id")
-        if not task_id:
-            raise PixAIError("no task id returned: " + json.dumps(created)[:300])
+        task_id = _cli_create_once(_mirror._session_for_create(session), params)
         print("  task id:", task_id)
         _bump_card_use(params)
         _poll_task_status(session, task_id, getattr(args, "poll_timeout", 600),
@@ -10261,6 +10397,8 @@ def run_reference_video(args):
     if not existing_task and not (imgs or vids or auds) and not override:
         raise PixAIError("--reference-video needs at least one --ref-image/--ref-video/"
                          "--ref-audio (a media_id or local file), or --task-id to recover.")
+    if not existing_task and override:
+        check_params_retired(json.loads(override))   # sent as given: no builder checks it
 
     is_private = (getattr(args, "vchannel", "private") == "private")
     vmodel = (getattr(args, "video_model", "") or "v4.0.1")
@@ -10346,10 +10484,7 @@ def run_reference_video(args):
         _apply_kaisuuken(session, params, args)   # free-card check on the API-key session
         # gql_mutate, never gql_adhoc -- a re-POST here is a second charge.
         # _session_for_create: create rides the mirror JWT when on; download stays API-key (F6).
-        created = gql_mutate(_mirror._session_for_create(session), _GEN_MUTATION, {"parameters": params})
-        task_id = (created.get("createGenerationTask") or {}).get("id")
-        if not task_id:
-            raise PixAIError("no task id returned: " + json.dumps(created)[:300])
+        task_id = _cli_create_once(_mirror._session_for_create(session), params)
         print("  task id:", task_id)
         _bump_card_use(params)
         _poll_task_status(session, task_id, getattr(args, "poll_timeout", 600), interval=5,
@@ -10390,6 +10525,8 @@ def run_edit_image(args):
     if not existing_task and not srcs and not override:
         raise PixAIError("--edit-image needs --edit-src <media_id|file> (repeatable), "
                          "or --task-id to recover an existing edit.")
+    if not existing_task and override:
+        check_params_retired(json.loads(override))   # sent as given: no builder checks it
 
     # PREVIEW: no upload, no submit, no credits. Local files shown as placeholders.
     if not existing_task and not getattr(args, "confirm", False):
@@ -10442,10 +10579,7 @@ def run_edit_image(args):
         _apply_kaisuuken(session, params, args)   # free-card check on the API-key session
         # gql_mutate, never gql_adhoc -- a re-POST here is a second charge.
         # _session_for_create: create rides the mirror JWT when on; download stays API-key (F6).
-        created = gql_mutate(_mirror._session_for_create(session), _GEN_MUTATION, {"parameters": params})
-        task_id = (created.get("createGenerationTask") or {}).get("id")
-        if not task_id:
-            raise PixAIError("no task id returned: " + json.dumps(created)[:300])
+        task_id = _cli_create_once(_mirror._session_for_create(session), params)
         print("  task id:", task_id)
         _bump_card_use(params)
         _poll_task_status(session, task_id, getattr(args, "poll_timeout", 300),
@@ -10503,7 +10637,7 @@ def run_edit_image(args):
         saved.append(str(path))
 
     if rows:
-        save_catalog(db_path, rows)
+        save_catalog_over_snapshot(db_path, rows, known)
     print("Edited + cataloged {} image(s):".format(len(saved)))
     for s in saved:
         print("  " + s)
@@ -10547,6 +10681,8 @@ def run_fix_models(args):
     db_path = _ensure_db(out)
     session = _make_session(getattr(args, "token", None))
     rows = load_catalog(db_path)
+    # As loaded: the save at the end merges over the rows as they are THEN (a Sync step).
+    snapshot = {r["media_id"]: dict(r) for r in rows if r.get("media_id")}
 
     to_resolve = {}   # version_id -> rows needing it
     for r in rows:
@@ -10603,7 +10739,7 @@ def run_fix_models(args):
                 print("  could not resolve model {} (left as-is)".format(vid))
 
     if fixed or relabeled:
-        save_catalog(db_path, rows)
+        save_catalog_over_snapshot(db_path, rows, snapshot, blank_keeps=False)
     print("\nFixed {} row(s) across {} model(s); {} id(s) unresolved{}{}.".format(
         fixed, len(to_resolve) - unresolved - len(lookup_failed), unresolved,
         " (relabeled {} rows to '{}')".format(relabeled, removed_label) if relabeled else "",
@@ -11273,29 +11409,203 @@ def training_price_tier(version_id, tier="price", config=None):
     return v if isinstance(v, int) else None
 
 
-def definite_refusal(exc):
-    """True when PixAI answered and REFUSED (so nothing was created or charged): a 4xx from a
-    REST route, a GraphQL error body, or a 401 -- or nothing was sent at all (LocalRefusal: a
-    READ_ONLY or validation refusal before the network call). False for anything that may
-    have reached PixAI and succeeded -- a timeout, a dropped connection, a 5xx, an unreadable
-    answer -- which a spend guard must treat as "may have started".
+# PixAI's own "rejected" list: the 20 codes its site's create flow (useHeldTaskPrice `ye`)
+# treats as "no task was made" (DESIGN_3.22 1.3). Every other code it may answer is, to the
+# site as to this app, an UNKNOWN outcome.
+PIXAI_REJECTED_CODES = frozenset({
+    "FORBIDDEN", "BAD_REQUEST", "INVALID_INPUT", "MODEL_DEPRECATED", "TOO_MANY_REQUESTS",
+    "INVALID_PARAMETERS_COMPATIBILITY", "NO_PERMISSION_FOR_GENERATION", "REQUIRE_T_2_MEMBERSHIP",
+    "INSUFFICIENT_BALANCE", "WAITING_NUM_EXCEEDED", "WATERMARK_NOT_AVAILABLE",
+    "NSFW_PROMPTS_DETECTED", "NSFW_PROMPTS_DETECTED_ADULT_NOT_SET", "NO_PERMISSION_FOR_PREVIEW",
+    "NO_PERMISSION_FOR_EARLY_ACCESS", "KAISUUKEN_NOT_AVAILABLE", "KAISUUKEN_NOT_ALLOWED",
+    "RECIPE_UNAVAILABLE", "RECIPE_INCOMPATIBLE", "REQUIRE_MEMBERSHIP",
+})
+# The codes a spend reads as "refused, nothing made" (DESIGN_3.22 2.6): PixAI's list above, and
+# three the create route answers before any task exists -- the credential is checked before the
+# handler runs (UNAUTHORIZED), the schema before it (VALIDATION_ERROR), and the site's own form
+# checks the lane entitlement before it submits (INFINITE_MODE_NOT_ELIGIBLE). Promoting another
+# code needs evidence and a design note: "unknown" costs a held button, never money.
+DEFINITE_CODES = PIXAI_REJECTED_CODES | {"UNAUTHORIZED", "VALIDATION_ERROR",
+                                         "INFINITE_MODE_NOT_ELIGIBLE"}
+# The training routes' family (DESIGN_3.22 2.6, V5): PixAI's list plus every code the training
+# routes declare in their error maps (harvest 938fb68efeea `trainingTask-DTATiVlJ.js`). Each
+# refuses the request against the task's current state, so no new run exists after it -- a clear
+# training refusal never holds Start, Describe or Retry. Never used for a create.
+TRAINING_CODES = PIXAI_REJECTED_CODES | {
+    "BAD_REQUEST", "INVALID_INPUT", "UNAUTHORIZED",                 # request and auth
+    "NOT_FOUND", "FORBIDDEN", "CONFLICT",                           # the task
+    "TRAINING_IMAGE_REJECTED", "TRAINING_DATASET_TOO_SMALL",         # the dataset
+    "MODEL_PUBLISH_CONFLICT", "LORA_REBATE_REQUIRES_PUBLIC",         # publishing
+    "INSUFFICIENT_BALANCE",                                          # credits
+}
+# `codes=ANY_PIXAI_CODE`: any code in PixAI's oRPC error body is a refusal -- for a non-spend
+# write whose route answers its own codes before it acts and whose caller reads the outcome
+# back (the inbox: mark read, reply, delete a reply, claim a gift). A spend never uses it.
+ANY_PIXAI_CODE = None
+# A REST timeout (408) or a closed-request (499) answer is never a refusal, whatever its body
+# says: PixAI, or an edge in front of it, may have accepted the request before it said so.
+_UNKNOWN_OUTCOME_STATUSES = frozenset({408, 499})
 
-    A GraphQL error body is a refusal only when its `data` resolved nothing: an answer whose
-    mutation root field came back non-null alongside `errors` is a PARTIAL SUCCESS -- the run
-    exists and may be charged -- so it is not definite (waves 2+3 review, F2)."""
+
+def classify_outcome(exc, codes=DEFINITE_CODES):
+    """What a failed send's exception proves: "local" (refused HERE, nothing sent), "refused"
+    (PixAI answered no, so nothing was created or charged) or "unknown" (it may exist and may be
+    charged: a spend guard reads it as "may have started").
+
+    It reads the exception's TYPE and structured fields only, never its message text
+    (DESIGN_3.22 2.6; the 3.21.2 fix L2):
+      - LocalRefusal: local.
+      - PixAIRestError: refused only when the status is a 4xx other than 408 and 499 AND the
+        body is PixAI's oRPC error (a JSON object with a string `code`) whose code is in
+        `codes`. A bare 4xx (an edge's page, no PixAI body), a 3xx, a 5xx and any other code:
+        unknown. `codes=None` accepts any PixAI code -- for a route whose own codes are all
+        answered before it acts and whose outcome the caller reads back (the inbox's).
+      - PixAIAuthError (the GraphQL road's 401): refused.
+      - a GraphQL error (the transport hangs the `errors` list on it as `graphql_errors`):
+        refused only when its `data` resolved nothing. A root field that came back non-null
+        beside `errors` is a PARTIAL SUCCESS -- the task exists and may be charged (waves 2+3
+        review, F2) -- so it is unknown.
+      - anything else (a timeout, a dropped connection, a non-JSON or id-less answer): unknown."""
     if isinstance(exc, LocalRefusal):
-        return True
+        return "local"
     if isinstance(exc, PixAIRestError):
-        return exc.status is not None and 400 <= int(exc.status) < 500
+        try:
+            status = int(exc.status)
+        except (TypeError, ValueError):
+            return "unknown"
+        if not 400 <= status < 500 or status in _UNKNOWN_OUTCOME_STATUSES:
+            return "unknown"
+        body = exc.body
+        code = body.get("code") if isinstance(body, dict) else None
+        if not isinstance(code, str) or not code:
+            return "unknown"
+        return "refused" if (codes is None or code in codes) else "unknown"
+    if isinstance(exc, PixAIAuthError):
+        return "refused"
     if isinstance(exc, PixAIError):
-        msg = str(exc)
-        if msg.startswith("GraphQL error"):
+        errors = getattr(exc, "graphql_errors", None)
+        if isinstance(errors, list) and errors:
             partial = getattr(exc, "graphql_data", None)
             if isinstance(partial, dict) and any(v is not None for v in partial.values()):
-                return False
-            return True
-        return msg.startswith("401 ")
-    return False
+                return "unknown"
+            # 3.21.2 review: an `errors` answer with no data is a refusal ONLY when every error
+            # names a definite code. An INTERNAL_SERVER_ERROR, an "upstream request timeout"
+            # with no code, or any code outside the table may sit in front of a task PixAI made.
+            for err in errors:
+                code = graphql_error_code(err)
+                if code is None or (codes is not None and code not in codes):
+                    return "unknown"
+            return "refused"
+    return "unknown"
+
+
+# A numeric GraphQL code with a known name. Evidence: 40300047 is PixAI's members-only refusal
+# (private/CLASS4_PROBE_2026-07-28.md section 6, live 403s; the Turbo resubmit has keyed on it
+# since 2026-07, DESIGN_3.22 2.7). Other numbers seen (40300027 LORA_NUM_EXCEEDED, 40300032
+# NSFW_DETECTED) name codes outside the definite tables, so they are left unknown.
+_GRAPHQL_NUMERIC_CODES = {40300047: "REQUIRE_MEMBERSHIP"}
+
+
+def graphql_error_code(err):
+    """One GraphQL error's code name, or None. Read where PixAI's own site reads it
+    (errorUtil `c`: `errors[i].extensions.exception.name`), then `extensions.code`, then a
+    top-level `code`; a known numeric code is mapped to its name. Never the message."""
+    if not isinstance(err, dict):
+        return None
+    ext = err.get("extensions") if isinstance(err.get("extensions"), dict) else {}
+    exc = ext.get("exception") if isinstance(ext.get("exception"), dict) else {}
+    for raw in (exc.get("name"), exc.get("code"), ext.get("code"), err.get("code")):
+        if isinstance(raw, str) and raw:
+            return raw
+        if isinstance(raw, int) and not isinstance(raw, bool) and raw in _GRAPHQL_NUMERIC_CODES:
+            return _GRAPHQL_NUMERIC_CODES[raw]
+    return None
+
+
+def outcome_reason(exc):
+    """PixAI's own reason for a failed send, in a short line for the user beside "may have
+    started" (an NSFW_DETECTED or INPUT_IMAGE_TOO_LARGE that is not a definite refusal, an
+    expired sign-in's 401): the oRPC code and message, the GraphQL errors' messages and codes,
+    else the exception's text. Display only -- never an input to classify_outcome."""
+    if isinstance(exc, PixAIRestError):
+        f = exc.fields
+        code = f.get("code") if isinstance(f.get("code"), str) else ""
+        text = f.get("message") if isinstance(f.get("message"), str) else ""
+        head = "HTTP {}".format(exc.status) if exc.status is not None else "PixAI"
+        if code or text:
+            return "{}: {}".format(head, " -- ".join(x for x in (code, text.strip()) if x))
+        return "{}: {}".format(head, str(exc).split(": ", 1)[-1][:200])
+    errors = getattr(exc, "graphql_errors", None)
+    if isinstance(errors, list) and errors:
+        bits = []
+        for e in errors:
+            if isinstance(e, dict):
+                code = graphql_error_code(e)
+                msg = str(e.get("message") or "").strip()
+                bits.append(msg + (" ({})".format(code) if code else ""))
+        if any(bits):
+            return "; ".join(b for b in bits if b)
+    return "{}: {}".format(type(exc).__name__, str(exc)) if not isinstance(exc, PixAIError) \
+        else str(exc)
+
+
+def definite_refusal(exc, codes=DEFINITE_CODES):
+    """True when nothing was created or charged: refused here before the network call
+    (LocalRefusal: READ_ONLY, the request's own validation) or refused by PixAI in a way that
+    proves no task exists. False for anything that may have reached PixAI and succeeded,
+    which a spend guard must treat as "may have started". The rule is classify_outcome's."""
+    return classify_outcome(exc, codes) in ("local", "refused")
+
+
+def send_outcome(exc, reached):
+    """A single send's state after `exc`: "not_sent" when the one spend request was never
+    reached (`reached` False: everything before it is local or a read), else "refused" when
+    the answer proves nothing was made (definite_refusal, or a refusal this app re-raised with
+    `refused = True` after that same check), else "may_have_started"."""
+    if not reached:
+        return "not_sent"
+    if getattr(exc, "refused", False) is True or definite_refusal(exc):
+        return "refused"
+    return "may_have_started"
+
+
+# What a command-line single send prints when its answer cannot show whether a task was made
+# (DESIGN_3.22 2.12). No catch-up runs for a CLI user, so it never promises one.
+CLI_UNCLEAR = ("PixAI may have started this (task not confirmed). Check pixai.art or run "
+               "--sync before running this again.")
+
+
+class SendOutcomeUnclear(Exception):
+    """A command-line single send that reached PixAI and got no answer that proves either
+    way: the task may exist and may be charged. The message is CLI_UNCLEAR and the cause is
+    chained. Deliberately NOT a PixAIError (DESIGN_3.22 2.2), so no guard that reads "a plain
+    PixAIError was raised before the send" can ever mistake it for nothing-sent; main() exits
+    non-zero on it."""
+
+
+def _cli_send_once(send, reached=lambda: True):
+    """Run a CLI runner's ONE send. A refusal comes back as it came (PixAI's words); an
+    unknown outcome after the send was reached raises SendOutcomeUnclear. Never re-sends."""
+    try:
+        return send()
+    except Exception as e:                                   # noqa: BLE001 -- re-raised below
+        if send_outcome(e, reached()) != "may_have_started":
+            raise
+        detail = "{}: {}".format(type(e).__name__, str(e)[:200]).strip()
+        raise SendOutcomeUnclear(CLI_UNCLEAR + "\n  PixAI's answer: " + detail) from e
+
+
+def _cli_create_once(create_session, params):
+    """The video, reference-video and edit runners' ONE createGenerationTask, through
+    gql_mutate (single attempt, never a redirect). Returns the task id. An answer with no id
+    is as unclear as a lost one, so it is raised inside the send and reads unclear too."""
+    def _send():
+        created = gql_mutate(create_session, _GEN_MUTATION, {"parameters": params})
+        task_id = (created.get("createGenerationTask") or {}).get("id")
+        if not task_id:
+            raise PixAIError("no task id returned: " + json.dumps(created)[:300])
+        return task_id
+    return _cli_send_once(_send)
 
 
 _TRAIN_ERROR_WORDS = {
@@ -13636,11 +13946,55 @@ def run_credit_log(args):
 RECONCILE_STAMP = "reconcile_stamp.json"
 
 
-def _stamp_reconcile(out, flagged, cleared):
+# The task statuses that end with no picture at all: nothing to back up, ever.
+_NO_PICTURE_STATUSES = frozenset({"failed", "cancelled", "canceled", "rejected", "error"})
+
+
+def feed_counts(nodes, have_task_ids):
+    """What a full walk of the live feed says about backing it up (the header's Backed up pill,
+    moonglade.gallery.backup_coverage). `nodes` are the feed's task summaries, `have_task_ids`
+    the catalog's task ids. Returns {live, no_picture, in_progress, missing}:
+      no_picture   a failed or cancelled generation -- PixAI made no picture, so there is
+                   nothing to fetch and nothing will ever fix it; the pill does not count it
+      in_progress  still queued or running (counted once it finishes)
+      missing      finished with a picture, and not in the catalog: what Sync now fetches."""
+    have = set(have_task_ids or ())
+    live = no_picture = in_progress = missing = 0
+    for node in nodes or ():
+        tid = str(node.get("id") or "")
+        if not tid:
+            continue
+        live += 1
+        st = str(node.get("status") or "").strip().lower()
+        if st in _NO_PICTURE_STATUSES:
+            no_picture += 1
+        elif st and st != "completed":
+            in_progress += 1
+        elif not media_ids_for(node):
+            no_picture += 1                  # finished, but PixAI lists no picture for it
+        elif tid not in have:
+            missing += 1
+    return {"live": live, "no_picture": no_picture, "in_progress": in_progress,
+            "missing": missing}
+
+
+def read_reconcile_stamp(out):
+    """reconcile_stamp.json as a dict, or {} when there is none or it will not read."""
+    try:
+        doc = json.loads(_paths.records_path(out, RECONCILE_STAMP).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return doc if isinstance(doc, dict) else {}
+
+
+def _stamp_reconcile(out, flagged, cleared, counts=None):
     """Write reconcile_stamp.json among the library's records, atomically. Advisory, like the
-    reconcile itself: a disk that refuses it costs the date on a LOST line, nothing more."""
+    reconcile itself: a disk that refuses it costs the date on a LOST line, nothing more.
+    `counts` (feed_counts) rides along for the Backed up pill."""
     doc = {"reconciled_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
            "flagged": flagged, "cleared": cleared}
+    for k, v in (counts or {}).items():
+        doc[k] = int(v)
     dest = _paths.records_path(out, RECONCILE_STAMP)
     tmp = dest.with_name(dest.name + ".tmp")
     try:
@@ -13668,6 +14022,7 @@ def run_reconcile_deleted(args):
     # mark tasks that still exist on PixAI as deleted, and the gallery offers those for a
     # bulk local Delete.
     live, before, page, complete = set(), None, 0, False
+    nodes = []                         # every summary, for feed_counts (the Backed up pill)
     while True:
         conn = find_connection(gql(session, page_variables(
             getattr(args, "page_size", 250) or 250,
@@ -13680,9 +14035,11 @@ def run_reconcile_deleted(args):
             complete = not pi.get("hasPreviousPage")
             break
         for e in edges:
-            tid = (e.get("node") or {}).get("id")
+            node = e.get("node") or {}
+            tid = node.get("id")
             if tid:
                 live.add(str(tid))
+                nodes.append(node)
         page += 1
         vlog("reconcile: page {}, {} live tasks so far".format(page, len(live)))
         if not pi.get("hasPreviousPage"):
@@ -13711,11 +14068,12 @@ def run_reconcile_deleted(args):
         else:
             r["deleted_remote"] = "1" if gone else ""
     save_catalog(db_path, rows)
-    _stamp_reconcile(out, flagged, cleared)
+    counts = feed_counts(nodes, {(r.get("task_id") or "").strip() for r in rows})
+    _stamp_reconcile(out, flagged, cleared, counts)
     print("Flagged {:,} row(s) as deleted-on-PixAI; cleared {:,} stale flag(s).".format(
         flagged, cleared))
     print("Review in the gallery: Source -> 'Deleted on PixAI', then bulk Delete (local).")
-    return {"live": len(live), "flagged": flagged, "cleared": cleared}
+    return dict(counts, live=len(live), flagged=flagged, cleared=cleared)
 
 
 class DiskCounts(tuple):
@@ -13842,6 +14200,55 @@ def run_sync_similar(args):
     else:
         print("Similar index topped up: embedded {:,} new images ({:,} -> {:,} in index, "
               "{} skipped).".format(n, before, after, ps.sync.last_errors))
+
+
+def _one_line(text, width):
+    t = " ".join(str(text or "").split())
+    return t if len(t) <= width else t[:width - 1].rstrip() + "\u2026"
+
+
+def run_search(args):
+    """--search / --export-csv: the gallery's own search, from the command line. Reads
+    catalog.db only -- no network, nothing written except the CSV a caller names. The query
+    goes through the SAME parser the search box uses (moonglade.gallery.query_catalog)."""
+    try:     # a prompt with characters the console cannot show must not stop the listing
+        sys.stdout.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
+    out = Path(args.out)
+    db_path = _ensure_db(out)
+    q = (getattr(args, "search", None) or "").strip()
+    if q:
+        rows, _ = query_catalog(db_path, q=q, page=1, page_size=None, sort="newest")
+    else:
+        rows = load_catalog(db_path)
+    csv_path = getattr(args, "export_csv", "")
+    if csv_path:
+        # newline="" so the file's line endings are the CSV writer's own, as the download's are
+        with open(csv_path, "w", encoding="utf-8", newline="") as fh:
+            fh.write(catalog_csv_text(rows))
+        print("Wrote {} row(s) to {}".format(len(rows), csv_path))
+        if not q:
+            return
+    limit = int(getattr(args, "limit", 50) or 0)
+    shown = rows[:limit] if limit > 0 else rows
+    if getattr(args, "search_json", False):
+        print(json.dumps([{"media_id": r.get("media_id", ""), "created_at": r.get("created_at", ""),
+                           "model": r.get("model_name", ""), "rating": r.get("rating", ""),
+                           "prompt": r.get("prompt_full") or r.get("prompt_preview") or ""}
+                          for r in shown], ensure_ascii=False, indent=2))
+        return
+    for r in shown:
+        print("{}  {}  {}  {}  {}".format(
+            r.get("media_id", ""), str(r.get("created_at", ""))[:10],
+            _one_line(r.get("model_name", ""), 24) or "-",
+            ("%s*" % r["rating"]) if r.get("rating") else "-",
+            _one_line(r.get("prompt_full") or r.get("prompt_preview"), 70)))
+    if len(shown) < len(rows):
+        print("... {} of {} match(es) shown; --limit 0 for all, --export-csv PATH for a file".format(
+            len(shown), len(rows)))
+    else:
+        print("{} match(es)".format(len(rows)))
 
 
 def run_catalog_stats(args):
@@ -14158,6 +14565,8 @@ def run_backfill_full_meta(args):
     session = _make_session(getattr(args, "token", None))
 
     rows = load_catalog(db_path)
+    # As loaded, so a checkpoint save keeps a rating or collection set while this runs.
+    snapshot = {r["media_id"]: dict(r) for r in rows if r.get("media_id")}
     with_loras = getattr(args, "with_loras", False)
     with_credit = getattr(args, "with_credit", False)
     with_surface = getattr(args, "with_surface", False)
@@ -14316,7 +14725,7 @@ def run_backfill_full_meta(args):
 
     def _checkpoint():
         if pending:
-            save_catalog(db_path, pending)
+            save_catalog_over_snapshot(db_path, pending, snapshot, blank_keeps=False)
             pending.clear()
 
     for tid, fm in _parallel_map(task_ids, _fetch_task, workers, _prog, delay=args.delay,
@@ -14864,7 +15273,7 @@ def run_download(args, progress=None):
                             _tick()
 
                 if page_rows:
-                    save_catalog(db_path, [carry_local_fields(r, known) for r in page_rows])
+                    save_catalog_over_snapshot(db_path, page_rows, known)
                 seen += len(edges)
                 if args.max and seen >= args.max:
                     print("Reached --max limit.")
@@ -14988,11 +15397,12 @@ def run_download(args, progress=None):
                         _check_time_capsule(meta.get("created_at"), out)
                         time.sleep(args.delay)
 
-            # Upsert this page's rows so progress is durable even on interrupt.
-            # _carry() re-merges each row over its existing catalog row so a
-            # re-pull never blanks local curation (collections/rating/tags/...).
+            # Upsert this page's rows so progress is durable even on interrupt. Each row
+            # is merged over the row the catalog holds NOW, not over `known` (read when
+            # the run started): a re-pull never blanks local curation, and a rating,
+            # collection or delete made in the gallery during the run is not undone.
             if page_rows:
-                save_catalog(db_path, [carry_local_fields(r, known) for r in page_rows])
+                save_catalog_over_snapshot(db_path, page_rows, known)
 
             # Count TASKS, not pages -- exactly as the parallel branch above does. Counting
             # one per page made every single-worker run (which is what --collect-only always
@@ -15182,12 +15592,22 @@ def main():
     ap = argparse.ArgumentParser(prog="python -m moonglade",
                                  description="Back up your own PixAI gallery.")
     ap.add_argument("--version", action="version", version="%(prog)s " + __version__)
-    ap.add_argument("--rebuild-thumbs", action="store_true",
+    # --help is grouped by what a command is for. The grouping is presentation only: every flag
+    # keeps its name, its default and its meaning.
+    g_backup = ap.add_argument_group("Backup", "pull your PixAI history down and keep it current")
+    g_library = ap.add_argument_group("Library", "work on the local library and its catalog")
+    g_create = ap.add_argument_group("Create", "make a picture, a video or an edit (a preview "
+                                     "until --confirm); the generation options live here too")
+    g_account = ap.add_argument_group("Account", "read-only looks at your PixAI account, "
+                                      "rewards, and the gallery's web logins")
+    g_maint = ap.add_argument_group("Maintenance", "repair and refill what the catalog holds")
+    g_search = ap.add_argument_group("Search", "search the local catalog (no network)")
+    g_maint.add_argument("--rebuild-thumbs", action="store_true",
                     help="regenerate EVERY image thumbnail at the current size/quality "
                          "settings (fixes quality drift across eras), extract posters for "
                          "poster-less videos via ffmpeg, and sweep orphaned thumbs. "
                          "Overwrites in place -- the gallery never goes blank.")
-    ap.add_argument("--sync", action="store_true",
+    g_backup.add_argument("--sync", action="store_true",
                     help="One-shot sync, in five steps: incremental pull WITH full metadata "
                          "(equivalent to --update --full-meta), fill any catalog rows still "
                          "missing prompts/seeds/models, re-resolve any unlabeled model names, "
@@ -15207,73 +15627,73 @@ def main():
     ap.add_argument("--out", default=None,
                     help="library folder for this run (default: the library folder set in "
                          "the Control Panel, or pixai_backup beside the app)")
-    ap.add_argument("--page-size", type=int, default=250,
+    g_backup.add_argument("--page-size", type=int, default=250,
                     help="tasks per API page (default 250; fewer round-trips. Keep it at 2,000 or below)")
-    ap.add_argument("--workers", type=int, default=4,
+    g_backup.add_argument("--workers", type=int, default=4,
                     help="parallel download workers (default 4). 1 = serial/polite. "
                          "Higher saturates bandwidth on bulk first-time pulls; ignored for "
                          "--collect-only.")
-    ap.add_argument("--max", type=int, default=0,
+    g_backup.add_argument("--max", type=int, default=0,
                     help="stop after N tasks (0=all); with --backfill-phash, caps the number "
                          "of rows that run processes instead")
-    ap.add_argument("--update", action="store_true",
+    g_backup.add_argument("--update", action="store_true",
                     help="incremental follow-up run: stop paging once a run of pages is "
                          "already fully on disk (newest-first, so older items are already "
                          "downloaded). Much faster than re-walking the whole history. The "
                          "early stop waits until one pass has reached the end of your "
                          "history, so an interrupted first backup resumes to the end.")
-    ap.add_argument("--update-grace", type=int, default=2,
+    g_backup.add_argument("--update-grace", type=int, default=2,
                     help="with --update, number of consecutive all-on-disk pages before "
                          "stopping (default 2; raise if your history has gaps). Ignored "
                          "until this library's walk has reached the end of history once.")
-    ap.add_argument("--accurate-count", action="store_true",
+    g_backup.add_argument("--accurate-count", action="store_true",
                     help="walk the whole API to count library size for the progress bar "
                          "(slow). Default uses the catalog size as a fast estimate.")
     # default is the _DefaultDelay sentinel, not a bare 0.4, so run_download can tell a typed
     # `--delay 0.4` from an untouched default. See _DefaultDelay for why a comparison cannot.
-    ap.add_argument("--delay", type=float, default=DEFAULT_DELAY,
+    g_backup.add_argument("--delay", type=float, default=DEFAULT_DELAY,
                     help="seconds to wait between API requests (default: 0.4). Passing it "
                          "EXPLICITLY also paces the parallel download stage, at one image "
                          "per --delay across the whole pool; left at its default, downloads "
                          "run at full --workers speed as they always have")
-    ap.add_argument("--probe", action="store_true",
+    g_backup.add_argument("--probe", action="store_true",
                     help="show first page + auto-detect the full-res variant, then exit")
-    ap.add_argument("--count", action="store_true",
+    g_backup.add_argument("--count", action="store_true",
                     help="tally total tasks + images via the API (no downloads), then exit")
-    ap.add_argument("--count-page-size", type=int, default=COUNT_PAGE_SIZE,
+    g_backup.add_argument("--count-page-size", type=int, default=COUNT_PAGE_SIZE,
                     help="page size used by --count (bigger = fewer requests; default "
                          "2000, because PixAI fails a 5000-row page now and then)")
-    ap.add_argument("--catalog-stats", action="store_true",
+    g_library.add_argument("--catalog-stats", action="store_true",
                     help="summarize the existing catalog.db (counts only), then exit")
-    ap.add_argument("--collect-only", action="store_true",
+    g_backup.add_argument("--collect-only", action="store_true",
                     help="scan and catalog images without downloading files")
-    ap.add_argument("--name-length", type=int, default=60,
+    g_backup.add_argument("--name-length", type=int, default=60,
                     help="max characters of the prompt used in filenames (default 60)")
-    ap.add_argument("--name-sep", default="_", choices=["_", "-"],
+    g_backup.add_argument("--name-sep", default="_", choices=["_", "-"],
                     help="word separator in filenames (default _)")
-    ap.add_argument("--convert", default=None, choices=["png", "jpeg", "jpg"],
+    g_backup.add_argument("--convert", default=None, choices=["png", "jpeg", "jpg"],
                     help="convert each downloaded webp to png or jpeg (needs Pillow). "
                          "Replaces the .webp unless --keep-webp is set.")
-    ap.add_argument("--jpeg-quality", type=int, default=92,
+    g_backup.add_argument("--jpeg-quality", type=int, default=92,
                     help="JPEG quality 1-100 when --convert jpeg (default 92)")
-    ap.add_argument("--jpeg-bg", default="white", choices=["white", "black"],
+    g_backup.add_argument("--jpeg-bg", default="white", choices=["white", "black"],
                     help="background to flatten transparency onto for JPEG")
-    ap.add_argument("--keep-webp", action="store_true",
+    g_backup.add_argument("--keep-webp", action="store_true",
                     help="keep the original .webp after converting")
-    ap.add_argument("--convert-existing", action="store_true",
+    g_backup.add_argument("--convert-existing", action="store_true",
                     help="convert all already-downloaded .webp files to --convert format "
                          "(default png). No token needed. Supports --dry-run and --keep-webp.")
-    ap.add_argument("--organize", action="store_true",
+    g_library.add_argument("--organize", action="store_true",
                     help="normalize the WHOLE backup into YYYY-MM/ month folders with "
                          "descriptive filenames (no batch subfolders); writes a reversible "
                          "move-manifest. Idempotent + dry-runnable. Then exit")
-    ap.add_argument("--undo-organize", action="store_true",
+    g_library.add_argument("--undo-organize", action="store_true",
                     help="revert the last --organize run using organize_manifest.csv "
                          "(move files back to their old paths), then exit")
-    ap.add_argument("--embed-metadata", action="store_true",
+    g_library.add_argument("--embed-metadata", action="store_true",
                     help="with --organize, embed prompt/IDs/date into PNG/JPEG files "
                          "(off by default; useful when pulling images into other apps)")
-    ap.add_argument("--dry-run", action="store_true",
+    g_library.add_argument("--dry-run", action="store_true",
                     help="with --organize / --undo-organize, show the "
                          "plan without moving anything")
     # ON BY DEFAULT since 2026-07-25. This is a backup tool whose point is the catalog, and
@@ -15283,172 +15703,171 @@ def main():
     # entries, all downloaded" over rows that could not say which model made them.) --sync
     # has always implied it; now every pull does, and the flag stays accepted so existing
     # scripts, docs and the Panel's whitelisted argv keep working unchanged.
-    ap.add_argument("--full-meta", dest="full_meta", action="store_true", default=True,
+    g_backup.add_argument("--full-meta", dest="full_meta", action="store_true", default=True,
                     help="(now the DEFAULT) fetch full prompt, seed, steps, sampler, CFG and "
                          "model name for each task via a second API call. One extra call per "
                          "unique task -- a batch's images share one call. Kept as an explicit "
                          "flag so existing commands and scripts still work.")
-    ap.add_argument("--no-full-meta", dest="full_meta", action="store_false",
+    g_backup.add_argument("--no-full-meta", dest="full_meta", action="store_false",
                     help="skip the per-task metadata call: faster pull, but the catalog rows "
                          "it creates carry no prompt, seed or model until a later "
                          "--backfill-full-meta fills them in. On a first backup of a large "
                          "history this is the quicker route -- the pull's metadata fetch is "
                          "serial, while --backfill-full-meta --workers N is parallel.")
-    ap.add_argument("--backfill-meta", action="store_true",
+    g_maint.add_argument("--backfill-meta", action="store_true",
                     help="fill in missing url/width/height in catalog.db via resolve_media "
                          "for rows that lack them, then exit")
-    ap.add_argument("--backfill-full-meta", action="store_true",
+    g_maint.add_argument("--backfill-full-meta", action="store_true",
                     help="fill in prompt_full/seed/model/etc in catalog.db via getTaskById "
                          "for rows that lack them; also backfills url/width/height as a bonus, then exit")
-    ap.add_argument("--with-loras", action="store_true",
+    g_backup.add_argument("--with-loras", action="store_true",
                     help="with --backfill-full-meta, ALSO re-fetch rows that have full meta but "
                          "no LoRA data yet (populates the loras column for older images; long run)")
-    ap.add_argument("--with-credit", action="store_true",
+    g_backup.add_argument("--with-credit", action="store_true",
                     help="with --backfill-full-meta, ALSO re-fetch rows that have full meta but "
                          "no recorded credit cost yet (recovers the paid_credit column for older "
                          "generations from the task record; long run)")
-    ap.add_argument("--with-surface", action="store_true",
+    g_backup.add_argument("--with-surface", action="store_true",
                     help="with --backfill-full-meta, ALSO re-fetch rows that have full meta but "
                          "none of the issue-#18 surface columns yet (inference profile, quality "
                          "tag, render time, backend, moderation, retry count...); the only way a "
                          "pre-#18 generation gains them. Long run on a big historical catalog.")
-    ap.add_argument("--backfill-lineage", action="store_true",
+    g_maint.add_argument("--backfill-lineage", action="store_true",
                     help="fill in source_media_id/derive_kind (which image an edit/upscale/"
                          "video was made FROM) for rows that predate lineage tracking, via "
                          "getTaskById; powers Image Details' LINEAGE panel. Idempotent -- a "
                          "confirmed original is remembered and never re-fetched. Then exit.")
-    ap.add_argument("--backfill-phash", action="store_true",
+    g_maint.add_argument("--backfill-phash", action="store_true",
                     help="compute a perceptual difference-hash (dHash) for every image catalog "
                          "row that lacks one, powering the near-duplicate ('upscaled or "
                          "recompressed copy') tier of GET /api/duplicates. Local Pillow work, no "
                          "network call -- --workers parallelizes it, --max caps how many rows "
                          "this run processes. Videos are skipped. Then exit.")
-    ap.add_argument("--sync-artworks", action="store_true",
+    g_backup.add_argument("--sync-artworks", action="store_true",
                     help="fetch your published-artwork metadata (title, NSFW flag, likes, "
                          "comments, views, aes score, tags) and merge it "
                          "onto matching catalog rows by media_id, then exit")
-    ap.add_argument("--with-videos", action="store_true",
+    g_backup.add_argument("--with-videos", action="store_true",
                     help="with --sync-artworks, also download animated-artwork video files "
                          "(videoMediaId) into a videos/ folder")
-    ap.add_argument("--no-views", action="store_true",
+    g_backup.add_argument("--no-views", action="store_true",
                     help="with --sync-artworks, skip the view-count sweep. Reading a view "
                          "count registers a view on PixAI's side (one per work, per sweep), "
                          "so this is the opt-out for a run where you want the metadata "
                          "refreshed without touching your own view numbers")
-    ap.add_argument("--views-only", dest="views_only", action="store_true",
+    g_backup.add_argument("--views-only", dest="views_only", action="store_true",
                     help="with --sync-artworks, read ONLY the view counts and skip the "
                          "artwork listing. The counts join your catalog by artwork id, so "
                          "they do not need the listing walked again. This is what the "
                          "Control Panel's weekly \"View counts\" job runs")
-    ap.add_argument("--sync-videos", action="store_true",
+    g_backup.add_argument("--sync-videos", action="store_true",
                     help="back up your image-to-video generations: find i2v tasks, download "
                          "each mp4 into videos/, and catalog them (is_video), then exit. This is "
                          "the video-side complement of --sync, which skips video tasks: run it to "
                          "capture videos made on the PixAI website (app-made videos are already "
                          "caught when generated). Full-history scan, so it's a separate pass.")
-    ap.add_argument("--faststart-videos", dest="faststart_videos", action="store_true",
+    g_backup.add_argument("--faststart-videos", dest="faststart_videos", action="store_true",
                     help="losslessly move every video's moov atom to the front (ffmpeg "
                          "-c copy +faststart) so iOS/Safari can play them over HTTP, then exit")
-    ap.add_argument("--account", action="store_true",
+    g_account.add_argument("--account", action="store_true",
                     help="show a read-only account dashboard (credit balance, membership, "
                          "subscription) and exit. Never moves money")
-    ap.add_argument("--cards", action="store_true",
+    g_account.add_argument("--cards", action="store_true",
                     help="show your free-generation cards (kaisuuken) + their ids, then exit. "
                          "Read-only; pass an id to a run with --kaisuuken-id")
-    ap.add_argument("--mirror-check", action="store_true",
+    g_account.add_argument("--mirror-check", action="store_true",
                     help="check the 'Mirror to PixAI website' session: renew the saved "
                          "sign-in once and report days-left, then exit. Never reads a browser "
                          "(connect with the Connect from PixAI bookmark), never prints the "
                          "token; spends nothing")
-    ap.add_argument("--card-history", action="store_true",
+    g_account.add_argument("--card-history", action="store_true",
                     help="show recent benefit-card usage (redemptions + refunds), then exit. "
                          "Read-only. Pass --card-history-all for the full lifetime card-type "
                          "catalog instead of a recent list")
-    ap.add_argument("--card-history-all", action="store_true",
+    g_account.add_argument("--card-history-all", action="store_true",
                     help="with --card-history, page all the way back and print every card "
                          "TYPE ever used (several requests; read-only)")
-    ap.add_argument("--card-history-count", type=int, default=0, metavar="N",
+    g_account.add_argument("--card-history-count", type=int, default=0, metavar="N",
                     help="with --card-history, how many recent records to show (default 20)")
-    ap.add_argument("--coupons", action="store_true",
+    g_account.add_argument("--coupons", action="store_true",
                     help="show your currently-held Credit Boost coupons, then exit. "
                          "Read-only -- a reward type separate from benefit cards. Pass "
                          "--coupons-history for the redeemed + expired view instead")
-    ap.add_argument("--coupons-history", action="store_true",
+    g_account.add_argument("--coupons-history", action="store_true",
                     help="with --coupons, show the past (redeemed + expired) view instead "
                          "of what you currently hold")
-    ap.add_argument("--credit-log", action="store_true",
+    g_account.add_argument("--credit-log", action="store_true",
                     help="show your full credit transaction ledger (purchases, claims, "
                          "gifts, generation spend, refunds), then exit. Read-only")
-    ap.add_argument("--credit-log-count", type=int, default=0, metavar="N",
+    g_account.add_argument("--credit-log-count", type=int, default=0, metavar="N",
                     help="with --credit-log, how many recent entries to show (default 30)")
-    ap.add_argument("--credit-log-before", default="", metavar="CURSOR",
+    g_account.add_argument("--credit-log-before", default="", metavar="CURSOR",
                     help="with --credit-log, page further into the past using a cursor "
                          "printed by a previous --credit-log run")
-    ap.add_argument("--contests", action="store_true",
+    g_account.add_argument("--contests", action="store_true",
                     help="list PixAI contests currently running (community + official), then "
                          "exit. Read-only. Add --all-contests to include ended ones")
-    ap.add_argument("--all-contests", action="store_true",
+    g_account.add_argument("--all-contests", action="store_true",
                     help="with --contests, include ended contests too")
-    ap.add_argument("--watch", action="store_true",
+    g_backup.add_argument("--watch", action="store_true",
                     help="live-monitor your PixAI events over the push WebSocket (read-only; "
                          "gentler than polling). Prints task/notification events as they arrive")
-    ap.add_argument("--watch-seconds", type=int, default=0, metavar="N",
+    g_backup.add_argument("--watch-seconds", type=int, default=0, metavar="N",
                     help="with --watch, auto-stop after N seconds (default: run until Ctrl-C)")
-    ap.add_argument("--watch-backup", action="store_true",
+    g_backup.add_argument("--watch-backup", action="store_true",
                     help="with --watch, mirror each generation into --out the instant it "
                          "reaches 'completed' (event-driven backup; no polling). Read-only")
-    ap.add_argument("--claims", action="store_true",
+    g_account.add_argument("--claims", action="store_true",
                     help="list your claimable rewards (daily credits, agent stamina), then "
                          "exit. Read-only")
-    ap.add_argument("--claim", default="", metavar="ID|all",
+    g_account.add_argument("--claim", default="", metavar="ID|all",
                     help="claim a ready reward by id (or 'all') -- requires --confirm. "
                          "Grants free credits/stamina to your own account")
-    ap.add_argument("--reconcile-deleted", action="store_true",
+    g_maint.add_argument("--reconcile-deleted", action="store_true",
                     help="flag catalog rows whose PixAI task is gone from your live feed "
                          "(deleted on the website) so the gallery can surface them for a "
                          "local prune, then exit")
-    ap.add_argument("--import-local", nargs="?", const="", default=None, metavar="DIR",
+    g_backup.add_argument("--import-local", nargs="?", const="", default=None, metavar="DIR",
                     help="catalog non-PixAI media (source='local') so it shows in the gallery. "
                          "No DIR = scan the backup folder for files you dropped in; a DIR "
                          "outside the backup is copied in. Then exit")
     # --- Generation (createGenerationTask) -------------------------------------
-    gen = ap.add_argument_group("generation (--generate)")
-    gen.add_argument("--generate", action="store_true",
+    g_create.add_argument("--generate", action="store_true",
                      help="create images via PixAI and catalog them (source='api'). "
                           "Preview-only unless --confirm (spends credits)")
-    gen.add_argument("--prompt", default="", help="positive prompt for --generate")
-    gen.add_argument("--negative", default="", help="negative prompt for --generate")
-    gen.add_argument("--model", default="", help="modelId for --generate (default: Tsubaki.2)")
-    gen.add_argument("--width", type=int, default=512,
+    g_create.add_argument("--prompt", default="", help="positive prompt for --generate")
+    g_create.add_argument("--negative", default="", help="negative prompt for --generate")
+    g_create.add_argument("--model", default="", help="modelId for --generate (default: Tsubaki.2)")
+    g_create.add_argument("--width", type=int, default=512,
                      help="image width in pixels (default 512; rounded down to a multiple of 8 "
                           "and moved onto the model's own size grid if it does not fit -- the "
                           "preview names any change)")
-    gen.add_argument("--height", type=int, default=512,
+    g_create.add_argument("--height", type=int, default=512,
                      help="image height in pixels (default 512; rounded and moved onto the "
                           "model's size grid the same way as --width)")
-    gen.add_argument("--steps", type=int, default=25,
+    g_create.add_argument("--steps", type=int, default=25,
                      help="sampling steps (default 25; not sent to a model that publishes its "
                           "own quality profiles, which set their own)")
-    gen.add_argument("--cfg", type=float, default=7.0,
+    g_create.add_argument("--cfg", type=float, default=7.0,
                      help="CFG scale (default 7; not sent to a model that publishes its own "
                           "quality profiles, which set their own)")
-    gen.add_argument("--batch-size", dest="count", type=int, default=1,
+    g_create.add_argument("--batch-size", dest="count", type=int, default=1,
                      help="number of images per --generate run (batch size)")
-    gen.add_argument("--seed", type=int, default=None,
+    g_create.add_argument("--seed", type=int, default=None,
                      help="seed for a repeatable picture (default: random -- none is sent)")
-    gen.add_argument("--priority", type=int, default=PRIORITY_TURBO,
+    g_create.add_argument("--priority", type=int, default=PRIORITY_TURBO,
                      choices=list(PRIORITY_CHOICES),
                      help="speed channel: 0 = standard, no extra cost; 500 = turbo, "
                           "~7.6x faster and free but MEMBERS ONLY (default -- falls back "
                           "to 0 on its own if the account isn't a member); 1000 = high, "
                           "~10x faster and costs EXTRA credits; 1500 = extra high")
-    gen.add_argument("--high-priority", dest="priority", action="store_const",
+    g_create.add_argument("--high-priority", dest="priority", action="store_const",
                      const=PRIORITY_HIGH,
                      help="shortcut for --priority 1000 (faster, costs extra credits)")
-    gen.add_argument("--low-priority", dest="priority", action="store_const",
+    g_create.add_argument("--low-priority", dest="priority", action="store_const",
                      const=PRIORITY_LOW,
                      help="shortcut for --priority 0 (standard speed, never members-only)")
-    gen.add_argument("--mode", default="auto",
+    g_create.add_argument("--mode", default="auto",
                      choices=["auto", "lite", "standard", "pro", "ultra"],
                      help="quality mode (inferenceProfile). auto (default) lets PixAI pick the "
                           "model's default -- always VALID (price depends on the model's own "
@@ -15457,11 +15876,11 @@ def main():
                           "is refused before anything is sent; if the list cannot be read and "
                           "PixAI rejects the mode, it is dropped and the run goes once on the "
                           "model's default")
-    gen.add_argument("--no-prompt-helper", dest="prompt_helper", action="store_false",
+    g_create.add_argument("--no-prompt-helper", dest="prompt_helper", action="store_false",
                      help="disable PixAI's prompt-helper (use your prompt more literally; "
                           "helps when auto-enhancement mangles a carefully-built prompt)")
-    gen.set_defaults(prompt_helper=True)
-    gen.add_argument("--lora", action="append", metavar="VERSIONID:WEIGHT",
+    g_create.set_defaults(prompt_helper=True)
+    g_create.add_argument("--lora", action="append", metavar="VERSIONID:WEIGHT",
                      help="add a LoRA by its version id and weight, e.g. "
                           "--lora 1686550608832816741:0.7 (repeatable). Find version ids "
                           "with --list-models")
@@ -15469,95 +15888,95 @@ def main():
     # with PixAI's own dialog label quoted in the help -- their two radio buttons read
     # "Upscale" (= the `enlarge` param) and "Hires" (= the `upscale` param), so naming the
     # flags after the labels instead would have made --upscale mean enlarge.
-    gen.add_argument("--enlarge", type=float, default=None, metavar="RATIO",
+    g_create.add_argument("--enlarge", type=float, default=None, metavar="RATIO",
                      help="enlarge the finished image with an upscaler network (PixAI's "
                           "'Upscale' method), in 0.1 steps from 1.1. Clamped to the largest "
                           "ratio the output-size ceiling allows for this --width/--height. "
                           "Mutually exclusive with --upscale")
-    gen.add_argument("--enlarge-model", dest="enlarge_model", default="",
+    g_create.add_argument("--enlarge-model", dest="enlarge_model", default="",
                      choices=list(ENLARGE_MODELS),
                      help="which upscaler network --enlarge runs (default: {})".format(
                          DEFAULT_ENLARGE_MODEL))
-    gen.add_argument("--upscale", type=float, default=None, metavar="RATIO",
+    g_create.add_argument("--upscale", type=float, default=None, metavar="RATIO",
                      help="re-diffuse the image at a larger size (PixAI's 'Hires' method), "
                           "in 0.1 steps from 1.1. Sharper than --enlarge and roughly 3x the "
                           "credits; allows a smaller maximum ratio. Mutually exclusive with "
                           "--enlarge")
-    gen.add_argument("--upscale-denoise", dest="upscale_denoising_strength", type=float,
+    g_create.add_argument("--upscale-denoise", dest="upscale_denoising_strength", type=float,
                      default=None, metavar="STRENGTH",
                      help="--upscale denoising strength, 0.01-0.99 (default {}; PixAI's own "
                           "hint is 0.4-0.6 -- higher redraws more)".format(
                               DEFAULT_UPSCALE_DENOISING_STRENGTH))
-    gen.add_argument("--upscale-denoise-steps", dest="upscale_denoising_steps", type=int,
+    g_create.add_argument("--upscale-denoise-steps", dest="upscale_denoising_steps", type=int,
                      default=None, metavar="N",
                      help="--upscale denoising steps, 1-50 (default {})".format(
                          DEFAULT_UPSCALE_DENOISING_STEPS))
-    gen.add_argument("--face-fix", dest="face_fix", action="store_true",
+    g_create.add_argument("--face-fix", dest="face_fix", action="store_true",
                      help="run PixAI's face restorer over the result (enableADetailer -- "
                           "the generator's 'Face Fix' booster)")
-    gen.add_argument("--quality-tag", dest="quality_tag", nargs="?",
+    g_create.add_argument("--quality-tag", dest="quality_tag", nargs="?",
                      const=DEFAULT_QUALITY_TAG, default="", metavar="PREFIX",
                      help="prepend a quality booster to the prompt (the generator's "
                           "'Quality Tag'). Bare flag uses '{}'".format(DEFAULT_QUALITY_TAG))
-    gen.add_argument("--task-id", default="",
+    g_create.add_argument("--task-id", default="",
                      help="with --generate, fetch + catalog an ALREADY-created task by id "
                           "(no new credits). Recovers a stranded generation that --update "
                           "can't see, since generated tasks don't enter the listing feed")
-    gen.add_argument("--params-json", default="", help="raw parameters object (overrides the above)")
-    gen.add_argument("--poll-timeout", type=int, default=300,
+    g_create.add_argument("--params-json", default="", help="raw parameters object (overrides the above)")
+    g_create.add_argument("--poll-timeout", type=int, default=300,
                      help="seconds to wait for a submitted task to finish before giving up (default 300)")
-    gen.add_argument("--confirm", action="store_true",
+    g_create.add_argument("--confirm", action="store_true",
                      help="REQUIRED for --generate, --generate-video, --reference-video and "
                           "--edit-image to actually submit (spends credits), and for --claim "
                           "(grants free credits/stamina to your own account)")
     # --- image-to-video generation (shares --prompt/--negative/--model/--confirm/--task-id) ---
-    gen.add_argument("--generate-video", dest="generate_video", action="store_true",
+    g_create.add_argument("--generate-video", dest="generate_video", action="store_true",
                      help="create an image-to-video clip via PixAI from a source image "
                           "(--image). Preview-only unless --confirm. Video is EXPENSIVE "
                           "(~27,500 credits for a 5s V4.0 clip)")
-    gen.add_argument("--image", default="", help="source image media_id to animate (first frame)")
-    gen.add_argument("--tail", default="", help="optional last-frame image media_id "
+    g_create.add_argument("--image", default="", help="source image media_id to animate (first frame)")
+    g_create.add_argument("--tail", default="", help="optional last-frame image media_id "
                      "(first/last-frame interpolation)")
-    gen.add_argument("--duration", type=int, default=5,
+    g_create.add_argument("--duration", type=int, default=5,
                      help="video length in seconds: 5, 6, 10 or 15 (default 5). Snapped to the "
                           "nearest length the chosen --video-model takes: 15 is V4.0 and Tsubaki "
                           "only (other engines stop at 10), and the Tsubaki engines have no 6")
-    gen.add_argument("--video-model", dest="video_model", default="",
+    g_create.add_argument("--video-model", dest="video_model", default="",
                      help="video model (default v4.0.1); overrides --model for --generate-video")
-    gen.add_argument("--video-mode", dest="vmode", default="professional",
+    g_create.add_argument("--video-mode", dest="vmode", default="professional",
                      choices=["basic", "professional"], help="video quality tier")
-    gen.add_argument("--audio", action="store_true", help="generate audio with the video")
-    gen.add_argument("--audio-language", dest="audio_language", default="english",
+    g_create.add_argument("--audio", action="store_true", help="generate audio with the video")
+    g_create.add_argument("--audio-language", dest="audio_language", default="english",
                      help="spoken language for --audio video sound (default english; no effect without --audio)")
-    gen.add_argument("--video-prompt-helper", dest="video_prompt_helper", action="store_true",
+    g_create.add_argument("--video-prompt-helper", dest="video_prompt_helper", action="store_true",
                      help="enable PixAI's prompt-helper for video (off by default)")
-    gen.add_argument("--camera-movement", dest="camera_movement", default="",
+    g_create.add_argument("--camera-movement", dest="camera_movement", default="",
                      choices=list(VIDEO_CAMERA_MOVES),
                      help="camera move (v2.7-style): horizontal/pan/roll/tilt/vertical-pan/zoom "
                           "(default unset = omit; camera direction can also go in the prompt)")
-    gen.add_argument("--video-channel", dest="vchannel", default="private",
+    g_create.add_argument("--video-channel", dest="vchannel", default="private",
                      choices=list(VIDEO_CHANNELS),
                      help="video channel: private = the site's 'Private' channel (works "
                           "can't be published) | normal")
-    gen.add_argument("--dump-params", action="store_true",
+    g_create.add_argument("--dump-params", action="store_true",
                      help="with --generate/--generate-video/--edit-image (esp. --task-id "
                           "recovery), print the task's full submit parameters -- bank any "
                           "param shape (multiRef, referenceVideo, ...) with no browser capture")
     # --- reference video (multi-image/video/audio reference) ---
-    gen.add_argument("--reference-video", dest="reference_video", action="store_true",
+    g_create.add_argument("--reference-video", dest="reference_video", action="store_true",
                      help="create a multi-reference video (referenceVideo): pass refs with "
                           "--ref-image/--ref-video/--ref-audio and cite them in --prompt as "
                           "@image1/@video1/@audio1. Preview-only unless --confirm")
-    gen.add_argument("--ref-image", dest="ref_image", action="append", metavar="MEDIA_ID|FILE",
+    g_create.add_argument("--ref-image", dest="ref_image", action="append", metavar="MEDIA_ID|FILE",
                      help="reference image (media_id or local file, auto-uploaded). Repeatable: "
                           "@image1=first, @image2=second, ...")
-    gen.add_argument("--ref-video", dest="ref_video", action="append", metavar="MEDIA_ID|FILE",
+    g_create.add_argument("--ref-video", dest="ref_video", action="append", metavar="MEDIA_ID|FILE",
                      help="reference video (repeatable; cite as @video1, @video2, ...)")
-    gen.add_argument("--ref-audio", dest="ref_audio", action="append", metavar="MEDIA_ID",
+    g_create.add_argument("--ref-audio", dest="ref_audio", action="append", metavar="MEDIA_ID",
                      help="reference audio, as a media_id only -- a local audio file cannot be "
                           "uploaded (put it in a video and pass that with --ref-video). "
                           "Repeatable; cite as @audio1, ...")
-    gen.add_argument("--video-ratio", dest="video_ratio", default="",
+    g_create.add_argument("--video-ratio", dest="video_ratio", default="",
                      choices=[""] + list(VIDEO_RATIOS), metavar="RATIO",
                      help="--reference-video output aspect ratio, Tsubaki video engines only "
                           "(tbkv1.0 / tbkv1.0.1): one of " + ", ".join(VIDEO_RATIOS)
@@ -15566,108 +15985,122 @@ def main():
     # former neighbourhood above for both measurements. Art filters run in the browser now
     # (static/mg-art-filters.js, the gallery's Edit > Enhance tab): free, offline, no submit.
     # --- instruct editing + media upload (the "Edit this image" surface) ---
-    gen.add_argument("--edit-image", dest="edit_image", action="store_true",
+    g_create.add_argument("--edit-image", dest="edit_image", action="store_true",
                      help="instruct-edit an image via PixAI: describe the change in --prompt "
                           "and pass source(s) with --edit-src (a catalog media_id OR a local "
                           "file, uploaded automatically). Preview-only unless --confirm")
-    gen.add_argument("--edit-src", dest="edit_src", action="append", metavar="MEDIA_ID|FILE",
+    g_create.add_argument("--edit-src", dest="edit_src", action="append", metavar="MEDIA_ID|FILE",
                      help="source image for --edit-image: a media_id or a local image file "
                           "(local files upload automatically). Repeatable for multi-image reference")
-    gen.add_argument("--edit-model", dest="edit_model", default="",
+    g_create.add_argument("--edit-model", dest="edit_model", default="",
                      help="edit model id (default PixAI Edit Pro {})".format(EDIT_PRO_MODEL_ID))
-    gen.add_argument("--edit-resolution", dest="edit_resolution", default="1K",
+    g_create.add_argument("--edit-resolution", dest="edit_resolution", default="1K",
                      help="edit output resolution (default 1K; e.g. 1K/2K)")
-    gen.add_argument("--edit-aspect", dest="edit_aspect", default="",
+    g_create.add_argument("--edit-aspect", dest="edit_aspect", default="",
                      help="edit output aspect ratio (default: the edit model's own -- Edit Pro "
                           "3:5; Reference Pro 'auto', which sends no aspect ratio and leaves "
                           "the frame to PixAI)")
-    gen.add_argument("--edit-quality", dest="edit_quality", default="medium",
+    g_create.add_argument("--edit-quality", dest="edit_quality", default="medium",
                      help="edit quality tier (default medium)")
-    gen.add_argument("--upload", dest="upload_file", default="", metavar="FILE",
+    g_create.add_argument("--upload", dest="upload_file", default="", metavar="FILE",
                      help="upload a local image to PixAI, print its media_id, then exit "
                           "(the reusable primitive behind --edit-src file support). Free")
-    gen.add_argument("--suggest-prompt", dest="suggest_prompt", default="", metavar="MEDIA|FILE",
+    g_create.add_argument("--suggest-prompt", dest="suggest_prompt", default="", metavar="MEDIA|FILE",
                      help="reverse a prompt out of an image ('Image to prompt'): print PixAI's "
                           "suggested tags + description for a catalog media_id or local file. Free")
-    gen.add_argument("--kaisuuken-id", dest="kaisuuken_id", default="", metavar="ID",
+    g_create.add_argument("--kaisuuken-id", dest="kaisuuken_id", default="", metavar="ID",
                      help="force a specific free card (kaisuuken) id on this generate/edit/"
                           "video run. Normally not needed -- a matching card is auto-applied "
                           "on --confirm (like the website)")
-    gen.add_argument("--no-card", dest="no_card", action="store_true",
+    g_create.add_argument("--no-card", dest="no_card", action="store_true",
                      help="do NOT auto-apply a free card; pay credits even if a card matches")
-    gen.add_argument("--list-models", nargs="?", const="", default=None, metavar="KEYWORD",
+    g_create.add_argument("--list-models", nargs="?", const="", default=None, metavar="KEYWORD",
                      help="search PixAI generation models by keyword and print their "
                           "generatable version ids (use as --model), then exit")
-    ap.add_argument("--fix-model-names", action="store_true",
+    g_maint.add_argument("--fix-model-names", action="store_true",
                     help="re-resolve readable model names for catalog rows whose model_name "
                          "is blank or a raw numeric id (one API call per distinct model), then exit")
-    ap.add_argument("--relabel-removed", action="store_true",
+    g_maint.add_argument("--relabel-removed", action="store_true",
                     help="with --fix-model-names, relabel ids that no longer resolve (deleted "
                          "models) to 'Unknown or removed model' instead of leaving the raw number")
-    ap.add_argument("--audit", action="store_true",
+    g_library.add_argument("--audit", action="store_true",
                     help="read-only duplicate audit of the whole backup folder; writes "
                          "audit_report.csv and prints a summary, then exit. Independent of catalog.db.")
-    ap.add_argument("--verify-library", dest="verify_library", action="store_true",
+    g_library.add_argument("--verify-library", dest="verify_library", action="store_true",
                     help="read-only integrity pass over every catalogued file: missing, zero-byte, "
                          "missing or empty thumbnails, uncataloged files. Writes "
                          "integrity_report.csv/.json to the library's _moonglade/records folder and prints a summary, "
                          "then exit. Changes nothing else.")
-    ap.add_argument("--verify-deep", dest="verify_deep", action="store_true",
+    g_library.add_argument("--verify-deep", dest="verify_deep", action="store_true",
                     help="with --verify-library, also check each file's end structurally "
                          "(PNG/JPEG/WebP/GIF end markers, MP4 moov); a torn file is reported as "
                          "suspect. Reads two small ranges per file, decodes nothing.")
-    ap.add_argument("--dedup", action="store_true",
+    g_library.add_argument("--dedup", action="store_true",
                     help="act on the audit: move redundant copies to _duplicates/ (keeping the "
                          "most-organized copy), then reconcile catalog.db. Dry-run unless --apply.")
-    ap.add_argument("--apply", action="store_true",
+    g_library.add_argument("--apply", action="store_true",
                     help="with --dedup, actually perform the moves/deletes (default is dry-run); "
                          "with --import-curation, actually write the curation")
-    ap.add_argument("--export-curation", dest="export_curation", nargs="?", const="",
+    g_library.add_argument("--export-curation", dest="export_curation", nargs="?", const="",
                     default=None, metavar="FILE",
                     help="write your curation (ratings, collections and their order, smart "
                          "collections, tags, keeper/reject marks, notes) to a JSON file keyed by "
                          "media id, then exit. Default file: curation_<stamp>.json in the library")
-    ap.add_argument("--import-curation", dest="import_curation", default="", metavar="FILE",
+    g_library.add_argument("--import-curation", dest="import_curation", default="", metavar="FILE",
                     help="read a curation file back into this catalog. Dry run unless --apply; "
                          "fill-only (keeps any rating, mark or note already there) unless "
                          "--curation-overwrite. Saves the current state first.")
-    ap.add_argument("--curation-overwrite", dest="curation_overwrite", action="store_true",
+    g_library.add_argument("--curation-overwrite", dest="curation_overwrite", action="store_true",
                     help="with --import-curation, the file wins for the pictures it lists: "
                          "rating, mark, note, tags, collections and manual orders")
-    ap.add_argument("--dedup-delete", action="store_true",
+    g_library.add_argument("--dedup-delete", action="store_true",
                     help="with --dedup --apply, delete redundant copies instead of quarantining them")
-    ap.add_argument("--no-content", action="store_true",
+    g_library.add_argument("--no-content", action="store_true",
                     help="with --audit/--dedup, skip content hashing (Class B); only do the fast "
                          "same-media_id location dedup (Class A)")
-    ap.add_argument("--verify-dupes", action="store_true",
+    g_library.add_argument("--verify-dupes", action="store_true",
                     help="final-pass safety check on _duplicates/: confirm every quarantined file "
                          "is byte-identical to a surviving keeper before you delete. Flags orphans "
                          "and same-id-different-bytes mismatches. Read-only unless --restore-orphans.")
-    ap.add_argument("--restore-orphans", action="store_true",
+    g_library.add_argument("--restore-orphans", action="store_true",
                     help="with --verify-dupes, move any orphaned quarantined files (no surviving "
                          "keeper) back to images/")
-    ap.add_argument("--rebuild-similar", action="store_true",
+    g_library.add_argument("--rebuild-similar", action="store_true",
                     help="drop + re-embed the visual-similarity ('Similar') index from scratch off "
                          "the on-disk backup. Cures a corrupted/duplicate index; builds ONE clean "
                          "named index. ~decode-bound, no network. Needs torch/pixeltable. "
                          "Heavy: don't run it beside GPU- or RAM-heavy programs.")
-    ap.add_argument("--sync-similar", action="store_true",
+    g_library.add_argument("--sync-similar", action="store_true",
                     help="TOP UP the 'Similar' index: embed only images it doesn't already have. "
                          "The incremental counterpart to --rebuild-similar and the one you "
                          "normally want -- it cannot lose existing rows, and after an interrupted "
                          "build it resumes instead of starting over. Needs torch/pixeltable. "
                          "Heavy: don't run it beside GPU- or RAM-heavy programs.")
-    webauth = ap.add_argument_group("web gallery login accounts (session-based auth)")
-    webauth.add_argument("--add-web-user", action="store_true",
+    g_account.add_argument("--add-web-user", action="store_true",
                     help="add or update a gallery web-login account: interactively prompts "
                          "for a username and password (getpass -- never echoed/printed), "
                          "hashes the password, and saves it to config.json's AUTH_USERS. "
                          "Deliberately CLI-only -- no account-creation form is ever reachable "
                          "over the network")
-    webauth.add_argument("--remove-web-user", default="", metavar="USERNAME",
+    g_account.add_argument("--remove-web-user", default="", metavar="USERNAME",
                     help="remove a gallery web-login account by username")
-    webauth.add_argument("--list-web-users", action="store_true",
+    g_account.add_argument("--list-web-users", action="store_true",
                     help="list gallery web-login usernames (never password hashes), then exit")
+    
+    g_search.add_argument("--search", default=None, metavar="QUERY",
+                    help="search the local catalog with the same query language as the gallery's "
+                         "search box (words, key:value operators like model: lora:Name>0.7 "
+                         "created:2026Q3 rating:>=4, -negation, quotes) and print one line per "
+                         "match: media id, date, model, rating, start of the prompt. Read-only, "
+                         "no network")
+    g_search.add_argument("--limit", type=int, default=50, metavar="N",
+                    help="with --search: print at most N matches (default 50; 0 = all)")
+    g_search.add_argument("--json", dest="search_json", action="store_true",
+                    help="with --search: print the matches as a JSON list instead of lines")
+    g_search.add_argument("--export-csv", dest="export_csv", default="", metavar="PATH",
+                    help="write the --search matches (every match, ignoring --limit) to PATH as "
+                         "a CSV with the same columns as the gallery's Export view; without "
+                         "--search it exports the whole catalog")
     args = ap.parse_args()
     # B2: before anything reads a setting, the install half of the move runs and the library
     # is resolved: --out for this one run, else settings.json's, else the default. The command
@@ -15722,6 +16155,9 @@ def main():
         pass
 
     try:
+        if getattr(args, "search", None) is not None or getattr(args, "export_csv", ""):
+            run_search(args)
+            return
         if args.catalog_stats:
             run_catalog_stats(args)
             return
@@ -16012,7 +16448,7 @@ def main():
                              progress_cb=((lambda d, t, _pct: _prog(d, t)) if _prog else None))
         except Exception as e:                           # noqa: BLE001 -- additive, never fatal
             vlog("thumbnail backfill after update skipped: {}".format(e))
-    except PixAIError as e:
+    except (PixAIError, SendOutcomeUnclear) as e:
         sys.exit(str(e))
 
 

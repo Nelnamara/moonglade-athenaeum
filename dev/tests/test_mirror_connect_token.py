@@ -1,7 +1,9 @@
 """Connect from PixAI, and the Mirror's renewal surviving a closed spell (2026-11-18).
 
-PixAI moved its sign-in where no outside program can read it, so the old Connect (the server
-reading this machine's browser store) finds nothing. The Control Panel now offers a bookmark
+PixAI moved its sign-in where an outside program mostly cannot read it, yet the one-click
+Connect (the server reading this machine's browser store, POST /api/mirror/connect) still
+worked on the owner's install, so both ways are offered; the one-click route now checks the
+account too (see the end of this file). The Control Panel offers a bookmark
 the user clicks on a signed-in pixai.art tab; it opens /mirror/connect here, which posts the
 tab's sign-in to POST /api/mirror/connect-token. That route is login-gated, CSRF-checked and
 same-origin only, refuses under READ_ONLY, and stores the token only when it is a PixAI JWT,
@@ -140,6 +142,24 @@ def test_an_account_that_cannot_be_confirmed_refuses(tmp_path, armed, monkeypatc
     assert mirror_mod.load_mirror_state() == {}
 
 
+def test_a_refused_key_checks_against_the_stored_signins_account(tmp_path, armed, monkeypatch):
+    """PixAI refusing the key (2026-11-19, a lapsed membership) must not lock the owner out of
+    reconnecting: the account the STORED sign-in names -- confirmed against this key when it
+    was connected -- answers instead, even once that sign-in has expired. Another account's
+    token is still refused, and with nothing stored the account cannot be confirmed at all."""
+    monkeypatch.setattr(mj, "resolve_user_id", lambda s: (_ for _ in ()).throw(
+        mj.PixAIAuthError("401 Unauthorized -- API key missing/expired.")))
+    cli = login_client(tmp_path)
+    d = _post(cli, _in(7)).get_json()
+    assert d["ok"] is False and "Check that the API key is set up" in d["error"]
+    mirror_mod.save_mirror_state({"jwt": _in(-2)})                        # expired, ours
+    d = _post(cli, _in(7, sub="1600000000000000999")).get_json()
+    assert d["ok"] is False and "different PixAI account" in d["error"]
+    tok = _in(7)
+    assert _post(cli, tok).get_json()["ok"] is True
+    assert mirror_mod.load_mirror_state()["jwt"] == tok
+
+
 @pytest.mark.parametrize("err", [
     requests.ConnectionError("no route to host"),
     requests.Timeout("read timed out"),
@@ -257,14 +277,40 @@ def test_home_network_addresses(addr, home):
     ("203.0.113.5", False), ("::ffff:8.8.8.8", False), ("2001:db8::1", False),
 ])
 def test_the_route_takes_a_sign_in_only_from_the_home_network(tmp_path, armed, addr, ok):
+    """Over HTTPS (another device's only road since 2026-11-19, below), the address decides."""
     cli = login_client(tmp_path)
     tok = _in(7)
-    r = cli.post(ROUTE, json=with_csrf(cli, {"token": tok}), environ_base={"REMOTE_ADDR": addr})
+    r = cli.post(ROUTE, json=with_csrf(cli, {"token": tok}),
+                 environ_base={"REMOTE_ADDR": addr, "wsgi.url_scheme": "https"},
+                 base_url="https://localhost")
     if ok:
         assert r.get_json()["ok"] is True
     else:
         assert r.status_code == 403 and "home network" in r.get_json()["error"]
         assert mirror_mod.load_mirror_state() == {} and armed.looked == []
+
+
+@pytest.mark.parametrize("addr", ["192.168.1.20", "10.0.0.68", "::ffff:192.168.1.20",
+                                  "fd12:3456::1"])
+def test_another_device_over_plain_http_is_refused_before_anything(tmp_path, armed, addr):
+    """App security review 2026-11-19, finding 1: a sign-in posted over plain http:// from
+    another device crosses the network in clear, so it is refused -- before the body is read,
+    the account looked up or anything stored -- with a sentence naming the https:// address."""
+    cli = login_client(tmp_path)
+    r = cli.post(ROUTE, json=with_csrf(cli, {"token": _in(7)}),
+                 environ_base={"REMOTE_ADDR": addr})
+    assert r.status_code == 403
+    err = r.get_json()["error"]
+    assert "https://" in err and "encrypted" in err
+    assert mirror_mod.load_mirror_state() == {} and armed.looked == []
+
+
+def test_this_pc_may_connect_over_plain_http(tmp_path, armed):
+    """The loopback never leaves the PC: plain HTTP from 127.0.0.1 still connects."""
+    cli = login_client(tmp_path)
+    r = cli.post(ROUTE, json=with_csrf(cli, {"token": _in(7)}),
+                 environ_base={"REMOTE_ADDR": "127.0.0.1"})
+    assert r.get_json()["ok"] is True
 
 
 # ---- the page the bookmark opens -------------------------------------------------------
@@ -337,3 +383,76 @@ def test_a_token_survives_the_app_being_closed_for_five_days(tmp_path, monkeypat
     assert mirror_mod.jwt_expiry(mirror_mod.load_mirror_state()["jwt"]) == reopen + 7 * DAY
     # and it is still bounded: at most one renewal a day while it runs, never a loop
     assert len(minted) <= 5
+
+
+# ---- one-click Connect (POST /api/mirror/connect): the browser read, same-account checked ---
+
+BROWSER_ROUTE = "/api/mirror/connect"
+
+
+def _browser_post(cli, **k):
+    return cli.post(BROWSER_ROUTE, json=with_csrf(cli), **k)
+
+
+def test_a_browser_sign_in_for_the_same_account_is_stored(tmp_path, armed, monkeypatch):
+    cli = login_client(tmp_path)
+    tok = _in(7)
+    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: tok)
+    monkeypatch.setattr(mirror_mod, "refresh_jwt", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("nothing is due")))
+    d = _browser_post(cli).get_json()
+    assert d == {"ok": True, "days_left": 6}
+    assert mirror_mod.load_mirror_state()["jwt"] == tok
+
+
+def test_a_browser_sign_in_for_another_account_is_refused_and_nothing_is_stored(
+        tmp_path, armed, monkeypatch, caplog):
+    caplog.set_level(logging.DEBUG)
+    cli = login_client(tmp_path)
+    tok = _in(7, sub="1600000000000000999")
+    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: tok)
+    r = _browser_post(cli)
+    d = r.get_json()
+    assert d["ok"] is False and d["error"] == mirror_mod.SITE_TOKEN_OTHER_ACCOUNT
+    assert not armed.path.exists()
+    assert tok not in r.get_data(as_text=True) and tok not in caplog.text
+    assert "1600000000000000999" not in r.get_data(as_text=True)
+
+
+def test_one_click_connect_keeps_the_later_expiring_sign_in(tmp_path, armed, monkeypatch):
+    cli = login_client(tmp_path)
+    later = _in(6.8, salt="a")
+    mirror_mod.save_mirror_state({"jwt": later})
+    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: _in(6.1, salt="b"))
+    monkeypatch.setattr(mirror_mod, "refresh_jwt", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("nothing is due")))
+    assert _browser_post(cli).get_json()["ok"] is True
+    assert mirror_mod.load_mirror_state()["jwt"] == later
+
+
+def test_one_click_connect_without_a_browser_token_says_so(tmp_path, armed, monkeypatch):
+    cli = login_client(tmp_path)
+    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: "")
+    d = _browser_post(cli).get_json()
+    assert d["ok"] is False and "browser" in d["error"]
+    assert not armed.path.exists()
+
+
+def test_one_click_connect_needs_the_token_and_refuses_under_read_only(tmp_path, armed, monkeypatch):
+    cli = login_client(tmp_path)
+    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("no browser read without the token or under READ_ONLY")))
+    assert cli.post(BROWSER_ROUTE, json={}).status_code == 400
+    monkeypatch.setattr(mj, "_read_only_now", lambda: True)
+    assert _browser_post(cli).get_json()["ok"] is False
+    assert not armed.path.exists()
+
+
+def test_one_click_connect_runs_a_due_renewal(tmp_path, armed, monkeypatch):
+    cli = login_client(tmp_path)
+    tok = _in(2)                                   # inside the refresh cushion
+    fresh = _in(7, salt="fresh")
+    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: tok)
+    monkeypatch.setattr(mirror_mod, "refresh_jwt", lambda *a, **k: fresh)
+    assert _browser_post(cli).get_json()["ok"] is True
+    assert mirror_mod.load_mirror_state()["jwt"] == fresh
