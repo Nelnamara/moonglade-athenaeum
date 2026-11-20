@@ -144,18 +144,28 @@ def _save_contest_cache(path, cache):
     import json
     import os
     try:
-        os.makedirs(os.path.dirname(str(path)), exist_ok=True)
-        tmp = "{}.tmp-{}".format(path, os.getpid())
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(cache, f, separators=(",", ":"))
-        for attempt in range(5):
+        import tempfile
+        folder = os.path.dirname(str(path))
+        os.makedirs(folder, exist_ok=True)
+        # A unique temp name per write (two threads of one process share a pid), made beside the
+        # target so os.replace stays on one volume; removed again if the write or swap fails.
+        fd, tmp = tempfile.mkstemp(dir=folder, prefix=os.path.basename(str(path)) + ".")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(cache, f, separators=(",", ":"))
+            for attempt in range(5):
+                try:
+                    os.replace(tmp, path)
+                    return
+                except PermissionError:        # Windows: a scanner can hold the target a moment
+                    if attempt == 4:
+                        raise
+                    time.sleep(0.05 * (2 ** attempt))
+        finally:
             try:
-                os.replace(tmp, path)
-                return
-            except PermissionError:            # Windows: a scanner can hold the target a moment
-                if attempt == 4:
-                    raise
-                time.sleep(0.05 * (2 ** attempt))
+                os.unlink(tmp)                 # gone already after a good os.replace
+            except OSError:
+                pass
     except Exception as e:                     # noqa: BLE001 -- a cache write must not fail the read
         from moonglade import logs as moonglade_logging
         moonglade_logging.get_logger().warning(

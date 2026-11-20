@@ -35,8 +35,12 @@ from moonglade import telemetry as _telemetry
 # surface that mounts a contest list shares one answer rather than each paying its own
 # round trip on open.
 CONTESTS_TTL = 90.0
-_contests_cache = {}
-_contests_cache_lock = threading.Lock()
+# A FORCED full walk (the board's refresh button: up to 100 pages) runs at most once per this
+# many seconds; inside the window a forced call is served from the memo, not refused.
+CONTESTS_FORCE_COOLDOWN_S = 300.0
+_contests_cache = {}                 # "board": the memo; "forced_at": when the last forced walk ended
+_contests_cache_lock = threading.Lock()   # guards the memo only -- never held across a walk
+_contests_walk_lock = threading.Lock()    # single-flight: one walk at a time, the rest wait on it
 
 
 def contest_board(core, session, force=False, full=False):
@@ -55,17 +59,34 @@ def contest_board(core, session, force=False, full=False):
     One snapshot, read the full depth (list_contests' own default), filtered by whoever
     needs less. Costs no more upstream than the single widest read did, and every caller
     now agrees about what exists."""
-    now = time.time()
+    asked = time.time()
     with _contests_cache_lock:
         ent = _contests_cache.get("board")
-        if not force and ent and (now - ent["at"]) < CONTESTS_TTL:
+        if ent and not force and (asked - ent["at"]) < CONTESTS_TTL:
             return ent["rows"]
-    meta = {}
-    rows = _contests.list_contests(session, active_only=False, meta=meta,
-                                   cache_path=_contests.contest_cache_path(), full=full)
-    with _contests_cache_lock:
-        _contests_cache["board"] = {"at": time.time(), "rows": rows, "meta": meta}
-    return rows
+        if (force and ent
+                and (asked - _contests_cache.get("forced_at", 0.0)) < CONTESTS_FORCE_COOLDOWN_S):
+            return ent["rows"]                       # walked fully a moment ago: the memo
+    # One walk at a time: whoever needs one queues here, and the one that gets in walks. The
+    # memo lock is NOT held across the walk, so readers of the memo are never blocked by it.
+    with _contests_walk_lock:
+        with _contests_cache_lock:
+            ent = _contests_cache.get("board")
+            if ent and ent["at"] >= asked:
+                return ent["rows"]                   # a walk finished while we waited: share it
+            if (force and ent
+                    and (time.time() - _contests_cache.get("forced_at", 0.0))
+                    < CONTESTS_FORCE_COOLDOWN_S):
+                return ent["rows"]
+        meta = {}
+        rows = _contests.list_contests(session, active_only=False, meta=meta,
+                                       cache_path=_contests.contest_cache_path(), full=full)
+        done = time.time()
+        with _contests_cache_lock:
+            _contests_cache["board"] = {"at": done, "rows": rows, "meta": meta}
+            if force:
+                _contests_cache["forced_at"] = done
+        return rows
 
 
 def contest_board_meta():

@@ -197,3 +197,116 @@ def test_the_board_read_goes_through_the_cache(monkeypatch):
     contest_sync.contest_board(None, object(), full=True)
     assert seen["cache_path"] == c.contest_cache_path() and seen["full"] is True
     contest_sync._contests_cache.clear()
+
+
+# ---- the board walk: a forced walk is rationed, and concurrent callers share one walk -------
+
+class _Walks:
+    """list_contests stand-in that counts walks and can hold one open."""
+    def __init__(self, gate=None):
+        import threading
+        self.n, self.live, self.peak = 0, 0, 0
+        self.gate, self.lock = gate, threading.Lock()
+
+    def __call__(self, session, **kw):
+        with self.lock:
+            self.n += 1
+            self.live += 1
+            self.peak = max(self.peak, self.live)
+        try:
+            if self.gate is not None:
+                self.gate.wait(5)
+            return [{"id": "w%d" % self.n}]
+        finally:
+            with self.lock:
+                self.live -= 1
+
+
+def test_two_forced_calls_inside_the_window_make_one_walk(monkeypatch):
+    walks = _Walks()
+    monkeypatch.setattr(c, "list_contests", walks)
+    contest_sync._contests_cache.clear()
+    first = contest_sync.contest_board(None, object(), force=True, full=True)
+    second = contest_sync.contest_board(None, object(), force=True, full=True)
+    assert walks.n == 1 and second == first      # served from the memo, not an error
+
+
+def test_a_forced_call_after_the_window_walks_again(monkeypatch):
+    walks = _Walks()
+    monkeypatch.setattr(c, "list_contests", walks)
+    contest_sync._contests_cache.clear()
+    contest_sync.contest_board(None, object(), force=True, full=True)
+    contest_sync._contests_cache["forced_at"] -= contest_sync.CONTESTS_FORCE_COOLDOWN_S + 1
+    rows = contest_sync.contest_board(None, object(), force=True, full=True)
+    assert walks.n == 2 and rows == [{"id": "w2"}]
+    assert contest_sync.CONTESTS_FORCE_COOLDOWN_S == 300.0
+
+
+def test_concurrent_callers_make_one_walk(monkeypatch):
+    import threading
+    gate = threading.Event()
+    walks = _Walks(gate)
+    monkeypatch.setattr(c, "list_contests", walks)
+    contest_sync._contests_cache.clear()
+    got, errs = [], []
+
+    def go(force):
+        try:
+            got.append(contest_sync.contest_board(None, object(), force=force, full=force))
+        except Exception as e:                   # noqa: BLE001
+            errs.append(e)
+    threads = [threading.Thread(target=go, args=(i % 2 == 0,)) for i in range(6)]
+    for t in threads:
+        t.start()
+    import time
+    deadline = time.time() + 5
+    while walks.n < 1 and time.time() < deadline:
+        time.sleep(0.01)
+    time.sleep(0.2)                              # the rest are queued behind the one walk
+    gate.set()
+    for t in threads:
+        t.join(10)
+    assert not errs and len(got) == 6
+    assert walks.n == 1 and walks.peak == 1
+    assert all(g == [{"id": "w1"}] for g in got)
+
+
+def test_the_memo_lock_is_free_while_a_walk_is_out(monkeypatch):
+    import threading
+    gate = threading.Event()
+    walks = _Walks(gate)
+    monkeypatch.setattr(c, "list_contests", walks)
+    contest_sync._contests_cache.clear()
+    t = threading.Thread(target=lambda: contest_sync.contest_board(None, object(), force=True))
+    t.start()
+    import time
+    while walks.n < 1:
+        time.sleep(0.01)
+    try:
+        assert contest_sync._contests_cache_lock.acquire(timeout=1), "held across the walk"
+        contest_sync._contests_cache_lock.release()
+    finally:
+        gate.set()
+        t.join(10)
+
+
+def test_the_cache_temp_names_are_unique_and_leave_nothing_behind(tmp_path, monkeypatch):
+    path = tmp_path / "sub" / "contest_cache.json"
+    seen = []
+    real = os.replace
+
+    def spy(src, dst, *a, **k):
+        seen.append(os.path.basename(src))
+        return real(src, dst, *a, **k)
+    monkeypatch.setattr(os, "replace", spy)
+    for _ in range(3):
+        c._save_contest_cache(str(path), {"v": 1, "rows": {}})
+    assert len(set(seen)) == 3 and all(n.startswith("contest_cache.json.") for n in seen)
+    assert sorted(x.name for x in path.parent.iterdir()) == ["contest_cache.json"]
+
+    def boom(src, dst, *a, **k):
+        raise OSError("no")
+    monkeypatch.setattr(os, "replace", boom)
+    c._save_contest_cache(str(path), {"v": 1, "rows": {}})        # logged, never raised
+    assert sorted(x.name for x in path.parent.iterdir()) == ["contest_cache.json"], \
+        "a failed swap leaves no temp file"
