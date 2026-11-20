@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from moonglade import cards as cards_mod
 from moonglade import gallery as moonglade_gallery
 from moonglade import backup as core
+from moonglade import gen_road as gen_road_mod
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import models as models_mod
@@ -982,14 +983,14 @@ def test_task_detail_query_reads_the_full_document(monkeypatch):
 
 def test_submit_generation(monkeypatch):
     monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", lambda s, q, v=None, retries=None: {"createGenerationTask": {"id": "T9"}})
-    assert core.submit_generation(object(), {"x": 1}) == "T9"
+    assert gen_road_mod.submit_generation(object(), {"x": 1}) == "T9"
 
 
 def test_submit_generation_raises(monkeypatch):
     import pytest
     monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", lambda s, q, v=None, retries=None: {"createGenerationTask": {}})
     with pytest.raises(core.PixAIError):
-        core.submit_generation(object(), {})
+        gen_road_mod.submit_generation(object(), {})
 
 
 def test_submit_generation_retries_on_inferenceprofile_rejection(monkeypatch):
@@ -1014,7 +1015,7 @@ def test_submit_generation_retries_on_inferenceprofile_rejection(monkeypatch):
 
     monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", fake_gql)
     params = {"prompts": "x", "modelId": "v", "inferenceProfile": "ultra"}
-    assert core.submit_generation(object(), params) == "T10"
+    assert gen_road_mod.submit_generation(object(), params) == "T10"
     assert len(calls) == 2                              # rejected once, retried once
     assert calls[0]["inferenceProfile"] == "ultra"       # first attempt: as chosen
     assert "inferenceProfile" not in calls[1]            # retry: dropped, not just changed
@@ -1032,7 +1033,7 @@ def test_submit_generation_does_not_retry_unrelated_errors(monkeypatch):
 
     monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", fake_gql)
     with pytest.raises(core.PixAIError, match="something else entirely"):
-        core.submit_generation(object(), {"prompts": "x", "inferenceProfile": "ultra"})
+        gen_road_mod.submit_generation(object(), {"prompts": "x", "inferenceProfile": "ultra"})
 
 
 def test_submit_generation_no_retry_when_param_absent(monkeypatch):
@@ -1048,7 +1049,7 @@ def test_submit_generation_no_retry_when_param_absent(monkeypatch):
 
     monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", fake_gql)
     with pytest.raises(core.PixAIError):
-        core.submit_generation(object(), {"prompts": "x"})   # no inferenceProfile key
+        gen_road_mod.submit_generation(object(), {"prompts": "x"})   # no inferenceProfile key
     assert len(calls) == 1                               # never retried
 
 
@@ -1065,7 +1066,7 @@ def test_collect_generation(monkeypatch, tmp_path):
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: {"outputs": {"mediaId": "M1"}})
     monkeypatch.setattr(core, "extract_full_meta", lambda r: {"prompt_full": "p"})
     monkeypatch.setattr(core, "_download_image_task", lambda *a, **k: ["/M1.webp"])
-    got = core.collect_generation(object(), "T", str(tmp_path))
+    got = gen_road_mod.collect_generation(object(), "T", str(tmp_path))
     assert got["media_ids"] == ["M1"] and got["saved"] == 1
 
 
@@ -1076,7 +1077,7 @@ def test_submit_fixer_filters_and_submits(monkeypatch):
         seen["body"] = body
         return {"id": "F1"}
     monkeypatch.setattr(core, "_rest_post", fake_post)
-    tid = core.submit_fixer(object(), "M", [
+    tid = gen_road_mod.submit_fixer(object(), "M", [
         {"x": 10, "y": 20, "width": 30, "height": 40, "tag": "FACE"},  # kept (tag lowercased)
         {"x": 1, "y": 1, "width": 0, "height": 5, "tag": "hand"},      # dropped (w == 0)
         {"x": 1, "y": 1, "width": 5, "height": 5, "tag": "nope"},      # dropped (bad tag)
@@ -1089,7 +1090,7 @@ def test_submit_fixer_needs_a_box(monkeypatch):
     import pytest
     monkeypatch.setattr(core, "_rest_post", lambda *a, **k: {"id": "x"})
     with pytest.raises(core.PixAIError):
-        core.submit_fixer(object(), "M", [])
+        gen_road_mod.submit_fixer(object(), "M", [])
 
 
 def test_run_generate_persists_paid_credit(monkeypatch, tmp_path):
@@ -1121,7 +1122,7 @@ def test_collect_generation_persists_paid_credit_zero_not_blank(monkeypatch, tmp
     monkeypatch.setattr(core, "download",
                         lambda s, url, stem, **k: ("ok", stem.with_suffix(".png")))
     monkeypatch.setattr(moonglade_gallery, "make_thumbnail", lambda *a, **k: None)
-    got = core.collect_generation(object(), "T1", str(tmp_path))
+    got = gen_road_mod.collect_generation(object(), "T1", str(tmp_path))
     assert got["media_ids"] == ["M1"]
     rows = moonglade_gallery.load_catalog(tmp_path / "catalog.db")
     assert rows[0].get("paid_credit") == "0"

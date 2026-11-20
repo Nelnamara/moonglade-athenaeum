@@ -283,6 +283,27 @@ SEAMS = {
         "FIXER_MODEL_ID", "edit_model_id", "edit_model_by_id", "edit_default_aspect",
         "clamp_edit_config", "_is_local_source", "build_chat_edit_parameters",
         "_edit_config_from_args", "clean_fix_boxes", "FIX_ONE_KIND", "build_fixer_body"]},
+    "moonglade.gen_road": {"from": "moonglade.backup", "names": [
+        "_GEN_MUTATION", "priority_for_submit", "_is_turbo_refusal", "_SCENE_LIST_Q",
+        "_SCENE_SUBMIT_M", "chat_editing_scenes", "submit_scene", "UNLIMITED_LANE",
+        "UNLIMITED_VERSIONS", "TSUBAKI3_MODEL_ID", "TSUBAKI3_VERSION_ID", "_UNLIMITED_CACHE_TTL",
+        "_UNLIMITED_FAIL_TTL", "_unlimited_cache", "UNLIMITED_BUSY", "_UNLIMITED_REFUSED",
+        "_UNLIMITED_NO_CARD", "_UNLIMITED_UNWIRED", "_UNLIMITED_T3_ONLY", "_UNLIMITED_IMAGE_ONLY",
+        "_UNLIMITED_UNREAD", "_UNLIMITED_UNCONFIRMED", "_UNLIMITED_ENDED", "_UNLIMITED_NOT_HELD",
+        "asks_unlimited", "is_lane_request", "_unlimited_identity", "_unlimited_session",
+        "_unlimited_raw", "_expiry_epoch", "infinite_mode_status", "_lane_size_rule",
+        "_lane_size_ok", "_unlimited_check", "unlimited_resolver", "_graphql_reason",
+        "submit_generation", "_SPEND_WATCH", "_SpendMark", "spend_watch", "_mark_spend_reached",
+        "_observe_send", "submit_fixer", "GenerationRequest", "RequestResolver",
+        "model_version_resolver", "gate_resolver", "_gen_args_from_web_payload",
+        "_edit_parameters_from_payload", "_ENHANCE_PRICE_NOTE", "_SUBMIT_ACTIONS",
+        "_SUBMIT_ACTION_DEFAULT", "build_request", "_IMAGE_REF_RE", "_image_refs", "_recipes_in",
+        "_shape_creativity", "price", "_price_breakdown", "_price_answer", "submit",
+        "_send_kwargs", "RUN_SEND_GAP_S", "_run_budget_note", "send_run", "collect_generation",
+        "PIXAI_REJECTED_CODES", "DEFINITE_CODES", "TRAINING_CODES", "ANY_PIXAI_CODE",
+        "_UNKNOWN_OUTCOME_STATUSES", "classify_outcome", "_GRAPHQL_NUMERIC_CODES",
+        "graphql_error_code", "outcome_reason", "definite_refusal", "send_outcome", "CLI_UNCLEAR",
+        "SendOutcomeUnclear", "_cli_send_once", "_cli_create_once"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -1077,6 +1098,35 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_unclear_single_sends.py', 'moonglade.gen_params'),
     ('tests/test_video_tsubaki.py', 'moonglade.gen_params'),
     ('tests/test_web_auth.py', 'moonglade.gen_params'),
+    # 3.22 phase 5, gen_road: no reader reads text that left backup.py. test_spend_no_retry reads
+    # submit_generation and send_run through _spend_path; test_unclear_single_sends' main() pin
+    # expects `_gen_road.SendOutcomeUnclear`; test_training_advanced and test_telemetry reach the
+    # code tables and the creates through gen_road_mod; test_loom_generate_guard's gallery check
+    # also bans `_gen_road.submit(`; the whole-file readers look for names that stayed.
+    ('tests/test_artworks_adhoc.py', 'moonglade.gen_road'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.gen_road'),
+    ('tests/test_config_path_routing.py', 'moonglade.gen_road'),
+    ('tests/test_csrf_coverage.py', 'moonglade.gen_road'),
+    ('tests/test_edit_upload.py', 'moonglade.gen_road'),
+    ('tests/test_enhance.py', 'moonglade.gen_road'),
+    ('tests/test_evidence_counters.py', 'moonglade.gen_road'),
+    ('tests/test_gen_surface.py', 'moonglade.gen_road'),
+    ('tests/test_history_feed_document.py', 'moonglade.gen_road'),
+    ('tests/test_jwt.py', 'moonglade.gen_road'),
+    ('tests/test_living_library.py', 'moonglade.gen_road'),
+    ('tests/test_loom_notify.py', 'moonglade.gen_road'),
+    ('tests/test_network.py', 'moonglade.gen_road'),
+    ('tests/test_pixai_client.py', 'moonglade.gen_road'),
+    ('tests/test_settings_store.py', 'moonglade.gen_road'),
+    ('tests/test_setup_prepare.py', 'moonglade.gen_road'),
+    ('tests/test_spend_no_retry.py', 'moonglade.gen_road'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.gen_road'),
+    ('tests/test_telemetry.py', 'moonglade.gen_road'),
+    ('tests/test_training_advanced.py', 'moonglade.gen_road'),
+    ('tests/test_training_parity.py', 'moonglade.gen_road'),
+    ('tests/test_unclear_single_sends.py', 'moonglade.gen_road'),
+    ('tests/test_video_tsubaki.py', 'moonglade.gen_road'),
+    ('tests/test_web_auth.py', 'moonglade.gen_road'),
 }
 
 
@@ -1165,7 +1215,7 @@ def _import_time_imports(tree):
     while stack:
         node = stack.pop()
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-            stack.extend(node.decorator_list)
+            stack.extend(getattr(node, "decorator_list", []))      # a Lambda has none
             stack.extend(node.args.defaults)
             continue
         if isinstance(node, (ast.Import, ast.ImportFrom)):

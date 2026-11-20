@@ -9,6 +9,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
 
@@ -397,7 +398,7 @@ def test_collect_generation_detects_video(monkeypatch, tmp_path):
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: {"outputs": {"videos": [{"mediaId": "V9"}]}})
     monkeypatch.setattr(core, "video_outputs", lambda r: ([{"video_media_id": "V9"}], {"prompt": "p"}))
     monkeypatch.setattr(core, "_download_video_task", lambda *a, **k: ["/V9.mp4"])
-    got = core.collect_generation(object(), "T", str(tmp_path))
+    got = gen_road_mod.collect_generation(object(), "T", str(tmp_path))
     assert got["is_video"] is True and got["media_ids"] == ["V9"] and got["saved"] == 1
 
 
@@ -482,7 +483,7 @@ def test_gallery_catalog_ref_passes_through_then_uploads_on_invalid_media_id(tmp
     uploaded, submitted = [], {}
     monkeypatch.setattr(core, "upload_media",
                         lambda session, path, **k: uploaded.append(str(path)) or "999000111222")
-    monkeypatch.setattr(core, "submit_generation",
+    monkeypatch.setattr(gen_road_mod, "submit_generation",
                         lambda session, params: submitted.update(params) or "task-1")
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
 
@@ -499,7 +500,7 @@ def test_gallery_catalog_ref_passes_through_then_uploads_on_invalid_media_id(tmp
             raise core.graphql_error("invalid_media_id", code="BAD_REQUEST")
         submitted.update(params)
         return "task-1"
-    monkeypatch.setattr(core, "submit_generation", _submit)
+    monkeypatch.setattr(gen_road_mod, "submit_generation", _submit)
 
     cli = login_test_client(create_app(tmp_path))
     r = cli.post("/api/loom/generate", json={
@@ -531,7 +532,7 @@ def test_gallery_r2v_catalog_ids_pass_through_without_upload(tmp_path, monkeypat
     calls, submitted = [], {}
     monkeypatch.setattr(core, "upload_media",
                         lambda session, path, **k: calls.append(1) or "777")
-    monkeypatch.setattr(core, "submit_generation",
+    monkeypatch.setattr(gen_road_mod, "submit_generation",
                         lambda session, params: submitted.update(params) or "t")
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
 
@@ -574,9 +575,9 @@ def test_fix_and_edit_upload_the_catalog_reference(tmp_path, monkeypatch, pixai)
 
     monkeypatch.setattr(core, "upload_media", lambda s, path, **k: "999000111222")
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "submit_generation",
+    monkeypatch.setattr(gen_road_mod, "submit_generation",
                         lambda s, params: seen.update(params=params) or "t1")
-    monkeypatch.setattr(core, "submit_fixer",
+    monkeypatch.setattr(gen_road_mod, "submit_fixer",
                         lambda s, src, boxes: seen.update(fix_src=src) or "t2")
 
     cli = login_test_client(create_app(tmp_path))
@@ -771,7 +772,7 @@ def test_a_failed_generation_is_logged_with_its_params(tmp_path, monkeypatch, ca
 
     def boom(session, params):
         raise core.PixAIError('unknown mode "professional" for i2vPro')
-    monkeypatch.setattr(core, "submit_generation", boom)
+    monkeypatch.setattr(gen_road_mod, "submit_generation", boom)
 
     cli = login_test_client(create_app(tmp_path))
     with caplog.at_level(logging.ERROR):
@@ -811,7 +812,7 @@ def test_the_failure_log_never_breaks_the_error_path(tmp_path, monkeypatch, pixa
     def boom(session, params):
         params["poison"] = Unserialisable()
         raise core.PixAIError("the real failure")
-    monkeypatch.setattr(core, "submit_generation", boom)
+    monkeypatch.setattr(gen_road_mod, "submit_generation", boom)
 
     cli = login_test_client(create_app(tmp_path))
     r = cli.post("/api/loom/generate", json={
@@ -936,7 +937,7 @@ def test_r2v_invalid_reference_image_media_id_falls_back_to_upload(tmp_path, mon
             raise core.graphql_error("invalid_reference_image_media_id", code="BAD_REQUEST")
         submitted.update(params)
         return "task-r2v"
-    monkeypatch.setattr(core, "submit_generation", _submit)
+    monkeypatch.setattr(gen_road_mod, "submit_generation", _submit)
 
     cli = login_test_client(create_app(tmp_path))
     r = cli.post("/api/loom/generate", json={
@@ -971,7 +972,7 @@ def test_r2v_fallback_keeps_first_pass_uploads_for_mixed_shots(tmp_path, monkeyp
             raise core.graphql_error("invalid_reference_image_media_id", code="BAD_REQUEST")
         submitted.update(params)
         return "task-mixed"
-    monkeypatch.setattr(core, "submit_generation", _submit)
+    monkeypatch.setattr(gen_road_mod, "submit_generation", _submit)
 
     cli = login_test_client(create_app(tmp_path))
     r = cli.post("/api/loom/generate", json={
@@ -997,7 +998,7 @@ def test_loom_generate_both_submits_rejected_is_exactly_two_posts_then_error(tmp
     def _submit(session, params):
         calls.append(1)
         raise core.graphql_error("invalid_reference_image_media_id", code="BAD_REQUEST")
-    monkeypatch.setattr(core, "submit_generation", _submit)
+    monkeypatch.setattr(gen_road_mod, "submit_generation", _submit)
     cli = login_test_client(create_app(tmp_path))
     r = cli.post("/api/loom/generate", json={"mode": "R2V", "prompt": "x", "images": [mid], "duration": 5})
     assert len(calls) == 2, "expected exactly two submits (try + one retry), got %d" % len(calls)
@@ -1019,7 +1020,7 @@ def test_loom_generate_lost_response_never_retries(tmp_path, monkeypatch, pixai)
     def _submit(session, params):
         calls.append(1)
         raise requests.ReadTimeout("read timed out")
-    monkeypatch.setattr(core, "submit_generation", _submit)
+    monkeypatch.setattr(gen_road_mod, "submit_generation", _submit)
     cli = login_test_client(create_app(tmp_path))
     r = cli.post("/api/loom/generate", json={"mode": "R2V", "prompt": "x", "images": [mid], "duration": 5})
     assert len(calls) == 1, "a lost response must NEVER be retried (double-spend), got %d submits" % len(calls)

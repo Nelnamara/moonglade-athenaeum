@@ -16,6 +16,7 @@ from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gallery as moonglade_gallery
 from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import pricing as pricing_mod
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
@@ -116,7 +117,7 @@ def test_collect_names_a_fix_from_its_source_image_not_the_template(monkeypatch,
                        prompt_preview="a night elf druid, moonlight")])
     _stub_collect(monkeypatch, tmp_path)
     monkeypatch.setattr(core, "_task_detail_query", lambda s, t: _fixer_task())
-    core.collect_generation(object(), "T1", str(tmp_path))
+    gen_road_mod.collect_generation(object(), "T1", str(tmp_path))
     row = next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
                if r["media_id"] == "M9")
     assert row["filename"] == "images/a_night_elf_druid_moonlight_fix-hand_T1_M9.jpg"
@@ -129,7 +130,7 @@ def test_collect_falls_back_to_the_source_media_id_when_it_is_not_in_the_catalog
     inherit the template name -- the source media_id is at least a real handle."""
     _stub_collect(monkeypatch, tmp_path)
     monkeypatch.setattr(core, "_task_detail_query", lambda s, t: _fixer_task(source="700"))
-    core.collect_generation(object(), "T1", str(tmp_path))
+    gen_road_mod.collect_generation(object(), "T1", str(tmp_path))
     row = next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
                if r["media_id"] == "M9")
     assert row["filename"] == "images/700_fix-hand_T1_M9.jpg"
@@ -142,7 +143,7 @@ def test_collect_still_names_an_ordinary_generation_from_its_prompt(monkeypatch,
     monkeypatch.setattr(core, "_task_detail_query", lambda s, t: {
         "parameters": {"prompts": "a night elf druid", "modelId": "V1"},
         "outputs": {"mediaId": "M9", "seed": 42}})
-    core.collect_generation(object(), "T1", str(tmp_path))
+    gen_road_mod.collect_generation(object(), "T1", str(tmp_path))
     row = next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
                if r["media_id"] == "M9")
     assert row["filename"] == "images/a_night_elf_druid_T1_M9.jpg"
@@ -178,7 +179,7 @@ def test_collect_writes_the_fix_model_and_leaves_the_rest_empty(monkeypatch, tmp
     collect path never wrote model_id/model_name at all."""
     _stub_collect(monkeypatch, tmp_path)
     monkeypatch.setattr(core, "_task_detail_query", lambda s, t: _fixer_task())
-    core.collect_generation(object(), "T1", str(tmp_path))
+    gen_road_mod.collect_generation(object(), "T1", str(tmp_path))
     row = next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
                if r["media_id"] == "M9")
     assert row["model_id"] == REFERENCE_PRO and row["model_name"] == "Reference Pro"
@@ -231,7 +232,7 @@ def test_fix_body_is_the_submit_body(monkeypatch):
     boxes += [dict(HAND, x=i) for i in range(20)]                        # 21 usable in all
     posts = _record_posts(monkeypatch)
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
-    assert core.submit_fixer(object(), "700", boxes) == "F1"
+    assert gen_road_mod.submit_fixer(object(), "700", boxes) == "F1"
     (path, sent), = posts
     assert path == "/task/fixer"
     body = gen_params_mod.build_fixer_body("700", boxes)
@@ -296,11 +297,11 @@ def test_submit_fixer_refuses_two_kinds_before_any_network(monkeypatch):
     monkeypatch.setattr(core, "_rest_post", _tripwire("_rest_post"))
     monkeypatch.setattr(mirror_mod, "_session_for_create", _tripwire("_session_for_create"))
     with pytest.raises(core.PixAIError, match="one kind"):
-        core.submit_fixer(object(), "700", [FACE, HAND])
+        gen_road_mod.submit_fixer(object(), "700", [FACE, HAND])
     # READ_ONLY is still checked FIRST: the refusal a read-only install sees is READ_ONLY's.
     monkeypatch.setattr(core, "READ_ONLY", True)
     with pytest.raises(core.PixAIError, match="READ_ONLY"):
-        core.submit_fixer(object(), "700", [FACE, HAND])
+        gen_road_mod.submit_fixer(object(), "700", [FACE, HAND])
 
 
 def _price_client(tmp_path, monkeypatch, answer=None):
@@ -581,7 +582,7 @@ def _collect_fix(monkeypatch, tmp_path, fixer):
     task = _fixer_task(source="700")
     task["parameters"]["chat"]["fixer"] = fixer
     monkeypatch.setattr(core, "_task_detail_query", lambda s, t: task)
-    core.collect_generation(object(), "T1", str(tmp_path))
+    gen_road_mod.collect_generation(object(), "T1", str(tmp_path))
     return next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
                 if r["media_id"] == "M9")["filename"]
 

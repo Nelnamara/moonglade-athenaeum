@@ -15,6 +15,7 @@ from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gallery as g
 from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import models as models_mod
 from moonglade import pricing as pricing_mod
 from moonglade.gallery import CATALOG_FIELDS, save_catalog, load_catalog
@@ -141,7 +142,7 @@ def test_build_request_says_when_the_engine_snaps_the_length():
     snaps on the client first, so this is the receipt for a Remix-built or hand-rolled
     payload. A length the engine takes says nothing, and v4.0.1 keeps its 6 s stop."""
     def req(model, d, shot="I2V"):
-        return core.build_request({"mode": shot, "images": ["1"], "prompt": "x",
+        return gen_road_mod.build_request({"mode": shot, "images": ["1"], "prompt": "x",
                                    "video_model": model, "duration": d}, mode="video")
     r = req("tbkv1.0.1", 6)
     assert r.parameters["i2vPro"]["duration"] == "5"
@@ -154,7 +155,7 @@ def test_build_request_says_when_the_engine_snaps_the_length():
     assert (e["used"], e["why"]) == (10, "this engine takes 5/6/10 s")
     for model, d in (("tbkv1.0.1", 10), ("tbkv1.0.1", 15), ("v4.0.1", 6), ("v4.0.1", "15")):
         assert req(model, d).adjusted == [], (model, d)
-    assert core.build_request({"mode": "I2V", "images": ["1"], "prompt": "x"},
+    assert gen_road_mod.build_request({"mode": "I2V", "images": ["1"], "prompt": "x"},
                               mode="video").adjusted == []          # no duration: the 5 default
 
 
@@ -239,8 +240,8 @@ def test_input_video_durations_keep_order_and_are_all_or_nothing():
 
 def test_build_request_fills_input_lengths_through_the_resolver():
     lens = {"9": 10.04166698455811, "8": 21.5}
-    rs = core.RequestResolver(video_duration=lens.get)
-    req = core.build_request({"mode": "R2V", "images": [], "video_refs": ["9", "8"],
+    rs = gen_road_mod.RequestResolver(video_duration=lens.get)
+    req = gen_road_mod.build_request({"mode": "R2V", "images": [], "video_refs": ["9", "8"],
                               "prompt": "@video1 @video2", "duration": 5},
                              mode="video", resolve=rs)
     rv = req.parameters["referenceVideo"]
@@ -250,8 +251,8 @@ def test_build_request_fills_input_lengths_through_the_resolver():
 
 
 def test_an_unknown_length_sends_the_empty_list_and_a_receipt():
-    rs = core.RequestResolver(video_duration={"9": 10.0}.get)
-    req = core.build_request({"mode": "R2V", "video_refs": ["9", "8"], "prompt": "x"},
+    rs = gen_road_mod.RequestResolver(video_duration={"9": 10.0}.get)
+    req = gen_road_mod.build_request({"mode": "R2V", "video_refs": ["9", "8"], "prompt": "x"},
                              mode="video", resolve=rs)
     assert req.parameters["referenceVideo"]["inputVideoDurations"] == []
     (entry,) = req.adjusted
@@ -264,8 +265,8 @@ def test_an_unknown_length_sends_the_empty_list_and_a_receipt():
 def test_an_i2v_shot_never_reads_or_reports_input_lengths():
     def boom(mid):
         raise AssertionError("an i2vPro shot has no referenceVideo to fill")
-    req = core.build_request({"mode": "I2V", "images": ["1"], "video_refs": ["9"], "prompt": "x"},
-                             mode="video", resolve=core.RequestResolver(video_duration=boom))
+    req = gen_road_mod.build_request({"mode": "I2V", "images": ["1"], "video_refs": ["9"], "prompt": "x"},
+                             mode="video", resolve=gen_road_mod.RequestResolver(video_duration=boom))
     assert "i2vPro" in req.parameters and req.adjusted == []
 
 
@@ -358,7 +359,7 @@ def test_price_and_loom_submit_send_byte_identical_reference_blocks(tmp_path, mo
     monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: priced.update(params) or 105000)
     monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "submit_generation",
+    monkeypatch.setattr(gen_road_mod, "submit_generation",
                         lambda s, params: sent.update(params) or "task-rv")
     cli = login_test_client(g.create_app(tmp_path))
     body = {"mode": "R2V", "images": [], "video_refs": [vid], "prompt": "@video1",
@@ -424,14 +425,14 @@ def test_negative_and_camera_still_reach_the_existing_engines():
 
 
 def test_build_request_says_what_tbkv_did_not_take():
-    req = core.build_request({"mode": "I2V", "images": ["1"], "prompt": "x",
+    req = gen_road_mod.build_request({"mode": "I2V", "images": ["1"], "prompt": "x",
                               "video_model": "tbkv1.0.1", "negative": "blurry",
                               "camera_movement": "pan"}, mode="video")
     assert {e["field"] for e in req.adjusted} == {"negativePrompts", "cameraMovement"}
     assert all(e["used"] is None for e in req.adjusted)
     assert "negativePrompts" not in req.parameters["i2vPro"]
     # an "unset" camera and an empty negative are nothing to report
-    quiet = core.build_request({"mode": "I2V", "images": ["1"], "prompt": "x",
+    quiet = gen_road_mod.build_request({"mode": "I2V", "images": ["1"], "prompt": "x",
                                 "video_model": "tbkv1.0.1", "camera_movement": "unset"},
                                mode="video")
     assert quiet.adjusted == []
@@ -781,7 +782,7 @@ def _web(**kw):
     body = {"mode": "R2V", "images": ["1"], "prompt": "@image1", "video_model": "tbkv1.0.1",
             "duration": 5}
     body.update(kw)
-    return core.build_request(body, mode="video")
+    return gen_road_mod.build_request(body, mode="video")
 
 
 def test_the_web_road_sends_the_ratio_for_tbkv_multi_reference():
@@ -833,7 +834,7 @@ def test_the_quote_and_the_submit_carry_the_same_ratio(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(priced=params) or 21000)
     monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "submit",
+    monkeypatch.setattr(gen_road_mod, "submit",
                         lambda s, req, **k: seen.update(sent=req.parameters) or {"task_id": "v1"})
     cli = login_client(tmp_path)
     body = {"mode": "R2V", "images": ["1"], "prompt": "@image1", "video_model": "tbkv1.0.1",

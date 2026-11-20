@@ -18,6 +18,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import models as models_mod
 from tests.conftest import login_client
 from moonglade import mirror as mirror_mod
@@ -170,8 +171,8 @@ def test_clean_palette_refuses_what_pixai_would(bad):
 # ---- the image road: built, gated, quoted, submitted ---------------------------------------
 
 def _road(payload, **kw):
-    return core.build_request(payload, mode="image", resolve=core.RequestResolver(
-        gate=core.gate_resolver(object())), **kw)
+    return gen_road_mod.build_request(payload, mode="image", resolve=gen_road_mod.RequestResolver(
+        gate=gen_road_mod.gate_resolver(object())), **kw)
 
 
 def _img(vid, **kw):

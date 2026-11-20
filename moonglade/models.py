@@ -1006,7 +1006,7 @@ def _attach_unlimited(session, meta):
     {owned, expires_at, days_left} plus `size`: the lane's size limit (_lane_size_rule) off
     the gate's own cached /size-config read, so the drawer locks exactly the sizes the build
     refuses. None when the status read failed -- the drawer offers nothing."""
-    from moonglade.backup import infinite_mode_status, _lane_size_rule, UNLIMITED_VERSIONS
+    from moonglade.gen_road import infinite_mode_status, _lane_size_rule, UNLIMITED_VERSIONS
     vid = str(meta.get("version_id") or "")
     meta["unlimited"] = None
     if vid not in UNLIMITED_VERSIONS:
@@ -1716,7 +1716,8 @@ def _check_context_images(session, p):
     PixAI's own site would never send. Raises PixAIError; returns nothing. Order: the shape of
     the list, then the model (/features must answer MMDIT26B with contextImages on), then the
     combinations the feature excludes, then the live max."""
-    from moonglade.backup import PixAIError, UNLIMITED_VERSIONS
+    from moonglade.backup import PixAIError
+    from moonglade.gen_road import UNLIMITED_VERSIONS
     ids = p.get("contextImages")
     if not isinstance(ids, list) or not ids \
             or not all(isinstance(x, str) and x.strip() for x in ids):

@@ -15,6 +15,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import integrity as integ
 from moonglade import models as models_mod
 from tests.test_unclear_single_sends import ROUTES, _Resp, rig  # noqa: F401  (rig is a fixture)
@@ -89,15 +90,15 @@ def test_P5_a_bare_401_on_fix_is_unclear_and_names_the_401(rig):
      "unknown"),                                                             # the site reads the name
 ])
 def test_a_graphql_error_is_a_refusal_only_by_a_definite_code(err, want):
-    assert core.classify_outcome(core.graphql_error([err])) == want
+    assert gen_road_mod.classify_outcome(core.graphql_error([err])) == want
 
 
 def test_every_error_must_carry_a_definite_code():
     ok = {"message": "a", "extensions": {"code": "BAD_REQUEST"}}
     bad = {"message": "b", "extensions": {"code": "INTERNAL_SERVER_ERROR"}}
-    assert core.classify_outcome(core.graphql_error([ok, ok])) == "refused"
-    assert core.classify_outcome(core.graphql_error([ok, bad])) == "unknown"
-    assert core.classify_outcome(core.graphql_error([ok, {"message": "c"}])) == "unknown"
+    assert gen_road_mod.classify_outcome(core.graphql_error([ok, ok])) == "refused"
+    assert gen_road_mod.classify_outcome(core.graphql_error([ok, bad])) == "unknown"
+    assert gen_road_mod.classify_outcome(core.graphql_error([ok, {"message": "c"}])) == "unknown"
 
 
 def test_the_two_resubmits_still_fire_on_their_coded_refusals(monkeypatch):
@@ -122,7 +123,7 @@ def test_the_two_resubmits_still_fire_on_their_coded_refusals(monkeypatch):
                 raise core.graphql_error([_err])
             return {"createGenerationTask": {"id": "T2"}}
         monkeypatch.setattr(core, "gql_mutate", mutate)
-        assert core.submit_generation(object(), dict(params)) == "T2"
+        assert gen_road_mod.submit_generation(object(), dict(params)) == "T2"
         assert len(sent) == 2
         uncoded = dict(err)
         uncoded.pop("extensions", None)
@@ -132,7 +133,7 @@ def test_the_two_resubmits_still_fire_on_their_coded_refusals(monkeypatch):
                             lambda s, q, v=None, _e=uncoded: sent.append(1) or
                             (_ for _ in ()).throw(core.graphql_error([_e])))
         with pytest.raises(core.PixAIError):
-            core.submit_generation(object(), dict(params))
+            gen_road_mod.submit_generation(object(), dict(params))
         assert len(sent) == 1, "no resubmit after an uncoded (unknown) answer"
 
 
@@ -149,11 +150,11 @@ def test_a_definite_fix_refusal_is_a_refusal_not_may_have_started(rig, code, sta
 
 
 def test_outcome_reason_words():
-    assert core.outcome_reason(core.PixAIRestError("x", 403, {"code": "NSFW_DETECTED",
+    assert gen_road_mod.outcome_reason(core.PixAIRestError("x", 403, {"code": "NSFW_DETECTED",
                                                               "message": "flagged"})) == \
         "HTTP 403: NSFW_DETECTED -- flagged"
-    assert "401" in core.outcome_reason(core.PixAIRestError("REST POST /x -> 401: no", 401, None))
-    assert core.outcome_reason(core.graphql_error(
+    assert "401" in gen_road_mod.outcome_reason(core.PixAIRestError("REST POST /x -> 401: no", 401, None))
+    assert gen_road_mod.outcome_reason(core.graphql_error(
         [{"message": "Internal server error", "extensions": {"code": "INTERNAL_SERVER_ERROR"}}])) \
         == "Internal server error (INTERNAL_SERVER_ERROR)"
 
@@ -182,7 +183,7 @@ def test_a_bookkeeping_failure_after_a_success_answers_the_task_id(rig, monkeypa
             @adjusted.setter
             def adjusted(self, v):
                 pass
-        monkeypatch.setattr(core, "build_request", lambda payload, *a, mode=None, **k: _Raising("image"))
+        monkeypatch.setattr(gen_road_mod, "build_request", lambda payload, *a, mode=None, **k: _Raising("image"))
     else:
         from moonglade import telemetry as telemetry_mod
         monkeypatch.setattr(telemetry_mod, "telem_set_add", _boom)

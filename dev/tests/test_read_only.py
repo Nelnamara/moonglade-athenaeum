@@ -13,6 +13,7 @@ READ_ONLY at all -- see dev/tests/test_read_only_cli_paths.py for that half."""
 import pytest
 
 from moonglade import backup as core
+from moonglade import gen_road as gen_road_mod
 from moonglade import organize as organize_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import cloud_delete as cloud_delete_mod
@@ -28,7 +29,7 @@ class TestSubmitGeneration:
     def test_blocked_when_read_only(self, mock_session, monkeypatch):
         monkeypatch.setattr(core, "READ_ONLY", True)
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.submit_generation(mock_session, {"prompt": "a cat"})
+            gen_road_mod.submit_generation(mock_session, {"prompt": "a cat"})
         mock_session.post.assert_not_called()  # the property that matters: no network call
 
     def test_allowed_when_not_read_only(self, mock_session, mocker, monkeypatch):
@@ -37,7 +38,7 @@ class TestSubmitGeneration:
         resp.status_code = 200
         resp.json.return_value = {"data": {"createGenerationTask": {"id": "t1"}}}
         mock_session.post.return_value = resp
-        assert core.submit_generation(mock_session, {"prompt": "a cat"}) == "t1"
+        assert gen_road_mod.submit_generation(mock_session, {"prompt": "a cat"}) == "t1"
         mock_session.post.assert_called_once()
 
 
@@ -46,7 +47,7 @@ class TestSubmitFixer:
         monkeypatch.setattr(core, "READ_ONLY", True)
         boxes = [{"x": 0, "y": 0, "width": 10, "height": 10, "tag": "hand"}]
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.submit_fixer(mock_session, "mid1", boxes)
+            gen_road_mod.submit_fixer(mock_session, "mid1", boxes)
         mock_session.post.assert_not_called()
 
 

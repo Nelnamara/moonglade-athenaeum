@@ -10,6 +10,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import integrity
 from moonglade import scan
 
@@ -70,14 +71,14 @@ def test_submit_refuses_before_any_network_call(after_cut, monkeypatch):
     params = {"i2vPro": {"model": "v3.2", "mediaId": "1"}}
     _Session.calls = 0
     with pytest.raises(core.PixAIError, match="retired by PixAI"):
-        core.submit_generation(_Session(), params)
+        gen_road_mod.submit_generation(_Session(), params)
     assert _Session.calls == 0
 
 
 def test_submit_refuses_a_reference_video_naming_it(after_cut, monkeypatch):
     monkeypatch.setattr(core, "_check_read_only", lambda *a, **k: None)
     with pytest.raises(core.PixAIError, match="retired by PixAI"):
-        core.submit_generation(_Session(), {"referenceVideo": {"model": "v3.2"}})
+        gen_road_mod.submit_generation(_Session(), {"referenceVideo": {"model": "v3.2"}})
 
 
 def test_submit_of_another_engine_is_not_refused_by_the_gate(after_cut, monkeypatch):
@@ -90,9 +91,9 @@ def test_submit_of_another_engine_is_not_refused_by_the_gate(after_cut, monkeypa
     def _boom(*a, **k):
         raise Reached()
 
-    monkeypatch.setattr(core, "is_lane_request", _boom)
+    monkeypatch.setattr(gen_road_mod, "is_lane_request", _boom)
     with pytest.raises(Reached):
-        core.submit_generation(_Session(), {"i2vPro": {"model": "v4.0.1"}})
+        gen_road_mod.submit_generation(_Session(), {"i2vPro": {"model": "v4.0.1"}})
 
 
 def test_front_end_mirror_matches_server_table():

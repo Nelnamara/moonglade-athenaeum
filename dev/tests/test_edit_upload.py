@@ -8,6 +8,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import pricing as pricing_mod
 
@@ -207,11 +208,11 @@ def test_cli_with_no_edit_aspect_takes_the_models_default(tmp_path):
 
 
 def test_web_payload_with_no_aspect_takes_the_models_default():
-    rs = core.RequestResolver()
-    ref = core._edit_parameters_from_payload(
+    rs = gen_road_mod.RequestResolver()
+    ref = gen_road_mod._edit_parameters_from_payload(
         {"source": "55", "instruction": "x", "edit_model": "reference-pro"}, "", rs)
     assert ref["chat"]["modelConfig"] == {"resolution": "2K"}
-    ep = core._edit_parameters_from_payload(
+    ep = gen_road_mod._edit_parameters_from_payload(
         {"source": "55", "instruction": "x", "edit_model": "edit-pro"}, "", rs)
     assert ep["chat"]["modelConfig"]["aspectRatio"] == "3:5"
 
@@ -228,7 +229,7 @@ def test_the_priced_auto_edit_is_the_submitted_one(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(priced=params) or 8000)
     monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "submit",
+    monkeypatch.setattr(gen_road_mod, "submit",
                         lambda s, req, **k: seen.update(sent=req.parameters) or {"task_id": "t1"})
     cli = login_test_client(create_app(tmp_path))
     body = {"mode": "edit", "edit_model": "reference-pro", "source": "55",
@@ -317,8 +318,8 @@ def test_a_preset_on_an_off_table_model_from_an_auto_card_sends_3_4():
     card is sitting on Reference Pro's default, Auto. The preset's model does not list Auto,
     so the submit must carry the old 3:4 -- not an unobserved no-aspect shape."""
     pre = {"prompt": "<preset prompt>", "scene_id": "character-card", "model_id": EDIT_V3}
-    rs = core.RequestResolver(preset=lambda user, name: pre if name == "cc" else None)
-    p = core._edit_parameters_from_payload(
+    rs = gen_road_mod.RequestResolver(preset=lambda user, name: pre if name == "cc" else None)
+    p = gen_road_mod._edit_parameters_from_payload(
         {"source": "55", "preset": "cc", "edit_model": "reference-pro", "aspect": "auto",
          "resolution": "2K", "quality": ""}, "", rs)
     assert p["chat"]["modelId"] == EDIT_V3
@@ -362,15 +363,15 @@ def test_edit_v4_clamps_to_what_it_takes():
 
 
 def test_edit_v4_sends_ten_inputs_no_quality_and_no_aspect_on_auto():
-    rs = core.RequestResolver()
-    p = core._edit_parameters_from_payload(
+    rs = gen_road_mod.RequestResolver()
+    p = gen_road_mod._edit_parameters_from_payload(
         {"source": "1", "sources": [str(i) for i in range(1, 13)], "instruction": "x",
          "edit_model": "edit-v4", "resolution": "4K", "quality": "", "aspect": "auto"}, "", rs)
     chat = p["chat"]
     assert chat["modelId"] == EDIT_V4
     assert chat["mediaIds"] == [str(i) for i in range(1, 11)] and chat["mediaId"] == "1"
     assert chat["modelConfig"] == {"resolution": "4K"}
-    p = core._edit_parameters_from_payload(
+    p = gen_road_mod._edit_parameters_from_payload(
         {"source": "1", "instruction": "x", "edit_model": "edit-v4", "resolution": "2K",
          "quality": "medium", "aspect": "1:8"}, "", rs)
     assert p["chat"]["modelConfig"] == {"resolution": "2K", "aspectRatio": "1:8"}
@@ -385,7 +386,7 @@ def test_the_priced_v4_edit_is_the_submitted_one(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(priced=params) or 9000)
     monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "submit",
+    monkeypatch.setattr(gen_road_mod, "submit",
                         lambda s, req, **k: seen.update(sent=req.parameters) or {"task_id": "t1"})
     cli = login_test_client(create_app(tmp_path))
     body = {"mode": "edit", "edit_model": "edit-v4", "source": "55",
@@ -438,19 +439,19 @@ def test_edit_pro_v2_clamps_to_its_own_aspects():
 def test_edit_pro_v2_payload_sends_its_model_and_up_to_ten_refs():
     """The submit shape is v1.0's chat block with V2.0's modelId; the slice follows the ROW's
     own max_refs -- ten on V2.0, still four on v1.0 -- never one fixed number."""
-    rs = core.RequestResolver()
+    rs = gen_road_mod.RequestResolver()
     srcs = [str(i) for i in range(1, 13)]
-    p = core._edit_parameters_from_payload(
+    p = gen_road_mod._edit_parameters_from_payload(
         {"source": "1", "sources": srcs, "instruction": "x", "edit_model": "edit-pro-v2",
          "resolution": "2K", "quality": "high", "aspect": "16:9"}, "", rs)
     assert p == {"chat": {
         "prompts": "x", "mediaId": "1", "mediaIds": srcs[:10], "modelId": EDIT_PRO_V2,
         "modelConfig": {"resolution": "2K", "aspectRatio": "16:9", "quality": "high"}}}
-    v1 = core._edit_parameters_from_payload(
+    v1 = gen_road_mod._edit_parameters_from_payload(
         {"source": "1", "sources": srcs, "instruction": "x", "edit_model": "edit-pro"}, "", rs)
     assert v1["chat"]["modelId"] == EDIT_PRO_V1 and v1["chat"]["mediaIds"] == srcs[:4]
     # no aspect picked -> V2.0's own 3:5 default
-    p = core._edit_parameters_from_payload(
+    p = gen_road_mod._edit_parameters_from_payload(
         {"source": "1", "instruction": "x", "edit_model": "edit-pro-v2"}, "", rs)
     assert p["chat"]["modelConfig"] == {"resolution": "1K", "aspectRatio": "3:5",
                                         "quality": "medium"}
@@ -472,7 +473,7 @@ def test_the_priced_edit_pro_v2_edit_is_the_submitted_one(tmp_path, monkeypatch)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(priced=params) or 27800)
     monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "submit",
+    monkeypatch.setattr(gen_road_mod, "submit",
                         lambda s, req, **k: seen.update(sent=req.parameters) or {"task_id": "t1"})
     cli = login_test_client(create_app(tmp_path))
     srcs = [str(55 + i) for i in range(11)]

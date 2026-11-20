@@ -15,6 +15,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import mirror as mirror_mod
 from moonglade import models as models_mod
 from moonglade import pricing as pricing_mod
@@ -85,7 +86,7 @@ def test_price_and_submit_apply_identical_gating(monkeypatch):
     "lite"), so this also proves the gate reads the model's true default."""
     monkeypatch.setattr(core, "_check_read_only", lambda *a, **k: None)
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
-    monkeypatch.setattr(core, "priority_for_submit", lambda p: p)
+    monkeypatch.setattr(gen_road_mod, "priority_for_submit", lambda p: p)
 
     priced = {}
 
@@ -107,7 +108,7 @@ def test_price_and_submit_apply_identical_gating(monkeypatch):
 
     base = {"modelId": "DIT3VER", "prompts": "a cat", "samplingSteps": 28, "cfgScale": 5,
             "samplingMethod": "Euler a", "width": 768, "height": 1280, "priority": 1000}
-    assert core.submit_generation(object(), dict(base)) == "T1"
+    assert gen_road_mod.submit_generation(object(), dict(base)) == "T1"
     pricing_mod.price_task(object(), dict(base))
 
     # DiT-auto now carries the model's REAL default profile ("pro"), on BOTH paths

@@ -44,6 +44,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 
 P_TURBO, P_HIGH, P_LOW = gen_params_mod.PRIORITY_TURBO, gen_params_mod.PRIORITY_HIGH, gen_params_mod.PRIORITY_LOW
 
@@ -76,7 +77,7 @@ def _img_payload(a):
 
 
 def _img_web(a):
-    return core.build_request(_img_payload(a), mode="image", resolve=None, is_member=None).parameters
+    return gen_road_mod.build_request(_img_payload(a), mode="image", resolve=None, is_member=None).parameters
 
 
 def test_image_plain_case_is_byte_identical():
@@ -115,7 +116,7 @@ def test_image_diverges_on_empty_model():
     ('pick a model', parameters None). Folding would turn a working default into a refusal."""
     a = _img_args(model="")
     assert gen_params_mod._gen_parameters(a)["modelId"] == gen_params_mod.DEFAULT_GEN_MODEL
-    assert core.build_request(_img_payload(a), mode="image", resolve=None).parameters is None
+    assert gen_road_mod.build_request(_img_payload(a), mode="image", resolve=None).parameters is None
 
 
 def test_image_diverges_on_low_priority():
@@ -149,14 +150,14 @@ def _vid_payload(a):
 
 def test_i2v_plain_case_is_byte_identical():
     a = _vid_args()
-    web = core.build_request(_vid_payload(a), mode="video", resolve=None).parameters
+    web = gen_road_mod.build_request(_vid_payload(a), mode="video", resolve=None).parameters
     assert web == gen_params_mod._gen_video_parameters(a)
 
 
 def test_i2v_diverges_on_kaisuuken_id():
     a = _vid_args(kaisuuken_id="CARD-9")
     old = gen_params_mod._gen_video_parameters(a)
-    web = core.build_request(_vid_payload(a), mode="video", resolve=None).parameters
+    web = gen_road_mod.build_request(_vid_payload(a), mode="video", resolve=None).parameters
     assert old.get("kaisuukenId") == "CARD-9"
     assert "kaisuukenId" not in web
 
@@ -168,7 +169,7 @@ def test_i2v_diverges_on_prompt_over_maxlen():
     a = _vid_args(prompt="x" * (gen_params_mod.VIDEO_PROMPT_MAXLEN + 100))
     gen_params_mod._gen_video_parameters(a)                       # no raise
     with pytest.raises(core.PixAIError):
-        core.build_request(_vid_payload(a), mode="video", resolve=None)
+        gen_road_mod.build_request(_vid_payload(a), mode="video", resolve=None)
 
 
 # =============================================================================
@@ -188,7 +189,7 @@ def test_refvideo_modelid_now_agrees_on_a_nondefault_model():
             "a pan @image1", image_media_ids=["55"], video_media_ids=[], audio_media_ids=[],
             model=model, duration=gen_params_mod._snap_video_duration(5, model), mode="professional",
             generate_audio=False, audio_language="english", is_private=True, kaisuuken_id="")
-        web = core.build_request(
+        web = gen_road_mod.build_request(
             {"mode": "R2V", "images": ["55"], "prompt": "a pan @image1", "duration": 5,
              "video_model": model, "quality": "professional", "is_private": True},
             mode="video", resolve=None).parameters
@@ -220,7 +221,7 @@ def _edit_old(a, src="5550"):
 
 
 def _edit_web(a, src="5550"):
-    return core.build_request(
+    return gen_road_mod.build_request(
         {"source": src, "sources": [src], "instruction": a.prompt,
          "edit_model": (a.edit_model or "edit-pro"), "resolution": a.edit_resolution,
          "aspect": a.edit_aspect, "quality": a.edit_quality},
@@ -262,10 +263,10 @@ def test_submit_road_cannot_force_a_kaisuuken_id(monkeypatch):
     hands _apply_kaisuuken, with every network leg stubbed."""
     seen = {}
     monkeypatch.setattr(core, "_check_read_only", lambda *a, **k: None)
-    monkeypatch.setattr(core, "submit_generation", lambda s, p: "TASK-1")
+    monkeypatch.setattr(gen_road_mod, "submit_generation", lambda s, p: "TASK-1")
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken",
                         lambda s, p, args: seen.setdefault("args", args))
-    req = core.GenerationRequest(mode="image", parameters={"prompts": "x"}, no_card=False)
-    out = core.submit(None, req)
+    req = gen_road_mod.GenerationRequest(mode="image", parameters={"prompts": "x"}, no_card=False)
+    out = gen_road_mod.submit(None, req)
     assert out == {"task_id": "TASK-1"}
     assert seen["args"].kaisuuken_id == ""              # no seam to force a specific card

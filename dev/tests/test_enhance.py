@@ -9,6 +9,7 @@ from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gallery as moonglade_gallery
 from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import models as models_mod
 
 from tests.conftest import login_client
@@ -40,7 +41,7 @@ def _arm_mirror(monkeypatch):
     monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
     monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: object())
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "submit_generation", _submit)
+    monkeypatch.setattr(gen_road_mod, "submit_generation", _submit)
     return calls
 
 
@@ -121,7 +122,7 @@ def test_enhance_refuses_when_mirror_off(tmp_path, monkeypatch, pixai):
     So a mirror-off request must 409 and submit NOTHING (no createGenerationTask, no charge)."""
     monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: False)          # mirror OFF
     submitted = {"n": 0}
-    monkeypatch.setattr(core, "submit_generation",
+    monkeypatch.setattr(gen_road_mod, "submit_generation",
                         lambda *a, **k: submitted.__setitem__("n", submitted["n"] + 1) or "X")
     # make_mirror_session must never even be consulted for a spend here, but stub it defensively.
     monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: None)
@@ -159,7 +160,7 @@ def test_enhance_telemetry_fires_only_on_terminal_success(tmp_path, monkeypatch)
     # Now the poll reports a terminal SUCCESS with output -> all three fire, exactly once.
     monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda session, tid: {"phase": "done", "paid_credit": 0})
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: {"media_ids": ["OUT1"], "saved": 1,
                                                   "is_video": False})
     d = cli.get("/api/task-status", query_string={"task_id": "T-ENH-1"}).get_json()
@@ -206,7 +207,7 @@ def test_enhance_workflow_name_preset_counts_toward_adept(tmp_path, monkeypatch)
                                    "workflow_name": "mymusise/39a2c67c:unet-0.1.3.2"})
     monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda session, tid: {"phase": "done", "paid_credit": 0})
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: {"media_ids": ["OUT1"], "saved": 1,
                                                   "is_video": False})
     cli.get("/api/task-status", query_string={"task_id": "T-ENH-1"})

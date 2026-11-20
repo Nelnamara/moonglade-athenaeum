@@ -16,6 +16,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import models as models_mod
 from moonglade import pricing as pricing_mod
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
@@ -645,7 +646,7 @@ def test_upscale_works_without_a_recorded_model(monkeypatch, tmp_path, pixai):
                        created_at="2026-07-01T00:00:00", width="1959", height="1097")])
     seen = {}
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "submit_generation",
+    monkeypatch.setattr(gen_road_mod, "submit_generation",
                         lambda _s, params: seen.setdefault("params", params) and "t1" or "t1")
     cli = login_client(tmp_path)
     r = cli.post("/api/generate", json={
@@ -764,7 +765,7 @@ def test_generate_rejects_a_version_id_sent_as_a_model_id(monkeypatch, tmp_path,
                        width="900", height="600")])
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(models_mod, "list_model_versions", lambda *a, **k: [])   # not a model id
-    monkeypatch.setattr(core, "submit_generation", lambda *a, **k: "nope")
+    monkeypatch.setattr(gen_road_mod, "submit_generation", lambda *a, **k: "nope")
     cli = login_client(tmp_path)
     r = cli.post("/api/generate", json={
         "model_id": gen_params_mod.UPSCALE_FALLBACK_VERSION_ID, "prompt": "x",

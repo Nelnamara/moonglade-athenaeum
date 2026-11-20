@@ -44,6 +44,7 @@ from moonglade import contest_sync as _contest_sync
 from moonglade import contest_wins
 from moonglade import dupes as _dupes
 from moonglade import gen_params as _gen_params
+from moonglade import gen_road as _gen_road
 from moonglade import health as _health
 from moonglade import jobs as _jobs
 from moonglade import living as _living
@@ -5890,7 +5891,7 @@ def scene_catalog(core, session, force=False):
         ent = _scenes_cache.get("catalog")
         if not force and ent and (now - ent["at"]) < SCENES_TTL:
             return ent["rows"]
-    rows = core.chat_editing_scenes(session)
+    rows = _gen_road.chat_editing_scenes(session)
     if rows:
         with _scenes_cache_lock:
             _scenes_cache["catalog"] = {"at": time.time(), "rows": rows}
@@ -7418,7 +7419,7 @@ def create_app(out_dir: Path):
                     got = _collected_from_catalog(tid)
                     if got is not None:
                         return got
-                got = core.collect_generation(session, tid, str(out_dir))
+                got = _gen_road.collect_generation(session, tid, str(out_dir))
                 # Seven Candles (gen_streak) + The Long Vigil (active_days): a gen collected
                 # into the archive marks today. Keyed day-lists, idempotent, silent-soft --
                 # telemetry must never break a collect.
@@ -14482,7 +14483,7 @@ def create_app(out_dir: Path):
                     category, training_task_id=dataset_task_id if reuse else "",
                     kaisuuken_id=(card["id"] if free_by_card else ""), config=cfg)
             except Exception as e:
-                if core.definite_refusal(e, codes=core.TRAINING_CODES):
+                if _gen_road.definite_refusal(e, codes=_gen_road.TRAINING_CODES):
                     train_guard.basic_resolve(key, "refused")
                     return jsonify({"error": str(e)}), 502
                 train_guard.basic_resolve(key, "ambiguous")
@@ -15027,7 +15028,7 @@ def create_app(out_dir: Path):
             try:
                 status = core.start_training_captions(session, tid)
             except Exception as e:                      # noqa: BLE001
-                if core.definite_refusal(e, codes=core.TRAINING_CODES):
+                if _gen_road.definite_refusal(e, codes=_gen_road.TRAINING_CODES):
                     train_guard.paid_resolve("caption", tid, "refused")
                     return _train_refusal(e)
                 train_guard.paid_resolve("caption", tid, "ambiguous")
@@ -15108,7 +15109,7 @@ def create_app(out_dir: Path):
             try:
                 status = core.submit_advanced_training(session, tid)
             except Exception as e:                      # noqa: BLE001
-                if core.definite_refusal(e, codes=core.TRAINING_CODES):
+                if _gen_road.definite_refusal(e, codes=_gen_road.TRAINING_CODES):
                     train_guard.paid_resolve("submit", tid, "refused")
                     return _train_refusal(e)
                 train_guard.paid_resolve("submit", tid, "ambiguous")
@@ -15179,7 +15180,7 @@ def create_app(out_dir: Path):
             try:
                 res = core.retry_training(session, tid)
             except Exception as e:                      # noqa: BLE001
-                if core.definite_refusal(e, codes=core.TRAINING_CODES):
+                if _gen_road.definite_refusal(e, codes=_gen_road.TRAINING_CODES):
                     train_guard.retry_resolve(tid, "refused")
                     return _train_refusal(e)
                 train_guard.retry_resolve(tid, "ambiguous")
@@ -16441,12 +16442,12 @@ def create_app(out_dir: Path):
         submit, and NO media resolver: _input_media_id uploads, and /api/price fires on
         every keystroke in the drawer -- resolving here would upload the same file once
         per character. A quote needs the SHAPE, not an upload-kind id."""
-        return core.RequestResolver(
-            model_version=core.model_version_resolver(gsession),
+        return _gen_road.RequestResolver(
+            model_version=_gen_road.model_version_resolver(gsession),
             preset=lambda u, name: _load_presets(u).get(name),
-            gate=core.gate_resolver(gsession),
+            gate=_gen_road.gate_resolver(gsession),
             video_duration=_video_duration_lookup,
-            unlimited=core.unlimited_resolver(gsession),
+            unlimited=_gen_road.unlimited_resolver(gsession),
             features=_models.features_resolver(gsession))
 
     def _submit_resolver(core, gsession):
@@ -16455,13 +16456,13 @@ def create_app(out_dir: Path):
         (the Loom's video routes resolve their own frames -- see loom_generate). The gate,
         the video-length lookup and the Unlimited Mode check are the SAME ones the quote
         uses."""
-        return core.RequestResolver(
-            model_version=core.model_version_resolver(gsession),
+        return _gen_road.RequestResolver(
+            model_version=_gen_road.model_version_resolver(gsession),
             preset=lambda u, name: _load_presets(u).get(name),
             media_id=lambda v: _input_media_id(core, gsession, v),
-            gate=core.gate_resolver(gsession),
+            gate=_gen_road.gate_resolver(gsession),
             video_duration=_video_duration_lookup,
-            unlimited=core.unlimited_resolver(gsession),
+            unlimited=_gen_road.unlimited_resolver(gsession),
             features=_models.features_resolver(gsession))
 
     def _lane_job_running(core):
@@ -16471,7 +16472,7 @@ def create_app(out_dir: Path):
         (SCOPE_2026-09-26_unlimited-mode §8.6). A lane task started on PixAI's own site is
         not in it; PixAI's refusal covers that case, and nothing is spent."""
         try:
-            return any(j.get("lane") == core.UNLIMITED_LANE
+            return any(j.get("lane") == _gen_road.UNLIMITED_LANE
                        and j.get("status") not in _jobs._JOBS_TERMINAL
                        for j in _jobs.read_jobs(out_dir))
         except Exception:
@@ -16981,7 +16982,7 @@ def create_app(out_dir: Path):
         """This request thread's spend mark (core.spend_watch): `.v` turns True once the one
         spend request is reached. Observation only; nothing extra is passed to the send."""
         from moonglade import backup as core
-        return core.spend_watch()
+        return _gen_road.spend_watch()
 
     def _send_failed(where, exc, reached, params, key, task_id=None):
         """A failed single send's answer. An unknown outcome is said plainly, with PixAI's own
@@ -17003,13 +17004,13 @@ def create_app(out_dir: Path):
             return (jsonify({"task_id": task_id}), 200), "", "sent"
         msg = _log_gen_failure(where, exc, params)[:300]
         try:
-            state = core.send_outcome(exc, bool(reached))
+            state = _gen_road.send_outcome(exc, bool(reached))
         except Exception:                                    # noqa: BLE001 -- never "refused"
             state = "may_have_started" if reached else "not_sent"
         _send_settle(key, state)
         if state == "may_have_started":
             try:
-                detail = _redact_host_paths(core.outcome_reason(exc))[:300]
+                detail = _redact_host_paths(_gen_road.outcome_reason(exc))[:300]
             except Exception:                                # noqa: BLE001
                 detail = msg
             return (jsonify({"error": _UNCLEAR_SEND, "detail": detail, "state": state,
@@ -17043,7 +17044,7 @@ def create_app(out_dir: Path):
             core, gsession = _gen_session()
             body = request.get_json(silent=True) or {}
             try:
-                req = core.build_request(body, user=user,
+                req = _gen_road.build_request(body, user=user,
                                          is_member=_account_is_member(core, gsession),
                                          resolve=_price_resolver(core, gsession))
             except core.PixAIError as e:
@@ -17059,7 +17060,7 @@ def create_app(out_dir: Path):
                 card_session = _card_session(core, gsession)
             except Exception:                              # noqa: BLE001
                 card_session = gsession
-            return jsonify(core.price(gsession, req, card_session=card_session))
+            return jsonify(_gen_road.price(gsession, req, card_session=card_session))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "cost": None, "free": False}), 200
 
@@ -17102,11 +17103,11 @@ def create_app(out_dir: Path):
             # Unlimited Mode (SCOPE_2026-09-26_unlimited-mode §8.6/§8.9): READ_ONLY refuses
             # FIRST, before the entitlement read and the gate's reads below, as run_generate
             # does -- then one lane task at a time, off the app's own job log.
-            lane = core.asks_unlimited(body)
+            lane = _gen_road.asks_unlimited(body)
             if lane:
-                core._check_read_only(core._SUBMIT_ACTION_DEFAULT)
+                core._check_read_only(_gen_road._SUBMIT_ACTION_DEFAULT)
                 if _lane_job_running(core):
-                    return jsonify({"error": core.UNLIMITED_BUSY}), 400
+                    return jsonify({"error": _gen_road.UNLIMITED_BUSY}), 400
             # Members-only options are dropped for an account PixAI reports as non-member.
             # Handed to the builder (not decided inside it) so the CLI keeps its own path
             # and /api/price passes the identical flag -- the badge must quote the shape
@@ -17117,7 +17118,7 @@ def create_app(out_dir: Path):
             # unpinned {"mode": "I2V"} POST here would otherwise build and pay for a video.
             # `params` is bound for the failure log below, which reads it through
             # locals().get() -- see _log_gen_failure.
-            req = core.build_request(body, mode="image", is_member=_ent["is_member"],
+            req = _gen_road.build_request(body, mode="image", is_member=_ent["is_member"],
                                      resolve=_submit_resolver(core, session))
             params = req.parameters
             # Authoritative model resolution happened inside build_request (see
@@ -17147,14 +17148,14 @@ def create_app(out_dir: Path):
             if held:
                 return held
             held_key = send_key
-            task_id = core.submit(session, req,
+            task_id = _gen_road.submit(session, req,
                                   **_quoted_free_hooks(core, req, expect_free))["task_id"]
             _send_settle(held_key, "sent")
             _record_loom_send(loom_target, task_id, req.parameters, "image")
             if req.unlimited:
                 # The lane mark on the job, written by the server rather than trusted from the
                 # client's own registration, so the one-at-a-time rule above can read it.
-                _log_job(task_id, status="running", type="generate", lane=core.UNLIMITED_LANE,
+                _log_job(task_id, status="running", type="generate", lane=_gen_road.UNLIMITED_LANE,
                          source="web")
             # Session M (NOTES 3/7): the single send's request as built and card-attached (the
             # card step writes kaisuukenId into req.parameters), so Inspect can show it. The
@@ -17389,7 +17390,7 @@ def create_app(out_dir: Path):
                 jp["no_card"] = True
             label = _cell_label(plan, job)
             try:
-                req = core.build_request(jp, mode="image", is_member=ent["is_member"],
+                req = _gen_road.build_request(jp, mode="image", is_member=ent["is_member"],
                                          resolve=rs)
             except core.PixAIError as e:
                 refusal = rec.refusal_from(e)
@@ -17410,7 +17411,7 @@ def create_app(out_dir: Path):
             # this account can't use Turbo) is applied HERE, at build, so it is quoted and
             # digested; a run job's submit (exact=True) never applies it again, so what is
             # sent is what was quoted.
-            req.parameters = core.priority_for_submit(req.parameters)
+            req.parameters = _gen_road.priority_for_submit(req.parameters)
             built.append({"cell": job["cell"], "job": job, "req": req,
                           "no_card": True if no_card else None})
         if any(b["req"].unlimited for b in built) and len(built) > 1:
@@ -17566,7 +17567,7 @@ def create_app(out_dir: Path):
         loom_target = _pop_loom_target(body)
         from moonglade import backup as core
         try:
-            core._check_read_only(core._SUBMIT_ACTION_DEFAULT)
+            core._check_read_only(_gen_road._SUBMIT_ACTION_DEFAULT)
         except core.PixAIError as e:
             return jsonify({"error": str(e), "read_only": True}), 200
         run_id = str(body.get("run_id") or "")
@@ -17632,8 +17633,8 @@ def create_app(out_dir: Path):
                 raise _RunRefused("What would be sent changed since you confirmed — nothing "
                                   "was sent.", changed=bad)
             # Step 6, the lane rule read off the app's own job log: one lane task at a time.
-            if core.asks_unlimited(body) and _lane_job_running(core):
-                raise _RunRefused(core.UNLIMITED_BUSY)
+            if _gen_road.asks_unlimited(body) and _lane_job_running(core):
+                raise _RunRefused(_gen_road.UNLIMITED_BUSY)
             # Steps 7-9: entitlements, one build per job, the quote (a single send has none).
             gcore, gsession = _gen_session()
             planned = _run_plan(gcore, gsession, body, user, resolver=_submit_resolver,
@@ -17699,7 +17700,7 @@ def create_app(out_dir: Path):
                          label="{} {}/{}".format(label_kind, cell + 1, len(built))
                          if len(built) > 1 else "Generated",
                          count=b["job"]["batch"], run=run_id, cell=cell, run_mode=mode,
-                         lane=core.UNLIMITED_LANE if b["req"].unlimited else None,
+                         lane=_gen_road.UNLIMITED_LANE if b["req"].unlimited else None,
                          source="web")
                 store.set_job(run_id, cell, state="sent", task_id=task_id,
                               request=_strip_request(request_), card=int(bool(card)))
@@ -17716,7 +17717,7 @@ def create_app(out_dir: Path):
             # A single send its badge called FREE: a confirmed total of 0, so the job is refused
             # before its create if the card step attaches no card -- in a single send's words.
             budget = {"each": 1, "total": 0, "note": _QUOTED_FREE_GONE}
-        res = core.send_run(gsession, [{"cell": b["cell"], "req": b["req"],
+        res = _gen_road.send_run(gsession, [{"cell": b["cell"], "req": b["req"],
                                         "no_card": b["no_card"]} for b in built],
                             hooks=_Hooks(), budget=budget)
         for j in res["jobs"]:
@@ -17860,7 +17861,7 @@ def create_app(out_dir: Path):
             # to the bare name `session` in this function a local (UnboundLocalError on
             # the read above), not a read of Flask's session.
             core, gsession = _gen_session()
-            req = core.build_request(p, mode="edit", user=user,
+            req = _gen_road.build_request(p, mode="edit", user=user,
                                      resolve=_submit_resolver(core, gsession))
             params = req.parameters          # bound for _log_gen_failure's locals().get()
             if params is None:
@@ -17871,7 +17872,7 @@ def create_app(out_dir: Path):
             if held:
                 return held
             held_key = send_key
-            task_id = core.submit(gsession, req,
+            task_id = _gen_road.submit(gsession, req,
                                   **_quoted_free_hooks(core, req, expect_free))["task_id"]
             _send_settle(held_key, "sent")
             _record_loom_send(loom_target, task_id, req.parameters, "edit")
@@ -18029,7 +18030,7 @@ def create_app(out_dir: Path):
             # be covered by a card (measured 2026-08-18) -- the check simply returns no
             # match -- but it costs nothing to ride the same choke and it is one fewer
             # spend path with a guard of its own to get wrong.
-            req = core.build_request(p, mode="enhance",
+            req = _gen_road.build_request(p, mode="enhance",
                                      resolve=_submit_resolver(core, session))
             params = req.parameters          # bound for _log_gen_failure's locals().get()
             if params is None:
@@ -18043,7 +18044,7 @@ def create_app(out_dir: Path):
             if held:
                 return held
             held_key = send_key
-            task_id = core.submit(session, req,
+            task_id = _gen_road.submit(session, req,
                                   **_quoted_free_hooks(core, req, expect_free))["task_id"]
             _send_settle(held_key, "sent")
             # [BLOCKER] Telemetry is DEFERRED, not fired here: submit_generation returns the id at
@@ -18165,7 +18166,7 @@ def create_app(out_dir: Path):
             held_key = send_key
             # submit_scene raises when PixAI's answer carries no task id (3.21.2): that is
             # "may have started", never a success with a null id.
-            task_id = core.submit_scene(
+            task_id = _gen_road.submit_scene(
                 _mirror.make_mirror_session(), scene_id, media,
                 preset=str(p.get("preset") or "random"), custom=p.get("custom"),
                 selector_values=(p.get("selector_values") or p.get("selectorValues") or []))
@@ -18255,11 +18256,11 @@ def create_app(out_dir: Path):
             loom_target = _pop_loom_target(p)
             # READ_ONLY first: the submit resolver below uploads the local file (a network
             # call), so the refusal has to come before it, not only inside submit_fixer.
-            core._check_read_only(core._SUBMIT_ACTIONS["fix"])
+            core._check_read_only(_gen_road._SUBMIT_ACTIONS["fix"])
             repeat, fix_key = _fix_repeat_refusal(core, p)
             if repeat:
                 return repeat
-            req = core.build_request(p, mode="fix",
+            req = _gen_road.build_request(p, mode="fix",
                                      resolve=_submit_resolver(core, session))
             if not req.media_id:
                 _fix_forget(fix_key)
@@ -18274,7 +18275,7 @@ def create_app(out_dir: Path):
             # raise; a box the cleaner would have dropped is still worth seeing, because
             # "which boxes did we actually ask about" is half the diagnosis.
             fix_params = {"mediaId": req.media_id, "boxes": req.boxes}
-            task_id = core.submit(session, req)["task_id"]
+            task_id = _gen_road.submit(session, req)["task_id"]
             _send_settle(fix_key, "sent")
             _record_loom_send(loom_target, task_id, req.parameters, "fix")
             _telemetry.telem_set_add("tools", "fix", out_dir=out_dir)   # Full Toolbox
@@ -20174,7 +20175,7 @@ __DESIGN_TOKENS__
             send_board = draft_board
         sending_key = (_account_prefs._account_key(user), submit_id) if journalled else None
         try:
-            _core._check_read_only(_core._SUBMIT_ACTION_DEFAULT)
+            _core._check_read_only(_gen_road._SUBMIT_ACTION_DEFAULT)
         except _core.PixAIError as e:
             return jsonify({"error": str(e)[:300]}), 200
         # 3.21.2 (L1): the gallery's own Video tab (no Loom keys) is a single send, held like
@@ -20343,10 +20344,10 @@ __DESIGN_TOKENS__
                 # The video-length lookup is the same one /api/price's resolver carries, so
                 # the Loom's submit cannot send a shorter inputVideoDurations than its badge
                 # quoted (2026-09-26).
-                return core.build_request({**p, "images": imgs,
+                return _gen_road.build_request({**p, "images": imgs,
                                            "video_refs": video_ids,
                                            "audio_refs": audio_ids}, mode="video",
-                                          resolve=core.RequestResolver(
+                                          resolve=_gen_road.RequestResolver(
                                               video_duration=_video_duration_lookup))
 
             req = _request_for(image_ids)
@@ -20358,7 +20359,7 @@ __DESIGN_TOKENS__
                 held_key = video_key
             try:
                 attempt["sent"] = False
-                task_id = core.submit(session_, req, **hooks)["task_id"]
+                task_id = _gen_road.submit(session_, req, **hooks)["task_id"]
             except core.PixAIError as e:
                 # SURVEYED, not guessed. getTaskById across the owner's own video history
                 # (2026-07-26, read-only, no credits) found EVERY i2vPro task carrying an
@@ -20402,7 +20403,7 @@ __DESIGN_TOKENS__
                 # was created and charged -- and it can name invalid_media_id all the same.
                 # Only a definite refusal created nothing; anything else goes to the classifier
                 # below and is journalled may_have_started, never submitted a second time.
-                if not _core.definite_refusal(e):
+                if not _gen_road.definite_refusal(e):
                     raise
                 # Spend review N1: the refused first attempt sent nothing that exists, so from
                 # here "sent" describes the fallback alone. A re-upload that fails below is
@@ -20430,7 +20431,7 @@ __DESIGN_TOKENS__
                 req = _request_for(image_ids)
                 params = req.parameters   # rebound for the failure log below
                 attempt["sent"] = False
-                task_id = core.submit(session_, req, **hooks)["task_id"]
+                task_id = _gen_road.submit(session_, req, **hooks)["task_id"]
             try:                       # Master of the Loom + Storyweaver telemetry
                 mode = str(p.get("mode") or "R2V").upper()
                 if mode in ("I2V", "FLF", "R2V"):
@@ -20470,7 +20471,7 @@ __DESIGN_TOKENS__
             msg = _log_gen_failure("/api/loom/generate", e, locals().get("params"))[:300]
             if not attempt["sent"]:
                 state = "not_sent"
-            elif getattr(e, "refused", False) or _core.definite_refusal(e):
+            elif getattr(e, "refused", False) or _gen_road.definite_refusal(e):
                 state = "refused"
             else:
                 state = "may_have_started"

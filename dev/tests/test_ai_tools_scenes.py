@@ -14,6 +14,7 @@ import time
 import pytest
 
 from moonglade import gallery as g
+from moonglade import gen_road as gen_road_mod
 from moonglade.gallery import save_catalog
 
 from tests.conftest import login_client
@@ -77,9 +78,15 @@ class _Upstream:
         return self.rows
 
 
-def _core(up):
-    """A stand-in `core` carrying only what scene_catalog touches."""
-    return type("C", (), {"chat_editing_scenes": staticmethod(up)})
+@pytest.fixture
+def _core(monkeypatch):
+    """`_core(up)`: a stand-in `core` carrying only what scene_catalog touches. Since 3.22
+    scene_catalog reads the scene list as `_gen_road.chat_editing_scenes`, so the stub is
+    installed there too."""
+    def _install(up):
+        monkeypatch.setattr(gen_road_mod, "chat_editing_scenes", up)
+        return type("C", (), {"chat_editing_scenes": staticmethod(up)})
+    return _install
 
 
 # --- normalization -------------------------------------------------------------------
@@ -156,7 +163,7 @@ def test_the_catalog_carries_no_price_so_no_row_pretends_to():
 
 # --- the memo ------------------------------------------------------------------------
 
-def test_catalog_is_memoized_so_both_scene_surfaces_share_one_upstream_read():
+def test_catalog_is_memoized_so_both_scene_surfaces_share_one_upstream_read(_core):
     up = _Upstream()
     core = _core(up)
     assert g.scene_catalog(core, object()) == CATALOG
@@ -164,7 +171,7 @@ def test_catalog_is_memoized_so_both_scene_surfaces_share_one_upstream_read():
     assert up.calls == 1
 
 
-def test_memo_expires_after_the_ttl():
+def test_memo_expires_after_the_ttl(_core):
     up = _Upstream()
     core = _core(up)
     g.scene_catalog(core, object())
@@ -173,7 +180,7 @@ def test_memo_expires_after_the_ttl():
     assert up.calls == 2
 
 
-def test_force_drops_the_memo():
+def test_force_drops_the_memo(_core):
     up = _Upstream()
     core = _core(up)
     g.scene_catalog(core, object())
@@ -181,7 +188,7 @@ def test_force_drops_the_memo():
     assert up.calls == 2
 
 
-def test_a_failure_is_not_cached():
+def test_a_failure_is_not_cached(_core):
     """A raise must reach the caller AND leave the store untouched, so the next open retries
     PixAI instead of being served a remembered outage for an hour."""
     bad = _Upstream(raises=RuntimeError("upstream down"))
@@ -193,7 +200,7 @@ def test_a_failure_is_not_cached():
     assert good.calls == 1
 
 
-def test_an_empty_answer_is_not_cached():
+def test_an_empty_answer_is_not_cached(_core):
     """An account that briefly answers [] must not blank the modal for the whole TTL."""
     empty = _Upstream(rows=[])
     assert g.scene_catalog(_core(empty), object()) == []
@@ -208,7 +215,7 @@ def _armed(monkeypatch, up):
     from moonglade import backup as core
     monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
     monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "chat_editing_scenes", up)
+    monkeypatch.setattr(gen_road_mod, "chat_editing_scenes", up)
 
 
 def test_api_scenes_serves_every_live_scene_with_its_tile_fields(tmp_path, monkeypatch):

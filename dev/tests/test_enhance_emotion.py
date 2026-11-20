@@ -4,6 +4,7 @@ from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gallery as g
 from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from tests.conftest import login_client
 from moonglade import mirror as mirror_mod
 from moonglade import branding as branding_mod
@@ -50,7 +51,7 @@ def _arm(monkeypatch):
     monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
     monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: object())
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "submit_generation", _submit)
+    monkeypatch.setattr(gen_road_mod, "submit_generation", _submit)
     return calls
 
 

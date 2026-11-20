@@ -10,6 +10,7 @@ from pathlib import Path
 from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import models as models_mod
 from moonglade import paths
 from moonglade import pricing as pricing_mod
@@ -1769,7 +1770,7 @@ def test_import_task_by_id(tmp_path, monkeypatch, pixai):
     route. It is deliberately LOGIN, not localhost: recovering your own finished media
     spends nothing."""
     called = {}
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: called.update(tid=tid) or {"saved": 1, "media_ids": ["m1"], "is_video": False})
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli = login_existing_client(cli)
@@ -1799,7 +1800,7 @@ def test_import_task_closes_the_original_orphaned_job_entry(tmp_path, monkeypatc
     (which, for a web-submitted generate job, IS the numeric task id), so the Activity
     card kept spinning on the orphan forever even after the real media had landed.
     Recovering the same task id an orphan is keyed on must close that original entry."""
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: {"saved": 1, "media_ids": ["m1"], "is_video": False})
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli = login_existing_client(cli)
@@ -1840,7 +1841,7 @@ def test_import_task_leaves_a_dismissed_orphan_alone(tmp_path, monkeypatch, pixa
     """If the owner already dismissed the orphaned entry by hand, a later recovery must
     not resurrect it with a new event -- dismiss is an explicit user action and stays
     respected, same as every other job in the log."""
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: {"saved": 1, "media_ids": ["m1"], "is_video": False})
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli = login_existing_client(cli)

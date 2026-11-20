@@ -27,6 +27,7 @@ import json
 
 from moonglade import backup as core
 from moonglade import gallery as g
+from moonglade import gen_road as gen_road_mod
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_client
 from moonglade import organize as organize_mod
@@ -87,7 +88,7 @@ def _collect_app(tmp_path, monkeypatch, rows):
         save_catalog(tmp_path / "catalog.db", rows)
         return {"media_ids": [r["media_id"] for r in rows], "saved": len(rows),
                 "is_video": False}
-    monkeypatch.setattr(core, "collect_generation", _collect)
+    monkeypatch.setattr(gen_road_mod, "collect_generation", _collect)
     return login_client(tmp_path)
 
 

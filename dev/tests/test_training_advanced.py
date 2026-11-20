@@ -23,6 +23,7 @@ import pytest
 import requests
 
 from moonglade import backup as core
+from moonglade import gen_road as gen_road_mod
 from moonglade import paths
 from moonglade.gallery import CATALOG_FIELDS, TrainGuard, create_app, save_catalog
 from tests.conftest import login_test_client
@@ -138,12 +139,12 @@ def test_the_eta_is_pixais_own_formula():
 
 
 def test_a_refusal_and_an_unclear_failure_are_told_apart():
-    assert core.definite_refusal(core.PixAIRestError("x", 403, {"code": "INSUFFICIENT_BALANCE"}))
-    assert core.definite_refusal(core.graphql_error('[{"message": "no"}]', code="FORBIDDEN"))
-    assert not core.definite_refusal(core.PixAIRestError("x", 502, {}))
-    assert not core.definite_refusal(requests.ReadTimeout("slow"))
-    assert not core.definite_refusal(requests.ConnectionError("dropped"))
-    assert not core.definite_refusal(core.PixAIError("HTTP 200 non-JSON response"))
+    assert gen_road_mod.definite_refusal(core.PixAIRestError("x", 403, {"code": "INSUFFICIENT_BALANCE"}))
+    assert gen_road_mod.definite_refusal(core.graphql_error('[{"message": "no"}]', code="FORBIDDEN"))
+    assert not gen_road_mod.definite_refusal(core.PixAIRestError("x", 502, {}))
+    assert not gen_road_mod.definite_refusal(requests.ReadTimeout("slow"))
+    assert not gen_road_mod.definite_refusal(requests.ConnectionError("dropped"))
+    assert not gen_road_mod.definite_refusal(core.PixAIError("HTTP 200 non-JSON response"))
 
 
 class _Resp:
@@ -185,13 +186,13 @@ def test_the_one_rest_error_serves_the_training_refusals_and_the_recipe_code():
         e = ei.value
         assert e.status == e.http_status == 403 and e.body == body
         assert e.code == "INSUFFICIENT_BALANCE" and e.data == {"mediaIds": ["5"]}
-        assert core.definite_refusal(e)
+        assert gen_road_mod.definite_refusal(e)
         assert core.training_error_words(e).startswith("there aren't enough credits")
     client = pixai_client_mod.PixAIClient(_Sess(_Resp(502, "<html>bad gateway</html>")))
     with pytest.raises(core.PixAIRestError) as ei:
         client.rest_put("/training-task/1/media", {})
     assert ei.value.body is None and ei.value.code == "" and ei.value.data == {}
-    assert not core.definite_refusal(ei.value)
+    assert not gen_road_mod.definite_refusal(ei.value)
     assert core.training_error_words(ei.value).startswith("REST PUT /training-task/1/media -> 502")
 
 
@@ -800,10 +801,10 @@ def test_a_graphql_answer_with_data_and_errors_is_not_a_definite_refusal():
     partial = _graphql_error({"data": {"createTrainingTask": {"id": "trn9"}},
                               "errors": [{"message": "a nested field failed"}]})
     assert partial.graphql_data == {"createTrainingTask": {"id": "trn9"}}
-    assert not core.definite_refusal(partial)
+    assert not gen_road_mod.definite_refusal(partial)
     for data in ({"createTrainingTask": None}, None):
         refused = _graphql_error({"data": data, "errors": [{"message": "nope", "extensions": {"code": "FORBIDDEN"}}]})
-        assert core.definite_refusal(refused)
+        assert gen_road_mod.definite_refusal(refused)
 
 
 def test_a_partial_basic_success_keeps_the_double_start_guard(tmp_path, monkeypatch, pixai):
@@ -948,10 +949,10 @@ def test_a_training_routes_own_refusal_leaves_retry_free(tmp_path, pixai, code, 
 
 
 def test_the_training_table_is_the_harvested_one_and_never_the_create_table():
-    assert core.TRAINING_CODES - core.PIXAI_REJECTED_CODES == {
+    assert gen_road_mod.TRAINING_CODES - gen_road_mod.PIXAI_REJECTED_CODES == {
         "UNAUTHORIZED", "NOT_FOUND", "CONFLICT", "TRAINING_IMAGE_REJECTED",
         "TRAINING_DATASET_TOO_SMALL", "MODEL_PUBLISH_CONFLICT", "LORA_REBATE_REQUIRES_PUBLIC"}
     for code in ("CONFLICT", "NOT_FOUND", "TRAINING_DATASET_TOO_SMALL"):
         exc = core.PixAIRestError("x", 409, {"code": code})
-        assert core.definite_refusal(exc, codes=core.TRAINING_CODES)
-        assert not core.definite_refusal(exc), "a training code read with the create table"
+        assert gen_road_mod.definite_refusal(exc, codes=gen_road_mod.TRAINING_CODES)
+        assert not gen_road_mod.definite_refusal(exc), "a training code read with the create table"

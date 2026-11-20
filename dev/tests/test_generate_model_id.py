@@ -14,6 +14,7 @@ network, no spend (everything mocked)."""
 from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import models as models_mod
 
 from tests.conftest import login_client
@@ -29,7 +30,7 @@ def test_generate_reresolves_current_version_over_stale_client_version(tmp_path,
     seen = {}
     monkeypatch.setattr(gen_params_mod, "_gen_parameters",
                         lambda args: seen.update(model=args.model) or {"modelId": args.model})
-    monkeypatch.setattr(core, "submit_generation",
+    monkeypatch.setattr(gen_road_mod, "submit_generation",
                         lambda s, params: seen.update(submitted=params) or "task123")
 
     client = login_client(tmp_path)
@@ -46,7 +47,7 @@ def test_generate_without_model_id_uses_client_version(tmp_path, monkeypatch, pi
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     seen = {}
     monkeypatch.setattr(gen_params_mod, "_gen_parameters", lambda args: seen.update(model=args.model) or {})
-    monkeypatch.setattr(core, "submit_generation", lambda s, params: "t")
+    monkeypatch.setattr(gen_road_mod, "submit_generation", lambda s, params: "t")
 
     client = login_client(tmp_path)
     r = client.post("/api/generate", json={"version_id": "V-DIRECT", "prompt": "x"})
@@ -66,7 +67,7 @@ def test_generate_honors_an_explicitly_chosen_non_latest_version(tmp_path, monke
     seen = {}
     monkeypatch.setattr(gen_params_mod, "_gen_parameters",
                         lambda args: seen.update(model=args.model) or {"modelId": args.model})
-    monkeypatch.setattr(core, "submit_generation",
+    monkeypatch.setattr(gen_road_mod, "submit_generation",
                         lambda s, params: seen.update(submitted=params) or "task123")
 
     client = login_client(tmp_path)
@@ -84,7 +85,7 @@ def test_generate_falls_back_to_latest_when_model_has_no_versions_at_all(tmp_pat
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     seen = {}
     monkeypatch.setattr(gen_params_mod, "_gen_parameters", lambda args: seen.update(model=args.model) or {})
-    monkeypatch.setattr(core, "submit_generation", lambda s, params: "task123")
+    monkeypatch.setattr(gen_road_mod, "submit_generation", lambda s, params: "task123")
 
     client = login_client(tmp_path)
     r = client.post("/api/generate", json={"model_id": "M1", "version_id": "V-WHATEVER", "prompt": "x"})

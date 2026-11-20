@@ -26,6 +26,7 @@ from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gallery as g
 from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import mirror as mirror_mod
 from moonglade import models as models_mod
 from moonglade import pixai_client as pc
@@ -119,7 +120,7 @@ def rig(tmp_path, monkeypatch):
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
     monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: client)
-    monkeypatch.setattr(core, "build_request", lambda payload, *a, mode=None, **k: _req_for(mode, payload))
+    monkeypatch.setattr(gen_road_mod, "build_request", lambda payload, *a, mode=None, **k: _req_for(mode, payload))
     monkeypatch.setattr(models_mod, "_gate_params_for_model", lambda s, p: p)
     monkeypatch.setattr(core, "upload_media", lambda *a, **k: pytest.fail("no upload here"))
     monkeypatch.setattr(core.time, "sleep", lambda s: None)
@@ -261,9 +262,9 @@ def test_submit_scene_never_returns_a_missing_task_id(monkeypatch):
     wire.answer = _Resp(200, {"data": {"createChatEditingSceneTask": None}})
     seen = []
     with pytest.raises(core.PixAIError) as ei:
-        core.submit_scene(pc.PixAIClient(wire), "s1", ["1"], on_send=seen.append)
+        gen_road_mod.submit_scene(pc.PixAIClient(wire), "s1", ["1"], on_send=seen.append)
     assert seen, "the send was reached"
-    assert core.send_outcome(ei.value, True) == "may_have_started"
+    assert gen_road_mod.send_outcome(ei.value, True) == "may_have_started"
     assert len(wire.posts) == 1
 
 
@@ -288,9 +289,9 @@ def test_cli_send_once_says_may_have_started_for_an_unknown_outcome():
     for exc in (requests.ReadTimeout("slow"), requests.HTTPError("502"),
                 core.PixAIError("no task id returned: {}"),
                 core.PixAIRestError("x", 408, {"code": "BAD_REQUEST"})):
-        with pytest.raises(core.SendOutcomeUnclear) as ei:
-            core._cli_send_once(lambda: (_ for _ in ()).throw(exc))
-        assert str(ei.value).startswith(core.CLI_UNCLEAR)
+        with pytest.raises(gen_road_mod.SendOutcomeUnclear) as ei:
+            gen_road_mod._cli_send_once(lambda: (_ for _ in ()).throw(exc))
+        assert str(ei.value).startswith(gen_road_mod.CLI_UNCLEAR)
         assert ei.value.__cause__ is exc
         assert not isinstance(ei.value, core.PixAIError)
 
@@ -298,24 +299,24 @@ def test_cli_send_once_says_may_have_started_for_an_unknown_outcome():
 def test_cli_send_once_passes_a_refusal_and_an_unreached_failure_through():
     refusal = core.graphql_error("not enough credits", code="INSUFFICIENT_BALANCE")
     with pytest.raises(core.PixAIError) as ei:
-        core._cli_send_once(lambda: (_ for _ in ()).throw(refusal))
+        gen_road_mod._cli_send_once(lambda: (_ for _ in ()).throw(refusal))
     assert ei.value is refusal
     with pytest.raises(requests.ReadTimeout):
-        core._cli_send_once(lambda: (_ for _ in ()).throw(requests.ReadTimeout("x")),
+        gen_road_mod._cli_send_once(lambda: (_ for _ in ()).throw(requests.ReadTimeout("x")),
                             reached=lambda: False)
 
 
 def test_cli_create_once_reads_a_lost_answer_as_unclear_over_the_real_transport():
     wire = Wire()
     wire.answer = requests.ReadTimeout("read timed out")
-    with pytest.raises(core.SendOutcomeUnclear):
-        core._cli_create_once(pc.PixAIClient(wire), {"modelId": V})
+    with pytest.raises(gen_road_mod.SendOutcomeUnclear):
+        gen_road_mod._cli_create_once(pc.PixAIClient(wire), {"modelId": V})
     assert len(wire.posts) == 1, "single attempt"
     wire.answer = _Resp(200, {"data": {"createGenerationTask": None}})
-    with pytest.raises(core.SendOutcomeUnclear):
-        core._cli_create_once(pc.PixAIClient(wire), {"modelId": V})
+    with pytest.raises(gen_road_mod.SendOutcomeUnclear):
+        gen_road_mod._cli_create_once(pc.PixAIClient(wire), {"modelId": V})
     wire.answer = _created("t9")
-    assert core._cli_create_once(pc.PixAIClient(wire), {"modelId": V}) == "t9"
+    assert gen_road_mod._cli_create_once(pc.PixAIClient(wire), {"modelId": V}) == "t9"
 
 
 @pytest.mark.parametrize("runner", ["run_generate_video", "run_reference_video", "run_edit_image"])
@@ -344,9 +345,9 @@ def test_run_generate_exits_with_the_honest_sentence(tmp_path, monkeypatch, caps
     import argparse
     args = argparse.Namespace(out=str(tmp_path), confirm=True, task_id="", token=None,
                               poll_timeout=1)
-    with pytest.raises(core.SendOutcomeUnclear) as ei:
+    with pytest.raises(gen_road_mod.SendOutcomeUnclear) as ei:
         core.run_generate(args)
-    assert core.CLI_UNCLEAR in str(ei.value)
+    assert gen_road_mod.CLI_UNCLEAR in str(ei.value)
     assert len(wire.creates()) == 1
 
 
@@ -355,4 +356,5 @@ def test_main_exits_non_zero_with_the_sentence():
     PixAIError (source pin: running main() needs a whole library)."""
     import inspect
     src = inspect.getsource(core.main)
-    assert "except (PixAIError, SendOutcomeUnclear) as e:\n        sys.exit(str(e))" in src
+    # (SendOutcomeUnclear is in moonglade/gen_road.py since 3.22)
+    assert "except (PixAIError, _gen_road.SendOutcomeUnclear) as e:\n        sys.exit(str(e))" in src

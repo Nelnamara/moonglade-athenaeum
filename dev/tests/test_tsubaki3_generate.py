@@ -31,6 +31,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import models as models_mod
 from moonglade import pricing as pricing_mod
 from tests.test_tsubaki3_image_gate import (
@@ -98,9 +99,9 @@ def rest(monkeypatch):
 
 def road(payload, **kw):
     s = object()
-    return core.build_request(payload, mode="image", resolve=core.RequestResolver(
-        gate=core.gate_resolver(s), features=models_mod.features_resolver(s),
-        unlimited=core.unlimited_resolver(s)), **kw)
+    return gen_road_mod.build_request(payload, mode="image", resolve=gen_road_mod.RequestResolver(
+        gate=gen_road_mod.gate_resolver(s), features=models_mod.features_resolver(s),
+        unlimited=gen_road_mod.unlimited_resolver(s)), **kw)
 
 
 def ctx_payload(**kw):
@@ -203,7 +204,7 @@ def test_the_gate_refuses_a_hand_built_context_image_dict(extra, words, rest):
 
 
 def test_a_lane_request_never_carries_context_images(rest, monkeypatch):
-    monkeypatch.setattr(core, "infinite_mode_status",
+    monkeypatch.setattr(gen_road_mod, "infinite_mode_status",
                         lambda s, v: {"owned": True, "expires_at": "2099-01-01", "days_left": 9})
     with pytest.raises(core.PixAIError):
         road(ctx_payload(unlimited=True, mode="pro"))
@@ -238,22 +239,22 @@ def test_recipes_run_the_helper_one_step_lower_at_build(rest):
     """The site's own rule (task-*.js): hasRecipes ? (medium -> low, else off). Keyed on the
     BUILT params' recipeIds (the passthrough is lane w2-recipes'), so it fires only when the
     recipes are really sent."""
-    rs = core.RequestResolver(features=models_mod.features_resolver(object()))
+    rs = gen_road_mod.RequestResolver(features=models_mod.features_resolver(object()))
     for asked, used in (("medium", "low"), ("low", "off"), ("off", "off")):
         params, adjusted = {"recipeIds": ["1"], "modelId": T3}, []
-        core._shape_creativity(params, asked, rs, T3, adjusted)
+        gen_road_mod._shape_creativity(params, asked, rs, T3, adjusted)
         assert params["promptHelper"]["creativity"] == used
         assert bool(adjusted) == (asked != "off")
     params, adjusted = {"modelId": T3}, []
-    core._shape_creativity(params, "medium", rs, T3, adjusted)
+    gen_road_mod._shape_creativity(params, "medium", rs, T3, adjusted)
     assert params["promptHelper"]["creativity"] == "medium" and adjusted == []
 
 
 def test_a_road_without_the_features_resolver_ignores_creativity(rest):
-    req = core.build_request({"version_id": T3, "prompt": "<p>", "creativity": "off",
+    req = gen_road_mod.build_request({"version_id": T3, "prompt": "<p>", "creativity": "off",
                               "prompt_helper": False, "width": 1024, "height": 1024},
-                             mode="image", resolve=core.RequestResolver(
-                                 gate=core.gate_resolver(object())))
+                             mode="image", resolve=gen_road_mod.RequestResolver(
+                                 gate=gen_road_mod.gate_resolver(object())))
     assert req.parameters["promptHelper"]["creativity"] == "off"      # the legacy off, via G6
 
 
@@ -293,7 +294,7 @@ def test_a_listed_profile_pixai_refuses_is_never_resubmitted_on_the_default(rest
     params = {"prompts": "p", "modelId": T3, "width": 1024, "height": 1024, "batchSize": 1,
               "inferenceProfile": "ultra", "priority": gen_params_mod.PRIORITY_TURBO}
     with pytest.raises(core.PixAIError, match="refused the ultra profile"):
-        core.submit_generation(object(), params)
+        gen_road_mod.submit_generation(object(), params)
     assert len(sent) == 1
 
 
@@ -308,7 +309,7 @@ def test_a_members_only_profile_stands_the_turbo_fallback_down(rest, monkeypatch
     params = {"prompts": "p", "modelId": T3, "width": 1024, "height": 1024, "batchSize": 1,
               "inferenceProfile": "ultra", "priority": gen_params_mod.PRIORITY_TURBO}
     with pytest.raises(core.PixAIError):
-        core.submit_generation(object(), params)
+        gen_road_mod.submit_generation(object(), params)
     assert len(sent) == 1
     # ...while Pro (listed, not members-only) keeps the Turbo self-heal
     sent.clear()
@@ -321,7 +322,7 @@ def test_a_members_only_profile_stands_the_turbo_fallback_down(rest, monkeypatch
         return {"createGenerationTask": {"id": "T1"}}
     monkeypatch.setattr(core, "gql_mutate", fake2)
     monkeypatch.setattr(core, "_turbo_refused", {"seen": False})
-    assert core.submit_generation(object(), dict(params, inferenceProfile="pro")) == "T1"
+    assert gen_road_mod.submit_generation(object(), dict(params, inferenceProfile="pro")) == "T1"
     assert len(calls) == 2 and calls[1]["priority"] == gen_params_mod.PRIORITY_LOW
 
 
@@ -351,9 +352,9 @@ def test_a_partial_success_is_never_resubmitted(rest, monkeypatch, message, prof
     params = {"prompts": "p", "modelId": T3, "width": 1024, "height": 1024, "batchSize": 1,
               "inferenceProfile": profile, "priority": gen_params_mod.PRIORITY_TURBO}
     with pytest.raises(core.PixAIError) as ei:
-        core.submit_generation(object(), params)
+        gen_road_mod.submit_generation(object(), params)
     assert len(sent) == 1, "a partial success was sent a second time"
-    assert core.definite_refusal(ei.value) is False
+    assert gen_road_mod.definite_refusal(ei.value) is False
 
 
 # =============================================================================
@@ -364,7 +365,7 @@ def test_the_breakdown_names_the_context_charge_and_a_non_default_profile(rest, 
     matched = []
     monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, **k: matched.append(params))
     req = road(ctx_payload(mode="ultra"))
-    out = core.price(object(), req)
+    out = gen_road_mod.price(object(), req)
     assert out["cost"] == 4000 + 1800 + 500
     assert out["context_images"] == 2 and out["context_charge"] == 1800
     assert out["profile"] == "Ultra" and out["profile_extra"] == 500
@@ -375,13 +376,13 @@ def test_the_breakdown_names_the_context_charge_and_a_non_default_profile(rest, 
 
 def test_no_breakdown_on_the_default_profile_or_a_card_covered_quote(rest, monkeypatch):
     monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, **k: None)
-    out = core.price(object(), road({"version_id": T3, "prompt": "p", "mode": "pro",
+    out = gen_road_mod.price(object(), road({"version_id": T3, "prompt": "p", "mode": "pro",
                                      "width": 1024, "height": 1024}))
     assert "profile" not in out and "context_images" not in out
     monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, **k: {
         "total": 3, "consumeAmount": 1, "covered": True, "name": "card"})
     monkeypatch.setattr(cards_mod, "card_covers", lambda best: True)
-    out = core.price(object(), road(ctx_payload()))
+    out = gen_road_mod.price(object(), road(ctx_payload()))
     assert out["free"] is True and "context_charge" not in out
 
 
@@ -423,15 +424,15 @@ def test_an_sdxl_version_has_no_tiers_no_max_and_no_creativity(rest):
 def test_the_tsubaki3_ids_match_the_drawer_copy():
     js = (ROOT / "gallery/src/gen/tsubakiCore.js").read_text(encoding="utf-8")
     m = re.search(r'TSUBAKI3 = \{ model_id: "(\d+)", version_id: "(\d+)"', js)
-    assert m and m.group(1) == core.TSUBAKI3_MODEL_ID and m.group(2) == core.TSUBAKI3_VERSION_ID
-    assert core.TSUBAKI3_VERSION_ID in core.UNLIMITED_VERSIONS
+    assert m and m.group(1) == gen_road_mod.TSUBAKI3_MODEL_ID and m.group(2) == gen_road_mod.TSUBAKI3_VERSION_ID
+    assert gen_road_mod.TSUBAKI3_VERSION_ID in gen_road_mod.UNLIMITED_VERSIONS
 
 
 def test_the_image_ref_rule_matches_the_drawer_copy():
     js = (ROOT / "gallery/src/gen/tsubakiCore.js").read_text(encoding="utf-8")
     assert "export const AT_REF_RE = /@image(\\d+)/g;" in js
-    assert core._IMAGE_REF_RE.pattern == r"@image(\d+)"
-    assert core._image_refs("a @image1 b @image12 @image0 @imagex") == [1, 12, 0]
+    assert gen_road_mod._IMAGE_REF_RE.pattern == r"@image(\d+)"
+    assert gen_road_mod._image_refs("a @image1 b @image12 @image0 @imagex") == [1, 12, 0]
 
 
 # =============================================================================
@@ -533,12 +534,12 @@ def test_the_edit_bar_is_sent_at_high_priority_and_quoted_at_it(rest, monkeypatc
     shows what is spent: free when a card covers it, the quoted credits when none does."""
     req = road(dict(js_bar))
     assert req.parameters["priority"] == gen_params_mod.PRIORITY_HIGH == 1000
-    assert not req.unlimited and not core.asks_unlimited(dict(js_bar))
+    assert not req.unlimited and not gen_road_mod.asks_unlimited(dict(js_bar))
     # no card: the quoted credits, priced on the dict that carries priority 1000
     matched = []
     monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, **k: matched.append(params))
     rest.priced.clear()
-    out = core.price(object(), req)
+    out = gen_road_mod.price(object(), req)
     assert out["free"] is False and out["cost"] == 4000 + 900
     assert str(rest.priced[0]["priority"]) == "1000"
     assert matched == [req.parameters] and matched[0]["priority"] == 1000
@@ -546,16 +547,16 @@ def test_the_edit_bar_is_sent_at_high_priority_and_quoted_at_it(rest, monkeypatc
     seen = []
     monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, **k: seen.append(params) or {
         "total": 2, "consumeAmount": 1, "covered": True, "name": "card"})
-    out = core.price(object(), req)
+    out = gen_road_mod.price(object(), req)
     assert out["free"] is True and seen[0]["priority"] == 1000
 
 
 def test_nothing_else_changes_priority():
     """Only the bar asks: the web payload without high_priority (the dock's default, the Loom's
     unticked box) is still Turbo, and with it ticked is still High."""
-    assert core._gen_args_from_web_payload({"prompt": "p"}).priority == gen_params_mod.PRIORITY_TURBO
-    assert core._gen_args_from_web_payload({"prompt": "p", "high_priority": False}).priority == gen_params_mod.PRIORITY_TURBO
-    assert core._gen_args_from_web_payload({"prompt": "p", "high_priority": True}).priority == gen_params_mod.PRIORITY_HIGH
+    assert gen_road_mod._gen_args_from_web_payload({"prompt": "p"}).priority == gen_params_mod.PRIORITY_TURBO
+    assert gen_road_mod._gen_args_from_web_payload({"prompt": "p", "high_priority": False}).priority == gen_params_mod.PRIORITY_TURBO
+    assert gen_road_mod._gen_args_from_web_payload({"prompt": "p", "high_priority": True}).priority == gen_params_mod.PRIORITY_HIGH
 
 
 def test_the_price_query_of_a_context_image_request_carries_control_nets(rest):

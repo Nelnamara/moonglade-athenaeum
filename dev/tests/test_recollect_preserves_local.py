@@ -13,6 +13,7 @@ rebuilt and written anyway.
 """
 from moonglade import backup as core
 from moonglade import gallery as g
+from moonglade import gen_road as gen_road_mod
 from moonglade.gallery import CATALOG_FIELDS, create_app, load_catalog, save_catalog
 
 from tests.conftest import login_test_client
@@ -81,7 +82,7 @@ def test_a_second_poll_of_a_done_task_does_not_collect_again(tmp_path, monkeypat
         calls["n"] += 1
         return {"media_ids": ["m1"], "saved": 1, "is_video": False}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "collect_generation", _collect)
+    monkeypatch.setattr(gen_road_mod, "collect_generation", _collect)
     monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, t: {"phase": "done", "paid_credit": 0})
     # the task's media is ALREADY catalogued, with local curation on it
@@ -106,7 +107,7 @@ def test_an_uncollected_done_task_still_collects(tmp_path, monkeypatch):
         calls["n"] += 1
         return {"media_ids": ["mX"], "saved": 1, "is_video": False}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "collect_generation", _collect)
+    monkeypatch.setattr(gen_road_mod, "collect_generation", _collect)
     monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, t: {"phase": "done", "paid_credit": 0})
     cli = _client(tmp_path, [])

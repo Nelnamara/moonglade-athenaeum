@@ -45,6 +45,7 @@ import requests
 
 from moonglade import backup as core
 from moonglade import cards as _cards
+from moonglade import gen_road as _gen_road
 from moonglade import pixai_client as _pixai_client
 
 # ---------------------------------------------------------------------------------------
@@ -586,7 +587,7 @@ def mark_read(session, ids):
         r = core._rest_post(session, "/user/me/notifications/read", {"ids": ids})
         answered = isinstance(r, dict) and r.get("success") is True
     except Exception as e:                                   # noqa: BLE001
-        if core.definite_refusal(e, codes=core.ANY_PIXAI_CODE):
+        if _gen_road.definite_refusal(e, codes=_gen_road.ANY_PIXAI_CODE):
             return _answer("refused", _mark_refusal(e))
     still = _still_unread(session, ids)
     if still is None:
@@ -625,7 +626,7 @@ def mark_all_read(session, tab):
         r = core._rest_put(session, "/user/me/notifications/read-marks", {"types": types})
         answered = isinstance(r, dict) and r.get("success") is True
     except Exception as e:                                   # noqa: BLE001
-        if core.definite_refusal(e, codes=core.ANY_PIXAI_CODE):
+        if _gen_road.definite_refusal(e, codes=_gen_road.ANY_PIXAI_CODE):
             return _answer("refused", _mark_refusal(e))
     try:
         after = unread_counts(session)
@@ -908,7 +909,7 @@ def post_reply(session, artwork_id, reply_to, content):
         r = core._rest_post(session, "/messages/", body)
         posted_id = str((r or {}).get("id") or "") if isinstance(r, dict) else ""
     except Exception as e:                                   # noqa: BLE001
-        if core.definite_refusal(e, codes=core.ANY_PIXAI_CODE):
+        if _gen_road.definite_refusal(e, codes=_gen_road.ANY_PIXAI_CODE):
             return _answer("refused", _reply_refusal(e))
     _drop_thread(artwork_id)
     found, raw = _find_reply(session, artwork_id, posted_id, me, reply_to, text,
@@ -965,7 +966,7 @@ def delete_reply(session, artwork_id, message_id):
     try:
         _rest_delete(session, "/messages/" + message_id, params={"topicRefType": "ARTWORK"})
     except Exception as e:                                   # noqa: BLE001
-        if core.definite_refusal(e, codes=core.ANY_PIXAI_CODE):
+        if _gen_road.definite_refusal(e, codes=_gen_road.ANY_PIXAI_CODE):
             return _answer("refused", "PixAI refused it. Nothing was deleted.")
     _drop_thread(artwork_id)
     after, _raw = _read_message(session, message_id)
@@ -1106,7 +1107,7 @@ def claim_gift(session, message_id):
     try:
         core._rest_post(session, DM_PREFIX + "/messages/" + message_id + "/claim", None)
     except Exception as e:                                   # noqa: BLE001
-        if core.definite_refusal(e, codes=core.ANY_PIXAI_CODE):
+        if _gen_road.definite_refusal(e, codes=_gen_road.ANY_PIXAI_CODE):
             return _answer("refused", _CLAIM_REFUSALS.get(
                 _status_of(e), "PixAI refused it. Nothing changed."))
     try:

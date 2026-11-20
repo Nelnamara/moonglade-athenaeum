@@ -14,6 +14,7 @@ import threading
 
 from moonglade import backup as core
 from moonglade import cards as cards_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import pricing as pricing_mod
 from moonglade.gallery import save_catalog, CATALOG_FIELDS
 from tests.conftest import _TEST_PASSWORD, _TEST_USERNAME, _do_login
@@ -42,7 +43,7 @@ def test_an_image_tab_send_covered_by_a_card_is_the_boards_and_costs_zero(gen):
 
 def test_an_edit_tab_send_reads_its_charge_off_the_catalog(gen, monkeypatch, tmp_path):
     gen["pixai"].on("/kaisuuken/check", _NO_CARD)
-    monkeypatch.setattr(core, "build_request", lambda payload, *a, **k: _Req("edit"))
+    monkeypatch.setattr(gen_road_mod, "build_request", lambda payload, *a, **k: _Req("edit"))
     d = gen["cli"].post("/api/edit", json={"source": "1", "instruction": "night",
                                            "loom_target": TARGET}).get_json()
     assert d.get("task_id") == "task-1", d
@@ -56,8 +57,8 @@ def test_an_edit_tab_send_reads_its_charge_off_the_catalog(gen, monkeypatch, tmp
 def test_a_fix_from_the_loom_is_the_boards_spend(gen, monkeypatch):
     req = _Req("fix")
     req.media_id, req.boxes = "1", [{"tag": "face", "x": 1, "y": 1, "w": 5, "h": 5}]
-    monkeypatch.setattr(core, "build_request", lambda payload, *a, **k: req)
-    monkeypatch.setattr(core, "submit_fixer", lambda session, media_id, boxes: "task-f")
+    monkeypatch.setattr(gen_road_mod, "build_request", lambda payload, *a, **k: req)
+    monkeypatch.setattr(gen_road_mod, "submit_fixer", lambda session, media_id, boxes: "task-f")
     d = gen["cli"].post("/api/fix", json={"source": "1", "boxes": req.boxes,
                                           "loom_target": TARGET}).get_json()
     assert d.get("task_id") == "task-f", d
@@ -98,7 +99,7 @@ def _armed(monkeypatch, fake):
     monkeypatch.setattr(_mirror, "mirror_enabled", lambda: True)
     monkeypatch.setattr(_mirror, "make_mirror_session", lambda *a, **k: fake)
     monkeypatch.setattr(_mirror, "_session_for_create", lambda s: fake)
-    monkeypatch.setattr(core, "build_request", lambda payload, *a, **k: _Req("enhance"))
+    monkeypatch.setattr(gen_road_mod, "build_request", lambda payload, *a, **k: _Req("enhance"))
 
 
 def test_a_presets_read_overtaken_by_a_send_is_not_cached(gen, monkeypatch):

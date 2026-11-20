@@ -14,6 +14,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import cards as cards_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import models as models_mod
 from moonglade import pricing as pricing_mod
 from moonglade import recipes as rec
@@ -94,13 +95,13 @@ def test_a_road_without_the_gate_cannot_vouch_for_recipes():
 # ---------------------------------------------------------------------------
 
 def _resolver(gate=True):
-    return core.RequestResolver(
+    return gen_road_mod.RequestResolver(
         model_version=lambda mid, vid="": "1983308862240288769",
         gate=(lambda params: (params, [])) if gate else None)
 
 
 def test_build_request_carries_the_recipes_through_the_gate():
-    req = core.build_request({"version_id": "1983308862240288769", "prompt": "a moon",
+    req = gen_road_mod.build_request({"version_id": "1983308862240288769", "prompt": "a moon",
                               "recipeIds": [RID]}, mode="image", resolve=_resolver())
     assert req.parameters["recipeIds"] == [RID]
     assert req.parameters["modelId"] == "1983308862240288769"
@@ -108,14 +109,14 @@ def test_build_request_carries_the_recipes_through_the_gate():
 
 def test_build_request_without_recipes_is_byte_identical():
     base = {"version_id": "1983308862240288769", "prompt": "a moon"}
-    a = core.build_request(dict(base), mode="image", resolve=_resolver())
-    b = core.build_request(dict(base, recipeIds=[]), mode="image", resolve=_resolver())
+    a = gen_road_mod.build_request(dict(base), mode="image", resolve=_resolver())
+    b = gen_road_mod.build_request(dict(base, recipeIds=[]), mode="image", resolve=_resolver())
     assert a.parameters == b.parameters and "recipeIds" not in a.parameters
 
 
 def test_build_request_refuses_recipes_on_a_gateless_road():
     with pytest.raises(core.PixAIError, match="can't check a recipe"):
-        core.build_request({"version_id": "1983308862240288769", "prompt": "x",
+        gen_road_mod.build_request({"version_id": "1983308862240288769", "prompt": "x",
                             "recipeIds": [RID]}, mode="image", resolve=_resolver(gate=False))
 
 
@@ -126,10 +127,10 @@ def test_unlimited_mode_still_refuses_a_recipe(monkeypatch):
     def lane_check(params, vid):
         seen["params"] = params
         raise core.PixAIError("Unlimited Mode can't use a workflow or a recipe")
-    rs = core.RequestResolver(model_version=lambda m, v="": "1983308862240288769",
+    rs = gen_road_mod.RequestResolver(model_version=lambda m, v="": "1983308862240288769",
                               gate=lambda p: (p, []), unlimited=lane_check)
     with pytest.raises(core.PixAIError, match="recipe"):
-        core.build_request({"version_id": "1983308862240288769", "prompt": "x",
+        gen_road_mod.build_request({"version_id": "1983308862240288769", "prompt": "x",
                             "unlimited": True, "recipeIds": [RID]}, mode="image", resolve=rs)
     assert seen["params"]["recipeIds"] == [RID]
 
@@ -150,7 +151,7 @@ def test_task_price_query_carries_recipe_ids_as_json(monkeypatch):
 
 
 def _req(params):
-    return core.GenerationRequest(mode="image", parameters=params, model_version_id="1")
+    return gen_road_mod.GenerationRequest(mode="image", parameters=params, model_version_id="1")
 
 
 def _no_card(monkeypatch):
@@ -168,7 +169,7 @@ def test_a_recipe_422_on_the_quote_becomes_the_structured_refusal(monkeypatch):
         raise err
     monkeypatch.setattr(core, "_rest_get", fake_get)
     _no_card(monkeypatch)
-    out = core.price(object(), _req({"modelId": "1", "recipeIds": [RID]}))
+    out = gen_road_mod.price(object(), _req({"modelId": "1", "recipeIds": [RID]}))
     assert out["cost"] is None and out["free"] is False
     r = out["recipe_error"]
     assert r["code"] == "RECIPE_INCOMPATIBLE" and r["reason"] == "model_mismatch"
@@ -180,7 +181,7 @@ def test_a_recipe_quote_that_fails_otherwise_is_unverified_and_never_free(monkey
     monkeypatch.setattr(core, "_rest_get",
                         lambda *a, **k: (_ for _ in ()).throw(core.PixAIError("timeout")))
     _no_card(monkeypatch)
-    out = core.price(object(), _req({"modelId": "1", "recipeIds": [RID]}))
+    out = gen_road_mod.price(object(), _req({"modelId": "1", "recipeIds": [RID]}))
     assert out == {"cost": None, "free": False,
                    "note": "couldn't verify the price with these recipes"}
 
@@ -190,7 +191,7 @@ def test_a_quote_without_recipes_keeps_todays_card_behaviour(monkeypatch):
     monkeypatch.setattr(cards_mod, "match_kaisuuken",
                         lambda *a, **k: {"id": "k1", "total": 3, "consumeAmount": 1,
                                          "covered": True, "name": "Tsubaki"})
-    out = core.price(object(), _req({"modelId": "1"}))
+    out = gen_road_mod.price(object(), _req({"modelId": "1"}))
     assert out["free"] is True and "card_note" not in out
 
 
@@ -199,7 +200,7 @@ def test_a_card_over_a_priced_recipe_quote_carries_the_note(monkeypatch):
     monkeypatch.setattr(cards_mod, "match_kaisuuken",
                         lambda *a, **k: {"id": "k1", "total": 3, "consumeAmount": 1,
                                          "covered": True, "name": "Tsubaki"})
-    out = core.price(object(), _req({"modelId": "1", "recipeIds": [RID]}))
+    out = gen_road_mod.price(object(), _req({"modelId": "1", "recipeIds": [RID]}))
     assert out["free"] is True and out["cost"] == 3000
     assert out["card_note"] == rec.CARD_NOTE
 
@@ -216,14 +217,14 @@ def test_the_send_refuses_recipes_beside_context_images(monkeypatch):
                         lambda s, p: dict({k: v for k, v in p.items() if k != "mediaId"},
                                           contextImages=[p["mediaId"]]))
     with pytest.raises(core.PixAIError, match="held while context images"):
-        core.submit_generation(fake, {"modelId": "1", "mediaId": "9", "recipeIds": [RID]})
+        gen_road_mod.submit_generation(fake, {"modelId": "1", "mediaId": "9", "recipeIds": [RID]})
     assert not [c for c in fake.calls if c.verb == "mutate"]
 
 
 def test_the_send_refuses_a_malformed_recipe_list():
     fake = FakePixAI()
     with pytest.raises(core.PixAIError):
-        core.submit_generation(fake, {"modelId": "1", "recipeIds": [int(RID)]})
+        gen_road_mod.submit_generation(fake, {"modelId": "1", "recipeIds": [int(RID)]})
     assert not [c for c in fake.calls if c.verb == "mutate"]
 
 
@@ -235,7 +236,7 @@ def test_a_recipe_refusal_is_never_resubmitted_whatever_its_words(monkeypatch):
     fake.fail("createGenerationTask", err)
     monkeypatch.setattr(models_mod, "_gate_params_for_model", lambda s, p: p)
     with pytest.raises(core.PixAIError):
-        core.submit_generation(fake, {"modelId": "1", "inferenceProfile": "pro",
+        gen_road_mod.submit_generation(fake, {"modelId": "1", "inferenceProfile": "pro",
                                       "recipeIds": [RID]})
     assert len([c for c in fake.calls if c.verb == "mutate"]) == 1
 
@@ -244,7 +245,7 @@ def test_read_only_refuses_before_the_recipe_backstop_or_any_call(monkeypatch):
     fake = FakePixAI()
     monkeypatch.setattr(core, "READ_ONLY", True)
     with pytest.raises(core.PixAIError, match="READ_ONLY"):
-        core.submit_generation(fake, {"modelId": "1", "recipeIds": [RID]})
+        gen_road_mod.submit_generation(fake, {"modelId": "1", "recipeIds": [RID]})
     assert fake.calls == []
 
 
@@ -680,11 +681,11 @@ def test_generate_answers_a_recipe_refusal_structured(tmp_path, monkeypatch):
 
     def refuse(session, req, **k):
         raise _refused("RECIPE_INCOMPATIBLE", "model_mismatch", [RID])
-    monkeypatch.setattr(core, "submit", refuse)
+    monkeypatch.setattr(gen_road_mod, "submit", refuse)
     monkeypatch.setattr(core, "account_info", lambda s: {})
-    monkeypatch.setattr(core, "model_version_resolver",
+    monkeypatch.setattr(gen_road_mod, "model_version_resolver",
                         lambda s: (lambda m, v="": "1983308862240288769"))
-    monkeypatch.setattr(core, "gate_resolver", lambda s: (lambda p: (p, [])))
+    monkeypatch.setattr(gen_road_mod, "gate_resolver", lambda s: (lambda p: (p, [])))
     cli = login_client(tmp_path)
     d = cli.post("/api/generate", json={"version_id": "1983308862240288769",
                                         "prompt": "a moon", "recipeIds": [RID]}).get_json()
@@ -786,7 +787,7 @@ def test_the_send_backstop_uses_the_same_wording(monkeypatch):
     fake = FakePixAI()
     monkeypatch.setattr(models_mod, "_gate_params_for_model", lambda s, p: p)
     with pytest.raises(core.PixAIError) as err:
-        core.submit_generation(fake, {"modelId": "1", "contextImages": ["9"],
+        gen_road_mod.submit_generation(fake, {"modelId": "1", "contextImages": ["9"],
                                       "recipeIds": [RID]})
     assert str(err.value) == rec.HELD_WITH_CONTEXT
     assert not [c for c in fake.calls if c.verb == "mutate"]
@@ -796,7 +797,7 @@ def test_the_task_price_query_of_a_built_recipe_request_carries_its_recipe_ids(t
                                                                              monkeypatch):
     monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
     req = road(_t3(recipeIds=[RID2, RID]))
-    out = core.price(object(), req)
+    out = gen_road_mod.price(object(), req)
     assert out["cost"] == 4000
     assert t3rest.priced, "the quote was read"
     for q in t3rest.priced:

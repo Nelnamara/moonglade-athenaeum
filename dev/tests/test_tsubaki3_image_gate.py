@@ -32,6 +32,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import models as models_mod
 from moonglade import pricing as pricing_mod
 
@@ -391,11 +392,11 @@ def test_the_upscale_road_passes_untouched_on_mmdit26a_and_b(vid, method, rest):
 
 
 def test_the_upscale_panel_payload_rides_the_road_untouched(rest):
-    req = core.build_request({"version_id": T3, "prompt": "", "ref_media_id": "M1",
+    req = gen_road_mod.build_request({"version_id": T3, "prompt": "", "ref_media_id": "M1",
                               "ref_strength": 0.55, "enlarge": 2, "width": 1000,
                               "height": 1000},
-                             mode="image", resolve=core.RequestResolver(
-                                 gate=core.gate_resolver(object())))
+                             mode="image", resolve=gen_road_mod.RequestResolver(
+                                 gate=gen_road_mod.gate_resolver(object())))
     p = req.parameters
     assert p["mediaId"] == "M1" and p["enlarge"] == 2.0 and "contextImages" not in p
     assert req.adjusted == []
@@ -462,8 +463,8 @@ def test_img2img_plus_hires_on_a_dit_model_rides_the_upscale_road_as_the_spec_re
 # =============================================================================
 
 def _road(payload, **kw):
-    return core.build_request(payload, mode="image", resolve=core.RequestResolver(
-        gate=core.gate_resolver(object())), **kw)
+    return gen_road_mod.build_request(payload, mode="image", resolve=gen_road_mod.RequestResolver(
+        gate=gen_road_mod.gate_resolver(object())), **kw)
 
 
 @pytest.mark.parametrize("vid", [T3, FLASH])
@@ -531,7 +532,7 @@ def test_a_reference_plus_a_lora_on_tsubaki3_is_refused_never_trimmed(rest):
         _road(payload)
     assert str(err.value) == "Tsubaki.3 can't combine a reference image with LoRAs — remove one"
     # the backstop inside price_task fails soft (no price), never raises
-    args = core._gen_args_from_web_payload(payload)
+    args = gen_road_mod._gen_args_from_web_payload(payload)
     args.model = T3
     raw = gen_params_mod._gen_parameters(args)
     assert raw["mediaId"] == "M1" and raw["lora"] == {"L1": 0.7}
@@ -708,14 +709,14 @@ def test_price_and_submit_card_match_and_send_the_gated_dict(rest, monkeypatch):
     gated = req.parameters
     assert gated["contextImages"] == ["M1"] and (gated["width"], gated["height"]) == (912, 512)
 
-    quoted = core.price(object(), req)
+    quoted = gen_road_mod.price(object(), req)
     assert matched[0] is gated                       # the badge's card verdict: gated dict
     assert quoted["free"] is True and quoted["cost"] == 4000
     assert rest.priced[-1]["contextImages"] == json.dumps(["M1"])
     assert rest.priced[-1]["width"] == 912
     assert {a["field"] for a in quoted["adjusted"]} >= {"width", "height"}
 
-    assert core.submit(object(), req) == {"task_id": "T1"}
+    assert gen_road_mod.submit(object(), req) == {"task_id": "T1"}
     assert matched[1] is gated                       # the spend's card check: same object
     assert sent[0] is gated                          # ...and the backstop sent it as-is
     assert gated["kaisuukenId"] == "card-1"
@@ -743,7 +744,7 @@ def test_run_generate_card_matches_and_submits_the_gated_dict(rest, monkeypatch,
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     monkeypatch.setattr(cards_mod, "match_kaisuuken",
                         lambda s, params, **k: matched.append(params) or dict(CARD))
-    monkeypatch.setattr(core, "submit_generation",
+    monkeypatch.setattr(gen_road_mod, "submit_generation",
                         lambda s, params: sent.append(params) or "T1")
 
     def stop(*a, **k):
@@ -809,27 +810,27 @@ def test_quality_tag_cases_on_the_version_row():
 
 
 def _with_row(row):
-    return core.RequestResolver(model_version=lambda mid, vid: row)
+    return gen_road_mod.RequestResolver(model_version=lambda mid, vid: row)
 
 
 def test_the_quality_tag_booster_sends_the_versions_own_tag():
     base = {"model_id": "M1", "version_id": "V", "prompt": "<prompt>",
             "quality_tag": "Masterpiece"}
     tagged = {"version_id": "V", "quality_tag": {"prefix": "", "suffix": "<suffix>"}}
-    req = core.build_request(base, mode="image", resolve=_with_row(tagged))
+    req = gen_road_mod.build_request(base, mode="image", resolve=_with_row(tagged))
     assert req.parameters["qualityTag"] == {"prefix": "", "suffix": "<suffix>"}
     assert req.adjusted == []
     # a row that answered with no tag (Tsubaki.3, Flash): nothing sent, and said so
     untagged = {"version_id": "V", "quality_tag": None}
-    req = core.build_request(base, mode="image", resolve=_with_row(untagged))
+    req = gen_road_mod.build_request(base, mode="image", resolve=_with_row(untagged))
     assert "qualityTag" not in req.parameters
     assert req.adjusted == [{"field": "qualityTag", "asked": "Masterpiece", "used": None,
                              "why": "this model version publishes no quality tag"}]
     # no row (the resolver answered a bare id): today's literal prefix
-    req = core.build_request(base, mode="image", resolve=_with_row("V"))
+    req = gen_road_mod.build_request(base, mode="image", resolve=_with_row("V"))
     assert req.parameters["qualityTag"] == {"prefix": "Masterpiece"}
     # the members-only rule is unchanged
-    req = core.build_request(base, mode="image", resolve=_with_row(tagged), is_member=False)
+    req = gen_road_mod.build_request(base, mode="image", resolve=_with_row(tagged), is_member=False)
     assert "qualityTag" not in req.parameters
 
 
@@ -1080,10 +1081,10 @@ def lane(monkeypatch):
 
 
 def lane_road(payload, **kw):
-    return core.build_request(dict(payload, unlimited=True), mode="image",
-                              resolve=core.RequestResolver(
-                                  gate=core.gate_resolver(object()),
-                                  unlimited=core.unlimited_resolver(object())), **kw)
+    return gen_road_mod.build_request(dict(payload, unlimited=True), mode="image",
+                              resolve=gen_road_mod.RequestResolver(
+                                  gate=gen_road_mod.gate_resolver(object()),
+                                  unlimited=gen_road_mod.unlimited_resolver(object())), **kw)
 
 
 # The owner's own site run 2060699017312381800, rebuilt with placeholders: Pro, 768 x 1280,
@@ -1165,11 +1166,11 @@ def test_the_lane_needs_the_gated_shape_and_a_road_that_can_check_it(lane):
     with pytest.raises(core.PixAIError) as err:
         lane_road(LANE_OK)
     assert "Couldn't read this model's settings" in str(err.value)
-    for rs in (core.RequestResolver(gate=core.gate_resolver(object())),
-               core.RequestResolver(unlimited=core.unlimited_resolver(object())),
+    for rs in (gen_road_mod.RequestResolver(gate=gen_road_mod.gate_resolver(object())),
+               gen_road_mod.RequestResolver(unlimited=gen_road_mod.unlimited_resolver(object())),
                None):
         with pytest.raises(core.PixAIError) as err:
-            core.build_request(dict(LANE_OK, unlimited=True), mode="image", resolve=rs)
+            gen_road_mod.build_request(dict(LANE_OK, unlimited=True), mode="image", resolve=rs)
         assert "can't be checked on this road" in str(err.value)
 
 
@@ -1180,14 +1181,14 @@ def test_the_lane_needs_the_gated_shape_and_a_road_that_can_check_it(lane):
 ])
 def test_the_lane_asked_for_on_another_road_is_refused_not_ignored(payload, lane):
     with pytest.raises(core.PixAIError) as err:
-        core.build_request(dict(payload, unlimited=True))
+        gen_road_mod.build_request(dict(payload, unlimited=True))
     assert "Tsubaki.3 image generation only" in str(err.value)
 
 
 def test_price_answers_a_lane_request_free_with_no_card_check(lane, monkeypatch):
     calls = _no_card(monkeypatch)
     req = lane_road(LANE_OK)
-    quoted = core.price(object(), req)
+    quoted = gen_road_mod.price(object(), req)
     assert quoted == {"cost": 0, "free": True, "unlimited": True, "list_cost": 4000}
     assert calls == []
     # the list price is the paid equivalent: the lane itself is not a priced field
@@ -1202,7 +1203,7 @@ def test_submit_sends_the_lane_once_with_no_card_whatever_no_card_says(lane, mon
                         lambda s, q, v=None: sent.append(v["parameters"])
                         or {"createGenerationTask": {"id": "T9"}})
     req = lane_road(LANE_OK)
-    assert core.submit(object(), req, no_card=False) == {"task_id": "T9"}
+    assert gen_road_mod.submit(object(), req, no_card=False) == {"task_id": "T9"}
     assert calls == [] and len(sent) == 1
     assert sent[0]["lane"] == "infinite"
     assert "kaisuukenId" not in sent[0] and "priority" not in sent[0]
@@ -1231,7 +1232,7 @@ def test_a_refused_lane_request_is_never_resubmitted_as_anything_else(refusal, m
     params = {"prompts": "<prompt>", "modelId": T3, "inferenceProfile": "pro",
               "priority": gen_params_mod.PRIORITY_TURBO, "lane": "infinite"}
     with pytest.raises(core.PixAIError) as err:
-        core.submit_generation(object(), params)
+        gen_road_mod.submit_generation(object(), params)
     assert str(err.value).startswith(REFUSED)
     assert len(sent) == 1 and sent[0]["inferenceProfile"] == "pro"
     assert core._turbo_refused["seen"] is False
@@ -1257,7 +1258,7 @@ def test_any_params_carrying_the_lane_never_touch_a_card(monkeypatch, capsys):
         raise AssertionError("a lane request carrying a card reached the mutation")
     monkeypatch.setattr(core, "gql_mutate", _no_mutation)
     with pytest.raises(core.PixAIError):
-        core.submit_generation(object(), {"modelId": T3, "lane": "infinite",
+        gen_road_mod.submit_generation(object(), {"modelId": T3, "lane": "infinite",
                                           "kaisuukenId": "c"})
     # ...and the CLI preview quotes it without a card check either
     cards_mod._preview_card_note(SimpleNamespace(no_card=False, kaisuuken_id="", token=None),
@@ -1269,43 +1270,43 @@ def test_status_is_owned_only_before_its_expiry_checked_on_every_call(lane):
     import datetime
     lane.grants[T3] = {"owned": True, "expiresAt": "2026-10-25T00:00:00Z"}
     at = datetime.datetime(2026, 9, 26, 12, tzinfo=datetime.timezone.utc).timestamp()
-    st = core.infinite_mode_status(object(), T3, now=at)
+    st = gen_road_mod.infinite_mode_status(object(), T3, now=at)
     assert st == {"owned": True, "expires_at": "2026-10-25T00:00:00Z", "days_left": 29}
     # the RAW answer is cached; the verdict is not -- a second look after the expiry needs no
     # new read and says not owned (§8.8: nothing goes out after the grant ends)
     late = datetime.datetime(2026, 10, 25, 0, 0, 1, tzinfo=datetime.timezone.utc).timestamp()
-    assert core.infinite_mode_status(object(), T3, now=late)["owned"] is False
+    assert gen_road_mod.infinite_mode_status(object(), T3, now=late)["owned"] is False
     assert len([c for c in lane.calls if LANE_PATH.match(c)]) == 1
     # owned without an expiry, or a body with no boolean `owned`, is not a grant
-    core._unlimited_cache.clear()
+    gen_road_mod._unlimited_cache.clear()
     lane.grants[T3] = {"owned": True, "expiresAt": None}
-    assert core.infinite_mode_status(object(), T3)["owned"] is False
-    core._unlimited_cache.clear()
+    assert gen_road_mod.infinite_mode_status(object(), T3)["owned"] is False
+    gen_road_mod._unlimited_cache.clear()
     lane.grants[T3] = {"owned": "yes"}
-    assert core.infinite_mode_status(object(), T3) is None
+    assert gen_road_mod.infinite_mode_status(object(), T3) is None
 
 
 def test_status_cache_keeps_success_five_minutes_and_a_failure_one(lane):
     def reads():
         return len([c for c in lane.calls if LANE_PATH.match(c)])
     key = (T3, "key")
-    assert core.infinite_mode_status(object(), T3)["owned"] is True
-    at, raw = core._unlimited_cache[key]
-    core._unlimited_cache[key] = (at - 299, raw)
-    core.infinite_mode_status(object(), T3)
+    assert gen_road_mod.infinite_mode_status(object(), T3)["owned"] is True
+    at, raw = gen_road_mod._unlimited_cache[key]
+    gen_road_mod._unlimited_cache[key] = (at - 299, raw)
+    gen_road_mod.infinite_mode_status(object(), T3)
     assert reads() == 1
-    core._unlimited_cache[key] = (at - 301, raw)
-    core.infinite_mode_status(object(), T3)
+    gen_road_mod._unlimited_cache[key] = (at - 301, raw)
+    gen_road_mod.infinite_mode_status(object(), T3)
     assert reads() == 2
     lane.grants[T3] = core.PixAIError("503")
-    core._unlimited_cache.clear()
-    assert core.infinite_mode_status(object(), T3) is None
-    at, raw = core._unlimited_cache[key]
+    gen_road_mod._unlimited_cache.clear()
+    assert gen_road_mod.infinite_mode_status(object(), T3) is None
+    at, raw = gen_road_mod._unlimited_cache[key]
     assert raw is None
-    core._unlimited_cache[key] = (at - 59, None)
-    assert core.infinite_mode_status(object(), T3) is None and reads() == 3
-    core._unlimited_cache[key] = (at - 61, None)
-    core.infinite_mode_status(object(), T3)
+    gen_road_mod._unlimited_cache[key] = (at - 59, None)
+    assert gen_road_mod.infinite_mode_status(object(), T3) is None and reads() == 3
+    gen_road_mod._unlimited_cache[key] = (at - 61, None)
+    gen_road_mod.infinite_mode_status(object(), T3)
     assert reads() == 4
 
 
@@ -1314,20 +1315,20 @@ def test_status_is_read_and_cached_under_the_identity_that_creates(lane, monkeyp
     identity -- off the stored token, never refreshed by a read -- and cached apart from the
     API key's."""
     mirror = object()
-    assert core.infinite_mode_status("api-session", T3)["owned"] is True
+    assert gen_road_mod.infinite_mode_status("api-session", T3)["owned"] is True
     monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
     monkeypatch.setattr(mirror_mod, "load_mirror_state", lambda: {"jwt": "<jwt>"})
     monkeypatch.setattr(mirror_mod, "_jwt_usable", lambda jwt: jwt == "<jwt>")
     monkeypatch.setattr(mirror_mod, "_mirror_session_from", lambda jwt: mirror)
     monkeypatch.setattr(mirror_mod, "make_mirror_session",
                         lambda *a, **k: pytest.fail("a status read must not refresh the token"))
-    assert core.infinite_mode_status("api-session", T3)["owned"] is True
+    assert gen_road_mod.infinite_mode_status("api-session", T3)["owned"] is True
     assert lane.sessions == ["api-session", mirror]
-    assert set(core._unlimited_cache) == {(T3, "key"), (T3, "mirror")}
+    assert set(gen_road_mod._unlimited_cache) == {(T3, "key"), (T3, "mirror")}
     # an unusable stored token is a failed read, not an API-key fallback
-    core._unlimited_cache.clear()
+    gen_road_mod._unlimited_cache.clear()
     monkeypatch.setattr(mirror_mod, "_jwt_usable", lambda jwt: False)
-    assert core.infinite_mode_status("api-session", T3) is None
+    assert gen_road_mod.infinite_mode_status("api-session", T3) is None
     assert len(lane.sessions) == 2
 
 
@@ -1346,7 +1347,7 @@ def test_the_drawers_version_meta_offers_the_lane_on_tsubaki3_only(lane):
     assert [c for c in lane.calls if LANE_PATH.match(c)] == [
         "/generation-model-version/%s/infinite-mode" % T3]
     lane.grants[T3] = core.PixAIError("503")
-    core._unlimited_cache.clear()
+    gen_road_mod._unlimited_cache.clear()
     assert models_mod._attach_unlimited(object(), dict(meta))["unlimited"] is None
     assert models_mod._empty_version_meta()["unlimited"] is None
 
@@ -1405,7 +1406,7 @@ def test_api_generate_runs_one_lane_task_at_a_time_off_its_own_job_log(monkeypat
     jobs_mod.append_job_event(tmp_path, "4141", status="running", type="generate",
                           lane="infinite")
     r = cli.post("/api/generate", json=dict(LANE_OK, unlimited=True))
-    assert r.get_json() == {"error": core.UNLIMITED_BUSY} and sent == []
+    assert r.get_json() == {"error": gen_road_mod.UNLIMITED_BUSY} and sent == []
     # once that task has finished, the next one goes out
     jobs_mod.append_job_event(tmp_path, "4141", status="done")
     d = cli.post("/api/generate", json=dict(LANE_OK, unlimited=True)).get_json()
@@ -1418,7 +1419,7 @@ def test_api_generate_runs_one_lane_task_at_a_time_off_its_own_job_log(monkeypat
     later = g.time.monotonic() + 11
     monkeypatch.setattr(g.time, "monotonic", lambda: later)
     r = cli.post("/api/generate", json=dict(LANE_OK, unlimited=True))
-    assert r.get_json() == {"error": core.UNLIMITED_BUSY} and len(sent) == 1
+    assert r.get_json() == {"error": gen_road_mod.UNLIMITED_BUSY} and len(sent) == 1
 
 
 def test_no_code_path_requests_the_claim_route():

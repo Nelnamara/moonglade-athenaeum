@@ -17,6 +17,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from tests.conftest import login_client
 
 V = "1983308862240288769"
@@ -117,7 +118,7 @@ def test_edit_and_ai_presets_refuse_a_free_quote_whose_card_is_gone(gen, monkeyp
     monkeypatch.setattr(_mirror, "make_mirror_session", lambda *a, **k: gen["pixai"])
     monkeypatch.setattr(_mirror, "_session_for_create", lambda s: s)
     seen = []
-    monkeypatch.setattr(core, "build_request",
+    monkeypatch.setattr(gen_road_mod, "build_request",
                         lambda payload, *a, **k: seen.append(dict(payload)) or _Req(mode))
     gen["pixai"].on("/kaisuuken/check", _NO_CARD)
     d = gen["cli"].post(route, json=dict(body, expect_free=True)).get_json()
@@ -144,7 +145,7 @@ def test_an_unlimited_mode_request_is_never_held_to_a_card(gen, monkeypatch):
     for it even if a client sent expect_free (the badge's unlimited quote is free: true)."""
     req = _Req("edit")
     req.unlimited = True
-    monkeypatch.setattr(core, "build_request", lambda payload, *a, **k: req)
+    monkeypatch.setattr(gen_road_mod, "build_request", lambda payload, *a, **k: req)
     d = gen["cli"].post("/api/edit", json={"source": "1", "instruction": "x",
                                            "expect_free": True}).get_json()
     assert d.get("task_id") == "task-1", d

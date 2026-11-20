@@ -11,6 +11,7 @@ import threading
 import time
 
 from moonglade import backup as core
+from moonglade import gen_road as gen_road_mod
 from moonglade import pricing as pricing_mod
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
@@ -490,7 +491,7 @@ def test_empty_output_task_is_logged_failed_not_left_running(tmp_path, monkeypat
 
     def _boom(*a, **k):
         raise core.EmptyOutputsError("task completed but no media ids found")
-    monkeypatch.setattr(core, "collect_generation", _boom)
+    monkeypatch.setattr(gen_road_mod, "collect_generation", _boom)
 
     r = cli.get("/api/task-status?task_id=555")
     assert r.get_json()["phase"] == "failed"
@@ -513,7 +514,7 @@ def test_a_transient_blip_still_does_not_write_a_false_failure(tmp_path, monkeyp
 
     def _blip(*a, **k):
         raise core.PixAIError("503 Service Unavailable")
-    monkeypatch.setattr(core, "collect_generation", _blip)
+    monkeypatch.setattr(gen_road_mod, "collect_generation", _blip)
 
     cli.get("/api/task-status?task_id=556")
     job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["556"]
@@ -558,7 +559,7 @@ def test_collect_is_single_flight_across_watcher_and_poll(tmp_path, monkeypatch,
             stats["cur"] -= 1
         return {"media_ids": ["M9"], "saved": 1, "is_video": True, "duration": 2.0}
 
-    monkeypatch.setattr(core, "collect_generation", slow_collect)
+    monkeypatch.setattr(gen_road_mod, "collect_generation", slow_collect)
 
     t = threading.Thread(target=app.extensions["mg_watch_mirror"], args=("909",))
     t.start()
@@ -605,7 +606,7 @@ def _stub_collect(monkeypatch, result, calls=None):
         if calls is not None:
             calls.append(str(tid))
         return dict(result)
-    monkeypatch.setattr(core, "collect_generation", _collect)
+    monkeypatch.setattr(gen_road_mod, "collect_generation", _collect)
 
 
 def test_watcher_mirror_records_the_media_it_collected_after_a_bare_done(tmp_path, monkeypatch):
@@ -886,7 +887,7 @@ def test_done_event_records_what_the_generation_actually_cost(tmp_path, monkeypa
     monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, tid: {"status": "completed", "phase": "done",
                                         "paid_credit": 3700, "started": True, "reason": ""})
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda *a, **k: {"media_ids": ["m1"], "saved": 1, "is_video": False})
 
     assert cli.get("/api/task-status?task_id=4242").get_json()["phase"] == "done"
@@ -904,7 +905,7 @@ def test_a_free_card_generation_records_zero_not_missing(tmp_path, monkeypatch, 
     monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, tid: {"status": "completed", "phase": "done",
                                         "paid_credit": 0, "started": True, "reason": ""})
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda *a, **k: {"media_ids": ["m1"], "saved": 1, "is_video": False})
 
     cli.get("/api/task-status?task_id=4243")
@@ -1056,7 +1057,7 @@ def test_a_terminal_poll_writes_no_running_phase_and_forgets_the_task(tmp_path, 
     monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, tid: {"status": "completed", "phase": "done",
                                         "paid_credit": 0, "started": True, "reason": ""})
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda *a, **k: {"media_ids": ["m1"], "saved": 1, "is_video": False})
     before = _raw_lines(tmp_path)
     cli.get("/api/task-status?task_id=7004")

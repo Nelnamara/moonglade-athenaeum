@@ -7,6 +7,7 @@ import json
 import websockets
 
 from moonglade import backup as core
+from moonglade import gen_road as gen_road_mod
 from moonglade import jobs as jobs_mod
 from moonglade import task_reads as task_reads_mod
 
@@ -105,7 +106,7 @@ def test_watch_backup_mirrors_completed_only(monkeypatch, tmp_path):
     monkeypatch.setattr(threading, "Thread", _FakeThread)
 
     calls = []
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: calls.append(tid) or {"saved": 4})
 
     args = SimpleNamespace(token=None, watch_seconds=0, watch_backup=True, out=str(tmp_path))
@@ -443,7 +444,7 @@ def test_catchup_backfills_absent_media_skips_present_and_rate_limits(monkeypatc
     monkeypatch.setattr(time, "sleep", lambda *a, **k: None)   # keep the paced sweep fast
 
     collected = []
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: collected.append(str(tid)) or {"saved": 1})
     reads = []
     monkeypatch.setattr(core, "find_connection",
@@ -566,7 +567,7 @@ def test_the_whole_lifecycle_closes_one_website_row_with_its_media(tmp_path, mon
     app = _watch_app(tmp_path)
     _sync_threads(monkeypatch)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: {"media_ids": ["MA", "MB"], "saved": 2,
                                                   "is_video": False})
 
@@ -622,7 +623,7 @@ def test_the_catchup_writes_a_done_row_for_a_website_task_it_had_to_collect(tmp_
     monkeypatch.setattr(core, "find_connection", lambda *a, **k: {"edges": edges})
     monkeypatch.setattr(mg, "get_row", lambda db_path, m: None)     # nothing catalogued yet
     monkeypatch.setattr(time, "sleep", lambda *a, **k: None)
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: {"media_ids": ["M5"], "saved": 1,
                                                   "is_video": False})
 
@@ -661,7 +662,7 @@ def test_the_event_path_and_the_catchup_converge_on_one_row(tmp_path, monkeypatc
     def fake_collect(s, tid, out, **k):
         collected.append(tid)
         return {"media_ids": ["M6"], "saved": 1, "is_video": False}
-    monkeypatch.setattr(core, "collect_generation", fake_collect)
+    monkeypatch.setattr(gen_road_mod, "collect_generation", fake_collect)
 
     app.extensions["mg_watch_on_event"](_frame("W6", "waiting"))
     app.extensions["mg_watch_catchup"]("startup")
@@ -680,7 +681,7 @@ def test_an_app_run_is_untouched_by_any_of_this(tmp_path, monkeypatch):
     app = _watch_app(tmp_path)
     _sync_threads(monkeypatch)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: {"media_ids": ["MX"], "saved": 1,
                                                   "is_video": False})
     # exactly what api_jobs_register writes for a dock submit
@@ -817,7 +818,7 @@ def test_catchup_tests_the_ids_the_catalog_actually_holds(monkeypatch, tmp_path,
     monkeypatch.setattr(time, "sleep", lambda *a, **k: None)
 
     collected = []
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: collected.append(str(tid)) or {"saved": 1})
 
     with caplog.at_level("INFO"):
@@ -1073,7 +1074,7 @@ def test_a_failed_collect_is_retried_after_300s_not_every_sweep(tmp_path, monkey
         tries.append(tid)
         raise core.PixAIError("PixAI said no")
 
-    monkeypatch.setattr(core, "collect_generation", _boom)
+    monkeypatch.setattr(gen_road_mod, "collect_generation", _boom)
     sweep = app.extensions["mg_watch_catchup"]
     sweep("reconnect")
     sweep("reconnect")
@@ -1100,7 +1101,7 @@ def test_a_task_the_sweep_collected_is_not_mirrored_again_by_a_late_frame(tmp_pa
     monkeypatch.setattr(core, "find_connection", lambda *a, **k: {"edges": edges})
     monkeypatch.setattr(mg, "get_row", lambda db_path, m: None)
     monkeypatch.setattr(mg, "get_row_by_task", lambda db_path, t: None)
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: {"media_ids": ["M_late"], "saved": 1,
                                                   "is_video": False})
     app.extensions["mg_watch_catchup"]("reconnect")

@@ -11,6 +11,7 @@ No network: the run road uses test_generate_runs' counting rig, the rest the `pi
 import json
 
 from moonglade import backup as core
+from moonglade import gen_road as gen_road_mod
 from moonglade import pricing as pricing_mod
 from tests.test_generate_runs import CARD as RUN_CARD
 from tests.test_generate_runs import cli, rig, run  # noqa: F401  (fixtures + helper)
@@ -49,7 +50,7 @@ def _armed(monkeypatch, fake):
     monkeypatch.setattr(_mirror, "make_mirror_session", lambda *a, **k: fake)
     monkeypatch.setattr(_mirror, "_session_for_create", lambda s: fake)
     monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: 1500)
-    monkeypatch.setattr(core, "build_request", lambda payload, *a, **k: _Req("enhance"))
+    monkeypatch.setattr(gen_road_mod, "build_request", lambda payload, *a, **k: _Req("enhance"))
 
 
 def _presets(g):

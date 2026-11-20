@@ -595,7 +595,8 @@ def _apply_kaisuuken(session, params, args):
     or a banked --dump-params shape included) never touches a card: no check runs and no id
     is attached, and a card asked for beside the lane is refused rather than dropped
     (SCOPE_2026-09-26_unlimited-mode §8.3)."""
-    from moonglade.backup import is_lane_request, PixAIError, _UNLIMITED_NO_CARD
+    from moonglade.backup import PixAIError
+    from moonglade.gen_road import is_lane_request, _UNLIMITED_NO_CARD
     explicit = (getattr(args, "kaisuuken_id", "") or "").strip()
     if is_lane_request(params):
         if explicit or params.get("kaisuukenId"):
@@ -673,7 +674,8 @@ def _preview_card_note(args, params):
     """In a PREVIEW, tell the user the real credit cost and whether a free card covers it --
     read-only /v2/kaisuuken/check + /v2/task-price (no spend, no upload). Fails soft (stays
     silent) if offline or unauthenticated, so previews still work with no network."""
-    from moonglade.backup import is_lane_request, _make_session
+    from moonglade.backup import _make_session
+    from moonglade.gen_road import is_lane_request
     def _fmt(n):
         return "~{:,} credits".format(n) if n is not None else "credits"
     if is_lane_request(params):

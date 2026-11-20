@@ -12,6 +12,7 @@ import pytest
 from moonglade import cards as cards_mod
 from moonglade import gallery as g
 from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import STARFALL_EVENT, ach_event, ach_nonce, login_client, login_test_client, _SEALED_DONOR
@@ -626,7 +627,7 @@ def _arm_mirror_bridge(monkeypatch, core):
     monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
     monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: object())
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "submit_generation", lambda *a, **k: "T-ENH-9")
+    monkeypatch.setattr(gen_road_mod, "submit_generation", lambda *a, **k: "T-ENH-9")
 
 
 def test_enhance_tools_complete(tmp_path, monkeypatch):
@@ -640,7 +641,7 @@ def test_enhance_tools_complete(tmp_path, monkeypatch):
     save_catalog(tmp_path / "catalog.db", [])
     cli = login_client(tmp_path)
     monkeypatch.setattr(task_reads_mod, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, t, out, **k: {"media_ids": ["OUT1"], "saved": 1, "is_video": False})
     # unique task id per submit so each terminal poll fires its own deferred record
     _seq = {"n": 0}
@@ -648,7 +649,7 @@ def test_enhance_tools_complete(tmp_path, monkeypatch):
     def _submit(*a, **k):
         _seq["n"] += 1
         return f"T-ENH-{_seq['n']}"
-    monkeypatch.setattr(core, "submit_generation", _submit)
+    monkeypatch.setattr(gen_road_mod, "submit_generation", _submit)
 
     # Each use is a separate press, past the single sends' double-tap window (3.21.2), so a
     # repeated preset is a second use rather than a held repeat.
@@ -702,7 +703,7 @@ def test_scene_and_gen_daymark_hooks_fire_on_terminal_success(tmp_path, monkeypa
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
     monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "submit_scene", lambda *a, **k: "T-SCENE-1")
+    monkeypatch.setattr(gen_road_mod, "submit_scene", lambda *a, **k: "T-SCENE-1")
     save_catalog(tmp_path / "catalog.db", [])
     cli = login_client(tmp_path)
     r = cli.post("/api/scene", json={"scene_id": "the-sun", "media_ids": ["srcABC"]})
@@ -710,7 +711,7 @@ def test_scene_and_gen_daymark_hooks_fire_on_terminal_success(tmp_path, monkeypa
     assert telemetry_mod.telemetry_metrics(tmp_path)["scenes_used"] == 0          # deferred: nothing at submit
     monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, tid: {"phase": "done", "paid_credit": 0})
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: {"media_ids": ["OUT1"], "saved": 1, "is_video": False})
     cli.get("/api/task-status", query_string={"task_id": "T-SCENE-1"})
     assert telemetry_mod.telemetry_metrics(tmp_path)["scenes_used"] == 1
@@ -736,7 +737,7 @@ def test_a_regular_mirror_gen_is_not_a_bridge_tool(tmp_path, monkeypatch):
     from moonglade import backup as core
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(task_reads_mod, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, t, out, **k: {"media_ids": ["OUT1"], "saved": 1, "is_video": False})
     save_catalog(tmp_path / "catalog.db", [])
     cli = login_client(tmp_path)
@@ -757,7 +758,7 @@ def test_an_enhance_terminal_counts_as_a_bridge_tool(tmp_path, monkeypatch):
     from moonglade import backup as core
     _arm_mirror_bridge(monkeypatch, core)
     monkeypatch.setattr(task_reads_mod, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, t, out, **k: {"media_ids": ["OUT1"], "saved": 1, "is_video": False})
     save_catalog(tmp_path / "catalog.db", [])
     cli = login_client(tmp_path)

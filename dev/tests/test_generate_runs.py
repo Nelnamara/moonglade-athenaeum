@@ -36,6 +36,7 @@ from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gallery as moonglade_gallery
 from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import pricing as pricing_mod
 from moonglade import recipes as moonglade_recipes
 from moonglade import runs
@@ -126,7 +127,7 @@ def rig(monkeypatch):
     monkeypatch.setattr(core, "gql_mutate", gql_mutate)
     monkeypatch.setattr(core, "gql_adhoc", gql_adhoc)
     monkeypatch.setattr(cards_mod, "_bump_card_use", lambda params: None)
-    monkeypatch.setattr(core, "RUN_SEND_GAP_S", 0)
+    monkeypatch.setattr(gen_road_mod, "RUN_SEND_GAP_S", 0)
     monkeypatch.setattr(core, "READ_ONLY", False)
     monkeypatch.setattr(core, "_read_only_now", lambda: False)
     monkeypatch.setattr(moonglade_recipes, "batch", lambda s, ids: (_ for _ in ()).throw(
@@ -743,15 +744,15 @@ def test_the_lock_is_install_wide_a_second_login_is_refused_mid_send(tmp_path, r
 
 def test_the_in_flight_mark_is_released_after_an_exception(cli, rig, monkeypatch):
     p = plan(cli, prompt="{a|b} x", count=2).get_json()
-    real = core.send_run
+    real = gen_road_mod.send_run
 
     def boom(*a, **k):
         raise RuntimeError("unexpected")
-    monkeypatch.setattr(core, "send_run", boom)
+    monkeypatch.setattr(gen_road_mod, "send_run", boom)
     with pytest.raises(RuntimeError):
         cli.application.config["PROPAGATE_EXCEPTIONS"] = True
         run(cli, run_id="e" * 32, ack=ack_of(p), prompt="{a|b} x", count=2)
-    monkeypatch.setattr(core, "send_run", real)
+    monkeypatch.setattr(gen_road_mod, "send_run", real)
     d = run(cli, run_id="f" * 32, ack=ack_of(p), prompt="{a|b} x", count=2).get_json()
     assert d["status"] == "sent"
 
@@ -938,24 +939,24 @@ def test_more_than_one_price_group_is_refused(cli, rig, monkeypatch):
 
 
 def test_unlimited_mode_takes_one_task_at_a_time(cli, rig, monkeypatch, tmp_path):
-    monkeypatch.setattr(core, "unlimited_resolver", lambda s: (
-        lambda params, vid: dict(params, lane=core.UNLIMITED_LANE)))
+    monkeypatch.setattr(gen_road_mod, "unlimited_resolver", lambda s: (
+        lambda params, vid: dict(params, lane=gen_road_mod.UNLIMITED_LANE)))
     d = plan(cli, prompt="{a|b} x", count=2, unlimited=True).get_json()
     assert "one picture at a time" in d["error"]
     jobs_mod.append_job_event(tmp_path, "5555", status="running", type="generate",
-                          lane=core.UNLIMITED_LANE)
+                          lane=gen_road_mod.UNLIMITED_LANE)
     d = run(cli, prompt="{a|b} x", count=1, unlimited=True).get_json()
-    assert d["error"] == core.UNLIMITED_BUSY
+    assert d["error"] == gen_road_mod.UNLIMITED_BUSY
     assert rig.mutations == []
 
 
 def test_a_lane_single_is_logged_with_its_lane(cli, rig, monkeypatch, tmp_path):
-    monkeypatch.setattr(core, "unlimited_resolver", lambda s: (
-        lambda params, vid: dict(params, lane=core.UNLIMITED_LANE)))
+    monkeypatch.setattr(gen_road_mod, "unlimited_resolver", lambda s: (
+        lambda params, vid: dict(params, lane=gen_road_mod.UNLIMITED_LANE)))
     d = run(cli, prompt="{a|b} x", count=1, unlimited=True).get_json()
     assert d["status"] == "sent"
     job = [j for j in jobs_mod.read_jobs(tmp_path) if j["job_id"] == d["jobs"][0]["task_id"]][0]
-    assert job["lane"] == core.UNLIMITED_LANE
+    assert job["lane"] == gen_road_mod.UNLIMITED_LANE
 
 
 def test_task_status_reports_the_expected_charge_beside_the_paid_one(cli, rig, monkeypatch, tmp_path):
@@ -967,7 +968,7 @@ def test_task_status_reports_the_expected_charge_beside_the_paid_one(cli, rig, m
     tid = d["jobs"][0]["task_id"]
     monkeypatch.setattr(task_reads_mod, "generation_status",
                         lambda s, t: {"phase": "done", "paid_credit": 1600, "status": "completed"})
-    monkeypatch.setattr(core, "collect_generation",
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, t, out, **k: {"media_ids": ["OUT1"], "saved": 1, "is_video": False})
     st = cli.get("/api/task-status", query_string={"task_id": tid}).get_json()
     assert st["expected_credit"] == 0 and st["paid_credit"] == 1600
@@ -1012,8 +1013,8 @@ def test_a_cell_the_recipes_would_take_over_the_prompt_budget_is_named(cli, rig,
 # ---------------------------------------------------------------------------------------
 
 def test_submit_without_hooks_sends_the_same_request_as_before(rig):
-    req = core.build_request(dict(BASE, count=1), mode="image")
-    core.submit(object(), req)
+    req = gen_road_mod.build_request(dict(BASE, count=1), mode="image")
+    gen_road_mod.submit(object(), req)
     assert rig.mutations[0] == req.parameters
 
 
@@ -1029,7 +1030,7 @@ def test_on_send_sees_a_copy_of_every_attempt_and_cannot_alter_or_block_it(rig):
         if i == 0:
             raise core.graphql_error('[{"message": "bad inferenceProfile"}]', code="BAD_REQUEST")
     rig.on_mutate = refuse_profile
-    core.submit_generation(object(), {"prompts": "a", "modelId": "V", "inferenceProfile": "pro"},
+    gen_road_mod.submit_generation(object(), {"prompts": "a", "modelId": "V", "inferenceProfile": "pro"},
                            on_send=spy)
     assert len(rig.mutations) == 2 and len(seen) == 2          # the resubmit is observed too
     assert rig.mutations[0]["prompts"] == "a" and rig.mutations[1]["prompts"] == "a"
@@ -1052,12 +1053,12 @@ def test_exact_turns_off_both_resubmits(rig, monkeypatch, params, error):
         raise core.graphql_error(error[len("GraphQL error: "):])
     rig.on_mutate = refuse
     with pytest.raises(core.PixAIError):
-        core.submit_generation(object(), dict(params))
+        gen_road_mod.submit_generation(object(), dict(params))
     assert len(rig.mutations) == 2, "without exact the resubmit fires (the path is real)"
     del rig.mutations[:]
     monkeypatch.setitem(core._turbo_refused, "seen", False)
     with pytest.raises(core.PixAIError):
-        core.submit_generation(object(), dict(params), exact=True)
+        gen_road_mod.submit_generation(object(), dict(params), exact=True)
     assert len(rig.mutations) == 1
     assert rig.mutations[0] == params
 
@@ -1066,9 +1067,9 @@ def test_exact_never_rewrites_the_priority_it_was_quoted_with(rig, monkeypatch):
     """Review N1: a run job goes out with the priority it was quoted and digested with; the
     Turbo -> Low downgrade is applied at the run's build, never again at its submit."""
     monkeypatch.setitem(core._turbo_refused, "seen", True)
-    core.submit_generation(object(), {"prompts": "a", "priority": gen_params_mod.PRIORITY_TURBO}, exact=True)
+    gen_road_mod.submit_generation(object(), {"prompts": "a", "priority": gen_params_mod.PRIORITY_TURBO}, exact=True)
     assert rig.mutations[0]["priority"] == gen_params_mod.PRIORITY_TURBO
-    core.submit_generation(object(), {"prompts": "a", "priority": gen_params_mod.PRIORITY_TURBO})
+    gen_road_mod.submit_generation(object(), {"prompts": "a", "priority": gen_params_mod.PRIORITY_TURBO})
     assert rig.mutations[1]["priority"] == gen_params_mod.PRIORITY_LOW, "a single send keeps today's rule"
 
 
@@ -1105,23 +1106,23 @@ def test_a_lane_graphql_error_is_refused_only_when_it_is_definite(rig, data, sta
         e.graphql_data = data
         raise e
     rig.on_mutate = answer
-    req = core.GenerationRequest(mode="image", unlimited=True, parameters={
-        "prompts": "a", "modelId": "V", "lane": core.UNLIMITED_LANE})
-    res = core.send_run(object(), [{"cell": 0, "req": req, "no_card": None}], hooks=_NoHooks())
+    req = gen_road_mod.GenerationRequest(mode="image", unlimited=True, parameters={
+        "prompts": "a", "modelId": "V", "lane": gen_road_mod.UNLIMITED_LANE})
+    res = gen_road_mod.send_run(object(), [{"cell": 0, "req": req, "no_card": None}], hooks=_NoHooks())
     assert res["jobs"][0]["state"] == state
     assert len(rig.mutations) == 1
 
 
 def test_before_send_runs_after_the_card_and_can_stop_the_send(rig):
     rig.card_default = CARD
-    req = core.build_request(dict(BASE, count=1), mode="image")
+    req = gen_road_mod.build_request(dict(BASE, count=1), mode="image")
     seen = []
 
     def stop(params):
         seen.append(params.get("kaisuukenId"))
         raise core.LocalRefusal("over budget")
     with pytest.raises(core.LocalRefusal):
-        core.submit(object(), req, before_send=stop)
+        gen_road_mod.submit(object(), req, before_send=stop)
     assert seen == ["K1"] and rig.mutations == []
 
 
@@ -1157,7 +1158,7 @@ def _posix_argv(command):
 
 
 def _web_params(**kw):
-    req = core.build_request(dict(BASE, **kw), mode="image")
+    req = gen_road_mod.build_request(dict(BASE, **kw), mode="image")
     return dict(req.parameters)
 
 

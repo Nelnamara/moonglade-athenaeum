@@ -33,6 +33,7 @@ import requests
 
 from moonglade import backup as core
 from moonglade import cards as cards_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import mirror as mirror_mod
 from moonglade import task_reads as task_reads_mod
@@ -67,7 +68,7 @@ SPEND_PATHS = ("submit_generation", "run_generate", "run_generate_video",
                "send_run")
 
 # Where each spend path lives: backup, or the split module it moved to (3.22, phase 5).
-_HOMES = (core, cloud_delete_mod)
+_HOMES = (core, cloud_delete_mod, gen_road_mod)
 
 
 def _spend_path(name):
@@ -219,7 +220,7 @@ class TestGqlAdhocDefault:
         monkeypatch.setattr(core.time, "sleep", lambda s: None)
         mock_session.post.side_effect = requests.ConnectionError("connection dropped")
         with pytest.raises(requests.RequestException):
-            core.gql_adhoc(mock_session, core._GEN_MUTATION, {"parameters": {}})
+            core.gql_adhoc(mock_session, gen_road_mod._GEN_MUTATION, {"parameters": {}})
         assert mock_session.post.call_count == 1, \
             "a createGenerationTask was POSTed more than once -- that is a second charge"
 
@@ -258,8 +259,8 @@ class TestGqlAdhocDefault:
 
 class TestSpendingPathsAreSingleAttempt:
     def test_submit_generation(self, mock_session, gql_calls):
-        core.submit_generation(mock_session, {"prompts": "a cat"})
-        _assert_single_attempt(gql_calls, core._GEN_MUTATION)
+        gen_road_mod.submit_generation(mock_session, {"prompts": "a cat"})
+        _assert_single_attempt(gql_calls, gen_road_mod._GEN_MUTATION)
 
     def test_send_run(self, mock_session, gql_calls, monkeypatch):
         """Session M's run sender: N jobs, N mutations, each single-attempt through the one
@@ -267,29 +268,29 @@ class TestSpendingPathsAreSingleAttempt:
         monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
         hooks = SimpleNamespace(sending=lambda cell: None, sent=lambda *a: None,
                                 failed=lambda *a: None)
-        jobs = [{"cell": k, "req": core.GenerationRequest(mode="image",
+        jobs = [{"cell": k, "req": gen_road_mod.GenerationRequest(mode="image",
                                                           parameters={"prompts": p}),
                  "no_card": None} for k, p in enumerate(("a cat", "a dog"))]
-        res = core.send_run(mock_session, jobs, hooks=hooks, gap_s=0)
+        res = gen_road_mod.send_run(mock_session, jobs, hooks=hooks, gap_s=0)
         assert res["status"] == "sent"
-        _assert_single_attempt(gql_calls, core._GEN_MUTATION)
+        _assert_single_attempt(gql_calls, gen_road_mod._GEN_MUTATION)
         assert len(gql_calls) == 2
 
     def test_run_generate(self, tmp_path, cli_stubs, gql_calls):
         _drive(core.run_generate, _cli_args(tmp_path))
-        _assert_single_attempt(gql_calls, core._GEN_MUTATION)
+        _assert_single_attempt(gql_calls, gen_road_mod._GEN_MUTATION)
 
     def test_run_generate_video(self, tmp_path, cli_stubs, gql_calls):
         _drive(core.run_generate_video, _cli_args(tmp_path, image="mid1"))
-        _assert_single_attempt(gql_calls, core._GEN_MUTATION)
+        _assert_single_attempt(gql_calls, gen_road_mod._GEN_MUTATION)
 
     def test_run_reference_video(self, tmp_path, cli_stubs, gql_calls):
         _drive(core.run_reference_video, _cli_args(tmp_path, ref_image=["mid1"]))
-        _assert_single_attempt(gql_calls, core._GEN_MUTATION)
+        _assert_single_attempt(gql_calls, gen_road_mod._GEN_MUTATION)
 
     def test_run_edit_image(self, tmp_path, cli_stubs, gql_calls):
         _drive(core.run_edit_image, _cli_args(tmp_path, edit_src=["mid1"]))
-        _assert_single_attempt(gql_calls, core._GEN_MUTATION)
+        _assert_single_attempt(gql_calls, gen_road_mod._GEN_MUTATION)
 
     def test_upload_media(self, tmp_path, mock_session, gql_calls, monkeypatch):
         """An upload costs no credits, but it still mutates the account: re-registering
@@ -368,7 +369,7 @@ class TestRestSpendPathsAreSingleAttempt:
         monkeypatch.setattr(core, "_rest_post",
                             lambda s, p, b, **k: posts.append(p) or {"id": "T1"})
         boxes = [{"x": 0, "y": 0, "width": 10, "height": 10, "tag": "hand"}]
-        assert core.submit_fixer(mock_session, "mid1", boxes) == "T1"
+        assert gen_road_mod.submit_fixer(mock_session, "mid1", boxes) == "T1"
         assert posts == ["/task/fixer"]
 
     def test_the_routed_image_delete_has_no_retry_loop(self):
@@ -509,7 +510,7 @@ class TestWritesNeverFollowRedirects:
     def test_a_3xx_on_a_mutation_is_an_error_after_one_post(self, status):
         s = _Kw(status=status, body={"data": {"createGenerationTask": {"id": "T1"}}})
         with pytest.raises(core.PixAIError, match="nothing was re-sent"):
-            core.gql_mutate(s, core._GEN_MUTATION, {"parameters": {}})
+            core.gql_mutate(s, gen_road_mod._GEN_MUTATION, {"parameters": {}})
         assert len(s.calls) == 1
 
     def test_the_renewal_refuses_to_follow(self):

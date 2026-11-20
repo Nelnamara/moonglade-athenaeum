@@ -17,6 +17,7 @@ from moonglade import container as _mc
 from moonglade import contest_sync as contest_sync_mod
 from moonglade import gallery
 from moonglade import gen_params as gen_params_mod
+from moonglade import gen_road as gen_road_mod
 from moonglade import health as health_mod
 from moonglade import migrate as moonglade_migrate
 from moonglade import mirror as mirror_mod
@@ -998,12 +999,12 @@ def _clear_gate_caches():
     max)."""
     models_mod._features_cache.clear()
     models_mod._size_config_cache.clear()
-    core._unlimited_cache.clear()
+    gen_road_mod._unlimited_cache.clear()
     models_mod._model_config_cache.clear()
     yield
     models_mod._features_cache.clear()
     models_mod._size_config_cache.clear()
-    core._unlimited_cache.clear()
+    gen_road_mod._unlimited_cache.clear()
     models_mod._model_config_cache.clear()
 
 
