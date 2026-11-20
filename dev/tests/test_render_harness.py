@@ -7468,7 +7468,9 @@ def test_the_phone_opens_a_matrix_as_a_grid_and_inspects_the_request_from_the_de
         page.wait_for_selector(".glm-sheet button:has-text('Inspect the request')")
         page.click(".glm-sheet button:has-text('Inspect the request')")
         page.wait_for_selector(".mgrun-insp .mgrun-inspbody")
-        page.wait_for_function("() => document.querySelector('.mgrun-inspbody').innerText.includes('createGenerationTask')")
+        # A run's image job rides the create door since 3.22 S3-image, so the Inspector names
+        # PixAI's REST operation (gen_road.request_record).
+        page.wait_for_function("() => document.querySelector('.mgrun-inspbody').innerText.includes('task.createTask')")
         assert page.locator(".mgrun-inspbtn").count() == 0, "the phone's Inspect is Copy JSON only: no CLI tab"
         assert page.inner_text(".mgrun-copy") == "Copy JSON"
         body = page.inner_text(".mgrun-inspbody")
