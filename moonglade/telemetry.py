@@ -11,6 +11,7 @@ state) are imported inside each function that uses them, never at the top, so im
 module never imports the gallery.
 """
 import json
+import logging
 import os
 import sqlite3
 import threading
@@ -82,13 +83,20 @@ def _save_telemetry(out_dir, data):
     """Atomic write (tmp + os.replace, the same idiom as download's .part) so a
     reader can never see a half-written file -- a torn read would fail-soft to
     empty defaults and the next mutate would persist that wipe."""
+    tmp = None
     try:
         p = _telemetry_path(out_dir)
         tmp = p.with_name(p.name + ".tmp-%d" % os.getpid())
         tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
         os.replace(tmp, p)
-    except OSError:
-        pass
+    except OSError as e:
+        logging.getLogger(__name__).warning(
+            "telemetry: could not save telemetry.json (%s); this update is lost", e)
+        if tmp is not None:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
 
 
 def _telem_file_lock(out_dir):
