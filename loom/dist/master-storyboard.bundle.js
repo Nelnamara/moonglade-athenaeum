@@ -4317,6 +4317,43 @@ ${"=".repeat(48)}
     return on ? " " + PRIVACY_BLUR_CLASS : "";
   }
 
+  // ../gallery/src/hooks/useScrollLock.js
+  var _locks = 0;
+  var _prevOverflow = "";
+  var _prevPadRight = "";
+  function _gutterIsReserved() {
+    try {
+      return typeof CSS !== "undefined" && CSS.supports && CSS.supports("scrollbar-gutter", "stable");
+    } catch {
+      return false;
+    }
+  }
+  function useScrollLock() {
+    useEffect(() => {
+      if (_locks === 0) {
+        _prevOverflow = document.body.style.overflow;
+        if (!_gutterIsReserved()) {
+          const bar = window.innerWidth - document.documentElement.clientWidth;
+          if (bar > 0) {
+            _prevPadRight = document.body.style.paddingRight;
+            document.body.style.paddingRight = bar + "px";
+          }
+        }
+        document.body.style.overflow = "hidden";
+      }
+      _locks += 1;
+      return () => {
+        _locks -= 1;
+        if (_locks === 0) {
+          document.body.style.overflow = _prevOverflow;
+          if (!_gutterIsReserved()) {
+            document.body.style.paddingRight = _prevPadRight;
+          }
+        }
+      };
+    }, []);
+  }
+
   // ../gallery/src/components/GalleryPicker.jsx
   var COPY_KEY = "pick-copyprompt";
   var TILE_KEY = "mg-pk-tile";
@@ -4345,6 +4382,7 @@ ${"=".repeat(48)}
     onClose
   }) {
     const initType = defaultType === "video" ? "video" : defaultType === "all" ? "all" : "image";
+    useScrollLock();
     const [images, setImages] = useState([]);
     const [collections, setCollections] = useState([]);
     const [total, setTotal] = useState(0);
