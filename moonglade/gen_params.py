@@ -1573,6 +1573,87 @@ def check_edit_outputs(params, caps=None):
     return None
 
 
+# =============================================================================
+# WHAT AN SVG OR A GIF MAY BE A SOURCE FOR (DESIGN_3.22 1.6 and 5.3; 3.22 S5)
+# =============================================================================
+# PixAI's own rules for a result (`task-Bjykk1Ur.js`): an SVG allows no image tools, no
+# use-as-base and no edit; a GIF allows upscale, variations and image-to-text, but not
+# use-as-base or edit; neither can become video. The app refuses the same, HERE, before any
+# upload or network call. The uses the app's roads name:
+#   edit    an edit's source or reference (Edit, Edit Pro)
+#   video   a video frame or a reference-video picture (I2V, FLF, R2V)
+#   base    a reference or context image on the image road -- the Upscale road included: it
+#           sends the picture as the same use-as-base mediaId, so a GIF is refused there too
+#           (the refuse reading; PixAI's own GIF upscale is not this request)
+#   tool    an AI tool's source: a hand/face Fix, an enhance preset, an AI Tools scene
+#   prompt  image-to-prompt (suggest-prompt)
+SOURCE_USES = ("edit", "video", "base", "tool", "prompt")
+_SOURCE_TAKES = {"svg": frozenset(), "gif": frozenset({"prompt"})}
+_SOURCE_WORDS = {"edit": "edited", "video": "a video frame",
+                 "base": "used as a base or reference picture", "tool": "used with an AI tool",
+                 "prompt": "read for a prompt"}
+_SOURCE_EXTS = {".svg": "svg", ".gif": "gif"}
+_SOURCE_DATA_TYPES = {"image/svg+xml": "svg", "image/gif": "gif"}
+
+
+def source_format(value, row=None):
+    """"svg" / "gif" / "" for a source: the catalog row's recorded output_format first, then
+    its file's extension; with no row, a local path's extension or a data: URL's type. Pure."""
+    if isinstance(row, dict):
+        rec = str(row.get("output_format") or "").strip().lower()
+        if rec in _SOURCE_TAKES:
+            return rec
+        return _SOURCE_EXTS.get(os.path.splitext(str(row.get("filename") or ""))[1].lower(), "")
+    s = str(value or "").strip()
+    if s.lower().startswith("data:"):
+        return _SOURCE_DATA_TYPES.get(s[5:].split(";", 1)[0].split(",", 1)[0].strip().lower(), "")
+    return _SOURCE_EXTS.get(os.path.splitext(s)[1].lower(), "")
+
+
+def source_refusal(fmt, use):
+    """The sentence refusing a `fmt` picture as a `use` source, or None when it is allowed."""
+    takes = _SOURCE_TAKES.get(str(fmt or "").lower())
+    if takes is None or use in takes:
+        return None
+    return "{} can't be {} on PixAI, so nothing was sent.".format(
+        "An SVG" if fmt == "svg" else "A GIF", _SOURCE_WORDS.get(use, "used here"))
+
+
+def refuse_unusable_source(fmt, use):
+    """LocalRefusal when a `fmt` picture is not a `use` source (source_refusal); else None."""
+    why = source_refusal(fmt, use)
+    if why:
+        from moonglade.backup import LocalRefusal
+        raise LocalRefusal(why)
+
+
+def refuse_unusable_sources(values, use, fmt_of):
+    """refuse_unusable_source for each of `values`, its format read by `fmt_of(value)`."""
+    for v in values or ():
+        if str(v or "").strip():
+            refuse_unusable_source(fmt_of(str(v).strip()), use)
+
+
+def catalog_source_format(out_dir):
+    """value -> source_format against the library at `out_dir` (the CLI runners' lookup): a
+    local file by its extension, a media id by its catalog row (recorded format, then
+    extension), anything else by its own text. A catalog that cannot be read reads as no row."""
+    from pathlib import Path
+    db = Path(out_dir or ".") / "catalog.db"
+
+    def _fmt(value):
+        s = str(value or "").strip()
+        if not s.isdigit() or _is_local_source(s):
+            return source_format(s)
+        from moonglade.backup import known_catalog_rows
+        try:
+            row = known_catalog_rows(db, [s]).get(s) if db.is_file() else None
+        except Exception:                                    # noqa: BLE001 -- no row
+            row = None
+        return source_format(s, row)
+    return _fmt
+
+
 def build_chat_edit_parameters(prompt, media_ids, model_id=EDIT_PRO_MODEL_ID, *,
                                resolution="1K", aspect_ratio=None, quality="medium",
                                kaisuuken_id="", scene_id="", output_format=None,

@@ -4490,6 +4490,10 @@ def run_suggest_prompt(args):
     if not src:
         raise PixAIError("--suggest-prompt needs a catalog media_id or a local image file.")
     is_local = _gen_params._is_local_source(src)
+    # 3.22 S5: PixAI reads no prompt from an SVG (a GIF it does) -- by the catalog under --out,
+    # then the extension, before any upload or request.
+    _gen_params.refuse_unusable_source(_gen_params.catalog_source_format(
+        getattr(args, "out", "") or _paths.DEFAULT_LIBRARY_DIR)(src), "prompt")
     if is_local:
         if Path(src).suffix.lower() in _VIDEO_EXTS:
             raise PixAIError(

@@ -823,6 +823,11 @@ class RequestResolver:
                           model's output lists from its live record
                           (models.edit_caps_resolver); absent or None = the baked
                           EDIT_MODELS lists
+    source_format(value) -> "svg" | "gif" | ""                -- 3.22 S5: a source's
+                          format (the catalog's recorded one, then its extension);
+                          an SVG or GIF a road may not take is refused at build,
+                          before `media_id` uploads anything. Absent = no lookup
+                          (the value's own extension still answers)
 
     `media_id` is deliberately absent when pricing. /api/price fires on every
     keystroke in the drawer, and resolving there would upload the same file once
@@ -838,6 +843,14 @@ class RequestResolver:
     unlimited: object = None
     features: object = None
     edit_caps: object = None
+    source_format: object = None
+
+
+def _refuse_sources(rs, values, use):
+    """The source rules (3.22 S5, gen_params.SOURCE_USES) over `values`, read through the
+    resolver's lookup (else each value's own text): LocalRefusal, before any upload."""
+    fmt_of = rs.source_format if rs.source_format is not None else _gen_params.source_format
+    _gen_params.refuse_unusable_sources(values, use, fmt_of)
 
 
 def model_version_resolver(session):
@@ -1117,6 +1130,9 @@ def _edit_parameters_from_payload(p, user, resolve):
     spec = _gen_params.edit_model_by_id(model_id)
     if spec:
         media = media[:spec["max_refs"]] or [src]
+    # 3.22 S5: an SVG or a GIF is never an edit source (PixAI's own rule) -- refused before the
+    # media resolver below uploads anything.
+    _refuse_sources(resolve, media, "edit")
     if resolve.media_id is not None:       # real submit -- see the docstring
         media = [resolve.media_id(m) for m in media]
     return _gen_params.build_chat_edit_parameters(instruction, media, **kwargs)
@@ -1183,6 +1199,7 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
         # -- /api/price with no media resolver, /api/fix with the uploading one -- so there
         # the boxes are identical and the media id is not: see build_fixer_body.)
         src = str(p.get("source") or "").strip()
+        _refuse_sources(rs, [src], "tool")          # 3.22 S5: before the upload
         if src and rs.media_id is not None:
             src = str(rs.media_id(src) or src)
         boxes = list(p.get("boxes") or [])
@@ -1208,6 +1225,7 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
         if shot not in ("I2V", "FLF", "R2V"):
             shot = "R2V"                   # the Loom's own default for an unnamed shot
         imgs = [str(i) for i in (p.get("images") or []) if str(i).strip()]
+        _refuse_sources(rs, imgs, "video")          # 3.22 S5: no SVG or GIF frame
         # .isdigit() on the video/audio refs is the SUBMIT's filter, and pricing uses it
         # too now: a non-numeric ref was priced and then dropped before the mutation,
         # which is a quote for a different job than the spend.
@@ -1293,6 +1311,7 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
 
     if road == "enhance":
         src = str(p.get("source") or "").strip()
+        _refuse_sources(rs, [src], "tool")          # 3.22 S5: before the upload
         if src and rs.media_id is not None:
             src = str(rs.media_id(src) or src)
         wid = str(p.get("workflow_id") or "").strip()
@@ -1329,6 +1348,9 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
 
     # --- the image road (the payload's own `mode` is the inferenceProfile here) --------
     args = _gen_args_from_web_payload(p)
+    # 3.22 S5: an SVG or a GIF is never a base -- a reference, a context image, or the Upscale
+    # road's source (the same use-as-base mediaId).
+    _refuse_sources(rs, [args.ref_media_id] + list(args.context_images or []), "base")
     # Session H (BUILD-w2-gen §2): what a context-image request may not carry, refused at build.
     if args.context_images:
         if args.ref_media_id:

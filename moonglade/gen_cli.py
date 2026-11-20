@@ -125,6 +125,12 @@ def run_generate(args):
     out = Path(args.out)
     params = _gen_params._gen_parameters(args)
     existing_task = (getattr(args, "task_id", "") or "").strip()
+    if not existing_task and isinstance(params, dict):
+        # 3.22 S5: an SVG or a GIF is never a base (a --params-json reference or context
+        # image) -- by the catalog under --out, then the extension, before anything is sent.
+        _gen_params.refuse_unusable_sources(
+            [params.get("mediaId")] + list(params.get("contextImages") or []), "base",
+            _gen_params.catalog_source_format(out))
 
     # SCOPE_2026-09-26 G7: gate ONCE, right after the build, and use that one dict for the
     # preview print, _preview_card_note, _apply_kaisuuken and submit_generation -- so the card
@@ -721,6 +727,11 @@ def run_generate_video(args):
     existing_task = (getattr(args, "task_id", "") or "").strip()
     if not existing_task and not (getattr(args, "image", "") or "").strip():
         raise PixAIError("--generate-video needs --image <media_id> (a catalog image to animate).")
+    if not existing_task:
+        # 3.22 S5: an SVG or a GIF is never a video frame -- before the preview or any send.
+        _gen_params.refuse_unusable_sources(
+            [getattr(args, "image", ""), getattr(args, "tail", "")], "video",
+            _gen_params.catalog_source_format(out))
     params = _gen_params._gen_video_parameters(args)
     if not existing_task:
         _gen_params.check_params_retired(params)      # a raw --params-json skips the builder's check
@@ -838,6 +849,9 @@ def run_reference_video(args):
                          "--ref-audio (a media_id or local file), or --task-id to recover.")
     if not existing_task and override:
         _gen_params.check_params_retired(json.loads(override))   # sent as given: no builder checks it
+    if not existing_task:
+        # 3.22 S5: an SVG or a GIF is never a reference-video picture -- before any upload.
+        _gen_params.refuse_unusable_sources(imgs, "video", _gen_params.catalog_source_format(out))
 
     is_private = (getattr(args, "vchannel", "private") == "private")
     vmodel = (getattr(args, "video_model", "") or "v4.0.1")
@@ -975,6 +989,15 @@ def run_edit_image(args):
     if not existing_task and not srcs and not override:
         raise PixAIError("--edit-image needs --edit-src <media_id|file> (repeatable), "
                          "or --task-id to recover an existing edit.")
+    if not existing_task:
+        # 3.22 S5: an SVG or a GIF is never an edit source (PixAI's rule) -- by the catalog
+        # under --out, then the file's extension, before any preview, upload or send.
+        fmt_of = _gen_params.catalog_source_format(out)
+        _gen_params.refuse_unusable_sources(srcs, "edit", fmt_of)
+        if override:
+            _chat = json.loads(override).get("chat") or {}
+            _gen_params.refuse_unusable_sources(
+                list(_chat.get("mediaIds") or []) + [_chat.get("mediaId")], "edit", fmt_of)
     if not existing_task and override:
         _gen_params.check_params_retired(json.loads(override))   # sent as given: no builder checks it
         # Edit Pro's new outputs (3.22 S5): a hand-written shape meets the builder's rules on the

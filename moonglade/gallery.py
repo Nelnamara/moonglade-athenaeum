@@ -16337,6 +16337,10 @@ def create_app(out_dir: Path):
         mid = (request.args.get("media_id") or "").strip()
         if not mid:
             return jsonify({"suggestions": [], "error": "media_id required"}), 400
+        # 3.22 S5: PixAI reads no prompt from an SVG; refused here, before any request.
+        why = _gen_params.source_refusal(_source_format_lookup(mid), "prompt")
+        if why:
+            return jsonify({"suggestions": [], "error": why}), 200
         try:
             core, session = _gen_session()
             return jsonify({"suggestions": core.suggest_prompt(session, mid)})
@@ -16515,7 +16519,8 @@ def create_app(out_dir: Path):
             video_duration=_video_duration_lookup,
             unlimited=_gen_road.unlimited_resolver(gsession),
             features=_models.features_resolver(gsession),
-            edit_caps=_models.edit_caps_resolver(gsession))
+            edit_caps=_models.edit_caps_resolver(gsession),
+            source_format=_source_format_lookup)
 
     def _submit_resolver(core, gsession):
         """For a SPEND. The price resolver plus the input resolver: a catalog media_id is
@@ -16531,7 +16536,8 @@ def create_app(out_dir: Path):
             video_duration=_video_duration_lookup,
             unlimited=_gen_road.unlimited_resolver(gsession),
             features=_models.features_resolver(gsession),
-            edit_caps=_models.edit_caps_resolver(gsession))
+            edit_caps=_models.edit_caps_resolver(gsession),
+            source_format=_source_format_lookup)
 
     def _lane_job_running(core):
         """True while the app's own job log holds an Unlimited Mode task that has not
@@ -16545,6 +16551,19 @@ def create_app(out_dir: Path):
                        for j in _jobs.read_jobs(out_dir))
         except Exception:
             return False
+
+    def _source_format_lookup(value):
+        """A create source's format, "svg" / "gif" / "" (RequestResolver.source_format, 3.22
+        S5): a catalog id by its row's recorded output_format, then its file's extension;
+        anything else (a data: picture, a name) by its own text. Local, no network."""
+        s = str(value or "").strip()
+        row = None
+        if s.isdigit():
+            try:
+                row = get_row(db_path, s)
+            except Exception:                                # noqa: BLE001 -- no row
+                row = None
+        return _gen_params.source_format(s, row)
 
     _video_len_cache = []   # the one cached lookup for this app (built on first use)
 
@@ -18186,6 +18205,11 @@ def create_app(out_dir: Path):
             held = _send_claim(send_key, claim=False)        # 3.21.2 (L1): before any network
             if held:
                 return held
+            # 3.22 S5: an AI tool takes no SVG or GIF (PixAI's rule) -- before any upload.
+            for m in (p.get("media_ids") or p.get("mediaIds") or []):
+                why = _gen_params.source_refusal(_source_format_lookup(m), "tool")
+                if why:
+                    return jsonify({"error": why, "state": "not_sent"}), 400
             core, session = _gen_session()
             scene_id = str(p.get("scene_id") or p.get("sceneId") or "").strip()
             media = [_input_media_id(core, session, str(m).strip())
@@ -20243,7 +20267,17 @@ __DESIGN_TOKENS__
         # without the reference the card showed.
         unsendable_av = [str(x) for k in ("video_refs", "audio_refs") for x in (p.get(k) or [])
                          if str(x or "").strip() and not str(x).strip().isdigit()]
-        if unsendable:
+        # 3.22 S5: an SVG or a GIF is never a video frame (PixAI's rule), by the catalog's
+        # recorded format, then the extension, or a data: thumbnail's own type -- refused
+        # with the same not_sent journal entry, before resolve_img uploads anything.
+        frame_why = next((w for w in (_gen_params.source_refusal(_source_format_lookup(x),
+                                                                 "video")
+                                      for x in (p.get("images") or []) if str(x or "").strip())
+                          if w), "")
+        if frame_why:
+            unsendable = [frame_why]
+            unsendable_msg = frame_why
+        elif unsendable:
             unsendable_msg = ("One of this shot's pictures can't be sent to PixAI (an imported "
                               "picture). Nothing was sent.")
         elif unsendable_av:
@@ -20394,7 +20428,8 @@ __DESIGN_TOKENS__
                                            "video_refs": video_ids,
                                            "audio_refs": audio_ids}, mode="video",
                                           resolve=_gen_road.RequestResolver(
-                                              video_duration=_video_duration_lookup))
+                                              video_duration=_video_duration_lookup,
+                                              source_format=_source_format_lookup))
 
             req = _request_for(image_ids)
             params = req.parameters      # bound for _log_gen_failure's locals().get()
