@@ -100,14 +100,14 @@ def task_detail_gql(session, task_id, retries=3, timeout=60, rest_fallback=False
 # the failed and cancelled tasks P1 read, no reason -- so a terminal failure's reason is still
 # read from GraphQL task(id), best effort. The rich read (task_detail_gql) stays on GraphQL.
 def _rest_task(session, task_id, with_parameters=False):
-    """GET /v2/task/{id} -> the REST task (a dict carrying `id` and `status`). Raises PixAIError
-    for an id that could leave its path segment (nothing is sent) or an answer that is not a
-    task. Read-only."""
-    from moonglade.backup import PixAIError, _rest_get
+    """GET /v2/task/{id} -> the REST task (a dict carrying `id` and `status`). Raises
+    LocalRefusal (a PixAIError) for an id that could leave its path segment (nothing is sent),
+    PixAIError for an answer that is not a task. Read-only."""
+    from moonglade.backup import PixAIError, LocalRefusal, _rest_get
     from moonglade.cloud_delete import _TASK_ID_RE
     tid = str(task_id or "").strip()
     if not _TASK_ID_RE.match(tid):
-        raise PixAIError("not a PixAI task id: {!r}; nothing was read".format(tid[:64]))
+        raise LocalRefusal("not a PixAI task id: {!r}; nothing was read".format(tid[:64]))
     data = _rest_get(session, "/task/" + tid,
                      params={"with_parameters": "true"} if with_parameters else None)
     if not isinstance(data, dict) or "status" not in data or not data.get("id"):
@@ -139,10 +139,49 @@ def _graphql_reason_of(session, task_id):
         return ""
 
 
+#: The status read's own retries (3.22 review F1). Before 3.22 the poll rode gql_adhoc, which
+#: retried a query 3 times with a doubling 2 s backoff; the REST GET (rest_get) is one attempt,
+#: so this read carries the same count itself. Safe because it is a read-only GET: a repeated
+#: status read cannot spend, delete or change anything. No POST is ever retried here.
+STATUS_READ_RETRIES = 3
+STATUS_READ_BACKOFF_S = 2.0
+
+
+def _read_retryable(e):
+    """True for a status-read failure a second attempt may get past: a dropped connection, a
+    timeout, a body that was not JSON, a 429 or a 5xx -- the set gql_adhoc retried. Not an SSL
+    failure, a refused id or any other 4xx (a retry repeats those exactly)."""
+    from moonglade.backup import PixAIRestError
+    if isinstance(e, requests.exceptions.SSLError):
+        return False
+    if isinstance(e, (requests.RequestException, ValueError)):
+        return True
+    if isinstance(e, PixAIRestError):
+        st = getattr(e, "status", None)
+        return isinstance(st, int) and (st == 429 or st >= 500)
+    return False
+
+
+def _rest_task_read(session, task_id):
+    """`_rest_task` with STATUS_READ_RETRIES bounded retries on a retryable failure (a GET, so
+    a retry is free). The last failure is raised as it came."""
+    delay = STATUS_READ_BACKOFF_S
+    for attempt in range(STATUS_READ_RETRIES + 1):
+        try:
+            return _rest_task(session, task_id)
+        except Exception as e:                              # noqa: BLE001 -- sorted below
+            if attempt == STATUS_READ_RETRIES or not _read_retryable(e):
+                raise
+            time.sleep(delay)
+            delay *= 2
+    raise RuntimeError("unreachable")
+
+
 def _status_read(session, task_id):
     """One status read on the REST route, in _GEN_STATUS's names: {status, paidCredit,
-    startedAt, outputs, reason}. The reason is read only for a terminal failure."""
-    t = _rest_task(session, task_id)
+    startedAt, outputs, reason}. The reason is read only for a terminal failure. The GET is
+    retried on a passing failure (`_rest_task_read`)."""
+    t = _rest_task_read(session, task_id)
     status = str(t.get("status") or "")
     reason = ""
     if status.lower() in _GEN_FAIL:
@@ -193,14 +232,27 @@ def _poll_task_status(session, task_id, timeout, *, interval=3, label="task",
     server-authoritative `paidCredit` (or None) and prints it as the actual cost on
     completion. Raises PixAIError on failure/timeout. Shared by the generate / video /
     edit submit paths so their poll behaviour can't drift."""
-    from moonglade.backup import PixAIError, vlog
+    from moonglade.backup import PixAIError, LocalRefusal, vlog
     deadline = time.time() + timeout
     paid_credit = None
     started_at, last_status = None, ""
+    read_error = None
     while time.time() < deadline:
         # 3.22 S3-poll: the REST read (GET /v2/task/{id}, API key), its reason from GraphQL
         # only on a terminal failure (_status_read).
-        task = _status_read(session, task_id)
+        try:
+            task = _status_read(session, task_id)
+        except LocalRefusal:
+            raise                       # an id that was never sent: no read will ever work
+        except (PixAIError, requests.RequestException, ValueError) as e:
+            # 3.22 review F1: a read that failed (after its own retries) says nothing about
+            # the task, which was created and may be running or done. It never ends the
+            # poll: the next read is tried at the next interval, until the deadline.
+            read_error = e
+            vlog("{} poll: the status read failed ({}); still waiting".format(label, e))
+            time.sleep(interval)
+            continue
+        read_error = None
         status = str(task.get("status", "")).lower()
         last_status = status or last_status
         started_at = task.get("startedAt") or started_at
@@ -224,6 +276,13 @@ def _poll_task_status(session, task_id, timeout, *, interval=3, label="task",
                 fail_noun, status,
                 " (PixAI's reason: {})".format(task["reason"]) if task.get("reason") else ""))
         time.sleep(interval)
+    if read_error is not None:
+        raise PixAIError(
+            "stopped waiting after {}s: PixAI's status read kept failing ({}), so this could "
+            "not see how the task ended. The task MAY STILL BE RUNNING on PixAI, and may "
+            "already be charged -- do not send it again (task {}). Recover it free once it "
+            "finishes with --task-id {} (or it arrives in your next --update).".format(
+                timeout, str(read_error)[:160], task_id, task_id))
     if _never_dispatched(last_status, started_at):
         raise PixAIError(
             "{} was accepted by PixAI but NEVER started. After {}s it is still queued "

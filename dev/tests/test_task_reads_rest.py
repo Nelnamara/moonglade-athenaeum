@@ -97,6 +97,85 @@ def test_the_poll_says_pixais_reason_on_a_failure(pixai, monkeypatch):
         task_reads._poll_task_status(object(), CANCELLED["id"], 30)
 
 
+# --- 3.22 review F1: the status read keeps gql_adhoc's retries, and the poll outlives a bad read --
+
+class _Clock(object):
+    """task_reads' `time`, faked: sleep moves the clock, so a poll's deadline is reached in no
+    real time."""
+
+    def __init__(self):
+        self.now, self.slept = 1000.0, []
+
+    def time(self):
+        return self.now
+
+    def sleep(self, s):
+        self.slept.append(s)
+        self.now += s
+
+
+def _flaky_rest(answers, calls):
+    """A _rest_get that plays `answers` in order: an exception is raised, a dict answered."""
+    def _get(session, path, params=None, **k):
+        calls.append(path)
+        a = answers.pop(0) if answers else answers_end[0]
+        if isinstance(a, Exception):
+            raise a
+        return a
+    answers_end = [answers[-1]] if answers else [None]
+    return _get
+
+
+def _bad_gateway():
+    return core.PixAIRestError("REST GET /task/x -> 502: bad gateway", status=502, body=None)
+
+
+def test_the_status_read_retries_a_passing_failure(monkeypatch):
+    import requests
+    clock = _Clock()
+    monkeypatch.setattr(task_reads, "time", clock)
+    calls = []
+    monkeypatch.setattr(core, "_rest_get", _flaky_rest(
+        [_bad_gateway(), requests.ReadTimeout("read timed out"), BATCH], calls))
+    st = task_reads.generation_status(object(), BATCH["id"])
+    assert st["phase"] == "done" and st["paid_credit"] == 3000
+    assert len(calls) == 3 and len(clock.slept) == 2
+
+
+def test_the_status_read_does_not_retry_a_refusal(pixai, monkeypatch):
+    clock = _Clock()
+    monkeypatch.setattr(task_reads, "time", clock)
+    with pytest.raises(core.PixAIRestError):
+        task_reads.generation_status(object(), "404404")          # the fixture's 404
+    assert len(pixai["calls"]) == 1 and clock.slept == []
+
+
+def test_the_poll_keeps_polling_past_a_read_that_failed(monkeypatch):
+    """A 502 on every attempt of one read (its retries spent) does not end the poll: the next
+    read finds the task done, and the poll answers its charge. Only GETs were made."""
+    clock = _Clock()
+    monkeypatch.setattr(task_reads, "time", clock)
+    calls = []
+    monkeypatch.setattr(core, "_rest_get", _flaky_rest(
+        [_bad_gateway() for _ in range(8)] + [BATCH], calls))
+    monkeypatch.setattr(core, "_rest_post", lambda *a, **k: pytest.fail("a POST was sent"))
+    assert task_reads._poll_task_status(object(), BATCH["id"], 300) == 3000
+    assert len(calls) == 9
+
+
+def test_a_poll_that_never_reads_says_the_task_may_still_be_running(monkeypatch):
+    clock = _Clock()
+    monkeypatch.setattr(task_reads, "time", clock)
+    calls = []
+    monkeypatch.setattr(core, "_rest_get", _flaky_rest([_bad_gateway()], calls))
+    with pytest.raises(core.PixAIError) as e:
+        task_reads._poll_task_status(object(), BATCH["id"], 60)
+    words = str(e.value)
+    assert "MAY STILL BE RUNNING" in words and BATCH["id"] in words
+    assert "do not send it again" in words
+    assert len(calls) > 1
+
+
 @pytest.mark.parametrize("bad", ["", "../task/1", "1/media/2", "a b", "x" * 65])
 def test_an_id_that_could_leave_its_path_is_never_read(pixai, bad):
     with pytest.raises(core.PixAIError):
