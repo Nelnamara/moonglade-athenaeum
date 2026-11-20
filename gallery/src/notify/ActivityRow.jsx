@@ -36,8 +36,14 @@ export default function ActivityRow({ job: j, expanded, onToggle: toggle, onDism
   const showErr = (st === "failed" || st === "done_with_errors" || st === "stale") && j.error;
   // ...and while it runs it mirrors it: "Fixing 12 files · 5 / 12" with the moon on that true fraction.
   const runMoon = integrity && st === "running" ? fractionOf(j.done, j.total) : null;
+  // DESIGN_3.22 2.4 rule 7 (review F2): the send carried a free card and PixAI charged anyway.
+  // The done event says so (card_unused) beside the charge; the row then wears the warning the
+  // row already has for "finished, with a problem" (done_with_errors: the at-warn tint and the
+  // at-errmsg line), in the owner's words. No charge known, no line -- the Cost row's rule.
+  const cardUnused = st === "done" && j.card_unused === true
+    && typeof j.paid_credit === "number" && isFinite(j.paid_credit) && j.paid_credit > 0;
   const cls = st === "failed" ? " at-failed"
-    : (st === "done_with_errors" || st === "stale") ? " at-warn" : "";
+    : (st === "done_with_errors" || st === "stale" || cardUnused) ? " at-warn" : "";
 
   const icon = st === "done" ? (
     <><span className="at-ok at-glyph">✓</span><img className="at-nel" src="/branding/mascots/trk_done.png" alt="" onError={(e) => e.currentTarget.remove()} /></>
@@ -160,6 +166,9 @@ export default function ActivityRow({ job: j, expanded, onToggle: toggle, onDism
       </div>
       {pct != null ? <div className="at-bar"><i style={{ width: pct + "%" }} /></div> : null}
       {showErr ? <div className="at-errmsg">{j.error}</div> : null}
+      {cardUnused ? (
+        <div className="at-errmsg">{"Your free card wasn't used. PixAI charged " + groupThousands(j.paid_credit) + " credits."}</div>
+      ) : null}
       {/* Sessions R + Y (R2c): Activity and PixAI disagree on how this job ended -- PixAI's
           inbox says it finished. A dim note, never a changed status: the row says what this
           app saw, and PixAI's word sits under it. */}
