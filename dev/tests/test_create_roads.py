@@ -574,6 +574,51 @@ def test_the_card_check_and_the_door_get_the_same_client_and_a_toggle_changes_no
     assert before["params"] is req.parameters
 
 
+class _SentStop(Exception):
+    """Raised by the stubbed poll: the send happened, the test has what it needs."""
+
+
+@pytest.mark.parametrize("runner", ["run_edit_image", "run_generate"])
+def test_the_cli_runner_hands_one_client_to_the_card_check_and_the_send(
+        runner, tmp_path, monkeypatch):
+    """V8 on the CLI (DESIGN_3.22 2.5): --edit-image --confirm and --generate --confirm take ONE
+    client from for_create, and the card check and the create door both get that object -- even
+    when the Mirror is switched on between them. A runner that asked for a second client for
+    the send would hand the door a different object, or reach make_mirror_session."""
+    seen = {}
+
+    def _card(session, params, args):
+        seen["card"] = session
+        monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
+        monkeypatch.setattr(mirror_mod, "make_mirror_session",
+                            lambda *a, **k: pytest.fail("the identity was chosen twice"))
+        return ""
+
+    def _door(session, kind, body):
+        seen["door"] = session
+        return {"id": "T1"}
+
+    def _poll(*a, **k):
+        raise _SentStop()
+    api = pc.PixAIClient(Wire())
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: api)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", _card)
+    monkeypatch.setattr(cards_mod, "_bump_card_use", lambda p: None)
+    monkeypatch.setattr(core, "_create", _door)
+    monkeypatch.setattr(task_reads_mod, "_poll_task_status", _poll)
+    monkeypatch.setattr(models_mod, "_gate_image_params", lambda s, p: (p, []))
+    monkeypatch.setattr(models_mod, "_refuse_lost_upscale", lambda a, p: None)
+    monkeypatch.setattr(gen_params, "_gen_parameters", lambda args: dict(IMAGE_P))
+    args = SimpleNamespace(out=str(tmp_path), params_json="", task_id="", confirm=True,
+                           token=None, prompt="make it night", edit_src=["111"],
+                           kaisuuken_id="", no_card=False, poll_timeout=1)
+    with pytest.raises(_SentStop):
+        getattr(gen_cli, runner)(args)
+    assert seen["card"] is seen["door"]
+    assert seen["door"] is not api and seen["door"]._create_chosen is True
+    assert seen["door"].auth_kind == "api-key"
+
+
 # ---------------------------------------------------------------------------
 # The observation step (T-F11) and the card proof in a run (T-V3)
 # ---------------------------------------------------------------------------
