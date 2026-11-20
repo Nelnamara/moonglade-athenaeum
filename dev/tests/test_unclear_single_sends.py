@@ -133,6 +133,10 @@ def rig(tmp_path, monkeypatch):
 
 def _req_for(mode, payload):
     r = _Req(mode or "image")
+    if mode == "edit":
+        # an edit is a chat block (the create door refuses an edit without one, V10)
+        r.parameters = {"chat": {"prompts": "make it night", "mediaId": "1", "mediaIds": ["1"],
+                                 "modelId": V}}
     if mode == "fix":
         r.parameters = {"mediaId": "700", "boxes": payload.get("boxes")}
         r.media_id, r.boxes = "700", payload.get("boxes")
@@ -350,7 +354,9 @@ def test_each_cli_runner_sends_through_the_unclear_wrapper(runner):
     answer into the honest sentence)."""
     import inspect
     src = inspect.getsource(getattr(gen_cli_mod, runner))        # the runners: gen_cli since 3.22
-    assert "_cli_create_once(" in src and "gql_mutate(" not in src
+    # the video runners keep _cli_create_once (GraphQL); the edit runner rides the create door
+    # through _cli_door_once since 3.22 S3-edit -- both turn a lost answer into the sentence
+    assert ("_cli_create_once(" in src or "_cli_door_once(" in src) and "gql_mutate(" not in src
     assert "_cli_send_once(" in inspect.getsource(gen_cli_mod.run_generate)
 
 

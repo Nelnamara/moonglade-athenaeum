@@ -969,7 +969,8 @@ def run_edit_image(args):
 
     # PREVIEW: no upload, no submit, no credits. Local files shown as placeholders.
     if not existing_task and not getattr(args, "confirm", False):
-        print("=== PixAI createGenerationTask -- EDIT (PREVIEW, no credits spent) ===")
+        print("=== PixAI task.createTask, POST /v2/task/create -- EDIT (PREVIEW, no credits "
+              "spent) ===")
         if override:
             params = json.loads(override)
         else:
@@ -979,6 +980,8 @@ def run_edit_image(args):
                 prompt, preview_ids, model_id=cfg["model_id"],
                 resolution=cfg["resolution"], aspect_ratio=cfg["aspect_ratio"],
                 quality=cfg["quality"], kaisuuken_id=cfg["kaisuuken_id"])
+        # V12 (DESIGN_3.22 2.3): the wire step before the preview and the card check.
+        params = _gen_params.to_wire("edit", params)
         print(json.dumps({"parameters": params}, indent=2))
         _cards._preview_card_note(args, params)
         print("\nThis would SPEND PixAI credits (unless free above). "
@@ -1015,10 +1018,16 @@ def run_edit_image(args):
                 resolution=cfg["resolution"], aspect_ratio=cfg["aspect_ratio"],
                 quality=cfg["quality"], kaisuuken_id=cfg["kaisuuken_id"])
         print("Submitting EDIT task (spends credits unless a free card applies)...")
-        _cards._apply_kaisuuken(session, params, args)   # free-card check on the API-key session
-        # gql_mutate, never gql_adhoc -- a re-POST here is a second charge.
-        # _session_for_create: create rides the mirror JWT when on; download stays API-key (F6).
-        task_id = _gen_road._cli_create_once(_mirror._session_for_create(session), params)
+        # V12: the wire step before the card check, so the card is matched on the sent shape.
+        params = _gen_params.to_wire("edit", params)
+        # V8 (DESIGN_3.22 2.5): the creating identity chosen ONCE, after READ_ONLY; the card
+        # check and the create door both ride it. Download stays on the API key (F6).
+        from moonglade import pixai_client as _pixai_client
+        create_client = _pixai_client._client_of(session).for_create()
+        _cards._apply_kaisuuken(create_client, params, args)
+        # THE create door (3.22 S3-edit): one POST, never retried, its unknown outcome said
+        # plainly (SendOutcomeUnclear).
+        task_id = _gen_road._cli_door_once(create_client, "edit", params)
         print("  task id:", task_id)
         _cards._bump_card_use(params)
         _task_reads._poll_task_status(session, task_id, getattr(args, "poll_timeout", 300),

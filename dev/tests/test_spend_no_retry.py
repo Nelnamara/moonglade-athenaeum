@@ -311,9 +311,13 @@ class TestSpendingPathsAreSingleAttempt:
         _drive(gen_cli_mod.run_reference_video, _cli_args(tmp_path, ref_image=["mid1"]))
         _assert_single_attempt(gql_calls, gen_road_mod._GEN_MUTATION)
 
-    def test_run_edit_image(self, tmp_path, cli_stubs, gql_calls):
-        _drive(gen_cli_mod.run_edit_image, _cli_args(tmp_path, edit_src=["mid1"]))
-        _assert_single_attempt(gql_calls, gen_road_mod._GEN_MUTATION)
+    def test_run_edit_image(self, tmp_path, cli_stubs, gql_calls, door_calls):
+        """The edit runner rides the create door since 3.22 S3-edit: one create, no GraphQL
+        mutation."""
+        _drive(gen_cli_mod.run_edit_image, _cli_args(
+            tmp_path, edit_src=["mid1"], params_json='{"chat": {"prompts": "x", "mediaId": "1"}}'))
+        assert [c.kind for c in door_calls] == ["edit"]
+        assert not [c for c in gql_calls if c.verb == "mutate"]
 
     def test_upload_media(self, tmp_path, mock_session, gql_calls, monkeypatch):
         """An upload costs no credits, but it still mutates the account: re-registering

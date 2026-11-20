@@ -1099,6 +1099,8 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
 
     if road == "edit":
         params = _edit_parameters_from_payload(p, user, rs)
+        if params is not None:
+            params = _gen_params.to_wire("edit", params)     # 2.4 rule 2, the last step
         return GenerationRequest(mode="edit", parameters=params, no_card=no_card,
                                  note=None if params else "pick an image to edit")
 
@@ -1877,7 +1879,7 @@ OUTCOME_FAMILIES = {"create": DEFINITE_CODES, "fixer": DEFINITE_CODES,
 # 2026-11-19); enhance cannot use /task/create, so it moves regardless.
 CREATE_ROAD = {
     "image": "rest",
-    "edit": "graphql",
+    "edit": "rest",
     "scene": "graphql",
     "enhance": "graphql",
     "fix": "rest_post",
@@ -2057,6 +2059,22 @@ def _cli_create_once(create_session, params):
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
         return task_id
     return _cli_send_once(_send)
+
+
+def _cli_door_once(create_client, kind, params):
+    """A CLI runner's ONE create through THE create door (3.22): core._create(kind, params)
+    on the client for_create chose, the observation step on its answer, and the task id back.
+    An unknown outcome after the send was reached raises SendOutcomeUnclear; a refusal comes
+    back as it came. Never re-sends."""
+    from moonglade import backup as _core
+    mark = spend_watch()
+
+    def _send():
+        _mark_spend_reached()
+        answer = _core._create(create_client, kind, params)
+        _observe_created(kind, params, answer)
+        return str(answer["id"])
+    return _cli_send_once(_send, reached=lambda: mark.v)
 
 
 # =============================================================================

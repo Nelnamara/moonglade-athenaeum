@@ -81,6 +81,10 @@ IMAGE_P = {"prompts": "a cat", "modelId": "1", "width": 512, "height": 512, "pri
            "inferenceProfile": "ultra"}
 
 
+EDIT_CHAT = {"prompts": "make it night", "mediaId": "111", "mediaIds": ["111"],
+             "modelId": gen_params.EDIT_PRO_MODEL_ID, "modelConfig": {"resolution": "1K"}}
+
+
 def _image_req(params=None):
     return gen_road.GenerationRequest(mode="image", parameters=dict(params or IMAGE_P),
                                       no_card=True)
@@ -138,6 +142,12 @@ SENDERS = {
     "image": [
         ("web submit", lambda s, tmp: gen_road.submit(s, _image_req())),
         ("run_generate", lambda s, tmp: _drive(gen_cli.run_generate, _cli_args(tmp))),
+    ],
+    "edit": [
+        ("web submit", lambda s, tmp: gen_road.submit(s, gen_road.GenerationRequest(
+            mode="edit", parameters={"chat": dict(EDIT_CHAT)}, no_card=True))),
+        ("run_edit_image", lambda s, tmp: _drive(gen_cli.run_edit_image, _cli_args(
+            tmp, edit_src=["111"], params_json=json.dumps({"chat": EDIT_CHAT})))),
     ],
 }
 
@@ -375,4 +385,22 @@ def test_read_only_refuses_the_image_road_before_the_card_or_the_mirror(monkeypa
         gen_road.submit(cli, _image_req())
     with pytest.raises(core.PixAIError, match="READ_ONLY"):
         gen_cli.run_generate(_cli_args(tmp_path))
+    with pytest.raises(core.PixAIError, match="READ_ONLY"):
+        gen_road.submit(cli, gen_road.GenerationRequest(mode="edit",
+                                                        parameters={"chat": dict(EDIT_CHAT)}))
+    with pytest.raises(core.PixAIError, match="READ_ONLY"):
+        gen_cli.run_edit_image(_cli_args(tmp_path, edit_src=["111"],
+                                         params_json=json.dumps({"chat": EDIT_CHAT})))
     assert roads == []
+
+
+def test_the_edit_runner_says_may_have_started_after_one_lost_send(door, cli, monkeypatch,
+                                                                   tmp_path):
+    """run_edit_image over the real door: a lost answer is one POST and the honest sentence."""
+    wire = Wire(requests.ReadTimeout("slow"))
+    monkeypatch.setattr(core, "_make_session", lambda token=None, **k: pc.PixAIClient(wire))
+    with pytest.raises(gen_road.SendOutcomeUnclear):
+        gen_cli.run_edit_image(_cli_args(tmp_path, edit_src=["111"],
+                                         params_json=json.dumps({"chat": EDIT_CHAT})))
+    assert len(wire.posts) == 1 and wire.posts[0][0].endswith("/task/create")
+    assert wire.posts[0][1] == {"parameters": {"chat": EDIT_CHAT}}
