@@ -132,7 +132,7 @@ class PixAIClient:
         """A Bearer session on the stored Mirror sign-in, for a READ the API key was refused
         on -- or None (not this client's to do, no usable sign-in, or a sign-in for another
         account than this client's). Never raises."""
-        if not self._read_fallback:
+        if not getattr(self, "_read_fallback", False):
             return None
         try:
             from moonglade import mirror as _mirror
@@ -151,7 +151,7 @@ class PixAIClient:
         """The session a READ tries first: the Mirror sign-in while the key was refused in
         the last KEY_REFUSED_HOLD_S (so every read does not pay a refusal first), else the
         key's own session."""
-        if self._read_fallback and time.monotonic() < _key_refused["until"]:
+        if getattr(self, "_read_fallback", False) and time.monotonic() < _key_refused["until"]:
             fb = self._read_fallback_session()
             if fb is not None:
                 return fb
