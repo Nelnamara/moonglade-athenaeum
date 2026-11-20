@@ -2195,6 +2195,16 @@ def _mc_int_str(model_config, key):
     return str(v) if isinstance(v, int) and not isinstance(v, bool) else ""
 
 
+def _task_for_full_meta(session, task_id):
+    """The task read for the readers of `parameters` alone -- collect's `--full-meta` and the
+    full-meta backfill (DESIGN_3.22 2.8). GraphQL first; if `task(id)` cannot be read, the REST
+    record with its stored parameters instead of nothing (`rest_fallback=True`). That record is
+    degraded (no per-image seeds, no tombstones, no video outputs) and `extract_full_meta`
+    leaves what it cannot know blank. Deletes, video sync, lineage and the publish index do NOT
+    use this: they keep `task_detail_gql`'s None."""
+    return _task_reads.task_detail_gql(session, task_id, rest_fallback=True)
+
+
 def extract_full_meta(task):
     """Pull the extended fields out of a getTaskById task dict."""
     if not task:
@@ -2293,7 +2303,10 @@ def extract_full_meta(task):
         # Per-ROW for the same reason (2026-09-06): PixAI deletes one output at a time, so
         # "does PixAI still have this one" cannot be a task-level answer.
         "cloud_deleted_at": "",
-        "_batch":      outputs.get("batch") if isinstance(outputs.get("batch"), list) else None,
+        # A REST-fallback record's batch lists only the LIVE members, so a position read off
+        # it would renumber the survivors (issue #33: PixAI's index is permanent). Not parked.
+        "_batch":      (outputs.get("batch") if isinstance(outputs.get("batch"), list)
+                        and not task.get("_rest_fallback") else None),
     }
 
 
@@ -5476,7 +5489,7 @@ def run_backfill_full_meta(args):
         print("Fetching with {} parallel workers.".format(workers))
 
     def _fetch_task(tid):
-        task_data = _task_reads.task_detail_gql(session, tid)
+        task_data = _task_for_full_meta(session, tid)
         fm = extract_full_meta(task_data)
         if fm.get("model_id"):
             fm["model_name"] = _models.model_name_gql(session, fm["model_id"])
@@ -6026,7 +6039,7 @@ def run_download(args, progress=None):
                     if use_full_meta:
                         tid = meta["task_id"]
                         if tid not in _full_meta_cache:
-                            task_data = _task_reads.task_detail_gql(session, tid)
+                            task_data = _task_for_full_meta(session, tid)
                             fm = extract_full_meta(task_data)
                             if fm.get("model_id"):
                                 fm["model_name"] = _models.model_name_gql(session, fm["model_id"])
@@ -6138,7 +6151,7 @@ def run_download(args, progress=None):
                 if use_full_meta:
                     tid = meta["task_id"]
                     if tid not in _full_meta_cache:
-                        task_data = _task_reads.task_detail_gql(session, tid)
+                        task_data = _task_for_full_meta(session, tid)
                         fm = extract_full_meta(task_data)
                         if fm.get("model_id"):
                             fm["model_name"] = _models.model_name_gql(session, fm["model_id"])

@@ -30,7 +30,7 @@ git tags. Full prose notes for tagged versions live on
 - **A free card that can't cover a job says so.** If PixAI answers that the job needs credits beyond the card, the message reads "the free card doesn't cover this"; the app never adds credits to a card, and the send is not repeated. (2026-11-20)
 
 ### Fixed
-- **A half-read generation can no longer lead to a delete.** If PixAI's full record of a task can't be read, a single-picture delete is refused ("PixAI's full record of this task could not be read, so nothing was deleted. Try again in a minute.") instead of being routed from the partial one. (2026-11-20)
+- **A half-read generation can no longer lead to a delete.** If PixAI's full record of a task can't be read, a single-picture delete is refused ("Couldn't read the task from PixAI; nothing was deleted, try again.") and nothing is routed from a partial record. Collecting with full details and the full-details backfill now fall back to PixAI's plainer record for the prompt and settings, leaving the per-picture seed and position blank rather than guessing. (2026-11-20)
 - **The picker no longer scrolls the library behind it.** While the Gallery picker is open the page behind it stays still, which also stops the flicker on a Mac in Chrome. (2026-11-20)
 - **SVG files draw in the gallery and still download safely.** They are served with their real type so a picture can show them, as a download only, under a strict sandbox. (2026-11-20)
 

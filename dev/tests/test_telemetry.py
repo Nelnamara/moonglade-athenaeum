@@ -359,28 +359,39 @@ def test_ach_event_debounces_a_double_fire(tmp_path):
     assert telemetry_mod.telemetry_metrics(tmp_path)["konami_triggered"] == 1
 
 
-def test_ach_debounce_window_is_narrower_than_a_hand(tmp_path):
+def test_ach_debounce_window_is_narrower_than_a_hand(tmp_path, monkeypatch):
     """The window is a wall-clock gap and can tell nothing else apart, so its WIDTH is the
-    whole claim the comments make. Real time, deliberately: two taps 200ms apart are two
-    taps and must both count; 50ms apart is one gesture fired twice and counts once.
+    whole claim the comments make. Two taps 200ms apart are two taps and must both count;
+    50ms apart is one gesture fired twice and counts once.
+
+    The gaps are on a FAKE clock handed to the debounce, not slept. The debounce stamps an
+    event BEFORE its handler's own work (the telemetry bump: lockfile, read, temp write,
+    os.replace), so on real time the 50ms gap was 50ms plus everything c's handler and d's
+    routing took, and under parallel workers that passed 150ms and d was not debounced
+    (KeyError on d["debounced"], seen once under xdist). The gap is the claim; the
+    machine's speed is not.
 
     It shipped at 400ms on 2026-09-07 and this is what that cost -- an ordinary phone
     tap-rate of ~3/sec landed every second tap inside the window, so the second of every
     pair of real taps was thrown away, while three separate comments said separate clicks
     were never touched. 150ms is over a double-fired DOM event and under a hand."""
+    clock = {"t": time.time()}   # real epoch: the sweep prunes stamps by it
+    real = g._ach_debounced
+    monkeypatch.setattr(g, "_ach_debounced",
+                        lambda sid, event, now=None: real(sid, event, now=clock["t"]))
     cli = login_client(tmp_path)
     n = ach_nonce(cli)
     a = cli.post("/api/ach-event", json={"event": "docs", "nonce": n}).get_json()
     assert a["ok"] is True and not a.get("debounced")
-    time.sleep(0.2)                                  # two separate taps at ~5/sec
+    clock["t"] += 0.2                                # two separate taps at ~5/sec
     b = cli.post("/api/ach-event", json={"event": "docs", "nonce": a["next_nonce"]}
                  ).get_json()
     assert b.get("debounced") is not True, "a real second tap must not be swallowed"
-    time.sleep(0.2)                                  # clear the window again
+    clock["t"] += 0.2                                # clear the window again
     c = cli.post("/api/ach-event", json={"event": "docs", "nonce": b["next_nonce"]}
                  ).get_json()
     assert c.get("debounced") is not True
-    time.sleep(0.05)                                 # the second half of ONE click
+    clock["t"] += 0.05                               # the second half of ONE click
     d = cli.post("/api/ach-event", json={"event": "docs", "nonce": c["next_nonce"]}
                  ).get_json()
     assert d["debounced"] is True

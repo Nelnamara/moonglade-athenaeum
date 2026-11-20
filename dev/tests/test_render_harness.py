@@ -11603,6 +11603,10 @@ def test_the_dock_says_the_price_inside_generate_and_stays_dim_until_priced(logg
     page.fill(".mgdock-prompt", "1girl, moonlit glade")
     page.wait_for_function("(s) => !document.querySelector(s).disabled", arg=go)
     _settle(page)
+    # Entering a mode or a field re-prices at once: usePriceProbe.refresh blanks the button's
+    # sub line and settles it only after PRICE_DEBOUNCE_MS (250ms); _settle is two frames.
+    page.wait_for_function("([s, t]) => { const e = document.querySelector(s + ' .mgspend-s');"
+                           " return e && e.textContent === t; }", arg=[go, "≈ 5,100 credits"])
     g = _spend_button(page, go)
     assert not g["disabled"] and g["sub"] == "≈ 5,100 credits" and " free" not in " " + g["cls"], g
     _two_lines_inside(g)
@@ -11677,6 +11681,10 @@ def test_the_phone_create_tab_says_the_price_inside_generate(logged_in_page, mon
     page.wait_for_function("() => !document.querySelector('.cm-generate').disabled")
     page.locator(".cm-generate").scroll_into_view_if_needed()
     _settle(page)
+    # Entering a mode or a field re-prices at once: usePriceProbe.refresh blanks the button's
+    # sub line and settles it only after PRICE_DEBOUNCE_MS (250ms); _settle is two frames.
+    page.wait_for_function("([s, t]) => { const e = document.querySelector(s + ' .mgspend-s');"
+                           " return e && e.textContent === t; }", arg=[".cm-generate", "≈ 5,100 credits"])
     g = _spend_button(page, ".cm-generate")
     assert not g["disabled"] and g["sub"] == "≈ 5,100 credits", g
     _two_lines_inside(g)
@@ -11740,6 +11748,10 @@ def test_the_video_tab_shows_a_card_per_model_with_its_price_for_this_picture(lo
     assert all(c["lines"][1] == "pick a picture" for c in cards), [c["lines"] for c in cards]
     assert asked == [], "nothing is priced without a picture"
     go = ".mgdock-gocol .mgdock-gen"   # the video drawer portals its Go into the column's slot
+    # Entering a mode or a field re-prices at once: usePriceProbe.refresh blanks the button's
+    # sub line and settles it only after PRICE_DEBOUNCE_MS (250ms); _settle is two frames.
+    page.wait_for_function("([s, t]) => { const e = document.querySelector(s + ' .mgspend-s');"
+                           " return e && e.textContent === t; }", arg=[go, "pick a picture first"])
     g = _spend_button(page, go)
     assert g["disabled"] and g["sub"] == "pick a picture first", g
 

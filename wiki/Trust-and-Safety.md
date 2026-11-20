@@ -31,11 +31,20 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   The guarantee is honesty, not refusal: a paid clip is never shown as free. The other way round
   is refused: if the card a free price was shown for has been used elsewhere or has expired by
   the time you send, nothing is sent and the app says the card is gone, so a send shown as free
-  is never charged. A card is all or nothing: if PixAI says a job needs credits beyond what the
-  card covers, the app adds none, tells you "the free card doesn't cover this", and does not
-  send it again. That holds for every send that shows a price first: the Generate dock (a
-  `{a|b}` prompt and a confirmed run included), Edit, Upscale, AI presets, the Video tab, and
-  the Loom's renders and its Image, Edit and Reference tabs. A training run's confirm prices it
+  is never charged. A card is all or nothing: if PixAI answers that a job needs credits beyond
+  what the card covers, the app adds none and does not send it again. The words "the free card
+  doesn't cover this" show only for an **image generation or an edit** (the Generate dock, a
+  `{a|b}` prompt and Upscale included): those go out on PixAI's own REST routes, where the app
+  can read the answer's code. **Video and reference video** (the Video tab and The Loom's
+  renders) go out on PixAI's GraphQL route, so there the line under the message is PixAI's
+  own wording, not those words, and it may not mention the card at all. Enhance, AI scenes and
+  Fix never use a free card.
+  **Either way the send is treated as one that "may have started"**, not as a proven refusal,
+  because that answer does not prove nothing was made. The app says "PixAI may have started
+  this. It was not sent again; check the Activity tray (or pixai.art) before sending it
+  again", and for the next 60 seconds the same request is refused before anything goes out
+  ("The last one may still be starting, so this was not sent"). Look in Activity before you
+  send it again. A training run's confirm prices it
   again and asks before it charges. The price and the send check your cards under the same
   sign-in. Details and the
   exact preview wording are in [Generating → Free cards and videos](Generating#free-cards-and-videos).
