@@ -6941,6 +6941,7 @@ def test_the_phones_use_default_is_off_when_the_pack_has_no_default_to_go_back_t
     _settle(page)
     _dismiss_any_achievement_toast(page)
     page.click('button:has-text("Control")')
+    _ctm_section(page, "This phone")   # the Branding tile lives in This phone (look pick B, 2026-11-19)
     page.wait_for_selector(".mgcp-tile.click")
     page.locator('.mgcp-tile.click:has-text("Branding")').click()
     page.wait_for_selector(".mgcp-brandgrid")
@@ -6965,12 +6966,13 @@ def test_the_phone_branding_roles_push_a_role_screen_with_44_px_controls(
     _settle(page)
     _dismiss_any_achievement_toast(page)
     page.click('button:has-text("Control")')
+    _ctm_section(page, "This phone")   # the Branding tile lives in This phone (look pick B, 2026-11-19)
     page.wait_for_selector(".mgcp-tile.click")
     page.locator('.mgcp-tile.click:has-text("Branding")').click()
     page.wait_for_selector(".mgcp-brandgrid")
     page.click('.mgcp-brandnav:has-text("Roles")')
     page.wait_for_selector(".mgcp-rlm-row")
-    rows = page.evaluate("""() => [...document.querySelectorAll('.mgcp-rlm-row')].map(r => ({
+    rows =page.evaluate("""() => [...document.querySelectorAll('.mgcp-rlm-row')].map(r => ({
         name: r.querySelector('.mgcp-rl-name > div').textContent,
         state: r.querySelectorAll('.mgcp-rl-name > div')[1].textContent,
         h: Math.round(r.getBoundingClientRect().height),
