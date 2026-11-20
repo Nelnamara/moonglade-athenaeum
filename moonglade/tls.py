@@ -59,6 +59,9 @@ TLS_OFF, TLS_LAN, TLS_ALL = "off", "lan", "all"
 # The authority lives ten years: it is what a device installs, so it should not move.
 CA_LIFETIME_DAYS = 3650
 # Apple's ceiling for a TLS server certificate is 825 days; a longer one is refused outright.
+# Apple counts the whole span from NotBefore to NotAfter, so the back-dated start is inside it:
+# a span of 826 days is "not standards compliant" on an iPhone, a Mac and an Apple TV even under
+# an authority the device trusts (measured with SecTrust, 2026-11-20).
 CERT_LIFETIME_DAYS = 825
 # A certificate this close to its end is replaced at the next start.
 CERT_RENEW_BEFORE_DAYS = 30
@@ -141,6 +144,18 @@ def _not_after(cert):
         return cert.not_valid_after_utc
     except AttributeError:                              # cryptography < 42
         return cert.not_valid_after.replace(tzinfo=datetime.timezone.utc)
+
+
+def _not_before(cert):
+    try:
+        return cert.not_valid_before_utc
+    except AttributeError:                              # cryptography < 42
+        return cert.not_valid_before.replace(tzinfo=datetime.timezone.utc)
+
+
+def within_apple_ceiling(cert):
+    """The certificate's whole span, NotBefore to NotAfter, is CERT_LIFETIME_DAYS or less. Pure."""
+    return _not_after(cert) - _not_before(cert) <= datetime.timedelta(days=CERT_LIFETIME_DAYS)
 
 
 def _spki(public_key):
@@ -293,7 +308,10 @@ def _ensure(dns_names, ip_addresses, now):
     dns, ips = _permitted_by(ca, dns, ips)
     cert_p, key_p = cert_path(), key_path()
     leaf, key = _load_first_cert(cert_p), _load_key(key_p)
-    if leaf is not None and key is not None and pair_matches(leaf, key) and _fresh(leaf, now):
+    # A certificate past Apple's ceiling (this module's first builds made 826-day ones) is
+    # re-issued once under the same authority, so a device's pinned fingerprint does not move.
+    if (leaf is not None and key is not None and pair_matches(leaf, key) and _fresh(leaf, now)
+            and within_apple_ceiling(leaf)):
         try:
             leaf.verify_directly_issued_by(ca)
             have_dns, have_ips = _leaf_names(leaf)
@@ -303,14 +321,15 @@ def _ensure(dns_names, ip_addresses, now):
         except Exception:                               # noqa: BLE001 -- not this authority's
             pass
     key = _ec_key()
+    start = now - datetime.timedelta(days=1)            # a little slack for a slow device clock
     leaf = (x509.CertificateBuilder()
             .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME,
                                                         "Moonglade Athenaeum")]))
             .issuer_name(ca.subject)
             .public_key(key.public_key())
             .serial_number(x509.random_serial_number())
-            .not_valid_before(now - datetime.timedelta(days=1))
-            .not_valid_after(min(now + datetime.timedelta(days=CERT_LIFETIME_DAYS),
+            .not_valid_before(start)
+            .not_valid_after(min(start + datetime.timedelta(days=CERT_LIFETIME_DAYS),
                                  _not_after(ca)))
             .add_extension(x509.SubjectAlternativeName(
                 [x509.DNSName(n) for n in dns] + [x509.IPAddress(a) for a in ips]),
