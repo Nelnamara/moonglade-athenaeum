@@ -25,6 +25,7 @@ import requests
 from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gallery as g
+from moonglade import gen_cli as gen_cli_mod
 from moonglade import gen_params as gen_params_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import mirror as mirror_mod
@@ -325,9 +326,9 @@ def test_each_cli_runner_sends_through_the_unclear_wrapper(runner):
     and run_generate through _cli_send_once (source pin: the wrapper is what turns a lost
     answer into the honest sentence)."""
     import inspect
-    src = inspect.getsource(getattr(core, runner))
+    src = inspect.getsource(getattr(gen_cli_mod, runner))        # the runners: gen_cli since 3.22
     assert "_cli_create_once(" in src and "gql_mutate(" not in src
-    assert "_cli_send_once(" in inspect.getsource(core.run_generate)
+    assert "_cli_send_once(" in inspect.getsource(gen_cli_mod.run_generate)
 
 
 def test_run_generate_exits_with_the_honest_sentence(tmp_path, monkeypatch, capsys):
@@ -346,7 +347,7 @@ def test_run_generate_exits_with_the_honest_sentence(tmp_path, monkeypatch, caps
     args = argparse.Namespace(out=str(tmp_path), confirm=True, task_id="", token=None,
                               poll_timeout=1)
     with pytest.raises(gen_road_mod.SendOutcomeUnclear) as ei:
-        core.run_generate(args)
+        gen_cli_mod.run_generate(args)
     assert gen_road_mod.CLI_UNCLEAR in str(ei.value)
     assert len(wire.creates()) == 1
 

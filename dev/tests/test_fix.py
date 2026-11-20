@@ -15,6 +15,7 @@ import requests
 from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gallery as moonglade_gallery
+from moonglade import gen_cli as gen_cli_mod
 from moonglade import gen_params as gen_params_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import pricing as pricing_mod
@@ -116,7 +117,7 @@ def test_collect_names_a_fix_from_its_source_image_not_the_template(monkeypatch,
                  [_row(media_id="700", filename="images/a_night_elf_druid_T0_700.jpg",
                        prompt_preview="a night elf druid, moonlight")])
     _stub_collect(monkeypatch, tmp_path)
-    monkeypatch.setattr(core, "_task_detail_query", lambda s, t: _fixer_task())
+    monkeypatch.setattr(gen_cli_mod, "_task_detail_query", lambda s, t: _fixer_task())
     gen_road_mod.collect_generation(object(), "T1", str(tmp_path))
     row = next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
                if r["media_id"] == "M9")
@@ -129,7 +130,7 @@ def test_collect_falls_back_to_the_source_media_id_when_it_is_not_in_the_catalog
     """A Fix run on an image this backup has never seen (a fresh upload) still must not
     inherit the template name -- the source media_id is at least a real handle."""
     _stub_collect(monkeypatch, tmp_path)
-    monkeypatch.setattr(core, "_task_detail_query", lambda s, t: _fixer_task(source="700"))
+    monkeypatch.setattr(gen_cli_mod, "_task_detail_query", lambda s, t: _fixer_task(source="700"))
     gen_road_mod.collect_generation(object(), "T1", str(tmp_path))
     row = next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
                if r["media_id"] == "M9")
@@ -140,7 +141,7 @@ def test_collect_still_names_an_ordinary_generation_from_its_prompt(monkeypatch,
     """No-regression: only the fixer family changes. A normal generation keeps
     build_stem_name's <prompt>_<task>_<media>."""
     _stub_collect(monkeypatch, tmp_path)
-    monkeypatch.setattr(core, "_task_detail_query", lambda s, t: {
+    monkeypatch.setattr(gen_cli_mod, "_task_detail_query", lambda s, t: {
         "parameters": {"prompts": "a night elf druid", "modelId": "V1"},
         "outputs": {"mediaId": "M9", "seed": 42}})
     gen_road_mod.collect_generation(object(), "T1", str(tmp_path))
@@ -178,7 +179,7 @@ def test_collect_writes_the_fix_model_and_leaves_the_rest_empty(monkeypatch, tmp
     """The catalog row is what the detail page renders. Model was an em-dash because the
     collect path never wrote model_id/model_name at all."""
     _stub_collect(monkeypatch, tmp_path)
-    monkeypatch.setattr(core, "_task_detail_query", lambda s, t: _fixer_task())
+    monkeypatch.setattr(gen_cli_mod, "_task_detail_query", lambda s, t: _fixer_task())
     gen_road_mod.collect_generation(object(), "T1", str(tmp_path))
     row = next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
                if r["media_id"] == "M9")
@@ -581,7 +582,7 @@ def _collect_fix(monkeypatch, tmp_path, fixer):
     _stub_collect(monkeypatch, tmp_path)
     task = _fixer_task(source="700")
     task["parameters"]["chat"]["fixer"] = fixer
-    monkeypatch.setattr(core, "_task_detail_query", lambda s, t: task)
+    monkeypatch.setattr(gen_cli_mod, "_task_detail_query", lambda s, t: task)
     gen_road_mod.collect_generation(object(), "T1", str(tmp_path))
     return next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
                 if r["media_id"] == "M9")["filename"]

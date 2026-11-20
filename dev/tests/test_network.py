@@ -4,6 +4,7 @@ import pytest
 import requests
 
 from moonglade import backup as core
+from moonglade import gen_cli as gen_cli_mod
 from moonglade import models as models_mod
 from moonglade import paths
 from moonglade import task_reads as task_reads_mod
@@ -1203,7 +1204,7 @@ def test_live_capture_writes_every_field_the_backfill_would(monkeypatch, tmp_pat
                 if k in CATALOG_FIELDS and str(v or "").strip()}
     expected |= {"loras"}          # "" by design out of extract_full_meta; caller resolves it
     src = (pathlib.Path(__file__).resolve().parents[2]
-           / "moonglade" / "backup.py").read_text(encoding="utf-8")
+           / "moonglade" / "gen_cli.py").read_text(encoding="utf-8")      # since 3.22
     # _download_image_task is the SHARED downloader: collect_generation (the web
     # app + job tracker) goes through it, so it is the path that matters most.
     # Since issue #19 it hands the fields to build_catalog_row as KEYWORDS rather than

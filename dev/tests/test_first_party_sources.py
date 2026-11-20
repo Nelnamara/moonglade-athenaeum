@@ -28,6 +28,7 @@ _TODAY = (
     "moonglade/cards.py",
     "moonglade/gen_params.py",
     "moonglade/gen_road.py",
+    "moonglade/gen_cli.py",
     "moonglade/similar.py", "moonglade/task_reads.py", "moonglade/telemetry.py",
     "moonglade/updater.py",
 )

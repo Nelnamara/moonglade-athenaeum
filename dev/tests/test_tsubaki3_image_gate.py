@@ -31,6 +31,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import cards as cards_mod
+from moonglade import gen_cli as gen_cli_mod
 from moonglade import gen_params as gen_params_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import models as models_mod
@@ -423,7 +424,7 @@ def test_an_upscale_whose_ratio_the_build_drops_is_refused_not_billed_as_a_new_g
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: pytest.fail("card check"))
     with pytest.raises(core.PixAIError) as err:
-        core.run_generate(_cli_args(tmp_path, ref_media_id="M1", enlarge=ratio, width=size,
+        gen_cli_mod.run_generate(_cli_args(tmp_path, ref_media_id="M1", enlarge=ratio, width=size,
                                     height=size, face_fix=False, confirm=False))
     assert "No upscale is possible" in str(err.value)
 
@@ -751,7 +752,7 @@ def test_run_generate_card_matches_and_submits_the_gated_dict(rest, monkeypatch,
         raise _Stop()
     monkeypatch.setattr(task_reads_mod, "_poll_task_status", stop)
     with pytest.raises(_Stop):
-        core.run_generate(_cli_args(tmp_path))
+        gen_cli_mod.run_generate(_cli_args(tmp_path))
     assert sent[0] is matched[0]
     assert (sent[0]["width"], sent[0]["height"]) == (912, 512)
     assert "enableADetailer" not in sent[0]
@@ -764,7 +765,7 @@ def test_run_generate_preview_prints_and_card_checks_the_gated_dict(rest, monkey
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(cards_mod, "match_kaisuuken",
                         lambda s, params, **k: matched.append(params) or None)
-    assert core.run_generate(_cli_args(tmp_path, confirm=False)) == {"submitted": False}
+    assert gen_cli_mod.run_generate(_cli_args(tmp_path, confirm=False)) == {"submitted": False}
     out = capsys.readouterr().out
     shown = json.loads(out.split("===\n", 1)[1].split("\n  adjusted:", 1)[0])["parameters"]
     assert (shown["width"], shown["height"]) == (912, 512)
@@ -787,7 +788,7 @@ def test_run_generate_confirm_refuses_read_only_before_the_gates_pixai_reads(ext
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "READ_ONLY", True)
     with pytest.raises(core.PixAIError) as err:
-        core.run_generate(_cli_args(tmp_path, **extra))
+        gen_cli_mod.run_generate(_cli_args(tmp_path, **extra))
     assert "READ_ONLY" in str(err.value)
 
 

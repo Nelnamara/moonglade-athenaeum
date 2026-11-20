@@ -13,6 +13,7 @@ rebuilt and written anyway.
 """
 from moonglade import backup as core
 from moonglade import gallery as g
+from moonglade import gen_cli as gen_cli_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade.gallery import CATALOG_FIELDS, create_app, load_catalog, save_catalog
 
@@ -53,13 +54,13 @@ def test_the_very_first_collect_has_no_catalog_to_snapshot(tmp_path, monkeypatch
     folder there is no table yet. Nothing local to carry is an empty map, not a crash."""
     _stub_download(monkeypatch, tmp_path, name="first.png")
     monkeypatch.setattr(core, "resolve_media", lambda s, mid: ("https://x/i.png", {}))
-    monkeypatch.setattr(core, "_task_image_media", lambda outputs: [("m0", "1")])
+    monkeypatch.setattr(gen_cli_mod, "_task_image_media", lambda outputs: [("m0", "1")])
     monkeypatch.setattr(core, "extract_full_meta", lambda r: {})
     monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, r: None)
     monkeypatch.setattr(g, "make_thumbnail", lambda *a, **k: None)
     assert not (tmp_path / "catalog.db").exists()
 
-    core._download_image_task(object(), {"outputs": {"x": 1}}, "t0", tmp_path, _Args(),
+    gen_cli_mod._download_image_task(object(), {"outputs": {"x": 1}}, "t0", tmp_path, _Args(),
                               prompt="the first one")
 
     assert [r["media_id"] for r in load_catalog(tmp_path / "catalog.db")] == ["m0"]

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from moonglade import cards as cards_mod
 from moonglade import gallery as moonglade_gallery
 from moonglade import backup as core
+from moonglade import gen_cli as gen_cli_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import task_reads as task_reads_mod
@@ -871,18 +872,18 @@ def test_task_image_media_prefers_batch_over_grid():
         {"mediaId": "C"},                                   # missing seed -> shared
         {"mediaId": ""},                                     # empty -> skipped
     ]}
-    media = core._task_image_media(outputs)
+    media = gen_cli_mod._task_image_media(outputs)
     assert [m for m, _ in media] == ["A", "B", "C"]          # the reals, NOT "GRID"
     assert dict(media) == {"A": "111", "B": "222", "C": "111"}  # per-image seed, shared fallback
 
 
 def test_task_image_media_single_and_legacy():
     # single image: no batch -> use mediaId
-    assert core._task_image_media({"mediaId": "X", "seed": "9"}) == [("X", "9")]
+    assert gen_cli_mod._task_image_media({"mediaId": "X", "seed": "9"}) == [("X", "9")]
     # legacy shape (batchMediaIds, no batch) still works, deduped
-    m = core._task_image_media({"mediaId": "X", "seed": "9", "batchMediaIds": ["X", "Y"]})
+    m = gen_cli_mod._task_image_media({"mediaId": "X", "seed": "9", "batchMediaIds": ["X", "Y"]})
     assert [mid for mid, _ in m] == ["X", "Y"]
-    assert core._task_image_media({}) == []
+    assert gen_cli_mod._task_image_media({}) == []
 
 
 def _stub_generate_network(monkeypatch, outputs):
@@ -917,7 +918,7 @@ def test_run_generate_saves_batch_individuals_not_the_grid(monkeypatch, tmp_path
     seen_mids = _stub_generate_network(monkeypatch, _BATCH_OUTPUTS)
     args = SimpleNamespace(out=str(tmp_path), params_json='{"prompts": "x", "modelId": "v"}',
                            confirm=True, task_id="", token=None)
-    res = core.run_generate(args)
+    res = gen_cli_mod.run_generate(args)
     assert seen_mids == ["A", "B"]        # the real individuals downloaded, never "GRID"
     assert res["images"] == 2
 
@@ -945,7 +946,7 @@ def test_run_generate_still_self_heals_after_delegating_to_submit_generation(mon
         out=str(tmp_path),
         params_json='{"prompts": "x", "modelId": "v", "inferenceProfile": "ultra"}',
         confirm=True, task_id="", token=None)
-    res = core.run_generate(args)
+    res = gen_cli_mod.run_generate(args)
     assert len(calls) == 2                       # rejected once, retried once
     assert "inferenceProfile" not in calls[1]     # retry dropped it
     assert seen_mids == ["A", "B"]
@@ -958,7 +959,7 @@ def test_run_edit_image_saves_batch_individuals_not_the_grid(monkeypatch, tmp_pa
     seen_mids = _stub_generate_network(monkeypatch, _BATCH_OUTPUTS)
     args = SimpleNamespace(out=str(tmp_path), params_json='{"chat": {"modelId": "v"}}',
                            confirm=True, task_id="", edit_src=[], prompt="x", token=None)
-    res = core.run_edit_image(args)
+    res = gen_cli_mod.run_edit_image(args)
     assert seen_mids == ["A", "B"]
     assert res["images"] == 2
 
@@ -974,11 +975,11 @@ def test_task_detail_query_reads_the_full_document(monkeypatch):
         return {"task": {"id": v["id"], "status": "completed"}}
 
     monkeypatch.setattr(core, "gql_adhoc", fake_adhoc)
-    t = core._task_detail_query(object(), "T7")
+    t = gen_cli_mod._task_detail_query(object(), "T7")
     assert t["id"] == "T7" and t["status"] == "completed"
     assert sent == [(task_reads_mod._TASK_DETAIL_DOC, {"id": "T7"})]
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, tid: {"id": tid, "via": "detail"})
-    assert core._task_detail_query(object(), "T8") == {"id": "T8", "via": "detail"}
+    assert gen_cli_mod._task_detail_query(object(), "T8") == {"id": "T8", "via": "detail"}
 
 
 def test_submit_generation(monkeypatch):
@@ -1065,7 +1066,7 @@ def test_generation_status_phases(monkeypatch):
 def test_collect_generation(monkeypatch, tmp_path):
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: {"outputs": {"mediaId": "M1"}})
     monkeypatch.setattr(core, "extract_full_meta", lambda r: {"prompt_full": "p"})
-    monkeypatch.setattr(core, "_download_image_task", lambda *a, **k: ["/M1.webp"])
+    monkeypatch.setattr(gen_cli_mod, "_download_image_task", lambda *a, **k: ["/M1.webp"])
     got = gen_road_mod.collect_generation(object(), "T", str(tmp_path))
     assert got["media_ids"] == ["M1"] and got["saved"] == 1
 
@@ -1104,7 +1105,7 @@ def test_run_generate_persists_paid_credit(monkeypatch, tmp_path):
                                       "outputs": _BATCH_OUTPUTS, "paidCredit": 2750})
     args = SimpleNamespace(out=str(tmp_path), params_json='{"prompts": "x", "modelId": "v"}',
                            confirm=True, task_id="", token=None)
-    core.run_generate(args)
+    gen_cli_mod.run_generate(args)
     rows = moonglade_gallery.load_catalog(tmp_path / "catalog.db")
     assert {r["media_id"]: r.get("paid_credit") for r in rows} == {"A": "2750", "B": "2750"}
 

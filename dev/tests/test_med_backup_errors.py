@@ -31,6 +31,7 @@ import pytest
 import requests
 
 from moonglade import backup as core
+from moonglade import gen_cli as gen_cli_mod
 from moonglade import media_tools as media_tools_mod
 from moonglade import telemetry as telemetry_mod
 from moonglade import task_reads as task_reads_mod
@@ -587,7 +588,7 @@ def recovery_network(monkeypatch):
 
 class TestM16VideoCollectionFailsSoft:
     def _run(self, tmp_path, task_id):
-        return core.run_generate(SimpleNamespace(
+        return gen_cli_mod.run_generate(SimpleNamespace(
             out=str(tmp_path), params_json='{"prompts": "x", "modelId": "v"}',
             confirm=False, task_id=task_id, token=None))
 
@@ -632,7 +633,7 @@ class TestM16VideoCollectionFailsSoft:
 
 class TestM16RecoveryIsCounted:
     def _run(self, tmp_path, task_id):
-        return core.run_generate(SimpleNamespace(
+        return gen_cli_mod.run_generate(SimpleNamespace(
             out=str(tmp_path), params_json='{"prompts": "x", "modelId": "v"}',
             confirm=False, task_id=task_id, token=None))
 

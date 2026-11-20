@@ -11,6 +11,7 @@ import threading
 import time
 
 from moonglade import backup as core
+from moonglade import gen_cli as gen_cli_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import pricing as pricing_mod
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
@@ -981,7 +982,7 @@ def _queued(tid_status="waiting", started=False):
 
 def _no_estimate(monkeypatch):
     """Silence the queue-estimate side trip for the phase-only tests below."""
-    monkeypatch.setattr(core, "_task_detail_query", lambda s, tid: {"parameters": {}})
+    monkeypatch.setattr(gen_cli_mod, "_task_detail_query", lambda s, tid: {"parameters": {}})
     monkeypatch.setattr(pricing_mod, "queue_wait_estimate", lambda *a, **k: None)
 
 
@@ -1082,7 +1083,7 @@ def test_pixais_own_queue_estimate_is_recorded_when_a_job_is_seen_queued(tmp_pat
     cli.post("/api/jobs", json={"job_id": "7005", "type": "generate", "label": "Generated"})
     monkeypatch.setattr(task_reads_mod, "generation_status", _queued())
     asked = []
-    monkeypatch.setattr(core, "_task_detail_query",
+    monkeypatch.setattr(gen_cli_mod, "_task_detail_query",
                         lambda s, tid: {"parameters": {"modelId": "1983308862240288769",
                                                        "priority": 1000}})
     monkeypatch.setattr(pricing_mod, "queue_wait_estimate",
@@ -1105,7 +1106,7 @@ def test_a_job_that_starts_before_its_first_poll_costs_no_extra_calls(tmp_path, 
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "7006", "type": "generate", "label": "Generated"})
     monkeypatch.setattr(task_reads_mod, "generation_status", _queued("processing", started=True))
-    monkeypatch.setattr(core, "_task_detail_query",
+    monkeypatch.setattr(gen_cli_mod, "_task_detail_query",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not ask")))
     monkeypatch.setattr(pricing_mod, "queue_wait_estimate",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not ask")))
@@ -1122,7 +1123,7 @@ def test_an_unavailable_estimate_still_ships_the_phase(tmp_path, monkeypatch, pi
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "7007", "type": "generate", "label": "Generated"})
     monkeypatch.setattr(task_reads_mod, "generation_status", _queued())
-    monkeypatch.setattr(core, "_task_detail_query",
+    monkeypatch.setattr(gen_cli_mod, "_task_detail_query",
                         lambda *a, **k: (_ for _ in ()).throw(core.PixAIError("boom")))
 
     cli.get("/api/task-status?task_id=7007")
@@ -1163,7 +1164,7 @@ def test_a_slow_eta_fetch_cannot_overwrite_a_newer_rendering_phase(tmp_path, mon
         """Stand in for the two real calls: block until poll B has finished writing."""
         b_done.wait(timeout=5)
         return 42
-    monkeypatch.setattr(core, "_task_detail_query", lambda *a, **k: {"parameters": {}})
+    monkeypatch.setattr(gen_cli_mod, "_task_detail_query", lambda *a, **k: {"parameters": {}})
     monkeypatch.setattr(pricing_mod, "queue_wait_estimate", _slow_estimate)
 
     a_err = []

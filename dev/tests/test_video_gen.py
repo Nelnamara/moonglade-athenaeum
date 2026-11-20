@@ -8,6 +8,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import cards as cards_mod
+from moonglade import gen_cli as gen_cli_mod
 from moonglade import gen_params as gen_params_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import media_tools as media_tools_mod
@@ -96,14 +97,14 @@ def _video_args(tmp_path, **kw):
 
 def test_generate_video_previews_without_confirm(tmp_path):
     # No --confirm => preview only, no network, spends nothing.
-    res = core.run_generate_video(_video_args(tmp_path))
+    res = gen_cli_mod.run_generate_video(_video_args(tmp_path))
     assert res == {"submitted": False}
 
 
 def test_generate_video_requires_a_source_image(tmp_path):
     import pytest
     with pytest.raises(core.PixAIError):
-        core.run_generate_video(_video_args(tmp_path, image=""))
+        gen_cli_mod.run_generate_video(_video_args(tmp_path, image=""))
 
 
 # ---- banked enums: camera movement + channel (2026-07-02) ----
@@ -141,7 +142,7 @@ def test_shot_params_carry_correct_modelid():
 # ---- --dump-params: bank any submit shape off a recovered task ----
 
 def test_dump_params_prints_full_shape_when_flagged(capsys):
-    core._maybe_dump_params(SimpleNamespace(dump_params=True),
+    gen_cli_mod._maybe_dump_params(SimpleNamespace(dump_params=True),
                             {"parameters": {"i2vPro": {"model": "v4.0.1"},
                                             "multiRefResource": {"imageMediaIds": ["1"]}}})
     out = capsys.readouterr().out
@@ -149,7 +150,7 @@ def test_dump_params_prints_full_shape_when_flagged(capsys):
 
 
 def test_dump_params_silent_by_default(capsys):
-    core._maybe_dump_params(SimpleNamespace(dump_params=False), {"parameters": {"x": 1}})
+    gen_cli_mod._maybe_dump_params(SimpleNamespace(dump_params=False), {"parameters": {"x": 1}})
     assert capsys.readouterr().out == ""
 
 
@@ -159,7 +160,7 @@ def test_dump_params_also_prints_the_task_status(capsys):
     one moment someone recovers a task specifically because something looked wrong, this
     told them nothing about the outcome. A real task carries status alongside parameters
     in the same getTaskById response; this must not require a second round trip."""
-    core._maybe_dump_params(SimpleNamespace(dump_params=True),
+    gen_cli_mod._maybe_dump_params(SimpleNamespace(dump_params=True),
                             {"parameters": {"x": 1}, "status": "Failed"})
     out = capsys.readouterr().out
     assert "task status: Failed" in out
@@ -168,7 +169,7 @@ def test_dump_params_also_prints_the_task_status(capsys):
 def test_dump_params_omits_the_status_line_when_absent(capsys):
     """Must not print 'task status: None' or similar -- silence is correct when the
     response genuinely carries no status field."""
-    core._maybe_dump_params(SimpleNamespace(dump_params=True), {"parameters": {"x": 1}})
+    gen_cli_mod._maybe_dump_params(SimpleNamespace(dump_params=True), {"parameters": {"x": 1}})
     out = capsys.readouterr().out
     assert "task status" not in out
 
@@ -177,13 +178,13 @@ def test_dump_params_omits_the_status_line_when_absent(capsys):
 
 class TestOutputsOrRaise:
     def test_does_not_raise_when_something_was_found(self):
-        core._outputs_or_raise({"status": "done"}, found=["media1"], empty_message="unused")
+        gen_cli_mod._outputs_or_raise({"status": "done"}, found=["media1"], empty_message="unused")
 
     def test_genuinely_empty_completed_task_keeps_the_original_message(self):
         """The case this message was always right about -- e.g. a silently
         content-filtered task that PixAI still reports as 'done'. Must not change."""
         with pytest.raises(core.EmptyOutputsError, match="task completed but no media"):
-            core._outputs_or_raise({"status": "done"}, found=[],
+            gen_cli_mod._outputs_or_raise({"status": "done"}, found=[],
                                    empty_message="task completed but no media ids found")
 
     def test_missing_status_keeps_the_original_message(self):
@@ -191,7 +192,7 @@ class TestOutputsOrRaise:
         (or the field is empty) must fall back to the original wording, not silently
         claim a failure that was never reported."""
         with pytest.raises(core.EmptyOutputsError, match="task completed but no media"):
-            core._outputs_or_raise({}, found=[],
+            gen_cli_mod._outputs_or_raise({}, found=[],
                                    empty_message="task completed but no media ids found")
 
     @pytest.mark.parametrize("raw_status", ["failed", "Failed", "ERROR", "cancelled",
@@ -203,7 +204,7 @@ class TestOutputsOrRaise:
         moonglade_backup.py's own generation_status() lowercases before comparing
         against this same _GEN_FAIL tuple."""
         with pytest.raises(core.EmptyOutputsError) as exc:
-            core._outputs_or_raise({"status": raw_status}, found=[],
+            gen_cli_mod._outputs_or_raise({"status": raw_status}, found=[],
                                    empty_message="task completed but no media ids found")
         msg = str(exc.value)
         assert "completed" not in msg, "still claims the task completed"
@@ -217,7 +218,7 @@ class TestOutputsOrRaise:
         response (wait vs. investigate) from what the situation calls for. A
         non-terminal status now says the task is still going and to come back."""
         with pytest.raises(core.EmptyOutputsError) as exc:
-            core._outputs_or_raise({"status": raw_status}, found=[],
+            gen_cli_mod._outputs_or_raise({"status": raw_status}, found=[],
                                    empty_message="task completed but no media ids found")
         msg = str(exc.value)
         assert "completed" not in msg
@@ -276,7 +277,7 @@ def test_reference_video_previews_without_confirm(tmp_path, monkeypatch, pixai):
     itself rides."""
     monkeypatch.setattr(core, "upload_media",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("no upload in preview")))
-    assert core.run_reference_video(_refvid_args(tmp_path)) == {"submitted": False}
+    assert gen_cli_mod.run_reference_video(_refvid_args(tmp_path)) == {"submitted": False}
     assert pixai.mutations() == 0
     assert not [c for c in pixai.calls if c.verb in ("query", "mutate", "persisted")]
 
@@ -284,14 +285,14 @@ def test_reference_video_previews_without_confirm(tmp_path, monkeypatch, pixai):
 def test_reference_video_requires_a_ref(tmp_path):
     import pytest
     with pytest.raises(core.PixAIError):
-        core.run_reference_video(_refvid_args(tmp_path, ref_image=None))
+        gen_cli_mod.run_reference_video(_refvid_args(tmp_path, ref_image=None))
 
 
 def test_reference_video_preview_snaps_duration(tmp_path, capsys):
     """B9's twin on the reference-video CLI path: --duration 7 has no matching allowed
     PixAI length (5/6/10/15) and must snap to the nearest (6), not submit verbatim --
     the exact bug already fixed for the Loom's build_shot_video_params, now missing here."""
-    core.run_reference_video(_refvid_args(tmp_path, duration=7))
+    gen_cli_mod.run_reference_video(_refvid_args(tmp_path, duration=7))
     out = capsys.readouterr().out
     assert '"duration": 6,' in out
 
@@ -311,7 +312,7 @@ def test_reference_video_argparse_default_is_5(monkeypatch, tmp_path):
     via core.main() rather than re-derived, so a future edit to the add_argument() call
     itself is what this test is pinned against."""
     captured = {}
-    monkeypatch.setattr(core, "run_reference_video", lambda a: captured.setdefault("args", a))
+    monkeypatch.setattr(gen_cli_mod, "run_reference_video", lambda a: captured.setdefault("args", a))
     monkeypatch.setattr("sys.argv", ["prog", "--reference-video", "--ref-image", "1",
                                      "--out", str(tmp_path)])
     core.main()
@@ -322,12 +323,12 @@ def test_reference_video_falls_back_to_5_not_15(tmp_path, capsys):
     """B10: run_reference_video's own call-site fallback (`getattr(args, "duration", ...)
     or ...`) must land on 5 for a falsy or wholly-missing --duration -- not the old,
     inconsistent 15 -- so no other duration-default drift exists for r2v."""
-    core.run_reference_video(_refvid_args(tmp_path, duration=0))
+    gen_cli_mod.run_reference_video(_refvid_args(tmp_path, duration=0))
     assert '"duration": 5,' in capsys.readouterr().out
 
     args = _refvid_args(tmp_path)
     del args.duration
-    core.run_reference_video(args)
+    gen_cli_mod.run_reference_video(args)
     assert '"duration": 5,' in capsys.readouterr().out
 
 
@@ -397,7 +398,7 @@ def test_build_shot_video_params_r2v_video_and_audio_ids_flow_through():
 def test_collect_generation_detects_video(monkeypatch, tmp_path):
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: {"outputs": {"videos": [{"mediaId": "V9"}]}})
     monkeypatch.setattr(core, "video_outputs", lambda r: ([{"video_media_id": "V9"}], {"prompt": "p"}))
-    monkeypatch.setattr(core, "_download_video_task", lambda *a, **k: ["/V9.mp4"])
+    monkeypatch.setattr(gen_cli_mod, "_download_video_task", lambda *a, **k: ["/V9.mp4"])
     got = gen_road_mod.collect_generation(object(), "T", str(tmp_path))
     assert got["is_video"] is True and got["media_ids"] == ["V9"] and got["saved"] == 1
 
@@ -422,7 +423,7 @@ def test_download_video_task_posterless_makes_ffmpeg_thumb(monkeypatch, tmp_path
         calls.append((str(video_path), str(thumb_path))); Path(thumb_path).write_bytes(b"jpg"); return True
     monkeypatch.setattr(media_tools_mod, "video_poster_thumb", _fake_vpt)
 
-    core._download_video_task(object(), {}, "T1", tmp_path, SimpleNamespace(name_length=60), {})
+    gen_cli_mod._download_video_task(object(), {}, "T1", tmp_path, SimpleNamespace(name_length=60), {})
 
     assert len(calls) == 1, "ffmpeg first-frame fallback should fire exactly once for a poster-less video"
     assert calls[0][1].endswith("V1.jpg")
@@ -448,7 +449,7 @@ def test_download_video_task_with_poster_skips_ffmpeg(monkeypatch, tmp_path):
 
     called = []
     monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: called.append(1))
-    core._download_video_task(object(), {}, "T2", tmp_path, SimpleNamespace(name_length=60), {})
+    gen_cli_mod._download_video_task(object(), {}, "T2", tmp_path, SimpleNamespace(name_length=60), {})
     assert called == [], "poster present -> ffmpeg fallback should be skipped"
     assert (tmp_path / "gallery" / "thumbs" / "V2.jpg").exists()
 
@@ -663,7 +664,7 @@ def test_download_video_task_catalogs_video_even_if_poster_fails(monkeypatch, tm
     monkeypatch.setattr(core, "save_catalog_over_snapshot",
                         lambda db, rows, snapshot: saved.extend(rows))
 
-    core._download_video_task(object(), {}, "T7", tmp_path, SimpleNamespace(name_length=60), {})
+    gen_cli_mod._download_video_task(object(), {}, "T7", tmp_path, SimpleNamespace(name_length=60), {})
     assert any(r.get("media_id") == "V7" and r.get("is_video") == "1" for r in saved), \
         "the finished video must be cataloged even when the poster thumbnail fails"
 
@@ -680,8 +681,8 @@ def test_local_video_reference_uploads_as_VIDEO(monkeypatch):
                         lambda s, p, mt="IMAGE": seen.append(mt) or "up-1")
     monkeypatch.setattr(gen_params_mod, "_is_local_source", lambda s: str(s).startswith("/local"))
 
-    assert core._resolve_refs(object(), ["/local/a.png"], "IMAGE") == ["up-1"]
-    assert core._resolve_refs(object(), ["/local/b.mp4"], "VIDEO") == ["up-1"]
+    assert gen_cli_mod._resolve_refs(object(), ["/local/a.png"], "IMAGE") == ["up-1"]
+    assert gen_cli_mod._resolve_refs(object(), ["/local/b.mp4"], "VIDEO") == ["up-1"]
     assert seen == ["IMAGE", "VIDEO"], \
         "local refs uploaded as {} -- a local video must register as VIDEO".format(seen)
 
@@ -693,12 +694,12 @@ def test_local_audio_reference_is_refused_not_mislabelled():
     media_id and a baffling downstream failure. Refuse it with a usable message
     instead. A bare media_id still passes straight through."""
     with pytest.raises(core.PixAIError) as e:
-        core._resolve_refs(object(), [__file__], None)
+        gen_cli_mod._resolve_refs(object(), [__file__], None)
     msg = str(e.value)
     assert "--ref-video" in msg, "the error must name the workaround, not just say no"
 
     # an existing media_id is untouched -- only the local-file case is refused
-    assert core._resolve_refs(object(), ["746928310596368107"], None) == \
+    assert gen_cli_mod._resolve_refs(object(), ["746928310596368107"], None) == \
         ["746928310596368107"]
 
 

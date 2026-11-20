@@ -304,6 +304,11 @@ SEAMS = {
         "_UNKNOWN_OUTCOME_STATUSES", "classify_outcome", "_GRAPHQL_NUMERIC_CODES",
         "graphql_error_code", "outcome_reason", "definite_refusal", "send_outcome", "CLI_UNCLEAR",
         "SendOutcomeUnclear", "_cli_send_once", "_cli_create_once"]},
+    "moonglade.gen_cli": {"from": "moonglade.backup", "names": [
+        "_maybe_dump_params", "_outputs_or_raise", "_print_gate_receipt", "run_generate",
+        "_video_row_model", "_download_video_task", "_task_image_media", "_task_detail_query",
+        "_fix_source_label", "_download_image_task", "_i2v_cli_unsent_notes", "run_generate_video",
+        "_resolve_refs", "run_reference_video", "run_upload", "run_edit_image"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -1127,6 +1132,35 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_unclear_single_sends.py', 'moonglade.gen_road'),
     ('tests/test_video_tsubaki.py', 'moonglade.gen_road'),
     ('tests/test_web_auth.py', 'moonglade.gen_road'),
+    # 3.22 phase 5, gen_cli: two readers read text that left backup.py and now read
+    # moonglade/gen_cli.py as well: test_gen_surface (the capture paths' row building, and
+    # run_generate's sampling fields) and test_network (the live capture's written fields, in
+    # _download_image_task). test_unclear_single_sends, test_read_only, test_spend_no_retry and
+    # test_video_tsubaki reach the runners through gen_cli_mod.
+    ('tests/test_artworks_adhoc.py', 'moonglade.gen_cli'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.gen_cli'),
+    ('tests/test_config_path_routing.py', 'moonglade.gen_cli'),
+    ('tests/test_csrf_coverage.py', 'moonglade.gen_cli'),
+    ('tests/test_edit_upload.py', 'moonglade.gen_cli'),
+    ('tests/test_enhance.py', 'moonglade.gen_cli'),
+    ('tests/test_evidence_counters.py', 'moonglade.gen_cli'),
+    ('tests/test_gen_surface.py', 'moonglade.gen_cli'),
+    ('tests/test_history_feed_document.py', 'moonglade.gen_cli'),
+    ('tests/test_jwt.py', 'moonglade.gen_cli'),
+    ('tests/test_living_library.py', 'moonglade.gen_cli'),
+    ('tests/test_loom_notify.py', 'moonglade.gen_cli'),
+    ('tests/test_network.py', 'moonglade.gen_cli'),
+    ('tests/test_pixai_client.py', 'moonglade.gen_cli'),
+    ('tests/test_settings_store.py', 'moonglade.gen_cli'),
+    ('tests/test_setup_prepare.py', 'moonglade.gen_cli'),
+    ('tests/test_spend_no_retry.py', 'moonglade.gen_cli'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.gen_cli'),
+    ('tests/test_telemetry.py', 'moonglade.gen_cli'),
+    ('tests/test_training_advanced.py', 'moonglade.gen_cli'),
+    ('tests/test_training_parity.py', 'moonglade.gen_cli'),
+    ('tests/test_unclear_single_sends.py', 'moonglade.gen_cli'),
+    ('tests/test_video_tsubaki.py', 'moonglade.gen_cli'),
+    ('tests/test_web_auth.py', 'moonglade.gen_cli'),
 }
 
 

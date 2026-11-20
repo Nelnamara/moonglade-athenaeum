@@ -43,6 +43,7 @@ from moonglade import container as moonglade_container
 from moonglade import contest_sync as _contest_sync
 from moonglade import contest_wins
 from moonglade import dupes as _dupes
+from moonglade import gen_cli as _gen_cli
 from moonglade import gen_params as _gen_params
 from moonglade import gen_road as _gen_road
 from moonglade import health as _health
@@ -21557,7 +21558,7 @@ __DESIGN_TOKENS__
         /v2/task/wait-time -- see core.queue_wait_estimate); fails soft, because an estimate
         must never turn a status poll into an error."""
         try:
-            params = (core._task_detail_query(session, tid) or {}).get("parameters") or {}
+            params = (_gen_cli._task_detail_query(session, tid) or {}).get("parameters") or {}
             if not isinstance(params, dict):
                 return None
             return _pricing.queue_wait_estimate(session, params.get("priority"),

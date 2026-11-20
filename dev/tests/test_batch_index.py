@@ -11,6 +11,7 @@ the <n> in the site's own from-PixAI-<taskId>-<n> download names). Pins:
     original numbers, nothing is ever renumbered.
 """
 from moonglade import backup as core
+from moonglade import gen_cli as gen_cli_mod
 from moonglade import task_reads as task_reads_mod
 
 
@@ -147,7 +148,7 @@ def test_a_deleted_member_is_not_one_of_the_tasks_images():
     and a --sync enumerate a task's outputs with. Left as it was, every re-sync would list
     an image PixAI had deleted and download it straight back into the library."""
     task = _batch_task_with_deletions(["mA", "mB", "mC", "mD"], deleted=("mB", "mD"))
-    got = [mid for mid, _seed in core._task_image_media(task["outputs"])]
+    got = [mid for mid, _seed in gen_cli_mod._task_image_media(task["outputs"])]
     assert got == ["mA", "mC"], "a deleted member came back as one of the task's images"
 
 
@@ -155,7 +156,7 @@ def test_a_batch_with_every_member_deleted_yields_nothing():
     """And in particular does NOT fall back to outputs.mediaId, which on a batch task is
     the combined preview picture rather than one of the images."""
     task = _batch_task_with_deletions(["mA", "mB"], deleted=("mA", "mB"))
-    assert core._task_image_media(task["outputs"]) == []
+    assert gen_cli_mod._task_image_media(task["outputs"]) == []
 
 
 def test_survivors_keep_pixais_original_numbers_when_a_sibling_is_deleted():

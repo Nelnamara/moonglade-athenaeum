@@ -33,6 +33,7 @@ import requests
 
 from moonglade import backup as core
 from moonglade import cards as cards_mod
+from moonglade import gen_cli as gen_cli_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import mirror as mirror_mod
@@ -68,7 +69,7 @@ SPEND_PATHS = ("submit_generation", "run_generate", "run_generate_video",
                "send_run")
 
 # Where each spend path lives: backup, or the split module it moved to (3.22, phase 5).
-_HOMES = (core, cloud_delete_mod, gen_road_mod)
+_HOMES = (core, cloud_delete_mod, gen_road_mod, gen_cli_mod)
 
 
 def _spend_path(name):
@@ -138,8 +139,8 @@ def cli_stubs(mock_session, monkeypatch):
     monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(task_reads_mod, "_poll_task_status", lambda *a, **k: None)
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda *a, **k: {})
-    monkeypatch.setattr(core, "_maybe_dump_params", lambda *a, **k: None)
-    monkeypatch.setattr(core, "_download_video_task", lambda *a, **k: [])
+    monkeypatch.setattr(gen_cli_mod, "_maybe_dump_params", lambda *a, **k: None)
+    monkeypatch.setattr(gen_cli_mod, "_download_video_task", lambda *a, **k: [])
     return mock_session
 
 
@@ -277,19 +278,19 @@ class TestSpendingPathsAreSingleAttempt:
         assert len(gql_calls) == 2
 
     def test_run_generate(self, tmp_path, cli_stubs, gql_calls):
-        _drive(core.run_generate, _cli_args(tmp_path))
+        _drive(gen_cli_mod.run_generate, _cli_args(tmp_path))
         _assert_single_attempt(gql_calls, gen_road_mod._GEN_MUTATION)
 
     def test_run_generate_video(self, tmp_path, cli_stubs, gql_calls):
-        _drive(core.run_generate_video, _cli_args(tmp_path, image="mid1"))
+        _drive(gen_cli_mod.run_generate_video, _cli_args(tmp_path, image="mid1"))
         _assert_single_attempt(gql_calls, gen_road_mod._GEN_MUTATION)
 
     def test_run_reference_video(self, tmp_path, cli_stubs, gql_calls):
-        _drive(core.run_reference_video, _cli_args(tmp_path, ref_image=["mid1"]))
+        _drive(gen_cli_mod.run_reference_video, _cli_args(tmp_path, ref_image=["mid1"]))
         _assert_single_attempt(gql_calls, gen_road_mod._GEN_MUTATION)
 
     def test_run_edit_image(self, tmp_path, cli_stubs, gql_calls):
-        _drive(core.run_edit_image, _cli_args(tmp_path, edit_src=["mid1"]))
+        _drive(gen_cli_mod.run_edit_image, _cli_args(tmp_path, edit_src=["mid1"]))
         _assert_single_attempt(gql_calls, gen_road_mod._GEN_MUTATION)
 
     def test_upload_media(self, tmp_path, mock_session, gql_calls, monkeypatch):

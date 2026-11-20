@@ -14,6 +14,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gallery as g
+from moonglade import gen_cli as gen_cli_mod
 from moonglade import gen_params as gen_params_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import models as models_mod
@@ -86,7 +87,7 @@ def test_tbkv_i2v_goes_out_in_the_sites_name_only_shape(model):
 
 
 def test_cli_reference_video_preview_sends_the_chosen_engines_id(tmp_path, capsys):
-    core.run_reference_video(_refvid_args(tmp_path, video_model="v4.0"))
+    gen_cli_mod.run_reference_video(_refvid_args(tmp_path, video_model="v4.0"))
     out = capsys.readouterr().out
     assert '"modelId": "2003968021137101826"' in out
     assert gen_params_mod.REFVIDEO_MODEL_ID not in out
@@ -133,7 +134,7 @@ def test_six_seconds_is_unchanged_on_the_existing_engines():
 
 
 def test_cli_reference_video_preview_snaps_six_to_five_on_tbkv(tmp_path, capsys):
-    core.run_reference_video(_refvid_args(tmp_path, video_model="tbkv1.0.1", duration=6))
+    gen_cli_mod.run_reference_video(_refvid_args(tmp_path, video_model="tbkv1.0.1", duration=6))
     assert '"duration": 5,' in capsys.readouterr().out
 
 
@@ -198,13 +199,13 @@ def test_video_ratio_flag_reaches_the_cli_preview(monkeypatch, tmp_path, capsys)
     # A scoped context, never monkeypatch.undo(): undo would also lift conftest's autouse
     # network blocks for the rest of this test.
     with monkeypatch.context() as m:
-        m.setattr(core, "run_reference_video", lambda a: captured.setdefault("args", a))
+        m.setattr(gen_cli_mod, "run_reference_video", lambda a: captured.setdefault("args", a))
         m.setattr("sys.argv", ["prog", "--reference-video", "--ref-image", "1",
                                "--video-model", "tbkv1.0.1", "--video-ratio", "21:9",
                                "--out", str(tmp_path)])
         core.main()
     assert captured["args"].video_ratio == "21:9"
-    core.run_reference_video(_refvid_args(tmp_path, video_model="tbkv1.0.1", video_ratio="21:9"))
+    gen_cli_mod.run_reference_video(_refvid_args(tmp_path, video_model="tbkv1.0.1", video_ratio="21:9"))
     assert '"ratio": "21:9"' in capsys.readouterr().out
 
 
@@ -216,7 +217,7 @@ def test_video_ratio_flag_refuses_a_value_pixai_does_not_take(monkeypatch, tmp_p
 
 
 def test_video_ratio_on_a_non_tbkv_engine_says_it_is_not_sent(tmp_path, capsys):
-    core.run_reference_video(_refvid_args(tmp_path, video_model="v4.0.1", video_ratio="16:9"))
+    gen_cli_mod.run_reference_video(_refvid_args(tmp_path, video_model="v4.0.1", video_ratio="16:9"))
     out = capsys.readouterr().out
     assert '"ratio"' not in out and "only sent to the Tsubaki video engines" in out
 
@@ -394,13 +395,13 @@ def test_cli_reference_video_measures_a_catalog_ref_against_out(tmp_path, monkey
     monkeypatch.setattr(media_tools_mod, "duration", lambda p, **k: 12.25)
     vid = "766390091666197256"
     save_catalog(tmp_path / "catalog.db", [_video_file(tmp_path, vid)])
-    core.run_reference_video(_refvid_args(tmp_path, ref_image=None, ref_video=[vid]))
+    gen_cli_mod.run_reference_video(_refvid_args(tmp_path, ref_image=None, ref_video=[vid]))
     out = capsys.readouterr().out
     assert '"inputVideoDurations": [\n        12.25\n      ]' in out
 
 
 def test_cli_reference_video_says_when_a_length_is_unknown(tmp_path, monkeypatch, capsys):
-    core.run_reference_video(_refvid_args(tmp_path, ref_image=None,
+    gen_cli_mod.run_reference_video(_refvid_args(tmp_path, ref_image=None,
                                           ref_video=["766390091666197257"]))
     out = capsys.readouterr().out
     assert '"inputVideoDurations": []' in out and gen_params_mod.INPUT_VIDEO_UNKNOWN_WHY in out
@@ -441,7 +442,7 @@ def test_build_request_says_what_tbkv_did_not_take():
 def test_cli_generate_video_says_what_tbkv_does_not_send(tmp_path, capsys):
     """The CLI i2v road's receipts (review f-V-F5 / V-R4): a negative, a camera move and a
     --video-ratio that --generate-video drops are named under the preview, never silent."""
-    core.run_generate_video(_i2v_args(tmp_path, video_model="tbkv1.0.1", negative="blurry",
+    gen_cli_mod.run_generate_video(_i2v_args(tmp_path, video_model="tbkv1.0.1", negative="blurry",
                                       camera_movement="pan", video_ratio="16:9"))
     out = capsys.readouterr().out
     assert "note: negative prompt not used by Tsubaki Video (not sent)." in out
@@ -451,7 +452,7 @@ def test_cli_generate_video_says_what_tbkv_does_not_send(tmp_path, capsys):
 
 
 def test_cli_generate_video_prints_no_note_where_everything_is_sent(tmp_path, capsys):
-    core.run_generate_video(_i2v_args(tmp_path, video_model="v4.0.1", negative="blurry",
+    gen_cli_mod.run_generate_video(_i2v_args(tmp_path, video_model="v4.0.1", negative="blurry",
                                       camera_movement="pan"))
     out = capsys.readouterr().out
     assert "note: " not in out
@@ -472,7 +473,7 @@ def test_cli_generate_video_names_the_drops_before_a_confirmed_submit(tmp_path, 
         raise _Stop()
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", _no_submit)
     with pytest.raises(_Stop):
-        core.run_generate_video(_i2v_args(tmp_path, video_model="tbkv1.0", negative="blurry",
+        gen_cli_mod.run_generate_video(_i2v_args(tmp_path, video_model="tbkv1.0", negative="blurry",
                                           confirm=True))
     assert "note: negative prompt not used by Tsubaki Video Flash (not sent)." in \
         capsys.readouterr().out
@@ -503,7 +504,7 @@ def test_cli_refuses_video_refs_on_tbkv_before_any_upload(tmp_path, monkeypatch)
     monkeypatch.setattr(core, "upload_media",
                         lambda *a, **k: pytest.fail("refused before any upload"))
     with pytest.raises(core.PixAIError, match="takes no video references"):
-        core.run_reference_video(_refvid_args(tmp_path, video_model="tbkv1.0.1",
+        gen_cli_mod.run_reference_video(_refvid_args(tmp_path, video_model="tbkv1.0.1",
                                               ref_video=["9"], confirm=True))
 
 
@@ -548,7 +549,7 @@ def _collect(tmp_path, monkeypatch, task, names=None):
     looked = []
     monkeypatch.setattr(models_mod, "model_name_gql",
                         lambda s, mid, **k: looked.append(mid) or (names or {}).get(mid, mid))
-    core._download_video_task(object(), task, "T-v", tmp_path,
+    gen_cli_mod._download_video_task(object(), task, "T-v", tmp_path,
                               SimpleNamespace(name_length=60), task["parameters"])
     return {r["media_id"]: r for r in load_catalog(tmp_path / "catalog.db")}, looked
 
@@ -657,7 +658,7 @@ def _recover_i2v(tmp_path, monkeypatch, task, lookup=None):
     def _no_title(s, mid, **k):
         raise core.PixAIError("lookup failed")
     monkeypatch.setattr(models_mod, "model_name_gql", lookup or _no_title)
-    got = core.run_generate_video(_i2v_args(tmp_path, task_id="T-v", image=""))
+    got = gen_cli_mod.run_generate_video(_i2v_args(tmp_path, task_id="T-v", image=""))
     assert got["submitted"] is True and got["videos"] == 1
     return {r["media_id"]: r for r in load_catalog(tmp_path / "catalog.db")}["780000000000000001"]
 

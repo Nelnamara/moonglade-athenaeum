@@ -24,6 +24,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gallery
+from moonglade import gen_cli as gen_cli_mod
 from moonglade import gen_params as gen_params_mod
 from moonglade import models as models_mod
 from moonglade.gallery import load_catalog
@@ -321,7 +322,7 @@ def video_task_network(monkeypatch):
 
 class TestM16VideoTaskRecoveredThroughGenerate:
     def _run(self, tmp_path):
-        return core.run_generate(SimpleNamespace(
+        return gen_cli_mod.run_generate(SimpleNamespace(
             out=str(tmp_path), params_json='{"prompts": "x", "modelId": "v"}',
             confirm=False, task_id="TV1", token=None))
 
@@ -405,7 +406,7 @@ def edit_task_network(monkeypatch):
 
 
 def _run_edit(tmp_path):
-    core.run_edit_image(SimpleNamespace(out=str(tmp_path), task_id="TE1", token=None,
+    gen_cli_mod.run_edit_image(SimpleNamespace(out=str(tmp_path), task_id="TE1", token=None,
                                         prompt="", edit_src=[], params_json=""))
     return load_catalog(tmp_path / "catalog.db")[0]
 

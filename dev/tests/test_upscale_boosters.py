@@ -15,6 +15,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import cards as cards_mod
+from moonglade import gen_cli as gen_cli_mod
 from moonglade import gen_params as gen_params_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import models as models_mod
@@ -187,7 +188,7 @@ def test_cli_flags_reach_the_builder(monkeypatch, tmp_path):
     """Driven through the REAL parser (core.main) so the add_argument() calls themselves
     are what's pinned, not a re-derived namespace."""
     captured = {}
-    monkeypatch.setattr(core, "run_generate", lambda a: captured.setdefault("args", a))
+    monkeypatch.setattr(gen_cli_mod, "run_generate", lambda a: captured.setdefault("args", a))
     monkeypatch.setattr("sys.argv", ["prog", "--generate", "--prompt", "p", "--model", "m",
                                      "--width", "1400", "--height", "784",
                                      "--upscale", "1.4", "--upscale-denoise", "0.5",
@@ -203,7 +204,7 @@ def test_cli_flags_reach_the_builder(monkeypatch, tmp_path):
 
 def test_cli_enlarge_flags_reach_the_builder(monkeypatch, tmp_path):
     captured = {}
-    monkeypatch.setattr(core, "run_generate", lambda a: captured.setdefault("args", a))
+    monkeypatch.setattr(gen_cli_mod, "run_generate", lambda a: captured.setdefault("args", a))
     monkeypatch.setattr("sys.argv", ["prog", "--generate", "--prompt", "p", "--model", "m",
                                      "--enlarge", "1.5", "--enlarge-model", "Lollypop",
                                      "--out", str(tmp_path)])
@@ -214,7 +215,7 @@ def test_cli_enlarge_flags_reach_the_builder(monkeypatch, tmp_path):
 
 def test_cli_generate_without_the_new_flags_is_unchanged(monkeypatch, tmp_path):
     captured = {}
-    monkeypatch.setattr(core, "run_generate", lambda a: captured.setdefault("args", a))
+    monkeypatch.setattr(gen_cli_mod, "run_generate", lambda a: captured.setdefault("args", a))
     monkeypatch.setattr("sys.argv", ["prog", "--generate", "--prompt", "p", "--model", "m",
                                      "--out", str(tmp_path)])
     core.main()

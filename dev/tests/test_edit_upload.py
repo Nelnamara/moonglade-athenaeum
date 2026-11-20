@@ -7,6 +7,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import cards as cards_mod
+from moonglade import gen_cli as gen_cli_mod
 from moonglade import gen_params as gen_params_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import pixai_client as pixai_client_mod
@@ -113,7 +114,7 @@ def test_edit_previews_without_confirm(tmp_path, monkeypatch):
         raise AssertionError("network/upload must not run in preview")
     monkeypatch.setattr(core, "gql_adhoc", boom)
     monkeypatch.setattr(core, "upload_media", boom)
-    res = core.run_edit_image(_edit_args(tmp_path))
+    res = gen_cli_mod.run_edit_image(_edit_args(tmp_path))
     assert res == {"submitted": False}
 
 
@@ -122,14 +123,14 @@ def test_edit_preview_shows_local_files_without_uploading(tmp_path, monkeypatch,
     f.write_bytes(b"x")
     monkeypatch.setattr(core, "upload_media",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("no upload in preview")))
-    core.run_edit_image(_edit_args(tmp_path, edit_src=[str(f)]))
+    gen_cli_mod.run_edit_image(_edit_args(tmp_path, edit_src=[str(f)]))
     out = capsys.readouterr().out
     assert "<upload:" in out and "PREVIEW" in out
 
 
 def test_edit_requires_a_source(tmp_path):
     with pytest.raises(core.PixAIError):
-        core.run_edit_image(_edit_args(tmp_path, edit_src=[], params_json="", task_id=""))
+        gen_cli_mod.run_edit_image(_edit_args(tmp_path, edit_src=[], params_json="", task_id=""))
 
 
 def test_edit_config_from_args_clamps_to_model_caps(tmp_path):
@@ -154,7 +155,7 @@ def test_edit_preview_shows_the_clamped_config_not_the_raw_defaults(tmp_path, ca
     actually submit) reflects the clamped values, not the CLI's raw defaults."""
     args = _edit_args(tmp_path, edit_model="1948514378441961474",
                       edit_resolution="1K", edit_aspect="21:9", edit_quality="medium")
-    core.run_edit_image(args)
+    gen_cli_mod.run_edit_image(args)
     out = capsys.readouterr().out
     assert '"resolution": "2K"' in out
     assert '"quality"' not in out   # reference-pro exposes no quality knob at all

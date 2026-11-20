@@ -6,6 +6,7 @@ import tempfile
 import types
 
 from moonglade import backup as core
+from moonglade import gen_cli as gen_cli_mod
 from moonglade import models as models_mod
 from moonglade.gallery import CATALOG_FIELDS, save_catalog, load_catalog
 from moonglade import task_reads as task_reads_mod
@@ -122,6 +123,8 @@ def test_every_capture_path_builds_its_row_through_the_shared_builder():
     copy of its pre-refactor output."""
     import pathlib
     src = pathlib.Path(core.__file__).read_text(encoding="utf-8")
+    # the CLI runners and the task downloaders are in moonglade/gen_cli.py since 3.22
+    src += "\n" + pathlib.Path(gen_cli_mod.__file__).read_text(encoding="utf-8")
 
     builder = _function_body(src, "def build_catalog_row")
     assert "for k in _TASK_ROW_FIELDS" in builder, \
@@ -276,7 +279,7 @@ def test_run_generate_reads_sampling_fields_from_the_model_not_the_submit():
     to preempt this for `steps` and leak the submitted value for `cfg`; source-level because the
     run_generate builder does real downloads no unit test drives."""
     import pathlib
-    src = pathlib.Path(core.__file__).read_text(encoding="utf-8")
+    src = pathlib.Path(gen_cli_mod.__file__).read_text(encoding="utf-8")    # since 3.22
     region = src[src.index("def run_generate("):src.index("def _download_video_task(")]
     for f in ("steps", "cfg_scale", "sampler"):
         assert '{0}=fm.get("{0}"'.format(f) in region, \

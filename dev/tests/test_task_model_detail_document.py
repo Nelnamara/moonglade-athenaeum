@@ -43,6 +43,7 @@ import requests
 
 from moonglade import backup as core
 from moonglade import gallery as g
+from moonglade import gen_cli as gen_cli_mod
 from moonglade import models as models_mod
 from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
 
@@ -320,7 +321,7 @@ def test_every_other_reader_of_a_task_reads_it_the_same(pixai, kind):
     for reader in (core.video_outputs, core.source_media_of_task, core.fixer_block,
                    cloud_delete_mod.task_artwork_ids, core._paid_credit_str):
         assert reader(task) == reader(saved), reader.__name__
-    assert core._task_image_media(task["outputs"]) == core._task_image_media(saved["outputs"])
+    assert gen_cli_mod._task_image_media(task["outputs"]) == gen_cli_mod._task_image_media(saved["outputs"])
     assert core._prompt_helper_label(task["parameters"], task) == \
         core._prompt_helper_label(saved["parameters"], saved)
     for mid in {doc["mediaId"], *(b["mediaId"] for b in doc["outputs"].get("batch") or [])}:
@@ -632,5 +633,5 @@ def test_the_retired_saved_requests_leave_nothing_behind():
     assert "TASK_DETAIL_HASH" not in example and "MODEL_DETAIL_HASH" not in example
     for reader in (task_reads_mod.task_detail_gql, models_mod._model_version_gql, models_mod.model_name_gql,
                    models_mod.resolve_model_base_id, core._resolve_model_preset,
-                   core._task_detail_query):
+                   gen_cli_mod._task_detail_query):
         assert ".persisted(" not in inspect.getsource(reader), reader.__name__
