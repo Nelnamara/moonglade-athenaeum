@@ -620,6 +620,29 @@ def test_prompt_helper_is_idempotent_and_other_architectures_keep_the_legacy_sha
     assert "creativity" not in legacy["promptHelper"]
 
 
+def test_the_builders_own_extra_shape_gates_as_before_and_is_idempotent(rest):
+    """_gen_parameters writes naturalPrompts under `extra` on every image (the REST create
+    schema has no top-level key). On MMDIT26B the gate keeps it there when the helper is on,
+    drops it when off, and re-gates its own answer to the same object; on MMDIT26A the extra
+    rides through untouched."""
+    def built(vid, **payload):
+        args = gen_road_mod._gen_args_from_web_payload(dict({"prompt": "<prompt>"}, **payload))
+        args.model = vid
+        return gen_params_mod._gen_parameters(args)
+    raw = built(T3)
+    assert raw["extra"] == {"naturalPrompts": "<prompt>"} and "naturalPrompts" not in raw
+    on, _ = gate(raw)
+    assert on["extra"] == {"naturalPrompts": "<prompt>"} and "naturalPrompts" not in on
+    assert on["promptHelper"]["creativity"] == "medium"
+    again, adjusted = gate(on)
+    assert again is on and adjusted == []
+    off, _ = gate(built(T3, prompt_helper="0"))
+    assert "extra" not in off and "naturalPrompts" not in off
+    assert gate(off)[0] is off
+    t2, _ = gate(built(T2))
+    assert t2["extra"] == {"naturalPrompts": "<prompt>"} and "naturalPrompts" not in t2
+
+
 # =============================================================================
 # G7 -- gate(gate(p)) is gate(p) on the twelve Tsubaki.3 wire shapes
 # =============================================================================

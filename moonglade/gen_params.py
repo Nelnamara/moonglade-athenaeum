@@ -352,9 +352,6 @@ def _gen_parameters(args):
         return max(64, (int(v) // 8) * 8)
     params = {
         "prompts": args.prompt,
-        # naturalPrompts is the natural-language form the prompt-helper reads; send
-        # it alongside prompts (PixAI's generator does the same).
-        "naturalPrompts": args.prompt,
         "modelId": args.model or DEFAULT_GEN_MODEL,
         "width": _dim(args.width),
         "height": _dim(args.height),
@@ -501,6 +498,16 @@ def _gen_parameters(args):
         params["qualityTag"] = {"prefix": qtag}      # their "Quality Tag" booster
     if getattr(args, "kaisuuken_id", ""):
         params["kaisuukenId"] = str(args.kaisuuken_id)   # spend a free card instead of credits
+    # naturalPrompts is the natural-language form the prompt helper reads; it goes beside
+    # prompts on every image, as PixAI's generator does -- and where PixAI's site puts it:
+    # under `extra` (PROBE_2026-09-23_site: "still nests naturalPrompts in extra";
+    # PROBE_2026-10-02_site's captured submit {extra:{naturalPrompts}, ...}). The REST create
+    # schema (`yt`) has no top-level key by that name, so the wire guard refuses one there.
+    # Merged into any extra already built; the MMDIT26B gate (G6) reads it here and stays
+    # idempotent.
+    extra = dict(params["extra"]) if isinstance(params.get("extra"), dict) else {}
+    extra["naturalPrompts"] = args.prompt
+    params["extra"] = extra
     return params
 
 

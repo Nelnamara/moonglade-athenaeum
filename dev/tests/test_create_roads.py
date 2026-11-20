@@ -430,6 +430,39 @@ def test_the_card_rides_inside_parameters_on_the_final_body(door, monkeypatch):
     assert body["parameters"]["kaisuukenId"] == "K1" and set(body) == {"parameters"}
 
 
+def test_a_tsubaki2_image_from_the_builder_passes_the_wire_guard(door):
+    """The default model's image, built by the web road's own builder, goes out through the
+    real door: naturalPrompts sits under `extra` (as PixAI's site nests it), never at the top
+    level, where REST's `yt` has no such key and the guard would refuse every image."""
+    req = gen_road.build_request({"prompt": "a cat", "version_id": gen_params.DEFAULT_GEN_MODEL},
+                                 mode="image")
+    assert req.parameters["modelId"] == gen_params.DEFAULT_GEN_MODEL
+    wire = Wire()
+    assert gen_road.submit(pc.PixAIClient(wire), req)["task_id"] == "T1"
+    (url, body), = wire.posts
+    assert url.endswith("/task/create")
+    assert body["parameters"]["extra"] == {"naturalPrompts": "a cat"}
+    assert "naturalPrompts" not in body["parameters"]
+
+
+def test_a_stray_top_level_naturalprompts_is_still_refused_unsent(door):
+    """A hand-built or --params-json body with the old top-level key is refused, never
+    stripped -- the builder moving it is not a licence for the guard to."""
+    wire = Wire()
+    req = _image_req(dict(IMAGE_P, naturalPrompts="a cat"))
+    with pytest.raises(core.LocalRefusal, match="naturalPrompts"):
+        gen_road.submit(pc.PixAIClient(wire), req)
+    assert wire.posts == []
+
+
+def test_the_video_builders_never_carry_the_image_extra():
+    """The naturalPrompts move is the image builder's alone: the GraphQL video and
+    reference-video bodies keep their recorded bytes (the fixture test above) and carry
+    neither key."""
+    for built in _shots():
+        assert "extra" not in built and "naturalPrompts" not in built
+
+
 def test_a_nested_unknown_key_added_after_the_card_step_is_refused_unsent(door, monkeypatch):
     def _card(session, params, args):
         params["kaisuukenId"] = "K1"

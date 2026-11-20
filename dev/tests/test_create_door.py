@@ -256,10 +256,10 @@ class TestWireGuard:
         assert s.posts == []
 
     def test_naturalprompts_at_the_top_level_is_refused(self):
-        """_gen_parameters writes a top-level naturalPrompts on every image; PixAI's `yt` has no
-        such key (it lives under `extra`), so REST would drop it silently. The guard refuses
-        (the conservative reading; see the S2a report). The gate moves it under `extra` on
-        MMDIT26B, which passes."""
+        """PixAI's `yt` has no top-level naturalPrompts (it lives under `extra`, where the site
+        nests it), so REST would drop one silently. The guard refuses a stray one (a
+        --params-json, a hand-built dict); _gen_parameters writes it under `extra`, which
+        passes (test_create_roads: the builder's Tsubaki.2 image over the real door)."""
         client, s = _client()
         with pytest.raises(core.LocalRefusal, match="naturalPrompts"):
             client.create("image", dict(IMAGE_P, naturalPrompts="a cat"))

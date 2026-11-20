@@ -390,7 +390,8 @@ def test_gen_parameters_mode_helper_natural():
                 steps=25, cfg=7.0, count=1, seed=None, params_json="")
     p = gen_params_mod._gen_parameters(SimpleNamespace(**base))
     assert "inferenceProfile" not in p                  # auto default omits it (safe)
-    assert p["naturalPrompts"] == "elf"                 # not skipped
+    assert p["extra"] == {"naturalPrompts": "elf"}      # not skipped; under extra, as the site
+    assert "naturalPrompts" not in p                    # REST's `yt` has no top-level key
     assert p["promptHelper"]["userWantToEnable"] is True
     assert "inferenceProfile" not in gen_params_mod._gen_parameters(SimpleNamespace(mode="auto", **base))
     p2 = gen_params_mod._gen_parameters(SimpleNamespace(mode="ultra", prompt_helper=False, **base))

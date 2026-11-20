@@ -919,7 +919,7 @@ def _flag_args(core, params):
             argv.append((" ", flag, text))
         ns[dest] = parsed
 
-    known = {"prompts", "naturalPrompts", "modelId", "width", "height", "samplingSteps",
+    known = {"prompts", "extra", "modelId", "width", "height", "samplingSteps",
              "cfgScale", "batchSize", "seed", "priority", "inferenceProfile",
              "negativePrompts", "lora", "loraParameters", "promptHelper", "enlarge",
              "enlargeModel", "upscale", "upscaleDenoisingStrength", "upscaleDenoisingSteps",
@@ -927,7 +927,9 @@ def _flag_args(core, params):
     if set(p) - known:
         return None
     prompt = p.get("prompts")
-    if not isinstance(prompt, str) or not prompt or p.get("naturalPrompts") != prompt:
+    # The CLI's builder writes the natural prompt under `extra` and nothing else there, so
+    # any other extra (or a different natural prompt) has no flag and goes as --params-json.
+    if not isinstance(prompt, str) or not prompt or p.get("extra") != {"naturalPrompts": prompt}:
         return None
     try:
         add("--model", str(p["modelId"]), "model", str(p["modelId"]))

@@ -240,12 +240,8 @@ def test_generate_failure_logs_a_failed_cli_job_and_still_raises(monkeypatch, tm
     # the registered refusal rather than dying at "No API key found" and logging THAT as
     # the error.
     pixai.fail("/task/create", core.PixAIError("rejected"))     # the create door (3.22)
-    # A body the create door's wire guard takes, so the registered refusal is what answers
-    # (the builder's top-level naturalPrompts is refused locally on REST; see test_create_door).
-    from moonglade import gen_params as _gen_params
-    monkeypatch.setattr(_gen_params, "_gen_parameters",
-                        lambda args: {"prompts": "p", "modelId": "1", "width": 512,
-                                      "height": 512})
+    # The builder's own body passes the create door's wire guard (naturalPrompts rides under
+    # `extra`), so the registered refusal is what answers.
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(sys, "argv",
                         ["prog", "--generate", "--prompt", "p", "--confirm",
