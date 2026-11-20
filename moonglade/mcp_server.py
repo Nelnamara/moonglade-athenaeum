@@ -135,9 +135,8 @@ def get_image(media_id: str, include_image: bool = True):
     try:
         import PIL.Image
         im = PIL.Image.open(path)
-        im.thumbnail((640, 640))
         buf = io.BytesIO()
-        im.convert("RGB").save(buf, format="JPEG", quality=85)
+        g.thumb_rgb(im, (640, 640), PIL.Image.BICUBIC).save(buf, format="JPEG", quality=85)
         return [meta, Image(data=buf.getvalue(), format="jpeg")]
     except Exception as e:
         return {**meta, "note": "could not render image: {}".format(e)}
