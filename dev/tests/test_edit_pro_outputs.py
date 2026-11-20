@@ -410,3 +410,65 @@ def test_check_edit_outputs_reads_a_built_shape():
         bad["chat"]["modelConfig"][key] = value
         with pytest.raises(core.LocalRefusal):
             gen_params.check_edit_outputs(bad)
+
+
+# ---------------------------------------------------------------------------
+# 5.2: cards are all or nothing (D2) -- "the card doesn't cover this", held as unclear
+# ---------------------------------------------------------------------------
+
+def _extra_credits_refusal():
+    return core.PixAIRestError("REST POST /task/create -> 400", 400,
+                               {"code": "KAISUUKEN_EXTRA_CREDITS_REQUIRED",
+                                "message": "extra credits required"})
+
+
+def test_extra_credits_required_reads_the_card_does_not_cover_this_and_holds():
+    e = _extra_credits_refusal()
+    assert "KAISUUKEN_EXTRA_CREDITS_REQUIRED" not in gen_road.DEFINITE_CODES
+    assert gen_road.classify_outcome(e, "create") == "unknown"
+    assert gen_road.send_outcome(e, True) == "may_have_started"
+    assert "the free card doesn't cover this" in gen_road.outcome_reason(e)
+
+
+def test_the_cli_says_the_card_does_not_cover_this_beside_may_have_started():
+    def _send():
+        raise _extra_credits_refusal()
+    with pytest.raises(gen_road.SendOutcomeUnclear) as ei:
+        gen_road._cli_send_once(_send)
+    assert str(ei.value).startswith(gen_road.CLI_UNCLEAR)
+    assert "the free card doesn't cover this" in str(ei.value)
+
+
+class _RefusingAnswer(_Answer):
+    status_code, ok = 400, False
+    text = '{"code": "KAISUUKEN_EXTRA_CREDITS_REQUIRED"}'
+
+    def json(self):
+        return {"code": "KAISUUKEN_EXTRA_CREDITS_REQUIRED"}
+
+
+class _RefusingWire(_Wire):
+    def post(self, url, **kw):
+        self.posts.append(json.loads(kw["data"].decode("utf-8")))
+        return _RefusingAnswer()
+
+
+def test_a_card_answered_with_extra_credits_required_is_never_resent(monkeypatch):
+    """No send after an unknown outcome: one POST, the card never re-sent without itself, and
+    never re-sent with kaisuukenExtraCredits."""
+    from moonglade import cards as cards_mod
+    monkeypatch.setattr(core, "_create", _REAL_CREATE)
+    monkeypatch.setattr(models_mod, "_gate_params_for_model", lambda s, p: p)
+
+    def _card(session, params, args):
+        params["kaisuukenId"] = "K1"
+        return "K1"
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", _card)
+    wire = _RefusingWire()
+    req = gen_road.GenerationRequest(mode="edit", parameters=gen_params.build_chat_edit_parameters(
+        "x", ["111"], V2, output_format="gif", frame_count=9))
+    with pytest.raises(core.PixAIRestError):
+        gen_road.submit(pc.PixAIClient(wire), req)
+    assert len(wire.posts) == 1
+    assert wire.posts[0]["parameters"]["kaisuukenId"] == "K1"
+    assert "kaisuukenExtraCredits" not in json.dumps(wire.posts)

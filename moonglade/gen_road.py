@@ -2069,6 +2069,16 @@ def graphql_error_code(err):
     return None
 
 
+# PixAI codes that are NOT definite refusals (so a send answered with one still holds as "may
+# have started") but whose plain meaning is known, said in the app's words beside that hold.
+# KAISUUKEN_EXTRA_CREDITS_REQUIRED: a free card is all or nothing (owner ruling D2,
+# DESIGN_3.22 5.2) -- the app never sends kaisuukenExtraCredits, so this reads "the card
+# doesn't cover this", never a prompt to top it up.
+OUTCOME_CODE_WORDS = {
+    "KAISUUKEN_EXTRA_CREDITS_REQUIRED": "the free card doesn't cover this",
+}
+
+
 def outcome_reason(exc):
     """PixAI's own reason for a failed send, in a short line for the user beside "may have
     started" (an NSFW_DETECTED or INPUT_IMAGE_TOO_LARGE that is not a definite refusal, an
@@ -2080,6 +2090,8 @@ def outcome_reason(exc):
         code = f.get("code") if isinstance(f.get("code"), str) else ""
         text = f.get("message") if isinstance(f.get("message"), str) else ""
         head = "HTTP {}".format(exc.status) if exc.status is not None else "PixAI"
+        if code in OUTCOME_CODE_WORDS:
+            return "{}: {} ({})".format(head, OUTCOME_CODE_WORDS[code], code)
         if code or text:
             return "{}: {}".format(head, " -- ".join(x for x in (code, text.strip()) if x))
         return "{}: {}".format(head, str(exc).split(": ", 1)[-1][:200])
@@ -2140,6 +2152,10 @@ def _cli_send_once(send, reached=lambda: True):
         if send_outcome(e, reached()) != "may_have_started":
             raise
         detail = "{}: {}".format(type(e).__name__, str(e)[:200]).strip()
+        code = getattr(e, "fields", {}).get("code") if isinstance(
+            getattr(e, "fields", None), dict) else None
+        if code in OUTCOME_CODE_WORDS:
+            detail = "{} -- {}".format(OUTCOME_CODE_WORDS[code], detail)
         raise SendOutcomeUnclear(CLI_UNCLEAR + "\n  PixAI's answer: " + detail) from e
 
 
