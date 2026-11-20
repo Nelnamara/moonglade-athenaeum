@@ -5,6 +5,7 @@ import { submitTask, useResultLines } from "../gen/submitTask.js";
 import usePriceProbe from "../gen/usePriceProbe.js";
 import { ResultLines } from "./EditTab.jsx";
 import CostBadge from "./CostBadge.jsx";
+import SpendButton from "./SpendButton.jsx";
 
 /* The Fix tab: drag boxes over hands and faces, PixAI repairs what is inside
    them. Two things make this surface unlike every other:
@@ -49,6 +50,7 @@ export default function FixTab({ visible, dock, source }) {
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
   const costRef = useRef(null);
+  const [quote, setQuote] = useState(null);       // the badge's verdict, for the price in ✦ Fix
   const drag = useRef(null);
   const busyRef = useRef(false);
 
@@ -239,14 +241,15 @@ export default function FixTab({ visible, dock, source }) {
     || !(scaleBoxes(boxes, scaleEl()) || []).length;
   const costLine = (
     /* no cardLabel: a Fix can never be card-covered */
-    <CostBadge ref={costRef} hint="Drag a box over a hand or face to see the cost."
+    <CostBadge ref={costRef} hint="Drag a box over a hand or face to see the cost." onButton onCost={setQuote}
       stack={inDock || undefined} balance={inDock ? dock.balance : undefined} />
   );
-  const goButton = inDock ? (
-    <button type="button" className={"mgdock-gen" + (goOff ? " off" : "")} disabled={goOff}
-      title={goTitle} onClick={run}><span>&#10022; Fix {tag}</span></button>
-  ) : (
-    <button className="gen" disabled={goOff} title={goTitle} onClick={run}>&#10022; Fix</button>
+  // The price rides inside the button (look pick round 2, topic 1 B).
+  const goButton = (
+    <SpendButton className={inDock ? "mgdock-gen" : "gen"} offClass={inDock ? "off" : ""}
+      quote={quote} disabled={goOff} title={goTitle}
+      idle={!source ? "pick an image first" : "drag a box first"}
+      label={inDock ? <>&#10022; Fix {tag}</> : <>&#10022; Fix</>} onPress={run} />
   );
   // The composer's line (a Fix has no prompt) -- the slab itself carries the DC's own
   // instruction copy (1501), so this only says where things stand.

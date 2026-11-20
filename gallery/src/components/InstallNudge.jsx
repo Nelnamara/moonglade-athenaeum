@@ -29,7 +29,7 @@ export function NudgeStrip({ show, onOpen, onDismiss }) {
   }, [show]);
   if (!mounted) return null;
   return (
-    <div className={"glm-nudge" + (leaving ? " leaving" : settled ? " settled" : "")}
+    <div data-phone-top="" className={"glm-nudge" + (leaving ? " leaving" : settled ? " settled" : "")}
       onAnimationEnd={() => { if (!leaving) setSettled(true); }}>
       <button type="button" className="glm-nudge-go" onClick={onOpen} disabled={leaving}>{STRIP_TEXT}</button>
       <button type="button" className="glm-nudge-x" aria-label="Don't show this again on this phone"

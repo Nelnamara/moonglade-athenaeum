@@ -72,6 +72,13 @@ import Icon from "../icons/Icons.jsx";
      cardLabel  — fallback name for the covering card when the server didn't send one.
      laneHeld   — (Session H) Unlimited Mode is offered on this model but not sent with this
                   request (the Context side): the context-image note adds "not Unlimited".
+     onButton   — (3.21.x look pick round 2, topic 1 B) the price is said INSIDE the button
+                  that spends (SpendButton.jsx, fed from onCost), so the badge drops its own
+                  price / card line and keeps only what the button cannot say: the stack keeps
+                  the balance ("N left") with the server's receipt and the card-short sentence;
+                  the bar keeps only the receipt and the card-short sentence, and is empty (and
+                  hidden) when there is neither. The badge stays MOUNTED either way -- the price
+                  probe writes its verdict through this ref.
      onCost     — called on every state push with the old mg-cost detail
                   {state, settled, cost, free, cards, card_name, card_expires, text, raw}
                   plus card_short (true only on the paid-because-short case above) and
@@ -253,8 +260,15 @@ function build(view, props) {
   // card name is the server's, the count and balance are the host's own real data. Idle,
   // checking and error carry only the balance (the DC: costSubText is '' unless settled).
   const stack = !!props.stack;
+  const onButton = !!props.onButton;
   let line = "";
-  if (stack) {
+  if (stack && onButton) {
+    // The button says the price and the card; beside it, the balance (the board's "87,251
+    // left"), after the receipt, which is a fact about what will be sent.
+    const balanceN = (props.balance != null && props.balance !== "" && isFinite(Number(props.balance)))
+      ? Number(props.balance) : null;
+    line = [adj, balanceN != null ? fmt(balanceN) + " left" : ""].filter(Boolean).join(" · ");
+  } else if (stack) {
     const parts = [];
     const countN = cardCount(props.count);
     if (lane) {
@@ -276,7 +290,13 @@ function build(view, props) {
     if (balanceN != null) parts.push(fmt(balanceN) + " credits");
     line = parts.join(" · ");
   }
-  return { state, warn, compact, stack, short, lane, main, mainIcon, sub, noteLine, adj, title, val, valIcon, lab, tip, tipWarn, dot, text, line, d };
+  // The bar beside a priced button (onButton, block form) keeps only what the button cannot
+  // say, on a settled answer: the card-short sentence and the receipt, in its one note line.
+  const btnNote = (onButton && !stack && !compact && (state === "free" || state === "paid"))
+    ? [short && sub ? sub.text : "", adj].filter(Boolean).join(" · ") : "";
+  const shownNote = (onButton && !stack && !compact)
+    ? (btnNote ? { text: btnNote, title: btnNote, days: null } : null) : noteLine;
+  return { state, warn, compact, stack, onButton, short, lane, main, mainIcon, sub, noteLine: shownNote, adj, title, val, valIcon, lab, tip, tipWarn, dot, text, line, d };
 }
 
 function detailOf(m) {
@@ -299,7 +319,7 @@ function detailOf(m) {
 const IDLE = { state: "idle", note: "", msg: "", raw: null };
 
 const CostBadge = forwardRef(function CostBadge(props, ref) {
-  const { hint, warn, compact, stack, count, sends, balance, cardLabel, laneHeld, onCost, id, className, style } = props;
+  const { hint, warn, compact, stack, count, sends, balance, cardLabel, laneHeld, onButton, onCost, id, className, style } = props;
   const [view, setView] = useState(IDLE);
 
   // Latest view/props/text for the imperative getters and the onCost effect (which fire
@@ -337,7 +357,7 @@ const CostBadge = forwardRef(function CostBadge(props, ref) {
     }
   }, [view]);
 
-  const m = build(view, { hint, warn, compact, stack, count, sends, balance, cardLabel, laneHeld });
+  const m = build(view, { hint, warn, compact, stack, count, sends, balance, cardLabel, laneHeld, onButton });
   mRef.current = m;
   // Short borrows the amber warn treatment (settled paid, flagged) and adds its own attribute so
   // a host or test can tell "card short" from "host warned" without parsing the sentence.
@@ -347,11 +367,14 @@ const CostBadge = forwardRef(function CostBadge(props, ref) {
   // otherwise); the block form keeps the native title exactly as before.
   const nativeTitle = (m.title && !(m.compact && m.tip)) ? m.title : undefined;
   const showChip = m.compact && m.val;
+  // The price-on-the-button form (onButton): the main line is the button's now, so only the
+  // note lines render -- the stack's balance line and card-short sentence, the bar's note.
+  const priceLine = !(m.onButton && !m.compact);
 
   return (
     <div
       id={id}
-      className={"cost-badge" + (m.compact ? " compact" : "") + (m.stack ? " stack" : "") + (className ? " " + className : "")}
+      className={"cost-badge" + (m.compact ? " compact" : "") + (m.stack ? " stack" : "") + (m.onButton && !m.compact ? " onbtn" : "") + (className ? " " + className : "")}
       data-state={m.state}
       data-warn={dataWarn}
       data-short={dataShort}
@@ -374,21 +397,27 @@ const CostBadge = forwardRef(function CostBadge(props, ref) {
            card-short note keeps its own amber line beneath -- the honesty content of that
            state is not something a tighter layout gets to hide */
         <>
-          <span className="mgc-main">
-            {m.state === "checking" ? <><span className="mgc-pip" />Checking cost…</>
-              : <>{m.mainIcon ? <Icon name={m.mainIcon} className="mgc-ico" /> : null}{m.main}</>}
-            {m.lane ? <span className="mgc-inf">∞</span> : null}
-          </span>
+          {priceLine ? (
+            <span className="mgc-main">
+              {m.state === "checking" ? <><span className="mgc-pip" />Checking cost…</>
+                : <>{m.mainIcon ? <Icon name={m.mainIcon} className="mgc-ico" /> : null}{m.main}</>}
+              {m.lane ? <span className="mgc-inf">∞</span> : null}
+            </span>
+          ) : null}
           {m.line ? <span className="mgc-line">{m.line}</span> : null}
           {m.sub && m.short ? <span className="mgc-sub" title={m.sub.title}>{m.sub.text}</span> : null}
         </>
-      ) : m.state === "checking" ? (
+      ) : m.state === "checking" && priceLine ? (
         <><span className="mgc-pip" />Checking cost…</>
       ) : (
         <>
-          {m.mainIcon ? <Icon name={m.mainIcon} className="mgc-ico" /> : null}
-          {m.main}
-          {m.lane ? <span className="mgc-inf">∞</span> : null}
+          {priceLine ? (
+            <>
+              {m.mainIcon ? <Icon name={m.mainIcon} className="mgc-ico" /> : null}
+              {m.main}
+              {m.lane ? <span className="mgc-inf">∞</span> : null}
+            </>
+          ) : null}
           {m.noteLine ? <span className="mgc-sub" title={m.noteLine.title}>{m.noteLine.text}</span> : null}
         </>
       )}

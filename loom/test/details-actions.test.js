@@ -51,13 +51,16 @@ describe("the primary group: the DC's fileActions, under the hero in the picture
 
   test("(a) exactly the five designed labels, in the designed order", () => {
     // (unslop pick 2B: Download's and Publish's marks are line icons, drawn beside the words)
+    // Delete locally left this row on 2026-11-19 (viewer-bar pick, round 2 topic 2 B): it now
+    // sits at the end of the second row, just before the cloud delete.
     assert.deepEqual(labels(g).filter((l) => l !== "Published"), [
-      "Download", "Publish", "⧉ Copy prompt", "⇱ Upscale", "Delete locally",
+      "Download", "Publish", "⧉ Copy prompt", "⇱ Upscale",
     ]);
   });
   test("(c) Download carries the shared metal face; Delete locally is the danger chip", () => {
     assert.match(g, /<a className="btn mgx-metal"[\s\S]*?><Icon name="download" \/> Download<\/a>/);
-    assert.match(g, /<button className="btn btn-danger" disabled=\{busy\}[\s\S]*?onClick=\{deleteLocal\}>Delete locally<\/button>/);
+    assert.match(src("gallery/src/components/DetailsView.jsx"),
+      /<button className="btn btn-danger" disabled=\{busy\}[\s\S]*?onClick=\{deleteLocal\}>Delete locally<\/button>/);
     // the metal recipe is shell.css's one class, not a second gradient in styles.css
     const shell = src("gallery/src/styles/shell.css");
     assert.match(shell, /\.mgx-metal \{[\s\S]*?--mm-grad: linear-gradient\(100deg/);
@@ -149,7 +152,9 @@ describe("the strip is gone: three groups, styled as groups, and the reveal stil
     // the quieted look: 600 (pick 3B) and the control corner (pick 5B)
     assert.match(css, /\.p-actions \.btn \{ font-size: 11px; font-weight: 600; white-space: nowrap; padding: 8px 14px;\r?\n\s*border-radius: var\(--radius-control\);/);
     assert.match(css, /\.p-actions \.btn-danger[^{]*\{ border: 1px solid rgba\(243,139,168,\.35\);\r?\n\s*background: rgba\(243,139,168,\.1\); color: var\(--red\);/);
-    assert.match(css, /\.p-actions-more \.btn \{ font-size: 10px;/);
+    // the More row is quieter by colour only, never smaller (2026-11-19 walk: "These buttons are tiny")
+    assert.doesNotMatch(css, /\.p-actions-more \.btn \{[^}]*font-size/);
+    assert.doesNotMatch(css, /\.p-actions-more \.btn \{[^}]*padding/);
     assert.match(css, /\.p-actions-more \.btn:not\(\.mgx-metal\):not\(\.btn-danger\) \{ color: var\(--overlay0\);/);
     // the existing .btn base is untouched
     assert.match(css, /\n\.btn \{ border-radius: var\(--radius-control\); border: 1px solid var\(--surface1\); color: var\(--text\);/);

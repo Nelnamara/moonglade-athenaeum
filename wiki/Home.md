@@ -33,7 +33,7 @@ New here? Start with **[Setup](Setup)** — it takes one API key and about a min
 
 Everything on this wiki is also in the app. Press **?** on the keyboard (outside a text field), or
 click the round **?** button — in the header of the gallery, the Generate dock, the Folio and the
-Control Panel, at the bottom right of The Loom, or on a phone in the icon row at the top — and the
+Control Panel, at the bottom right of The Loom, or on a phone the **Guide** card in the Menu — and the
 **Guide** opens over whatever you were doing, on the page for that screen. **Esc** closes it.
 
 - **The page list** runs down the left, with **Search the guide** above it: type a few letters and

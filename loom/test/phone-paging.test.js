@@ -97,20 +97,26 @@ describe("U1 the paging choice: where it lives", () => {
   });
 
   test("Control's Library paging row is its first settings row, Data saver beside it (owner's walk 2026-10-04)", () => {
+    /* Since the 2026-11-19 layout (look pick B) Control is three sections, and "This phone holds
+       Library paging, Data saver and About": paging is that section's first row, Data saver the next,
+       About after them, and every other setting the section holds comes later. */
     const c = code("components/ControlMobile.jsx");
     assert.match(c, /import PagingRow from "\.\/PagingRow\.jsx";/);
-    const glance = c.indexOf(">At a glance<");
+    const phone = c.indexOf('section === "phone" && (');
     const paging = c.indexOf("<PagingRow />");
     const saver = c.indexOf("<DataSaverRow />");
-    assert.ok(glance > 0 && paging > glance && saver > paging, "At a glance, then Library paging, then Data saver");
-    // nothing that is a setting comes before them: not Branding, the mirror, the blur tile or the skins
-    for (const later of ["brandingUnlocked && (", 'className="ctm-mirror"', "<BlurToggleTile", "<SkinsRow"]) {
-      const at = c.indexOf(later);
+    const about = c.indexOf('className="mghelp-aboutrow"');
+    assert.ok(phone > 0 && paging > phone && saver > paging && about > saver,
+      "This phone, then Library paging, then Data saver, then About");
+    // nothing that is a setting comes before them in that section: not Branding, the blur tile or the skins
+    for (const later of ["brandingUnlocked && (", "<BlurToggleTile", "<SkinsRow"]) {
+      const at = c.indexOf(later, phone);
       assert.ok(at > saver, later + " comes after the two per-device phone choices");
     }
-    const between = c.slice(c.indexOf("</div>", c.indexOf("ctm-statgrid")), paging);
+    assert.ok(c.indexOf('className="ctm-mirror"') < phone, "the Live Mirror is the Jobs section's, not This phone's");
+    const between = c.slice(phone, paging);
     assert.ok(!/<(?!\/)(?!div)[A-Z]/.test(between.replace(/\{\/\*[\s\S]*?\*\/\}/g, "")),
-      "no other row between At a glance and Library paging");
+      "no other row before Library paging in This phone");
     const row = code("components/PagingRow.jsx");
     assert.match(row, /usePaging\(\)/);
     assert.match(row, /Library paging/);

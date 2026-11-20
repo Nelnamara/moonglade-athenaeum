@@ -140,6 +140,18 @@ def test_the_broken_files_confirm_opens_over_health_and_under_the_power_modal(z)
     assert bf["scrim"] > z["cu_toast"] and bf["host"] < z["cp_pwr"]
 
 
+def test_duplicate_review_opened_from_the_panel_sits_on_the_panel(z):
+    """One Tidy place (2026-11-19): Duplicate Review opens from the Control Panel's Tidy tab, so
+    it takes the Panel's own sub-layer rung (.mgv-over). At the plain .mgv 410/411 it tied the
+    Panel and its scrim painted under the Panel's slab. The Fix all confirm, which also opens
+    from Tidy, stays above it."""
+    over = {"scrim": _z("styles/overlays.css", ".mgv-scrim.mgv-over"),
+            "host": _z("styles/overlays.css", ".mgv-host.mgv-over")}
+    assert over["host"] > over["scrim"] > z["mgv_host"], "Duplicate Review would open under the Panel"
+    assert over["host"] < z["cp_pwr"], "the power modal must stay above everything on the Panel"
+    assert _z("styles/broken-files.css", ".mgbf-scrim") > over["host"]
+
+
 def test_the_colour_palette_stays_under_the_picker_it_opens():
     """"Extract from image" -> "From the gallery" opens the shared picker ON TOP of the palette
     window; flip that pair and the picker paints behind the window that asked for it."""

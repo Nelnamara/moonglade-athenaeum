@@ -641,7 +641,8 @@ html.mg-noblur .mgdock-scrim {
 .mgdock-emoname { font-size: 10px; color: var(--subtext); text-align: center; line-height: 1.2; }
 .mgdock-emocount { font-size: 10.5px; color: var(--overlay0); text-align: center; }
 
-/* the ONE Generate button (real surface: accent bg, cost chip on the right) */
+/* the ONE Generate button (real surface: accent bg; since look pick round 2, topic 1 B, its
+   price is the button's second line -- SpendButton.jsx / spend-button.css) */
 .mgdock-enhgen { display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 11px 13px; border-radius: 10px; cursor: pointer; font-family: inherit;
   border: 1px solid rgba(255, 255, 255, .25);
@@ -650,8 +651,6 @@ html.mg-noblur .mgdock-scrim {
   box-shadow: 0 6px 18px rgba(0, 0, 0, .42); transition: filter .16s; }
 .mgdock-enhgen:hover:not(.off) { filter: brightness(1.1); }
 .mgdock-enhgen.off { opacity: .5; cursor: default; box-shadow: none; }
-.mgdock-enhgencost { font-family: ui-monospace, Menlo, monospace; font-size: 10px; font-weight: 600;
-  color: #fff; background: rgba(255, 255, 255, .18); border-radius: 5px; padding: 2px 6px; }
 
 /* THE ONE DOOR to the art filters (comp A2 129). The inline 12-swatch teaser strip and
    "◐ Open compare view — M1–M7" are retired: two half-doors to one room was the #48

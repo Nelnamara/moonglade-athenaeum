@@ -626,10 +626,10 @@ button:disabled { cursor: default; }
 .p-actions .btn-danger, .p-actions .btn-danger:hover { border: 1px solid rgba(243,139,168,.35);
   background: rgba(243,139,168,.1); color: var(--red); }
 .p-actions .btn-danger:hover { border-color: rgba(243,139,168,.6); }
-/* More: everything the design doesn't draw, visibly second-tier -- smaller, dimmer,
-   tighter; Delete from PixAI keeps its red but at the row's quieter weight */
-.p-actions-more { gap: 5px; padding-top: 2px; }
-.p-actions-more .btn { font-size: 10px; font-weight: 600; padding: 5px 10px; border-radius: var(--radius-control-sm); }
+/* More: everything the design doesn't draw, visibly second-tier by colour only -- dimmer, the
+   same size as the first row (2026-11-19 walk: "These buttons are tiny" at 10px / 5px 10px, once
+   Delete locally moved here); Delete from PixAI keeps its red but at the row's quieter weight */
+.p-actions-more { gap: 7px; padding-top: 2px; }
 .p-actions-more .btn:not(.mgx-metal):not(.btn-danger) { color: var(--overlay0);
   background: rgba(12,10,28,.45); border-color: rgba(255,255,255,.08); }
 .p-actions-more .btn:not(.mgx-metal):not(.btn-danger):not(.is-off):hover { color: var(--text); }

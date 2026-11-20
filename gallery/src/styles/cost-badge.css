@@ -208,3 +208,8 @@
    warning on a warned or failed quote. Drawn by CostBadge.jsx beside the words, never inside
    them, so the badge's text stays plain words. It takes the colour of the line it sits in. */
 .cost-badge .mgc-ico { margin-right: .3em; }
+
+/* onButton (3.21.x look pick round 2, topic 1 B): the price moved INTO the button that spends
+   (SpendButton.jsx), so a badge with nothing left to say -- no receipt, no card-short
+   sentence, no balance -- takes no room. It stays mounted: the price probe writes through it. */
+.cost-badge.onbtn:empty { display: none; }

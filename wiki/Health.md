@@ -18,7 +18,7 @@ The **Health** overlay is your analytics dashboard over `catalog.db`:
 > no PixAI task behind them, so they can never carry a model.
 
 Reach it from **Health** in the row of destinations under the gallery's banner (on a phone,
-**Menu → Health**).
+**Control → Health**).
 
 ## Storage used
 
@@ -36,8 +36,8 @@ cutting the same pictures. Sizes are the bytes each picture's file takes on disk
 
 **Click a segment (or its name under the bar) and the gallery opens filtered to it** — the type,
 the model or the collection, starting over from the whole library. **Other** is "everything not
-named", so it doesn't open anything. On a phone the same bars are on the Health screen (Menu →
-Health) and a tap does the same.
+named", so it doesn't open anything. On a phone the same bars are in the Control tab's Health
+section (Control → Health) and a tap does the same.
 
 The bars count pictures that are in your catalog *and* on disk. A file that is in the folder but
 not in the catalog counts under **Uncataloged** below, and a catalog row whose file is gone counts
@@ -63,7 +63,11 @@ something was missing.
 
 ## Duplicates review
 
-**Duplicate Review** (opened from Health's Duplicates tile) shows cross-folder duplicate copies side-by-side before you dedup.
+Health keeps the **Duplicates** and **Reclaimable** numbers; clicking either (or **Missing
+files**) opens the Control Panel's **Tidy** tab, the one place for duplicates, stray files and
+broken files (see [Control Panel → Tidy](Control-Panel#tidy--duplicates-stray-files-and-broken-files)).
+There, **Review** opens **Duplicate Review** (on a phone, Health's Duplicates tile still opens it
+directly), which shows cross-folder duplicate copies side-by-side before you dedup.
 In the **Same seed** and **Near-duplicate** groups the members are different pictures, so a
 member PixAI no longer has (gone from your PixAI history as of the last check) is the only
 copy of its picture. It goes with the rest, named first: its pill reads *✕ remove · only
@@ -110,7 +114,8 @@ out of **Missing files**. Three tiles cover that:
   They still count in **Images on disk** and **Missing files** keeps its meaning; this tile
   says it plainly instead.
 - **Missing thumbs** and **Last verified** — read from the last integrity check: **Control
-  Panel → Check — read-only → Verify library integrity → run ▸** (or
+  Panel → Tidy → Broken → Check** (on a phone, **Control → Check — read-only → Verify library
+  integrity → run ▸**; or
   `python -m moonglade --verify-library`). They show "—" and "never" until it has run once.
 
 The check looks at every catalogued file: missing, empty, no thumbnail (or, for a video, no
@@ -129,12 +134,12 @@ repairs nothing; the **Broken files** list below is where you act on what it fou
 
 ### Broken files
 
-When the last check found broken files, Health shows a **Broken files** section under the tiles
-and above the storage bars. It is absent on a clean library. The **Zero-byte files**,
-**Missing thumbs** and **Missing files** tiles turn peach while the list has rows of their kind,
-and clicking one jumps to the list with that kind picked (**Missing files** opens it at **All**). **Control Panel → Check — read-only → Verify library
-integrity** says "N broken · Review ▸" after a check that found some; that opens Health at the
-list too.
+When the last check found broken files, the **Broken files** list appears in the Control
+Panel's **Tidy** tab, under its three columns (until 2026-11-19 it sat in Health, under the
+tiles). It is absent on a clean library. In Health, the **Zero-byte files**, **Missing thumbs**
+and **Missing files** tiles turn peach while the list has rows of their kind, and clicking one
+opens Tidy with that kind picked (**Missing files** opens it at **All**). Tidy's **Broken**
+column shows how many rows the list has and how many can be fixed.
 
 The chips across the top are **All**, **Zero-byte**, **Thumbnail**, **Suspect** and **Lost**,
 each with its count (a chip with nothing under it is hidden). A file that is missing altogether
@@ -182,7 +187,8 @@ checked again so the tiles and the report follow.
 
 #### Fix all recoverable
 
-The section's **Fix all recoverable (N)** button counts the missing, empty, cut-short and thumbnail rows
+The section's **Fix all recoverable (N)** button (and Tidy's **Fix all**, which opens the same
+confirm) counts the missing, empty, cut-short and thumbnail rows
 that can be fixed — never a Lost row, never a picture PixAI no longer has — and asks once:
 how many files it will re-download from PixAI and about how much that is, how many thumbnails
 it will rebuild here, how many lost files it leaves alone, and "Nothing is deleted." On a phone
@@ -191,14 +197,14 @@ counts only the thumbnails.
 
 While it runs, the section's header reads "5 / 12 fixed" with the moon filling as files finish,
 and a **Stop** that lets the current file finish and then stops (nothing is rolled back). The
-file being downloaded shows how many of its bytes have arrived. You can close Health: the run
+file being downloaded shows how many of its bytes have arrived. You can close the Panel: the run
 carries on, the Activity window shows it as "Fixing 12 files · 5 / 12", and clicking that line
 brings you back to the list. When it ends a note says what happened ("Fixed 11 of 12. 1
-couldn't be re-downloaded.") with **Show**, and Health's tiles measure again.
+couldn't be re-downloaded.") with **Show**, and the counts measure again.
 
 #### On a phone
 
-In **Menu → Health** the **Zero-byte files**, **Missing thumbs** and **Missing files** tiles
+In **Control → Health** the **Zero-byte files**, **Missing thumbs** and **Missing files** tiles
 turn peach the same way, and a **Broken files** row under the tiles (with "12 · 1 lost ›") opens the list as its own
 screen; tapping a peach tile opens it at that kind. The chips scroll sideways, and tapping a row
 opens a sheet with what applies to it: **Re-download** or **Rebuild**, **Open details**, and

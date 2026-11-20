@@ -6,9 +6,10 @@ import { isPrivacyBlurOn, privacyBlurClass } from "../lib/privacyBlur.js";
 import { createPortal } from "react-dom";
 import Icon from "../icons/Icons.jsx";
 import CostBadge from "./CostBadge.jsx";
+import SpendButton from "./SpendButton.jsx";
 import {
-  MODELS, pickerModels, MODEL_VMODES, MODEL_MAXDUR, MODE_LBL, MODE_PH, CHANNEL_CAP, CAMERA_OPTS, AUDIO_LANGS,
-  DEFAULT_MODEL, MODEL_CARD, SHOT_LABEL, modelCaps, modelMeta, bankView,
+  MODELS, MODEL_VMODES, MODE_LBL, MODE_PH, CHANNEL_CAP, CAMERA_OPTS, AUDIO_LANGS,
+  DEFAULT_MODEL, SHOT_LABEL, bankView,
   durationAllowed, modelTakes, refCap,
   friendlyGenErr, refItem, primaryBank, setPrimaryBank, buildPayload, hasAnyRef,
   applyMode as applyModeState,
@@ -20,6 +21,9 @@ import {
   linesShown,
 } from "../gen/videoDrawerCore.js";
 import usePriceProbe from "../gen/usePriceProbe.js";
+import { requestPrice } from "../gen/priceRequest.js";
+import { priceKey } from "../gen/priceProbeCore.js";
+import { CARD_LENGTHS, modelCards, pendingPrices } from "../gen/videoModelCardsCore.js";
 import { submitTask } from "../gen/submitTask.js";
 import { CEILING_MS } from "../notify/pollCadence.js";
 import { chipify as refChipify, promptText as refPromptText } from "../gen/refChips.js";
@@ -219,6 +223,16 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   const previewRef = useRef(null);
   const audFileRef = useRef(null);
   const costRef = useRef(null);
+  // The badge's last verdict, for the price inside "Generate video" (SpendButton).
+  const [quote, setQuote] = useState(null);
+  // The model cards' answers (priceKey -> the parsed /api/price body, null = the check failed),
+  // the one request out, and a repaint as each lands. Aborted when the drawer goes.
+  const cardAnswers = useRef(new Map());
+  const cardBusy = useRef(false);
+  const cardCtrl = useRef(null);
+  const [, bumpCards] = useState(0);
+  const stopCardPrices = () => { if (cardCtrl.current) { try { cardCtrl.current.abort(); } catch { /* settled */ } } };
+  useEffect(() => stopCardPrices, []);   // eslint-disable-line react-hooks/exhaustive-deps
   const rootRef = useRef(null);
   // liveNode retains the root node even AFTER React unmounts it (React nulls rootRef on unmount).
   // A submit that resolves after the drawer unmounts (e.g. the Loom's Mobile-view toggle flipped
@@ -384,6 +398,12 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   // (clamped + snapped). No mode rides it: the host works the shot's mode out from its OWN card
   // (gatedShot), since this drawer's mode may be one a prefill gated silently.
   const pickVideoModel = (v) => { st.current.model = v; applyModelGating(true); reprice(); emit("mg-model-commit", { model: v, duration: st.current.duration }); };
+  // A length stop (the Duration stops, and the model cards' length switch above them): a stop
+  // the engine does not take, or the one already on, does nothing.
+  const pickDuration = (d) => {
+    if (!durationAllowed(st.current.model, d) || d === st.current.duration) return;
+    st.current.duration = d; rerender(); reprice(); emit("mg-duration-commit", { duration: d });
+  };
   // "Use these settings for every shot" (loomCtx only, issue #90 J): the five settings as the
   // form holds them, handed to the host, which asks first and writes them to the board's shots.
   // Mode and duration are not among them. Nothing here prices, sends or changes the form.
@@ -719,6 +739,40 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   // to keep in step. The red (not amber) colour is re-asserted by gen-drawer.css's own override.
   const warn = s.model === "v4.0" ? "V4.0 full — ~2.5× Lite" : "";
 
+  // ---- the model cards' prices (look pick round 2, topic 4 C) ---------------------------------
+  // Each card prices THIS drawer's payload with only the engine and the length changed
+  // (videoModelCardsCore.cardPayload), through the one price transport, ONE request at a time
+  // and each answer once per payload (keyed by priceKey, so a prompt keystroke asks nothing).
+  // Only while the cards are on screen: in the dock, while its settings are open. Nothing here
+  // touches the drawer's own probe or its Go gate -- these answers price nothing that is sent.
+  const cardsOn = !inDock || dock.expanded !== false;
+  let cardPrompt = "";
+  try { cardPrompt = promptText(); } catch { cardPrompt = ""; }
+  // The drawer's OWN payload is the probe's to price (the Go gate's quote): its card cell reads
+  // that answer rather than asking PixAI the same question twice.
+  const ownKey = priceKey(payload());
+  const probeAnswer = (k) => (probe.verdict && probe.verdict.settled && probe.verdict.pricedKey === k
+    && probe.response ? probe.response : undefined);
+  const cards = modelCards(s, { prompt: cardPrompt,
+    price: (k) => (k === ownKey ? probeAnswer(k)
+      : cardAnswers.current.has(k) ? cardAnswers.current.get(k) : undefined) });
+  useEffect(() => {
+    if (!cardsOn || cardBusy.current) return;
+    const next = pendingPrices(cards, s.duration, (k) => k === ownKey || cardAnswers.current.has(k))[0];
+    if (!next) return;
+    cardBusy.current = true;
+    const c = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    cardCtrl.current = c;
+    requestPrice(next.payload, { signal: c ? c.signal : undefined }).then(({ response, failed }) => {
+      cardBusy.current = false;
+      if (cardCtrl.current === c) cardCtrl.current = null;
+      if (c && c.signal.aborted) return;
+      if (cardAnswers.current.size > 400) cardAnswers.current.clear();
+      cardAnswers.current.set(next.key, failed ? null : response);
+      bumpCards((n) => n + 1);
+    });
+  });
+
   // ---- SHOT MODE + the ref/frame banks (DC 1346-1376, getters 2842-2895) ----------------
   // ALL three segments always render; one the engine lacks is dimmed (opacity .35, not-allowed,
   // title '<label> needs the V4.0 pair'), never removed -- the DC's shotModes.
@@ -803,19 +857,19 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   );
   const costLine = (
     <CostBadge ref={costRef} className="mgd-cost" warn={warn} cardLabel="a video card"
-      hint="Pick a source image to see the cost."
+      hint="Pick a source image to see the cost." onButton onCost={setQuote}
       stack={inDock || undefined} balance={inDock ? dock.balance : undefined} />
   );
-  const goButton = inDock ? (
-    <button type="button" className={"mgdock-gen" + (canGo ? "" : " off")} disabled={!canGo} onClick={doGenerate}
+  // The price rides inside the button (look pick round 2, topic 1 B), and the button stays
+  // dim until it knows -- before this the Video button looked lit with nothing priced.
+  const goIdle = isR2v ? "pick a reference first" : flfMissingStart() ? "pick a start frame first" : "pick a picture first";
+  const goButton = (
+    <SpendButton className={inDock ? "mgdock-gen" : "mgd-go"} offClass={inDock ? "off" : ""}
+      quote={quote} idle={goIdle}
+      disabled={!canGo} busy={!!s.rendering} busyLabel="Rendering…"
       title={s.rendering ? "Rendering…" : canGo ? "Submit — this spends credits or a card"
-        : "Waiting for the cost to settle for these settings"}>
-      <span>{s.rendering ? "Rendering…" : "✦ Generate video"}</span>
-    </button>
-  ) : (
-    <button type="button" className="mgd-go" disabled={!canGo} onClick={doGenerate}>
-      {s.rendering ? "Rendering…" : "Generate video"}
-    </button>
+        : "Waiting for the cost to settle for these settings"}
+      label={inDock ? "✦ Generate video" : "Generate video"} onPress={doGenerate} />
   );
   // The composer's top row on the Video tab (DC 1557-1562: pip · summary): the engine as the
   // pip, shot mode · duration as the summary. Read-only here -- the ENGINE controls stay in
@@ -926,38 +980,49 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
           </div>
         </div>
 
-        {/* ENGINE (§45 drift): the retired model/LoRA flyout is replaced by an inline 2-column
-            chip grid of the 7 engines (DC 1433-1451; videoChips/videoModelMeta 2987-3001).
-            Header = ENGINE label + the selected engine's label (single line, ellipsis). Each chip
-            is a radio dot + the wrapping engine name; picking one runs pickVideoModel -> the same
-            applyModelGating(true) + re-price the flyout ran (adjusts shot mode + clamps duration
-            to the engine's caps). The meta row beneath is the selected engine's
-            'Ns max · card/no card' line plus its capability chips. DURATION + CAMERA left this
-            slab in the rebalance (§45): CAMERA under SHOT MODE, DURATION under MODE & CHANNEL. */}
+        {/* ENGINE: the middle slab. Since look pick round 2 (topic 4 C, 2026-11-19) it is the
+            model cards below, which replaced §45's 2-column chip grid and its one-engine meta
+            row: picking still runs pickVideoModel -> applyModelGating(true) + re-price (adjusts
+            shot mode + clamps duration to the engine's caps). DURATION + CAMERA stay where the
+            §45 rebalance put them: CAMERA under SHOT MODE, DURATION under MODE & CHANNEL. */}
         <div className="mgd-slab" style={{ animationDelay: "60ms" }}>
-          <div className="mgd-enghd">
-            <div className="mgd-sec">Engine</div>
-            <div className="mgd-engcur">{chosenModel ? chosenModel.label : s.model}</div>
+          {/* THE MODEL CARDS (3.21.x look pick round 2, topic 4 option C; the board's
+              #video mock). "Models · this picture" over the length switch, then one card per
+              engine: name + "in use" / "Use this", its tags, the shot modes it takes, the price
+              at every length for this picture (real /api/price answers, filling in as they
+              come back) and what the free card does. "Use this" is the same pickVideoModel
+              the chip grid ran; the length switch is the Duration control's own handler. */}
+          <div className="mgd-enghd mgd-mchd">
+            <div className="mgd-sec">Models · this picture</div>
+            <div className="mgd-seg mgd-mcseg" role="radiogroup" aria-label="Length">
+              {CARD_LENGTHS.map((d) => {
+                const ok = durationAllowed(s.model, d);
+                return (
+                  <button key={d} type="button" role="radio" aria-checked={d === s.duration} aria-disabled={!ok}
+                    className={(d === s.duration ? "on" : "") + (ok ? "" : " off")}
+                    title={d + " seconds" + (ok ? "" : " — not on this engine")}
+                    onClick={() => pickDuration(d)}>{d}s</button>
+                );
+              })}
+            </div>
           </div>
-          <div className="mgd-enggrid" role="radiogroup" aria-label="Video engine">
-            {pickerModels().map((m) => {
-              const sel = m.value === s.model;
-              const modes = (MODEL_VMODES[m.value] || ["i2v", "flf", "r2v"]).map((x) => SHOT_LABEL[x]).join(" / ");
-              return (
-                <div key={m.value} role="radio" aria-checked={sel}
-                  className={"mgd-engchip" + (sel ? " sel" : "")}
-                  title={m.label + " — " + modes + " · " + (MODEL_MAXDUR[m.value] || 10) + "s max · "
-                    + (MODEL_CARD[m.value] === false ? "no card" : MODEL_CARD[m.value] === null ? "card coverage checked at price time" : "card")}
-                  onClick={() => pickVideoModel(m.value)}>
-                  <span className="mgd-engdot" />
-                  <span className="mgd-englabel">{m.label}</span>
+          <div className="mgd-mcards" role="radiogroup" aria-label="Video model">
+            {cards.map((c) => (
+              <div key={c.value} role="radio" aria-checked={c.inUse}
+                className={"mgd-mcard" + (c.inUse ? " cur" : "")} data-model={c.value}>
+                <div className="mgd-mcrow">
+                  <span className="mgd-mct">{c.label}</span>
+                  {c.inUse ? <span className="mgd-mcuse on">in use</span>
+                    : <button type="button" className="mgd-mcuse" data-model={c.value} onClick={() => pickVideoModel(c.value)}>Use this</button>}
                 </div>
-              );
-            })}
-          </div>
-          <div className="mgd-engmeta">
-            <span>{modelMeta(s.model)}</span>
-            {modelCaps(s.model).map(([t, kind]) => <span key={t} className={"mgd-cap" + (kind ? " " + kind : "")}>{t}</span>)}
+                <div className="mgd-mccaps">
+                  {c.caps.map(([t, kind]) => <span key={t} className={"mgd-cap" + (kind ? " " + kind : "")}>{t}</span>)}
+                </div>
+                <span className="mgd-mcm">{c.modes}</span>
+                <span className="mgd-mcm mgd-mcprice">{c.line}</span>
+                <span className={"mgd-mcm mgd-mccover" + (c.cover.ok ? " ok" : "")}>{c.cover.text}</span>
+              </div>
+            ))}
           </div>
           {/* The Loom only: every shot keeps its own settings, and this copies the bound shot's
               to all of them (the host asks first). The Loom panel's small text action. */}
@@ -1021,7 +1086,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
                 <button key={d} type="button" role="radio" aria-checked={d === s.duration} aria-disabled={!ok}
                   className={"mgd-stop" + (d === s.duration ? " on" : "") + (ok ? "" : " off")}
                   title={d + " seconds" + (ok ? "" : " — not on this engine")}
-                  onClick={() => { if (!ok || d === st.current.duration) return; st.current.duration = d; rerender(); reprice(); emit("mg-duration-commit", { duration: d }); }}>{d}</button>
+                  onClick={() => pickDuration(d)}>{d}</button>
               );
             })}
           </div>

@@ -54,8 +54,12 @@ test("all three Fixer surfaces clear the boxes when the kind changes (one kind p
   assert.doesNotMatch(sb, /onClick=\{\(\) => setFixTag\(/, "no Loom chip sets the kind without clearing the boxes");
 });
 
-test("the desktop Loom's cost line carries the pass note between the price and 'never card-covered'", () => {
+// 2026-11-19 (look pick round 2, topic 1 B): the price moved INTO the Fix button (SpendButton,
+// read off the same fixPriceEntry); the pass note stays as the one line above it, shown only on
+// a settled price.
+test("the desktop Loom's Fix keeps the pass note above a button that carries the price", () => {
   const sb = read("../master-storyboard.jsx");
   assert.match(sb, /import \{ scaleBoxes, fixPassNote, FIX_NO_BOX_ON_PICTURE \} from "\.\.\/gallery\/src\/gen\/editCore\.js";/);
-  assert.match(sb, /"≈ " \+ Number\(fixPriceEntry\.pr\.cost\)\.toLocaleString\(\) \+ " credits" \+ \(fixNote \? " · " \+ fixNote : ""\) \+ " — never card-covered"/);
+  assert.match(sb, /\{fixNote && fixPriceEntry && fixPriceEntry\.pr && typeof fixPriceEntry\.pr\.cost === "number" \? \(\s*<div className="lv-dim"[^>]*>\{fixNote\}<\/div>/);
+  assert.match(sb, /<SpendButton className="lv-go" offClass="" quote=\{quoteFromEntry\(fixPriceEntry\)\}/);
 });

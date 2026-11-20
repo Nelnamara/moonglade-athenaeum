@@ -12,29 +12,36 @@ const SRC = path.join(here, "..", "..", "gallery", "src");
 const src = (rel) => readFileSync(path.join(SRC, rel), "utf8").split("\r\n").join("\n");
 const code = (rel) => src(rel).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
-describe("desktop: a section inside Health (W1a)", () => {
-  test("under the tiles, above the storage bars, only when the last check found broken rows", () => {
+/* One Tidy place (owner pick 2026-11-19, round 2 option B): on the desktop the list moved from
+   Health into the Control Panel's Tidy tab, beside the check that fills it. Health keeps the
+   tiles; they open Tidy. */
+describe("desktop: a section inside the Control Panel's Tidy tab", () => {
+  test("under Tidy's three columns, only when the last check found broken rows", () => {
+    const t = code("components/TidyTab.jsx");
+    const cols = t.indexOf('className="mgcp-tidycols"');
+    const section = t.indexOf("<BrokenFiles ");
+    assert.ok(cols >= 0 && section > cols, "order: the columns, then Broken files");
+    assert.match(t, /listShown \? \(\s*<BrokenFiles /, "drawn only while the list has rows");
+    assert.match(t, /counts\.all > 0/);
+    assert.match(t, /actionSpec\("verify-library"\)/, "the integrity check sits in the Broken column");
     const h = code("components/HealthOverlay.jsx");
-    const tiles = h.indexOf('className="mgh-stats"');
-    const section = h.indexOf("<BrokenFiles ");
-    const bars = h.indexOf("<StorageBars ");
-    assert.ok(tiles >= 0 && section > tiles && bars > section, "order: tiles, Broken files, storage bars");
-    assert.match(h, /bfShown \? \(\s*<BrokenFiles /, "drawn only while the list has rows");
-    assert.match(h, /counts\.all > 0/);
+    assert.doesNotMatch(h, /<BrokenFiles /, "Health no longer draws a second copy of the list");
   });
-  test("a problem tile opens the list at its chip", () => {
+  test("a Health problem tile opens Tidy's list at its chip", () => {
     const h = code("components/HealthOverlay.jsx");
     assert.match(h, /tileChip\(st\.label, bf\.doc\.counts\)/);
     assert.match(h, /onClick=\{\(\) => openBroken\(chip\)\}/);
-    assert.match(h, /scrollIntoView/);
+    assert.match(h, /openBrokenFiles\(chip \|\| "all"\)/);
+    const t = code("components/TidyTab.jsx");
+    assert.match(t, /takeBrokenFilesIntent\(\)/);
+    assert.match(t, /subscribeBrokenFilesIntent/);
+    assert.match(t, /scrollIntoView/);
   });
-  test("the Control Panel's Verify row says what it found and opens the list at All", () => {
-    const c = code("components/ControlPanelOverlay.jsx");
-    assert.match(c, /key === "verify-library" && brokenReview/);
-    assert.match(c, /openBrokenFiles\("all"\)/);
+  test("every door into the list opens the Panel on Tidy; Open details closes the Panel", () => {
     const a = code("App.jsx");
-    assert.match(a, /registerBrokenFilesOpener\(\(\) => setOverlay\("health"\)\)/);
-    assert.match(a, /onOpenDetails=\{\(mid\) => \{ setOverlay\(null\); openDetails\(mid\); \}\}/);
+    assert.match(a, /registerBrokenFilesOpener\(openTidy\)/);
+    assert.match(a, /setPanelTab\(\{ tab: "tidy", n: Date\.now\(\) \}\)/);
+    assert.match(a, /onOpenDetails=\{\(mid\) => \{ setOverlay\(null\); setPanelTab\(null\); openDetails\(mid\); \}\}/);
   });
 });
 
@@ -161,6 +168,8 @@ describe("phone (W6a)", () => {
     assert.match(c, /openBrokenFiles\("all"\)/);
     const a = code("components/AppMobile.jsx");
     assert.match(a, /registerBrokenFilesOpener\(/);
-    assert.match(a, /openScreenKey\("health"\)/);
+    // since the 2026-11-19 layout (look pick B) Health is the Control tab's Health section
+    assert.match(a, /setCtlSection\("health"\);\s*setTab\("control"\);/);
+    assert.doesNotMatch(a, /openScreenKey\("health"\)/);
   });
 });

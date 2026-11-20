@@ -650,7 +650,9 @@ def test_fix_surface_mounts_the_shared_cost_badge():
     assert "<CostBadge ref={costRef}" in src, (
         "the Fix surface no longer mounts <CostBadge> -- it would be the only spend "
         "surface without the shared cost renderer")
-    assert "onClick={run}" in src   # and a submit button wired to run()
+    # and a submit button wired to run() -- since look pick round 2 (topic 1 B) the shared
+    # <SpendButton>, whose press is the host's own run()
+    assert "<SpendButton" in src and "onPress={run}" in src
 
 
 def test_fix_cost_asks_the_server_and_hardcodes_nothing():

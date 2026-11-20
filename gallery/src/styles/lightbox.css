@@ -188,3 +188,11 @@
   .lbx-stars .stars .st:hover { transform: none; }
   .lbx-thumb.on { transform: none; }
 }
+
+/* THE BAR IN TWO GROUPS (owner pick, look board round 2 topic 2 option B, 2026-11-19): make | keep,
+   a thin rule between, then Slideshow and Close. The rule is the mock's .vsep: 1px, the chip border
+   colour, full height of the row. Groups are layout-transparent wrappers so the chips keep their gap. */
+.lbx-acts { flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+.lbx-group { display: contents; }
+.lbx-vsep { width: 1px; align-self: stretch; margin: 0 3px; background: rgba(255,255,255,.12); }
+.lbx-chip.lbx-download { display: inline-flex; align-items: center; gap: 5px; }

@@ -22,8 +22,10 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   **A free card is used when it covers the whole job, and the price you see is the price you
   pay.** Image and edit cards cover one generation each; a video card is a book of tickets and a
   clip costs one per 5 seconds (5s = 1, 10s = 2, 15s = 3). When you hold enough, the clip is free
-  and the preview reads "uses N of H cards". When you don't, **no card is used and the clip costs
-  the full credit price** — nothing is partly applied — and the preview says exactly that. It is
+  and the send button reads "Free · uses N cards". When you don't, **no card is used and the clip
+  costs the full credit price** — nothing is partly applied — and the button says exactly that. A
+  button that spends stays dim until the price is known, and stays dim if the price check fails
+  ("Couldn't check the price"), so nothing is sent at a price you were not shown. It is
   not refused: matching the website, Generate still spends if you click, and The Loom's batch
   confirm counts tickets against your pool and names which shots will spend before you confirm.
   The guarantee is honesty, not refusal: a paid clip is never shown as free. The other way round
@@ -271,7 +273,9 @@ opted *out* of with `--dry-run` — its safety net is that moves are reversible
 (`organize_manifest.csv` + `--undo-organize`), not that it waits for permission first. This
 flag is specifically about your PixAI *account*, not your local files. The one local exception
 is the gallery's **Duplicate Review**: with `READ_ONLY` set, moving a duplicate aside and
-undoing that move are both refused, since they are the browser's way to run a dedup.
+undoing that move are both refused, since they are the browser's way to run a dedup. So is
+**Empty _duplicates/** (the Control Panel's Tidy tab, and `--empty-duplicates --apply`): with
+`READ_ONLY` set it refuses, and it never deletes outright — the files go to the Recycle Bin.
 
 ## Found a real gap in any of this?
 

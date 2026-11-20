@@ -133,7 +133,7 @@ function toast(title, msg) {
 
 export default function LightboxMobile({
   items, index, setIndex, onClose, onRate, onCurate, page, pages, loadPage, onOpenDetails, onSimilar,
-  onEnterContest, member, onSendToVideo, offset, total, continuous = false, loadMore,
+  onEnterContest, member, onSendToVideo, onRemix, offset, total, continuous = false, loadMore,
 }) {
   const it = items[index];
   const mid = it ? it.media_id : null;
@@ -478,13 +478,21 @@ export default function LightboxMobile({
             <button type="button" className="lbm-chip"
               onClick={() => onSendToVideo && onSendToVideo(it.media_id)}>▶ To Video</button>
           ) : null}
-          <button type="button" className="lbm-chip lbm-similar"
-            title="Find what looks like this one"
-            onClick={() => onSimilar && onSimilar(it.media_id)}>◈ Similar</button>
+          {/* ↺ Remix (owner pick 2026-11-19, look board round 2 topic 2 B): the record's own door,
+              same handler -- the recipe prefilled into Create, never a spend. */}
+          <button type="button" className="lbm-chip lbm-remix"
+            onClick={() => onRemix && onRemix(it.media_id, !!it.is_video)}>{"↺"} Remix</button>
           {/* Stills only: a video's Upscale could only say it applies to images. */}
           {!it.is_video ? (
             <button type="button" className={"lbm-chip" + (sheetOpen ? " on" : "")} onClick={toggleUpscale}>⇱ Upscale</button>
           ) : null}
+          <span className="lbm-vsep" aria-hidden="true" />
+          {/* ↓ Download: the same full-resolution link the record's Download chip carries. */}
+          <a className="lbm-chip lbm-chip-metal lbm-download" download
+            href={"/full/" + encodeURIComponent(it.media_id) + "?dl=1"}>{"↓"} Download</a>
+          <button type="button" className="lbm-chip lbm-similar"
+            title="Find what looks like this one"
+            onClick={() => onSimilar && onSimilar(it.media_id)}>◈ Similar</button>
           <button type="button" className="lbm-chip" onClick={() => onOpenDetails(it.media_id)}>Details ›</button>
           <MakeRecipeChip className="lbm-chip" mediaId={it.media_id} isVideo={!!it.is_video} phone />
           {/* One of the three entry points Contest Mobile Handoff.dc.html keeps -- "the
@@ -498,6 +506,7 @@ export default function LightboxMobile({
             <button type="button" className="lbm-chip"
               onClick={() => onEnterContest(it.media_id)}>★ Enter contest</button>
           )}
+          <span className="lbm-vsep" aria-hidden="true" />
           <button type="button" className="lbm-chip lbm-chip-metal" onClick={() => setSlideOn((v) => !v)}>
             {slideOn ? "⏸ Pause" : "▶ Slideshow"}
           </button>

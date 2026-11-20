@@ -67,8 +67,12 @@ after(async () => { for (const m of mounted) await m.unmount(); });
 
 /** One click on a drawer control (React's onClick listens at the root, so a bubbling click does). */
 const click = async (el) => { await act(async () => { el.dispatchEvent(new FEvent("click", { bubbles: true })); }); };
-const engineChip = (node, label) => node.querySelectorAll(".mgd-engchip")
-  .find((c) => (c.querySelector(".mgd-englabel") || {}).textContent === label);
+// An engine is picked with its model card's "Use this" (look pick round 2, topic 4 C: the cards
+// replaced the chip grid; the pick is the same pickVideoModel).
+const engineChip = (node, label) => {
+  const card = node.querySelectorAll(".mgd-mcard").find((c) => (c.querySelector(".mgd-mct") || {}).textContent === label);
+  return card ? card.querySelector("button.mgd-mcuse") : undefined;
+};
 const channelBtn = (node, label) => node.querySelectorAll(".mgd-channel").find((b) => b.textContent === label);
 
 /** The window.confirm answers for one test, and every question asked. */

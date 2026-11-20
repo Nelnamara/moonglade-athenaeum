@@ -11,7 +11,6 @@ import SeriesModal from "./components/SeriesModal.jsx";
 import Lightbox from "./components/Lightbox.jsx";
 import DetailsView from "./components/DetailsView.jsx";
 import HealthOverlay from "./components/HealthOverlay.jsx";
-import DuplicateReviewOverlay from "./components/DuplicateReviewOverlay.jsx";
 import MyArtOverlay from "./components/MyArtOverlay.jsx";
 import PublishOverlay from "./components/PublishOverlay.jsx";
 import TrainOverlay from "./components/TrainOverlay.jsx";
@@ -300,9 +299,6 @@ export default function App({ boot }) {
   /* The earn moment's "See it in the Folio" (notify/ach.js): this shell's door to the Folio. The feat to
      scroll to is left for the Folio itself (folio/folioFocus.js). */
   useEffect(() => registerFolioOpener(() => setOverlay("folio")), []);
-  /* Health's Broken files list (Session W): the Control Panel's "Review ▸" and a fix run's Activity
-     row bring Health up; the list itself scrolls to its section (lib/brokenFilesNav.js). */
-  useEffect(() => registerBrokenFilesOpener(() => setOverlay("health")), []);
   // Contact Sheet's two entry points hand it different targets: the Actions
   // menu freezes the explicit selection (ids); the Advanced flyout prints the
   // current collection view (collectionName) -- the same ids-or-collection
@@ -794,6 +790,16 @@ export default function App({ boot }) {
     open(takeCarriedPanelTab());
     return () => window.removeEventListener(OPEN_PANEL_EVENT, onRequest);
   }, []);
+  /* ONE TIDY PLACE (owner pick 2026-11-19, round 2 option B): duplicates, stray files and
+     broken files live in the Control Panel's Tidy tab. Health's Duplicates / Reclaimable /
+     Missing files tiles open it, and so does every door into the Broken files list -- Health's
+     problem tiles and a fix run's Activity row (lib/brokenFilesNav.js); the list scrolls to
+     its section and picks the chip it was asked for. */
+  const openTidy = useCallback(() => {
+    setPanelTab({ tab: "tidy", n: Date.now() });
+    setOverlay("panel");
+  }, []);
+  useEffect(() => registerBrokenFilesOpener(openTidy), [openTidy]);
 
   /* ---- bulk Actions: the classic flows, confirm texts verbatim ---- */
   const selIds = [...selected];
@@ -1923,7 +1929,7 @@ export default function App({ boot }) {
           onEdit={requestEdit} onToVideo={requestVideo}
           onOpenDetails={openDetails}
           onPublish={openPublish}
-          onSimilar={showSimilar}
+          onSimilar={showSimilar} onRemix={requestRemix}
           member={account ? account.is_member : null}
         />
       )}
@@ -1945,19 +1951,10 @@ export default function App({ boot }) {
           onModelFilter={(m) => { setOverlay(null); applyAdvanced({ model: m }); }}
           onTagFilter={(t) => { setOverlay(null); applyAdvanced({ tag: t }); }}
           onLoraFilter={(l) => { setOverlay(null); applyAdvanced({ lora: l }); }}
-          onOpenDuplicates={() => setOverlay("duprev")}
+          onOpenTidy={openTidy}
           /* N6: a Storage segment closes Health and opens the library filtered to it; the whole
              filter set starts over, because the bars measure the whole library */
           onStoragePick={(f) => { setOverlay(null); applyAdvanced({ ...ADV_DEFAULTS, ...storageFilterPatch(f) }); }}
-          /* Session W: a broken row's Open details closes Health and opens the record */
-          onOpenDetails={(mid) => { setOverlay(null); openDetails(mid); }}
-        />
-      )}
-      {overlay === "duprev" && (
-        <DuplicateReviewOverlay
-          onClose={() => setOverlay(null)}
-          onResolved={afterMutation}
-          boot={boot}
         />
       )}
       {overlay === "myart" && (
@@ -1993,7 +1990,11 @@ export default function App({ boot }) {
       )}
       {overlay === "panel" && (
         <ControlPanelOverlay onClose={() => { setOverlay(null); setPanelTab(null); }}
-          boot={boot} account={account} tabRequest={panelTab} />
+          boot={boot} account={account} tabRequest={panelTab}
+          /* Tidy's Duplicate Review moved or restored a file: the grid reloads (afterMutation) */
+          onLibraryChanged={afterMutation}
+          /* Session W: a broken row's Open details (now in Tidy) closes the Panel and opens the record */
+          onOpenDetails={(mid) => { setOverlay(null); setPanelTab(null); openDetails(mid); }} />
       )}
       {overlay === "contactsheet" && (
         <ContactSheetOverlay

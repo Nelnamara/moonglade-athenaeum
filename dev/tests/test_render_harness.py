@@ -2080,7 +2080,10 @@ def test_phone_similar_door_opens_results_and_the_token_puts_the_library_back(
     stub_code_module(monkeypatch, "similar",
                      _fake_similar_module([("101", 0.91), ("102", 0.88), ("103", 0.77)]))
 
-    page = logged_in_page(**PHONE)
+    # 390 wide and 700 tall, a smaller phone than PHONE's 844: since the 2026-11-19 layout (look
+    # pick B) the header is ~90 px instead of 172, and on the module's six rows a 390x844 library
+    # now has no scroll range at all -- this test needs a real non-zero offset to round-trip.
+    page = logged_in_page(width=PHONE["width"], height=700)
     _visit(page, "/")
     page.wait_for_selector(".glm-grid .glm-tile")
     _dismiss_any_achievement_toast(page)
@@ -2851,7 +2854,15 @@ def _board_with_a_long_brief():
 
 
 def _open_contests_from_the_control_tab(page, board):
-    """The owner's own route in: stand on Control, then the menu -> Contests.
+    """The Contests screen over a painted Control tab.
+
+    Until 2026-11-19 this was the owner's own route in: stand on Control, then the menu ->
+    Contests. Since the phone layout of that day (look pick B) the Menu's door is on the Gallery's
+    header only -- Control wears the one-row header with no round buttons -- so the route is the
+    one that still puts this screen over that tab: the menu -> Contests from the Gallery, then
+    Control on the tab bar. A pushed screen is mounted in `.glm-body` above whichever tab is
+    showing and stays up across a tab switch (AppMobile.jsx), so the screen ends up exactly where
+    the old route put it: over the Control panel, with the panel's whole range underneath.
 
     "Stand on Control" means on the Control tab as the owner sees it: its panel painted. The
     tab's frame (`.glm-tab`) is on the page from the first frame, but ControlMobile.jsx draws
@@ -2871,16 +2882,16 @@ def _open_contests_from_the_control_tab(page, board):
     page.goto("/", wait_until="domcontentloaded")
     page.wait_for_selector(".glm-body", timeout=10_000)
     _freeze_motion(page)
-    page.click('.glm-navitem:has-text("Control")')
-    page.wait_for_selector(".glm-tab", timeout=10_000)
-    # The panel itself, not its placeholder: `.ctm-statgrid` exists only once the summary has
-    # landed. A wider budget than the context's, as _login's: a slow server read is not what
-    # this test is about, and a summary that never lands still fails here, loudly.
-    page.wait_for_selector(".glm-tab .ctm-statgrid", timeout=30_000)
-    _settle(page)
     page.click('button[title="More"]')
     page.click('.glm-menu-item:has-text("Contests")')
     page.wait_for_selector(".cmb-hero", timeout=10_000)
+    page.click('.glm-navitem:has-text("Control")')
+    page.wait_for_selector(".glm-tab", timeout=10_000)
+    # The panel itself, not its placeholder: `.ctm-joblist` (the Jobs section's job console)
+    # exists only once the summary has landed. A wider budget than the context's, as _login's: a
+    # slow server read is not what this test is about, and a summary that never lands still
+    # fails here, loudly.
+    page.wait_for_selector(".glm-tab .ctm-joblist", timeout=30_000)
     _settle(page)
 
 
@@ -2962,8 +2973,9 @@ def test_the_phone_contest_detail_scrolls_itself_and_never_the_control_tab_under
     failed "this test cannot see the defect it exists for"; under 16 busy loops it did so
     in 10 of 10 runs, with the summary landing 0.6-1.9 s after the read (0 of 10 on a quiet
     machine). The page always got there; the test measured early. The open now waits for the
-    panel's "At a glance" grid (`.ctm-statgrid`), so the precondition is read on the tab as the
-    owner sees it, and it still fails, with its own message, on a tab that has no range."""
+    panel itself (since the 2026-11-19 layout, the Jobs section's job console, `.ctm-joblist`), so
+    the precondition is read on the tab as the owner sees it, and it still fails, with its own
+    message, on a tab that has no range."""
     page = logged_in_page(**MOBILE)
     _open_contests_from_the_control_tab(page, _board_with_a_long_brief())
     page.click(".cmb-hero")
@@ -4389,7 +4401,10 @@ def test_the_phone_activity_thumbnail_really_opens_the_picture(logged_in_page):
     _dismiss_any_achievement_toast(page)
     _settle(page)
 
-    page.click('button[title="Activity"]')
+    # Activity is a card in the Menu since the 2026-11-19 layout (look pick B: the header keeps
+    # three round buttons -- Folio, Loom, Menu)
+    page.click('button[title="More"]')
+    page.click('.glm-menu-card[title="Activity"]')
     page.wait_for_selector(".glm-sheet .at-row")
     thumb = page.locator(".glm-sheet .at-row .at-thumb")
     assert thumb.count() == 1, (
@@ -4569,15 +4584,17 @@ def test_the_pager_lands_each_page_at_its_top(
         assert _body_top(page) == 400, (
             "the library scroller would not take a test offset -- nothing below measures "
             "anything")
-        # ...and from there the pill row really is scrolled away, which is the complaint.
+        # ...and from there the first rows of pictures really are scrolled away, which is the
+        # complaint. (Since the 2026-11-19 layout, look pick B, the search field and the media
+        # pills are sticky and never leave; what goes is the header above them, and the pictures.)
         away = page.evaluate("""() => {
             const body = document.querySelector('.glm-body').getBoundingClientRect();
-            const pills = document.querySelector('.glm-bar2').getBoundingClientRect();
-            return pills.bottom <= body.top;
+            const first = document.querySelector('.glm-grid .glm-tile').getBoundingClientRect();
+            return first.bottom <= body.top + 120;
         }""")
-        assert away, (
-            "the media pills are still on screen at 400px down, so 'the pill row scrolled "
-            "away' is not the state this test starts from")
+        assert away and page.locator(".glm-hero.away").count() == 1, (
+            "the first row of pictures is still on screen at 400px down, so 'the page's top "
+            "scrolled away' is not the state this test starts from")
 
         page.click('.glm-pager button:has-text("Next")')
         _phone_on_page(page, 2)
@@ -4587,6 +4604,7 @@ def test_the_pager_lands_each_page_at_its_top(
         assert landed == 0, (
             "page 2 opened {:.0f}px down -- the reader lands mid-page on a page they have "
             "not read".format(landed))
+        page.wait_for_selector(".glm-hero:not(.away)")   # at the top of a page the header is back
         geo = page.evaluate("""() => {
             const body = document.querySelector('.glm-body').getBoundingClientRect();
             const bar = document.querySelector('.glm-bar').getBoundingClientRect();
@@ -4759,7 +4777,10 @@ def test_each_tab_keeps_its_own_scroll(
 
         # Control is the tab deep enough to hold a place of its own (see the docstring).
         page.click('.glm-navitem:has-text("Control")')
-        page.wait_for_selector(".ctm-statcard", timeout=10_000)
+        page.wait_for_selector(".ctm-sections .cm-segbtn.on", timeout=10_000)
+        # the panel as painted: the job console has read the schedule. Set before that, the offset
+        # is moved by the browser's scroll anchoring when the console's rows arrive above it.
+        page.wait_for_selector(".ctm-joblist .ctm-jobrow", timeout=10_000)
         _settle(page)
         arrived = page.evaluate(_BODY_SCROLL_JS)
         assert arrived["top"] == 0, (
@@ -4781,7 +4802,7 @@ def test_each_tab_keeps_its_own_scroll(
 
         # ...and Control kept its own, separately.
         page.click('.glm-navitem:has-text("Control")')
-        page.wait_for_selector(".ctm-statcard")
+        page.wait_for_selector(".ctm-sections .cm-segbtn.on")
         _settle(page)
         assert _body_top(page) == 300, (
             "Control came back at {:.0f} instead of the 300 it was left at"
@@ -4793,6 +4814,14 @@ def test_each_tab_keeps_its_own_scroll(
         page.click('.glm-navitem:has-text("Gallery")')
         page.wait_for_selector(".glm-grid .glm-tile")
         _settle(page)
+        # 500 down, the Gallery's header has slid away (look pick B, 2026-11-19), and the Menu's
+        # door with it: a short pull back up brings it back, as a thumb would. That pull is the
+        # library's place from here on.
+        page.evaluate("() => { const b = document.querySelector('.glm-body'); b.scrollTop = b.scrollTop - 40; }")
+        page.wait_for_selector(".glm-hero:not(.away)")
+        _settle(page)
+        place = _body_top(page)
+        assert place == 460, place
         page.click('button[title="More"]')
         page.click('.glm-menu-item:has-text("My Art")')
         page.wait_for_selector(".glm-screen")
@@ -4805,7 +4834,7 @@ def test_each_tab_keeps_its_own_scroll(
         page.click(".glm-screen-back")
         page.wait_for_selector(".glm-screen", state="detached")
         _settle(page)
-        assert _body_top(page) == 500, (
+        assert _body_top(page) == place, (
             "a tab round trip UNDER an open screen overwrote the library's place with the "
             "parked 0: it came back at {:.0f}".format(_body_top(page)))
     finally:
@@ -5440,6 +5469,7 @@ def test_phone_lora_sheet_pages_past_its_first_24_and_confirm_closes_it(logged_i
     _visit(page, "/")
     _settle(page)
     page.click("button:has-text('Create')")
+    _cm_section(page, "Model")   # the LoRA row is in the Model section (look pick B, 2026-11-19)
     page.wait_for_selector(".cm-addlora")
     page.click(".cm-addlora")
     page.wait_for_selector(".mfly.open .mg-card")
@@ -5506,6 +5536,7 @@ def _sheet_geometry(page):
 
 def _open_phone_lora_sheet(page):
     page.click("button:has-text('Create')")
+    _cm_section(page, "Model")   # the LoRA row is in the Model section (look pick B, 2026-11-19)
     page.wait_for_selector(".cm-addlora")
     page.click(".cm-addlora")
     page.wait_for_selector(".mfly.open .mg-card")
@@ -6376,7 +6407,9 @@ def test_the_dock_offers_unlimited_mode_and_locks_what_the_lane_runs_on(
     badge = page.locator(".mgdock-gocol > .cost-badge")
     page.wait_for_function(
         "() => document.querySelector('.mgdock-gocol > .cost-badge').dataset.state === 'paid'")
-    assert "5,100" in badge.inner_text()
+    # the price rides inside ✦ Generate since look pick round 2 (topic 1 B); the badge keeps the balance
+    go = page.locator(".mgdock-gocol > .mgdock-gen")
+    assert "5,100" in go.locator(".mgspend-s").inner_text()
     off = page.evaluate(_UNL_CONTROLS_JS)
     assert off == {"modes": [False, False],
                    "sizes": [False, False, False, False],
@@ -6389,9 +6422,11 @@ def test_the_dock_offers_unlimited_mode_and_locks_what_the_lane_runs_on(
     page.wait_for_function(
         "() => document.querySelector('.mgdock-gocol > .cost-badge').dataset.lane === 'unlimited'")
     assert badge.get_attribute("data-state") == "free"
-    assert badge.locator(".mgc-main").inner_text().replace("\n", "").strip() == "Free∞"
+    page.wait_for_function(
+        "() => document.querySelector('.mgdock-gocol > .mgdock-gen .mgspend-inf') !== null")
+    assert go.locator(".mgspend-s").inner_text().replace("\n", "").strip() == "Free∞"
     inf = page.evaluate("""() => {
-        const el = document.querySelector('.mgdock-gocol > .cost-badge .mgc-inf');
+        const el = document.querySelector('.mgdock-gocol > .mgdock-gen .mgspend-inf');
         const probe = document.createElement('span');
         probe.style.color = 'var(--green)';
         document.body.appendChild(probe);
@@ -7060,6 +7095,36 @@ def test_the_dock_opens_one_confirm_for_a_run_and_cancel_sends_nothing(logged_in
     assert [u for u in posts if u.endswith("/api/generate/plan")], "the confirm is the server's quote"
 
 
+def _dismiss_corner_toasts(page):
+    """Put away every corner notice (#mg-toasts) with its own x, as a thumb would. On the phone the
+    stack sits just under the top chrome (2026-11-19), so a notice the run itself raised (the update
+    receipt, which stays until dismissed, or an earn) can lie over the first row of a section."""
+    for _ in range(6):
+        x = page.locator("#mg-toasts .mg-toast:not(.out) .mt-x")
+        if not x.count():
+            return
+        x.first.click()
+        page.wait_for_timeout(400)
+
+
+def _cm_section(page, name):
+    """Show one of the phone Create tab's sections (Prompt, Model, Frame, Recipes, More -- look
+    pick B, 2026-11-19) by its chip, the way a thumb does."""
+    page.wait_for_selector(".cm-secchips")
+    page.click(".cm-secchip:has-text('%s')" % name)
+    page.wait_for_selector(".cm-secchip.on:has-text('%s')" % name)
+    _settle(page)
+
+
+def _ctm_section(page, label):
+    """Show one of the phone Control tab's sections (Jobs, Health, This phone -- look pick B,
+    2026-11-19) by its segment, the way a thumb does."""
+    page.wait_for_selector(".ctm-sections")
+    page.click(".ctm-sections .cm-segbtn:has-text('%s')" % label)
+    page.wait_for_selector(".ctm-sections .cm-segbtn.on:has-text('%s')" % label)
+    _settle(page)
+
+
 def test_the_phone_create_tab_confirms_a_batch_before_it_sends(logged_in_page, monkeypatch):
     """Phone 390x844: a plain batch x2 on the Create tab opens the same confirm (one task of 2
     images at the server's price), on screen and tappable; Cancel sends nothing."""
@@ -7069,12 +7134,16 @@ def test_the_phone_create_tab_confirms_a_batch_before_it_sends(logged_in_page, m
     _visit(page, "/")
     _settle(page)
     page.click("button:has-text('Create')")
-    page.wait_for_selector(".cm-modelrow")
+    # Create is in sections since the 2026-11-19 layout (look pick B): the model row is in Model,
+    # the prompt in Prompt and the Advanced door in More; Generate is in the pinned bar on all three
+    _cm_section(page, "Model")
     page.click(".cm-modelrow")
     page.wait_for_selector(".mfly.open .mg-card")
     page.locator(".mfly.open .mg-card").first.click()
     page.wait_for_function("() => !document.querySelector('.mfly.open')", timeout=5000)
+    _cm_section(page, "Prompt")
     page.fill("textarea.cm-ta", "1girl, moonlit glade")
+    _cm_section(page, "More")
     page.click(".cm-advrow")
     page.wait_for_selector(".glm-screen .cm-chip")
     page.locator(".glm-screen .cm-chiprow").filter(has_text="4").locator("button:has-text('2')").last.click()
@@ -7222,10 +7291,11 @@ def test_the_dock_keeps_a_default_negative_last_presets_and_quick_picks_on_the_a
 
 def test_the_phone_create_tab_has_last_presets_quick_picks_and_no_matrix_setup(
         logged_in_page, render_server, monkeypatch):
-    """Phone 390x844. ↺ Last and Presets are two chips above the prompt; the quick picks are ONE
-    scrolling row of 36 px chips; Presets opens a sheet on screen; the { } key inserts a variable
+    """Phone 390x844. ↺ Last and Presets are two chips in one row with { } and Lists under the
+    prompt (the Prompt section, look pick B, 2026-11-19); the quick picks are ONE scrolling row of
+    36 px chips (the Model section); Presets opens a sheet on screen; the { } key inserts a variable
     and Lists opens the lists sheet; a template prompt shows the tint and Random's row WITHOUT a
-    Matrix switch; Create -> Advanced carries the default negative row."""
+    Matrix switch; Create -> More -> Advanced carries the default negative row."""
     _fake_unlimited_pixai(monkeypatch)
     _seed_power_account(render_server.root, extra_models=5)
     try:
@@ -7237,22 +7307,28 @@ def test_the_phone_create_tab_has_last_presets_quick_picks_and_no_matrix_setup(
         _settle(page)
         page.click("button:has-text('Create')")
         page.wait_for_selector(".pm-chips")
-        page.wait_for_selector(".pm-quick .pm-chip")
         _settle(page)
         assert _power_writes(prefs_posts) == []
+        tools = page.evaluate("""() => {
+            const row = document.querySelector('.cm-prompttools');
+            const ta = document.querySelector('textarea.cm-ta').getBoundingClientRect().bottom;
+            const tops = [...row.querySelectorAll('.pm-chip, .pm-key')].map(x => Math.round(x.getBoundingClientRect().top));
+            return {under: row.getBoundingClientRect().top >= ta, oneRow: new Set(tops).size === 1,
+                    labels: [...row.querySelectorAll('.pm-chip, .pm-key')].map(x => x.innerText)};
+        }""")
+        assert tools["under"] and tools["oneRow"], tools
+        assert [x.replace("↺ ", "") for x in tools["labels"]] == ["Last", "Presets", "{ }", "Lists"], tools
+        _cm_section(page, "Model")
+        page.wait_for_selector(".pm-quick .pm-chip")
         chips = page.evaluate("""() => {
             const q = document.querySelector('.pm-quick');
             const c = [...q.querySelectorAll('.pm-chip')];
-            const top = document.querySelector('.pm-chips').getBoundingClientRect().bottom;
-            const ta = document.querySelector('textarea.cm-ta').getBoundingClientRect().top;
             return {h: c.map(x => Math.round(x.getBoundingClientRect().height)),
-                    ox: getComputedStyle(q).overflowX, sw: q.scrollWidth, cw: q.clientWidth,
-                    above: top <= ta, n: c.length,
-                    labels: [...document.querySelectorAll('.pm-chips .pm-chip')].map(x => x.innerText)};
+                    ox: getComputedStyle(q).overflowX, sw: q.scrollWidth, cw: q.clientWidth, n: c.length};
         }""")
         assert set(chips["h"]) == {36}, chips
         assert chips["ox"] == "auto" and chips["sw"] > chips["cw"], "one row that scrolls sideways: %r" % chips
-        assert chips["above"] and [x.replace("↺ ", "") for x in chips["labels"]] == ["Last", "Presets"], chips
+        _cm_section(page, "Prompt")
         page.click(".pm-chip:has-text('Presets')")
         page.wait_for_selector(".glm-sheet .mgpow-panel")
         _settle(page)
@@ -7265,8 +7341,10 @@ def test_the_phone_create_tab_has_last_presets_quick_picks_and_no_matrix_setup(
         page.click(".glm-scrim")
         page.wait_for_selector(".glm-sheet", state="detached")
 
+        _cm_section(page, "Model")
         page.click(".pm-quick .pm-chip:has-text('Tsubaki.3')")
         page.wait_for_function("() => document.querySelector('.cm-modelname') && document.querySelector('.cm-modelname').innerText.includes('Tsubaki.3')")
+        _cm_section(page, "Prompt")
         page.fill("textarea.cm-ta", "1girl")
         page.click(".pm-key")
         assert page.input_value("textarea.cm-ta") == "1girl{a|b}", "the { } key inserts a variable at the caret"
@@ -7281,6 +7359,8 @@ def test_the_phone_create_tab_has_last_presets_quick_picks_and_no_matrix_setup(
         page.click(".glm-scrim")
         page.wait_for_selector(".glm-sheet", state="detached")
 
+        _cm_section(page, "More")
+        _dismiss_corner_toasts(page)   # the Advanced row is the More section's first row
         page.click(".cm-advrow")
         page.wait_for_selector(".glm-screen .cm-subhead")
         default = page.locator(".glm-screen .pm-tools .mgpow-default")
@@ -7989,6 +8069,7 @@ def test_data_saver_auto_follows_the_connection_and_says_so_where_it_cannot_tell
         assert (page.locator(".glm-saverchip").count() == 1) is expect_on
         assert [k for k in page.evaluate("window.__qWrites") if k == "mg_phone_saver"] == []
         page.click(".glm-navitem >> nth=2")
+        _ctm_section(page, "This phone")   # Data saver is in This phone (look pick B, 2026-11-19)
         page.wait_for_selector(".ctm-saver")
         assert sub in page.locator(".ctm-saver-title span").inner_text()
         assert page.locator(".ctm-saver-modes button.on").inner_text() == "Auto on metered"
@@ -8004,6 +8085,7 @@ def test_the_control_row_sets_the_saver_mode_and_a_tap_is_the_only_write(
     try:
         _q_open(page)
         page.click(".glm-navitem >> nth=2")
+        _ctm_section(page, "This phone")   # Data saver is in This phone (look pick B, 2026-11-19)
         page.wait_for_selector(".ctm-saver")
         page.locator(".ctm-saver").scroll_into_view_if_needed()
         # (tapping the tab bar LEAVES the gallery, which is when the marker is written; Control itself
@@ -8140,7 +8222,13 @@ def test_pull_to_refresh_on_my_art_re_reads_the_list_and_calls_no_sync(
         first = len(items)
         assert first >= 1
         _settle(page)
-        release = _q_touch_drag(page, 195, 300, 450)
+        # The pull starts where it always has on the screen itself -- 78 px into the My Art body,
+        # which was y 300 under the 172 px banner -- and runs the same 150 px. Since the 2026-11-19
+        # layout (look pick B) the header is ~90 px, so the same spot is higher on the glass; a
+        # fixed y 300 now lands ~157 px into the body, on a different part of the screen, and that
+        # pull did not arm. The gesture under test is the same one, started where it was.
+        y0 = round(page.evaluate("() => document.querySelector('.glm-screen-body').getBoundingClientRect().top")) + 78
+        release = _q_touch_drag(page, 195, y0, y0 + 150)
         _settle(page)
         assert page.evaluate(_Q_PULL_STATE_JS)["label"] == "release to refresh"
         release()
@@ -8952,7 +9040,8 @@ def test_a_turn_back_upright_puts_the_phone_grid_back_to_two_columns(phone_q_ser
 _Q_ACTS_JS = """() => {
     const row = document.querySelector('.lbm-actsrow');
     const vw = innerWidth;
-    const chips = [...row.children].map((c) => { const b = c.getBoundingClientRect();
+    // the group rules (.lbm-vsep) are not buttons: only the chips are measured for room to tap
+    const chips = [...row.children].filter((c) => !c.classList.contains('lbm-vsep')).map((c) => { const b = c.getBoundingClientRect();
         const e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
         return {t: c.textContent.trim(), l: b.left, r: b.right, top: Math.round(b.top), h: b.height, hit: !!(e && c.contains(e))}; });
     const rb = row.getBoundingClientRect();
@@ -9142,6 +9231,7 @@ def test_the_phone_layout_keys_long_press_opens_layout_and_paging_and_a_tap_stil
 
         # Control's row mirrors the same value, and sets it
         page.click(".glm-navitem:has-text('Control')")
+        _ctm_section(page, "This phone")   # Library paging is in This phone (look pick B, 2026-11-19)
         page.wait_for_selector(".ctm-paging")
         assert page.locator(".ctm-paging button[aria-checked=true]").inner_text() == "Continuous"
         page.click(".ctm-paging button:has-text('Pages')")
@@ -9929,8 +10019,12 @@ def _rf_phone(logged_in_page, init=None, **routes):
     return page, posts
 
 
+# The Menu's Inbox and Gift box entries, found by their names: since the 2026-11-19 layout (look
+# pick B) they are two cards of the Menu's grid, in the board's order, no longer its first two rows.
 _RF_ROW_ICON_JS = """() => {
-  const rows = [...document.querySelectorAll('.glm-menu-list .glm-menu-item')];
+  const all = [...document.querySelectorAll('.glm-menu-list .glm-menu-item')];
+  const named = (n) => all.find((b) => (b.querySelector('.glm-menu-card-h') || b).textContent.trim().endsWith(n));
+  const rows = [named('Inbox'), named('Gift box')];
   const box = (el) => { if (!el) return null; const b = el.getBoundingClientRect();
     return {w: Math.round(b.width), h: Math.round(b.height), bg: getComputedStyle(el).backgroundImage}; };
   return {inbox: box(rows[0].querySelector('.ib-inboxic')), gift: box(rows[1].querySelector('.ib-giftic')),
@@ -9940,8 +10034,9 @@ _RF_ROW_ICON_JS = """() => {
 
 
 def test_the_phone_inbox_sheet_has_no_gifts_and_the_gift_box_sheet_holds_them(logged_in_page):
-    """Owner's walk, ruling 1, on the phone. The Menu's first two rows stay Inbox and Gift box and the ☰
-    badge stays unread plus pending gifts; the Inbox row counts the unread. The Inbox sheet has no Gifts
+    """Owner's walk, ruling 1, on the phone. The Menu keeps its Inbox and Gift box entries (two cards of
+    its grid since the 2026-11-19 layout, look pick B) and the ☰ badge stays unread plus pending gifts;
+    the Inbox card counts the unread. The Inbox sheet has no Gifts
     tab and no gift rows; gifts live only in the Gift box sheet, beside the events and the expiring
     cards."""
     page, posts = _rf_phone(logged_in_page)
@@ -9950,8 +10045,8 @@ def test_the_phone_inbox_sheet_has_no_gifts_and_the_gift_box_sheet_holds_them(lo
     page.wait_for_selector(".glm-menu-list .glm-menu-item")
     _settle(page)
     page.wait_for_selector(".glm-menu-item .ib-inboxic.small[style*='background-image']")
-    rows = page.evaluate("() => [...document.querySelectorAll('.glm-menu-list .glm-menu-item')].slice(0, 2)"
-                         ".map((b) => b.textContent)")
+    rows = page.evaluate("() => ['Inbox', 'Gift box'].map((n) => [...document.querySelectorAll('.glm-menu-list .glm-menu-card')]"
+                         ".find((b) => b.querySelector('.glm-menu-card-h').textContent.trim().endsWith(n))).map((b) => b.textContent)")
     assert rows[0].startswith("Inbox") and rows[0].endswith("5 new ›"), rows
     assert rows[1].startswith("Gift box"), rows
     ic = page.evaluate(_RF_ROW_ICON_JS)
@@ -10046,16 +10141,18 @@ _RF_CONTROL_ORDER_JS = """() => {
   const idx = (sel) => secs.findIndex((s) => s.querySelector(sel));
   const paging = document.querySelector('.ctm-paging').getBoundingClientRect();
   const saver = document.querySelector('.ctm-saver').getBoundingClientRect();
-  return {about: idx('.mghelp-aboutrow'), glance: idx('.ctm-statgrid'), paging: idx('.ctm-paging'),
-          saver: idx('.ctm-saver'), mirror: idx('.ctm-mirror'), skins: idx('.mgcp-skinsrow'), n: secs.length,
-          pagingBottom: paging.bottom, saverTop: saver.top, vh: window.innerHeight};
+  const nav = document.querySelector('.glm-nav').getBoundingClientRect();
+  return {about: idx('.mghelp-aboutrow'), paging: idx('.ctm-paging'),
+          saver: idx('.ctm-saver'), skins: idx('.mgcp-skinsrow'), n: secs.length,
+          pagingBottom: paging.bottom, saverTop: saver.top, vh: window.innerHeight, navTop: nav.top};
 }"""
 
 
 def test_the_phone_control_screen_leads_its_settings_with_library_paging_and_data_saver(
         phone_u_server, render_browser, monkeypatch):
-    """Owner's walk, ruling 3. On the phone's Control screen, Library paging is the first settings row,
-    right under About and At a glance, with Data saver beside it: the two per-device phone choices
+    """Owner's walk, ruling 3, in the 2026-11-19 layout (look pick B: "This phone holds Library paging,
+    Data saver and About"). On the phone's Control screen, Library paging is the first row of the This
+    phone section, with Data saver beside it and About after them: the two per-device phone choices
     together, on the first screen without scrolling. The long-press hint dot under ▦ / ▭ now goes once
     the paging choice is found by either road -- a tap on Control's row counts as much as the long-press
     sheet -- and opening Control writes nothing."""
@@ -10064,15 +10161,15 @@ def test_the_phone_control_screen_leads_its_settings_with_library_paging_and_dat
         _q_open(page)
         assert page.locator(".glm-layout .glm-layout-dot").count() == 1, "the dot shows until found"
         page.click(".glm-navitem:has-text('Control')")
+        _ctm_section(page, "This phone")
         page.wait_for_selector(".ctm-paging")
         _settle(page)
         o = page.evaluate(_RF_CONTROL_ORDER_JS)
-        assert o["about"] >= 0 and o["glance"] == o["about"] + 1, o
-        assert o["paging"] == o["glance"] + 1, ("Library paging is the first settings row", o)
+        assert o["paging"] == 0, ("Library paging is This phone's first row", o)
         assert o["saver"] == o["paging"] + 1, ("Data saver sits beside it", o)
-        assert o["paging"] < o["mirror"], ("above the Live Mirror and everything after it", o)
+        assert o["about"] == o["saver"] + 1, ("About after them", o)
         assert o["skins"] < 0 or o["paging"] < o["skins"], o
-        assert o["pagingBottom"] <= o["vh"], ("on the first screen, no scrolling", o)
+        assert o["pagingBottom"] <= o["navTop"], ("on the first screen, no scrolling", o)
         writes = page.evaluate("window.__qWrites")
         assert not [k for k in writes if k.startswith("mg_phone_paging")], ("opening Control writes nothing", writes)
 
@@ -11218,6 +11315,1099 @@ def test_a_page_on_another_port_is_refused_by_the_front_door(logged_in_page, ren
     assert seen == [403], seen
     # ...and this server is still up and still has the session
     assert page.goto(target + "/api/ping").status == 200
+
+
+# ---------------------------------------------------------------------------
+# 3.21.x look picks, round 2 (owner, 2026-11-19; look board LOOK_BOARD_2026-11-19_round2.html):
+#   topic 2 option B -- Download and Remix on the viewer's bar, in two groups: make | keep
+#   topic 6 option A -- My Art's All time / 30 days switch
+# ---------------------------------------------------------------------------
+
+_BAR_LABELS_JS = """(sel) => [...document.querySelector(sel).children].flatMap((c) => {
+    if (/(^|\\s)(lbx|lbm)-vsep(\\s|$)/.test(c.className)) return ['|'];
+    if (/(^|\\s)lbx-group(\\s|$)/.test(c.className)) return [...c.children].map((k) => k.textContent.trim());
+    return [c.textContent.trim()]; })"""
+
+
+def test_the_desktop_viewer_bar_is_make_then_keep_with_download_and_remix(
+        phone_q_server, render_browser, monkeypatch):
+    """Look board round 2, topic 2 B: the bar is two groups with a thin rule between -- make (Edit, To
+    Video, Remix, Upscale), keep (Download, Publish, Make a recipe, Similar, Details) -- then Slideshow
+    and Close. Download takes the metal, Publish is a plain chip, Download is the same /full/<id>?dl=1
+    link Details has, D downloads, and Remix does what Details' Remix does: closes the viewer, opens the
+    Generate dock, spends nothing. Delete locally left Details' first row for the end of its second."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch, touch=False, viewport=DESKTOP)
+    try:
+        _visit(page, "/")
+        page.wait_for_selector(".mgg-card")
+        _dismiss_any_achievement_toast(page)
+        page.locator('.mgg-card:has(img[src*="/thumbs/500.jpg"])').first.click()
+        page.wait_for_selector(".lbx .lbx-hero img")
+        _settle(page)
+        labels = page.evaluate(_BAR_LABELS_JS, ".lbx-acts")
+        assert labels.count("|") == 2, labels
+        bars = [i for i, x in enumerate(labels) if x == "|"]
+
+        def at(word):
+            return next(i for i, x in enumerate(labels) if word in x)
+        order = [at("Edit"), at("To Video"), at("Remix"), at("Upscale"), bars[0], at("Download"), at("Publish"),
+                 at("Similar"), at("Details"), bars[1], at("Slideshow"), at("Close")]
+        assert order == sorted(order) and len(set(order)) == len(order), labels
+        dl = page.locator(".lbx-acts a.lbx-download")
+        assert dl.get_attribute("href") == "/full/500?dl=1"
+        assert "lbx-chip-metal" in dl.get_attribute("class")
+        assert "lbx-chip-metal" not in page.locator(".lbx-chip:has-text('Publish')").get_attribute("class")
+        assert "lbx-chip-metal" in page.locator(".lbx-chip:has-text('Slideshow')").get_attribute("class")
+        assert "D download" in page.locator(".lbx-hint").inner_text()
+        # the whole bar is on screen at a normal desktop width
+        r = _q_box(page, ".lbx-acts")
+        assert r["l"] >= 0 and r["r"] <= DESKTOP["width"], r
+        # D downloads through the same link
+        with page.expect_download() as dlinfo:
+            page.keyboard.press("d")
+        assert "dl=1" in dlinfo.value.url
+        # Remix: the viewer closes, the dock opens, nothing is sent
+        page.click(".lbx-chip:has-text('Remix')")
+        page.wait_for_selector(".lbx", state="detached")
+        page.wait_for_selector(".mgdock")
+        assert _q_generation_posts(seen) == []
+        # Details: Delete locally is on the second row, off the Download row
+        _visit(page, "/")
+        page.wait_for_selector(".mgg-card")
+        _dismiss_any_achievement_toast(page)
+        page.locator('.mgg-card:has(img[src*="/thumbs/500.jpg"])').first.click()
+        page.wait_for_selector(".lbx .lbx-hero img")
+        page.click(".lbx-acts a:has-text('Details')")
+        page.wait_for_selector(".p-actions-more")
+        assert page.locator(".p-actions-primary .btn-danger").count() == 0
+        assert page.locator(".p-actions-primary:has-text('Download')").count() == 1
+        last = page.evaluate("""() => [...document.querySelectorAll('.p-actions-more > *')].map((e) => e.textContent.trim())""")
+        assert "Delete locally" in last, last
+        assert last.index("Delete locally") >= len(last) - 2, last
+    finally:
+        ctx.close()
+
+
+def test_the_phone_viewer_row_has_remix_and_download_in_make_then_keep(
+        phone_q_server, render_browser, monkeypatch):
+    """Look board round 2, topic 2 B on the phone: the same two groups in the viewer's action row,
+    Remix after To Video, Download (the record's link) opening the keep group. A tap on Remix leaves
+    the viewer and sends nothing."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch)
+    try:
+        _q_open(page)
+        _q_tile(page, 0).click()
+        page.wait_for_selector(".lbm-actsrow .lbm-similar")
+        labels = page.evaluate(_BAR_LABELS_JS, ".lbm-actsrow")
+        assert labels.count("|") == 2, labels
+        i1, i2 = labels.index("|"), len(labels) - 1 - labels[::-1].index("|")
+        make, keep = labels[:i1], labels[i1 + 1:i2]
+        assert [m for m in make if "Remix" in m] and [m for m in make if "To Video" in m] \
+            and [m for m in make if "Upscale" in m], labels
+        assert make.index(next(m for m in make if "To Video" in m)) < make.index(next(m for m in make if "Remix" in m)), labels
+        assert "Download" in keep[0] and any("Similar" in k for k in keep) and any("Details" in k for k in keep), labels
+        assert "Slideshow" in labels[-1], labels
+        assert page.locator(".lbm-actsrow a.lbm-download").get_attribute("href") == "/full/500?dl=1"
+        _dismiss_any_achievement_toast(page)
+        page.click(".lbm-actsrow .lbm-remix")
+        page.wait_for_selector(".lbm-root", state="detached")
+        assert _q_generation_posts(seen) == []
+    finally:
+        ctx.close()
+
+
+_MYART_STUB = {
+    "items": [
+        {"media_id": "m%d" % i, "artwork_id": "a%d" % i, "title": "Work %d" % i, "thumb": "/thumbs/500.jpg",
+         "is_video": False, "is_nsfw": False, "date": "2026-10-0%d" % i, "created_at": "2026-10-0%dT00:00:00Z" % i,
+         "tags": [], "public": True, "sensitive": False, "likes": likes, "comments": 0, "views": views,
+         "views_30": v30, "likes_30": l30}
+        for i, (views, likes, v30, l30) in enumerate(
+            [(5000, 40, 100, 1), (900, 10, 700, 3), (300, 5, 200, 7)], start=1)],
+    "csrf": "x", "coverage": {"media": 3, "artworks": 3},
+    "window": {"days": 30, "since": "2026-11-19", "full": False, "seen": True},
+}
+_YOURART_STUB = {"items": [], "totals": {"count": 3, "views": 6200, "likes": 55, "comments": 0, "views_rows": 3},
+                 "views_synced": True, "views_at": "", "spikes": []}
+
+
+def _myart_stats(page, sel):
+    return page.evaluate("""(s) => [...document.querySelectorAll(s)].map((e) => [...e.children].map((c) => c.textContent.trim()).join(' '))""", sel)
+
+
+def test_the_desktop_my_art_switch_flips_totals_bars_and_sorts_and_says_since(
+        phone_q_server, render_browser, monkeypatch):
+    """Look board round 2, topic 6 A: an All time / 30 days switch beside Sort. All time is today's
+    panel unchanged; 30 days swaps Views and Likes in the stat row for the window's totals (labelled
+    'since <date>' while fewer than 30 days of readings exist), each card's views and bar to the
+    window's number, and Most viewed to the window's order."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch, touch=False, viewport=DESKTOP)
+    try:
+        page.route("**/api/myart/items", lambda r: _q_json(r, _MYART_STUB))
+        page.route("**/api/your-art", lambda r: _q_json(r, _YOURART_STUB))
+        _visit(page, "/")
+        page.wait_for_selector(".mgg-card")
+        _dismiss_any_achievement_toast(page)
+        page.click("button:has-text('My Art')")
+        page.wait_for_selector(".mgma2-seg")
+        page.wait_for_selector(".mgma2-fviews")
+        assert [b.strip() for b in page.locator(".mgma2-seg button").all_inner_texts()] == ["All time", "30 days"]
+        assert page.locator(".mgma2-seg button.on").inner_text() == "All time"
+        stats = _myart_stats(page, ".mgma2-stat")
+        assert "6,200" in stats[1] and "Total views" in stats[1], stats
+        page.click(".mgma2-seg button:has-text('30 days')")
+        _settle(page)
+        stats = _myart_stats(page, ".mgma2-stat")
+        assert stats[1] == "1,000 Views, since Nov 19", stats
+        assert stats[2] == "11 Likes, since Nov 19", stats
+        assert stats[0].startswith("3") and "Published" in stats[0], stats
+        views = [v.strip() for v in page.locator(".mgma2-fviews .n").all_inner_texts()]
+        assert sorted(views) == ["100 views", "200 views", "700 views"], views
+        # the best card's bar is full, the others a share of it
+        widths = page.evaluate("""() => [...document.querySelectorAll('.mgma2-fviews')].map((f) => [f.querySelector('.n').textContent,
+            f.querySelector('.mgma-bar').style.width])""")
+        assert dict(widths)["700 views"] == "100%", widths
+        # a full 30 days says "30 days"
+        full = dict(_MYART_STUB, window={"days": 30, "since": "2026-10-01", "full": True, "seen": True})
+        page.unroute("**/api/myart/items")
+        page.route("**/api/myart/items", lambda r: _q_json(r, full))
+        page.click("button:has-text('Close')") if page.locator("button.mgv-x").count() == 0 else page.click("button.mgv-x")
+        page.click("button:has-text('My Art')")
+        page.wait_for_selector(".mgma2-seg")
+        page.click(".mgma2-seg button:has-text('30 days')")
+        _settle(page)
+        assert _myart_stats(page, ".mgma2-stat")[1] == "1,000 Views, 30 days"
+        assert _q_generation_posts(seen) == []
+    finally:
+        ctx.close()
+
+
+def test_the_phone_my_art_switch_flips_the_totals_and_the_card_numbers(
+        phone_q_server, render_browser, monkeypatch):
+    """Look board round 2, topic 6 A on the phone: the same switch in the toolbar, the same numbers."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch)
+    try:
+        _q_open(page)
+        page.route("**/api/myart/items", lambda r: _q_json(r, _MYART_STUB))
+        page.route("**/api/your-art", lambda r: _q_json(r, _YOURART_STUB))
+        page.click("button[title=More]")
+        page.click(".glm-menu-item:has-text('My Art')")
+        page.wait_for_selector(".myam-spanseg")
+        page.wait_for_selector(".mgma2-fviews")
+        assert [b.strip() for b in page.locator(".myam-spanseg button").all_inner_texts()] == ["All time", "30 days"]
+        r = _q_box(page, ".myam-spanseg")
+        assert r["l"] >= 0 and r["r"] <= PHONE["width"], r
+        assert "6,200" in _myart_stats(page, ".myam-statcell")[1]
+        page.click(".myam-spanseg button:has-text('30 days')")
+        _settle(page)
+        stats = _myart_stats(page, ".myam-statcell")
+        assert stats[1] == "1,000 Views, since Nov 19", stats
+        assert stats[2] == "11 Likes, since Nov 19", stats
+        views = [v.strip() for v in page.locator(".mgma2-fviews .n").all_inner_texts()]
+        assert sorted(views) == ["100 views", "200 views", "700 views"], views
+    finally:
+        ctx.close()
+# 3.21.x look picks, round 2 (moonglade-internal DECISIONS "3.21.x look picks, round 2"; the
+# pixel source is design/board/LOOK_BOARD_2026-11-19_round2.html): topic 1 option B, the price
+# as a second line INSIDE the button that spends, dim until priced; and topic 4 option C, a
+# card per video model with its price for this picture at each length. Measured at the owner's
+# desktop dock size (1568x724) and the phone (390x844).
+# ---------------------------------------------------------------------------
+LOOK_DESKTOP = {"width": 1568, "height": 724}
+
+
+def _spend_button(page, selector):
+    """The button's two lines and its box, as the browser draws them."""
+    return page.evaluate("""(sel) => {
+        const b = document.querySelector(sel);
+        if (!b) return null;
+        const a = b.querySelector('.mgspend-a'), s = b.querySelector('.mgspend-s');
+        const r = (el) => { const x = el.getBoundingClientRect();
+            return {top: x.top, bottom: x.bottom, left: x.left, right: x.right}; };
+        return {disabled: b.disabled, cls: b.className, priced: b.dataset.priced || '',
+                action: a ? a.textContent : null, sub: s ? s.textContent : null,
+                box: r(b), a: a ? r(a) : null, s: s ? r(s) : null,
+                outline: getComputedStyle(b).outlineColor, outlineStyle: getComputedStyle(b).outlineStyle,
+                vw: innerWidth, vh: innerHeight};
+    }""", selector)
+
+
+def _token_color(page, token):
+    return page.evaluate("""(t) => { const p = document.createElement('span');
+        p.style.color = 'var(' + t + ')'; document.body.appendChild(p);
+        const c = getComputedStyle(p).color; p.remove(); return c; }""", token)
+
+
+def _two_lines_inside(g):
+    """The action over the price, both inside the button, the button inside the viewport."""
+    assert g["a"] and g["s"], g
+    assert g["s"]["top"] >= g["a"]["bottom"] - 1, "the price is the SECOND line, under the action: %r" % g
+    for k in ("a", "s"):
+        assert g["box"]["left"] - 1 <= g[k]["left"] and g[k]["right"] <= g["box"]["right"] + 1, g
+        assert g["box"]["top"] - 1 <= g[k]["top"] and g[k]["bottom"] <= g["box"]["bottom"] + 1, g
+    assert 0 <= g["box"]["left"] and g["box"]["right"] <= g["vw"], g
+    assert 0 <= g["box"]["top"] and g["box"]["bottom"] <= g["vh"], g
+
+
+_UNPRICED = "Couldn't check the price"
+
+
+def test_the_dock_says_the_price_inside_generate_and_stays_dim_until_priced(logged_in_page, monkeypatch):
+    """Desktop 1568x724, look pick round 2 topic 1 B: before a model the Generate button is dim
+    and says "pick a model first"; priced, it is live with "≈ 5,100 credits" under the word (the
+    badge beside it no longer carries a price line); a free card reads "Free · uses 1 card" with
+    the emerald ring; a price check that fails leaves it dim saying "Couldn't check the price"."""
+    _fake_unlimited_pixai(monkeypatch)
+    page = logged_in_page(**LOOK_DESKTOP)
+    _run_harness_guards(page, monkeypatch)
+    answer = {"v": None}
+    page.route("**/api/price", lambda r: r.continue_() if answer["v"] is None else _q_json(r, answer["v"]))
+    _visit(page, "/")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+    page.click(".mgx-gen")
+    page.wait_for_selector(".mgdock")
+    go = ".mgdock-gocol > .mgdock-gen"
+    page.wait_for_selector(go + " .mgspend-s")
+    # the probe's first pass says "checking the price…", then lands on "nothing to price"
+    page.wait_for_function("(s) => document.querySelector(s + ' .mgspend-s').textContent === 'pick a model first'",
+                           arg=go)
+    g = _spend_button(page, go)
+    assert g["disabled"] and g["priced"] == "" and " off" in " " + g["cls"], g
+    assert (g["action"], g["sub"]) == ("✦ Generate", "pick a model first"), g
+    assert page.locator(".mgdock-gocol > .cost-badge .mgc-main").count() == 0, \
+        "the line above the button goes: the price is the button's"
+
+    if not page.locator(".mgdock-modelrow").is_visible():
+        page.click(".mgdock-expand")
+    page.wait_for_selector(".mgdock-modelrow", state="visible")
+    page.click(".mgdock-modelrow")
+    page.wait_for_selector(".mfly.open .mg-card")
+    page.locator(".mfly.open .mg-card").first.click()
+    page.wait_for_function("(s) => document.querySelector(s).dataset.priced === '1'", arg=go)
+    g = _spend_button(page, go)
+    assert g["disabled"] and g["sub"] == "≈ 5,100 credits", "priced, but the host's own gate (no prompt) holds: %r" % g
+    page.fill(".mgdock-prompt", "1girl, moonlit glade")
+    page.wait_for_function("(s) => !document.querySelector(s).disabled", arg=go)
+    _settle(page)
+    g = _spend_button(page, go)
+    assert not g["disabled"] and g["sub"] == "≈ 5,100 credits" and " free" not in " " + g["cls"], g
+    _two_lines_inside(g)
+    assert page.locator(".mgdock-gocol > .cost-badge .mgc-main").count() == 0
+
+    def reprice(payload, _size_index):
+        """Answer the next price check with `payload`, and move a priced field (the size) to
+        a stop it is not on, so the probe asks again."""
+        answer["v"] = payload
+        if not page.locator(".mgdock-slabs:not(.mgdock-editslabs)").first.is_visible():
+            page.click(".mgdock-expand")
+        page.wait_for_selector(".mgdock-slabs:not(.mgdock-editslabs) .mgdock-stops", state="visible")
+        moved = page.evaluate("""() => {
+            const slabs = [...document.querySelectorAll('.mgdock-slabs:not(.mgdock-editslabs) .mgdock-slab')];
+            const b = [...slabs[1].querySelectorAll('.mgdock-stops')[0].querySelectorAll('button')]
+                .find((x) => !x.disabled && !x.classList.contains('on'));
+            if (b) b.click();
+            return !!b; }""")
+        assert moved, "a size stop to move to"
+
+    def sub_is(text):
+        try:
+            page.wait_for_function("([s, t]) => document.querySelector(s + ' .mgspend-s').textContent === t",
+                                   arg=[go, text])
+        except _PlaywrightTimeout:
+            raise AssertionError("the button never said %r: %r" % (text, _spend_button(page, go))) from None
+
+    reprice({"cost": 5100, "free": True, "card_name": "Daily card", "cards": 3}, 1)
+    sub_is("Free · uses 1 card")
+    _settle(page)
+    g = _spend_button(page, go)
+    assert not g["disabled"] and " free" in " " + g["cls"], g
+    assert g["outlineStyle"] == "solid" and g["outline"] == _token_color(page, "--emerald"), \
+        "a free answer wears the emerald ring: %r" % g
+    _two_lines_inside(g)
+
+    reprice({"error": "the harness says no"}, 2)
+    sub_is(_UNPRICED)
+    g = _spend_button(page, go)
+    assert g["disabled"] and g["priced"] == "", "a failed check leaves the button dim: %r" % g
+
+    # The proof the dim state is the button's own rule, not a host gate: with a price back, the
+    # same button is live again.
+    reprice({"cost": 2400, "free": False}, 0)
+    sub_is("≈ 2,400 credits")
+    assert not _spend_button(page, go)["disabled"]
+
+
+def test_the_phone_create_tab_says_the_price_inside_generate(logged_in_page, monkeypatch):
+    """Phone 390x844, look pick round 2 topic 1 B: the Create tab's Generate is dim and says
+    "pick a model first" with no model; with one it is live with the price as its second line,
+    both lines inside the full-width button, on screen."""
+    _fake_unlimited_pixai(monkeypatch)
+    page = logged_in_page(**PHONE)
+    _run_harness_guards(page, monkeypatch)
+    _visit(page, "/")
+    _settle(page)
+    page.click("button:has-text('Create')")
+    _cm_section(page, "Model")   # the phone layout (round 2, pick B) keeps the model row in Model
+    page.wait_for_selector(".cm-modelrow")
+    page.wait_for_function("() => { const s = document.querySelector('.cm-generate .mgspend-s');"
+                           " return !!s && s.textContent === 'pick a model first'; }")
+    g = _spend_button(page, ".cm-generate")
+    assert g["disabled"] and (g["action"], g["sub"]) == ("✦ Generate", "pick a model first"), g
+    page.click(".cm-modelrow")
+    page.wait_for_selector(".mfly.open .mg-card")
+    page.locator(".mfly.open .mg-card").first.click()
+    page.wait_for_function("() => !document.querySelector('.mfly.open')", timeout=5000)
+    page.wait_for_function("() => document.querySelector('.cm-generate').dataset.priced === '1'")
+    _cm_section(page, "Prompt")   # the prompt box lives in the Prompt section
+    page.fill("textarea.cm-ta", "1girl, moonlit glade")
+    page.wait_for_function("() => !document.querySelector('.cm-generate').disabled")
+    page.locator(".cm-generate").scroll_into_view_if_needed()
+    _settle(page)
+    g = _spend_button(page, ".cm-generate")
+    assert not g["disabled"] and g["sub"] == "≈ 5,100 credits", g
+    _two_lines_inside(g)
+    assert page.locator(".cm-cost .cost-badge .mgc-main").count() == 0, "no price line above the button"
+
+
+def _video_price(body):
+    """A price per engine and length, as /api/price would answer -- V4.0 Lite covered by a card."""
+    rate = {"v4.0.1": 5500, "v4.0": 14000, "tbkv1.0.1": 4200, "tbkv1.0": 2380, "v3.2": 3000,
+            "v3.0.2": 1800, "v3.0": 2000, "v3.0.1": 4480, "v2.7": 5600}
+    cost = rate.get(body.get("video_model"), 1000) * int(body.get("duration") or 5)
+    if body.get("video_model") == "v4.0.1":
+        return {"cost": cost, "free": True, "card_name": "V4.0 card", "cards": 9, "cards_needed": 1}
+    return {"cost": cost, "free": False}
+
+
+def _video_cards(page, root):
+    return page.evaluate("""(root) => [...document.querySelectorAll(root + ' .mgd-mcard')].map((c) => {
+        const r = c.getBoundingClientRect();
+        return {model: c.dataset.model, title: c.querySelector('.mgd-mct').textContent,
+                use: c.querySelector('.mgd-mcuse').textContent,
+                caps: [...c.querySelectorAll('.mgd-cap')].map((x) => x.textContent),
+                lines: [...c.querySelectorAll('.mgd-mcm')].map((x) => x.textContent),
+                cover: c.querySelector('.mgd-mccover').className.includes(' ok'),
+                coverColor: getComputedStyle(c.querySelector('.mgd-mccover')).color,
+                left: r.left, right: r.right, vw: innerWidth};
+    })""", root)
+
+
+def test_the_video_tab_shows_a_card_per_model_with_its_price_for_this_picture(logged_in_page, monkeypatch):
+    """Desktop 1568x724, look pick round 2 topic 4 C: the Video tab's engine slab is a card per
+    model -- name and "in use" / "Use this", its tags, the shot modes it takes, the price at each
+    length for THIS picture and what the free card does. With no picture every price reads "pick
+    a picture" and Generate video is dim; with one, each card fills in from the price check
+    (V4.0 Lite covered by the card, emerald), and "Use this" moves the engine."""
+    page = logged_in_page(**LOOK_DESKTOP)
+    _run_harness_guards(page, monkeypatch)
+    asked = []
+
+    def _price(route):
+        body = json.loads(route.request.post_data or "{}")
+        asked.append(body)
+        _q_json(route, _video_price(body))
+    page.route("**/api/price", _price)
+    _visit(page, "/")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+    page.click(".mgx-gen")
+    page.wait_for_selector(".mgdock")
+    page.click(".mgdock-tab:has-text('Video')")
+    if not page.locator(".mgd-mcards").is_visible():
+        page.click(".mgdock-expand")
+    page.wait_for_selector(".mgd-mcards", state="visible")
+    _settle(page)
+    cards = _video_cards(page, ".mgdock")
+    assert len(cards) >= 8, cards
+    cur = [c for c in cards if c["use"] == "in use"]
+    assert [c["title"] for c in cur] == ["V4.0 Lite Preview"], cards
+    assert cur[0]["caps"] == ["multi-ref", "audio", "15s", "end-frame", "default"]
+    assert cur[0]["lines"][0] == "First Frame · First & Last · Multi-Reference"
+    assert all(c["lines"][1] == "pick a picture" for c in cards), [c["lines"] for c in cards]
+    assert asked == [], "nothing is priced without a picture"
+    go = ".mgdock-gocol .mgdock-gen"   # the video drawer portals its Go into the column's slot
+    g = _spend_button(page, go)
+    assert g["disabled"] and g["sub"] == "pick a picture first", g
+
+    page.evaluate("() => document.querySelector('.gen-drawer.mgd-dock')"
+                  ".setRefs([{media_id: '424242', thumb: '/thumbs/424242.jpg'}])")
+    try:
+        page.wait_for_function("""() => { const c = document.querySelector('.mgd-mcard.cur .mgd-mcprice');
+            return c && c.textContent === '5s 27,500 · 10s 55,000 · 15s 82,500'; }""")
+    except _PlaywrightTimeout:
+        raise AssertionError("the card in use never priced: %r / asked %r"
+                             % (_video_cards(page, ".mgdock")[:2], asked[:3])) from None
+    page.wait_for_function("""() => [...document.querySelectorAll('.mgd-mcprice')]
+        .every((x) => !x.textContent.includes('…'))""", timeout=15000)
+    _settle(page)
+    cards = {c["title"]: c for c in _video_cards(page, ".mgdock")}
+    lite = cards["V4.0 Lite Preview"]
+    assert lite["lines"][2] == "Your free card covers this" and lite["cover"], lite
+    assert lite["coverColor"] == _token_color(page, "--emerald")
+    flash = cards["Tsubaki Video Flash"]
+    assert flash["lines"] == ["First Frame · First & Last · Multi-Reference · no negative, no camera",
+                              "5s 11,900 · 10s 23,800 · 15s 35,700", "No free card covers this"], flash
+    assert "cheap" in flash["caps"]
+    v27 = cards["V2.7 (High Dynamics)"]
+    assert v27["lines"][1] == "5s 28,000 · 10s 56,000" and v27["lines"][2] == "Never card-covered", v27
+    for c in cards.values():
+        assert c["right"] <= c["vw"] and c["left"] >= 0, c
+    assert len({json.dumps(b, sort_keys=True) for b in asked}) == len(asked), "each payload is asked once"
+    g = _spend_button(page, go)
+    assert not g["disabled"] and g["sub"] == "Free · uses 1 card", g
+
+    page.click(".mgd-mcard[data-model='tbkv1.0'] .mgd-mcuse")
+    page.wait_for_function("() => document.querySelector('.mgd-mcard.cur').dataset.model === 'tbkv1.0'")
+    page.wait_for_function("(s) => document.querySelector(s + ' .mgspend-s').textContent === '≈ 11,900 credits'", arg=go)
+    assert page.locator(".mgd-mcard.cur .mgd-mcuse").inner_text() == "in use"
+
+
+def test_the_phone_video_mode_shows_the_model_cards_inside_the_screen(logged_in_page, monkeypatch):
+    """Phone 390x844: the same cards in the Create tab's Video mode, every card inside the
+    screen's width, and Generate video dim with "pick a picture first" until a picture is
+    chosen and priced."""
+    page = logged_in_page(**PHONE)
+    _run_harness_guards(page, monkeypatch)
+    page.route("**/api/price", lambda r: _q_json(r, _video_price(json.loads(r.request.post_data or "{}"))))
+    _visit(page, "/")
+    _settle(page)
+    page.click("button:has-text('Create')")
+    page.click(".cm-seg3 .cm-segbtn:has-text('Video')")
+    page.wait_for_selector(".cm-videohost .mgd-mcards")
+    page.locator(".cm-videohost .mgd-mcards").scroll_into_view_if_needed()
+    _settle(page)
+    cards = _video_cards(page, ".cm-videohost")
+    assert len(cards) >= 8 and all(c["left"] >= 0 and c["right"] <= c["vw"] for c in cards), cards
+    assert all(c["lines"][1] == "pick a picture" for c in cards)
+    g = _spend_button(page, ".cm-videohost .mgd-go")
+    assert g["disabled"] and g["sub"] == "pick a picture first", g
+    page.evaluate("() => document.querySelector('.cm-videohost .gen-drawer')"
+                  ".setRefs([{media_id: '424242', thumb: '/thumbs/424242.jpg'}])")
+    page.wait_for_function("() => document.querySelector('.cm-videohost .mgd-go').dataset.priced === '1'")
+    page.locator(".cm-videohost .mgd-go").scroll_into_view_if_needed()
+    _settle(page)
+    g = _spend_button(page, ".cm-videohost .mgd-go")
+    assert not g["disabled"] and g["sub"] == "Free · uses 1 card", g
+    _two_lines_inside(g)
+    page.locator(".cm-videohost .mgd-mcards").scroll_into_view_if_needed()
+# One Tidy place (owner pick 2026-11-19, round 2 option B)
+# ---------------------------------------------------------------------------
+# Duplicates, stray files and broken files used to live in three places (Health's Duplicate
+# Review and Broken files list, the Panel's five-step Dedup chain beside Organize, and
+# "Verify library integrity" under Check). They are one Control Panel tab now, one column per
+# job, as the look board's topic 5 option B draws them. These drive the real tab: its layout,
+# the one duplicates flow with its gates intact, Duplicate Review stacked ON the Panel, and
+# every door from Health landing on it.
+
+# One recoverable zero-byte row: enough for Health's tile to turn into a door and for Tidy's
+# Broken column and list to have something to show. The shape is broken_list()'s own.
+_TIDY_BROKEN_DOC = {
+    "verified_at": "2026-11-19T08:00:00", "deep": True,
+    "rows": [{"media_id": "100", "problem": "zero-byte", "kind": "zero",
+              "path": "harness_0.png", "size": 0, "state": "recoverable",
+              "action": "redownload", "archive_only": False, "mark": "", "thumb": False,
+              "is_video": False, "created_at": "2025-01-01T00:00:00", "gone_as_of": None}],
+    "counts": {"all": 1, "zero": 1, "thumb": 0, "suspect": 0, "missing": 0, "lost": 0},
+    "broken": 1, "lost": 0,
+    "fix": {"redownload": ["100"], "rebuild": [], "lost": 0, "redownload_bytes": 4096},
+    "read_only": False,
+    "run": {"running": False},
+}
+
+_TIDY_AUDIT_OUT = ("Auditing harness (content hashing: on)...\n\n"
+                   "Copies that could be removed:\n  2025-01/harness_dup.png\n\n"
+                   "Result: Found 1 duplicate file (1.0 KB you could free). Nothing changed.\n")
+_TIDY_PREVIEW_OUT = ("\nDedup plan: 1 redundant files to quarantine to _duplicates/ (1.0 KB)\n"
+                     "  2025-01/harness_dup.png\n\n"
+                     "Dry run -- nothing changed. Re-run with --apply to perform it.\n\n"
+                     "Result: 1 duplicate file would move to _duplicates/ (1.0 KB). Nothing moved yet.\n")
+
+
+def _fake_cli_jobs(monkeypatch, verify_out="ok\n"):
+    """subprocess.Popen stubbed the way the Panel test above stubs it: no maintenance job really
+    runs against the module's shared library. Returns the argv list of every start."""
+    import io as _io
+    import subprocess as _subprocess
+    import time as _time
+    started = []
+
+    class _FakeProc:
+        def __init__(self, argv):
+            started.append([str(a) for a in argv])
+            if "--audit" in argv:
+                text = _TIDY_AUDIT_OUT
+            elif "--verify-dupes" in argv:
+                text = verify_out
+            elif "--dedup" in argv and "--apply" not in argv:
+                text = _TIDY_PREVIEW_OUT
+            else:
+                text = "ok\n"
+            self.stdout = _io.StringIO(text)
+
+        def wait(self):
+            _time.sleep(0.3)
+            return 0
+    monkeypatch.setattr(_subprocess, "Popen", lambda argv, *a, **k: _FakeProc(argv))
+    return started
+
+
+def _open_tidy(page):
+    _open_panel(page)
+    page.wait_for_function(
+        "() => /The library/.test(document.querySelector('[aria-label=\"Control Panel\"]')?.innerText || '')",
+        timeout=20_000)
+    page.click('.mgcp-tabs button:has-text("Tidy")')
+    page.wait_for_selector(".mgcp-tidycols")
+    _settle(page)
+
+
+def _chip_state(page, text):
+    return page.evaluate("""(t) => {
+      const b = [...document.querySelectorAll('.mgcp-tidy button.mgcp-chip')]
+        .find((x) => x.textContent.trim().replace(/\\s+/g, ' ').startsWith(t));
+      return b ? (b.disabled ? 'disabled' : 'enabled') : 'absent';
+    }""", text)
+
+
+def test_the_tidy_tab_lays_out_its_three_columns_and_maintenance_points_to_it(logged_in_page):
+    """The board's option B: a Tidy tab between Maintenance and ✦ Branding, three columns side
+    by side, top-aligned -- Duplicates, Stray files, Broken. Maintenance keeps no Organize row
+    and no Dedup chain, only a line pointing at Tidy."""
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    _settle(page)
+    _open_tidy(page)
+
+    tabs = page.locator(".mgcp-tabs button").all_inner_texts()
+    assert [t.strip() for t in tabs][:2] == ["Maintenance", "Tidy"], tabs
+
+    read_cols = """() => [...document.querySelectorAll('.mgcp-tidycol')].map((c) => {
+      const r = c.getBoundingClientRect();
+      return {label: c.querySelector('.mgcp-mkick').textContent, top: Math.round(r.top),
+              left: Math.round(r.left), width: Math.round(r.width)};
+    })"""
+    cols = page.evaluate(read_cols)
+    assert [c["label"] for c in cols] == ["Duplicates", "Stray files", "Broken"], cols
+    assert len({c["top"] for c in cols}) == 1, "the three columns are one top-aligned row: %r" % cols
+    assert cols[0]["left"] < cols[1]["left"] < cols[2]["left"], cols
+    assert all(c["width"] > 150 for c in cols), cols
+    # Proves itself: with the grid gone the columns stack, and the three tops differ.
+    page.add_style_tag(content=".mgcp-tidycols { display: block !important; }")
+    _settle(page)
+    assert len({c["top"] for c in page.evaluate(read_cols)}) == 3
+    page.evaluate("() => document.head.lastElementChild.remove()")
+
+    for text in ("Find", "Review", "Preview", "Undo", "Check"):
+        assert _chip_state(page, text) != "absent", text
+
+    page.click('.mgcp-tabs button:has-text("Maintenance")')
+    page.wait_for_selector("button.mgcp-tidylink")
+    maint = page.inner_text(".mgcp-grid")
+    assert "Organize into month folders" not in maint and "Quarantine" not in maint, maint
+    assert "Verify library integrity" not in maint and "Verify _duplicates/" not in maint, maint
+    page.click("button.mgcp-tidylink")
+    page.wait_for_selector(".mgcp-tidycols")
+
+
+def test_tidy_runs_one_duplicates_flow_and_keeps_every_gate(logged_in_page, monkeypatch):
+    """Find is Audit then Preview (two read-only jobs, the second only after the first finished
+    clean). Until it has run, Move all / Check / Delete stay greyed; after it, Move all opens but
+    still arms first and starts nothing on the first click, and Check and Delete stay greyed --
+    the chain's own order. The result box leads with Preview's sentence and folds its files."""
+    started = _fake_cli_jobs(monkeypatch)
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    _settle(page)
+    _open_tidy(page)
+
+    assert _chip_state(page, "Move all to _duplicates/") == "disabled"
+    assert _chip_state(page, "Check _duplicates/") == "enabled"
+    assert _chip_state(page, "Delete library copies outright") == "disabled"
+
+    page.click('.mgcp-tidy button.mgcp-chip:has-text("Find")')
+    page.wait_for_function(
+        "() => /would move to _duplicates\\//.test("
+        "document.querySelector('.mgcp-tidy .mgcp-runresult')?.innerText || '')",
+        timeout=20_000)
+    finds = [a for a in started if "--audit" in a or "--dedup" in a]
+    assert len(finds) == 2, started
+    assert "--audit" in finds[0] and "--dedup" in finds[1] and "--apply" not in finds[1], finds
+    box = page.inner_text(".mgcp-tidy .mgcp-runresult")
+    assert "1 duplicate file would move to _duplicates/ (1.0 KB). Nothing moved yet." in box, box
+    page.click(".mgcp-tidy .mgcp-runfold")
+    page.wait_for_selector(".mgcp-tidy .mgcp-runfiles")
+    assert "2025-01/harness_dup.png" in page.inner_text(".mgcp-tidy .mgcp-runfiles")
+
+    assert _chip_state(page, "Move all to _duplicates/") == "enabled"
+    assert _chip_state(page, "Check _duplicates/") == "enabled"
+    assert _chip_state(page, "Delete library copies outright") == "disabled"
+    n = len(started)
+    page.click('.mgcp-tidy button.mgcp-chip:has-text("Move all to _duplicates/")')
+    page.wait_for_selector('.mgcp-tidy button.mgcp-chip:has-text("Confirm — Move all to _duplicates/")')
+    assert len(started) == n, "the first click on a step that moves files must only arm it"
+
+
+_TIDY_VERIFY_SAFE = ("Verifying quarantine ...\n\nQuarantined files checked : 2\n"
+                     "Result: All 2 files in _duplicates/ (1.0 KB) have a copy kept in the library. Safe to delete.\n")
+_TIDY_VERIFY_UNSAFE = ("Verifying quarantine ...\n\nResult: Not safe to delete yet: 1 of 2 files in "
+                       "_duplicates/ need a look. Review the flagged items above.\n")
+
+
+@pytest.mark.parametrize("safe", [True, False])
+def test_tidy_empty_duplicates_opens_only_after_an_all_clear_check(logged_in_page, monkeypatch, safe):
+    """Empty _duplicates/ is greyed until a Check _duplicates/ finishes saying every file is safe.
+    Then its first click only arms it, naming the count and the size; the second starts the job
+    with --empty-duplicates --apply; and the job's start closes it again. A Check that found a
+    problem leaves it greyed (the mutation half: the same flow, one sentence different)."""
+    started = _fake_cli_jobs(monkeypatch, _TIDY_VERIFY_SAFE if safe else _TIDY_VERIFY_UNSAFE)
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    _settle(page)
+    _open_tidy(page)
+    assert _chip_state(page, "Empty _duplicates/") == "disabled"
+
+    page.click('.mgcp-tidy button.mgcp-chip:has-text("Check _duplicates/")')
+    page.wait_for_function(
+        "() => /_duplicates\\//.test(document.querySelector('.mgcp-tidy .mgcp-runresult')?.innerText || '')",
+        timeout=20_000)
+    assert any("--verify-dupes" in a for a in started), started
+    if not safe:
+        assert _chip_state(page, "Empty _duplicates/") == "disabled"
+        assert _chip_state(page, "Delete library copies outright") == "disabled", (
+            "a Check run out of order must not unlock the chain's later step")
+        return
+    assert _chip_state(page, "Empty _duplicates/") == "enabled"
+    assert _chip_state(page, "Delete library copies outright") == "disabled", (
+        "a Check run out of order must not unlock the chain's later step")
+    n = len(started)
+    page.click('.mgcp-tidy button.mgcp-chip:has-text("Empty _duplicates/")')
+    armed = '.mgcp-tidy button.mgcp-chip:has-text("Confirm — send 2 files (1.0 KB) to the Recycle Bin")'
+    page.wait_for_selector(armed)
+    assert len(started) == n, "the first click must only arm it"
+    page.click(armed)
+    # the stand-in job prints "ok" and no Result line, so its box reads "✓ Finished"
+    page.wait_for_selector('.mgcp-tidy .mgcp-runresult:has-text("Finished")', timeout=20_000)
+    empties = [a for a in started if "--empty-duplicates" in a]
+    assert len(empties) == 1 and "--apply" in empties[0], started
+    assert _chip_state(page, "Empty _duplicates/") == "disabled", "a job ran since the Check"
+
+
+def test_tidy_review_opens_duplicate_review_on_top_of_the_panel(logged_in_page):
+    """Review is the one Duplicate Review, stacked ON the Panel (the .mgv-over rung): the slab's
+    own centre is the topmost element, its back link says Tidy, and Escape closes it first while
+    the Panel stays."""
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    _settle(page)
+    _open_tidy(page)
+    page.click('.mgcp-tidy button.mgcp-chip:has-text("Review")')
+    page.wait_for_selector('[aria-label="Duplicate Review"]')
+    _settle(page)
+    assert "← Tidy" in page.inner_text('[aria-label="Duplicate Review"] .mgdr-back')
+    top = page.evaluate("""() => {
+      const s = document.querySelector('[aria-label="Duplicate Review"]');
+      const r = s.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + 30);
+      return !!(hit && s.contains(hit));
+    }""")
+    assert top, "Duplicate Review painted under the Control Panel"
+    page.keyboard.press("Escape")
+    page.wait_for_selector('[aria-label="Duplicate Review"]', state="detached")
+    assert page.locator('[aria-label="Control Panel"]').count() == 1, "Escape closed the Panel too"
+    assert page.locator(".mgcp-tidycols").count() == 1
+
+
+def test_health_tiles_open_tidy_and_the_broken_files_list_lives_there(logged_in_page):
+    """Health keeps its numbers. Its Duplicates tile opens the Panel on Tidy; a problem tile with
+    rows on the Broken files list opens Tidy's list at its chip. Health draws no second copy of
+    the list. Tidy's Fix all opens the list's one confirm, and Escape closes that confirm only."""
+    page = logged_in_page(**DESKTOP)
+    page.route("**/api/integrity/broken", lambda route: route.fulfill(
+        status=200, content_type="application/json", body=json.dumps(_TIDY_BROKEN_DOC)))
+    _visit(page, "/")
+    _settle(page)
+    _dismiss_any_achievement_toast(page)
+
+    page.click('nav[aria-label="Destinations"] button:has-text("Health")')
+    page.wait_for_selector('[aria-label="Collection Health"] .mgh-stats')
+    assert page.locator('[aria-label="Collection Health"] .mgbf').count() == 0, (
+        "Health still draws the Broken files list")
+    page.click('.mgh-stat:has(.mgh-stat-label:text-is("Duplicates")) button')
+    page.wait_for_selector(".mgcp-tidycols")
+    assert page.locator('[aria-label="Collection Health"]').count() == 0
+
+    page.keyboard.press("Escape")
+    page.wait_for_selector('[aria-label="Control Panel"]', state="detached")
+    page.click('nav[aria-label="Destinations"] button:has-text("Health")')
+    flag = '.mgh-stat:has(.mgh-stat-label:text-is("Zero-byte files")) button.flag'
+    page.wait_for_selector(flag)
+    page.click(flag)
+    page.wait_for_selector(".mgcp-tidy .mgbf")
+    page.wait_for_selector('.mgcp-tidy .mgbf-chip[aria-selected="true"]:has-text("Zero-byte")')
+    broken = page.locator('.mgcp-tidycol[aria-label="Broken files"]').inner_text()
+    assert "1 recoverable" in broken, broken
+
+    page.click('.mgcp-tidycol[aria-label="Broken files"] button.mgcp-chip:has-text("Fix all")')
+    page.wait_for_selector(".mgbf-confirm")
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".mgbf-confirm", state="detached")
+    assert page.locator('[aria-label="Control Panel"]').count() == 1, (
+        "Escape on the Fix all confirm closed the Panel under it")
+# ---------------------------------------------------------------------------------------------
+# THE PHONE LAYOUT, LOOK PICK B (owner, 2026-11-19: "The phone layout is utter shit and I hate it.
+# Fix it"). Pixel source: moonglade-internal design/board/LOOK_BOARD_2026-11-19_round2.html, topic
+# 3, option B -- today's header made smaller, each tab split into sections, the Menu a grid of cards.
+# Four guards, one per screen the board draws, each measured at 390x844 as a person drives it.
+# MG_PHONE_SHOTS=<folder> also saves each screen there as a PNG for a by-eye comparison with the
+# board (nothing is saved without it).
+
+def _pb_shot(page, name):
+    folder = os.environ.get("MG_PHONE_SHOTS")
+    if folder:
+        os.makedirs(folder, exist_ok=True)
+        page.screenshot(path=os.path.join(folder, name + ".png"))
+
+
+_PB_GEO_JS = """(sel) => { const el = document.querySelector(sel); if (!el) return null;
+    const r = el.getBoundingClientRect(); const cs = getComputedStyle(el);
+    return {t: r.top, b: r.bottom, l: r.left, r: r.right, h: r.height, w: r.width,
+            shown: cs.display !== 'none' && cs.visibility !== 'hidden' && r.height > 0}; }"""
+
+
+def _pb_geo(page, sel):
+    return page.evaluate(_PB_GEO_JS, sel)
+
+
+def _pb_phone(server, render_browser, monkeypatch):
+    monkeypatch.setattr(core, "_config_path", lambda: server.config_path)
+    ctx = render_browser.new_context(
+        viewport={"width": PHONE["width"], "height": PHONE["height"]},
+        device_scale_factor=1, base_url=server.base_url)
+    ctx.set_default_timeout(10_000)
+    page = ctx.new_page()
+    _rf_routes(page, account=_rf_account(social=True))
+    _login(page)
+    _visit(page, "/")
+    page.wait_for_selector(".glm-grid .glm-tile")
+    _dismiss_any_achievement_toast(page)
+    # the account has a claim waiting (the board draws its pill), so the claim card opens itself
+    # once; "Not now" puts it away and leaves the pill
+    try:
+        page.click(".mgclaim-x", timeout=3000)
+        page.wait_for_selector(".mgclaim-card", state="detached")
+    except _PlaywrightTimeout:
+        pass
+    _settle(page)
+    return ctx, page
+
+
+def test_the_phone_header_is_two_short_rows_with_three_buttons_and_slides_away_on_the_gallery(
+        paged_library_server, render_browser, monkeypatch):
+    """Look pick B, the Gallery. The header keeps the mark, the title, the counts, the claim and the
+    credits on two short rows with three round buttons (Folio, Loom, Menu); scrolled down, it slides
+    away and the search bar and the media chips stay at the top of the list; a pull back up brings
+    it back. Create and Control wear the one-row header: mark, name, credits, no round buttons."""
+    ctx, page = _pb_phone(paged_library_server, render_browser, monkeypatch)
+    try:
+        page.wait_for_selector(".glm-hero-claim")
+        _settle(page)
+        _pb_shot(page, "phone_gallery_home")
+        hero = _pb_geo(page, ".glm-hero")
+        assert hero["t"] == 0 and hero["h"] < 110, ("today's header, made smaller", hero)
+        assert page.evaluate("() => [...document.querySelectorAll('.glm-hero .glm-iconbtn')]"
+                             ".map((b) => b.title)") == [
+            "Folio of Honors", "The Loom — video storyboard", "More"], "three round buttons"
+        rows = page.evaluate("""() => [...document.querySelectorAll('.glm-hero > .glm-hero-row')].map((r) => ({
+            t: Math.round(r.getBoundingClientRect().top), text: r.innerText}))""")
+        assert len(rows) == 2 and rows[0]["t"] < rows[1]["t"], rows
+        assert "Moonglade Athenaeum" in rows[0]["text"], rows
+        assert " img" in rows[1]["text"] and "claim" in rows[1]["text"] and "46,200" in rows[1]["text"], rows
+        mark = _pb_geo(page, ".glm-hero-mark")
+        assert round(mark["w"]) == 40 and round(mark["h"]) == 40, mark
+
+        # scrolled down: the header has slid off, the search bar and the chips are at the top
+        page.evaluate("() => { document.querySelector('.glm-body').scrollTop = 600; }")
+        _settle(page)
+        page.wait_for_selector(".glm-hero.away")
+        _settle(page)
+        hero, body = _pb_geo(page, ".glm-hero"), _pb_geo(page, ".glm-body")
+        bars, pills = _pb_geo(page, ".glm-bars"), _pb_geo(page, ".glm-bar2")
+        assert hero["b"] <= 0.5 and body["t"] <= 0.5, ("the header slid away", hero, body)
+        assert abs(bars["t"] - body["t"]) < 1 and pills["t"] >= body["t"] and pills["b"] < 140, (
+            "the search bar and the media chips stay", bars, pills)
+        assert _body_top(page) >= 500, "the slide did not move the reader back up"
+        _pb_shot(page, "phone_gallery_scrolled")
+        # a pull back up brings it back
+        page.evaluate("() => { const b = document.querySelector('.glm-body'); b.scrollTop = b.scrollTop - 80; }")
+        page.wait_for_selector(".glm-hero:not(.away)")
+        _settle(page)
+        assert _pb_geo(page, ".glm-hero")["t"] == 0
+
+        # Create and Control: the one-row header
+        for tab, ready in (("Create", ".cm-secchips"), ("Control", ".ctm-sections")):
+            page.click(".glm-navitem:has-text('%s')" % tab)
+            page.wait_for_selector(ready)
+            _settle(page)
+            hero = _pb_geo(page, ".glm-hero.glm-hero-compact")
+            assert hero and hero["h"] < 56, (tab, hero)
+            assert page.locator(".glm-hero .glm-iconbtn").count() == 0, tab
+            assert page.locator(".glm-hero .glm-hero-credits").inner_text().strip() == "✦ 46,200", tab
+            assert round(_pb_geo(page, ".glm-hero-mark")["w"]) == 28, tab
+        # back on the Gallery, scrolled where it was left, the header comes back slid away
+        page.click(".glm-navitem:has-text('Gallery')")
+        page.wait_for_selector(".glm-hero.glm-hero-full")
+        _settle(page)
+        assert _body_top(page) > 400 and page.locator(".glm-hero.away").count() == 1
+    finally:
+        ctx.close()
+
+
+def test_the_phone_create_tab_is_five_sections_with_the_price_and_generate_on_the_first_screen(
+        paged_library_server, render_browser, monkeypatch):
+    """Look pick B, Create. Under Image | Edit | Video a row of section chips (Prompt, Model, Frame,
+    Recipes, More) shows one section at a time; the Prompt section is the prompt, its tools and one
+    line about the rest; the price and Generate are one bar above the tab bar on every section, on
+    the first screen; the section survives a trip to another tab."""
+    ctx, page = _pb_phone(paged_library_server, render_browser, monkeypatch)
+    try:
+        page.click(".glm-navitem:has-text('Create')")
+        page.wait_for_selector(".cm-secchips")
+        _settle(page)
+        _pb_shot(page, "phone_create")
+        assert page.locator(".cm-secchip").all_inner_texts() == ["Prompt", "Model", "Frame", "Recipes", "More"]
+        assert page.locator(".cm-secchip.on").inner_text() == "Prompt"
+        nav = _pb_geo(page, ".glm-nav")
+        ta = _pb_geo(page, "textarea.cm-ta")
+        assert ta["shown"] and ta["h"] >= 140, ("the prompt box is the Prompt section", ta)
+        assert not _pb_geo(page, ".cm-modelrow")["shown"], "the model row waits in Model"
+        summary = page.locator(".cm-secsummary").inner_text()
+        assert summary.startswith("Model · ") and "×" in summary, summary
+
+        def spend_on_screen(where):
+            bar, btn = _pb_geo(page, ".cm-spend"), _pb_geo(page, ".cm-spend .cm-generate")
+            assert bar["shown"] and bar["b"] <= nav["t"] + 0.5 and bar["t"] > 300, (where, bar, nav)
+            assert btn["r"] <= PHONE["width"] and btn["h"] >= 36, (where, btn)
+            assert page.locator(".cm-spend .cost-badge").count() == 1, where
+        spend_on_screen("Prompt")
+
+        for name, sel in (("Model", ".cm-modelrow"), ("Frame", ".cm-sizeline"), ("Recipes", ".cm-section[data-section=recipes]"),
+                          ("More", ".cm-advrow")):
+            page.click(".cm-secchip:has-text('%s')" % name)
+            _settle(page)
+            assert _pb_geo(page, sel)["shown"], name
+            assert not _pb_geo(page, "textarea.cm-ta")["shown"], name
+            spend_on_screen(name)
+            if name == "Model":
+                _pb_shot(page, "phone_create_model")
+
+        # the section is held across a tab switch
+        page.click(".cm-secchip:has-text('Model')")
+        page.click(".glm-navitem:has-text('Gallery')")
+        page.wait_for_selector(".glm-grid .glm-tile")
+        page.click(".glm-navitem:has-text('Create')")
+        page.wait_for_selector(".cm-secchips")
+        assert page.locator(".cm-secchip.on").inner_text() == "Model"
+        # Edit carries its price and its button in the same bar. The corner toasts (#mg-toasts, top
+        # 64 px, right) sit over the top of a sectioned tab now that its header is one short row;
+        # this run raises some (the update receipt among them, which stays until dismissed), so
+        # each is put away with its own ×, as a thumb would, before the tap.
+        _dismiss_any_achievement_toast(page)
+        _dismiss_corner_toasts(page)
+        page.click(".cm-tab .cm-segbtn:has-text('Edit')")
+        _settle(page)
+        # The two-line spend button (look pick round 2, topic 1 B): the action, then the price line.
+        assert page.locator(".cm-spend .cm-generate .mgspend-a").inner_text().strip() == "✦ Edit"
+        assert page.locator(".cm-secchips").count() == 0
+    finally:
+        ctx.close()
+
+
+def test_the_phone_control_tab_is_jobs_health_and_this_phone_with_sync_now_on_the_first_screen(
+        paged_library_server, render_browser, monkeypatch):
+    """Look pick B, Control. Jobs | Health | This phone; Jobs opens first with Sync now and Tidy
+    side by side on the first screen, the last run under them and the job console as a list;
+    Health holds the counts and Collection Health; This phone holds Library paging, Data saver and
+    About, in that order. Tidy opens the duplicates and the Back gesture closes it."""
+    ctx, page = _pb_phone(paged_library_server, render_browser, monkeypatch)
+    try:
+        page.click(".glm-navitem:has-text('Control')")
+        page.wait_for_selector(".ctm-sections")
+        _settle(page)
+        _pb_shot(page, "phone_control")
+        assert page.locator(".ctm-sections .cm-segbtn").all_inner_texts() == ["Jobs", "Health", "This phone"]
+        assert page.locator(".ctm-sections .cm-segbtn.on").inner_text() == "Jobs"
+        nav = _pb_geo(page, ".glm-nav")
+        sync, tidy = _pb_geo(page, ".ctm-syncnow"), _pb_geo(page, ".ctm-tidy")
+        assert sync["b"] <= nav["t"] and sync["t"] < 220, ("Sync now on the first screen", sync)
+        assert abs(sync["t"] - tidy["t"]) < 12 and tidy["l"] > sync["r"], ("Tidy beside it", sync, tidy)
+        assert page.locator(".ctm-syncnow").inner_text().strip() == "↻ Sync now"
+        assert page.locator(".ctm-lastrun").count() == 1
+        assert page.locator(".mgcp-sidehead:has-text('The job console')").count() == 1
+        # Sync is ONE row in the job console, read the way the scheduler decides who runs it
+        # (lib/livingRow.js autoSync, the desktop Panel's own one-truth fix); the standing order's
+        # own row is the Ledger's, as on the desktop
+        page.wait_for_selector(".ctm-jobrow")
+        names = page.locator(".ctm-joblist .ctm-jobrow .ctm-jobname").all_inner_texts()
+        assert len([n for n in names if "Sync" in n and "i2v" not in n]) == 1, names
+        assert page.locator(".ctm-joblist .ctm-jobrow[data-action=sync]").count() == 1, names
+        assert page.locator(".ctm-joblist:has-text('workers')").count() == 0, "the standing order is the Ledger's"
+        page.click(".ctm-jobseg .cm-segbtn:has-text('Ledger')")
+        page.wait_for_selector(".ctm-ledger .ctm-standing:has-text('Standing order')")
+        page.click(".ctm-jobseg .cm-segbtn:has-text('Pipelines')")
+        assert page.locator(".ctm-paging").count() == 0 and page.locator(".ctm-statgrid").count() == 0
+
+        page.click(".ctm-tidy")
+        page.wait_for_selector(".glm-screen[aria-label='Duplicates']")
+        page.go_back()
+        page.wait_for_selector(".glm-screen", state="detached")
+        assert page.locator(".ctm-sections").count() == 1, "Back closed Tidy and stayed in the app"
+
+        page.click(".ctm-sections .cm-segbtn:has-text('Health')")
+        page.wait_for_selector(".ctm-health .mgh-rows")
+        _settle(page)
+        _pb_shot(page, "phone_control_health")
+        assert page.locator(".mgcp-sidehead:has-text('At a glance')").count() == 1
+        assert page.locator(".ctm-syncnow").count() == 0
+
+        page.click(".ctm-sections .cm-segbtn:has-text('This phone')")
+        page.wait_for_selector(".ctm-paging")
+        _settle(page)
+        _pb_shot(page, "phone_control_this_phone")
+        order = page.evaluate("""() => { const secs = [...document.querySelectorAll('.cm-pad > .ctm-sec')];
+            const at = (sel) => secs.findIndex((s) => s.querySelector(sel));
+            return {paging: at('.ctm-paging'), saver: at('.ctm-saver'), about: at('.mghelp-aboutrow')}; }""")
+        assert 0 <= order["paging"] and order["saver"] == order["paging"] + 1 and order["about"] == order["saver"] + 1, order
+        assert _pb_geo(page, ".ctm-paging")["b"] <= nav["t"], "paging on the first screen"
+    finally:
+        ctx.close()
+
+
+def test_the_phone_menu_is_a_grid_of_cards_in_the_boards_order(logged_in_page):
+    """Look pick B, the Menu: a grid of cards two to a row, each a name and one line, in the board's
+    order, with Activity (the old header's round button) and the guide among them; Health is not a
+    card (it is Control's Health section); Log Out is the plain row under the grid. Activity opens
+    its sheet. The Gift box card draws the pack's rewards/gift.png at 18 px, as its row did; the
+    harness's branding root holds no pack, so the pack's file (MOONGLADE_PACK_ART) or a stand-in
+    PNG answers that address here."""
+    from io import BytesIO
+
+    from PIL import Image
+    page = logged_in_page(width=390, height=844, is_mobile=True, has_touch=True)
+    _rf_routes(page)
+    pack = os.environ.get("MOONGLADE_PACK_ART", "").strip()
+    pngs = {}
+    for name in ("gift", "claim"):
+        path = os.path.join(pack, "rewards", name + ".png") if pack else ""
+        if path and os.path.isfile(path):
+            with open(path, "rb") as fh:
+                pngs[name] = fh.read()
+        else:
+            buf = BytesIO()
+            Image.new("RGBA", (64, 64), (230, 170, 80, 255)).save(buf, "PNG")
+            pngs[name] = buf.getvalue()
+    asked = []
+
+    def _answer(name):
+        def handler(route):
+            asked.append(name)
+            route.fulfill(status=200, content_type="image/png", body=pngs[name])
+        return handler
+    for name in ("gift", "claim"):
+        page.route("**/branding/rewards/%s.png" % name, _answer(name))
+    _visit(page, "/")
+    page.wait_for_selector(".glm-grid .glm-tile")
+    page.wait_for_selector(".glm-iconbtn[title=More] .ib-menubadge")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+    page.click(".glm-iconbtn[title=More]")
+    page.wait_for_selector(".glm-menu-grid .glm-menu-card")
+    page.wait_for_function("() => performance.getEntriesByType('resource').some((e) => e.name.includes('/branding/rewards/gift.png'))")
+    page.wait_for_selector(".glm-menu-item .ib-inboxic.small[style*='background-image']")
+    _settle(page)
+    gift = page.evaluate("""() => { const c = [...document.querySelectorAll('.glm-menu-card')].find((b) =>
+        b.querySelector('.glm-menu-card-h').textContent.trim().endsWith('Gift box'));
+        const ic = c.querySelector('.ib-giftic.small'); const r = ic.getBoundingClientRect();
+        return {w: Math.round(r.width), h: Math.round(r.height), bg: getComputedStyle(ic).backgroundImage}; }""")
+    assert gift["w"] == 18 and gift["h"] == 18 and "/branding/rewards/gift.png" in gift["bg"], gift
+    assert "gift" in asked, "the card asked the branding route for the Gift box picture"
+    _pb_shot(page, "phone_menu")
+    cards = page.evaluate("""() => [...document.querySelectorAll('.glm-menu-grid > .glm-menu-card')].map((c) => {
+        const r = c.getBoundingClientRect();
+        return {h: c.querySelector('.glm-menu-card-h').innerText.trim(), s: c.querySelector('.glm-menu-card-s').innerText.trim(),
+                l: Math.round(r.left), t: Math.round(r.top), w: Math.round(r.width)}; })""")
+    assert [c["h"] for c in cards] == [
+        "My Art", "Collections", "Publish", "Contests", "Train a LoRA", "Inbox", "Gift box",
+        "Import", "Activity", "Guide"], cards
+    assert all(c["s"] for c in cards), ("every card has its line", cards)
+    assert len({c["l"] for c in cards}) == 2 and cards[0]["t"] == cards[1]["t"], ("two to a row", cards)
+    assert all(c["l"] >= 0 and c["l"] + c["w"] <= PHONE["width"] for c in cards), cards
+    assert next(c for c in cards if c["h"] == "Inbox")["s"] == "5 new ›"
+    assert page.locator(".glm-menu-item:has-text('Health')").count() == 0
+    logout = _pb_geo(page, ".glm-menu-logout")
+    assert logout["t"] > max(c["t"] for c in cards), "Log Out under the grid"
+
+    page.click(".glm-menu-card:has-text('Activity')")
+    page.wait_for_selector(".glm-sheet .at-empty, .glm-sheet .glm-activity-list")
+
+
+_PB_TOAST_JS = """() => {
+  const toasts = [...document.querySelectorAll('#mg-toasts .mg-toast')];
+  const half = innerHeight / 2;
+  const chrome = [...document.querySelectorAll('.glm-stage [data-phone-top]')].map((el) => el.getBoundingClientRect())
+    .filter((r) => r.height > 0 && r.bottom > 0 && r.top < half);
+  const floor = Math.max(0, ...chrome.map((r) => r.bottom));
+  // every control in the top chrome is still the topmost thing at its own centre
+  const covered = [...document.querySelectorAll('.glm-stage [data-phone-top] button, .glm-stage [data-phone-top] input')]
+    .filter((b) => { const r = b.getBoundingClientRect(); return r.width > 0 && r.bottom > 0 && r.top < half && r.left < innerWidth && r.right > 0; })
+    .filter((b) => { const r = b.getBoundingClientRect(); const x = Math.min(innerWidth - 1, Math.max(0, r.left + r.width / 2));
+      const at = document.elementFromPoint(x, r.top + r.height / 2); return !(at && (at === b || b.contains(at))); })
+    .map((b) => (b.textContent || b.title || b.placeholder || b.className).trim().slice(0, 30));
+  return {floor, tops: toasts.map((t) => t.getBoundingClientRect().top), n: toasts.length, covered};
+}"""
+
+
+def test_the_phone_toasts_sit_under_the_top_chrome_and_cover_none_of_its_controls(
+        paged_library_server, render_browser, monkeypatch):
+    """The corner toasts on the phone (2026-11-19, with look pick B). The stack used to sit at a fixed
+    64 px, made for the desktop's banner; under the phone's new short header that line ran through
+    Create's Image · Edit · Video and section chips and Control's sections, and a sticky toast held
+    them covered. On every tab -- and on the Gallery with its header slid away -- a sticky toast now
+    sits under the lowest top control on screen, and every one of those controls is still the thing
+    a tap lands on. The desktop keeps its 64 px (the variable is the phone shell's alone)."""
+    ctx, page = _pb_phone(paged_library_server, render_browser, monkeypatch)
+    try:
+        page.evaluate("() => window.Toast.show({title: 'Harness note', msg: 'stays until dismissed', sticky: true})")
+        page.wait_for_selector("#mg-toasts .mg-toast")
+        for tab, ready in (("Gallery", ".glm-bars"), ("Create", ".cm-secchips"), ("Control", ".ctm-sections")):
+            page.click(".glm-navitem:has-text('%s')" % tab)
+            page.wait_for_selector(ready)
+            if tab == "Control":
+                # the console as it is once read, with Sync now and Tidy (top controls too) above it
+                page.wait_for_selector(".ctm-jobrow")
+                assert page.locator(".ctm-syncrow[data-phone-top]").count() == 1
+            _settle(page)
+            t = page.evaluate(_PB_TOAST_JS)
+            assert t["n"] >= 1 and t["floor"] > 60, (tab, t)
+            assert all(top >= t["floor"] for top in t["tops"]), (tab, "a toast sits on the top chrome", t)
+            assert t["covered"] == [], (tab, "a top control is under a toast", t)
+            if tab == "Create":
+                _pb_shot(page, "phone_create_toast")
+            if tab == "Control":
+                _pb_shot(page, "phone_control_toast")
+        # the Gallery, scrolled: the header has gone, the toast follows the sticky search and chips up
+        page.click(".glm-navitem:has-text('Gallery')")
+        page.wait_for_selector(".glm-bars")
+        page.evaluate("() => { document.querySelector('.glm-body').scrollTop = 600; }")
+        page.wait_for_selector(".glm-hero.away")
+        _settle(page)
+        page.wait_for_function("""() => { const t = document.querySelector('#mg-toasts .mg-toast');
+            const b = document.querySelector('.glm-bars').getBoundingClientRect();
+            return t && Math.abs(t.getBoundingClientRect().top - (b.bottom + 8)) < 2; }""")
+        t = page.evaluate(_PB_TOAST_JS)
+        assert t["covered"] == [] and all(top >= t["floor"] for top in t["tops"]), t
+    finally:
+        ctx.close()
 
 
 def test_hovering_the_loom_button_shows_its_tip_at_once(logged_in_page):

@@ -505,6 +505,10 @@ def cmd_verify_dupes(args, out):
     --restore-orphans is passed."""
     restore = getattr(args, "restore_orphans", False)
     print("Verifying quarantine in {}/_duplicates ...".format(out))
+    # Any earlier all-clear stops counting the moment a check starts: only THIS check's answer
+    # may open Empty _duplicates/ (the snapshot below, written only when it is all clear).
+    _clear_verified_snapshot(out)
+    before = _quarantine_listing(out)
     res = verify_quarantine(out, restore_orphans=restore,
                             progress=getattr(args, "progress", None))
     if res["total"] == 0:
@@ -541,8 +545,17 @@ def cmd_verify_dupes(args, out):
         if res["orphan"] and not restore:
             print("Re-run with --restore-orphans to move orphans back to images/.")
     if not res["differs"] and not res["orphan"]:
-        _result("All {:,} file{} in _duplicates/ {} a copy kept in the library. Safe to delete.".format(
-            res["total"], "" if res["total"] == 1 else "s",
+        # The all-clear Empty _duplicates/ reads: exactly which files this check passed. Written
+        # only when nothing in _duplicates/ moved while the check ran.
+        after = _quarantine_listing(out)
+        if after != before or len(after) != res["total"]:
+            _result("_duplicates/ changed while it was being checked. Check it again before "
+                    "emptying it.")
+            return res
+        _write_verified_snapshot(out, after)
+        size = sum(v[0] for v in after.values())
+        _result("All {:,} file{} in _duplicates/ ({}) {} a copy kept in the library. Safe to delete.".format(
+            res["total"], "" if res["total"] == 1 else "s", _fmt_bytes(size),
             "has" if res["total"] == 1 else "have"))
     else:
         flagged = len(res["differs"]) + len(res["orphan"])
@@ -550,6 +563,203 @@ def cmd_verify_dupes(args, out):
                 "Review the flagged items above.".format(
                     flagged, res["total"], "" if res["total"] == 1 else "s"))
     return res
+
+
+# ---------------------------------------------------------------------------
+# Empty _duplicates/ (One Tidy place, 2026-11-19): the last step of the duplicates road
+# ---------------------------------------------------------------------------
+# The ONLY way this empties anything is after a --verify-dupes that found every quarantined
+# file safe (a byte- or pixel-identical keeper still in the library; nothing DIFFERS, nothing
+# ORPHAN). That check writes the exact list it passed -- path, size, mtime -- and nothing else
+# does. Emptying then:
+#   1. refuses without that list, or when _duplicates/ no longer matches it exactly (a file
+#      added, removed or changed since the check blocks it);
+#   2. refuses under READ_ONLY, and refuses (deletes nothing) without send2trash -- the files
+#      go to the Recycle Bin, never straight off the disk;
+#   3. re-runs the check on the spot and refuses unless it is still all clear;
+#   4. only then sends exactly the checked files (and each one's Duplicate Review undo note)
+#      to the Recycle Bin, removes the folders that are left empty, and reconciles the catalog.
+VERIFIED_SNAPSHOT = "duplicates_verified.json"
+
+
+def _quarantine_listing(out_dir):
+    """{relative path: [size, mtime_ns]} of every file verify_quarantine checks (the image
+    files under _duplicates/)."""
+    root = out_dir / "_duplicates"
+    if not root.exists():
+        return {}
+    got = {}
+    for p in root.rglob("*"):
+        if p.is_file() and p.suffix.lower() in _IMAGE_EXTS:
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            got[p.relative_to(out_dir).as_posix()] = [st.st_size, st.st_mtime_ns]
+    return got
+
+
+def _snapshot_path(out_dir, make=False):
+    return _paths.records_path(out_dir, VERIFIED_SNAPSHOT, make=make)
+
+
+def _write_verified_snapshot(out_dir, listing):
+    import json
+    from datetime import datetime, timezone
+    _snapshot_path(out_dir, make=True).write_text(json.dumps({
+        "verified_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "files": listing}), encoding="utf-8")
+
+
+def _clear_verified_snapshot(out_dir):
+    try:
+        _snapshot_path(out_dir).unlink()
+    except OSError:
+        pass
+
+
+def _read_verified_snapshot(out_dir):
+    import json
+    try:
+        d = json.loads(_snapshot_path(out_dir).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    files = d.get("files") if isinstance(d, dict) else None
+    return files if isinstance(files, dict) else None
+
+
+def empty_gate(out_dir, listing):
+    """'' when `listing` (what _duplicates/ holds now) is exactly what the last all-clear
+    check passed, else the plain reason it is not. The one door to emptying."""
+    passed = _read_verified_snapshot(out_dir)
+    if passed is None:
+        return ("_duplicates/ has not passed Check _duplicates/ since it last changed. "
+                "Run the check first.")
+    passed = {k: list(v) for k, v in passed.items()}
+    if passed != listing:
+        added = len(set(listing) - set(passed))
+        gone = len(set(passed) - set(listing))
+        changed = sum(1 for k in set(listing) & set(passed) if listing[k] != passed[k])
+        bits = [b for b in (
+            "{:,} added".format(added) if added else "",
+            "{:,} gone".format(gone) if gone else "",
+            "{:,} changed".format(changed) if changed else "") if b]
+        return ("_duplicates/ changed since it was checked ({}). Run the check again."
+                .format(", ".join(bits)))
+    return ""
+
+
+def _recycle_bin():
+    """send2trash's send2trash, or None when the package is not installed."""
+    try:
+        from send2trash import send2trash
+    except ImportError:
+        return None
+    return send2trash
+
+
+def _refuse(why):
+    """A refusal is a finished run with a warning (the Panel's result box shows it as one)."""
+    import os
+    from moonglade.backup import PANEL_WARN_PREFIX
+    _result("Not emptied: {} Nothing was moved.".format(why))
+    if os.environ.get("MOONGLADE_PROGRESS") == "1":
+        print("{}1".format(PANEL_WARN_PREFIX), flush=True)
+    return {"emptied": 0, "refused": why}
+
+
+def cmd_empty_duplicates(args, out, db_path):
+    """--empty-duplicates: send the checked files in _duplicates/ to the Recycle Bin. A preview
+    unless --apply. See the block comment above for every gate, in order."""
+    apply = getattr(args, "apply", False)
+    listing = _quarantine_listing(out)
+    if not listing:
+        _clear_verified_snapshot(out)
+        _result("_duplicates/ is empty, so there is nothing to empty.")
+        return {"emptied": 0}
+    total = sum(v[0] for v in listing.values())
+    n = len(listing)
+    what = "{:,} file{} ({})".format(n, "" if n == 1 else "s", _fmt_bytes(total))
+    why = empty_gate(out, listing)
+    if why:
+        return _refuse(why)
+    if not apply:
+        print("Would send {} from _duplicates/ to the Recycle Bin.".format(what))
+        _result("{} in _duplicates/ would go to the Recycle Bin. Nothing moved yet.".format(what))
+        return {"emptied": 0, "would": n, "bytes": total}
+
+    from moonglade.backup import PixAIError, _check_read_only
+    try:
+        _check_read_only("empty _duplicates/ to the Recycle Bin")
+    except PixAIError:
+        return _refuse("read-only mode is on.")
+    trash = _recycle_bin()
+    if trash is None:
+        return _refuse("sending files to the Recycle Bin needs the send2trash package, which "
+                       "isn't installed (pip install send2trash). Nothing is ever deleted outright "
+                       "from here.")
+
+    # Check again, now: a keeper deleted since the check would leave an orphan behind.
+    print("Checking _duplicates/ again before emptying it ...")
+    res = verify_quarantine(out, progress=getattr(args, "progress", None))
+    now = _quarantine_listing(out)
+    if res["differs"] or res["orphan"] or now != listing or res["total"] != n:
+        _clear_verified_snapshot(out)
+        return _refuse("_duplicates/ is no longer all clear ({:,} differ, {:,} with no copy kept, "
+                       "{} since the check). Run the check again.".format(
+                           len(res["differs"]), len(res["orphan"]),
+                           "changed" if now != listing else "unchanged"))
+
+    moved = failed = 0
+    moved_bytes = 0
+    _prog = getattr(args, "progress", None)
+    for i, rel in enumerate(sorted(listing)):
+        p = out / rel
+        try:
+            trash(str(p))
+            moved += 1
+            moved_bytes += listing[rel][0]
+            print("  {}".format(rel))
+        except Exception as e:      # noqa: BLE001 -- any failure leaves the file where it is
+            print("  failed {} ({})".format(rel, e))
+            failed += 1
+            continue
+        note = p.with_name(p.name + ".undo.json")    # Duplicate Review's undo note, now moot
+        if note.exists():
+            try:
+                trash(str(note))
+            except Exception:       # noqa: BLE001 -- the note is harmless where it is
+                pass
+        if _prog:
+            _prog(i + 1, n, 0)
+    _clear_verified_snapshot(out)
+
+    root = out / "_duplicates"
+    for d in sorted((x for x in root.rglob("*") if x.is_dir()), key=lambda x: -len(x.parts)):
+        try:
+            d.rmdir()                # only ever removes an EMPTY folder
+        except OSError:
+            pass
+    try:
+        root.rmdir()
+        gone = True
+    except OSError:
+        gone = not root.exists()
+
+    try:
+        from moonglade.backup import _ensure_db
+        n_rec = reconcile_catalog_with_disk(out, _ensure_db(out))
+        print("Reconciled catalog: updated {:,} filename/batch entries to match disk.".format(n_rec))
+    except Exception:               # noqa: BLE001 -- no catalog: nothing to reconcile
+        pass
+
+    sentence = "Moved {:,} file{} ({}) from _duplicates/ to the Recycle Bin.".format(
+        moved, "" if moved == 1 else "s", _fmt_bytes(moved_bytes))
+    if failed:
+        sentence += " {:,} could not be moved.".format(failed)
+    sentence += " _duplicates/ is gone." if gone else " _duplicates/ still holds other files."
+    _result(sentence)
+    return {"emptied": moved, "failed": failed, "bytes": moved_bytes, "folder_gone": gone}
 
 
 def reconcile_catalog_with_disk(out_dir, db_path):

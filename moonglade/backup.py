@@ -35,7 +35,7 @@ QUICK START
   python -m moonglade --max 40           # small test first
 """
 
-__version__ = "3.21.2"
+__version__ = "3.21.3"
 
 import argparse
 import base64
@@ -16065,6 +16065,11 @@ def main():
     g_library.add_argument("--restore-orphans", action="store_true",
                     help="with --verify-dupes, move any orphaned quarantined files (no surviving "
                          "keeper) back to images/")
+    g_library.add_argument("--empty-duplicates", dest="empty_duplicates", action="store_true",
+                    help="send the files in _duplicates/ to the Recycle Bin, only after a "
+                         "--verify-dupes that found every one safe and only if nothing in "
+                         "_duplicates/ changed since; checks again first. Preview unless --apply. "
+                         "Needs send2trash; refused under READ_ONLY.")
     g_library.add_argument("--rebuild-similar", action="store_true",
                     help="drop + re-embed the visual-similarity ('Similar') index from scratch off "
                          "the on-disk backup. Cures a corrupted/duplicate index; builds ONE clean "
@@ -16291,6 +16296,9 @@ def main():
             return
         if args.verify_dupes:
             _organize.cmd_verify_dupes(args, out)
+            return
+        if getattr(args, "empty_duplicates", False):
+            _organize.cmd_empty_duplicates(args, out, db_path)
             return
         if getattr(args, "rebuild_thumbs", False):
             run_rebuild_thumbs(args)

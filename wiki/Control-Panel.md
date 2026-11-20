@@ -12,7 +12,9 @@ they are simply no longer the only way anything happens. See
 [Runs itself — the living library](#runs-itself--the-living-library).
 
 **Panel** opens the Panel as an **overlay on top of the gallery**, not a separate
-page — click it again or `Esc` to close. Its tab is **Maintenance**; **Accounts**,
+page — click it again or `Esc` to close. Its tabs are **Maintenance** and **Tidy** (duplicates,
+stray files and broken files, all in one place — see [Tidy](#tidy--duplicates-stray-files-and-broken-files)),
+plus **✦ Branding** once it is earned; **Accounts**,
 **Trash**, and **PixAI account** (your cards, coupons and credit ledger) are their own
 tiles inside Maintenance, each opening as a further overlay on top of the Panel itself.
 **PixAI account** opens on a strip of figures — credits, how much of that is paid and how
@@ -79,32 +81,16 @@ only when you press it.
 
 ### Tend — care for the files
 
-Three rows. Anything that moves or overwrites files asks first: the first click turns the
+Anything that moves or overwrites files asks first: the first click turns the
 button into **Confirm — …** with its name, and a second click runs it. These only run for a
 request from the machine hosting the gallery. Signed in from a tablet on your LAN you can
 browse, generate and run the read-only checks, but a job that changes files returns *"this
 action changes files; localhost-only"* — deliberate, because they move or overwrite files on
-the server's own disk.
+the server's own disk. The same rule holds in the [Tidy](#tidy--duplicates-stray-files-and-broken-files) tab.
 
-- **Organize into month folders** — **Organize — preview (dry run)** shows the plan without
-  moving anything, and what it found appears beside it. **Organize into month folders** then
-  normalizes the backup into `YYYY-MM/` folders with readable filenames, writing an undo
-  manifest. **Undo** replays that manifest backwards, then deletes it, keeping any move it could not undo for the next Undo. There's no second
-  manifest to undo the undo.
-- **Dedup** — a chain of five steps: **Audit → Preview → Quarantine → Verify → Delete**.
-  Each step is greyed out until the one before it has finished (hover it: *Run the earlier
-  stages first*), so you can't reach the end by accident. **Audit** runs the full check
-  (identical files under different names too, so it finds the same copies Preview does) and
-  writes the report to `audit_report.csv` in the library's `_moonglade/records/` folder; the
-  quick same-id-only check is `python -m moonglade --audit --no-content` on the command line.
-  Each step ends with one plain sentence saying what it found or did (for example *"14
-  duplicate files would move to _duplicates/ (25.6 MB). Nothing moved yet."*), and the file
-  list sits folded under **Show the 14 files**. **Preview**
-  shows the plan without moving anything. **Quarantine** (marked with a lock) moves redundant
-  copies aside to `_duplicates/`, keeping the most-organized one. **Verify** confirms every
-  quarantined file is byte-identical to a surviving copy, and flags orphans, before you
-  empty the folder. **Delete** (also locked) removes the redundant copies outright instead —
-  no `_duplicates/` safety net, no undo. Run Preview and Verify first.
+**Organize into month folders** and the **Dedup** chain moved to the **Tidy** tab on
+2026-11-19; a line here, *Organize and Dedup moved to Tidy ›*, takes you there.
+
 - **Thumbnails & Similar index** — **Rebuild ALL thumbnails** regenerates every thumbnail at
   current settings, extracts posters for poster-less videos, and sweeps orphans. It
   overwrites in place, so the gallery never goes blank. **Top up Similar** embeds any images
@@ -126,13 +112,6 @@ Each row shows when it last ran, with a **run ▸** beside it:
 - **Catalog stats** — counts summarized straight from `catalog.db`.
 - **Inventory count** — counts what's on your account so you can compare it to what's
   local. Downloads nothing.
-- **Verify _duplicates/** — the same read-only check as the Dedup chain's **Verify**.
-- **Verify library integrity** — the read-only integrity check (`--verify-library
-  --verify-deep`): missing and empty files, files cut short, missing or empty thumbnails.
-  Its row shows when it last ran; the log shows the summary and the first lines of
-  `integrity_report.csv`. After a check that found broken files the row also says
-  **N broken · Review ▸**, which opens Health at the **Broken files** list. See
-  [Health → Library integrity](Health).
 - **Sync published-artwork metadata** — merges titles, tags, likes and aesthetic scores onto
   matching rows. It re-reads your whole published list, so it takes much longer than
   **Sync now**. You rarely need it: the **Published-artwork sweep** in
@@ -149,6 +128,91 @@ Good for a quick smoke test after changing settings.
 The full re-walk (re-pull ALL history + metadata) has no button of its own. It appears in
 [Runs itself](#runs-itself--the-living-library) purely as a sixty-day floor, never as a timer,
 and its **Run now** starts it by hand.
+
+(**Verify _duplicates/** and **Verify library integrity** moved to the **Tidy** tab, beside the
+files they check.)
+
+## Tidy — duplicates, stray files and broken files
+
+One tab for everything that tidies the library's files (2026-11-19). Before it, the same work
+sat in three places: Health's Duplicate Review and Broken files list, the Dedup chain and
+**Organize into month folders** under Maintenance's Tend, and **Verify library integrity** under
+Check. Tidy runs the same jobs and the same checks as before; nothing new deletes anything, and
+nothing that moves or deletes files got any easier to reach.
+
+The tab has three columns, each with its count and its buttons. The counts are Health's own,
+re-read when a job here finishes. While a job runs, the console's running view (name, bar,
+log, **■ Stop this job**) sits above the columns, and the finished job's result box stays there
+until you dismiss it or start another. It is the same console as Maintenance's: one job at a
+time, whichever tab started it.
+
+### Duplicates
+
+The count is Health's **Duplicates** tile (copies of a picture saved in more than one folder),
+with **Reclaimable** under it.
+
+- **Find** — the duplicate audit and the dedup preview, one after the other. Both are
+  read-only: nothing moves. The audit runs the full check (identical files under different
+  names too) and writes `audit_report.csv` to the library's `_moonglade/records/` folder (the
+  quick same-id-only check is `python -m moonglade --audit --no-content` on the command line);
+  the preview starts only if the audit finished cleanly. The result box leads with one plain
+  sentence (for example *"14 duplicate files would move to _duplicates/ (25.6 MB). Nothing moved
+  yet."*), and the file list sits folded under **Show the 14 files**.
+- **Review** — opens **Duplicate Review** on top of the Panel (← **Tidy** brings you back). It
+  shows each group side by side; you keep one copy in each group and the rest move to
+  `_duplicates/`, with **Undo** on each group. See [Health → Duplicates review](Health#duplicates-review).
+- **then** — the rest of the road:
+  - **Move all to _duplicates/** (marked with a lock; greyed out until **Find** has run in this
+    Panel session) moves every redundant copy the preview listed aside to `_duplicates/`, keeping
+    the copy that opens as an image, then the larger, then the most-organized one. It checks the
+    moved files afterwards on its own.
+  - **Check _duplicates/** (read-only, any time) confirms every quarantined file is
+    byte-identical (or pixel-identical) to a copy still in the library, and flags anything that
+    differs and any orphan (a file with no copy kept). Its sentence says how many files and how
+    much space, for example *"All 14 files in _duplicates/ (25.6 MB) have a copy kept in the
+    library. Safe to delete."*
+  - **Empty _duplicates/** (locked) is the last step. It opens only straight after a **Check**
+    that found every file safe — any other job, or a move in Duplicate Review, closes it again
+    until the next **Check**. The first click turns it into **Confirm — send 14 files (25.6 MB)
+    to the Recycle Bin**; the second sends exactly the files that **Check** passed (and their
+    Duplicate Review undo notes) to the **Recycle Bin**, removes the folders left empty and
+    reconciles the catalog. Before it moves anything it makes sure `_duplicates/` is still
+    exactly what **Check** saw — a file added, removed or changed since stops it — and checks
+    every file again on the spot. Like the other steps that change files it runs only on the PC
+    running Moonglade, and `READ_ONLY` refuses it. Nothing is deleted outright: if the
+    `send2trash` package is missing (the launcher installs it with the rest), it refuses and
+    changes nothing. Its run lands in the **Ledger**.
+- **or, with no _duplicates/ safety net** — **Delete library copies outright** (locked) re-runs
+  the dedup and deletes redundant copies **in the library** directly, instead of moving them —
+  no `_duplicates/`, no Recycle Bin, no undo. It never deletes a copy that is not the same
+  picture as the one kept. It keeps the old chain's gate: greyed out until **Find**, **Move all**
+  and **Check** have run, in that order, in this Panel session.
+
+### Stray files
+
+The count is the pictures not in a month folder (the flat `images/` folder and any old
+`batches/`). **Preview** shows the organize plan without moving anything, and what it found
+replaces the line under the count (*"7 would move"*). **Move** (organize into month folders)
+normalizes the backup into `YYYY-MM/` folders with readable filenames, writing an undo manifest.
+**Undo** replays that manifest backwards, then deletes it, keeping any move it could not undo for
+the next Undo. There's no second manifest to undo the undo.
+
+### Broken
+
+The count is the rows on the **Broken files** list from the last integrity check, with how many
+of them can be fixed. **Check** runs that check (`--verify-library --verify-deep`, read-only):
+missing and empty files, files cut short, missing or empty thumbnails; the log shows the summary
+and the first lines of `integrity_report.csv`, and the column says when it last ran. **Fix all**
+opens the **Broken files** list's own confirm (the totals, then **Fix all recoverable**).
+
+Under the three columns, when the last check found broken files, sits the **Broken files** list
+itself — chips, rows, each row's one fix, **Mark lost** — exactly as described in
+[Health → Broken files](Health#broken-files). Health's problem tiles, its **Duplicates**,
+**Reclaimable** and **Missing files** tiles, and a fix run's Activity row all open this tab.
+
+On the phone, the Control tab still carries Organize, the Dedup chain and the two checks, and
+Health still opens Duplicate Review and the Broken files list; the phone layout's own redesign
+brings Tidy there.
 
 ## Download workers
 
@@ -288,10 +352,16 @@ it just stay sharp. It applies the moment you click it, including to the Panel y
 it in, and it is remembered for next time on this device only. Turning it back **On**
 restores the same blur — nothing else about how popups look or open changes either way.
 
-The same switch is on the phone's **Control** screen.
+The same switch is on the phone's **Control** screen, in its **This phone** section.
 
-**Library paging** (phone). The first setting on the phone's **Control** screen, right under **At a
-glance**: **Pages** (the default — **‹ Prev · Next ›**, a page at a time) or **Continuous** (the library
+**On a phone** the Control tab is in three sections. **Jobs** opens first: **↻ Sync now** and
+**Tidy** (the duplicates, the same review Health opens) side by side, when Sync last ran, then the
+job console — each scheduled job with how often it runs and whether it is on, Sync once, read
+the way the desktop Panel reads it — and under it the Pipelines and the Ledger (with the standing order), Recover a task by ID, the Live Mirror with Restart and Stop, and Accounts.
+**Health** has At a glance and [Collection Health](Health), Trash and the two downloads. **This
+phone** has Library paging, Data saver and About, then the blur switch, Branding and the skins.
+
+**Library paging** (phone). The first row of the phone's **Control → This phone** section: **Pages** (the default — **‹ Prev · Next ›**, a page at a time) or **Continuous** (the library
 loads as you scroll). It is the same choice the gallery's long-press sheet makes (see [Gallery](Gallery)),
 kept in the phone's browser like the blur. Tapping either one here also clears the small dot under the
 gallery's ▦ ▭ keys, the same as the long-press does.
@@ -460,8 +530,8 @@ changes of the release you are running, and a short *Under the hood* line for th
 it and **‹ This version** to come back. Along the bottom, **Guide** opens the
 [in-app guide](Home#help-inside-the-app), **Report an issue ↗** opens the project's issue
 page and **Releases ↗** its release notes. Up to date, the stamp shows the build (for
-example `v3.15.0 · 1a2b3c4`) and opens the same card. On a phone it is **Control → About
-Moonglade**, under the update row, and the guide's last page is About too.
+example `v3.15.0 · 1a2b3c4`) and opens the same card. On a phone it is **Control → This phone →
+About Moonglade**, and the guide's last page is About too.
 
 **An update that worked says so when the app comes back.** Pressing **Update now** ends in
 the page reloading into the new version, and a small note appears in the corner on the way

@@ -121,6 +121,12 @@ out this device only (to sign out every device, see [Trust & Safety](Trust-and-S
   by **Most viewed** as easily as by Most liked. See
   [View counts](Backing-Up#view-counts-and-the-one-thing-worth-knowing-about-them) for where
   those numbers come from and why looking at them is not quite free.
+  Beside Sort there is an **All time / 30 days** switch. **30 days** changes the whole panel at once:
+  the totals row, each card's views and bar, its hearts, and the Most viewed and Most liked sorts all
+  count only the last 30 days. PixAI itself only reports lifetime counts, so Moonglade keeps one
+  reading per day from the day this arrived; until it has 30 days of them the totals say **since
+  that day** (for example "since Nov 19") instead of "30 days" and count from the first reading.
+  Published and Comments always stay lifetime.
   My Art reads your local catalog, and the titles, tags and like counts it lists arrive with
   **Sync published-artwork metadata** (Panel → Maintenance, or `--sync-artworks` — see
   [Backing Up](Backing-Up)). On a library where that has never run there is nothing for it to
@@ -177,10 +183,10 @@ out this device only (to sign out every device, see [Trust & Safety](Trust-and-S
     opens PixAI's page in a new tab. The app never checks in, claims or plays an event for you, and
     the banner list is read without your API key (PixAI only answers it that way), at most once an
     hour.
-- **On a phone** the header stays as it was: the **Menu** button (three lines) carries one badge (unread
-  notifications plus waiting gifts), and **Inbox** and **Gift box** are the Menu's first two rows,
+- **On a phone** the **Menu** button (three lines) in the Gallery's header carries one badge (unread
+  notifications plus waiting gifts), and **Inbox** and **Gift box** are two cards in the Menu,
   each opening a full-height sheet. Inbox is the same list as the desktop's Inbox panel. Gift box is
-  the desktop's Gift box panel: the event cards, the free cards about to expire and your gifts; its row
+  the desktop's Gift box panel: the event cards, the free cards about to expire and your gifts; its card
   shows the soonest expiry, or how many gifts are waiting.
 - **Free cards about to expire.** When any free card you hold expires within three days, the
   **Cards** half of the credits chip gets a thin peach underline, and hovering the chip lists
@@ -188,7 +194,7 @@ out this device only (to sign out every device, see [Trust & Safety](Trust-and-S
   *"… today"*; never a countdown in hours. With nothing that close, there is no underline and
   the hover reads as it always did. Free cards aren't billing, so the mark is peach, not gold.
   The dates come from the same card summary the chip already reads. The **Gift box** lists
-  them too, and on a phone, where there is no hover, the **Menu**'s **Gift box** row shows the
+  them too, and on a phone, where there is no hover, the **Menu**'s **Gift box** card shows the
   soonest one.
 - **Panel** (the gear) — the Control Panel overlay: maintenance jobs with live logs and progress,
   the `Runs itself` job list, server Stop/Restart, accounts, updates and **About**.
@@ -432,6 +438,16 @@ so you can bookmark one, and the browser's Back button closes it.
   your edits…** bar under the picture that sends a Tsubaki.3 edit of it, priced before you send;
   ✎ Edit again or `Esc` closes it, and its **More options in the Edit drawer ↗** opens the Edit
   tab — see [Generating](Generating#tsubaki3-context-images-and-image-prompts).
+- **The viewer's top bar is two groups with a thin line between them.** First what *makes* a new
+  picture — **✎ Edit**, **▶ To Video**, **↺ Remix**, **⇱ Upscale** — then what *keeps or shares*
+  this one — **↓ Download** (the bright button), **Publish**, **⁂ Make a recipe**, **◈ Similar**,
+  **Details** — then **▶ Slideshow** and **✕ Close**. Remix and Download do exactly what they do on
+  the picture's record: Remix closes the viewer and fills the Generate drawer with the whole recipe
+  (nothing is spent until you press Generate), Download saves the full-size file. `D` downloads the
+  open picture; `R` sends it to Remix with a fresh seed. They are still on the record too; **Delete
+  locally** stays there, at the end of its second row. The phone's viewer row has the same two groups
+  (Remix after To Video, Download first in the second group), with a thin line across the row between
+  them.
 - **Detail page** (via the lightbox's *Details*, or by clicking a video): full
   metadata (incl. negative + clip-skip), Copy Prompt, **Filter by model** — a filter
   link to every image from the same model — View Batch, Edit Prompt. Keys: `←` `→`
@@ -496,12 +512,25 @@ the same honest count and 10-second **Undo** as the desktop. In the full-screen 
 to take the rating off. **Details** carries the same **Your layer** card as the desktop. See
 [Collections](Collections).
 
+**The phone's layout.** On the **Gallery** tab the header is two short rows: the mark, the name
+and its line, and three round buttons — the **Folio**, **The Loom** and the **Menu** — then the
+counts, the claim and the credits. Scroll down the library and the header slides away; the search
+box and the media chips (All · Images · Videos, Grid · Feed, Sort) stay at the top. Scroll back up a
+little, or reach the top, and it comes back. **Create** and **Control** have a one-row header (the
+mark, the name and the credits) and are split into sections: Create into **Prompt**, **Model**,
+**Frame**, **Recipes** and **More**, with the price and Generate in one bar above the tab bar;
+Control into **Jobs**, **Health** and **This phone** (see [Control Panel](Control-Panel)). Each tab
+remembers its section while you are on another one. The **Menu** is a grid of cards — My Art,
+Collections, Publish, Contests, Train a LoRA, Inbox, Gift box, Import, **Activity** (the
+generations and syncs the app is following) and **Guide** — with Log Out under them. While
+something is running, the Menu button shows a small dot.
+
 **On a phone, three more things about where you are.** Each of the three tabs —
 **Gallery**, **Create**, **Control** — keeps its own scroll position, so reading deep into
 your library and stepping over to the composer no longer drops you into the middle of it,
 and the library is still deep when you come back. Turning the page with **‹ Prev** or
-**Next ›** starts you at the top of the page you asked for, with the search box and the
-media pills back on screen. And while a sheet is up — **Sort**, **Advanced Search**,
+**Next ›** starts you at the top of the page you asked for, with the header back on screen.
+And while a sheet is up — **Sort**, **Advanced Search**,
 **Actions** — the library behind the dim is held still, and is exactly where you left it
 when the sheet goes. See the [FAQ](FAQ) for what the phone's Back gesture closes.
 
@@ -561,7 +590,7 @@ picture on its own says *single image*. **▶ To Video** and, on a picture's rec
 **▶ Send to Video** all only open the **Create** tab already filled in — Remix fills the Image form with
 the recorded prompt (or, for a picture made by a Generate run with variables, that run's template);
 Send to Video puts the picture in as the start frame — and **nothing is sent** until you press
-Generate. The viewer's buttons (Edit, To Video, Similar, Upscale, Details and the rest) wrap onto two or
+Generate. The viewer's buttons (Edit, To Video, Remix, Upscale, Download, Similar, Details and the rest) wrap onto two or
 three lines when the phone is upright, so every one is on screen without a sideways swipe.
 
 **Where you are in the library.** A picture's record and the full-screen viewer both say where the
@@ -627,7 +656,7 @@ one), laid out for a wide, short screen:
 - **The gallery shows 4 columns** (3 on a screen under 700 px wide), each column stacked like the upright two. **Feed** stays one
   picture per row, but no picture is drawn taller than the screen. The **N new since** line, **↑ Newest**
   and pull to refresh work exactly as upright.
-- **In the viewer the picture fits the height** and the actions — Edit, To Video, Similar, Upscale, Enter
+- **In the viewer the picture fits the height** and the actions — Edit, To Video, Remix, Upscale, Download, Similar, Enter
   contest, Details, Slideshow — are a column down the right edge, ahead of the placard, the prompt and the
   film strip, which scroll beneath them.
 - **Sheets open from the right edge as side panels**, no wider than 380 px: Sort, Advanced, Actions, the

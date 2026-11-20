@@ -31,13 +31,24 @@ test("each of the three Deep Focus gen tabs gets its own cost-badge ref", () => 
   assert.match(src, /const refCostRef = useRef\(null\);/);
 });
 
+// 2026-11-19: each badge is mounted through a bind (bindCost) that writes the same ref and
+// re-prices a badge that comes back on a tab switch -- the badge's price now rides inside its
+// tab's send button (look pick round 2, topic 1 B), which must never sit dim beside a prompt.
 test("a <CostBadge> is actually mounted in the Image, Edit, and Reference tab JSX", () => {
-  assert.match(src, /<CostBadge ref=\{imgCostRef\}/,
+  assert.match(src, /<CostBadge ref=\{imgCostBind\}[^>]*onButton onCost=\{setImgQuote\}/,
     "the Image tab's badge must actually be in the rendered tabBody, not just declared as a ref");
-  assert.match(src, /<CostBadge ref=\{editCostRef\}/,
+  assert.match(src, /<CostBadge ref=\{editCostBind\}[^>]*onButton onCost=\{setEditQuote\}/,
     "the Edit tab's badge must actually be in the rendered tabBody, not just declared as a ref");
-  assert.match(src, /<CostBadge ref=\{refCostRef\}/,
+  assert.match(src, /<CostBadge ref=\{refCostBind\}[^>]*onButton onCost=\{setRefQuote\}/,
     "the Reference tab's badge must actually be in the rendered tabBody, not just declared as a ref");
+  for (const [bind, ref] of [["imgCostBind", "imgCostRef"], ["editCostBind", "editCostRef"], ["refCostBind", "refCostRef"]]) {
+    assert.match(src, new RegExp("const " + bind + " = useCallback\\(bindCost\\(" + ref + ", set\\w+Quote\\), \\[\\]\\);"),
+      bind + " must write " + ref + " -- priceInto reads the badge off that ref");
+  }
+  assert.match(src, /refObj\.current = el;\s*if \(el && el !== was\) setCostEpoch\(\(n\) => n \+ 1\);\s*if \(!el\) setQ\(null\);/,
+    "a badge that mounts must be re-priced, and one that goes must take its button's quote with it");
+  const epochDeps = (src.match(/active\.c\.(imgPrompt|editPrompt|refPrompt), costEpoch\]\);/g) || []).length;
+  assert.equal(epochDeps, 3, "each of the three price effects lists costEpoch");
 });
 
 test("badge refreshes are debounced read-only price checks, not the spend endpoints", () => {

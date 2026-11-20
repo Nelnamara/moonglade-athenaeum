@@ -26,8 +26,10 @@ function row() {
 test("the design's five come first, in the design's order, then the extras", () => {
   const r = row();
   const at = (s) => { const k = r.indexOf(s); assert.ok(k >= 0, s + " is on the row"); return k; };
-  const order = [">✎ Edit<", ">▶ To Video<", ">◈ Similar<", ">⇱ Upscale<", ">Details ›<",
-    "<MakeRecipeChip", ">★ Enter contest<", '"▶ Slideshow"'].map(at);
+  // Since the 2026-11-19 viewer-bar pick (round 2, topic 2 B) the row is two groups: make
+  // (Edit, To Video, Remix, Upscale) then keep (Download, Similar, Details, the extras).
+  const order = [">✎ Edit<", ">▶ To Video<", '{"↺"} Remix<', ">⇱ Upscale<", '{"↓"} Download<',
+    ">◈ Similar<", ">Details ›<", "<MakeRecipeChip", ">★ Enter contest<"].map(at);
   for (let k = 1; k < order.length; k++) {
     assert.ok(order[k] > order[k - 1], "chip " + k + " comes after chip " + (k - 1));
   }
