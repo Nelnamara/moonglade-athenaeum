@@ -13312,7 +13312,11 @@ def create_app(out_dir: Path):
         refresh = request.args.get("refresh") == "1"
         try:
             core, session = _gen_session()
-            rows = _contest_sync.contest_board(core, session, force=refresh, full=refresh)
+            if refresh:
+                rows, stale_at = _contest_sync.contest_board(core, session, force=True, full=True), None
+            else:
+                # A cold open answers from the saved list at once and refreshes behind it.
+                rows, stale_at = _contest_sync.contest_board_swr(core, session)
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "contests": []}), 200
         # Both variants come off the ONE snapshot -- `active` is the server's own
@@ -13325,10 +13329,14 @@ def create_app(out_dir: Path):
         if board["truncated"]:
             board["limit"] = int(bm.get("limit") or 0)
             board["total_count"] = int(bm.get("total_count") or 0)
-        return jsonify({"contests": contests,
-                        "official": sum(1 for c in contests if c["type"] == "official"),
-                        "community": sum(1 for c in contests if c["type"] != "official"),
-                        "board": board})
+        out = {"contests": contests,
+               "official": sum(1 for c in contests if c["type"] == "official"),
+               "community": sum(1 for c in contests if c["type"] != "official"),
+               "board": board}
+        if stale_at is not None:
+            out["stale"] = True               # the saved list; a walk is refreshing it
+            out["saved_at"] = stale_at
+        return jsonify(out)
 
     @app.route("/api/contests/qualify")
     @tier(LOGIN)
@@ -13465,7 +13473,8 @@ def create_app(out_dir: Path):
         board = {}
         try:
             core, session = _gen_session()
-            for c in _contest_sync.contest_board(core, session) or []:
+            # Titles only: the saved list is good enough, so this never waits on a walk.
+            for c in _contest_sync.contest_board_swr(core, session)[0] or []:
                 if isinstance(c, dict) and c.get("id"):
                     board[str(c["id"])] = c
         except Exception:                       # soft: key-only rows beat an error page
