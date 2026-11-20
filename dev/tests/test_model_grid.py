@@ -890,6 +890,8 @@ def _stub_generate_network(monkeypatch, outputs):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: "")
     monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", lambda s, q, v=None, retries=None: {"createGenerationTask": {"id": "T1"}})
+    # an image create rides the create door since 3.22 S3-image (core._create)
+    monkeypatch.setattr(core, "_create", lambda s, kind, body: {"id": "T1"})
     monkeypatch.setattr(task_reads_mod, "_poll_task_status", lambda *a, **k: None)
     monkeypatch.setattr(task_reads_mod, "task_detail_gql",
                         lambda s, t: {"createdAt": "2026-07-22T00:00:00Z", "outputs": outputs})
@@ -932,16 +934,13 @@ def test_run_generate_still_self_heals_after_delegating_to_submit_generation(mon
     seen_mids = _stub_generate_network(monkeypatch, _BATCH_OUTPUTS)
     calls = []
 
-    def fake_gql(s, q, v=None, retries=None):
-        params = v["parameters"]
+    def fake_create(s, kind, params):
         calls.append(dict(params))
         if "inferenceProfile" in params:
-            raise core.graphql_error(
-                '[{"message": "unknown inferenceProfile \\"ultra\\" '
-                'for model type \\"SDXL_MODEL\\""}]', code="BAD_REQUEST")
-        return {"createGenerationTask": {"id": "T1"}}
+            raise _profile_refusal()
+        return {"id": "T1"}
 
-    monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", fake_gql)
+    monkeypatch.setattr(core, "_create", fake_create)
     args = SimpleNamespace(
         out=str(tmp_path),
         params_json='{"prompts": "x", "modelId": "v", "inferenceProfile": "ultra"}',
@@ -982,15 +981,27 @@ def test_task_detail_query_reads_the_full_document(monkeypatch):
     assert gen_cli_mod._task_detail_query(object(), "T8") == {"id": "T8", "via": "detail"}
 
 
+# PixAI's REST refusal of a profile, as the create door raises it (S3-image): BAD_REQUEST whose
+# structured issue path names inferenceProfile (DESIGN_3.22 2.7). The drop reads that path,
+# never the message.
+def _profile_refusal(path=("parameters", "inferenceProfile"), message="unsupported"):
+    return core.PixAIRestError("REST POST /task/create -> 400: " + message, status=400, body={
+        "code": "BAD_REQUEST", "message": message,
+        "data": {"issues": [{"path": list(path), "message": message}]}})
+
+
 def test_submit_generation(monkeypatch):
-    monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", lambda s, q, v=None, retries=None: {"createGenerationTask": {"id": "T9"}})
+    monkeypatch.setattr(core, "_create", lambda s, kind, body: {"id": "T9"})
     assert gen_road_mod.submit_generation(object(), {"x": 1}) == "T9"
 
 
 def test_submit_generation_raises(monkeypatch):
     import pytest
-    monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", lambda s, q, v=None, retries=None: {"createGenerationTask": {}})
-    with pytest.raises(core.PixAIError):
+
+    def _no_id(s, kind, body):
+        raise core.CreateOutcomeUnknown("no task id", kind=kind)
+    monkeypatch.setattr(core, "_create", _no_id)
+    with pytest.raises(core.CreateOutcomeUnknown):
         gen_road_mod.submit_generation(object(), {})
 
 
@@ -1006,15 +1017,13 @@ def test_submit_generation_retries_on_inferenceprofile_rejection(monkeypatch):
     behavior: drop inferenceProfile, resubmit on the model's default."""
     calls = []
 
-    def fake_gql(s, q, v=None, retries=None):
-        calls.append(dict(v["parameters"]))
-        if "inferenceProfile" in v["parameters"]:
-            raise core.graphql_error(
-                '[{"message": "unknown inferenceProfile \\"ultra\\" '
-                'for model type \\"SDXL_MODEL\\""}]', code="BAD_REQUEST")
-        return {"createGenerationTask": {"id": "T10"}}
+    def fake_create(s, kind, params):
+        calls.append(dict(params))
+        if "inferenceProfile" in params:
+            raise _profile_refusal()
+        return {"id": "T10"}
 
-    monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", fake_gql)
+    monkeypatch.setattr(core, "_create", fake_create)
     params = {"prompts": "x", "modelId": "v", "inferenceProfile": "ultra"}
     assert gen_road_mod.submit_generation(object(), params) == "T10"
     assert len(calls) == 2                              # rejected once, retried once
@@ -1029,10 +1038,12 @@ def test_submit_generation_does_not_retry_unrelated_errors(monkeypatch):
     try, not silently eat inferenceProfile and retry for an unrelated reason."""
     import pytest
 
-    def fake_gql(s, q, v=None, retries=None):
-        raise core.graphql_error("something else entirely", code="BAD_REQUEST")
+    def fake_create(s, kind, params):
+        # a BAD_REQUEST whose message even names inferenceProfile, about another field
+        raise _profile_refusal(path=("parameters", "width"),
+                               message="something else entirely, not inferenceProfile")
 
-    monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", fake_gql)
+    monkeypatch.setattr(core, "_create", fake_create)
     with pytest.raises(core.PixAIError, match="something else entirely"):
         gen_road_mod.submit_generation(object(), {"prompts": "x", "inferenceProfile": "ultra"})
 
@@ -1044,11 +1055,11 @@ def test_submit_generation_no_retry_when_param_absent(monkeypatch):
     import pytest
     calls = []
 
-    def fake_gql(s, q, v=None, retries=None):
+    def fake_create(s, kind, params):
         calls.append(1)
-        raise core.graphql_error("inferenceProfile is unsupported here", code="BAD_REQUEST")
+        raise _profile_refusal()
 
-    monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", fake_gql)
+    monkeypatch.setattr(core, "_create", fake_create)
     with pytest.raises(core.PixAIError):
         gen_road_mod.submit_generation(object(), {"prompts": "x"})   # no inferenceProfile key
     assert len(calls) == 1                               # never retried

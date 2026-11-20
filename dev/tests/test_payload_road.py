@@ -79,7 +79,7 @@ def road(monkeypatch):
     monkeypatch.setattr(cards_mod, "match_kaisuuken",
                         lambda s, params, **k: seen["matched"].append(params) or dict(CARD))
     monkeypatch.setattr(gen_road_mod, "submit_generation",
-                        lambda s, params: seen["submitted"].append(params) or "task-1")
+                        lambda s, params, **_kw: seen["submitted"].append(params) or "task-1")
     monkeypatch.setattr(gen_road_mod, "submit_fixer",
                         lambda s, mid, boxes: seen["fixed"].append((mid, boxes)) or "task-2")
     # A Fix is priced on PixAI's own Fix price route (#93), off the submit body itself.
@@ -166,7 +166,7 @@ def test_a_covering_card_is_attached_on_submit_and_reported_by_price():
         mp.setattr(pricing_mod, "price_task", lambda s, params: 1200)
         mp.setattr(cards_mod, "match_kaisuuken", lambda s, params, **k: dict(CARD))
         mp.setattr(gen_road_mod, "submit_generation",
-                   lambda s, params: seen.update(params=params) or "t")
+                   lambda s, params, **_kw: seen.update(params=params) or "t")
         req = _build({"version_id": "V1", "prompt": "x"})
         quoted = gen_road_mod.price(sess, req)
         gen_road_mod.submit(sess, req)
@@ -186,7 +186,7 @@ def test_price_says_paid_when_the_card_is_short_and_submit_attaches_nothing():
         mp.setattr(pricing_mod, "price_task", lambda s, params: 27500)
         mp.setattr(cards_mod, "match_kaisuuken", lambda s, params, **k: dict(short))
         mp.setattr(gen_road_mod, "submit_generation",
-                   lambda s, params: seen.update(params=params) or "t")
+                   lambda s, params, **_kw: seen.update(params=params) or "t")
         req = _build({"mode": "R2V", "images": ["77"], "prompt": "x"})
         quoted = gen_road_mod.price(sess, req)
         gen_road_mod.submit(sess, req)

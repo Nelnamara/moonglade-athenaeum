@@ -44,7 +44,7 @@ def rig(tmp_path, monkeypatch):
         rec["built"].append(dict(payload))
         return real_build(payload, *a, **k)
 
-    def _submit_gen(session, params, on_send=None, exact=False):
+    def _submit_gen(session, params, on_send=None, exact=False, **_kw):
         if on_send:
             on_send(params)
         rec["submits"].append(dict(params))

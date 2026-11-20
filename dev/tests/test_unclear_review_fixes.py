@@ -18,7 +18,7 @@ from moonglade import gen_params as gen_params_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import integrity as integ
 from moonglade import models as models_mod
-from tests.test_unclear_single_sends import ROUTES, _Resp, rig  # noqa: F401  (rig is a fixture)
+from tests.test_unclear_single_sends import ROUTES, _Resp, _route, rig  # noqa: F401  (rig is a fixture)
 
 INTERNAL = lambda: _Resp(200, {"errors": [{"message": "Internal server error",
                                            "extensions": {"code": "INTERNAL_SERVER_ERROR"}}],
@@ -35,7 +35,7 @@ PRISMA = lambda: _Resp(200, {"errors": [{"message": "Internal server error", "ex
                          ids=["internal", "upstream-timeout", "prisma"])
 @pytest.mark.parametrize("kind", ["generate", "edit", "enhance", "scene", "video"])
 def test_P1_a_graphql_server_error_is_unclear_and_holds_the_same_send(rig, kind, ans):
-    route, body, ok = ROUTES[kind]
+    route, body, ok = _route(kind)
     rig["wire"].answer = lambda u, j: ans()
     r1 = rig["cli"].post(route, json=body).get_json()
     assert r1["state"] == "may_have_started" and r1["unclear"] is True, r1
@@ -46,7 +46,7 @@ def test_P1_a_graphql_server_error_is_unclear_and_holds_the_same_send(rig, kind,
 
 
 def test_P2_a_blank_seed_repeat_after_a_success_is_held(rig):
-    route, body, ok = ROUTES["generate"]
+    route, body, ok = _route("generate")
     rig["wire"].answer = lambda u, j: ok()
     rig["cli"].post(route, json=dict(body, seed=None))
     rig["clock"][0] += 3
@@ -110,28 +110,31 @@ def test_the_two_resubmits_still_fire_on_their_coded_refusals(monkeypatch):
     monkeypatch.setattr(models_mod, "_gate_params_for_model", lambda s, p: p)
     monkeypatch.setattr(models_mod, "_profile_listing", lambda s, p: (False, False))
     monkeypatch.setitem(core._turbo_refused, "seen", False)
+    # An image create rides the create door since 3.22 S3-image: PixAI's REST refusals, the
+    # code in the oRPC body (and, for the profile, the issue path naming it).
     cases = [({"prompts": "a", "modelId": "1", "inferenceProfile": "pro"},
-              {"message": "unknown inferenceProfile", "extensions": {"code": "BAD_REQUEST"}}),
+              {"code": "BAD_REQUEST", "message": "unknown inferenceProfile",
+               "data": {"issues": [{"path": ["parameters", "inferenceProfile"]}]}}),
              ({"prompts": "a", "modelId": "1", "priority": gen_params_mod.PRIORITY_TURBO},
-              {"message": "Only member can use turbo mode", "code": 40300047})]
+              {"code": "REQUIRE_MEMBERSHIP", "message": "Only member can use turbo mode"})]
     for params, err in cases:
         sent = []
 
-        def mutate(s, q, v=None, _err=err):
-            sent.append(dict(v["parameters"]))
+        def create(s, kind, v, _err=err):
+            sent.append(dict(v))
             if len(sent) == 1:
-                raise core.graphql_error([_err])
-            return {"createGenerationTask": {"id": "T2"}}
-        monkeypatch.setattr(core, "gql_mutate", mutate)
+                raise core.PixAIRestError("REST POST /task/create -> 400", status=400, body=_err)
+            return {"id": "T2"}
+        monkeypatch.setattr(core, "_create", create)
         assert gen_road_mod.submit_generation(object(), dict(params)) == "T2"
         assert len(sent) == 2
         uncoded = dict(err)
-        uncoded.pop("extensions", None)
         uncoded.pop("code", None)
         sent.clear()
-        monkeypatch.setattr(core, "gql_mutate",
-                            lambda s, q, v=None, _e=uncoded: sent.append(1) or
-                            (_ for _ in ()).throw(core.graphql_error([_e])))
+        monkeypatch.setattr(core, "_create",
+                            lambda s, kind, v, _e=uncoded: sent.append(1) or
+                            (_ for _ in ()).throw(core.PixAIRestError(
+                                "REST POST /task/create -> 400", status=400, body=_e)))
         with pytest.raises(core.PixAIError):
             gen_road_mod.submit_generation(object(), dict(params))
         assert len(sent) == 1, "no resubmit after an uncoded (unknown) answer"
@@ -169,7 +172,7 @@ def _boom(*a, **k):
 def test_a_bookkeeping_failure_after_a_success_answers_the_task_id(rig, monkeypatch, kind):
     """The task exists: the answer is its id (so the job is registered), the failure is
     logged, and the record stays "sent" -- never "may have started"."""
-    route, body, ok = ROUTES[kind]
+    route, body, ok = _route(kind)
     rig["wire"].answer = lambda u, j: ok()
     if kind == "generate":
         # generate's first step after the send that reads the request: the clamp receipt

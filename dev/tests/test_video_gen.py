@@ -485,7 +485,7 @@ def test_gallery_catalog_ref_passes_through_then_uploads_on_invalid_media_id(tmp
     monkeypatch.setattr(core, "upload_media",
                         lambda session, path, **k: uploaded.append(str(path)) or "999000111222")
     monkeypatch.setattr(gen_road_mod, "submit_generation",
-                        lambda session, params: submitted.update(params) or "task-1")
+                        lambda session, params, **_kw: submitted.update(params) or "task-1")
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
 
     # UPDATED 2026-07-26. i2v now sends the catalog id FIRST, because uploading a copy is what
@@ -495,7 +495,7 @@ def test_gallery_catalog_ref_passes_through_then_uploads_on_invalid_media_id(tmp
     # Simulated by rejecting the first submit the way PixAI did in July.
     calls = []
 
-    def _submit(session, params):
+    def _submit(session, params, **_kw):
         calls.append(params.get("i2vPro", {}).get("mediaId"))
         if len(calls) == 1:
             raise core.graphql_error("invalid_media_id", code="BAD_REQUEST")
@@ -534,7 +534,7 @@ def test_gallery_r2v_catalog_ids_pass_through_without_upload(tmp_path, monkeypat
     monkeypatch.setattr(core, "upload_media",
                         lambda session, path, **k: calls.append(1) or "777")
     monkeypatch.setattr(gen_road_mod, "submit_generation",
-                        lambda session, params: submitted.update(params) or "t")
+                        lambda session, params, **_kw: submitted.update(params) or "t")
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
 
     cli = login_test_client(create_app(tmp_path))
@@ -577,7 +577,7 @@ def test_fix_and_edit_upload_the_catalog_reference(tmp_path, monkeypatch, pixai)
     monkeypatch.setattr(core, "upload_media", lambda s, path, **k: "999000111222")
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(gen_road_mod, "submit_generation",
-                        lambda s, params: seen.update(params=params) or "t1")
+                        lambda s, params, **_kw: seen.update(params=params) or "t1")
     monkeypatch.setattr(gen_road_mod, "submit_fixer",
                         lambda s, src, boxes: seen.update(fix_src=src) or "t2")
 
@@ -771,7 +771,7 @@ def test_a_failed_generation_is_logged_with_its_params(tmp_path, monkeypatch, ca
     monkeypatch.setattr(core, "upload_media", lambda session, path, **k: "777")
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
 
-    def boom(session, params):
+    def boom(session, params, **_kw):
         raise core.PixAIError('unknown mode "professional" for i2vPro')
     monkeypatch.setattr(gen_road_mod, "submit_generation", boom)
 
@@ -810,7 +810,7 @@ def test_the_failure_log_never_breaks_the_error_path(tmp_path, monkeypatch, pixa
     monkeypatch.setattr(core, "upload_media", lambda session, path, **k: "777")
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
 
-    def boom(session, params):
+    def boom(session, params, **_kw):
         params["poison"] = Unserialisable()
         raise core.PixAIError("the real failure")
     monkeypatch.setattr(gen_road_mod, "submit_generation", boom)
@@ -932,7 +932,7 @@ def test_r2v_invalid_reference_image_media_id_falls_back_to_upload(tmp_path, mon
                         lambda session, path, **k: uploaded.append(str(path)) or "999000111222")
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
 
-    def _submit(session, params):
+    def _submit(session, params, **_kw):
         calls.append(list(params.get("referenceVideo", {}).get("referenceImageMediaIds") or []))
         if len(calls) == 1:
             raise core.graphql_error("invalid_reference_image_media_id", code="BAD_REQUEST")
@@ -967,7 +967,7 @@ def test_r2v_fallback_keeps_first_pass_uploads_for_mixed_shots(tmp_path, monkeyp
     monkeypatch.setattr(core, "upload_media", _upload)
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
 
-    def _submit(session, params):
+    def _submit(session, params, **_kw):
         calls.append(list(params.get("referenceVideo", {}).get("referenceImageMediaIds") or []))
         if len(calls) == 1:
             raise core.graphql_error("invalid_reference_image_media_id", code="BAD_REQUEST")
@@ -996,7 +996,7 @@ def test_loom_generate_both_submits_rejected_is_exactly_two_posts_then_error(tmp
     calls = []
     monkeypatch.setattr(core, "upload_media", lambda session, path, **k: "999000111222")
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
-    def _submit(session, params):
+    def _submit(session, params, **_kw):
         calls.append(1)
         raise core.graphql_error("invalid_reference_image_media_id", code="BAD_REQUEST")
     monkeypatch.setattr(gen_road_mod, "submit_generation", _submit)
@@ -1018,7 +1018,7 @@ def test_loom_generate_lost_response_never_retries(tmp_path, monkeypatch, pixai)
     calls, uploaded = [], []
     monkeypatch.setattr(core, "upload_media", lambda session, path, **k: uploaded.append(1) or "x")
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
-    def _submit(session, params):
+    def _submit(session, params, **_kw):
         calls.append(1)
         raise requests.ReadTimeout("read timed out")
     monkeypatch.setattr(gen_road_mod, "submit_generation", _submit)

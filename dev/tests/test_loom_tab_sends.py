@@ -21,7 +21,7 @@ from tests.conftest import _TEST_PASSWORD, _TEST_USERNAME, _do_login
 from tests.test_generate_runs import CARD as RUN_CARD
 from tests.test_generate_runs import cli, rig, run  # noqa: F401  (fixtures + helper)
 from tests.test_single_send_quoted_free import (  # noqa: F401  (fixture + helpers)
-    _CARD, _NO_CARD, _Req, _body, gen)
+    _CARD, _NO_CARD, _Req, _body, _sent, gen)
 
 TARGET = {"board_id": "b1", "card_id": "c1"}
 
@@ -37,7 +37,7 @@ def test_an_image_tab_send_covered_by_a_card_is_the_boards_and_costs_zero(gen):
     d = gen["cli"].post("/api/generate", json=dict(_body(), loom_target=TARGET)).get_json()
     assert d.get("task_id") == "task-1", d
     assert _sends(gen["cli"]) == [{"task_id": "task-1", "card": "c1", "kind": "image", "cost": 0}]
-    sent = gen["pixai"].calls_for("createGenerationTask")[0].variables["parameters"]
+    sent = _sent(gen)[0]
     assert "loom_target" not in sent, "the board's key never reaches PixAI"
 
 

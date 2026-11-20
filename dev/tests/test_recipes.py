@@ -230,15 +230,22 @@ def test_the_send_refuses_a_malformed_recipe_list():
 
 def test_a_recipe_refusal_is_never_resubmitted_whatever_its_words(monkeypatch):
     """Even a refusal whose text says inferenceProfile goes out ONCE (review finding 4)."""
+    # an image create rides the create door since 3.22 S3-image: PixAI's REST refusal, its
+    # RECIPE_* code in the oRPC body and an issue path naming inferenceProfile, still goes once
+    from tests.conftest import _REAL_CREATE
+    monkeypatch.setattr(core, "_create", _REAL_CREATE)
     fake = FakePixAI()
-    err = _refused("RECIPE_INCOMPATIBLE", "mutually_exclusive_feature", [RID])
-    err.args = ("GraphQL error: inferenceProfile clashes with a recipe",)
-    fake.fail("createGenerationTask", err)
+    err = core.PixAIRestError(
+        "REST POST /task/create -> 400: inferenceProfile clashes with a recipe", status=400,
+        body={"code": "RECIPE_INCOMPATIBLE", "message": "inferenceProfile clashes",
+              "data": {"recipeIds": [RID], "reason": "mutually_exclusive_feature",
+                       "issues": [{"path": ["parameters", "inferenceProfile"]}]}})
+    fake.fail("/task/create", err)
     monkeypatch.setattr(models_mod, "_gate_params_for_model", lambda s, p: p)
     with pytest.raises(core.PixAIError):
         gen_road_mod.submit_generation(fake, {"modelId": "1", "inferenceProfile": "pro",
                                       "recipeIds": [RID]})
-    assert len([c for c in fake.calls if c.verb == "mutate"]) == 1
+    assert fake.creates() == 1
 
 
 def test_read_only_refuses_before_the_recipe_backstop_or_any_call(monkeypatch):

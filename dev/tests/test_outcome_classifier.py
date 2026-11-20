@@ -141,13 +141,15 @@ def test_the_lane_branch_reads_the_graphql_attributes_not_the_prefix(monkeypatch
     monkeypatch.setattr(core._mirror, "_session_for_create", lambda s: s)
     monkeypatch.setattr(models_mod, "_gate_params_for_model", lambda s, p: p)
     lane = {"modelId": "1", "prompts": "x", "lane": "infinite"}
-    fake_text = core.PixAIError('GraphQL error: [{"message": "no"}]')
-    monkeypatch.setattr(core, "gql_mutate", lambda *a, **k: (_ for _ in ()).throw(fake_text))
+    # (the lane rides the create door since 3.22 S3-image; the rule is the same on it)
+    fake_text = core.PixAIError('GraphQL error: [{"message": "no"}] INFINITE_MODE_NOT_ELIGIBLE')
+    monkeypatch.setattr(core, "_create", lambda *a, **k: (_ for _ in ()).throw(fake_text))
     with pytest.raises(core.PixAIError) as ei:
         gen_road_mod.submit_generation(object(), dict(lane))
     assert ei.value is fake_text and not getattr(ei.value, "refused", False)
-    real = core.graphql_error("no", code="INFINITE_MODE_NOT_ELIGIBLE")
-    monkeypatch.setattr(core, "gql_mutate", lambda *a, **k: (_ for _ in ()).throw(real))
+    real = core.PixAIRestError("REST POST /task/create -> 400", status=400,
+                               body={"code": "INFINITE_MODE_NOT_ELIGIBLE", "message": "no"})
+    monkeypatch.setattr(core, "_create", lambda *a, **k: (_ for _ in ()).throw(real))
     with pytest.raises(core.PixAIError) as ei:
         gen_road_mod.submit_generation(object(), dict(lane))
     assert ei.value.refused is True

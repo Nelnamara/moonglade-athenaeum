@@ -43,7 +43,7 @@ def test_emotions_endpoint_self_populates_from_staged_art(tmp_path):
 def _arm(monkeypatch):
     calls = {"params": None}
 
-    def _submit(session, params):
+    def _submit(session, params, **_kw):
         calls["params"] = params
         return "T-1"
 

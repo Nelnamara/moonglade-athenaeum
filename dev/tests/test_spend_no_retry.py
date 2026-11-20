@@ -133,6 +133,23 @@ def gql_calls(monkeypatch):
 
 
 @pytest.fixture
+def door_calls(monkeypatch):
+    """Record every create that reached THE create door (PixAIClient.create, 3.22), through
+    the real core._create delegate (conftest blocks it), and answer each with a task id. The
+    door itself -- one POST, no retries argument, no loop -- is pinned in
+    test_create_door.py; this records that a spend path reached it once per job."""
+    from tests.conftest import _REAL_CREATE
+    calls = []
+
+    def _create(self, kind, body):
+        calls.append(SimpleNamespace(kind=kind, body=body))
+        return {"id": "T{}".format(len(calls))}
+    monkeypatch.setattr(core, "_create", _REAL_CREATE)
+    monkeypatch.setattr(pixai_client_mod.PixAIClient, "create", _create)
+    return calls
+
+
+@pytest.fixture
 def cli_stubs(mock_session, monkeypatch):
     """The minimum needed to drive a CLI runner as far as its submit: a session, no free
     card (the spend-time check is a live REST call), and no polling."""
@@ -260,13 +277,16 @@ class TestGqlAdhocDefault:
 # ---------------------------------------------------------------------------
 
 class TestSpendingPathsAreSingleAttempt:
-    def test_submit_generation(self, mock_session, gql_calls):
+    def test_submit_generation(self, mock_session, gql_calls, door_calls):
+        """An image create rides the create door since 3.22 S3-image: one call, no GraphQL
+        mutation at all."""
         gen_road_mod.submit_generation(mock_session, {"prompts": "a cat"})
-        _assert_single_attempt(gql_calls, gen_road_mod._GEN_MUTATION)
+        assert [c.kind for c in door_calls] == ["image"]
+        assert not [c for c in gql_calls if c.verb == "mutate"]
 
-    def test_send_run(self, mock_session, gql_calls, monkeypatch):
-        """Session M's run sender: N jobs, N mutations, each single-attempt through the one
-        verb that offers no retries (submit -> submit_generation(exact=True) -> gql_mutate)."""
+    def test_send_run(self, mock_session, gql_calls, door_calls, monkeypatch):
+        """Session M's run sender: N jobs, N creates, each through the one door that offers no
+        retries (submit -> submit_generation(exact=True) -> core._create, 3.22)."""
         monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
         hooks = SimpleNamespace(sending=lambda cell: None, sent=lambda *a: None,
                                 failed=lambda *a: None)
@@ -275,12 +295,13 @@ class TestSpendingPathsAreSingleAttempt:
                  "no_card": None} for k, p in enumerate(("a cat", "a dog"))]
         res = gen_road_mod.send_run(mock_session, jobs, hooks=hooks, gap_s=0)
         assert res["status"] == "sent"
-        _assert_single_attempt(gql_calls, gen_road_mod._GEN_MUTATION)
-        assert len(gql_calls) == 2
+        assert [c.kind for c in door_calls] == ["image", "image"]
+        assert not [c for c in gql_calls if c.verb == "mutate"]
 
-    def test_run_generate(self, tmp_path, cli_stubs, gql_calls):
+    def test_run_generate(self, tmp_path, cli_stubs, gql_calls, door_calls):
         _drive(gen_cli_mod.run_generate, _cli_args(tmp_path))
-        _assert_single_attempt(gql_calls, gen_road_mod._GEN_MUTATION)
+        assert [c.kind for c in door_calls] == ["image"]
+        assert not [c for c in gql_calls if c.verb == "mutate"]
 
     def test_run_generate_video(self, tmp_path, cli_stubs, gql_calls):
         _drive(gen_cli_mod.run_generate_video, _cli_args(tmp_path, image="mid1"))

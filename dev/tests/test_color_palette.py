@@ -263,9 +263,8 @@ def test_api_generate_sends_the_palette_it_quoted(tmp_path, rest, monkeypatch):
     monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, **k: cards.append(dict(params)))
     sent = []
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
-    monkeypatch.setattr(core, "gql_mutate",
-                        lambda s, q, v=None: sent.append(v["parameters"])
-                        or {"createGenerationTask": {"id": "4242"}})
+    monkeypatch.setattr(core, "_create",                # the create door (3.22 S3-image)
+                        lambda s, kind, v: sent.append(v) or {"id": "4242"})
     d = cli.post("/api/generate", json=_img(T3)).get_json()
     assert d.get("task_id") == "4242", d
     assert len(sent) == 1 and sent[0]["colorPalette"] == SENT
@@ -276,6 +275,7 @@ def test_read_only_refuses_a_palette_generate_before_anything_is_sent(tmp_path, 
     cli = _web(monkeypatch, tmp_path)
     sent = []
     monkeypatch.setattr(core, "gql_mutate", lambda *a, **k: sent.append(a) or {})
+    monkeypatch.setattr(core, "_create", lambda *a, **k: sent.append(a) or {})
     monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "READ_ONLY", True)
     d = cli.post("/api/generate", json=_img(T3)).get_json()

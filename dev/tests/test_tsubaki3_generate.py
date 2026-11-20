@@ -283,13 +283,23 @@ def test_an_unlisted_profile_is_refused_at_build(rest):
         road({"version_id": T3, "prompt": "<p>", "mode": "lite", "width": 1024, "height": 1024})
 
 
+# PixAI's REST refusals, as the create door raises them (3.22 S3-image): an oRPC body with a
+# code, and for a profile PixAI cannot take, a structured issue path naming it (2.7).
+def _rest_refusal(code, path=None, status=400, message="refused"):
+    body = {"code": code, "message": message}
+    if path is not None:
+        body["data"] = {"issues": [{"path": list(path), "message": message}]}
+    return core.PixAIRestError("REST POST /task/create -> {}".format(status), status=status,
+                               body=body)
+
+
 def test_a_listed_profile_pixai_refuses_is_never_resubmitted_on_the_default(rest, monkeypatch):
     sent = []
 
-    def fake(s, q, v=None):
-        sent.append(dict(v["parameters"]))
-        raise core.graphql_error('[{"message": "inferenceProfile ultra requires membership"}]', code="REQUIRE_MEMBERSHIP")
-    monkeypatch.setattr(core, "gql_mutate", fake)
+    def fake(s, kind, v):
+        sent.append(dict(v))
+        raise _rest_refusal("BAD_REQUEST", path=("parameters", "inferenceProfile"))
+    monkeypatch.setattr(core, "_create", fake)
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     params = {"prompts": "p", "modelId": T3, "width": 1024, "height": 1024, "batchSize": 1,
               "inferenceProfile": "ultra", "priority": gen_params_mod.PRIORITY_TURBO}
@@ -301,10 +311,10 @@ def test_a_listed_profile_pixai_refuses_is_never_resubmitted_on_the_default(rest
 def test_a_members_only_profile_stands_the_turbo_fallback_down(rest, monkeypatch):
     sent = []
 
-    def fake(s, q, v=None):
-        sent.append(dict(v["parameters"]))
-        raise core.graphql_error('[{"message": "REQUIRE_MEMBERSHIP"}]', code="REQUIRE_MEMBERSHIP")
-    monkeypatch.setattr(core, "gql_mutate", fake)
+    def fake(s, kind, v):
+        sent.append(dict(v))
+        raise _rest_refusal("REQUIRE_MEMBERSHIP")
+    monkeypatch.setattr(core, "_create", fake)
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     params = {"prompts": "p", "modelId": T3, "width": 1024, "height": 1024, "batchSize": 1,
               "inferenceProfile": "ultra", "priority": gen_params_mod.PRIORITY_TURBO}
@@ -315,12 +325,12 @@ def test_a_members_only_profile_stands_the_turbo_fallback_down(rest, monkeypatch
     sent.clear()
     calls = []
 
-    def fake2(s, q, v=None):
-        calls.append(dict(v["parameters"]))
-        if v["parameters"].get("priority") == gen_params_mod.PRIORITY_TURBO:
-            raise core.graphql_error('[{"message": "REQUIRE_MEMBERSHIP"}]', code="REQUIRE_MEMBERSHIP")
-        return {"createGenerationTask": {"id": "T1"}}
-    monkeypatch.setattr(core, "gql_mutate", fake2)
+    def fake2(s, kind, v):
+        calls.append(dict(v))
+        if v.get("priority") == gen_params_mod.PRIORITY_TURBO:
+            raise _rest_refusal("REQUIRE_MEMBERSHIP")
+        return {"id": "T1"}
+    monkeypatch.setattr(core, "_create", fake2)
     monkeypatch.setattr(core, "_turbo_refused", {"seen": False})
     assert gen_road_mod.submit_generation(object(), dict(params, inferenceProfile="pro")) == "T1"
     assert len(calls) == 2 and calls[1]["priority"] == gen_params_mod.PRIORITY_LOW
@@ -331,18 +341,19 @@ def test_a_members_only_profile_stands_the_turbo_fallback_down(rest, monkeypatch
     ("REQUIRE_MEMBERSHIP", "pro"),
 ])
 def test_a_partial_success_is_never_resubmitted(rest, monkeypatch, message, profile):
-    """PixAI answered with errors AND a created task (`data.createGenerationTask` non-null):
-    the task exists and may be charged. Neither the profile drop nor the Turbo-to-standard
-    resubmit may send it again -- that would be a second paid generation (red team
-    2026-10-01). The error goes back to the caller exactly as it came."""
+    """An answer that does not prove a refusal (the REST road's form of the GraphQL partial
+    success: a 5xx carrying the very code and words the resubmits key on, after which the task
+    may exist and be charged). Neither the profile drop nor the Turbo-to-standard resubmit may
+    send it again -- that would be a second paid generation (red team 2026-10-01). The error
+    goes back to the caller exactly as it came."""
     sent = []
 
-    def fake(s, q, v=None):
-        sent.append(dict(v["parameters"]))
-        e = core.graphql_error('[{"message": "%s"}]' % message)
-        e.graphql_data = {"createGenerationTask": {"id": "T-made"}}
-        raise e
-    monkeypatch.setattr(core, "gql_mutate", fake)
+    def fake(s, kind, v):
+        sent.append(dict(v))
+        raise _rest_refusal("REQUIRE_MEMBERSHIP" if profile == "pro" else "BAD_REQUEST",
+                            path=("parameters", "inferenceProfile"), status=502,
+                            message=message)
+    monkeypatch.setattr(core, "_create", fake)
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     monkeypatch.setattr(core, "_turbo_refused", {"seen": False})
     # Reach the two resubmit branches: the profile is not one the version lists (so the

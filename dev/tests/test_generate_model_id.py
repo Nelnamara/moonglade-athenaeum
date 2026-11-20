@@ -31,7 +31,7 @@ def test_generate_reresolves_current_version_over_stale_client_version(tmp_path,
     monkeypatch.setattr(gen_params_mod, "_gen_parameters",
                         lambda args: seen.update(model=args.model) or {"modelId": args.model})
     monkeypatch.setattr(gen_road_mod, "submit_generation",
-                        lambda s, params: seen.update(submitted=params) or "task123")
+                        lambda s, params, **_kw: seen.update(submitted=params) or "task123")
 
     client = login_client(tmp_path)
     r = client.post("/api/generate", json={"model_id": "M1", "version_id": STALE, "prompt": "a cat"})
@@ -47,7 +47,7 @@ def test_generate_without_model_id_uses_client_version(tmp_path, monkeypatch, pi
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     seen = {}
     monkeypatch.setattr(gen_params_mod, "_gen_parameters", lambda args: seen.update(model=args.model) or {})
-    monkeypatch.setattr(gen_road_mod, "submit_generation", lambda s, params: "t")
+    monkeypatch.setattr(gen_road_mod, "submit_generation", lambda s, params, **_kw: "t")
 
     client = login_client(tmp_path)
     r = client.post("/api/generate", json={"version_id": "V-DIRECT", "prompt": "x"})
@@ -68,7 +68,7 @@ def test_generate_honors_an_explicitly_chosen_non_latest_version(tmp_path, monke
     monkeypatch.setattr(gen_params_mod, "_gen_parameters",
                         lambda args: seen.update(model=args.model) or {"modelId": args.model})
     monkeypatch.setattr(gen_road_mod, "submit_generation",
-                        lambda s, params: seen.update(submitted=params) or "task123")
+                        lambda s, params, **_kw: seen.update(submitted=params) or "task123")
 
     client = login_client(tmp_path)
     r = client.post("/api/generate", json={"model_id": "M1", "version_id": CHOSEN, "prompt": "a cat"})
@@ -85,7 +85,7 @@ def test_generate_falls_back_to_latest_when_model_has_no_versions_at_all(tmp_pat
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     seen = {}
     monkeypatch.setattr(gen_params_mod, "_gen_parameters", lambda args: seen.update(model=args.model) or {})
-    monkeypatch.setattr(gen_road_mod, "submit_generation", lambda s, params: "task123")
+    monkeypatch.setattr(gen_road_mod, "submit_generation", lambda s, params, **_kw: "task123")
 
     client = login_client(tmp_path)
     r = client.post("/api/generate", json={"model_id": "M1", "version_id": "V-WHATEVER", "prompt": "x"})

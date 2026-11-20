@@ -648,7 +648,7 @@ def test_upscale_works_without_a_recorded_model(monkeypatch, tmp_path, pixai):
     seen = {}
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(gen_road_mod, "submit_generation",
-                        lambda _s, params: seen.setdefault("params", params) and "t1" or "t1")
+                        lambda _s, params, **_kw: seen.setdefault("params", params) and "t1" or "t1")
     cli = login_client(tmp_path)
     r = cli.post("/api/generate", json={
         "version_id": gen_params_mod.UPSCALE_FALLBACK_VERSION_ID,

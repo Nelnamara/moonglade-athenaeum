@@ -35,11 +35,13 @@ class TestSubmitGeneration:
 
     def test_allowed_when_not_read_only(self, mock_session, mocker, monkeypatch):
         monkeypatch.setattr(core, "READ_ONLY", False)
+        from tests.conftest import _REAL_CREATE          # an image create rides the door (3.22)
+        monkeypatch.setattr(core, "_create", _REAL_CREATE)
         resp = mocker.MagicMock()
         resp.status_code = 200
-        resp.json.return_value = {"data": {"createGenerationTask": {"id": "t1"}}}
+        resp.json.return_value = {"id": "t1"}
         mock_session.post.return_value = resp
-        assert gen_road_mod.submit_generation(mock_session, {"prompt": "a cat"}) == "t1"
+        assert gen_road_mod.submit_generation(mock_session, {"prompts": "a cat"}) == "t1"
         mock_session.post.assert_called_once()
 
 

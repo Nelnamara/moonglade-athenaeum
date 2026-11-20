@@ -702,9 +702,9 @@ def test_price_and_submit_card_match_and_send_the_gated_dict(rest, monkeypatch):
     monkeypatch.setattr(cards_mod, "match_kaisuuken",
                         lambda s, params, **k: matched.append(params) or dict(CARD))
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
-    monkeypatch.setattr(core, "gql_mutate",
-                        lambda s, q, v=None: sent.append(v["parameters"])
-                        or {"createGenerationTask": {"id": "T1"}})
+    monkeypatch.setattr(core, "_create",
+                        lambda s, kind, v: sent.append(v)
+                        or {"id": "T1"})
     req = _road({"version_id": T3, "prompt": "<prompt>", "ref_media_id": "M1",
                  "width": 768, "height": 432})
     gated = req.parameters
@@ -746,7 +746,7 @@ def test_run_generate_card_matches_and_submits_the_gated_dict(rest, monkeypatch,
     monkeypatch.setattr(cards_mod, "match_kaisuuken",
                         lambda s, params, **k: matched.append(params) or dict(CARD))
     monkeypatch.setattr(gen_road_mod, "submit_generation",
-                        lambda s, params: sent.append(params) or "T1")
+                        lambda s, params, **_kw: sent.append(params) or "T1")
 
     def stop(*a, **k):
         raise _Stop()
@@ -1200,9 +1200,9 @@ def test_submit_sends_the_lane_once_with_no_card_whatever_no_card_says(lane, mon
     calls = _no_card(monkeypatch)
     sent = []
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
-    monkeypatch.setattr(core, "gql_mutate",
-                        lambda s, q, v=None: sent.append(v["parameters"])
-                        or {"createGenerationTask": {"id": "T9"}})
+    monkeypatch.setattr(core, "_create",
+                        lambda s, kind, v: sent.append(v)
+                        or {"id": "T9"})
     req = lane_road(LANE_OK)
     assert gen_road_mod.submit(object(), req, no_card=False) == {"task_id": "T9"}
     assert calls == [] and len(sent) == 1
@@ -1211,10 +1211,8 @@ def test_submit_sends_the_lane_once_with_no_card_whatever_no_card_says(lane, mon
 
 
 @pytest.mark.parametrize("refusal", [
-    'GraphQL error: [{"message": "unknown inferenceProfile \\"pro\\"", '
-    '"extensions": {"code": "INFINITE_MODE_NOT_ELIGIBLE"}}]',
-    'GraphQL error: [{"message": "Only member can use turbo mode", '
-    '"extensions": {"code": "REQUIRE_MEMBERSHIP"}}]',
+    ("INFINITE_MODE_NOT_ELIGIBLE", 'unknown inferenceProfile "pro"'),
+    ("REQUIRE_MEMBERSHIP", "Only member can use turbo mode"),
 ])
 def test_a_refused_lane_request_is_never_resubmitted_as_anything_else(refusal, monkeypatch):
     """§8.2: neither automatic resubmit fires on a lane request -- not the inferenceProfile
@@ -1222,12 +1220,16 @@ def test_a_refused_lane_request_is_never_resubmitted_as_anything_else(refusal, m
     _turbo_refused). One mutation; PixAI's refusal in plain words."""
     sent = []
 
-    def _refuse(s, q, v=None):
-        sent.append(dict(v["parameters"]))
-        raise core.graphql_error(refusal[len("GraphQL error: "):])   # as the transport raises it
+    def _refuse(s, kind, v):
+        # PixAI's REST refusal, as the create door raises it (3.22 S3-image): the code in the
+        # oRPC body, the words in its message.
+        sent.append(dict(v))
+        code, message = refusal
+        raise core.PixAIRestError("REST POST /task/create -> 400", status=400,
+                                  body={"code": code, "message": message})
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     monkeypatch.setattr(models_mod, "_gate_params_for_model", lambda s, p: p)
-    monkeypatch.setattr(core, "gql_mutate", _refuse)
+    monkeypatch.setattr(core, "_create", _refuse)
     monkeypatch.setitem(core._turbo_refused, "seen", False)
     # a CLI --params-json shape: lane AND the app's Turbo, which only the web road strips
     params = {"prompts": "<prompt>", "modelId": T3, "inferenceProfile": "pro",
@@ -1258,6 +1260,7 @@ def test_any_params_carrying_the_lane_never_touch_a_card(monkeypatch, capsys):
     def _no_mutation(*a, **k):
         raise AssertionError("a lane request carrying a card reached the mutation")
     monkeypatch.setattr(core, "gql_mutate", _no_mutation)
+    monkeypatch.setattr(core, "_create", _no_mutation)
     with pytest.raises(core.PixAIError):
         gen_road_mod.submit_generation(object(), {"modelId": T3, "lane": "infinite",
                                           "kaisuukenId": "c"})
@@ -1382,7 +1385,8 @@ def test_api_generate_refuses_a_lane_request_under_read_only_before_any_read(mon
         def _boom(*a, **k):
             raise AssertionError("PixAI was reached before READ_ONLY: " + name)
         return _boom
-    for fn in ("_rest_get", "_rest_post", "account_info", "gql_mutate", "gql_adhoc"):
+    for fn in ("_rest_get", "_rest_post", "account_info", "gql_mutate", "gql_adhoc",
+               "_create"):
         monkeypatch.setattr(core, fn, tripwire(fn))
     for fn in ("match_kaisuuken",):                              # in cards since 3.22
         monkeypatch.setattr(cards_mod, fn, tripwire(fn))
@@ -1401,9 +1405,9 @@ def test_api_generate_runs_one_lane_task_at_a_time_off_its_own_job_log(monkeypat
     calls = _no_card(monkeypatch)
     sent = []
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
-    monkeypatch.setattr(core, "gql_mutate",
-                        lambda s, q, v=None: sent.append(v["parameters"])
-                        or {"createGenerationTask": {"id": "4242"}})
+    monkeypatch.setattr(core, "_create",
+                        lambda s, kind, v: sent.append(v)
+                        or {"id": "4242"})
     jobs_mod.append_job_event(tmp_path, "4141", status="running", type="generate",
                           lane="infinite")
     r = cli.post("/api/generate", json=dict(LANE_OK, unlimited=True))

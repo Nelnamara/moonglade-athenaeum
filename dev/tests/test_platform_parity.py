@@ -102,9 +102,9 @@ def test_price_and_submit_apply_identical_gating(monkeypatch):
     monkeypatch.setattr(core, "_rest_get", fake_rest_get)
 
     submitted = {}
-    monkeypatch.setattr(core, "gql_mutate",
-                        lambda s, q, v=None: (submitted.update(v["parameters"]),
-                                              {"createGenerationTask": {"id": "T1"}})[1])
+    # an image create rides the create door since 3.22 S3-image
+    monkeypatch.setattr(core, "_create",
+                        lambda s, kind, v: (submitted.update(v), {"id": "T1"})[1])
 
     base = {"modelId": "DIT3VER", "prompts": "a cat", "samplingSteps": 28, "cfgScale": 5,
             "samplingMethod": "Euler a", "width": 768, "height": 1280, "priority": 1000}

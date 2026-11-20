@@ -114,6 +114,17 @@ def rig(monkeypatch):
                 return {"createGenerationTask": {"id": got}}
         return {"createGenerationTask": {"id": str(9000 + len(r.mutations))}}
 
+    def create(session, kind, body):
+        # The create door (3.22 S3-image): a run's image jobs ride it, recorded with the
+        # GraphQL road's mutations so a test counts sends the same way on either road.
+        params = dict(body or {})
+        r.mutations.append(params)
+        if r.on_mutate is not None:
+            got = r.on_mutate(len(r.mutations) - 1, params)
+            if got is not None:
+                return {"id": got}
+        return {"id": str(9000 + len(r.mutations))}
+
     def gql_adhoc(*a, **k):
         r.calls.append("gql_adhoc")
         raise core.PixAIError("no ad-hoc GraphQL in these tests")
@@ -125,6 +136,7 @@ def rig(monkeypatch):
     monkeypatch.setattr(pricing_mod, "price_task", price_task)
     monkeypatch.setattr(cards_mod, "match_kaisuuken", match)
     monkeypatch.setattr(core, "gql_mutate", gql_mutate)
+    monkeypatch.setattr(core, "_create", create)
     monkeypatch.setattr(core, "gql_adhoc", gql_adhoc)
     monkeypatch.setattr(cards_mod, "_bump_card_use", lambda params: None)
     monkeypatch.setattr(gen_road_mod, "RUN_SEND_GAP_S", 0)
@@ -1028,7 +1040,7 @@ def test_on_send_sees_a_copy_of_every_attempt_and_cannot_alter_or_block_it(rig):
 
     def refuse_profile(i, params):
         if i == 0:
-            raise core.graphql_error('[{"message": "bad inferenceProfile"}]', code="BAD_REQUEST")
+            raise _profile_refusal()
     rig.on_mutate = refuse_profile
     gen_road_mod.submit_generation(object(), {"prompts": "a", "modelId": "V", "inferenceProfile": "pro"},
                            on_send=spy)
@@ -1037,11 +1049,20 @@ def test_on_send_sees_a_copy_of_every_attempt_and_cannot_alter_or_block_it(rig):
     assert "inferenceProfile" not in rig.mutations[1]
 
 
+# PixAI's REST refusal of a profile, as the create door raises it (3.22 S3-image): BAD_REQUEST with
+# an issue path naming inferenceProfile, the structure the profile drop reads (DESIGN_3.22 2.7).
+def _profile_refusal():
+    return core.PixAIRestError("REST POST /task/create -> 400: bad inferenceProfile", status=400,
+                               body={"code": "BAD_REQUEST", "message": "bad inferenceProfile",
+                                     "data": {"issues": [{"path": ["parameters",
+                                                                    "inferenceProfile"]}]}})
+
+
 @pytest.mark.parametrize("params,error", [
-    ({"prompts": "a", "inferenceProfile": "pro"},
-     'GraphQL error: [{"message": "bad inferenceProfile", "extensions": {"code": "BAD_REQUEST"}}]'),
+    ({"prompts": "a", "inferenceProfile": "pro"}, _profile_refusal),
     ({"prompts": "a", "priority": gen_params_mod.PRIORITY_TURBO},
-     'GraphQL error: [{"message": "REQUIRE_MEMBERSHIP", "code": 40300047}]'),
+     lambda: core.PixAIRestError("REST POST /task/create -> 403", status=403,
+                                 body={"code": "REQUIRE_MEMBERSHIP", "message": "members"})),
 ], ids=["profile-drop", "turbo-to-low"])
 def test_exact_turns_off_both_resubmits(rig, monkeypatch, params, error):
     """Review S5 (F6): BOTH refusal-only resubmits are real paths without exact=True -- the
@@ -1050,7 +1071,7 @@ def test_exact_turns_off_both_resubmits(rig, monkeypatch, params, error):
     monkeypatch.setitem(core._turbo_refused, "seen", False)
 
     def refuse(i, p):
-        raise core.graphql_error(error[len("GraphQL error: "):])
+        raise error()
     rig.on_mutate = refuse
     with pytest.raises(core.PixAIError):
         gen_road_mod.submit_generation(object(), dict(params))

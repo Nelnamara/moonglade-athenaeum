@@ -47,7 +47,7 @@ def _generate_capture(tmp_path, monkeypatch, payload, out=None):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(gen_road_mod, "submit_generation",
-                        lambda s, params: seen.update(params=params) or "t1")
+                        lambda s, params, **_kw: seen.update(params=params) or "t1")
     client = login_client(tmp_path)
     r = client.post("/api/generate", json=payload)
     assert r.status_code == 200, r.get_data(as_text=True)

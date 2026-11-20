@@ -48,12 +48,34 @@ def priority_for_submit(params):
 
 
 def _is_turbo_refusal(err):
-    """True for PixAI's members-only refusal of the Turbo channel -- matched on the
-    stable parts (its REQUIRE_MEMBERSHIP code, its numeric code, or the message) rather
-    than on one exact string."""
-    s = str(err)
-    return ("REQUIRE_MEMBERSHIP" in s or "40300047" in s
-            or ("turbo" in s.lower() and "member" in s.lower()))
+    """True for PixAI's members-only refusal (REQUIRE_MEMBERSHIP), read by its CODE only
+    (DESIGN_3.22 2.7; S3_MESSAGE_TESTS item 1): on REST the oRPC body's `code`, on GraphQL any
+    error whose code graphql_error_code reads as REQUIRE_MEMBERSHIP (the numeric 40300047 maps
+    there). Never the message text. Consulted only after a definite refusal."""
+    from moonglade.backup import PixAIRestError
+    if isinstance(err, PixAIRestError):
+        return err.code == "REQUIRE_MEMBERSHIP"
+    errors = getattr(err, "graphql_errors", None)
+    return isinstance(errors, list) and any(
+        graphql_error_code(e) == "REQUIRE_MEMBERSHIP" for e in errors)
+
+
+def _names_inference_profile(err):
+    """True when a refusal's STRUCTURED data names `inferenceProfile` (DESIGN_3.22 2.7; S3_
+    MESSAGE_TESTS item 2): a REST BAD_REQUEST or INVALID_PARAMETERS_COMPATIBILITY whose
+    `data.issues[].path` holds it. PixAI's `data.compatibility` enum (lora, controlnet,
+    styleMix, lowPriority) never names it. A GraphQL error carries no field that names the
+    profile, and no GraphQL create carries one once image rides the door, so it is False there.
+    An issue's message is never read."""
+    from moonglade.backup import PixAIRestError
+    if not isinstance(err, PixAIRestError) or err.code not in (
+            "BAD_REQUEST", "INVALID_PARAMETERS_COMPATIBILITY"):
+        return False
+    for issue in err.data.get("issues") or []:
+        path = issue.get("path") if isinstance(issue, dict) else None
+        if isinstance(path, list) and "inferenceProfile" in path:
+            return True
+    return False
 
 
 # The Bridge §4/§5 -- "AI Tools" = PixAI "chat editing scenes". A DIFFERENT surface from the
@@ -382,9 +404,18 @@ def _graphql_reason(err):
     return s
 
 
-def submit_generation(session, params, *, on_send=None, exact=False):
-    """Submit a createGenerationTask and return the task id immediately -- no wait, no
-    download. The card (if any) must already be attached to `params`. Raises on no id.
+def submit_generation(session, params, *, on_send=None, exact=False, kind="image",
+                      on_created=None):
+    """Submit one generation and return the task id immediately -- no wait, no download. The
+    card (if any) must already be attached to `params`. Raises on no id.
+
+    THE ROAD (3.22, DESIGN_3.22 2.11): `kind` ("image", "edit", "video"; the caller's own mode,
+    never read off the parameters) picks CREATE_ROAD's road. On "rest" the one send is the
+    create door (core._create), and its answer goes through the observation step
+    (_observe_created, fail-soft) and to `on_created(answer)`; on "graphql" it is
+    createGenerationTask through gql_mutate, as before. Both resubmits below are keyed on
+    PixAI's CODES (_names_inference_profile, _is_turbo_refusal), never on message text, and
+    fire only after a definite refusal.
 
     Session M (BUILD-w5-m s3.4): `on_send(variables)` is called immediately before each
     mutation with a deep COPY of what is about to go out -- observation only: its return is
@@ -451,6 +482,8 @@ def submit_generation(session, params, *, on_send=None, exact=False):
     # self-heal (pinned since 2026-07-24).
     listed, members_only = _models._profile_listing(session, params)
 
+    road = CREATE_ROAD.get(kind, "graphql")
+
     def _send(p):
         _mark_spend_reached()                                # 3.21.2: this thread's spend mark
         if on_send is not None:
@@ -458,24 +491,35 @@ def submit_generation(session, params, *, on_send=None, exact=False):
                 on_send(copy.deepcopy(p))
             except Exception:                                # noqa: BLE001
                 pass                                         # a recorder never blocks a spend
-        return gql_mutate(session, _GEN_MUTATION, {"parameters": p})
+        if road == "rest":
+            # THE create door: one POST, checked on its final bytes. Its unknown outcomes
+            # (CreateOutcomeUnknown) are not PixAIErrors, so nothing below can resubmit them.
+            from moonglade import backup as _core
+            answer = _core._create(session, kind, p)
+            _observe_created(kind, p, answer, on_created)
+            return str(answer["id"])
+        created = gql_mutate(session, _GEN_MUTATION, {"parameters": p})
+        tid = ((created or {}).get("createGenerationTask") or {}).get("id")
+        if not tid:
+            # Raised inside the send, so it reads "may have started" and is never resubmitted
+            # (definite_refusal is False for it).
+            raise PixAIError("no task id returned: " + json.dumps(created)[:200])
+        return str(tid)
     try:
-        created = _send(params)
+        task_id = _send(params)
     except PixAIError as e:
         if _recipes.refusal_from(e):
             # PixAI refused a recipe: nothing was created. Re-raised BEFORE the two resubmits
             # below can read its words -- a recipe refusal is never retried as anything else.
             raise
         if lane:
-            # Never retried as anything else (§8.2). A GraphQL error whose data resolved
-            # nothing is PixAI refusing the task, so nothing exists and nothing was spent;
-            # anything else -- a partial success (the mutation's data came back beside the
-            # errors, review N2), a timeout -- is passed on as it came, because it does not
-            # prove that and must read may_have_started, never refused.
-            # Keyed on the type and the transport's structured `errors` (classify_outcome's
-            # rule), never on the message text (DESIGN_3.22 2.6, L2).
-            if definite_refusal(e) and getattr(e, "graphql_errors", None):
-                refused = PixAIError(_UNLIMITED_REFUSED + ": " + _graphql_reason(e))
+            # Never retried as anything else (§8.2). A definite refusal (classify_outcome: a
+            # coded GraphQL error with no data, or a REST oRPC code in the table) means nothing
+            # exists and nothing was spent; anything else -- a partial success, a timeout, a
+            # local refusal -- is passed on as it came. Keyed on the type and the structured
+            # fields, never on the message text (DESIGN_3.22 2.6, L2).
+            if classify_outcome(e) == "refused":
+                refused = PixAIError(_UNLIMITED_REFUSED + ": " + outcome_reason(e))
                 refused.graphql_data = getattr(e, "graphql_data", None)
                 refused.refused = True       # a definite refusal, for a run's job state
                 raise refused
@@ -485,42 +529,38 @@ def submit_generation(session, params, *, on_send=None, exact=False):
             # would be a request nobody quoted, sent after the run's budget check. PixAI's
             # answer comes back as it came; definite_refusal() reads it.
             raise
-        if not definite_refusal(e):
-            # Both resubmits below are safe ONLY because a refusal means nothing was made. A
-            # GraphQL error whose mutation data came back non-null is a partial success: the
-            # task exists and may be charged, so sending again would pay twice. The same rule
-            # the lane, run jobs, training and the Loom fallback already follow (red team
-            # 2026-10-01). A timeout or dropped connection is passed on unchanged as well.
+        if classify_outcome(e) != "refused":
+            # Both resubmits below are safe ONLY because a refusal by PixAI means nothing was
+            # made. A partial success, a timeout, a dropped connection, a bare 4xx or a code
+            # outside DEFINITE_CODES is passed on unchanged; so is a local refusal (nothing
+            # reached PixAI, so there is no PixAI answer to correct).
             raise
-        if "inferenceProfile" in str(e) and "inferenceProfile" in params and listed:
+        if _names_inference_profile(e) and "inferenceProfile" in params and listed:
             refused = PixAIError("PixAI refused the {} profile for this account, so nothing "
                                  "was made: {}".format(params.get("inferenceProfile"),
-                                                       _graphql_reason(e)))
+                                                       outcome_reason(e)))
             refused.refused = True
             raise refused
-        if "inferenceProfile" in str(e) and "inferenceProfile" in params:
+        if _names_inference_profile(e) and "inferenceProfile" in params:
             dropped = params.pop("inferenceProfile")
             print("  mode '{}' not supported by this model; retrying on the "
                   "model's default...".format(dropped))
-            created = _send(params)
+            task_id = _send(params)
         elif _is_turbo_refusal(e) and params.get("priority") == _gen_params.PRIORITY_TURBO \
                 and not members_only:
             # Turbo (500) is members-only and this app asked for it on EVERY submit, so
             # the day a membership lapses every generate/edit/video/fix/upscale starts
             # failing at once. Safe to re-submit for the same reason the inferenceProfile
-            # case above is: PixAI returned a GraphQL error, so the task was rejected --
-            # nothing exists and nothing was charged. Falls back to the tier their own
-            # client would have picked for a non-member.
+            # case above is: PixAI refused the task with a definite code -- nothing exists and
+            # nothing was charged. Falls back to the tier their own client would have picked
+            # for a non-member.
             params = dict(params, priority=_gen_params.PRIORITY_LOW)
             _turbo_refused["seen"] = True
             print("  turbo is members-only on this account; resubmitting at standard "
                   "speed (no extra cost).")
-            created = _send(params)
+            task_id = _send(params)
         else:
             raise
-    task_id = (created.get("createGenerationTask") or {}).get("id")
-    if not task_id:
-        raise PixAIError("no task id returned: " + json.dumps(created)[:200])
     _cards._bump_card_use(params)
     return str(task_id)
 
@@ -566,6 +606,64 @@ def _observe_send(on_send, payload):
         on_send(copy.deepcopy(payload))
     except Exception:                                        # noqa: BLE001
         pass
+
+
+#: DESIGN_3.22 2.4 rule 7 / 7.3 R8: whether a card-covered create through the door has once
+#: been PROVEN free on PixAI's REST route (the terminal read showed paidQuota 0 and the card
+#: count dropped). Until then a run counts a card job as charged whenever PixAI's answer shows
+#: a charge (send_run). Flipped only by a commit that cites R8's record.
+CARD_PROOF_ON_REST = False
+
+#: The stored-parameters keys the observation step compares (2.4 rule 6).
+_OBSERVED_KEYS = ("modelId", "priority", "kaisuukenId", "channel", "lane")
+
+
+def _observe_created(kind, sent, answer, on_created=None):
+    """THE OBSERVATION STEP after a successful door create (DESIGN_3.22 2.4 rule 6, T-F11):
+    compare the answer's stored `parameters` with what was sent (modelId, priority,
+    kaisuukenId, channel, lane, chat.modelId, chat.modelConfig.*) and read `paidQuota`. A
+    difference, or a `paidQuota > 0` on a card send, is a LOUD warning in the log. Returns the
+    warnings. Observation only and fail-soft: nothing it raises can turn a created task into an
+    error, and it never sends anything. `on_created(answer)` is told after it (a run reads the
+    charge from there, rule 7)."""
+    warnings = []
+    try:
+        stored = answer.get("parameters") if isinstance(answer, dict) else None
+        if isinstance(stored, dict) and isinstance(sent, dict):
+            for k in _OBSERVED_KEYS:
+                if k in sent and stored.get(k) != sent.get(k):
+                    warnings.append("{} sent {!r}, stored {!r}".format(k, sent.get(k),
+                                                                       stored.get(k)))
+            sc, tc = sent.get("chat"), stored.get("chat")
+            if isinstance(sc, dict) and isinstance(tc, dict):
+                if "modelId" in sc and tc.get("modelId") != sc.get("modelId"):
+                    warnings.append("chat.modelId sent {!r}, stored {!r}".format(
+                        sc.get("modelId"), tc.get("modelId")))
+                smc, tmc = sc.get("modelConfig") or {}, tc.get("modelConfig") or {}
+                if isinstance(smc, dict) and isinstance(tmc, dict):
+                    for k, v in smc.items():
+                        if tmc.get(k) != v:
+                            warnings.append("chat.modelConfig.{} sent {!r}, stored {!r}".format(
+                                k, v, tmc.get(k)))
+        paid = answer.get("paidQuota") if isinstance(answer, dict) else None
+        if isinstance(paid, (int, float)) and not isinstance(paid, bool) and paid > 0 \
+                and isinstance(sent, dict) and sent.get("kaisuukenId"):
+            warnings.append("a free card was sent and PixAI's answer shows paidQuota {}: the "
+                            "card may not have been used".format(paid))
+        if warnings:
+            import logging
+            logging.getLogger("moonglade.create").warning(
+                "create %s task %s: PixAI's stored request differs from what was sent: %s",
+                kind, answer.get("id") if isinstance(answer, dict) else "?",
+                "; ".join(warnings))
+    except Exception:                                        # noqa: BLE001 -- observation only
+        pass
+    if on_created is not None:
+        try:
+            on_created(copy.deepcopy(answer))
+        except Exception:                                    # noqa: BLE001
+            pass
+    return warnings
 
 
 def submit_fixer(session, media_id, boxes, on_send=None):
@@ -1249,6 +1347,9 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
         params.setdefault("controlNets", [])
         if params.get("batchSize") == 1:
             params.pop("batchSize")
+    # The road-aware wire step, LAST (DESIGN_3.22 2.4 rule 2): the badge, the card check and
+    # the send all see the shape the door sends. On a GraphQL road it returns params itself.
+    params = _gen_params.to_wire("image", params)
     return GenerationRequest(mode="image", parameters=params,
                              no_card=args.no_card or lane, model_version_id=args.model,
                              lora_version_ids=lora_ids, adjusted=adjusted, unlimited=lane)
@@ -1430,7 +1531,8 @@ def _price_answer(session, req, card_session=None):
     return out
 
 
-def submit(session, req, *, no_card=None, before_send=None, on_send=None, exact=False):
+def submit(session, req, *, no_card=None, before_send=None, on_send=None, exact=False,
+           on_created=None):
     """Spend: READ_ONLY guard -> free card -> the one mutation this road's mode uses.
     Returns {"task_id": ...}.
 
@@ -1468,6 +1570,12 @@ def submit(session, req, *, no_card=None, before_send=None, on_send=None, exact=
                                         **({"on_send": on_send} if on_send is not None else {}))}
     if req.parameters is None:
         raise PixAIError(req.note or "nothing to submit")
+    kind = _REQUEST_KINDS.get(req.mode, req.mode)
+    # V8 (DESIGN_3.22 2.5): the identity is chosen ONCE, here, after READ_ONLY; the card check,
+    # before_send's card test and the send all see this one client. A Mirror toggle moved after
+    # this line changes nothing in this send.
+    from moonglade import pixai_client as _pixai_client
+    session = _pixai_client._client_of(session).for_create()
     if req.unlimited:
         # S5: the card step is skipped outright for a lane request -- keyed on req.unlimited,
         # which the `no_card` argument cannot override (§8.10). submit_generation guards the
@@ -1475,7 +1583,7 @@ def submit(session, req, *, no_card=None, before_send=None, on_send=None, exact=
         if before_send is not None:
             before_send(req.parameters)
         return {"task_id": submit_generation(session, req.parameters,
-                                             **_send_kwargs(on_send, exact))}
+                                             **_send_kwargs(on_send, exact, kind, on_created))}
     from types import SimpleNamespace
     skip = req.no_card if no_card is None else bool(no_card)
     # Passing the flag through rather than branching around the call keeps
@@ -1486,17 +1594,26 @@ def submit(session, req, *, no_card=None, before_send=None, on_send=None, exact=
     if before_send is not None:
         before_send(req.parameters)
     return {"task_id": submit_generation(session, req.parameters,
-                                         **_send_kwargs(on_send, exact))}
+                                         **_send_kwargs(on_send, exact, kind, on_created))}
 
 
-def _send_kwargs(on_send, exact):
-    """submit_generation's Session M keywords, passed only when asked for: a default submit
-    calls it exactly as it always did."""
+#: GenerationRequest.mode -> the door/road kind (CREATE_ROAD's key). The kind always comes
+#: from the request's own mode, never from its parameters (V10).
+_REQUEST_KINDS = {"image": "image", "edit": "edit", "video": "video", "enhance": "enhance"}
+
+
+def _send_kwargs(on_send, exact, kind="image", on_created=None):
+    """submit_generation's keywords, each passed only when it differs from the default: a
+    default image submit calls it exactly as it always did."""
     kw = {}
     if on_send is not None:
         kw["on_send"] = on_send
     if exact:
         kw["exact"] = True
+    if kind != "image":
+        kw["kind"] = kind
+    if on_created is not None:
+        kw["on_created"] = on_created
     return kw
 
 
@@ -1509,6 +1626,38 @@ def _run_budget_note(sent):
     return ("The free card expected for image {} was used elsewhere, so it would cost more "
             "than you confirmed. {} {} sent; the rest were not.".format(
                 sent + 1, sent, "was" if sent == 1 else "were"))
+
+
+def _paid_quota(answer):
+    """PixAI's charge on a task answer (REST `paidQuota`, GraphQL `paidCredit`), or 0."""
+    if not isinstance(answer, dict):
+        return 0
+    for k in ("paidQuota", "paidCredit", "paid_credit"):
+        v = answer.get(k)
+        try:
+            if v is not None and not isinstance(v, bool):
+                return float(v)
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def _card_unproven(req):
+    """True while a card on this request's road is not yet proven free (2.4 rule 7): the
+    request rides the create door and R8 has not passed."""
+    kind = _REQUEST_KINDS.get(getattr(req, "mode", ""), getattr(req, "mode", ""))
+    return CREATE_ROAD.get(kind) == "rest" and not CARD_PROOF_ON_REST
+
+
+def _card_job_was_charged(session, task_id):
+    """One read of a card job's task before the next job goes (2.4 rule 7): True only when
+    PixAI shows a charge on it. Read-only and fail-soft (a failed read is False)."""
+    try:
+        from moonglade import task_reads as _task_reads
+        st = _task_reads.generation_status(session, task_id) or {}
+        return _paid_quota({"paidCredit": st.get("paid_credit")}) > 0
+    except Exception:                                        # noqa: BLE001
+        return False
 
 
 def send_run(session, jobs, *, hooks, budget=None, gap_s=None, sleep=None):
@@ -1541,7 +1690,8 @@ def send_run(session, jobs, *, hooks, budget=None, gap_s=None, sleep=None):
     gap = RUN_SEND_GAP_S if gap_s is None else gap_s
     pause = sleep if sleep is not None else time.sleep
     out = []
-    state = {"charged": 0, "sent": 0, "stop": None}
+    state = {"charged": 0, "sent": 0, "stop": None, "card_pending": None,
+             "card_ignored": False}
 
     for idx, job in enumerate(jobs):
         cell = job["cell"]
@@ -1557,20 +1707,34 @@ def send_run(session, jobs, *, hooks, budget=None, gap_s=None, sleep=None):
                              "were not sent.".format(cell + 1))
             out.append({"cell": cell, "state": "not_sent", "card": False})
             continue
-        seen = {"request": None}
+        seen = {"request": None, "answer": None}
 
         def _on_send(variables):
             seen["request"] = variables
 
+        def _on_created(answer):
+            seen["answer"] = answer
+
         def _before(params):
-            if budget is None or params.get("kaisuukenId"):
+            # A card job skips the check -- unless a card in this run was already shown not to
+            # apply (2.4 rule 7): from then on every job is held to the confirmed total.
+            if budget is None or (params.get("kaisuukenId") and not state["card_ignored"]):
                 return
             if state["charged"] + int(budget["each"]) > int(budget["total"]):
                 raise LocalRefusal(budget.get("note") or _run_budget_note(state["sent"]))
 
+        if budget is not None and state["card_pending"] is not None:
+            # 2.4 rule 7 (V3), before the next job: the last card job's task read once more,
+            # and counted as charged when PixAI now shows a charge on it. Fail-soft: a failed
+            # read proves nothing either way and counts nothing.
+            if _card_job_was_charged(session, state["card_pending"]):
+                state["charged"] += int(budget["each"])
+                state["card_ignored"] = True
+            state["card_pending"] = None
         try:
             task_id = submit(session, job["req"], no_card=job.get("no_card"),
-                             before_send=_before, on_send=_on_send, exact=True)["task_id"]
+                             before_send=_before, on_send=_on_send, exact=True,
+                             on_created=_on_created)["task_id"]
         except Exception as e:                               # noqa: BLE001
             reached = seen["request"] is not None
             if not reached:
@@ -1594,6 +1758,15 @@ def send_run(session, jobs, *, hooks, budget=None, gap_s=None, sleep=None):
         card = bool((seen["request"] or {}).get("kaisuukenId"))
         if not card and budget is not None:
             state["charged"] += int(budget["each"])
+        elif card and budget is not None and _card_unproven(job["req"]):
+            # 2.4 rule 7 (V3): until R8 has proven a card free on the REST create, a card job
+            # whose create answer shows a charge counts as charged at its quoted full price, so
+            # a run can never pay past its confirmed total because PixAI ignored a card.
+            if _paid_quota(seen["answer"]) > 0:
+                state["charged"] += int(budget["each"])
+                state["card_ignored"] = True
+            else:
+                state["card_pending"] = str(task_id)
         state["sent"] += 1
         out.append({"cell": cell, "state": "sent", "task_id": str(task_id), "card": card})
         try:
@@ -1703,7 +1876,7 @@ OUTCOME_FAMILIES = {"create": DEFINITE_CODES, "fixer": DEFINITE_CODES,
 # means installing the previous release. Video and reference video stay on GraphQL (owner,
 # 2026-11-19); enhance cannot use /task/create, so it moves regardless.
 CREATE_ROAD = {
-    "image": "graphql",
+    "image": "rest",
     "edit": "graphql",
     "scene": "graphql",
     "enhance": "graphql",

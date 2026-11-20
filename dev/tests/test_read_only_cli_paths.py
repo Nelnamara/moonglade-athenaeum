@@ -71,8 +71,10 @@ class TestRunGenerateReadOnly:
         monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
         resp = mocker.MagicMock()
         resp.status_code = 200
-        resp.json.return_value = {"data": {"createGenerationTask": {"id": "t1"}}}
+        resp.json.return_value = {"id": "t1"}         # the create door's answer (3.22 S3-image)
         mock_session.post.return_value = resp
+        from tests.conftest import _REAL_CREATE
+        monkeypatch.setattr(core, "_create", _REAL_CREATE)
         monkeypatch.setattr(task_reads_mod, "_poll_task_status", lambda *a, **k: None)
         monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda *a, **k: {"outputs": {"mediaId": "m1"}})
         monkeypatch.setattr(gen_cli_mod, "_download_image_task", lambda *a, **k: [])

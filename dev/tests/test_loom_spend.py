@@ -41,7 +41,7 @@ def rig(tmp_path, monkeypatch):
         if rec["card"]:
             params["kaisuukenId"] = rec["card"]
 
-    def _submit_gen(session, params, on_send=None, exact=False):
+    def _submit_gen(session, params, on_send=None, exact=False, **_kw):
         if on_send:
             on_send(params)
         rec["submits"].append(dict(params))

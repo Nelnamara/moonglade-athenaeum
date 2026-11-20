@@ -361,7 +361,7 @@ def test_price_and_loom_submit_send_byte_identical_reference_blocks(tmp_path, mo
     monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(gen_road_mod, "submit_generation",
-                        lambda s, params: sent.update(params) or "task-rv")
+                        lambda s, params, **_kw: sent.update(params) or "task-rv")
     cli = login_test_client(g.create_app(tmp_path))
     body = {"mode": "R2V", "images": [], "video_refs": [vid], "prompt": "@video1",
             "duration": 15, "video_model": "v4.0.1", "quality": "professional",

@@ -32,7 +32,7 @@ def _arm_mirror(monkeypatch):
     reaches the network. submit_generation is mocked so no createGenerationTask is ever sent."""
     calls = {"submit": 0, "last_params": None}
 
-    def _submit(session, params):
+    def _submit(session, params, **_kw):
         calls["submit"] += 1
         calls["last_params"] = params
         return "T-ENH-1"

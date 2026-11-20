@@ -153,9 +153,12 @@ def run_generate(args):
         if session is not None:
             params, adjusted = _models._gate_image_params(session, params)
             _models._refuse_lost_upscale(args, params)
+        # V12 (DESIGN_3.22 2.3): the road-aware wire step BEFORE the preview and the card
+        # check, so the CLI quotes and card-checks the shape the create door sends.
+        params = _gen_params.to_wire("image", params)
 
     if not existing_task and not getattr(args, "confirm", False):
-        print("=== PixAI createGenerationTask (PREVIEW -- no credits spent) ===")
+        print("=== PixAI task.createTask, POST /v2/task/create (PREVIEW -- no credits spent) ===")
         print(json.dumps({"parameters": params}, indent=2))
         _print_gate_receipt(adjusted, gated=session is not None)
         _cards._preview_card_note(args, params)
@@ -189,13 +192,18 @@ def run_generate(args):
         # dev/tests/test_read_only_cli_paths.py describe finding.
         _check_read_only("submit a generation (spends credits)")
         print("Submitting generation task...")
-        _cards._apply_kaisuuken(session, params, args)
+        # V8 (DESIGN_3.22 2.5): the creating identity is chosen ONCE, after READ_ONLY; the card
+        # check and the create door both ride it. Poll and download stay on `session` (F6).
+        from moonglade import pixai_client as _pixai_client
+        create_client = _pixai_client._client_of(session).for_create()
+        _cards._apply_kaisuuken(create_client, params, args)
         # 3.21.2 (L1): an answer that cannot show whether the task was made says so in plain
         # words and exits non-zero -- never a raw transport error that reads like "nothing
         # happened, try again". `reached` is submit_generation's own mark just before the send.
         reached = _gen_road.spend_watch()
-        task_id = _gen_road._cli_send_once(lambda: _gen_road.submit_generation(session, params),
-                                 reached=lambda: reached.v)
+        task_id = _gen_road._cli_send_once(
+            lambda: _gen_road.submit_generation(create_client, params, kind="image"),
+            reached=lambda: reached.v)
         print("  task id:", task_id)
 
         _task_reads._poll_task_status(session, task_id, getattr(args, "poll_timeout", 300),
