@@ -8,6 +8,7 @@ Everything here stays on this machine: the HTTPS server test binds 127.0.0.1 and
 itself. The certificate tests need the `cryptography` package (requirements.txt); CI's curated
 install leaves it out, so those skip there and run on every machine the app is installed on.
 """
+import datetime
 import io
 import json
 import logging
@@ -217,8 +218,9 @@ def test_the_authority_is_made_once_and_signs_the_server_certificate(tmp_path, m
     assert "mypc" not in {str(p) for p in permitted}
     names = leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
     assert "mypc.local" in names.get_values_for_type(x509.DNSName)
+    # Apple counts NotBefore to NotAfter: 826 days is refused even under a trusted authority
     life = leaf.not_valid_after_utc - leaf.not_valid_before_utc
-    assert life.days <= tls.CERT_LIFETIME_DAYS + 1
+    assert life <= datetime.timedelta(days=tls.CERT_LIFETIME_DAYS) and tls.within_apple_ceiling(leaf)
     # a restart reuses both; a new home address re-issues the server certificate only
     first = cert.read_bytes()
     tls.ensure_certificate(dns_names=["mypc", "mypc.local"], ip_addresses=["192.168.1.5"])
@@ -350,6 +352,43 @@ def test_an_older_self_signed_certificate_is_migrated_once(tmp_path):
     leaf.verify_directly_issued_by(ca)
     after = cert_p.read_bytes()
     tls.ensure_certificate()
+    assert cert_p.read_bytes() == after
+
+
+def test_a_certificate_longer_than_apples_ceiling_is_reissued_once(tmp_path):
+    """The first builds back-dated the start a day and still added the full 825 days: an
+    826-day span, which an iPhone, a Mac and an Apple TV refuse as "not standards compliant"
+    (SecTrust, 2026-11-20). The next start re-issues it under the same authority, so the
+    fingerprint a device pinned does not move, and the start after that changes nothing."""
+    x509 = _x509()
+    import datetime
+    from cryptography.hazmat.primitives import hashes, serialization
+    from moonglade import tls
+    cert_p, key_p = tls.ensure_certificate(dns_names=["mypc.local"])
+    authority = tls.fingerprint()
+    good = _certs(cert_p)[0]
+    ca = _certs(tmp_path / moonglade_paths.TLS_CA_CERT_NAME)[0]
+    ca_key = serialization.load_pem_private_key(
+        (tmp_path / moonglade_paths.TLS_CA_KEY_NAME).read_bytes(), None)
+    key = serialization.load_pem_private_key(key_p.read_bytes(), None)
+    start = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1)
+    builder = (x509.CertificateBuilder().subject_name(good.subject).issuer_name(ca.subject)
+               .public_key(key.public_key()).serial_number(9)
+               .not_valid_before(start)
+               .not_valid_after(start + datetime.timedelta(days=tls.CERT_LIFETIME_DAYS + 1)))
+    for ext in good.extensions:
+        builder = builder.add_extension(ext.value, ext.critical)
+    too_long = builder.sign(ca_key, hashes.SHA256())
+    assert not tls.within_apple_ceiling(too_long)
+    cert_p.write_bytes(too_long.public_bytes(serialization.Encoding.PEM)
+                       + ca.public_bytes(serialization.Encoding.PEM))
+    tls.ensure_certificate(dns_names=["mypc.local"])
+    leaf = _certs(cert_p)[0]
+    assert leaf != too_long and tls.within_apple_ceiling(leaf)
+    leaf.verify_directly_issued_by(ca)
+    assert tls.fingerprint() == authority, "the authority a device pinned must not move"
+    after = cert_p.read_bytes()
+    tls.ensure_certificate(dns_names=["mypc.local"])
     assert cert_p.read_bytes() == after
 
 
