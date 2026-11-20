@@ -119,8 +119,11 @@ SEAMS = {
         "_video_faststart_attempt", "video_faststart"]},
     "moonglade.mirror": {"from": "moonglade.backup", "names": [
         "MIRROR_REFRESH_PATH", "MIRROR_REFRESH_WHEN_DAYS_LEFT", "MIRROR_TOKEN_LIFE_S",
-        "MIRROR_WEB_USER_AGENT", "MIRROR_WEB_ORIGIN", "_b64url_decode",
-        "jwt_claims", "jwt_expiry", "jwt_days_left", "mirror_needs_refresh", "_is_api_key",
+        "LOCALSTORAGE_JWT_KEY", "MIRROR_WEB_USER_AGENT", "MIRROR_WEB_ORIGIN", "_b64url_decode",
+        "jwt_claims", "jwt_expiry", "jwt_days_left", "mirror_needs_refresh", "_read_file_shared",
+        "_lvarint", "_snappy_decompress", "_lvldb_decompress_block", "_lvldb_block_pairs",
+        "_LVLDB_SSTABLE_MAGIC", "_lvldb_sstable_entries", "_lvldb_log_entries",
+        "_lvldb_value_to_jwt", "_pick_pixai_token", "read_browser_jwt", "_is_api_key",
         "_renewal_headers", "_fresh_pixai_token", "refresh_jwt", "_drop_cookies", "_refresh_last",
         "_mirror_lock", "_MIRROR_REFRESH_COOLDOWN", "MIRROR_RENEW_BACKOFF_CAP_S",
         "MIRROR_RENEW_FLOOR_S", "MIRROR_RENEW_TICK_S", "_mirror_renewal", "_mirror_renewal_reset",

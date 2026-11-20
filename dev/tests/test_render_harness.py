@@ -12408,3 +12408,28 @@ def test_the_phone_toasts_sit_under_the_top_chrome_and_cover_none_of_its_control
         assert t["covered"] == [] and all(top >= t["floor"] for top in t["tops"]), t
     finally:
         ctx.close()
+
+
+def test_hovering_the_loom_button_shows_its_tip_at_once(logged_in_page):
+    """The Loom's one-line explanation is an instant tip (`data-tip`), not a native `title=`:
+    a title waits on a mouse and never shows on a phone. Hovering must show the SAME text
+    within a fraction of a second (the tip's own .18s fade, not a browser delay), and it must
+    sit under the button without running off the screen."""
+    page = logged_in_page(**DESKTOP)
+    page.goto("/", wait_until="domcontentloaded")
+    _settle(page)
+    btn = page.locator("a.mgx-metal-loom").first
+    want = ("The Loom — plan a video as a storyboard, shot by shot, and render the "
+            "clips into one reel")
+    assert btn.get_attribute("data-tip") == want
+    assert btn.get_attribute("title") is None
+    probe = ("() => { const el = document.querySelector('a.mgx-metal-loom'); "
+             "const s = getComputedStyle(el, '::after'); "
+             "return {text: s.content, opacity: parseFloat(s.opacity)}; }")
+    assert page.evaluate(probe)["opacity"] == 0
+    btn.hover()
+    page.wait_for_function("() => parseFloat(getComputedStyle("
+                           "document.querySelector('a.mgx-metal-loom'), '::after').opacity) > 0.95",
+                           timeout=700)
+    got = page.evaluate(probe)
+    assert want in got["text"], got

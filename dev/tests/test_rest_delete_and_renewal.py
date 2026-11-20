@@ -641,9 +641,10 @@ class TestNoCredentialLeaks:
 
     def test_the_check_says_nothing_was_sent_when_there_was_no_live_token(
             self, tmp_path, monkeypatch, capsys):
-        """An expired stored JWT (and the check reads no browser): nothing is sent, so the
-        check must not claim PixAI answered (#92 review F5)."""
+        """An expired stored JWT and no browser token: nothing is sent, so the check must not
+        claim PixAI answered (#92 review F5)."""
         _armed(tmp_path, monkeypatch, _jwt(-1))
+        monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: "")
         made = _transport(monkeypatch, _Resp(body={"token": _jwt(7)}))
         res = mirror_mod.run_mirror_check(SimpleNamespace())
         out = capsys.readouterr().out

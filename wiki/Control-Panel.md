@@ -441,7 +441,11 @@ is also filed into your **pixai.art web library** — the same place things land
 generate on the website — instead of living only in your local backup. Handy if you like
 having your work visible in your PixAI account too. When it's off, nothing changes.
 
-It works by riding your own PixAI sign-in from the website:
+It works by riding your own PixAI sign-in from the website. There are two ways to connect. On the
+PC running Moonglade, the tile's **Connect** button reads the pixai.art sign-in from that PC's
+Chrome, Edge or Brave in one click (the sign-in has to be there; if it isn't, it says so). It too
+accepts only a sign-in for the **same PixAI account as your API key**. The bookmark below works
+from any browser and any device on your home network:
 
 1. Drag **Connect from PixAI** from the tile to your browser's bookmarks bar. (Clicking it
    on the Control Panel itself does nothing but remind you; it has to run on PixAI.) The
@@ -464,7 +468,7 @@ It works by riding your own PixAI sign-in from the website:
    for up to about six days. You only need the bookmark again if you sign out of PixAI, or if
    the app was closed long enough for the session to lapse.
 
-**Disconnect** (on the tile, on the server machine, while a sign-in is stored) makes Moonglade
+**Disconnect** (on the tile, from any device on your home network, while a sign-in is stored) makes Moonglade
 forget the PixAI sign-in: it deletes the stored copy, stops renewing it and turns the switch off.
 That ends Moonglade's hold on it, not PixAI's: to end the sign-in itself, sign that session out on
 pixai.art's own sessions page (your profile's settings). Use both if you think the sign-in was

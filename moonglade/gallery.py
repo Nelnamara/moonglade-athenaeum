@@ -8800,6 +8800,9 @@ def create_app(out_dir: Path):
             "trash_count": trash_count,
             "supervised": _supervised(),
             "panel_is_local": panel_is_local,
+            # On this PC or a private home network (the reach of Connect from PixAI): the
+            # Mirror tile's Disconnect shows for it, not only for the page on 127.0.0.1.
+            "home_network": bool(_mirror.home_network_address(request.remote_addr)),
             "actions": actions, "all_actions": all_actions,
             "out_dir": str(out_dir) if panel_is_local else "",
             "web_users": core.list_web_users(),
@@ -15729,13 +15732,16 @@ def create_app(out_dir: Path):
         return jsonify({"enabled": want})
 
     @app.route("/api/mirror/disconnect", methods=["POST"])
-    @tier(LOCALHOST)
+    @tier(LOGIN)
     def api_mirror_disconnect():
         """The Mirror tile's Disconnect (app security review 2026-11-19, finding 7): forget the
         stored PixAI sign-in and stop renewing it (mirror.disconnect_mirror), and turn the
-        switch off, since an armed Mirror with no sign-in refuses every create. LOCALHOST, like
-        the switch beside it; the session's CSRF token. Body {csrf}. Answers ok, or a plain
-        sentence; the sign-in is never read back."""
+        switch off, since an armed Mirror with no sign-in refuses every create. LOGIN tier, a
+        client on this machine or a private home network (mirror.home_network_address), the
+        same reach as Connect from PixAI; the session's CSRF token. Body {csrf}. Answers ok, or
+        a plain sentence; the sign-in is never read back."""
+        if not _mirror.home_network_address(request.remote_addr):
+            return jsonify({"ok": False, "error": _mirror.SITE_TOKEN_NOT_HOME}), 403
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
@@ -15752,11 +15758,60 @@ def create_app(out_dir: Path):
                                      "off: " + _redact_host_paths(str(e))[:160]}), 200
         return jsonify({"ok": True, "enabled": False})
 
-    # The old Connect (POST /api/mirror/connect) read whatever pixai.art sign-in a browser
-    # profile on THIS machine held and stored it with no check that it was the API key's
-    # account. PixAI no longer keeps its sign-in where that read looked, and the route was a
-    # cross-account risk, so it is gone (2026-11-18). Connect from PixAI, below, is the one way
-    # in: the user's own pixai.art tab hands its sign-in over and accept_site_token checks it.
+    def _connect_api_key_account():
+        # The account the API key REALLY is, asked of PixAI every time: a USER_ID pinned
+        # in config.json is a legacy override and must not decide whose sign-in is kept.
+        from moonglade import backup as core
+        s = core._make_session(None, resolve_user=False)
+        try:
+            return core.resolve_user_id(s)
+        except core.PixAIAuthError:
+            # PixAI refuses the key and no usable sign-in could answer for it (2026-11-19):
+            # the account the STORED sign-in names, expired or not, is one this key was
+            # already confirmed to be when that sign-in was connected. None stored: refuse.
+            old = _mirror.load_mirror_state().get("jwt") or ""
+            return str(_mirror.jwt_claims(old).get("sub") or "") if old else ""
+
+    # One-click Connect (back 2026-11-19): read the pixai.art sign-in from THIS machine's
+    # Chrome/Edge/Brave. The one thing the 3.20.7 route lacked is added: the token's `sub`
+    # must be the account the API key resolves to (mirror.accept_site_token), so a browser
+    # signed in as someone else is refused and nothing is stored.
+    @app.route("/api/mirror/connect", methods=["POST"])
+    @tier(LOGIN)
+    def api_mirror_connect():
+        """Connect: read the pixai.art sign-in from this machine's browser, check it is the
+        API key's own account, store it, run a due renewal. Answers only ok + days left, or a
+        fixed plain sentence -- never the token, a claim or the account id. No credential
+        crosses the network: the server reads its own local browser store. LOGIN tier, the
+        session's CSRF token (body {csrf})."""
+        from moonglade import backup as core
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict) or not _check_csrf(body):
+            return jsonify({"ok": False, "error": "Your session expired. Reload the page and "
+                            "try again."}), 400
+        try:
+            core._check_read_only("connect the PixAI mirror")   # the renewal is account-mutating
+        except Exception as e:                          # noqa: BLE001
+            return jsonify({"ok": False, "error": _redact_host_paths(str(e))[:160]}), 200
+        try:
+            bj = _mirror.read_browser_jwt()
+        except Exception:                               # noqa: BLE001 -- the reader never raises
+            bj = None
+        if not bj:
+            return jsonify({"ok": False, "error": "Couldn't read a pixai.art session from a "
+                            "browser on this machine. Sign in to pixai.art in Chrome/Edge/Brave "
+                            "(reload the page once so the token is written), then try again, "
+                            "or use the Connect from PixAI bookmark."}), 200
+        out = _mirror.accept_site_token(bj, _connect_api_key_account)
+        if not out.get("ok"):
+            return jsonify({"ok": False, "error": out.get("error") or "Not connected."}), 200
+        try:
+            _mirror.make_mirror_session(user_initiated=True)   # a due renewal, as before
+        except Exception:                               # noqa: BLE001
+            pass
+        jwt = _mirror.load_mirror_state().get("jwt") or ""
+        return jsonify({"ok": bool(jwt),
+                        "days_left": _mirror.jwt_days_left(jwt) if jwt else None})
 
     @app.route("/mirror/connect")
     @tier(LOGIN)
@@ -15813,12 +15868,7 @@ def create_app(out_dir: Path):
         except Exception as e:                          # noqa: BLE001
             return jsonify({"ok": False, "error": _redact_host_paths(str(e))[:160]}), 200
 
-        def _api_key_account():
-            # The account the API key REALLY is, asked of PixAI every time: a USER_ID pinned
-            # in config.json is a legacy override and must not decide whose sign-in is kept.
-            s = core._make_session(None, resolve_user=False)
-            return core.resolve_user_id(s)
-        out = _mirror.accept_site_token(body.get("token"), _api_key_account)
+        out = _mirror.accept_site_token(body.get("token"), _connect_api_key_account)
         if out.get("ok"):
             return jsonify({"ok": True, "days_left": out.get("days_left")})
         return jsonify({"ok": False, "error": out.get("error") or "Not connected."}), 200
