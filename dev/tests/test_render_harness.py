@@ -7353,6 +7353,12 @@ def test_the_phone_create_tab_has_last_presets_quick_picks_and_no_matrix_setup(
         page.fill("textarea.cm-ta", "1girl")
         page.click(".pm-key")
         assert page.input_value("textarea.cm-ta") == "1girl{a|b}", "the { } key inserts a variable at the caret"
+        # The key then selects "a|b" from a setTimeout(0) (PowerMobile.jsx PromptTools.insert), so
+        # the next keystrokes replace it. A fill that lands before that timer runs has its
+        # select-all undone by it and replaces only "a|b" (the CI failure artifact read
+        # "1girl{1girl, {silver|cobalt} hair}", a nested brace). Wait for the selection.
+        page.wait_for_function("() => { const t = document.querySelector('textarea.cm-ta');"
+                               " return t.selectionStart === 6 && t.selectionEnd === 9; }")
         page.fill("textarea.cm-ta", "1girl, {silver|cobalt} hair")
         page.wait_for_selector(".mgrun-toks .mgrun-tok.var")
         row = page.locator(".mgrun-moderow.phone")
