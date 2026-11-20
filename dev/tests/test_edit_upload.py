@@ -150,6 +150,23 @@ def test_an_unknown_edit_model_id_is_refused_before_anything_moves(tmp_path, mon
         assert spec["label"] in msg and spec["model_id"] in msg
 
 
+@pytest.mark.parametrize("quote, cost", [(8000, "~8,000 credits"),
+                                         (None, "couldn't verify the cost")])
+def test_edit_preview_first_line_names_the_default_model_and_its_price(
+        tmp_path, monkeypatch, capsys, quote, cost):
+    """3.22 review: with no --edit-model the preview's FIRST line says the default (the
+    gallery Edit tab's own, Edit Pro) is used, with its quote; a named model is named."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, p: quote)
+    gen_cli_mod.run_edit_image(_edit_args(tmp_path, no_card=True))
+    first = capsys.readouterr().out.splitlines()[0]
+    assert first == "No --edit-model given: using Edit Pro ({}), {}.".format(
+        gen_params_mod.EDIT_PRO_MODEL_ID, cost)
+    gen_cli_mod.run_edit_image(_edit_args(tmp_path, no_card=True, edit_model=REF_PRO))
+    assert capsys.readouterr().out.splitlines()[0] == "Edit model: Reference Pro ({}).".format(
+        REF_PRO)
+
+
 def test_edit_config_from_args_clamps_to_model_caps(tmp_path):
     """The CLI's own --edit-resolution/--edit-quality DEFAULTS (1K/medium) are exactly
     what used to reach the server unclamped -- a real model like reference-pro (no
