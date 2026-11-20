@@ -1956,6 +1956,28 @@ _WIRE_ENUMS = {"channel": ("normal", "private"),                     # `Ne`
                "lane": ("normal", "infinite"),                       # `Xn`
                "watermark": ("pixai",)}
 _WIRE_OUTPUT_FORMATS = ("png", "svg", "gif")                          # chatEditing-DtzDRo8B.js
+#: `Wa`, the modelStyle union, per branch (3.22 review F9): its `type` names the ONE other key
+#: the branch takes, and each branch is a zod `object` that strips any key outside it, so
+#: {type:"key", custom} would lose `custom` silently. Harvest 938fb68efeea
+#: BaseTaskSubmitForm-BYhygXK9.js: Wa=ge([p({type:q("key"),keyId:r()}),
+#: p({type:q("custom"),custom:r()}),p({type:q("styleKeyRef"),refId:r()})]).
+_WIRE_MODEL_STYLE = {"key": "keyId", "custom": "custom", "styleKeyRef": "refId"}
+
+
+def _check_model_style(style):
+    """Refuse a modelStyle that is not exactly one branch of `Wa`: a known `type` and that
+    branch's one key, a string. Never strips. Returns None."""
+    if not isinstance(style, dict):
+        return                                     # _wire_walk already named the shape
+    t = style.get("type")
+    branch = _WIRE_MODEL_STYLE.get(t) if isinstance(t, str) else None
+    if branch is None:
+        raise _wire_refusal("modelStyle.type must be one of " + "/".join(_WIRE_MODEL_STYLE))
+    stray = [k for k in style if k not in ("type", branch)]
+    if stray:
+        raise _wire_refusal("modelStyle.{} does not go with type {!r}".format(stray[0], t))
+    if not isinstance(style.get(branch), str):
+        raise _wire_refusal("modelStyle type {!r} needs {} as text".format(t, branch))
 
 
 def _wire_refusal(why):
@@ -2068,6 +2090,8 @@ def check_wire(kind, body):
     for k, allowed in _WIRE_ENUMS.items():
         if k in inner and inner[k] not in allowed:
             raise _wire_refusal("{} must be one of {}".format(k, "/".join(allowed)))
+    if kind in ("image", "edit") and "modelStyle" in inner:
+        _check_model_style(inner["modelStyle"])
     mc = (inner.get("chat") or {}).get("modelConfig") if kind == "edit" else None
     if isinstance(mc, dict):
         fmt = mc.get("outputFormat")

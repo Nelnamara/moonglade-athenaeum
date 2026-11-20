@@ -455,6 +455,35 @@ def test_a_stray_top_level_naturalprompts_is_still_refused_unsent(door):
     assert wire.posts == []
 
 
+@pytest.mark.parametrize("style", [
+    {"type": "key", "keyId": "k1"},
+    {"type": "custom", "custom": "watercolour"},
+    {"type": "styleKeyRef", "refId": "r1"},
+])
+def test_each_modelstyle_branch_passes_the_wire_guard(style):
+    gen_params.check_wire("image", {"parameters": dict(IMAGE_P, modelStyle=style)})
+
+
+@pytest.mark.parametrize("style, why", [
+    ({"type": "key", "keyId": "k1", "custom": "x"}, "modelStyle.custom"),
+    ({"type": "custom", "custom": "x", "refId": "r"}, "modelStyle.refId"),
+    ({"type": "styleKeyRef", "refId": "r", "keyId": "k"}, "modelStyle.keyId"),
+    ({"type": "key", "custom": "x"}, "modelStyle.custom"),
+    ({"type": "key"}, "needs keyId"),
+    ({"type": "key", "keyId": 7}, "needs keyId"),
+    ({"type": "lora", "keyId": "k"}, "modelStyle.type"),
+    ({"keyId": "k"}, "modelStyle.type"),
+], ids=["key+custom", "custom+refId", "ref+keyId", "key-with-custom-only", "key-alone",
+        "key-not-text", "unknown-type", "no-type"])
+def test_a_modelstyle_mixing_union_branches_is_refused_unsent(door, style, why):
+    """3.22 review F9: PixAI's `Wa` is a union of three objects, each stripping keys outside
+    it, so a stray key from another branch would vanish silently. Refused, never stripped."""
+    wire = Wire()
+    with pytest.raises(core.LocalRefusal, match=why):
+        gen_road.submit(pc.PixAIClient(wire), _image_req(dict(IMAGE_P, modelStyle=style)))
+    assert wire.posts == []
+
+
 def test_the_video_builders_never_carry_the_image_extra():
     """The naturalPrompts move is the image builder's alone: the GraphQL video and
     reference-video bodies keep their recorded bytes (the fixture test above) and carry
