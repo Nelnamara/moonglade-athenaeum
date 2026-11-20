@@ -113,7 +113,9 @@ export default function AiToolsModal({ open, onClose, onPick }) {
                     the blurred backdrop behind the picture is that same image). */}
                 <div className="mgai-art">
                   <span className="mgai-initial">{s.name[0]}</span>
-                  <img src={"/branding/bridge/scene_" + s.slug + ".webp"} alt="" loading="lazy"
+                  {(s.localArt !== false || s.thumb) ? <img
+                    src={s.localArt === false ? s.thumb : "/branding/bridge/scene_" + s.slug + ".webp"}
+                    data-fell={s.localArt === false ? "1" : undefined} alt="" loading="lazy"
                     onLoad={(e) => {
                       const el = e.currentTarget;
                       const box = el.parentNode;
@@ -127,7 +129,7 @@ export default function AiToolsModal({ open, onClose, onPick }) {
                       const el = e.currentTarget;
                       if (s.thumb && el.dataset.fell !== "1") { el.dataset.fell = "1"; el.src = s.thumb; return; }
                       el.style.display = "none";
-                    }} />
+                    }} /> : null}
                   {s.tier ? <span className="mgai-tierbadge" data-tip="PixAI keeps this tool behind its first membership tier" aria-label="Tier 1. PixAI keeps this tool behind its first membership tier">Tier 1</span> : null}
                   {/* the control chip is pinned top-right OVER the art, hue-law coloured --
                       it says how much work the tool needs before you open it */}
