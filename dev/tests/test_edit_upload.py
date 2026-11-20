@@ -133,6 +133,23 @@ def test_edit_requires_a_source(tmp_path):
         gen_cli_mod.run_edit_image(_edit_args(tmp_path, edit_src=[], params_json="", task_id=""))
 
 
+@pytest.mark.parametrize("confirm", [False, True])
+def test_an_unknown_edit_model_id_is_refused_before_anything_moves(tmp_path, monkeypatch,
+                                                                    confirm):
+    """3.22 review N1: `--edit-model <id>` with an id no edit model has is refused, preview and
+    --confirm alike, before a session, an upload or a price read, naming the known models."""
+    def boom(*a, **k):
+        raise AssertionError("nothing may move for an unknown edit model")
+    monkeypatch.setattr(core, "_make_session", boom)
+    monkeypatch.setattr(core, "upload_media", boom)
+    with pytest.raises(core.LocalRefusal) as ei:
+        gen_cli_mod.run_edit_image(_edit_args(tmp_path, edit_model="1234567890", confirm=confirm))
+    msg = str(ei.value)
+    assert "1234567890" in msg and "nothing was sent" in msg
+    for spec in gen_params_mod.EDIT_MODELS.values():
+        assert spec["label"] in msg and spec["model_id"] in msg
+
+
 def test_edit_config_from_args_clamps_to_model_caps(tmp_path):
     """The CLI's own --edit-resolution/--edit-quality DEFAULTS (1K/medium) are exactly
     what used to reach the server unclamped -- a real model like reference-pro (no
