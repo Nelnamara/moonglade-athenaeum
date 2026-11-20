@@ -103,6 +103,8 @@ _SCENE_LIST_Q = """query listChatEditingScenes {
     overrideParameters
   }
 }"""
+# The GraphQL scene create, no longer sent since 3.22 S3-scene (the create door's
+# /task/chat-editing-scene takes the same input); kept as the record of the old road.
 _SCENE_SUBMIT_M = ("mutation createChatEditingSceneTask($input: CreateChatEditingSceneTaskInput!)"
                    " { createChatEditingSceneTask(input: $input) { id } }")
 
@@ -126,15 +128,16 @@ def chat_editing_scenes(session):
 
 def submit_scene(session, scene_id, media_ids, preset="random", custom=None, selector_values=None,
                  on_send=None):
-    """Submit a chat-editing scene task (createChatEditingSceneTask) -> task id. The generate
-    half of the Bridge AI-Tools tier. SPENDS, so it goes through gql_mutate (SINGLE attempt, no
-    retry -- a re-POST after a lost response pays twice) and MUST run on the mirror JWT; the
+    """Submit a chat-editing scene task (POST /v2/task/chat-editing-scene, through the create
+    door since 3.22) -> task id. The generate half of the Bridge AI-Tools tier. SPENDS, so it
+    goes through the door (SINGLE attempt, no retry -- a re-POST after a lost response pays
+    twice) and MUST run on the mirror JWT (the door refuses any other identity); the
     caller passes _check_read_only first at the route choke, exactly like /api/enhance ->
     submit_generation. `preset` is a preset key, "random", or "custom" (with `custom` text);
     `selector_values` is [{id, value}] for the scene's selectors (e.g. aspect-ratio).
     `on_send(input)` is called immediately before the mutation (observation only)."""
-    from moonglade.backup import _check_read_only, gql_mutate, PixAIError
-    _check_read_only("submit chat-editing scene")
+    from moonglade import backup as _core
+    _core._check_read_only("submit chat-editing scene")
     inp = {"sceneId": str(scene_id),
            "mediaIds": [str(m) for m in (media_ids or []) if m],
            "preset": str(preset or "random")}
@@ -144,13 +147,12 @@ def submit_scene(session, scene_id, media_ids, preset="random", custom=None, sel
         inp["selectorValues"] = [{"id": str(s["id"]), "value": s["value"]}
                                  for s in selector_values if s.get("id")]
     _observe_send(on_send, inp)
-    d = gql_mutate(session, _SCENE_SUBMIT_M, {"input": inp})
-    tid = ((d or {}).get("createChatEditingSceneTask") or {}).get("id")
-    if not tid:
-        # An answer with no task id is not a success and not a refusal: the task may exist
-        # (3.21.2). Raised AFTER the send, so every caller reads it "may have started".
-        raise PixAIError("scene: no task id returned: " + json.dumps(d)[:200])
-    return str(tid)
+    # THE create door (3.22 S3-scene): POST /v2/task/chat-editing-scene, the same input object
+    # GraphQL took. The door refuses it on any client but the Mirror's web sign-in (2.5), and an
+    # answer with no task id is CreateOutcomeUnknown -- the task may exist -- never a None id.
+    answer = _core._create(session, "scene", inp)
+    _observe_created("scene", inp, answer)
+    return str(answer["id"])
 
 
 # =============================================================================
@@ -1880,7 +1882,7 @@ OUTCOME_FAMILIES = {"create": DEFINITE_CODES, "fixer": DEFINITE_CODES,
 CREATE_ROAD = {
     "image": "rest",
     "edit": "rest",
-    "scene": "graphql",
+    "scene": "rest",
     "enhance": "graphql",
     "fix": "rest",
     "video": "graphql",

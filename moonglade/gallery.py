@@ -18130,9 +18130,14 @@ def create_app(out_dir: Path):
                 return held
             held_key = send_key
             # submit_scene raises when PixAI's answer carries no task id (3.21.2): that is
-            # "may have started", never a success with a null id.
+            # "may have started", never a success with a null id. Its client is the marked
+            # web-jwt one (3.22, DESIGN_3.22 2.5): for_create(require="web-jwt") refuses,
+            # with nothing sent, unless the Mirror is armed and usable, and the door refuses a
+            # scene on any other identity.
+            from moonglade import pixai_client as _pixai_client
             task_id = _gen_road.submit_scene(
-                _mirror.make_mirror_session(), scene_id, media,
+                _pixai_client._client_of(session).for_create(require="web-jwt"),
+                scene_id, media,
                 preset=str(p.get("preset") or "random"), custom=p.get("custom"),
                 selector_values=(p.get("selector_values") or p.get("selectorValues") or []))
             if not task_id:

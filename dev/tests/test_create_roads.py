@@ -105,6 +105,29 @@ def test_a_fix_without_a_proven_id_is_unknown_and_sent_once(door, answer):
     assert len(wire.posts) == 1
 
 
+def test_a_scene_rides_the_door_on_the_web_sign_in_only(door, monkeypatch):
+    """T-F5 through the road: submit_scene on the API key is refused with nothing sent; on the
+    Mirror's marked client it is one POST of the scene input."""
+    wire = Wire(_Answer(200, {"id": "S1"}))
+    with pytest.raises(core.LocalRefusal):
+        gen_road.submit_scene(pc.PixAIClient(wire), "character-card", ["111"])
+    assert wire.posts == []
+    monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
+    monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: wire)
+    client = pc.PixAIClient(Wire()).for_create(require="web-jwt")
+    assert gen_road.submit_scene(client, "character-card", ["111"], preset="random") == "S1"
+    (url, body), = wire.posts
+    assert url.endswith("/task/chat-editing-scene")
+    assert body == {"sceneId": "character-card", "mediaIds": ["111"], "preset": "random"}
+
+
+def test_a_scene_answer_without_an_id_is_unknown(door):
+    wire = Wire(_Answer(200, {}))
+    with pytest.raises(core.CreateOutcomeUnknown):
+        gen_road.submit_scene(pc.PixAIClient(wire, auth_kind="web-jwt"), "s", ["1"])
+    assert len(wire.posts) == 1
+
+
 def _image_req(params=None):
     return gen_road.GenerationRequest(mode="image", parameters=dict(params or IMAGE_P),
                                       no_card=True)
@@ -168,6 +191,10 @@ SENDERS = {
             mode="edit", parameters={"chat": dict(EDIT_CHAT)}, no_card=True))),
         ("run_edit_image", lambda s, tmp: _drive(gen_cli.run_edit_image, _cli_args(
             tmp, edit_src=["111"], params_json=json.dumps({"chat": EDIT_CHAT})))),
+    ],
+    # AI Tools scenes have no CLI runner: the one sender is submit_scene (the /api/scene road).
+    "scene": [
+        ("submit_scene", lambda s, tmp: gen_road.submit_scene(s, "character-card", ["111"])),
     ],
     # The Fix has no CLI runner: its one sender is the web road (submit -> submit_fixer).
     "fix": [

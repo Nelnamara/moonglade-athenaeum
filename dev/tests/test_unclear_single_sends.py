@@ -119,9 +119,13 @@ def rig(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_rest_post", _REAL_REST_POST)
     monkeypatch.setattr(core, "_rest_get", _REAL_REST_GET)
     monkeypatch.setattr(core, "_create", _REAL_CREATE)          # the create door (3.22)
-    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
+    # The Mirror is armed: a create rides its web sign-in, the identity the door requires for
+    # a scene or an enhance (3.22, DESIGN_3.22 2.5) -- the same mocked wire underneath.
+    web = pc.PixAIClient(wire, auth_kind="web-jwt")
+    web._create_chosen = True
+    monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: web)
     monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
-    monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: client)
+    monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: web)
     monkeypatch.setattr(gen_road_mod, "build_request", lambda payload, *a, mode=None, **k: _req_for(mode, payload))
     monkeypatch.setattr(models_mod, "_gate_params_for_model", lambda s, p: p)
     monkeypatch.setattr(core, "upload_media", lambda *a, **k: pytest.fail("no upload here"))
@@ -287,10 +291,12 @@ def test_submit_scene_never_returns_a_missing_task_id(monkeypatch):
     """The coordinator's finding: submit_scene answered None for an id-less answer, so
     /api/scene said task_id null and AI Tools re-armed. It raises now, after the send."""
     wire = Wire()
-    wire.answer = _Resp(200, {"data": {"createChatEditingSceneTask": None}})
+    monkeypatch.setattr(core, "_create", _REAL_CREATE)
+    wire.answer = _Resp(200, {})              # the create door's answer with no task id (3.22)
     seen = []
-    with pytest.raises(core.PixAIError) as ei:
-        gen_road_mod.submit_scene(pc.PixAIClient(wire), "s1", ["1"], on_send=seen.append)
+    with pytest.raises(core.CreateOutcomeUnknown) as ei:
+        gen_road_mod.submit_scene(pc.PixAIClient(wire, auth_kind="web-jwt"), "s1", ["1"],
+                                  on_send=seen.append)
     assert seen, "the send was reached"
     assert gen_road_mod.send_outcome(ei.value, True) == "may_have_started"
     assert len(wire.posts) == 1
