@@ -7361,7 +7361,10 @@ def create_app(out_dir: Path):
                       # drop investigation is a read of /api/watch/status, not a probe.
                       # `last_close` is watch_close_info's dict; the Panel does not draw these.
                       "connected_at": None, "last_close_at": None, "last_close": None,
-                      "last_connection_s": None, "reconnects": 0}
+                      "last_connection_s": None, "reconnects": 0,
+                      # 3.22: the REST task stream's OWN record (moonglade.task_feed). The
+                      # stream never writes the WebSocket's fields above.
+                      "task_stream": _task_feed.new_stream_status()}
 
     # ---- Single-flight collect (per task id, in-process) -------------------------
     # THREE uncoordinated collectors live in this process: the always-on live-mirror
@@ -7799,9 +7802,14 @@ def create_app(out_dir: Path):
             edges = (conn or {}).get("edges") or []
             missed = []
             nodes = {}
+            unfinished = False
             for edge in edges:
                 node = edge.get("node", edge)
                 tid = str(node.get("id") or "")
+                _st = str(node.get("status") or "").lower()
+                if _st and _st not in _task_reads._GEN_DONE and _st not in _task_reads._GEN_FAIL \
+                        and _st not in ("cancelled", "canceled"):
+                    unfinished = True
                 if not tid or str(node.get("status") or "") not in _task_reads._GEN_DONE:
                     continue
                 failed_at = _catchup_failed.get(tid)
@@ -7836,6 +7844,9 @@ def create_app(out_dir: Path):
                     continue
                 missed.append(tid)
                 nodes[tid] = node
+            if unfinished:
+                # An unfinished task: an idle task stream reopens to watch it finish.
+                _task_stream.request_reopen("sweep")
             if not missed:
                 _log.info("live mirror: catch-up after %s -- nothing missed", reason)
                 return True
@@ -8052,6 +8063,20 @@ def create_app(out_dir: Path):
     # handler is only ever called from the WebSocket the suite never opens.
     app.extensions["mg_watch_on_event"] = _watch_on_event
 
+    def _stream_session():
+        """The REST task stream's client: the API key presenting as the website (design 4
+        item 2). Never the Mirror JWT, which is reserved for the create POST."""
+        from moonglade import backup as core
+        return _mirror.present_as_web(core._make_session(None))
+
+    # The stream's frames reach the SAME handler the socket's taskUpdated frames did.
+    _task_stream = _task_feed.TaskStream(
+        make_session=_stream_session,
+        on_task=lambda frame: _watch_on_event({"taskUpdated": frame}),
+        request_catchup=lambda reason: _request_catchup(reason),
+        status=_watch_status["task_stream"], lock=_watch_lock)
+    app.extensions["mg_task_stream"] = _task_stream
+
     def _watch_cycle(state):
         """ONE connection's life: connect, run until it ends, record how it ended, and wait as
         long as watch_reconnect_plan says. `state` carries what outlives a connection -- the
@@ -8157,6 +8182,7 @@ def create_app(out_dir: Path):
         # No separate startup sweep (#60): the first subscribe asks the one sweep worker for it,
         # and it reads after the subscription is live rather than racing it.
         threading.Thread(target=_periodic_catchup, daemon=True).start()
+        threading.Thread(target=_task_stream.run, daemon=True).start()
         state = {"backoff": WATCH_BACKOFF_FIRST, "clock": _time.monotonic,
                  "sleep": _time.sleep}
         while True:
@@ -9687,7 +9713,9 @@ def create_app(out_dir: Path):
         """Live-mirror watcher health: is the push WebSocket connected right now, when
         did it last see an event, how many gens has it mirrored this server run."""
         with _watch_lock:
-            return jsonify(dict(_watch_status))
+            out = dict(_watch_status)
+            out["task_stream"] = dict(_watch_status["task_stream"])
+            return jsonify(out)
 
     @app.route("/api/panel/cancel", methods=["POST"])
     @tier(LOCALHOST)
@@ -21924,6 +21952,9 @@ __DESIGN_TOKENS__
                  done=body.get("done"), total=body.get("total"), count=_count,
                  run=_run, cell=_cell if _run else None,
                  source=body.get("source") or "web")
+        if (body.get("status") or "running") == "running":
+            # The app just sent a create: an idle task stream reopens to watch it.
+            _task_stream.request_reopen("create")
         return jsonify({"ok": True})
 
     @app.route("/api/jobs/dismiss", methods=["POST"])
