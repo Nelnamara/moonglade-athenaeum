@@ -357,16 +357,18 @@ class TestWireGuard:
 # ---------------------------------------------------------------------------
 
 class TestKindAndIdentity:
-    @pytest.mark.parametrize("kind, body", [
-        ("image", dict(IMAGE_P, i2vPro={"model": "x", "mediaId": "1"})),
-        ("image", dict(IMAGE_P, referenceVideo={"model": "x"})),
-        ("edit", dict(EDIT_P, i2vPro={"model": "x", "mediaId": "1"})),
-        ("edit", IMAGE_P),
-        ("image", EDIT_P),
+    @pytest.mark.parametrize("kind, body, words", [
+        ("image", dict(IMAGE_P, i2vPro={"model": "x", "mediaId": "1"}), "video request"),
+        ("image", dict(IMAGE_P, referenceVideo={"model": "x"}), "video request"),
+        ("edit", dict(EDIT_P, i2vPro={"model": "x", "mediaId": "1"}), "video request"),
+        ("edit", IMAGE_P, "no edit block"),
+        ("image", EDIT_P, "be sent as an image"),
     ])
-    def test_a_shape_that_disagrees_with_the_kind_is_refused(self, kind, body):
+    def test_a_shape_that_disagrees_with_the_kind_is_refused(self, kind, body, words):
+        """V10's own check, named by its sentence: the wire guard would also refuse a video
+        block on these kinds, but the kind check must not lean on it."""
         client, s = _client()
-        with pytest.raises(core.LocalRefusal):
+        with pytest.raises(core.LocalRefusal, match=words):
             client.create(kind, body)
         assert s.posts == []
 
