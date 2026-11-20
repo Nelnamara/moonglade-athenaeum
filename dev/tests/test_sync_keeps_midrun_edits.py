@@ -120,7 +120,7 @@ def test_the_backfill_step_keeps_edits_made_while_it_ran(tmp_path, monkeypatch):
     save_catalog(db, [_row(media_id="m1", task_id="t1", filename="a.png"),
                       _row(media_id="m2", task_id="t2", filename="b.png")])
 
-    def detail(session, tid):
+    def detail(session, tid, **kw):
         if tid == "t1":
             update_rating(db, "m1", 4)
             _set(db, "m1", collections="Mid-run")

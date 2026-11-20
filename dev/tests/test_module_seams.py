@@ -361,6 +361,7 @@ SOURCE_READERS = {
     "tests/test_enhance.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_evidence_counters.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_first_party_sources.py": ("moonglade.gallery",),
+    "tests/test_full_meta_rest_fallback.py": ("moonglade.backup",),
     "tests/test_gen_surface.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_history_feed_document.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_jwt.py": ("moonglade.backup", "moonglade.gallery"),
@@ -1262,6 +1263,13 @@ SOURCE_READERS_REVIEWED = {
     # 3.22 S2a: the create door's test reads only backup's `_create` delegate (and
     # pixai_client's own source), neither of which any move touched.
     *(("tests/test_create_door.py", "moonglade." + _m) for _m in (
+        "cards", "cloud_delete", "contests", "gen_cli", "gen_params", "gen_road", "jobs",
+        "media_tools", "mirror", "models", "organize", "pixai_client", "pricing", "task_feed",
+        "task_reads", "training")),
+    # 3.22 F4: the full-meta fallback test reads the source of backup's run_backfill_full_meta
+    # and run_download (both stayed in backup) and of cloud_delete; it was written after every
+    # move, so nothing it reads has since moved.
+    *(("tests/test_full_meta_rest_fallback.py", "moonglade." + _m) for _m in (
         "cards", "cloud_delete", "contests", "gen_cli", "gen_params", "gen_road", "jobs",
         "media_tools", "mirror", "models", "organize", "pixai_client", "pricing", "task_feed",
         "task_reads", "training")),

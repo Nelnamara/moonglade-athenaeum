@@ -1162,7 +1162,7 @@ def test_backfill_full_meta_recovers_historical_paid_credit(tmp_path, mocker, pi
         "t2": {"parameters": {"prompts": "ignored -- row already has meta"},
                "outputs": {}, "paidCredit": 0},
     }
-    mocker.patch.object(task_reads_mod, "task_detail_gql", side_effect=lambda s, tid: tasks[str(tid)])
+    mocker.patch.object(task_reads_mod, "task_detail_gql", side_effect=lambda s, tid, **kw: tasks[str(tid)])
 
     # Pass 1: plain backfill -> t1 fetched (missing meta) and gains cost; t2 untouched.
     core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
@@ -1261,7 +1261,7 @@ def test_the_backfill_separates_errors_from_tasks_that_carried_no_prompt(tmp_pat
     mocker.patch.object(models_mod, "model_name_gql", side_effect=lambda s, m: "M")
     mocker.patch.object(core, "resolve_loras", side_effect=lambda s, t: "")
 
-    def detail(_s, tid):
+    def detail(_s, tid, **kw):
         if tid == "t0":
             raise core.PixAIError("HTTP 429 rate limited")
         if tid == "t1":
@@ -1435,7 +1435,7 @@ def test_backfill_full_meta_refetches_rows_that_have_only_a_prompt(tmp_path, moc
     task = {"parameters": {"prompts": "night elf druid", "modelId": "4242"},
             "outputs": {"seed": 5, "detailParameters": {"samplingSteps": 25,
                                                         "samplingMethod": "Euler a"}}}
-    mocker.patch.object(task_reads_mod, "task_detail_gql", side_effect=lambda s, tid: task)
+    mocker.patch.object(task_reads_mod, "task_detail_gql", side_effect=lambda s, tid, **kw: task)
     mocker.patch.object(models_mod, "model_name_gql", side_effect=lambda s, mid: "WAI v17")
     mocker.patch.object(core, "resolve_loras", side_effect=lambda s, t: "")
 
@@ -1448,7 +1448,7 @@ def test_backfill_full_meta_refetches_rows_that_have_only_a_prompt(tmp_path, moc
     # that is re-fetched on every sweep forever.
     calls = []
     mocker.patch.object(task_reads_mod, "task_detail_gql",
-                        side_effect=lambda s, tid: calls.append(tid) or task)
+                        side_effect=lambda s, tid, **kw: calls.append(tid) or task)
     core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
     assert calls == [], "the filled row is being re-fetched on every run"
 

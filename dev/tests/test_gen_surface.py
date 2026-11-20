@@ -190,7 +190,7 @@ def test_with_surface_gate_readmits_pre18_rows(monkeypatch, tmp_path, pixai):
 
     fetched = []
 
-    def detail(session, tid):
+    def detail(session, tid, **kw):
         fetched.append(tid)
         return {"parameters": {"modelId": "V1", "inferenceProfile": "lite"},
                 "outputs": {}, "updatedAt": "2026-08-01T00:00:00Z",
@@ -239,7 +239,7 @@ def test_backfill_checkpoints_incrementally_not_only_at_the_end(monkeypatch, tmp
         rows.append(r)
     save_catalog(db, rows)
 
-    def detail(session, tid):
+    def detail(session, tid, **kw):
         return {"parameters": {"modelId": "V1", "inferenceProfile": "lite", "prompts": "a cat"},
                 "outputs": {}, "updatedAt": "2026-08-1" + tid[-1]}
 
