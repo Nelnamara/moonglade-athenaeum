@@ -21,6 +21,19 @@ from moonglade import jobs as jobs_mod
 from moonglade import task_reads as task_reads_mod
 
 
+def _status_answers(monkeypatch, task):
+    """The status read rides GET /v2/task/{id} since 3.22 S3-poll: REST answers the status,
+    startedAt and the charge (paidQuota); GraphQL task(id) still answers the failure reason.
+    `task` is the GraphQL task shape these tests were written against."""
+    from moonglade import backup as _core
+    t = task if isinstance(task, dict) else {}
+    rest = {"status": t.get("status"), "startedAt": t.get("startedAt"),
+            "paidQuota": t.get("paidCredit"), "outputs": {"mediaIds": [], "mediaUrls": []}}
+    monkeypatch.setattr(_core, "_rest_get",
+                        lambda s, path, params=None, **k: dict(rest, id=path.rsplit("/", 1)[-1]))
+    monkeypatch.setattr(_core, "gql_adhoc", lambda *a, **k: {"task": task})
+
+
 def _row(**kw):
     return {f: "" for f in CATALOG_FIELDS} | kw
 
@@ -742,9 +755,9 @@ def test_generation_status_surfaces_pixai_cancel_reason(monkeypatch):
     the job log, the tracker card -- could say no more than "cancelled", which reads as
     though the OWNER cancelled it. He hit this five times across four days and the reason
     string never once reached him."""
-    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {
+    _status_answers(monkeypatch, {
         "status": "cancelled", "startedAt": None,
-        "outputs": {"reason": "waiting timeout"}, "paidCredit": 1200}})
+        "outputs": {"reason": "waiting timeout"}, "paidCredit": 1200})
     st = task_reads_mod.generation_status(object(), "2037594262049550370")
     assert st["phase"] == "failed"
     assert st.get("reason") == "waiting timeout", \
@@ -755,20 +768,20 @@ def test_generation_status_reports_whether_the_task_ever_started(monkeypatch):
     """`started` is the only thing separating "queued, no worker ever took it" from
     "genuinely working". Both sit at a non-terminal status, so without this a tracker can
     only show an indefinite spinner -- which is exactly how an hour of nothing looked."""
-    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {
-        "status": "waiting", "startedAt": None}})
+    _status_answers(monkeypatch, {
+        "status": "waiting", "startedAt": None})
     assert task_reads_mod.generation_status(object(), "t1")["started"] is False
 
-    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {
-        "status": "running", "startedAt": "2026-07-25T05:00:00.000Z"}})
+    _status_answers(monkeypatch, {
+        "status": "running", "startedAt": "2026-07-25T05:00:00.000Z"})
     assert task_reads_mod.generation_status(object(), "t2")["started"] is True
 
 
 def test_generation_status_keeps_its_existing_keys(monkeypatch):
     """resolve_orphan_jobs and /api/task-status both read this dict positionally by key;
     adding fields must not drop the three they already depend on."""
-    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {
-        "status": "completed", "paidCredit": 42}})
+    _status_answers(monkeypatch, {
+        "status": "completed", "paidCredit": 42})
     st = task_reads_mod.generation_status(object(), "t3")
     assert st["status"] == "completed" and st["phase"] == "done" and st["paid_credit"] == 42
 

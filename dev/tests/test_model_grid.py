@@ -1068,8 +1068,10 @@ def test_submit_generation_no_retry_when_param_absent(monkeypatch):
 def test_generation_status_phases(monkeypatch):
     for raw, phase in [("completed", "done"), ("succeeded", "done"), ("failed", "failed"),
                        ("cancelled", "failed"), ("running", "running"), ("pending", "running")]:
-        monkeypatch.setattr(core, "gql_adhoc",
-                            lambda s, q, v=None, _r=raw: {"task": {"status": _r, "paidCredit": 7}})
+        # the status read rides GET /v2/task/{id} since 3.22 S3-poll (paidQuota is paidCredit)
+        monkeypatch.setattr(core, "_rest_get", lambda s, path, params=None, _r=raw, **k: {
+            "id": "T", "status": _r, "paidQuota": 7, "outputs": {}})
+        monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {}})
         st = task_reads_mod.generation_status(object(), "T")
         assert st["phase"] == phase and st["paid_credit"] == 7
 

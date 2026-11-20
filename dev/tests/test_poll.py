@@ -9,6 +9,19 @@ from moonglade import task_reads as task_reads_mod
 from moonglade import cloud_delete as cloud_delete_mod
 
 
+def _status_answers(monkeypatch, task):
+    """The status read rides GET /v2/task/{id} since 3.22 S3-poll: REST answers the status,
+    startedAt and the charge (paidQuota); GraphQL task(id) still answers the failure reason.
+    `task` is the GraphQL task shape these tests were written against."""
+    from moonglade import backup as _core
+    t = task if isinstance(task, dict) else {}
+    rest = {"status": t.get("status"), "startedAt": t.get("startedAt"),
+            "paidQuota": t.get("paidCredit"), "outputs": {"mediaIds": [], "mediaUrls": []}}
+    monkeypatch.setattr(_core, "_rest_get",
+                        lambda s, path, params=None, **k: dict(rest, id=path.rsplit("/", 1)[-1]))
+    monkeypatch.setattr(_core, "gql_adhoc", lambda *a, **k: {"task": task})
+
+
 def _one_poll_then_timeout(monkeypatch, task):
     """Let _poll_task_status observe `task` exactly once, then hit its deadline.
 
@@ -16,29 +29,28 @@ def _one_poll_then_timeout(monkeypatch, task):
     is a different case from 'observed it queued and unstarted' and must not be conflated
     (see _never_dispatched). The fake clock yields start, one in-loop check, then a value
     past the deadline. Nothing sleeps."""
-    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": task})
+    _status_answers(monkeypatch, task)
     monkeypatch.setattr(core.time, "sleep", lambda *_a, **_k: None)
     ticks = iter([0, 0])
     monkeypatch.setattr(core.time, "time", lambda: next(ticks, 10_000))
 
 
 def test_poll_returns_paid_credit_and_prints_cost(monkeypatch, capsys):
-    monkeypatch.setattr(core, "gql_adhoc",
-                        lambda *a, **k: {"task": {"status": "completed", "paidCredit": 27500}})
+    _status_answers(monkeypatch, {"status": "completed", "paidCredit": 27500})
     paid = task_reads_mod._poll_task_status(object(), "t1", 300, label="video", fail_noun="video generation")
     assert paid == 27500
     assert "actual cost: 27,500 credits" in capsys.readouterr().out
 
 
 def test_poll_completed_without_cost_returns_none(monkeypatch, capsys):
-    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {"status": "succeeded"}})
+    _status_answers(monkeypatch, {"status": "succeeded"})
     paid = task_reads_mod._poll_task_status(object(), "t2", 300, label="generate", fail_noun="generation")
     assert paid is None
     assert "actual cost" not in capsys.readouterr().out
 
 
 def test_poll_raises_on_failure_with_noun(monkeypatch):
-    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {"status": "failed"}})
+    _status_answers(monkeypatch, {"status": "failed"})
     with pytest.raises(core.PixAIError) as e:
         task_reads_mod._poll_task_status(object(), "t3", 300, label="edit", fail_noun="edit")
     assert "edit ended with status: failed" in str(e.value)
@@ -47,7 +59,7 @@ def test_poll_raises_on_failure_with_noun(monkeypatch):
 def test_poll_raises_on_timeout(monkeypatch):
     """Timeout must NOT read as task failure: the task keeps running on PixAI, so the
     message says so and gives the free --task-id recovery path."""
-    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {"status": "running"}})
+    _status_answers(monkeypatch, {"status": "running"})
     with pytest.raises(core.PixAIError) as e:
         task_reads_mod._poll_task_status(object(), "t4", 0, label="generate", fail_noun="generation")
     msg = str(e.value)
@@ -68,8 +80,8 @@ def test_poll_cancelled_surfaces_pixai_own_reason(monkeypatch):
     """PixAI reaps an undispatched task with outputs={"reason": "waiting timeout"}. The
     owner hit this five times across four days and never once saw that string -- the
     error said only 'cancelled', which reads like HE cancelled something."""
-    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {
-        "status": "cancelled", "startedAt": None, "outputs": {"reason": "waiting timeout"}}})
+    _status_answers(monkeypatch, {
+        "status": "cancelled", "startedAt": None, "outputs": {"reason": "waiting timeout"}})
     with pytest.raises(core.PixAIError) as e:
         task_reads_mod._poll_task_status(object(), "t5", 300, label="enhance", fail_noun="enhance")
     msg = str(e.value)
@@ -107,7 +119,7 @@ def test_poll_timeout_without_ever_observing_the_task_stays_reassuring(monkeypat
     recover-it-free message rather than confidently declaring a task dead it never looked
     at. This is the same class of error as the message the fix above removes, so it gets
     its own guard."""
-    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {"status": "running"}})
+    _status_answers(monkeypatch, {"status": "running"})
     with pytest.raises(core.PixAIError) as e:
         task_reads_mod._poll_task_status(object(), "t8", 0, label="generate", fail_noun="generation")
     msg = str(e.value)
@@ -153,10 +165,10 @@ def test_a_content_refusal_tells_the_user_what_to_do_about_it(monkeypatch):
 
 def test_generation_status_surfaces_a_provider_refusal(monkeypatch):
     """End of the chain: the status dict every caller reads must carry it."""
-    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {
+    _status_answers(monkeypatch, {
         "status": "failed", "startedAt": "2026-07-25T15:44:53Z",
         "outputs": {"failureMessage": "Provider refused to answer",
-                    "failure_reason": "PROVIDER_REFUSE_ANSWER"}}})
+                    "failure_reason": "PROVIDER_REFUSE_ANSWER"}})
     st = task_reads_mod.generation_status(object(), "t9")
     assert st["phase"] == "failed"
     assert "refused" in (st.get("reason") or "").lower(), \

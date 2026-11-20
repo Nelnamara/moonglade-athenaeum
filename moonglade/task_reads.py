@@ -75,11 +75,104 @@ def task_detail_gql(session, task_id, retries=3, timeout=60):
         if not isinstance(data, dict) or "task" not in data:
             raise PixAIError("PixAI answered, but with no task in it")
     except (PixAIError, requests.RequestException) as e:
+        # 3.22 S3-poll (DESIGN_3.22 2.8): the REST read with its stored parameters, before
+        # giving up. A read fallback cannot spend; per-image seeds are then unknown.
+        fallback = _rest_detail_fallback(session, task_id)
+        if fallback is not None:
+            return fallback
         print("  could not read task {} back from PixAI ({}). Nothing was spent and nothing "
               "is lost -- this call only READS a task, so the generation and its credits are "
               "exactly as PixAI left them. Try again in a moment.".format(task_id, e))
         return None
     return data.get("task")
+
+
+# ---------------------------------------------------------------------------
+# THE REST TASK READ (3.22 S3-poll, DESIGN_3.22 1.4 and 2.8)
+# ---------------------------------------------------------------------------
+# GET /v2/task/{id} on the API key: status, startedAt, paidQuota (GraphQL's paidCredit, equal on
+# every task P1 read) and REST's own `outputs` ({mediaIds, mediaUrls, videoMediaId, ...};
+# mediaIds is exactly the LIVE set, never the composite). It carries no per-image seed and, on
+# the failed and cancelled tasks P1 read, no reason -- so a terminal failure's reason is still
+# read from GraphQL task(id), best effort. The rich read (task_detail_gql) stays on GraphQL.
+def _rest_task(session, task_id, with_parameters=False):
+    """GET /v2/task/{id} -> the REST task (a dict carrying `id` and `status`). Raises PixAIError
+    for an id that could leave its path segment (nothing is sent) or an answer that is not a
+    task. Read-only."""
+    from moonglade.backup import PixAIError, _rest_get
+    from moonglade.cloud_delete import _TASK_ID_RE
+    tid = str(task_id or "").strip()
+    if not _TASK_ID_RE.match(tid):
+        raise PixAIError("not a PixAI task id: {!r}; nothing was read".format(tid[:64]))
+    data = _rest_get(session, "/task/" + tid,
+                     params={"with_parameters": "true"} if with_parameters else None)
+    if not isinstance(data, dict) or "status" not in data or not data.get("id"):
+        raise PixAIError("PixAI answered, but with no task in it")
+    return data
+
+
+def _rest_reason(task):
+    """PixAI's reason off a REST task, when it gives one (P1 found none on a failed or a
+    cancelled task, so this is read first and GraphQL is asked only when it is empty)."""
+    msg = task.get("taskStatusMsgI18n")
+    if isinstance(msg, dict):
+        msg = msg.get("en") or next((v for v in msg.values() if isinstance(v, str)), "")
+    if isinstance(msg, str) and msg.strip():
+        return msg.strip()
+    out = task.get("outputs") if isinstance(task.get("outputs"), dict) else {}
+    why = out.get("chatEditFailureReason")
+    return why.strip() if isinstance(why, str) and why.strip() else ""
+
+
+def _graphql_reason_of(session, task_id):
+    """The failure reason from GraphQL task(id) (outputs.reason and kin), best effort: '' on
+    any failure. Read-only."""
+    from moonglade.backup import gql_adhoc
+    try:
+        t = ((gql_adhoc(session, _GEN_STATUS, {"id": str(task_id)}) or {}).get("task") or {})
+        return _task_failure_reason(t.get("outputs"))
+    except Exception:                                       # noqa: BLE001 -- best effort
+        return ""
+
+
+def _status_read(session, task_id):
+    """One status read on the REST route, in _GEN_STATUS's names: {status, paidCredit,
+    startedAt, outputs, reason}. The reason is read only for a terminal failure."""
+    t = _rest_task(session, task_id)
+    status = str(t.get("status") or "")
+    reason = ""
+    if status.lower() in _GEN_FAIL:
+        reason = _rest_reason(t) or _graphql_reason_of(session, task_id)
+    return {"status": status, "paidCredit": t.get("paidQuota"), "startedAt": t.get("startedAt"),
+            "outputs": t.get("outputs") or {}, "reason": reason}
+
+
+def _rest_detail_fallback(session, task_id):
+    """The rich read's fallback when GraphQL task(id) could not be read (DESIGN_3.22 2.8): REST
+    getById with its stored parameters, in task_detail_gql's shape -- `parameters`, and
+    `outputs` rebuilt from the LIVE media ids (one id: outputs.mediaId, so a delete of it
+    routes to the whole-task delete; more: outputs.batch, one entry per live image, so a delete
+    of one routes per image; a target not in the set is refused by the router). Per-image seeds
+    are unknown (`_rest_fallback` says so). None on any failure. A read: it cannot spend."""
+    try:
+        t = _rest_task(session, task_id, with_parameters=True)
+    except Exception:                                       # noqa: BLE001 -- None, as before
+        return None
+    out = t.get("outputs") if isinstance(t.get("outputs"), dict) else {}
+    mids = [str(m) for m in (out.get("mediaIds") or []) if m]
+    outputs = {}
+    if len(mids) == 1:
+        outputs["mediaId"] = mids[0]
+    elif mids:
+        outputs["batch"] = [{"mediaId": m} for m in mids]
+    if out.get("videoMediaId"):
+        outputs["videoMediaId"] = str(out["videoMediaId"])
+    return {"id": str(t.get("id")), "status": t.get("status"),
+            "parameters": t.get("parameters") if isinstance(t.get("parameters"), dict) else {},
+            "outputs": outputs, "paidCredit": t.get("paidQuota"),
+            "startedAt": t.get("startedAt"), "endAt": t.get("endAt"),
+            "createdAt": t.get("createdAt"), "updatedAt": t.get("updatedAt"),
+            "_rest_fallback": True}
 
 
 _GEN_STATUS = ("query($id: ID!) { task(id: $id) "
@@ -95,12 +188,14 @@ def _poll_task_status(session, task_id, timeout, *, interval=3, label="task",
     server-authoritative `paidCredit` (or None) and prints it as the actual cost on
     completion. Raises PixAIError on failure/timeout. Shared by the generate / video /
     edit submit paths so their poll behaviour can't drift."""
-    from moonglade.backup import gql_adhoc, PixAIError, vlog
+    from moonglade.backup import PixAIError, vlog
     deadline = time.time() + timeout
     paid_credit = None
     started_at, last_status = None, ""
     while time.time() < deadline:
-        task = (gql_adhoc(session, _GEN_STATUS, {"id": task_id}) or {}).get("task") or {}
+        # 3.22 S3-poll: the REST read (GET /v2/task/{id}, API key), its reason from GraphQL
+        # only on a terminal failure (_status_read).
+        task = _status_read(session, task_id)
         status = str(task.get("status", "")).lower()
         last_status = status or last_status
         started_at = task.get("startedAt") or started_at
@@ -121,7 +216,8 @@ def _poll_task_status(session, task_id, timeout, *, interval=3, label="task",
             return paid_credit
         if status in _GEN_FAIL:
             raise PixAIError("{} ended with status: {}{}".format(
-                fail_noun, status, _pixai_reason_suffix(task)))
+                fail_noun, status,
+                " (PixAI's reason: {})".format(task["reason"]) if task.get("reason") else ""))
         time.sleep(interval)
     if _never_dispatched(last_status, started_at):
         raise PixAIError(
@@ -250,12 +346,10 @@ def generation_status(session, task_id):
         timeout"). Without it a caller can only report "cancelled", which reads as though
         the USER cancelled something they never started.
     Callers that only want the original three keys are unaffected -- those are unchanged."""
-    from moonglade.backup import gql_adhoc
-    d = gql_adhoc(session, _GEN_STATUS, {"id": str(task_id)}) or {}
-    t = d.get("task") or {}
+    # 3.22 S3-poll (DESIGN_3.22 2.8): the REST read; paidQuota is paid_credit (P1: equal).
+    t = _status_read(session, task_id)
     raw = (t.get("status") or "").lower()
     phase = ("done" if raw in _GEN_DONE else
              "failed" if raw in _GEN_FAIL else "running")
     return {"status": t.get("status") or "", "phase": phase, "paid_credit": t.get("paidCredit"),
-            "started": bool(t.get("startedAt")),
-            "reason": _task_failure_reason(t.get("outputs"))}
+            "started": bool(t.get("startedAt")), "reason": t.get("reason") or ""}
