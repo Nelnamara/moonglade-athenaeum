@@ -606,7 +606,15 @@ def test_matrix_cells_go_out_without_a_card_in_order(cli, rig):
     assert d["axes"][-1]["values"] == ["x", "y", "z"]
 
 
-def test_random_jobs_carry_a_card_for_the_covered_ones(cli, rig):
+def _cards_prove_free(monkeypatch):
+    """Each card job's terminal read (2.4 rule 7) shows it ended free. Without it the rig's
+    blocked REST read holds the run (3.22 review F3: an unread card counts as charged)."""
+    monkeypatch.setattr(task_reads_mod, "generation_status",
+                        lambda s, t: {"phase": "done", "paid_credit": 0, "status": "completed"})
+
+
+def test_random_jobs_carry_a_card_for_the_covered_ones(cli, rig, monkeypatch):
+    _cards_prove_free(monkeypatch)
     rig.cards = [dict(CARD, total=2)]                 # the plan's check
     p = plan(cli, prompt="{a|b} x", count=3).get_json()
     assert p["covered"] == 2 and p["total"] == 1600
@@ -618,7 +626,8 @@ def test_random_jobs_carry_a_card_for_the_covered_ones(cli, rig):
     assert [j["expected"] for j in d["jobs"]] == [0, 0, 1600]
 
 
-def test_a_card_gone_stops_the_run_before_it_costs_more_than_confirmed(cli, rig):
+def test_a_card_gone_stops_the_run_before_it_costs_more_than_confirmed(cli, rig, monkeypatch):
+    _cards_prove_free(monkeypatch)
     rig.cards = [dict(CARD, total=2)]
     p = plan(cli, prompt="{a|b} x", count=3).get_json()
     rig.cards = [dict(CARD, total=2), dict(CARD, total=2)]   # the quote, job 1; then none

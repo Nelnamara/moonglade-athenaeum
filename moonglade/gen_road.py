@@ -1738,7 +1738,8 @@ def _send_kwargs(on_send, exact, kind="image", on_created=None):
 
 
 # Session M: the pause between one answered mutation and the next in a run ("be polite to
-# their servers"; the Loom's batch staggers 2.2 s). Nothing waits for a task to FINISH.
+# their servers"; the Loom's batch staggers 2.2 s). Nothing waits for a task to FINISH, except
+# a card job in a confirmed-total run while the card on REST is unproven (RUN_CARD_PROOF_WAIT_S).
 RUN_SEND_GAP_S = 1.5
 
 
@@ -1769,15 +1770,47 @@ def _card_unproven(req):
     return CREATE_ROAD.get(kind) == "rest" and not CARD_PROOF_ON_REST
 
 
-def _card_job_was_charged(session, task_id):
-    """One read of a card job's task before the next job goes (2.4 rule 7): True only when
-    PixAI shows a charge on it. Read-only and fail-soft (a failed read is False)."""
-    try:
-        from moonglade import task_reads as _task_reads
-        st = _task_reads.generation_status(session, task_id) or {}
-        return _paid_quota({"paidCredit": st.get("paid_credit")}) > 0
-    except Exception:                                        # noqa: BLE001
-        return False
+#: 2.4 rule 7 (V3), 3.22 review F3: how long a run waits for a card job's TERMINAL read before
+#: it sends the next job, and how often it reads in that time. The read 1.5 s after a create
+#: (RUN_SEND_GAP_S) usually finds the task still waiting or running, and a task that has not
+#: ended may still show paidQuota 0 although PixAI will charge it (rule 7's whole reason), so a
+#: 0 on a task that has not ended proves nothing. Only an ended task's 0 proves the card.
+RUN_CARD_PROOF_WAIT_S = 120
+RUN_CARD_PROOF_POLL_S = 3
+
+
+def _card_job_charge(session, task_id, pause, wait_s=None, poll_s=None):
+    """A card job's charge, read before the next job goes (2.4 rule 7). Read-only. Returns
+    "free"         the task ended and PixAI shows no charge: the card was used;
+    "card_unused"  the task completed and PixAI shows a charge: the card was not used;
+    "held"         anything else -- the read failed, a charge shows on a task that has not
+                   completed, or the task had not ended within RUN_CARD_PROOF_WAIT_S.
+    Fail-closed (F3): the caller counts "card_unused" AND "held" as charged, never as free, so
+    a run is held to its confirmed total whenever the card cannot be shown to have applied."""
+    from moonglade import task_reads as _task_reads
+    wait = RUN_CARD_PROOF_WAIT_S if wait_s is None else wait_s
+    step = RUN_CARD_PROOF_POLL_S if poll_s is None else poll_s
+    waited = 0
+    while True:
+        try:
+            st = _task_reads.generation_status(session, task_id) or {}
+        except Exception:                                    # noqa: BLE001 -- held, below
+            return "held"
+        phase = st.get("phase")
+        if _paid_quota({"paidCredit": st.get("paid_credit")}) > 0:
+            return "card_unused" if phase == "done" else "held"
+        if phase in ("done", "failed"):
+            return "free"
+        if waited >= wait:
+            return "held"
+        pause(step)
+        waited += step
+
+
+def _run_unproven_note(sent):
+    return ("PixAI hasn't shown whether the free card on image {} was used, so image {} could "
+            "cost more than you confirmed. {} {} sent; the rest were not.".format(
+                sent, sent + 1, sent, "was" if sent == 1 else "were"))
 
 
 def send_run(session, jobs, *, hooks, budget=None, gap_s=None, sleep=None):
@@ -1811,7 +1844,7 @@ def send_run(session, jobs, *, hooks, budget=None, gap_s=None, sleep=None):
     pause = sleep if sleep is not None else time.sleep
     out = []
     state = {"charged": 0, "sent": 0, "stop": None, "card_pending": None,
-             "card_ignored": False}
+             "card_ignored": False, "hold_note": None}
 
     for idx, job in enumerate(jobs):
         cell = job["cell"]
@@ -1841,15 +1874,21 @@ def send_run(session, jobs, *, hooks, budget=None, gap_s=None, sleep=None):
             if budget is None or (params.get("kaisuukenId") and not state["card_ignored"]):
                 return
             if state["charged"] + int(budget["each"]) > int(budget["total"]):
-                raise LocalRefusal(budget.get("note") or _run_budget_note(state["sent"]))
+                raise LocalRefusal(budget.get("note") or state["hold_note"]
+                                   or _run_budget_note(state["sent"]))
 
         if budget is not None and state["card_pending"] is not None:
-            # 2.4 rule 7 (V3), before the next job: the last card job's task read once more,
-            # and counted as charged when PixAI now shows a charge on it. Fail-soft: a failed
-            # read proves nothing either way and counts nothing.
-            if _card_job_was_charged(session, state["card_pending"]):
+            # 2.4 rule 7 (V3), before the next job: the last card job's task is read until it
+            # ends (bounded, _card_job_charge). Fail-CLOSED (3.22 review F3): a charge, a read
+            # that failed, or a task that had not ended in time all count the job as charged
+            # at its quoted price, so every later job is held to the confirmed total. Only an
+            # ended task showing no charge counts the card as used.
+            proof = _card_job_charge(session, state["card_pending"], pause)
+            if proof != "free":
                 state["charged"] += int(budget["each"])
                 state["card_ignored"] = True
+                if proof == "held" and state["hold_note"] is None:
+                    state["hold_note"] = _run_unproven_note(state["sent"])
             state["card_pending"] = None
         try:
             task_id = submit(session, job["req"], no_card=job.get("no_card"),

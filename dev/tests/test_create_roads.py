@@ -537,21 +537,33 @@ def test_the_observation_step_never_turns_a_created_task_into_an_error(door, mon
                                       on_created=_boom) == "T1"
 
 
-def _run(monkeypatch, answers, budget, status=None):
-    """Two card-covered image jobs through send_run, the door answering `answers`."""
+def _run(monkeypatch, answers, budget, status=None, reads=None, slept=None):
+    """Three card-covered image jobs through send_run, the door answering `answers`. `status`
+    answers each task's read (a callable is called with the task id); `reads` and `slept`
+    record the reads and the run's pauses."""
     monkeypatch.setattr(core, "_create", lambda s, k, b: answers.pop(0))
 
     def _card(session, params, args):
         params["kaisuukenId"] = "K1"
         return "K1"
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", _card)
-    monkeypatch.setattr(task_reads_mod, "generation_status",
-                        lambda s, t: status.get(t, {}) if status else {})
-    hooks = SimpleNamespace(sending=lambda c: None, sent=lambda *a: None,
+
+    def _status(s, t):
+        if reads is not None:
+            reads.append(t)
+        if callable(status):
+            return status(t)
+        return status.get(t, {}) if status else {}
+    monkeypatch.setattr(task_reads_mod, "generation_status", _status)
+    hooks = SimpleNamespace(sending=lambda c: None, sent=lambda *a, **k: None,
                             failed=lambda *a: None)
     jobs = [{"cell": i, "req": _image_req(), "no_card": None} for i in range(3)]
     return gen_road.send_run(pc.PixAIClient(Wire()), jobs, hooks=hooks, budget=budget,
-                             gap_s=0)
+                             gap_s=0, sleep=(slept.append if slept is not None
+                                             else (lambda s: None)))
+
+
+DONE_FREE = {"phase": "done", "paid_credit": 0}
 
 
 def test_a_run_counts_an_ignored_card_as_charged_and_never_pays_past_its_total(monkeypatch):
@@ -570,8 +582,46 @@ def test_a_charge_seen_on_the_read_before_the_next_job_counts_too(monkeypatch):
 
 def test_cards_that_apply_leave_the_run_alone(monkeypatch):
     res = _run(monkeypatch, [{"id": "A", "paidQuota": 0}, {"id": "B"}, {"id": "C"}],
-               {"each": 100, "total": 0}, status={})
+               {"each": 100, "total": 0}, status={"A": DONE_FREE, "B": DONE_FREE})
     assert [j["state"] for j in res["jobs"]] == ["sent", "sent", "sent"]
+
+
+# 3.22 review F3: the read before the next job fails CLOSED.
+
+def test_a_card_read_that_fails_counts_the_job_as_charged(monkeypatch):
+    """Card job A's read fails: A counts as charged, so B (a card job too) is held to the
+    confirmed total and is not sent. Before F3 a failed read counted nothing, and B skipped
+    the budget check."""
+    def _down(t):
+        raise core.PixAIError("REST GET /task/A -> 502")
+    res = _run(monkeypatch, [{"id": "A"}, {"id": "B"}, {"id": "C"}],
+               {"each": 100, "total": 100}, status=_down)
+    assert [j["state"] for j in res["jobs"]] == ["sent", "not_sent", "not_sent"]
+    assert "hasn't shown whether the free card on image 1 was used" in res["reason"]
+
+
+def test_a_card_job_still_running_is_read_until_it_ends(monkeypatch):
+    """A read 1.5 s after the create finds the task still running with paidQuota 0, which
+    proves nothing: the run reads again (its own pause between) until the task ends."""
+    seq = {"A": [{"phase": "running", "paid_credit": 0}, {"phase": "running"}, DONE_FREE],
+           "B": [DONE_FREE]}
+    reads, slept = [], []
+    res = _run(monkeypatch, [{"id": "A"}, {"id": "B"}, {"id": "C"}],
+               {"each": 100, "total": 0},
+               status=lambda t: seq[t].pop(0) if len(seq[t]) > 1 else seq[t][0],
+               reads=reads, slept=slept)
+    assert [j["state"] for j in res["jobs"]] == ["sent", "sent", "sent"]
+    assert reads == ["A", "A", "A", "B"]
+    assert slept == [gen_road.RUN_CARD_PROOF_POLL_S] * 2
+
+
+def test_a_card_job_that_never_ends_in_time_holds_the_run(monkeypatch):
+    slept = []
+    res = _run(monkeypatch, [{"id": "A"}, {"id": "B"}, {"id": "C"}],
+               {"each": 100, "total": 100},
+               status=lambda t: {"phase": "running", "paid_credit": 0}, slept=slept)
+    assert [j["state"] for j in res["jobs"]] == ["sent", "not_sent", "not_sent"]
+    assert sum(slept) >= gen_road.RUN_CARD_PROOF_WAIT_S
 
 
 # ---------------------------------------------------------------------------
