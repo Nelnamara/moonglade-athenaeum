@@ -17914,10 +17914,12 @@ def create_app(out_dir: Path):
         # The cache's generation when this read began: a send or refusal that lands while it
         # runs bumps it, and this read's (older) answer is then never cached.
         gen0 = _enh_price_cache["gen"]
-        # Stored session (no bootstrap) -- as the gate uses -- and only while the Mirror is ON,
-        # like the scene routes: make_mirror_session can renew the token, and nothing may renew
-        # it as a side effect while the owner has the Mirror switched off (#71).
-        s = _mirror.make_mirror_session() if _mirror.mirror_enabled() else None
+        # 3.22 S3-enhance (T-F4, V9): the Mirror's STORED sign-in, only while the Mirror is ON
+        # (pricing.enhance_quote_session: never make_mirror_session, so a quote renews
+        # nothing, #71), and PixAI's own enhance quote, POST /v2/task/enhance/price -- the
+        # same price the badge reads. An enhance never takes a card: no card check runs and
+        # free_card is always False.
+        s = _pricing.enhance_quote_session()
 
         def _row(pr):
             row = {"key": pr.get("key"), "label": pr.get("label"),
@@ -17926,13 +17928,13 @@ def create_app(out_dir: Path):
                    "has_control": bool(pr.get("has_control")), "price": None, "free_card": False}
             if s is not None:
                 try:
-                    params = _gen_params.build_panelplugin_parameters(
-                        "1", row["workflow_id"], workflow_name=row["workflow_name"])
-                    row["price"] = _pricing.price_task(s, params)
-                    # card_covers, the one coverage verdict the send reads too (2026-11-18): a
-                    # card that matched but does not cover the job is not "free".
-                    row["free_card"] = _cards.card_covers(
-                        _cards.match_kaisuuken(s, params, enrich=True))
+                    # A placeholder source: the quote prices the request SHAPE (verified for
+                    # task-price 2026-08-18). A preset with a control (Change Emotion) needs
+                    # its prompt to be quoted at all, so it has no price until one is picked.
+                    etype = _gen_params.enhance_type_for(row["workflow_name"])
+                    if etype is not None and not row["has_control"]:
+                        row["price"] = _pricing.price_enhance(
+                            s, _gen_params.build_enhance_body("1", etype))
                 except Exception:
                     row["price"] = None
             return row
@@ -17949,7 +17951,7 @@ def create_app(out_dir: Path):
                 out = list(ex.map(_row, _gen_params.BRIDGE_ENHANCE_PRESETS))
         else:
             out = [_row(pr) for pr in _gen_params.BRIDGE_ENHANCE_PRESETS]
-        if s is not None and all(r["price"] is not None for r in out) \
+        if s is not None and all(r["price"] is not None for r in out if not r["has_control"]) \
                 and _enh_price_cache["gen"] == gen0:     # cache only a fully-real, current result
             _enh_price_cache["presets"] = out
             _enh_price_cache["at"] = now
@@ -18112,6 +18114,10 @@ def create_app(out_dir: Path):
         reached = _Reached()
         try:
             p = request.get_json(silent=True) or {}
+            # V9 (3.22): a scene never takes a card, so a send claiming a FREE quote is refused
+            # before anything else, with nothing sent.
+            if _pop_expect_free(p):
+                return jsonify({"error": _gen_road.CARDLESS_FREE, "state": "not_sent"}), 400
             send_key = _send_key("scene", p)
             held = _send_claim(send_key, claim=False)        # 3.21.2 (L1): before any network
             if held:
@@ -18224,6 +18230,10 @@ def create_app(out_dir: Path):
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
             loom_target = _pop_loom_target(p)
+            # V9 (3.22): no card ever covers a Fix, so a send claiming a FREE quote is refused
+            # before anything else, with nothing sent.
+            if _pop_expect_free(p):
+                return jsonify({"error": _gen_road.CARDLESS_FREE, "state": "not_sent"}), 400
             # READ_ONLY first: the submit resolver below uploads the local file (a network
             # call), so the refusal has to come before it, not only inside submit_fixer.
             core._check_read_only(_gen_road._SUBMIT_ACTIONS["fix"])

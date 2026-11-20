@@ -36,6 +36,65 @@ if _FIXER_PRICE_PATH != "/task/fixer/price":      # pragma: no cover - an edit-t
     raise ImportError("_FIXER_PRICE_PATH must be exactly /task/fixer/price (the Fix QUOTE route)")
 
 
+# PixAI's own ENHANCE price route (3.22 S3-enhance, DESIGN_3.22 2.3): the same input as the
+# enhance submit, one segment from the SPEND route "/task/enhance" -- so a named constant, never
+# assembled, pinned whole by an `if` that `python -O` cannot strip.
+_ENHANCE_PRICE_PATH = "/task/enhance/price"
+if _ENHANCE_PRICE_PATH != "/task/enhance/price":    # pragma: no cover - an edit-time tripwire
+    raise ImportError("_ENHANCE_PRICE_PATH must be exactly /task/enhance/price (a QUOTE route)")
+_enhance_quote_seen = {"logged": False}
+
+
+def enhance_quote_session():
+    """The session an enhance is QUOTED on (DESIGN_3.22 2.5): the Mirror's STORED sign-in, only
+    while the Mirror is armed and the token usable -- the identity that runs the job. Built
+    directly from the stored token, never through make_mirror_session: a quote renews nothing.
+    None otherwise (the badge then says it couldn't verify the cost)."""
+    from moonglade import mirror as _mirror
+    try:
+        if not _mirror.mirror_enabled():
+            return None
+        jwt = _mirror.load_mirror_state().get("jwt") or ""
+        return _mirror._mirror_session_from(jwt) if _mirror._jwt_usable(jwt) else None
+    except Exception:                                       # noqa: BLE001 -- fail soft
+        return None
+
+
+def price_enhance(session, body):
+    """PixAI's price for an enhance of exactly `body` (build_enhance_body's dict), from POST
+    /v2/task/enhance/price -> int credits, or None. A QUOTE: no _check_read_only, single attempt
+    (rest_post), fails soft. The route has no contract description (P4), so the answer's shape
+    is logged on the first read, and a number is answered only when it parses as
+    {actualPrice: int}; anything else is None ("couldn't verify the cost"). `session` None (no
+    armed Mirror) is None without a call."""
+    from moonglade.backup import PixAIError, _rest_post
+    from moonglade.gen_params import build_enhance_body
+    if session is None or not isinstance(body, dict):
+        return None
+    try:
+        sent = build_enhance_body(body.get("mediaId"), body.get("enhanceType"), body.get("prompt"))
+    except PixAIError:
+        return None
+    try:
+        data = _rest_post(session, _ENHANCE_PRICE_PATH, sent)
+    except (PixAIError, requests.RequestException, ValueError):
+        return None
+    if not _enhance_quote_seen["logged"]:
+        _enhance_quote_seen["logged"] = True
+        try:
+            import logging
+            shape = ({k: type(v).__name__ for k, v in data.items()} if isinstance(data, dict)
+                     else type(data).__name__)
+            logging.getLogger("moonglade.pricing").info(
+                "enhance quote: first answer's shape %s", shape)
+        except Exception:                                   # noqa: BLE001
+            pass
+    ap = data.get("actualPrice") if isinstance(data, dict) else None
+    if isinstance(ap, int) and not isinstance(ap, bool):
+        return ap
+    return None
+
+
 def price_fixer(session, body):
     """PixAI's price for a Fix of exactly `body` (build_fixer_body's dict), from POST
     /v2/task/fixer/price -> {"cost": int, "original": int|None}, or None.

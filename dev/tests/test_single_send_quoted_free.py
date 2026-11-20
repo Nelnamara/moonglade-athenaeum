@@ -123,7 +123,6 @@ class _Req:
 
 @pytest.mark.parametrize("route,mode,body", [
     ("/api/edit", "edit", {"source": "1", "instruction": "make it night"}),
-    ("/api/enhance", "enhance", {"source": "1", "workflow_id": "42"}),
 ])
 def test_edit_and_ai_presets_refuse_a_free_quote_whose_card_is_gone(gen, monkeypatch, route, mode, body):
     from moonglade import mirror as _mirror
@@ -164,3 +163,26 @@ def test_an_unlimited_mode_request_is_never_held_to_a_card(gen, monkeypatch):
     assert d.get("task_id") == "task-1", d
     assert _creates(gen) == 1
     assert gen["pixai"].calls_for("/kaisuuken/check") == [], "a lane request is never card-checked"
+
+
+@pytest.mark.parametrize("route,body", [
+    ("/api/enhance", {"source": "1", "workflow_id": "42"}),
+    ("/api/scene", {"scene_id": "s1", "media_ids": ["1"]}),
+    ("/api/fix", {"source": "1", "boxes": [{"x": 1, "y": 1, "width": 5, "height": 5,
+                                            "tag": "face"}]}),
+])
+def test_a_cardless_send_claiming_a_free_quote_is_refused_with_nothing_sent(gen, monkeypatch,
+                                                                          route, body):
+    """3.22 (V9): an AI preset, an AI Tools scene and a Fix never take a free card, so their
+    quotes are never FREE, and a send that claims one is refused before anything goes out."""
+    from moonglade import mirror as _mirror
+    monkeypatch.setattr(_mirror, "mirror_enabled", lambda: True)
+    monkeypatch.setattr(_mirror, "make_mirror_session", lambda *a, **k: gen["pixai"])
+    sent = []
+    for fn in ("submit_enhance", "submit_scene", "submit_fixer"):
+        monkeypatch.setattr(gen_road_mod, fn, lambda *a, **k: sent.append(a) or "t")
+    monkeypatch.setattr(gen_road_mod, "build_request", lambda payload, *a, **k: _Req("enhance"))
+    d = gen["cli"].post(route, json=dict(body, expect_free=True)).get_json()
+    assert "never uses a free card" in d["error"] and d["state"] == "not_sent", d
+    assert sent == [] and _creates(gen) == 0
+    assert gen["pixai"].calls_for("/kaisuuken/check") == []

@@ -86,6 +86,125 @@ EDIT_CHAT = {"prompts": "make it night", "mediaId": "111", "mediaIds": ["111"],
 
 
 FIX_BOX = {"x": 1, "y": 2, "width": 30, "height": 40, "tag": "hand"}
+ENHANCE_BODY = {"enhanceType": "background-remover", "mediaId": "111"}
+# PixAI's constants.imageEnhancementPlugins, as its live config answers it (DECISIONS: the
+# per-plugin {workflowName, workflowVersion, args}); the names are the presets' pinned ones.
+PLUGINS = {"handfix": {"workflowName": "mymusise/hand-fix", "workflowVersion": "v1"},
+           "face-detailer": {"workflowName": "kyo/face-detailer", "workflowVersion": "v4.0"},
+           "emotion": {"workflowName": "kyo/emotionlab", "workflowVersion": "633acbbb"},
+           "background-remover": {"workflowName": "mymusise/39a2c67c",
+                                  "workflowVersion": "unet-0.1.3.2"},
+           "image-to-lineart": {"workflowName": "pixai-official/image-to-lineart"},
+           "sketch-coloring": {"workflowName": "pixai-official/sketch-coloring-workflow"}}
+
+
+def _web_jwt(session):
+    """The Mirror armed for the test: a marked web-jwt client over `session`."""
+    c = pc.PixAIClient(session, auth_kind="web-jwt")
+    c._create_chosen = True
+    return c
+
+
+# ---------------------------------------------------------------------------
+# Enhance on the REST route (T-F4, T-V9, mutations 12, 13, 28)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def plugins(monkeypatch):
+    monkeypatch.setattr(core, "_cached_config",
+                        lambda key, **k: {"imageEnhancementPlugins": PLUGINS}
+                        if key == "constants" else None)
+
+
+def test_every_pinned_preset_maps_to_the_type_pixais_site_would_send(plugins):
+    want = {"handfix": "handfix", "face": "face-detailer", "emotion": "emotion",
+            "bg_remove": "background-remover", "line_art": "image-to-lineart",
+            "sketch_color": "sketch-coloring"}
+    for pr in gen_params.BRIDGE_ENHANCE_PRESETS:
+        assert gen_params.enhance_type_for(pr["workflow_name"]) == want[pr["key"]], pr["key"]
+
+
+def test_an_unmapped_preset_is_a_note_and_never_sent(monkeypatch):
+    monkeypatch.setattr(core, "_cached_config", lambda key, **k: None)   # config unreadable
+    req = gen_road.build_request({"source": "111", "workflow_name": "mymusise/hand-fix:v1"},
+                                 mode="enhance")
+    assert req.parameters is None and req.note == gen_params.ENHANCE_UNMAPPED
+    req = gen_road.build_request({"source": "111", "workflow_id": "1793447160259872021"},
+                                 mode="enhance")
+    assert req.parameters is None                    # a numeric id can never be mapped
+
+
+def test_the_enhance_body_and_the_emotion_prompt(plugins):
+    req = gen_road.build_request({"source": "111", "workflow_name": "mymusise/39a2c67c:unet"},
+                                 mode="enhance")
+    assert req.parameters == ENHANCE_BODY and req.no_card is True
+    emo = gen_road.build_request({"source": "111", "emotion": "smile",
+                                  "workflow_name": gen_params.ENHANCE_EMOTION_WORKFLOW},
+                                 mode="enhance")
+    assert emo.parameters["enhanceType"] == "emotion" and emo.parameters["prompt"]
+    # an emotion without its expression cannot be sent (the site's own rule)
+    bare = gen_road.build_request({"source": "111",
+                                   "workflow_name": gen_params.ENHANCE_EMOTION_WORKFLOW},
+                                  mode="enhance")
+    assert bare.parameters is None
+
+
+def test_an_enhance_send_makes_no_card_call_and_rides_the_web_sign_in(door, monkeypatch):
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken",
+                        lambda *a, **k: pytest.fail("an enhance reached the card step"))
+    monkeypatch.setattr(cards_mod, "match_kaisuuken",
+                        lambda *a, **k: pytest.fail("an enhance reached the card check"))
+    wire = Wire(_Answer(200, {"id": "E1"}))
+    req = gen_road.GenerationRequest(mode="enhance", parameters=dict(ENHANCE_BODY),
+                                     no_card=False, media_id="111")
+    assert gen_road.submit(_web_jwt(wire), req, no_card=False) == {"task_id": "E1"}
+    (url, body), = wire.posts
+    assert url.endswith("/task/enhance") and body == ENHANCE_BODY
+    # on the API key it is refused with nothing sent (mutation 14)
+    wire2 = Wire()
+    with pytest.raises(core.LocalRefusal):
+        gen_road.submit(pc.PixAIClient(wire2), req)
+    assert wire2.posts == []
+
+
+def test_the_badge_quotes_the_enhance_price_route_on_the_mirror_session(monkeypatch):
+    asked = []
+    mirror_session = object()
+    monkeypatch.setattr(cards_mod, "match_kaisuuken",
+                        lambda *a, **k: pytest.fail("an enhance quote ran a card check"))
+    monkeypatch.setattr(core, "_rest_post", lambda s, path, body, **k: (
+        asked.append((s, path, body)), {"actualPrice": 1000})[1])
+    from moonglade import pricing
+    monkeypatch.setattr(pricing, "enhance_quote_session", lambda: mirror_session)
+    req = gen_road.GenerationRequest(mode="enhance", parameters=dict(ENHANCE_BODY),
+                                     media_id="111", no_card=True)
+    out = gen_road.price(object(), req)
+    assert out["cost"] == 1000 and out["free"] is False
+    assert asked == [(mirror_session, "/task/enhance/price", ENHANCE_BODY)]
+    # an answer that is not {actualPrice: int} is no number
+    monkeypatch.setattr(core, "_rest_post", lambda *a, **k: {"actualPrice": "1000"})
+    assert gen_road.price(object(), req)["cost"] is None
+    # no armed Mirror: no call at all, and "couldn't verify"
+    monkeypatch.setattr(pricing, "enhance_quote_session", lambda: None)
+    monkeypatch.setattr(core, "_rest_post", lambda *a, **k: pytest.fail("quoted with no Mirror"))
+    out = gen_road.price(object(), req)
+    assert out["cost"] is None and out["note"] == gen_road._ENHANCE_PRICE_NOTE
+
+
+def test_the_quote_and_spend_paths_are_never_swapped():
+    from moonglade import pricing
+    assert pricing._ENHANCE_PRICE_PATH == "/task/enhance/price"
+    assert pc.CREATE_PATHS["enhance"] == "/task/enhance"
+    assert pricing._FIXER_PRICE_PATH == "/task/fixer/price"
+    assert pc.CREATE_PATHS["fix"] == "/task/fixer"
+
+
+@pytest.mark.parametrize("mode", ["enhance", "scene", "fix"])
+def test_a_cardless_send_claiming_a_free_quote_is_refused(mode):
+    req = gen_road.GenerationRequest(mode=mode, parameters={"x": 1})
+    with pytest.raises(core.LocalRefusal):
+        gen_road.quoted_free_hooks(req, True)
+    assert gen_road.quoted_free_hooks(req, False) == {}
 
 
 def test_a_fix_over_the_real_door_is_one_post_of_the_cleaned_body(door):
@@ -195,6 +314,11 @@ SENDERS = {
     # AI Tools scenes have no CLI runner: the one sender is submit_scene (the /api/scene road).
     "scene": [
         ("submit_scene", lambda s, tmp: gen_road.submit_scene(s, "character-card", ["111"])),
+    ],
+    # Enhance has no CLI runner: its one sender is the web road (submit -> submit_enhance).
+    "enhance": [
+        ("web submit", lambda s, tmp: gen_road.submit(_web_jwt(s), gen_road.GenerationRequest(
+            mode="enhance", parameters=dict(ENHANCE_BODY), no_card=True, media_id="111"))),
     ],
     # The Fix has no CLI runner: its one sender is the web road (submit -> submit_fixer).
     "fix": [

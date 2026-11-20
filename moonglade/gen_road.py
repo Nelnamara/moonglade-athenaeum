@@ -668,6 +668,26 @@ def _observe_created(kind, sent, answer, on_created=None):
     return warnings
 
 
+def submit_enhance(session, body, on_send=None):
+    """Submit one AI-preset enhance (POST /v2/task/enhance, through the create door) -> task
+    id. 3.22 S3-enhance. READ_ONLY first; then the identity: for_create(require="web-jwt") --
+    the API-key panelplugin reaped unstarted (DECISIONS 2026-08-18), so an enhance never rides
+    the key, and the door refuses it there too. The body is rebuilt by build_enhance_body (a
+    hand-built one is refused before any network call). No card, ever. One POST; an id-less or
+    lost answer is CreateOutcomeUnknown. `on_send(body)` is told just before it."""
+    from moonglade import backup as _core
+    from moonglade import pixai_client as _pixai_client
+    _core._check_read_only("submit an AI preset (spends credits)")
+    sent = _gen_params.build_enhance_body((body or {}).get("mediaId"),
+                                          (body or {}).get("enhanceType"),
+                                          (body or {}).get("prompt"))
+    client = _pixai_client._client_of(session).for_create(require="web-jwt")
+    _observe_send(on_send, sent)
+    answer = _core._create(client, "enhance", sent)
+    _observe_created("enhance", sent, answer)
+    return str(answer["id"])
+
+
 def submit_fixer(session, media_id, boxes, on_send=None):
     """Submit a hand/face fixer task via POST /v2/task/fixer -> task id (poll it like any
     generation). `boxes` = [{x, y, width, height, tag}] in ORIGINAL-image pixel coords, tag
@@ -1056,9 +1076,8 @@ def _edit_parameters_from_payload(p, user, resolve):
     return _gen_params.build_chat_edit_parameters(instruction, media, **kwargs)
 
 
-# An enhance/panelplugin task is priced by its workflow id, which is deliberately NOT in
-# _PRICE_SCALARS: pricing the workflow-less shape that survives the allowlist returns a
-# confident WRONG number, so no number is the honest answer until it is measured live.
+# What the badge says when PixAI's enhance quote (POST /v2/task/enhance/price, 3.22) gave no
+# number it could read, or there is no armed Mirror to ask on.
 _ENHANCE_PRICE_NOTE = "couldn't verify the cost of an AI preset yet"
 
 # The READ_ONLY refusal wording per road -- the same sentences submit_generation and
@@ -1229,29 +1248,35 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
             src = str(rs.media_id(src) or src)
         wid = str(p.get("workflow_id") or "").strip()
         wname = str(p.get("workflow_name") or "").strip()
+        # An enhance never takes a card (3.22, V9/T-F4): no_card is forced True, never read
+        # off the payload, and no card check ever runs for one.
         if not src:
-            return GenerationRequest(mode="enhance", no_card=no_card,
-                                     note="pick an image first",
-                                     price_note=_ENHANCE_PRICE_NOTE)
+            return GenerationRequest(mode="enhance", no_card=True,
+                                     note="pick an image first")
         if not (wid or wname):
-            return GenerationRequest(mode="enhance", no_card=no_card, media_id=src,
-                                     note="pick an AI preset",
-                                     price_note=_ENHANCE_PRICE_NOTE)
-        # workflow_name wins inside the builder when both are set; a preset is pinned to
-        # exactly one of the two (numeric id OR author/workflow name) in the caller.
-        # Change Emotion carries a control: pass the picked expression, and ONLY for that
-        # preset (an unknown input on the others would be a stray arg on a spend submit).
-        # The picker sends the option KEY (filename stem); emotionlab's `prompt` arg wants
-        # the danbooru TAG STRING, so translate key->tag here (unknown key falls back to
-        # itself).
+            return GenerationRequest(mode="enhance", no_card=True, media_id=src,
+                                     note="pick an AI preset")
+        # 3.22 S3-enhance: the REST route takes {enhanceType, mediaId, prompt?}. The type is
+        # the live imageEnhancementPlugins key whose workflowName matches the preset's, as
+        # PixAI's site maps it (gen_params.enhance_type_for). A preset addressed only by a
+        # numeric workflow id, or one the live config does not list, cannot be mapped: it is
+        # a note with no parameters, and nothing is sent (the conservative reading).
+        etype = _gen_params.enhance_type_for(wname) if wname else None
+        if etype is None:
+            return GenerationRequest(mode="enhance", no_card=True, media_id=src,
+                                     note=_gen_params.ENHANCE_UNMAPPED)
+        # Change Emotion carries a control: the picked expression, translated key -> the
+        # danbooru TAG STRING emotionlab wants (unknown key falls back to itself), rides in
+        # `prompt` -- and ONLY for the emotion preset.
         emotion_key = str(p.get("emotion") or "").strip()
         emotion_tag = _gen_params.ENHANCE_EMOTION_PROMPTS.get(emotion_key, emotion_key)
-        extra = ({_gen_params.ENHANCE_EMOTION_ARG: emotion_tag}
-                 if emotion_tag and wname == _gen_params.ENHANCE_EMOTION_WORKFLOW else None)
-        params = _gen_params.build_panelplugin_parameters(src, wid, workflow_name=wname,
-                                              extra_inputs=extra)
-        return GenerationRequest(mode="enhance", parameters=params, no_card=no_card,
-                                 media_id=src, price_note=_ENHANCE_PRICE_NOTE)
+        prompt = emotion_tag if emotion_tag and etype == "emotion" else None
+        try:
+            params = _gen_params.build_enhance_body(src, etype, prompt)
+        except PixAIError as e:
+            return GenerationRequest(mode="enhance", no_card=True, media_id=src, note=str(e))
+        return GenerationRequest(mode="enhance", parameters=params, no_card=True,
+                                 media_id=src)
 
     # --- the image road (the payload's own `mode` is the inferenceProfile here) --------
     args = _gen_args_from_web_payload(p)
@@ -1486,6 +1511,17 @@ def _price_answer(session, req, card_session=None):
         return {"cost": None, "free": False, "note": req.note}
     if req.price_note:
         return {"cost": None, "free": False, "note": req.price_note}
+    if req.mode == "enhance":
+        # 3.22 S3-enhance (T-F4, V9): PixAI's own enhance quote on the identity that runs the
+        # job (the Mirror's stored sign-in, no renewal), never a card check, never FREE. A
+        # failed or unrecognised quote is no number, in the badge's own words.
+        cost = _pricing.price_enhance(_pricing.enhance_quote_session(), req.parameters)
+        out = {"cost": cost, "free": False, "cards": None, "cards_held": None,
+               "cards_needed": None, "card_short": False, "card_name": None,
+               "card_template": None, "card_expires": None}
+        if cost is None:
+            out["note"] = _ENHANCE_PRICE_NOTE
+        return out
     if req.mode == "fix":
         # #93: a Fix is priced by PixAI's own Fix price route off the exact submit body
         # (req.parameters IS that body). Never a card check -- no card can cover a Fix --
@@ -1574,6 +1610,15 @@ def submit(session, req, *, no_card=None, before_send=None, on_send=None, exact=
                                         **({"on_send": on_send} if on_send is not None else {}))}
     if req.parameters is None:
         raise PixAIError(req.note or "nothing to submit")
+    if req.mode == "enhance":
+        # 3.22 S3-enhance (T-F4): no card step at all -- no /kaisuuken/check, no card -- and
+        # the send only on the Mirror's web sign-in (submit_enhance). before_send still runs
+        # last before the send, as on every other branch.
+        if before_send is not None:
+            before_send(req.parameters)
+        return {"task_id": submit_enhance(session, req.parameters,
+                                          **({"on_send": on_send} if on_send is not None
+                                             else {}))}
     kind = _REQUEST_KINDS.get(req.mode, req.mode)
     # V8 (DESIGN_3.22 2.5): the identity is chosen ONCE, here, after READ_ONLY; the card check,
     # before_send's card test and the send all see this one client. A Mirror toggle moved after
@@ -1883,7 +1928,7 @@ CREATE_ROAD = {
     "image": "rest",
     "edit": "rest",
     "scene": "rest",
-    "enhance": "graphql",
+    "enhance": "rest",
     "fix": "rest",
     "video": "graphql",
     "refvideo": "graphql",
@@ -2117,10 +2162,21 @@ def quoted_free_hooks(req, expect_free):
     hold the send to."""
     if not expect_free or req.unlimited:
         return {}
+    if req.mode in CARDLESS_MODES:
+        # V9 (DESIGN_3.22 2.3): a kind that never takes a card can never have been quoted FREE,
+        # so a send that says it was is refused here, with nothing sent.
+        from moonglade.backup import LocalRefusal
+        raise LocalRefusal(CARDLESS_FREE)
 
     def _before_send(params):
         refuse_if_quoted_free_gone(params)
     return {"before_send": _before_send}
+
+
+#: The kinds no free card ever covers: their routes run no card check (V9).
+CARDLESS_MODES = frozenset(("enhance", "scene", "fix"))
+CARDLESS_FREE = ("This kind of send never uses a free card, so it can't have been priced FREE. "
+                 "Nothing was sent. Check the price again before you send.")
 
 
 # --- the repeat hold (3.21.2, DESIGN_3.22 2.12 and V1) -------------------------

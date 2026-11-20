@@ -132,7 +132,7 @@ def rig(tmp_path, monkeypatch):
     monkeypatch.setattr(core.time, "sleep", lambda s: None)
     clock = [1000.0]
     monkeypatch.setattr(g.time, "monotonic", lambda: clock[0])
-    return {"cli": login_client(tmp_path), "wire": wire, "clock": clock}
+    return {"cli": login_client(tmp_path), "wire": wire, "clock": clock, "web": web}
 
 
 def _req_for(mode, payload):
@@ -141,6 +141,9 @@ def _req_for(mode, payload):
         # an edit is a chat block (the create door refuses an edit without one, V10)
         r.parameters = {"chat": {"prompts": "make it night", "mediaId": "1", "mediaIds": ["1"],
                                  "modelId": V}}
+    if mode == "enhance":
+        # an enhance is the REST route's {enhanceType, mediaId} (3.22 S3-enhance)
+        r.parameters = {"enhanceType": "background-remover", "mediaId": "1"}
     if mode == "fix":
         r.parameters = {"mediaId": "700", "boxes": payload.get("boxes")}
         r.media_id, r.boxes = "700", payload.get("boxes")
@@ -278,7 +281,7 @@ def test_a_failure_before_the_send_is_not_sent_and_drops_the_record(rig, monkeyp
         calls.append(1)
         if len(calls) == 1:
             raise core.PixAIError("Mirror mode is on but no mirror session is available")
-        return s
+        return rig["web"]                     # the armed Mirror's client once it is back
     monkeypatch.setattr(mirror_mod, "_session_for_create", mirror)
     d = rig["cli"].post(route, json=body).get_json()
     assert d["state"] == "not_sent" and not d.get("unclear"), d

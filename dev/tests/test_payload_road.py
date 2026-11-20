@@ -31,10 +31,9 @@ from moonglade import pricing as pricing_mod
 # One row per mode build_request supports. `payload` is a complete, buildable request;
 # `missing` is the same road with the one thing it cannot do without taken away.
 #
-#   priceable  -- False only for enhance: a panelplugin task is priced by its workflow id,
-#                 which is deliberately NOT in _PRICE_SCALARS, so pricing the workflow-less
-#                 shape that survives the allowlist returns a confident WRONG number. No
-#                 number is the honest answer, and price() must not reach the endpoint.
+#   priceable  -- every road is priced since 3.22 S3-enhance: an enhance on PixAI's own
+#                 enhance quote (price_enhance, POST /v2/task/enhance/price), off the very
+#                 {enhanceType, mediaId} body the submit sends.
 #   mutation   -- the ONE call this road's submit makes.
 MODES = [
     ("image", {"version_id": "V1", "prompt": "a moonwell", "width": 512, "height": 512},
@@ -46,8 +45,9 @@ MODES = [
      {"mode": "fix"}, "pick an image to fix", True, "submit_fixer"),
     ("video", {"mode": "I2V", "images": ["77"], "prompt": "a slow pan", "duration": 5},
      {"mode": "I2V", "images": []}, "pick a source image", True, "submit_generation"),
-    ("enhance", {"mode": "enhance", "source": "55", "workflow_id": "1794855217667308480"},
-     {"mode": "enhance"}, "pick an image first", False, "submit_generation"),
+    ("enhance", {"mode": "enhance", "source": "55",
+                 "workflow_name": "mymusise/39a2c67c:unet-0.1.3.2"},
+     {"mode": "enhance"}, "pick an image first", True, "submit_enhance"),
 ]
 _IDS = [row[0] for row in MODES]
 
@@ -82,6 +82,16 @@ def road(monkeypatch):
                         lambda s, params, **_kw: seen["submitted"].append(params) or "task-1")
     monkeypatch.setattr(gen_road_mod, "submit_fixer",
                         lambda s, mid, boxes: seen["fixed"].append((mid, boxes)) or "task-2")
+    # 3.22 S3-enhance: an enhance is quoted on PixAI's enhance price route (on the Mirror's
+    # stored sign-in) and sent through submit_enhance; its type comes from the live config.
+    monkeypatch.setattr(pricing_mod, "enhance_quote_session", lambda: object())
+    monkeypatch.setattr(pricing_mod, "price_enhance",
+                        lambda s, body: seen["priced"].append(body) or 1000)
+    monkeypatch.setattr(gen_road_mod, "submit_enhance",
+                        lambda s, body, **_kw: seen["submitted"].append(body) or "task-3")
+    monkeypatch.setattr(core, "_cached_config", lambda key, **k: {"imageEnhancementPlugins": {
+        "background-remover": {"workflowName": "mymusise/39a2c67c"}}} if key == "constants"
+        else None)
     # A Fix is priced on PixAI's own Fix price route (#93), off the submit body itself.
     monkeypatch.setattr(pricing_mod, "price_fixer",
                         lambda s, body: seen["priced"].append(body)
@@ -286,19 +296,19 @@ def test_submit_refuses_a_request_that_could_not_be_built(mode, _p, missing, not
     assert not road["submitted"] and not road["fixed"]
 
 
-def test_enhance_is_never_priced_even_though_its_shape_is_real(road):
-    """[MAJOR] An enhance/panelplugin task HAS a real submit shape, and it still must not
-    be quoted: it is priced by its workflow id, deliberately absent from _PRICE_SCALARS,
-    so price_task would quote the workflow-less remainder and be confidently wrong.
-    `price_note` is how one road carries 'this shape is real but unpriceable' without a
-    second road appearing to hold it."""
-    req = _build({"mode": "enhance", "source": "55", "workflow_id": "1794855217667308480"})
-    assert req.parameters is not None and req.price_note
+def test_enhance_is_priced_only_by_the_enhance_quote_and_never_card_checked(road):
+    """3.22 S3-enhance (T-F4, V9): an enhance is quoted by PixAI's own enhance price route off
+    the {enhanceType, mediaId} body it sends -- never by /v2/task-price (which priced the
+    panelplugin shape wrongly) and never with a card check: it is never FREE."""
+    req = _build({"mode": "enhance", "source": "55",
+                  "workflow_name": "mymusise/39a2c67c:unet-0.1.3.2"})
+    assert req.parameters == {"enhanceType": "background-remover", "mediaId": "55"}
+    assert not req.price_note
     quoted = gen_road_mod.price(FakeSession(), req)
-    assert quoted["cost"] is None and quoted["free"] is False
-    assert not road["priced"], "enhance must not reach the pricing endpoint"
+    assert quoted["cost"] == 1000 and quoted["free"] is False
+    assert road["priced"] == [req.parameters] and not road["matched"]
     gen_road_mod.submit(FakeSession(), req)
-    assert road["submitted"] == [req.parameters]
+    assert road["submitted"] == [req.parameters] and not road["matched"]
 
 
 # --- the model resolve is one rule, not two ----------------------------------

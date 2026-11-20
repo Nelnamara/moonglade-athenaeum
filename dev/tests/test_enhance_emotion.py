@@ -51,7 +51,15 @@ def _arm(monkeypatch):
     monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
     monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: object())
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(gen_road_mod, "submit_generation", _submit)
+    monkeypatch.setattr(gen_road_mod, "submit_enhance", _submit)     # the door's enhance (3.22)
+    monkeypatch.setattr(core, "_cached_config", lambda key, **k: {"imageEnhancementPlugins": {
+        "handfix": {"workflowName": "mymusise/hand-fix"},
+        "face-detailer": {"workflowName": "kyo/face-detailer"},
+        "emotion": {"workflowName": "kyo/emotionlab"},
+        "background-remover": {"workflowName": "mymusise/39a2c67c"},
+        "image-to-lineart": {"workflowName": "pixai-official/image-to-lineart"},
+        "sketch-coloring": {"workflowName": "pixai-official/sketch-coloring-workflow"}}}
+                        if key == "constants" else None)
     return calls
 
 
@@ -62,12 +70,14 @@ def test_picked_emotion_reaches_submit_only_for_the_emotion_preset(tmp_path, mon
     cli.post("/api/enhance", json={"source": "srcABC",
                                    "workflow_name": gen_params_mod.ENHANCE_EMOTION_WORKFLOW,
                                    "emotion": "happy"})
-    # the picked KEY is translated to emotionlab's danbooru TAG string on the `prompt` arg
+    # the picked KEY is translated to emotionlab's danbooru TAG string, which rides the REST
+    # route's `prompt` (3.22: {enhanceType: "emotion", mediaId, prompt})
     assert gen_params_mod.ENHANCE_EMOTION_ARG == "prompt"
-    assert calls["params"]["inputs"].get(gen_params_mod.ENHANCE_EMOTION_ARG) == "smile"
+    assert calls["params"]["enhanceType"] == "emotion"
+    assert calls["params"].get("prompt") == "smile"
     assert gen_params_mod.ENHANCE_EMOTION_PROMPTS["happy"] == "smile"
     # a DIFFERENT preset never gets the stray arg, even if an emotion is sent
     calls["params"] = None
     cli.post("/api/enhance", json={"source": "srcABC",
                                    "workflow_name": "mymusise/hand-fix:v1", "emotion": "happy"})
-    assert gen_params_mod.ENHANCE_EMOTION_ARG not in calls["params"]["inputs"]
+    assert calls["params"]["enhanceType"] == "handfix" and "prompt" not in calls["params"]

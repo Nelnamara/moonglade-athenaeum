@@ -1592,6 +1592,59 @@ def build_fixer_body(media_id, boxes):
 
 
 # =============================================================================
+# ENHANCE ON PIXAI'S REST ROUTE (DESIGN_3.22 2.3; 3.22 S3-enhance)
+# =============================================================================
+# POST /v2/task/enhance takes {enhanceType, mediaId, prompt?}, not a panelplugin workflow
+# (task.createTask refuses workflow keys). The site maps a workflow to its enhanceType as
+# `task-CtewRxby.js` ke() does: the workflow name's part before ":" matched against PixAI's live
+# config constants.imageEnhancementPlugins[<enhanceType>].workflowName. G and Q below are that
+# file's own lists.
+ENHANCE_TYPES = ("handfix", "face-detailer", "emotion", "background-remover",
+                 "image-to-lineart", "sketch-coloring")                 # task-CtewRxby.js G
+ENHANCE_PROMPT_TYPES = ("face-detailer", "emotion", "sketch-coloring")   # task-CtewRxby.js Q
+ENHANCE_UNMAPPED = ("Couldn't match this AI preset to PixAI's enhance route, so nothing was "
+                    "sent -- try again in a minute")
+
+
+def enhance_type_for(workflow_name, plugins=None):
+    """The enhanceType PixAI's site would send for `workflow_name` (an "author/workflow:ver"
+    preset address), or None. `plugins` is constants.imageEnhancementPlugins; None reads it
+    from PixAI's live public config (cached, fail-soft). Only the six known types are ever
+    answered. Pure when `plugins` is given."""
+    name = str(workflow_name or "").split(":", 1)[0].strip()
+    if not name:
+        return None
+    if plugins is None:
+        from moonglade.backup import _cached_config
+        plugins = (_cached_config("constants") or {}).get("imageEnhancementPlugins")
+    if not isinstance(plugins, dict):
+        return None
+    for key, row in plugins.items():
+        if key in ENHANCE_TYPES and isinstance(row, dict) and row.get("workflowName") == name:
+            return key
+    return None
+
+
+def build_enhance_body(media_id, enhance_type, prompt=None):
+    """THE body of an enhance on the REST route: {enhanceType, mediaId, prompt?}, the site's
+    q(): a prompt rides only the three types that take one, and an emotion needs one (its ye()).
+    Raises LocalRefusal for an unknown type, no source, or an emotion with no prompt."""
+    from moonglade.backup import LocalRefusal
+    t = str(enhance_type or "")
+    mid = str(media_id or "").strip()
+    if t not in ENHANCE_TYPES:
+        raise LocalRefusal(ENHANCE_UNMAPPED)
+    if not mid:
+        raise LocalRefusal("pick an image first")
+    body = {"enhanceType": t, "mediaId": mid}
+    if t in ENHANCE_PROMPT_TYPES and isinstance(prompt, str) and prompt.strip():
+        body["prompt"] = prompt
+    if t == "emotion" and "prompt" not in body:
+        raise LocalRefusal("pick an expression first")
+    return body
+
+
+# =============================================================================
 # THE WIRE GUARD (DESIGN_3.22 2.4): priced = sent, checked on the final bytes
 # =============================================================================
 # PixAI's REST create routes strip every key their schema does not name, at every depth,

@@ -66,32 +66,50 @@ def test_a_preset_a_card_only_partly_covers_is_not_free(gen, monkeypatch):
     assert rows and not any(r["free_card"] for r in rows)
 
 
-def test_presets_drop_their_cached_free_after_a_refusal_and_recover(gen, monkeypatch):
+
+def _enhance_config(monkeypatch):
+    """3.22 S3-enhance: the presets price on PixAI's enhance quote, their type read off the live
+    config, answered here for every pinned preset; and an enhance sends through submit_enhance."""
+    plugins = {t: {"workflowName": wn} for t, wn in (
+        ("handfix", "mymusise/hand-fix"), ("face-detailer", "kyo/face-detailer"),
+        ("emotion", "kyo/emotionlab"), ("background-remover", "mymusise/39a2c67c"),
+        ("image-to-lineart", "pixai-official/image-to-lineart"),
+        ("sketch-coloring", "pixai-official/sketch-coloring-workflow"))}
+    monkeypatch.setattr(core, "_cached_config", lambda key, **k: {
+        "imageEnhancementPlugins": plugins} if key == "constants" else None)
+    monkeypatch.setattr(pricing_mod, "enhance_quote_session", lambda: object())
+    monkeypatch.setattr(gen_road_mod, "submit_enhance", lambda *a, **k: "task-1")
+
+
+def test_an_ai_preset_send_claiming_a_free_quote_is_refused_and_nothing_created(gen, monkeypatch):
+    """3.22 S3-enhance (V9): an enhance never takes a card, so the chips never say FREE and a
+    send that claims a FREE quote is refused with nothing sent."""
     _armed(monkeypatch, gen["pixai"])
-    gen["pixai"].on("/kaisuuken/check", _CARD)
-    assert all(r["free_card"] for r in _presets(gen))
-    # The card is used elsewhere; the cached chips still say free ...
-    gen["pixai"].on("/kaisuuken/check", _NO_CARD)
-    assert all(r["free_card"] for r in _presets(gen)), "(the cache is what this test is about)"
-    # ... the send the chip called free is refused, nothing created ...
-    d = gen["cli"].post("/api/enhance", json={"source": "1", "workflow_id": "42",
-                                              "expect_free": True}).get_json()
-    assert "free card" in d["error"]
-    assert gen["pixai"].mutations("createGenerationTask") == 0
-    # ... and the next read asks PixAI again: the tab stops offering "free".
+    _enhance_config(monkeypatch)
+    monkeypatch.setattr(pricing_mod, "price_enhance", lambda s, body: 1000)
     assert not any(r["free_card"] for r in _presets(gen))
-
-
-def test_presets_drop_their_cached_free_after_a_send(gen, monkeypatch):
-    _armed(monkeypatch, gen["pixai"])
-    gen["pixai"].on("/kaisuuken/check", _CARD)
-    _presets(gen)
-    n = len(gen["pixai"].calls_for("/kaisuuken/check"))
+    sent = []
+    monkeypatch.setattr(gen_road_mod, "submit_enhance", lambda *a, **k: sent.append(a) or "t")
     d = gen["cli"].post("/api/enhance", json={"source": "1", "workflow_id": "42",
                                               "expect_free": True}).get_json()
+    assert "never uses a free card" in d["error"] and d["state"] == "not_sent"
+    assert sent == [] and gen["pixai"].calls_for("/kaisuuken/check") == []
+
+
+def test_presets_read_the_price_again_after_a_send(gen, monkeypatch):
+    _armed(monkeypatch, gen["pixai"])
+    _enhance_config(monkeypatch)
+    asked = []
+    monkeypatch.setattr(pricing_mod, "price_enhance",
+                        lambda s, body: asked.append(body) or 1000)
+    _presets(gen)
+    n = len(asked)
+    _presets(gen)
+    assert len(asked) == n, "a fully-priced answer is cached"
+    d = gen["cli"].post("/api/enhance", json={"source": "1", "workflow_id": "42"}).get_json()
     assert d.get("task_id") == "task-1", d
     _presets(gen)
-    assert len(gen["pixai"].calls_for("/kaisuuken/check")) > n + 1, "re-read after the send"
+    assert len(asked) > n, "re-read after the send"
 
 
 def test_the_enhance_tab_reads_prices_again_after_every_send():

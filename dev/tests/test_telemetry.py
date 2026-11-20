@@ -629,6 +629,16 @@ def _arm_mirror_bridge(monkeypatch, core):
     monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: object())
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(gen_road_mod, "submit_generation", lambda *a, **k: "T-ENH-9")
+    # 3.22 S3-enhance: an enhance is sent by submit_enhance, its type read off PixAI's live
+    # config (constants.imageEnhancementPlugins), answered here for every pinned preset.
+    monkeypatch.setattr(gen_road_mod, "submit_enhance", lambda *a, **k: "T-ENH-9")
+    plugins = {t: {"workflowName": wn} for t, wn in (
+        ("handfix", "mymusise/hand-fix"), ("face-detailer", "kyo/face-detailer"),
+        ("emotion", "kyo/emotionlab"), ("background-remover", "mymusise/39a2c67c"),
+        ("image-to-lineart", "pixai-official/image-to-lineart"),
+        ("sketch-coloring", "pixai-official/sketch-coloring-workflow"))}
+    monkeypatch.setattr(core, "_cached_config", lambda key, **k: {
+        "imageEnhancementPlugins": plugins} if key == "constants" else None)
 
 
 def test_enhance_tools_complete(tmp_path, monkeypatch):
@@ -650,7 +660,7 @@ def test_enhance_tools_complete(tmp_path, monkeypatch):
     def _submit(*a, **k):
         _seq["n"] += 1
         return f"T-ENH-{_seq['n']}"
-    monkeypatch.setattr(gen_road_mod, "submit_generation", _submit)
+    monkeypatch.setattr(gen_road_mod, "submit_enhance", _submit)
 
     # Each use is a separate press, past the single sends' double-tap window (3.21.2), so a
     # repeated preset is a second use rather than a held repeat.

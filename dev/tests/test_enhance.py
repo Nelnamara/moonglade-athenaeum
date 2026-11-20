@@ -29,7 +29,8 @@ def _enhance_client(tmp_path):
 
 def _arm_mirror(monkeypatch):
     """Mirror ARMED with a live session, and every spend/collect entry point mocked so nothing
-    reaches the network. submit_generation is mocked so no createGenerationTask is ever sent."""
+    reaches the network. submit_enhance (the create door's enhance, 3.22) is mocked so nothing
+    is ever sent, and PixAI's live config answers the enhance-type map."""
     calls = {"submit": 0, "last_params": None}
 
     def _submit(session, params, **_kw):
@@ -41,7 +42,15 @@ def _arm_mirror(monkeypatch):
     monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
     monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: object())
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(gen_road_mod, "submit_generation", _submit)
+    monkeypatch.setattr(gen_road_mod, "submit_enhance", _submit)
+    monkeypatch.setattr(core, "_cached_config", lambda key, **k: {"imageEnhancementPlugins": {
+        "handfix": {"workflowName": "mymusise/hand-fix"},
+        "face-detailer": {"workflowName": "kyo/face-detailer"},
+        "emotion": {"workflowName": "kyo/emotionlab"},
+        "background-remover": {"workflowName": "mymusise/39a2c67c"},
+        "image-to-lineart": {"workflowName": "pixai-official/image-to-lineart"},
+        "sketch-coloring": {"workflowName": "pixai-official/sketch-coloring-workflow"}}}
+                        if key == "constants" else None)
     return calls
 
 
@@ -129,7 +138,7 @@ def test_enhance_refuses_when_mirror_off(tmp_path, monkeypatch, pixai):
 
     cli = _enhance_client(tmp_path)
     r = cli.post("/api/enhance", json={"source": "srcABC",
-                                       "workflow_id": "1793447160259872021"})
+                                       "workflow_name": "pixai-official/image-to-lineart:0a59dd67"})
     assert r.status_code == 409
     assert "Mirror to PixAI must be armed" in (r.get_json() or {}).get("error", "")
     assert submitted["n"] == 0, "a mirror-off enhance reached the submit choke"
@@ -149,7 +158,7 @@ def test_enhance_telemetry_fires_only_on_terminal_success(tmp_path, monkeypatch)
 
     # Submit accepted -> task_id returned, but telemetry has NOT moved yet.
     r = cli.post("/api/enhance", json={"source": "srcABC",
-                                       "workflow_id": "1793447160259872021"})
+                                       "workflow_name": "pixai-official/image-to-lineart:0a59dd67"})
     assert r.status_code == 200 and r.get_json().get("task_id") == "T-ENH-1"
     assert calls["submit"] == 1
     telem = telemetry_mod.load_telemetry(tmp_path)
@@ -168,8 +177,8 @@ def test_enhance_telemetry_fires_only_on_terminal_success(tmp_path, monkeypatch)
     telem = telemetry_mod.load_telemetry(tmp_path)
     assert telem["counters"].get("enhances") == 1
     assert "enhance" in telem["sets"].get("tools", [])
-    # The identity ACTUALLY submitted (here the numeric id) is what counts toward Enhance Adept.
-    assert "1793447160259872021" in telem["sets"].get("enhance_workflows", [])
+    # The identity ACTUALLY submitted (the preset's workflow name) counts toward Enhance Adept.
+    assert "pixai-official/image-to-lineart:0a59dd67" in telem["sets"].get("enhance_workflows", [])
 
     # A second poll of the same finished task must NOT double-count (pending entry consumed).
     cli.get("/api/task-status", query_string={"task_id": "T-ENH-1"})
@@ -183,7 +192,7 @@ def test_enhance_telemetry_does_not_fire_on_dispatched_then_failed(tmp_path, mon
     _arm_mirror(monkeypatch)
     cli = _enhance_client(tmp_path)
     assert cli.post("/api/enhance", json={"source": "srcABC",
-                                          "workflow_name": "kyo/emotionlab"}
+                                          "workflow_name": "kyo/emotionlab", "emotion": "happy"}
                     ).get_json().get("task_id") == "T-ENH-1"
 
     monkeypatch.setattr(task_reads_mod, "generation_status",
