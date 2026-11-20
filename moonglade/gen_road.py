@@ -1239,6 +1239,9 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
             use_prompt_helper=bool(p.get("prompt_helper")),
             input_video_durations=durations,
             ratio=ratio)
+        # The road-aware wire step (3.22 S3-video-wire): video stays on GraphQL, so this
+        # returns the very same object, byte for byte (DESIGN_3.22 2.11, T-F7).
+        params = _gen_params.to_wire("video", params)
         return GenerationRequest(mode="video", parameters=params, no_card=no_card,
                                  adjusted=adjusted)
 

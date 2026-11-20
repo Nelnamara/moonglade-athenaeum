@@ -86,6 +86,58 @@ EDIT_CHAT = {"prompts": "make it night", "mediaId": "111", "mediaIds": ["111"],
 
 
 FIX_BOX = {"x": 1, "y": 2, "width": 30, "height": 40, "tag": "hand"}
+
+# Recorded from today's builders before S3-video-wire (build_shot_video_params, 2026-11-20),
+# byte for byte: the GraphQL video bodies must never move (DESIGN_3.22 2.11, T-F7).
+I2V_FIXTURE = json.loads(
+    '{"channel": "normal", "enablePreview": true, "hidePrompts": false, "i2vPro": '
+    '{"audioLanguage": "english", "duration": "5", "generateAudio": false, "mediaId": '
+    '"733917871331404290", "mode": "professional", "model": "v4.0.1", "prompts": "a fox runs", '
+    '"usePromptsHelper": false}, "isPrivate": false, "modelId": "2003969750675682808", '
+    '"priority": 1000}')
+R2V_FIXTURE = json.loads(
+    '{"channel": "private", "enablePreview": true, "hidePrompts": false, "isPrivate": true, '
+    '"modelId": "2003969750675682808", "priority": 1000, "referenceVideo": {"audioLanguage": '
+    '"english", "duration": 5, "generateAudio": true, "inputVideoDurations": [], "mode": '
+    '"professional", "model": "v4.0.1", "prompt": "@image1 waves", "referenceAudioMediaIds": [], '
+    '"referenceImageMediaIds": ["733917871331404290", "733917871331404291"], '
+    '"referenceVideoMediaIds": []}}')
+
+
+def _shots():
+    i2v = gen_params.build_shot_video_params(
+        "I2V", "a fox runs", image_ids=["733917871331404290"], video_ids=[], audio_ids=[],
+        duration=5, generate_audio=False, model="", camera_movement="", quality="professional",
+        audio_language="english", negative="", is_private=False, use_prompt_helper=False,
+        input_video_durations=[], ratio="")
+    r2v = gen_params.build_shot_video_params(
+        "R2V", "@image1 waves", image_ids=["733917871331404290", "733917871331404291"],
+        video_ids=[], audio_ids=[], duration=5, generate_audio=True, model="",
+        camera_movement="", quality="professional", audio_language="english", negative="",
+        is_private=True, use_prompt_helper=False, input_video_durations=[], ratio="")
+    return i2v, r2v
+
+
+def test_the_graphql_video_bodies_are_byte_identical_and_to_wire_leaves_them_alone():
+    i2v, r2v = _shots()
+    for built, fixture, kind in ((i2v, I2V_FIXTURE, "video"), (r2v, R2V_FIXTURE, "refvideo")):
+        assert json.dumps(built, sort_keys=True) == json.dumps(fixture, sort_keys=True)
+        wired = gen_params.to_wire(kind, built)
+        assert wired is built, "to_wire touched a GraphQL body"
+        assert json.dumps(wired, sort_keys=True) == json.dumps(fixture, sort_keys=True)
+        assert {"isPrivate", "enablePreview", "hidePrompts"} <= set(wired)   # nothing dropped
+
+
+def test_the_video_road_sends_the_fixture_through_gql_mutate_unchanged(monkeypatch):
+    sent = []
+    monkeypatch.setattr(core, "gql_mutate", lambda s, q, v=None: sent.append(v["parameters"])
+                        or {"createGenerationTask": {"id": "V1"}})
+    monkeypatch.setattr(core, "_create", lambda *a, **k: pytest.fail("video rode the door"))
+    i2v, _r2v = _shots()
+    req = gen_road.build_request({"mode": "I2V", "images": ["733917871331404290"],
+                                  "prompt": "a fox runs", "duration": 5}, mode="video")
+    assert gen_road.submit(object(), req, no_card=True) == {"task_id": "V1"}
+    assert json.dumps(sent[0], sort_keys=True) == json.dumps(i2v, sort_keys=True)
 ENHANCE_BODY = {"enhanceType": "background-remover", "mediaId": "111"}
 # PixAI's constants.imageEnhancementPlugins, as its live config answers it (DECISIONS: the
 # per-plugin {workflowName, workflowVersion, args}); the names are the presets' pinned ones.
@@ -319,6 +371,17 @@ SENDERS = {
     "enhance": [
         ("web submit", lambda s, tmp: gen_road.submit(_web_jwt(s), gen_road.GenerationRequest(
             mode="enhance", parameters=dict(ENHANCE_BODY), no_card=True, media_id="111"))),
+    ],
+    # Video and reference video stay on GraphQL (owner, 2026-11-19): web and both CLI runners.
+    "video": [
+        ("web submit", lambda s, tmp: gen_road.submit(s, gen_road.GenerationRequest(
+            mode="video", parameters=dict(I2V_FIXTURE), no_card=True))),
+        ("run_generate_video", lambda s, tmp: _drive(gen_cli.run_generate_video, _cli_args(
+            tmp, image="733917871331404290", params_json=json.dumps(I2V_FIXTURE)))),
+    ],
+    "refvideo": [
+        ("run_reference_video", lambda s, tmp: _drive(gen_cli.run_reference_video, _cli_args(
+            tmp, ref_image=["733917871331404290"], params_json=json.dumps(R2V_FIXTURE)))),
     ],
     # The Fix has no CLI runner: its one sender is the web road (submit -> submit_fixer).
     "fix": [

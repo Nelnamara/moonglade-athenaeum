@@ -724,6 +724,10 @@ def run_generate_video(args):
     params = _gen_params._gen_video_parameters(args)
     if not existing_task:
         _gen_params.check_params_retired(params)      # a raw --params-json skips the builder's check
+    # 3.22 S3-video-wire (DESIGN_3.22 2.4 rule 2, V12): the road-aware wire step before the
+    # preview and the card check. Video stays on GraphQL (owner, 2026-11-19), where it returns
+    # the params unchanged, byte for byte.
+    params = _gen_params.to_wire("video", params)
 
     if not existing_task and not getattr(args, "confirm", False):
         i2v = params.get("i2vPro") or {}
@@ -759,12 +763,14 @@ def run_generate_video(args):
         for n in _i2v_cli_unsent_notes(args):
             print("  note: " + n)
         print("Submitting VIDEO generation task (this spends credits)...")
-        _cards._apply_kaisuuken(session, params, args)   # free-card check on the API-key session
+        # V8 (DESIGN_3.22 2.5): the creating identity chosen ONCE, after READ_ONLY, for the
+        # card check and the create; download below stays on the API-key `session` (F6).
+        from moonglade import pixai_client as _pixai_client
+        create_client = _pixai_client._client_of(session).for_create()
+        _cards._apply_kaisuuken(create_client, params, args)
         # gql_mutate, never gql_adhoc: a re-POSTed createGenerationTask is a second
         # (expensive) video and a second charge -- see gql_mutate's docstring.
-        # _session_for_create: the CREATE rides the mirror JWT when the toggle is on
-        # (else pass-through); download below stays on the API-key `session` (F6).
-        task_id = _gen_road._cli_create_once(_mirror._session_for_create(session), params)
+        task_id = _gen_road._cli_create_once(create_client, params)
         print("  task id:", task_id)
         _cards._bump_card_use(params)
         _task_reads._poll_task_status(session, task_id, getattr(args, "poll_timeout", 600),
@@ -860,7 +866,9 @@ def run_reference_video(args):
         # a real 3x cost divergence, B10), snapped to PixAI's allowed lengths before use
         # for either preview or submit, same as the i2v CLI path (B9). No model_id: the
         # builder sends THIS engine's own id (it used to send v4.0.1's for every engine).
-        return _gen_params.build_reference_video_parameters(
+        # 3.22 S3-video-wire: the road-aware wire step on every build, so the preview, the
+        # card check and the send see one shape (GraphQL road: returned unchanged, byte for byte).
+        return _gen_params.to_wire("refvideo", _gen_params.build_reference_video_parameters(
             prompt, image_media_ids=img_ids, video_media_ids=vid_ids, audio_media_ids=aud_ids,
             model=vmodel,
             duration=_gen_params._snap_video_duration(getattr(args, "duration", 5) or 5, vmodel),
@@ -868,7 +876,7 @@ def run_reference_video(args):
             generate_audio=bool(getattr(args, "audio", False)),
             audio_language=getattr(args, "audio_language", None) or "english",
             is_private=is_private, kaisuuken_id=getattr(args, "kaisuuken_id", "") or "",
-            ratio=ratio, input_video_durations=in_durs)
+            ratio=ratio, input_video_durations=in_durs))
 
     def _notes():
         if in_unknown:
@@ -907,17 +915,20 @@ def run_reference_video(args):
         # this function ever reaches the createGenerationTask call.
         _check_read_only("submit a reference video generation (spends credits)")
         if override:
-            params = json.loads(override)
+            params = _gen_params.to_wire("refvideo", json.loads(override))
         else:
             params = _build(_resolve_refs(session, imgs, "IMAGE"),
                             _resolve_refs(session, vids, "VIDEO"),
                             _resolve_refs(session, auds, None))
             _notes()
         print("Submitting REFERENCE VIDEO task (spends credits unless a free card applies)...")
-        _cards._apply_kaisuuken(session, params, args)   # free-card check on the API-key session
+        # V8 (DESIGN_3.22 2.5): the creating identity chosen ONCE, after READ_ONLY, for the
+        # card check and the create; download stays on the API key (F6).
+        from moonglade import pixai_client as _pixai_client
+        create_client = _pixai_client._client_of(session).for_create()
+        _cards._apply_kaisuuken(create_client, params, args)
         # gql_mutate, never gql_adhoc -- a re-POST here is a second charge.
-        # _session_for_create: create rides the mirror JWT when on; download stays API-key (F6).
-        task_id = _gen_road._cli_create_once(_mirror._session_for_create(session), params)
+        task_id = _gen_road._cli_create_once(create_client, params)
         print("  task id:", task_id)
         _cards._bump_card_use(params)
         _task_reads._poll_task_status(session, task_id, getattr(args, "poll_timeout", 600), interval=5,
