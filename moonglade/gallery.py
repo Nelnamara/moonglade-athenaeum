@@ -43,6 +43,7 @@ from moonglade import container as moonglade_container
 from moonglade import contest_sync as _contest_sync
 from moonglade import contest_wins
 from moonglade import dupes as _dupes
+from moonglade import gen_params as _gen_params
 from moonglade import health as _health
 from moonglade import jobs as _jobs
 from moonglade import living as _living
@@ -5167,24 +5168,24 @@ def _upscale_const_js():
     from moonglade import backup as core
     return ("<script nonce=\"__CSP_NONCE__\">window.MG_UPSCALE={};window.MG_LORA={};</script>".format(
         json.dumps({
-            "enlargeModels": list(core.ENLARGE_MODELS),
-            "defaultEnlargeModel": core.DEFAULT_ENLARGE_MODEL,
-            "ceiling": core.UPSCALE_PIXEL_CEILING,
+            "enlargeModels": list(_gen_params.ENLARGE_MODELS),
+            "defaultEnlargeModel": _gen_params.DEFAULT_ENLARGE_MODEL,
+            "ceiling": _gen_params.UPSCALE_PIXEL_CEILING,
             # So the panel can upscale an image whose model the catalog never recorded,
             # instead of refusing until one is picked -- PixAI's own dialog has no model
             # control at all. Served rather than retyped, like everything else here. It is
             # a VERSION id, so the panel sends it as version_id; see core for why.
-            "fallbackVersionId": core.UPSCALE_FALLBACK_VERSION_ID,
-            "denoise": {"strength": core.DEFAULT_UPSCALE_DENOISING_STRENGTH,
-                        "steps": core.DEFAULT_UPSCALE_DENOISING_STEPS},
+            "fallbackVersionId": _gen_params.UPSCALE_FALLBACK_VERSION_ID,
+            "denoise": {"strength": _gen_params.DEFAULT_UPSCALE_DENOISING_STRENGTH,
+                        "steps": _gen_params.DEFAULT_UPSCALE_DENOISING_STEPS},
         }, separators=(",", ":")),
         # LoRA weight bounds per base architecture -- DiT allows 0..1.2, the SD family
         # -2..2. One table, served, so the drawer's slider and the builder's clamp cannot
         # drift into offering a weight the architecture rejects.
         json.dumps({
-            "ranges": {k: list(v) for k, v in core.LORA_WEIGHT_RANGES.items()},
-            "fallback": [core.LORA_WEIGHT_MIN, core.LORA_WEIGHT_MAX],
-            "step": core.LORA_WEIGHT_STEP,
+            "ranges": {k: list(v) for k, v in _gen_params.LORA_WEIGHT_RANGES.items()},
+            "fallback": [_gen_params.LORA_WEIGHT_MIN, _gen_params.LORA_WEIGHT_MAX],
+            "step": _gen_params.LORA_WEIGHT_STEP,
         }, separators=(",", ":"))))
 
 
@@ -6455,7 +6456,7 @@ def create_app(out_dir: Path):
     _BRIDGE_PRESET_KEY_BY_NAME = {
         n: k for n, k in (
             (str(pp.get("workflow_name") or "").strip(), str(pp.get("key") or "").strip())
-            for pp in getattr(_mb_bridge, "BRIDGE_ENHANCE_PRESETS", ()))
+            for pp in getattr(_gen_params, "BRIDGE_ENHANCE_PRESETS", ()))
         if n and k}
 
     # The asset container's first-run fetch (2026-08-10, moonglade-internal/DECISIONS.md "The
@@ -16488,7 +16489,7 @@ def create_app(out_dir: Path):
         the quote, the drawer's spend and the Loom's spend all read one cached answer."""
         from moonglade import backup as core
         if not _video_len_cache:
-            _video_len_cache.append(core.make_video_duration_lookup(out_dir, db_path))
+            _video_len_cache.append(_gen_params.make_video_duration_lookup(out_dir, db_path))
         return _video_len_cache[0](media_id)
 
     _presets_lock = threading.Lock()
@@ -17904,7 +17905,7 @@ def create_app(out_dir: Path):
             return jsonify({"palettes": cached})
         try:
             core, gsession = _gen_session()
-            rows = core.color_palette_presets(gsession)
+            rows = _gen_params.color_palette_presets(gsession)
         except Exception as e:
             return jsonify({"palettes": [], "error": _redact_host_paths(str(e))[:200]})
         for r in rows:
@@ -17959,7 +17960,7 @@ def create_app(out_dir: Path):
                    "has_control": bool(pr.get("has_control")), "price": None, "free_card": False}
             if s is not None:
                 try:
-                    params = core.build_panelplugin_parameters(
+                    params = _gen_params.build_panelplugin_parameters(
                         "1", row["workflow_id"], workflow_name=row["workflow_name"])
                     row["price"] = _pricing.price_task(s, params)
                     # card_covers, the one coverage verdict the send reads too (2026-11-18): a
@@ -17978,10 +17979,10 @@ def create_app(out_dir: Path):
         # (it mutates no shared session state), and this is one small burst per cache-miss.
         if s is not None:
             from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=len(core.BRIDGE_ENHANCE_PRESETS)) as ex:
-                out = list(ex.map(_row, core.BRIDGE_ENHANCE_PRESETS))
+            with ThreadPoolExecutor(max_workers=len(_gen_params.BRIDGE_ENHANCE_PRESETS)) as ex:
+                out = list(ex.map(_row, _gen_params.BRIDGE_ENHANCE_PRESETS))
         else:
-            out = [_row(pr) for pr in core.BRIDGE_ENHANCE_PRESETS]
+            out = [_row(pr) for pr in _gen_params.BRIDGE_ENHANCE_PRESETS]
         if s is not None and all(r["price"] is not None for r in out) \
                 and _enh_price_cache["gen"] == gen0:     # cache only a fully-real, current result
             _enh_price_cache["presets"] = out
@@ -18059,7 +18060,7 @@ def create_app(out_dir: Path):
             _wname = str(p.get("workflow_name") or "").strip()
             _identity = _wname or str(p.get("workflow_id") or "").strip()
             _emo = str(p.get("emotion") or "").strip()
-            _emo_key = _emo if (_emo and _wname == core.ENHANCE_EMOTION_WORKFLOW) else None
+            _emo_key = _emo if (_emo and _wname == _gen_params.ENHANCE_EMOTION_WORKFLOW) else None
             with _enhance_pending_lock:
                 _enhance_pending[str(task_id)] = (_identity, _emo_key)
             # enhance_tools (Blades of Gondolin) + Speak-Friend (bridge_gens) are DEFERRED to
@@ -18099,7 +18100,7 @@ def create_app(out_dir: Path):
             for p in sorted(edir.iterdir()):
                 if p.is_file() and p.suffix.lower() in exts:
                     found[p.stem] = "/branding/bridge/emotion/" + p.name   # loose overrides packed
-        gated = getattr(core, "ENHANCE_EMOTION_MEMBERSHIP", frozenset())
+        gated = getattr(_gen_params, "ENHANCE_EMOTION_MEMBERSHIP", frozenset())
         emotions = [{"key": k, "label": k.replace("-", " ").replace("_", " ").strip().title(),
                      "img": v, "membership": k in gated} for k, v in sorted(found.items())]
         return jsonify({"emotions": emotions})
@@ -18215,7 +18216,7 @@ def create_app(out_dir: Path):
         never recorded (None, None): it cannot spend, and its own refusal is the answer the
         caller should see."""
         try:
-            body = core.build_fixer_body(str(p.get("source") or "").strip(), p.get("boxes"))
+            body = _gen_params.build_fixer_body(str(p.get("source") or "").strip(), p.get("boxes"))
         except Exception:                  # noqa: BLE001 -- the build refuses it properly below
             return None, None
         key = _send_key("fix", body)

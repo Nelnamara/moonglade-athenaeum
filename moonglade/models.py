@@ -1762,7 +1762,8 @@ def _gate_image_params(session, params):
     loraParameters) are replaced, never mutated, so the caller's dict is never touched.
     Raises PixAIError for the one refusal (a reference plus LoRAs on an MMDIT26B model) --
     at build time that is the badge's note and costs nothing."""
-    from moonglade.backup import lora_weight_range, PixAIError
+    from moonglade.backup import PixAIError
+    from moonglade.gen_params import lora_weight_range
     adjusted = []
     if not isinstance(params, dict) or not params.get("modelId"):
         return params, adjusted

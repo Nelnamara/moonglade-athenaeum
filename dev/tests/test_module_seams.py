@@ -255,6 +255,34 @@ SEAMS = {
         "match_kaisuuken", "card_covers", "_card_uses_note", "card_short_note",
         "_SIGNIN_REFUSED_MIRROR", "_SIGNIN_REFUSED_API_KEY", "_is_signin_refusal",
         "_apply_kaisuuken", "_preview_card_note"]},
+    "moonglade.gen_params": {"from": "moonglade.backup", "names": [
+        "DEFAULT_GEN_MODEL", "LORA_WEIGHT_STEP", "LORA_WEIGHT_RANGES", "LORA_WEIGHT_MIN",
+        "LORA_WEIGHT_MAX", "lora_weight_range", "_lora_params", "ENLARGE_MODELS",
+        "DEFAULT_ENLARGE_MODEL", "DEFAULT_QUALITY_TAG", "UPSCALE_FALLBACK_VERSION_ID",
+        "DEFAULT_UPSCALE_DENOISING_STRENGTH", "DEFAULT_UPSCALE_DENOISING_STEPS",
+        "UPSCALE_RATIO_STEP", "UPSCALE_PIXEL_CEILING", "UPSCALE_RATIO_HARD_MAX",
+        "upscale_output_dims", "max_upscale_ratio", "_upscale_ratio", "PRIORITY_LOW",
+        "PRIORITY_TURBO", "PRIORITY_HIGH", "PRIORITY_XHIGH", "PRIORITY_CHOICES",
+        "_coerce_priority", "PALETTE_GROUPS", "PALETTE_MAX_COLORS", "PALETTE_NAME_MAX",
+        "PALETTE_NAME_DEFAULT", "_PALETTE_HEX_RE", "_palette_ratio", "_palette_group_colors",
+        "clean_color_palette", "color_palette_presets", "_gen_parameters", "DEFAULT_VIDEO_MODEL",
+        "VIDEO_CAMERA_MOVES", "VIDEO_AUDIO_LANGS", "VIDEO_DURATIONS", "VIDEO_MODELS",
+        "VIDEO_MODEL_RETIRED", "_video_clock", "video_model_retired", "check_video_model_retired",
+        "_params_video_models", "check_params_retired", "video_model_id", "_video_model_id_fits",
+        "VIDEO_CHANNELS", "TSUBAKI_VIDEO_MODELS", "VIDEO_MODEL_DURATIONS",
+        "VIDEO_NO_NEGATIVE_MODELS", "VIDEO_NO_CAMERA_MODELS", "VIDEO_REF_CAPS",
+        "VIDEO_RATIO_MODELS", "VIDEO_RATIOS", "VIDEO_I2V_NO_MODELID_MODELS",
+        "video_model_durations", "_check_video_ref_caps", "build_video_parameters",
+        "REFVIDEO_MODEL_ID", "build_reference_video_parameters", "input_video_durations",
+        "INPUT_VIDEO_UNKNOWN_WHY", "make_video_duration_lookup", "VIDEO_15S_MODELS",
+        "VIDEO_PROMPT_MAXLEN", "VIDEO_AUDIO_MODELS", "_snap_video_duration",
+        "build_shot_video_params", "build_panelplugin_parameters", "BRIDGE_ENHANCE_PRESETS",
+        "ENHANCE_EMOTION_WORKFLOW", "ENHANCE_EMOTION_ARG", "ENHANCE_EMOTION_PROMPTS",
+        "ENHANCE_EMOTION_MEMBERSHIP", "_gen_video_parameters", "EDIT_PRO_MODEL_ID",
+        "EDIT_ASPECT_AUTO", "EDIT_MODELS", "DEFAULT_EDIT_MODEL", "_EDIT_ASPECT_UNKNOWN_MODEL",
+        "FIXER_MODEL_ID", "edit_model_id", "edit_model_by_id", "edit_default_aspect",
+        "clamp_edit_config", "_is_local_source", "build_chat_edit_parameters",
+        "_edit_config_from_args", "clean_fix_boxes", "FIX_ONE_KIND", "build_fixer_body"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -323,7 +351,7 @@ SOURCE_READERS = {
     "loom/test/mg-notify-queue-phase.test.js": ("moonglade.gallery",),
     "loom/test/mg-notify-website-source.test.js": ("moonglade.gallery",),
     "loom/test/phone-back-layers.test.js": ("moonglade.gallery",),
-    "loom/test/video-roster-parity.test.js": ("moonglade.backup",),
+    "loom/test/video-roster-parity.test.js": ("moonglade.gen_params",),
 }
 
 # (reader file, new module) pairs someone has checked after a move touched what the reader
@@ -1020,6 +1048,35 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_unclear_single_sends.py', 'moonglade.cards'),
     ('tests/test_video_tsubaki.py', 'moonglade.cards'),
     ('tests/test_web_auth.py', 'moonglade.cards'),
+    # 3.22 phase 5, gen_params: two readers read text that left backup.py and now read
+    # moonglade/gen_params.py: loom/test/video-roster-parity (the video tables; its SOURCE_READERS
+    # entry says so) and test_enhance's restored-panelplugin check (the builder's literals; the
+    # `--workflow-id` absence check still reads backup, where the parser is). The rest reach the
+    # builders through gen_params_mod or look for names that stayed.
+    ('tests/test_artworks_adhoc.py', 'moonglade.gen_params'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.gen_params'),
+    ('tests/test_config_path_routing.py', 'moonglade.gen_params'),
+    ('tests/test_csrf_coverage.py', 'moonglade.gen_params'),
+    ('tests/test_edit_upload.py', 'moonglade.gen_params'),
+    ('tests/test_enhance.py', 'moonglade.gen_params'),
+    ('tests/test_evidence_counters.py', 'moonglade.gen_params'),
+    ('tests/test_gen_surface.py', 'moonglade.gen_params'),
+    ('tests/test_history_feed_document.py', 'moonglade.gen_params'),
+    ('tests/test_jwt.py', 'moonglade.gen_params'),
+    ('tests/test_living_library.py', 'moonglade.gen_params'),
+    ('tests/test_loom_notify.py', 'moonglade.gen_params'),
+    ('tests/test_network.py', 'moonglade.gen_params'),
+    ('tests/test_pixai_client.py', 'moonglade.gen_params'),
+    ('tests/test_settings_store.py', 'moonglade.gen_params'),
+    ('tests/test_setup_prepare.py', 'moonglade.gen_params'),
+    ('tests/test_spend_no_retry.py', 'moonglade.gen_params'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.gen_params'),
+    ('tests/test_telemetry.py', 'moonglade.gen_params'),
+    ('tests/test_training_advanced.py', 'moonglade.gen_params'),
+    ('tests/test_training_parity.py', 'moonglade.gen_params'),
+    ('tests/test_unclear_single_sends.py', 'moonglade.gen_params'),
+    ('tests/test_video_tsubaki.py', 'moonglade.gen_params'),
+    ('tests/test_web_auth.py', 'moonglade.gen_params'),
 }
 
 
@@ -1296,7 +1353,11 @@ def test_the_js_reader_scan_sees_the_node_tests():
     js = {p for p in readers if p.endswith(rp.JS_SUFFIXES)}
     assert "loom/test/import-batches.test.js" in js
     assert any("moonglade.gallery" in readers[p] for p in js)
-    assert any("moonglade.backup" in readers[p] for p in js)
+    # Since 3.22 the node tests that read the engine read the modules split out of it
+    # (cards, gen_params), not backup.py itself.
+    from_backup = {"moonglade.backup"} | {m for m, e in SEAMS.items()
+                                          if e["from"] == "moonglade.backup"}
+    assert any(set(readers[p]) & from_backup for p in js)
 
 
 def test_source_readers_touched_by_a_move_were_reviewed():

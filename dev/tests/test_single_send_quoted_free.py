@@ -16,6 +16,7 @@ create mutations, not off a stub of the function under test."""
 import pytest
 
 from moonglade import backup as core
+from moonglade import gen_params as gen_params_mod
 from tests.conftest import login_client
 
 V = "1983308862240288769"
@@ -35,7 +36,7 @@ def gen(tmp_path, monkeypatch, pixai):
             return {"kaisuukens": []}
         return [{"id": V, "modelId": "M1"}]
     monkeypatch.setattr(core, "_rest_get", _rest_get)
-    monkeypatch.setattr(core, "_gen_parameters",
+    monkeypatch.setattr(gen_params_mod, "_gen_parameters",
                         lambda args: {"modelId": args.model, "prompt": "a cat", "width": 512,
                                       "height": 512})
     monkeypatch.setattr(core.time, "sleep", lambda s: None)

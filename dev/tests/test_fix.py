@@ -15,6 +15,7 @@ import requests
 from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gallery as moonglade_gallery
+from moonglade import gen_params as gen_params_mod
 from moonglade import pricing as pricing_mod
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
@@ -22,7 +23,7 @@ from tests.conftest import login_client
 from moonglade import mirror as mirror_mod
 
 
-REFERENCE_PRO = core.EDIT_MODELS["reference-pro"]["model_id"]
+REFERENCE_PRO = gen_params_mod.EDIT_MODELS["reference-pro"]["model_id"]
 
 # The prompt PixAI writes into a fixer task itself. It is a FIXED template -- identical on
 # every Fix ever submitted -- which is exactly why naming the output from it produced a
@@ -233,7 +234,7 @@ def test_fix_body_is_the_submit_body(monkeypatch):
     assert core.submit_fixer(object(), "700", boxes) == "F1"
     (path, sent), = posts
     assert path == "/task/fixer"
-    body = core.build_fixer_body("700", boxes)
+    body = gen_params_mod.build_fixer_body("700", boxes)
     assert sent == body
     assert set(sent) == {"mediaId", "boxes"}, "never cusPrompts, never anything else"
     assert sent["mediaId"] == "700"
@@ -244,18 +245,18 @@ def test_fix_body_is_the_submit_body(monkeypatch):
 def test_a_box_off_the_top_or_left_is_clipped_not_shifted():
     """#93 review F3: x -160 width 360 covers 0..200 of the picture. Shifting it to x 0 kept
     the width and repaired 0..360; the part on the picture is 0..200."""
-    out = core.clean_fix_boxes([{"x": -160, "y": -10, "width": 360, "height": 210, "tag": "face"}])
+    out = gen_params_mod.clean_fix_boxes([{"x": -160, "y": -10, "width": 360, "height": 210, "tag": "face"}])
     assert out == [{"x": 0, "y": 0, "width": 200, "height": 200, "tag": "face"}]
     # wholly off the picture: nothing left, so the box is dropped
-    assert core.clean_fix_boxes([{"x": -50, "y": 5, "width": 50, "height": 9, "tag": "hand"}]) == []
+    assert gen_params_mod.clean_fix_boxes([{"x": -50, "y": 5, "width": 50, "height": 9, "tag": "hand"}]) == []
     # an in-picture box is untouched
-    assert core.clean_fix_boxes([HAND]) == [HAND]
+    assert gen_params_mod.clean_fix_boxes([HAND]) == [HAND]
 
 
 @pytest.mark.parametrize("bad", [float("inf"), float("-inf"), float("nan")])
 def test_a_non_finite_box_is_dropped_not_raised(bad, monkeypatch):
     box = {"x": bad, "y": 1, "width": 5, "height": 5, "tag": "face"}
-    assert core.clean_fix_boxes([box, FACE]) == [FACE]
+    assert gen_params_mod.clean_fix_boxes([box, FACE]) == [FACE]
     monkeypatch.setattr(core, "_rest_post", _tripwire("_rest_post"))
     assert pricing_mod.price_fixer(object(), {"mediaId": "700", "boxes": [box]}) is None
 
@@ -275,20 +276,20 @@ def test_a_non_finite_box_on_the_routes_is_a_note_and_never_sent(raw, tmp_path, 
 
 def test_fix_body_refuses_no_usable_box():
     with pytest.raises(core.PixAIError, match="drag a box"):
-        core.build_fixer_body("700", [])
+        gen_params_mod.build_fixer_body("700", [])
     with pytest.raises(core.PixAIError, match="drag a box"):
-        core.build_fixer_body("700", [{"x": 1, "y": 1, "width": 5, "height": 5, "tag": "elbow"}])
+        gen_params_mod.build_fixer_body("700", [{"x": 1, "y": 1, "width": 5, "height": 5, "tag": "elbow"}])
 
 
 def test_fix_body_refuses_two_kinds():
     with pytest.raises(core.PixAIError, match="one kind") as err:
-        core.build_fixer_body("700", [FACE, HAND])
-    assert str(err.value) == core.FIX_ONE_KIND
+        gen_params_mod.build_fixer_body("700", [FACE, HAND])
+    assert str(err.value) == gen_params_mod.FIX_ONE_KIND
     # case does not smuggle a second kind past the check
     with pytest.raises(core.PixAIError, match="one kind"):
-        core.build_fixer_body("700", [dict(FACE, tag="FACE"), dict(HAND, tag="Hand")])
+        gen_params_mod.build_fixer_body("700", [dict(FACE, tag="FACE"), dict(HAND, tag="Hand")])
     # ...and one kind, however many boxes, is fine
-    assert len(core.build_fixer_body("700", [FACE, dict(FACE, x=9)])["boxes"]) == 2
+    assert len(gen_params_mod.build_fixer_body("700", [FACE, dict(FACE, x=9)])["boxes"]) == 2
 
 
 def test_submit_fixer_refuses_two_kinds_before_any_network(monkeypatch):
@@ -405,7 +406,7 @@ def test_price_route_two_kinds_is_a_note_not_a_price(tmp_path, monkeypatch):
     d = cli.post("/api/price", json={"mode": "fix", "source": "700",
                                      "boxes": [FACE, HAND]}).get_json()
     assert d["cost"] is None and d["free"] is False
-    assert d["note"] == core.FIX_ONE_KIND
+    assert d["note"] == gen_params_mod.FIX_ONE_KIND
     assert seen["posts"] == [], "no network call for a body PixAI refuses"
 
 

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from moonglade import backup as core
 from moonglade import cards as cards_mod
+from moonglade import gen_params as gen_params_mod
 from moonglade import models as models_mod
 from moonglade import paths
 from moonglade import pricing as pricing_mod
@@ -1021,20 +1022,20 @@ def test_gen_reference_image_passthrough():
                         priority=500, mode="auto", seed=None, lora=[],
                         prompt_helper=True, kaisuuken_id="",
                         ref_media_id="739707411648019153", ref_strength=0.55)
-    p = core._gen_parameters(a)
+    p = gen_params_mod._gen_parameters(a)
     assert p["mediaId"] == "739707411648019153" and p["strength"] == 0.55
     a.ref_media_id = ""
-    p2 = core._gen_parameters(a)
+    p2 = gen_params_mod._gen_parameters(a)
     assert "mediaId" not in p2 and "strength" not in p2   # absent when no ref
 
 
 def test_edit_scene_id_passthrough():
     """Capture #13 (task 2030050946353349700): a Toolbox preset = the normal chat
     block + a canned prompt + top-level sceneId."""
-    p = core.build_chat_edit_parameters("canned prompt", ["55"],
+    p = gen_params_mod.build_chat_edit_parameters("canned prompt", ["55"],
                                         scene_id="character-card")
     assert p["sceneId"] == "character-card" and p["chat"]["prompts"] == "canned prompt"
-    assert "sceneId" not in core.build_chat_edit_parameters("x", ["55"])
+    assert "sceneId" not in gen_params_mod.build_chat_edit_parameters("x", ["55"])
 
 
 def test_presets_import_and_use(tmp_path, monkeypatch, pixai):
@@ -1571,12 +1572,12 @@ def test_branding_absent_is_404(tmp_path):
 def test_edit_model_id_and_quality_omit():
     """The Edit-model registry maps picker keys to the right model ids, and
     build_chat_edit_parameters omits 'quality' when empty (Reference Pro has no quality)."""
-    assert core.edit_model_id("edit-pro") == core.EDIT_PRO_MODEL_ID
-    assert core.edit_model_id("reference-pro") == "1948514378441961474"
-    assert core.edit_model_id("nope") == "" and core.edit_model_id("") == ""
-    ref = core.build_chat_edit_parameters("x", ["10"], quality="")     # ref-pro: no quality knob
+    assert gen_params_mod.edit_model_id("edit-pro") == gen_params_mod.EDIT_PRO_MODEL_ID
+    assert gen_params_mod.edit_model_id("reference-pro") == "1948514378441961474"
+    assert gen_params_mod.edit_model_id("nope") == "" and gen_params_mod.edit_model_id("") == ""
+    ref = gen_params_mod.build_chat_edit_parameters("x", ["10"], quality="")     # ref-pro: no quality knob
     assert "quality" not in ref["chat"]["modelConfig"]
-    ep = core.build_chat_edit_parameters("x", ["10"], quality="high")
+    ep = gen_params_mod.build_chat_edit_parameters("x", ["10"], quality="high")
     assert ep["chat"]["modelConfig"]["quality"] == "high"
 
 
@@ -1597,20 +1598,20 @@ def test_edit_price_uses_selected_model(tmp_path, monkeypatch, pixai):
     cli.post("/api/price", json={"mode": "edit", "edit_model": "edit-pro", "source": "55",
                                  "resolution": "2K", "quality": "high", "aspect": "1:1"})
     chat = seen["p"]["chat"]
-    assert chat["modelId"] == core.EDIT_PRO_MODEL_ID and chat["modelConfig"]["quality"] == "high"
+    assert chat["modelId"] == gen_params_mod.EDIT_PRO_MODEL_ID and chat["modelConfig"]["quality"] == "high"
 
 
 def test_clamp_edit_config_snaps_to_model_caps():
     """Backend guard (fixes the skeptic-found preset bug): any resolution/quality/aspect that
     the resolved model doesn't support is snapped to a valid one — no path sends an invalid knob."""
     # Reference Pro: no quality knob + 1K unsupported -> quality dropped, resolution -> 2K default
-    assert core.clamp_edit_config("1948514378441961474", "1K", "medium", "21:9") == ("2K", "", "21:9")
+    assert gen_params_mod.clamp_edit_config("1948514378441961474", "1K", "medium", "21:9") == ("2K", "", "21:9")
     # Edit Pro: 4K unsupported -> 1K default; valid quality kept; unknown aspect -> default.
     # The default moved 3:4 -> 3:5 ON PURPOSE (SCOPE_2026-09-26 E2): Edit Pro's own
     # extra.chatEditing publishes defaultAspectRatio "3:5" and adds 3:5 / 5:3.
-    assert core.clamp_edit_config(core.EDIT_PRO_MODEL_ID, "4K", "high", "nope") == ("1K", "high", "3:5")
+    assert gen_params_mod.clamp_edit_config(gen_params_mod.EDIT_PRO_MODEL_ID, "4K", "high", "nope") == ("1K", "high", "3:5")
     # unknown model -> pass through untouched
-    assert core.clamp_edit_config("999", "8K", "ultra", "5:1") == ("8K", "ultra", "5:1")
+    assert gen_params_mod.clamp_edit_config("999", "8K", "ultra", "5:1") == ("8K", "ultra", "5:1")
 
 
 def test_edit_price_clamps_invalid_knobs(tmp_path, monkeypatch, pixai):

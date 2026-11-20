@@ -50,7 +50,8 @@ def price_fixer(session, body):
     The body is put through build_fixer_body once more before it goes out: for a dict that
     builder made it is the same body (cleaning is idempotent), and a hand-built one that is
     empty or carries two kinds is refused here, before any network call."""
-    from moonglade.backup import build_fixer_body, PixAIError, _rest_post
+    from moonglade.backup import PixAIError, _rest_post
+    from moonglade.gen_params import build_fixer_body
     try:
         sent = build_fixer_body((body or {}).get("mediaId") or "", (body or {}).get("boxes"))
     except (PixAIError, AttributeError, TypeError):

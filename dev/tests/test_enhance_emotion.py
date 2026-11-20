@@ -3,6 +3,7 @@ into the panelplugin submit (and only for that one preset)."""
 from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gallery as g
+from moonglade import gen_params as gen_params_mod
 from tests.conftest import login_client
 from moonglade import mirror as mirror_mod
 from moonglade import branding as branding_mod
@@ -58,14 +59,14 @@ def test_picked_emotion_reaches_submit_only_for_the_emotion_preset(tmp_path, mon
     calls = _arm(monkeypatch)
     # the emotion preset carries the pick into inputs
     cli.post("/api/enhance", json={"source": "srcABC",
-                                   "workflow_name": core.ENHANCE_EMOTION_WORKFLOW,
+                                   "workflow_name": gen_params_mod.ENHANCE_EMOTION_WORKFLOW,
                                    "emotion": "happy"})
     # the picked KEY is translated to emotionlab's danbooru TAG string on the `prompt` arg
-    assert core.ENHANCE_EMOTION_ARG == "prompt"
-    assert calls["params"]["inputs"].get(core.ENHANCE_EMOTION_ARG) == "smile"
-    assert core.ENHANCE_EMOTION_PROMPTS["happy"] == "smile"
+    assert gen_params_mod.ENHANCE_EMOTION_ARG == "prompt"
+    assert calls["params"]["inputs"].get(gen_params_mod.ENHANCE_EMOTION_ARG) == "smile"
+    assert gen_params_mod.ENHANCE_EMOTION_PROMPTS["happy"] == "smile"
     # a DIFFERENT preset never gets the stray arg, even if an emotion is sent
     calls["params"] = None
     cli.post("/api/enhance", json={"source": "srcABC",
                                    "workflow_name": "mymusise/hand-fix:v1", "emotion": "happy"})
-    assert core.ENHANCE_EMOTION_ARG not in calls["params"]["inputs"]
+    assert gen_params_mod.ENHANCE_EMOTION_ARG not in calls["params"]["inputs"]

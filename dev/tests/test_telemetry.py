@@ -11,6 +11,7 @@ import pytest
 
 from moonglade import cards as cards_mod
 from moonglade import gallery as g
+from moonglade import gen_params as gen_params_mod
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import STARFALL_EVENT, ach_event, ach_nonce, login_client, login_test_client, _SEALED_DONOR
@@ -660,7 +661,7 @@ def test_enhance_tools_complete(tmp_path, monkeypatch):
         assert r.status_code == 200
         cli.get("/api/task-status", query_string={"task_id": r.get_json()["task_id"]})
 
-    presets = {p["key"]: p["workflow_name"] for p in core.BRIDGE_ENHANCE_PRESETS}
+    presets = {p["key"]: p["workflow_name"] for p in gen_params_mod.BRIDGE_ENHANCE_PRESETS}
     non_emotion = [k for k in presets if k != "emotion"]
     assert len(non_emotion) == 5                                   # the roster's "SIX tools" minus emotion
 
@@ -677,8 +678,8 @@ def test_enhance_tools_complete(tmp_path, monkeypatch):
     assert telemetry_mod.telemetry_metrics(tmp_path)["enhance_tools_complete"] == 5
 
     # the emotion tool with a PARTIAL emotion set stays at 5 (emotion incomplete)
-    emo_wf = core.ENHANCE_EMOTION_WORKFLOW
-    emo_keys = list(core.ENHANCE_EMOTION_PROMPTS.keys())
+    emo_wf = gen_params_mod.ENHANCE_EMOTION_WORKFLOW
+    emo_keys = list(gen_params_mod.ENHANCE_EMOTION_PROMPTS.keys())
     for ek in emo_keys[:-1]:
         _run_enhance(source="src-emo", workflow_name=emo_wf, emotion=ek)
     assert telemetry_mod.telemetry_metrics(tmp_path)["enhance_tools_complete"] == 5
@@ -760,7 +761,7 @@ def test_an_enhance_terminal_counts_as_a_bridge_tool(tmp_path, monkeypatch):
                         lambda s, t, out, **k: {"media_ids": ["OUT1"], "saved": 1, "is_video": False})
     save_catalog(tmp_path / "catalog.db", [])
     cli = login_client(tmp_path)
-    preset = core.BRIDGE_ENHANCE_PRESETS[0]["workflow_name"]
+    preset = gen_params_mod.BRIDGE_ENHANCE_PRESETS[0]["workflow_name"]
     r = cli.post("/api/enhance", json={"source": "src1", "workflow_name": preset})
     assert r.status_code == 200
     tid = r.get_json()["task_id"]

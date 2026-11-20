@@ -39,6 +39,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+from moonglade import gen_params as _gen_params
 from moonglade import paths as _paths
 
 # ---------------------------------------------------------------------------------------
@@ -951,7 +952,7 @@ def _flag_args(core, params):
                 return None
             add("--seed", p["seed"], "seed", p["seed"])
         if "priority" in p:
-            if p["priority"] not in core.PRIORITY_CHOICES:
+            if p["priority"] not in _gen_params.PRIORITY_CHOICES:
                 return None
             add("--priority", p["priority"], "priority", p["priority"])
         if "inferenceProfile" in p:
@@ -977,7 +978,7 @@ def _flag_args(core, params):
             ns["lora"] = specs
         if "enlarge" in p:
             add("--enlarge", p["enlarge"], "enlarge", float(p["enlarge"]))
-            if p.get("enlargeModel") not in core.ENLARGE_MODELS:
+            if p.get("enlargeModel") not in _gen_params.ENLARGE_MODELS:
                 return None
             add("--enlarge-model", p["enlargeModel"], "enlarge_model", p["enlargeModel"])
         if "upscale" in p:
@@ -1000,7 +1001,7 @@ def _flag_args(core, params):
     except (TypeError, ValueError, KeyError):
         return None
     if ns["priority"] is None:
-        ns["priority"] = core.PRIORITY_TURBO
+        ns["priority"] = _gen_params.PRIORITY_TURBO
     return argv, ns
 
 
@@ -1021,7 +1022,7 @@ def cli_command(core, params, *, no_card=False, shell=None):
     if got is not None:
         argv, ns = got
         try:
-            rebuilt = core._gen_parameters(SimpleNamespace(**ns))
+            rebuilt = _gen_params._gen_parameters(SimpleNamespace(**ns))
         except Exception:                                    # noqa: BLE001
             rebuilt = None
         if rebuilt == body:

@@ -35,6 +35,7 @@ import requests
 from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gallery as moonglade_gallery
+from moonglade import gen_params as gen_params_mod
 from moonglade import pricing as pricing_mod
 from moonglade import recipes as moonglade_recipes
 from moonglade import runs
@@ -1038,7 +1039,7 @@ def test_on_send_sees_a_copy_of_every_attempt_and_cannot_alter_or_block_it(rig):
 @pytest.mark.parametrize("params,error", [
     ({"prompts": "a", "inferenceProfile": "pro"},
      'GraphQL error: [{"message": "bad inferenceProfile", "extensions": {"code": "BAD_REQUEST"}}]'),
-    ({"prompts": "a", "priority": core.PRIORITY_TURBO},
+    ({"prompts": "a", "priority": gen_params_mod.PRIORITY_TURBO},
      'GraphQL error: [{"message": "REQUIRE_MEMBERSHIP", "code": 40300047}]'),
 ], ids=["profile-drop", "turbo-to-low"])
 def test_exact_turns_off_both_resubmits(rig, monkeypatch, params, error):
@@ -1065,20 +1066,20 @@ def test_exact_never_rewrites_the_priority_it_was_quoted_with(rig, monkeypatch):
     """Review N1: a run job goes out with the priority it was quoted and digested with; the
     Turbo -> Low downgrade is applied at the run's build, never again at its submit."""
     monkeypatch.setitem(core._turbo_refused, "seen", True)
-    core.submit_generation(object(), {"prompts": "a", "priority": core.PRIORITY_TURBO}, exact=True)
-    assert rig.mutations[0]["priority"] == core.PRIORITY_TURBO
-    core.submit_generation(object(), {"prompts": "a", "priority": core.PRIORITY_TURBO})
-    assert rig.mutations[1]["priority"] == core.PRIORITY_LOW, "a single send keeps today's rule"
+    core.submit_generation(object(), {"prompts": "a", "priority": gen_params_mod.PRIORITY_TURBO}, exact=True)
+    assert rig.mutations[0]["priority"] == gen_params_mod.PRIORITY_TURBO
+    core.submit_generation(object(), {"prompts": "a", "priority": gen_params_mod.PRIORITY_TURBO})
+    assert rig.mutations[1]["priority"] == gen_params_mod.PRIORITY_LOW, "a single send keeps today's rule"
 
 
 def test_a_known_turbo_refusal_is_quoted_digested_and_sent_as_low(cli, rig, monkeypatch):
     monkeypatch.setitem(core._turbo_refused, "seen", True)
     p = plan(cli, prompt="{a|b} x", count=2).get_json()
     assert {c["request"]["variables"]["parameters"]["priority"] for c in p["cells"]} \
-        == {core.PRIORITY_LOW}
+        == {gen_params_mod.PRIORITY_LOW}
     d = run(cli, ack=ack_of(p), prompt="{a|b} x", count=2).get_json()
     assert d["status"] == "sent"
-    assert [m["priority"] for m in rig.mutations] == [core.PRIORITY_LOW] * 2
+    assert [m["priority"] for m in rig.mutations] == [gen_params_mod.PRIORITY_LOW] * 2
 
 
 class _NoHooks(object):
@@ -1180,7 +1181,7 @@ def test_the_flag_command_rebuilds_the_same_parameters(cli_parser, kw):
     out = runs.cli_command(core, params, shell="posix")
     assert out["form"] == "flags", out
     ns = cli_parser.parse_args(_posix_argv(out["command"]))
-    assert core._gen_parameters(ns) == params
+    assert gen_params_mod._gen_parameters(ns) == params
     for dest, value in runs._CLI_DEFAULTS.items():
         if dest in ("priority",):
             continue
@@ -1192,7 +1193,7 @@ def test_the_cli_defaults_are_the_parsers_own(cli_parser):
     ns = cli_parser.parse_args(["--generate"])
     for dest, value in runs._CLI_DEFAULTS.items():
         if dest == "priority":
-            assert ns.priority == core.PRIORITY_TURBO
+            assert ns.priority == gen_params_mod.PRIORITY_TURBO
             continue
         if dest == "count":
             # --batch-size shares dest="count" with the top-level --count switch, so its
@@ -1279,4 +1280,4 @@ def test_the_powershell_command_survives_real_windows_powershell(tmp_path, cli_p
                        capture_output=True, stdin=subprocess.DEVNULL)
         argv = json.loads(dump.read_text(encoding="utf-8"))
         ns = cli_parser.parse_args(argv)
-        assert core._gen_parameters(ns) == params, (out["command"], argv)
+        assert gen_params_mod._gen_parameters(ns) == params, (out["command"], argv)

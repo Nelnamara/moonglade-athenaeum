@@ -14,6 +14,7 @@ REAL `{"profiles": [...]}` shape and the real parse. All network is mocked at `_
 import pytest
 
 from moonglade import backup as core
+from moonglade import gen_params as gen_params_mod
 from moonglade import mirror as mirror_mod
 from moonglade import models as models_mod
 from moonglade import pricing as pricing_mod
@@ -157,7 +158,7 @@ def test_gate_leaves_a_video_submit_untouched(monkeypatch):
     it, never add an image inferenceProfile to it."""
     monkeypatch.setattr(models_mod, "_model_profiles",
                         lambda s, vid: pytest.fail("gate must not look up profiles for video"))
-    vparams = core.build_video_parameters("motion", media_id="1", mode="professional")
+    vparams = gen_params_mod.build_video_parameters("motion", media_id="1", mode="professional")
     assert models_mod._gate_params_for_model(object(), vparams) is vparams
 
 

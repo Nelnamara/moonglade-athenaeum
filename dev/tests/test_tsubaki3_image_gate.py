@@ -31,6 +31,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import cards as cards_mod
+from moonglade import gen_params as gen_params_mod
 from moonglade import models as models_mod
 from moonglade import pricing as pricing_mod
 
@@ -145,7 +146,7 @@ def img(vid, **kw):
     """A plain app-built image submit, as _gen_parameters shapes it."""
     p = {"prompts": "<prompt>", "naturalPrompts": "<prompt>", "modelId": vid,
          "width": 1024, "height": 1024, "samplingSteps": 25, "cfgScale": 7.0,
-         "batchSize": 1, "priority": core.PRIORITY_TURBO,
+         "batchSize": 1, "priority": gen_params_mod.PRIORITY_TURBO,
          "promptHelper": {"withStage": True, "userWantToEnable": True,
                           "forcePromptHelperDetectionSide": "server"}}
     p.update(kw)
@@ -375,7 +376,7 @@ def test_the_upscale_road_passes_untouched_on_mmdit26a_and_b(vid, method, rest):
     snapped, stripped or turned into a context image -- G3 there would bill a new Tsubaki.3
     generation for an Upscale click. The 2026-08-25 profile branch still applies."""
     p = {"modelId": vid, "prompts": "", "mediaId": "M1", "strength": 0.55,
-         "width": 1000, "height": 1000, "batchSize": 1, "priority": core.PRIORITY_TURBO,
+         "width": 1000, "height": 1000, "batchSize": 1, "priority": gen_params_mod.PRIORITY_TURBO,
          method: 1.5}
     if method == "upscale":
         p.update(upscaleDenoisingStrength=0.6, upscaleDenoisingSteps=25, upscaleSampler="")
@@ -447,7 +448,7 @@ def test_img2img_plus_hires_on_a_dit_model_rides_the_upscale_road_as_the_spec_re
     then wins over G2's never-Hires-or-Face-Fix rule, and over G1 and G10 too. The code
     follows the spec literally until the owner rules which one wins."""
     p = {"modelId": T2, "prompts": "<prompt>", "mediaId": "M1", "strength": 0.5,
-         "width": 1000, "height": 1000, "batchSize": 1, "priority": core.PRIORITY_TURBO,
+         "width": 1000, "height": 1000, "batchSize": 1, "priority": gen_params_mod.PRIORITY_TURBO,
          "enableADetailer": True, "upscale": 1.5, "upscaleDenoisingStrength": 0.6,
          "upscaleDenoisingSteps": 25, "upscaleSampler": ""}
     out, adjusted = gate(p)
@@ -532,7 +533,7 @@ def test_a_reference_plus_a_lora_on_tsubaki3_is_refused_never_trimmed(rest):
     # the backstop inside price_task fails soft (no price), never raises
     args = core._gen_args_from_web_payload(payload)
     args.model = T3
-    raw = core._gen_parameters(args)
+    raw = gen_params_mod._gen_parameters(args)
     assert raw["mediaId"] == "M1" and raw["lora"] == {"L1": 0.7}
     assert pricing_mod.price_task(object(), raw) is None
 
@@ -723,7 +724,7 @@ def test_price_and_submit_card_match_and_send_the_gated_dict(rest, monkeypatch):
 def _cli_args(tmp_path, **kw):
     base = dict(out=str(tmp_path), params_json="", prompt="<prompt>", negative="",
                 model=T3, width=768, height=432, steps=25, cfg=7.0, count=1, seed=None,
-                priority=core.PRIORITY_TURBO, mode="auto", prompt_helper=True, lora=None,
+                priority=gen_params_mod.PRIORITY_TURBO, mode="auto", prompt_helper=True, lora=None,
                 ref_media_id="", ref_strength=0.55, enlarge=None, upscale=None,
                 upscale_denoising_strength=None, upscale_denoising_steps=None,
                 face_fix=True, quality_tag="", kaisuuken_id="", no_card=False,
@@ -948,7 +949,7 @@ def test_the_drawers_all_versions_read_carries_the_rule_features_and_compat(rest
 # =============================================================================
 
 def test_user_dit26b_joins_the_dit_tables():
-    assert core.lora_weight_range("USER_DIT26B_MODEL") == (0.0, 1.2)
+    assert gen_params_mod.lora_weight_range("USER_DIT26B_MODEL") == (0.0, 1.2)
     assert "USER_DIT26B_MODEL" in models_mod.LORA_BASE_MODEL_TYPES
     assert "USER_DIT26B_MODEL" in models_mod.DIT_SIZE_STEP_TYPES
     assert "USER_DIT26B_MODEL" in models_mod.NO_HIRES_FACEFIX_TYPES
@@ -1228,7 +1229,7 @@ def test_a_refused_lane_request_is_never_resubmitted_as_anything_else(refusal, m
     monkeypatch.setitem(core._turbo_refused, "seen", False)
     # a CLI --params-json shape: lane AND the app's Turbo, which only the web road strips
     params = {"prompts": "<prompt>", "modelId": T3, "inferenceProfile": "pro",
-              "priority": core.PRIORITY_TURBO, "lane": "infinite"}
+              "priority": gen_params_mod.PRIORITY_TURBO, "lane": "infinite"}
     with pytest.raises(core.PixAIError) as err:
         core.submit_generation(object(), params)
     assert str(err.value).startswith(REFUSED)

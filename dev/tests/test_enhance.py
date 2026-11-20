@@ -8,6 +8,7 @@ from pathlib import Path
 from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gallery as moonglade_gallery
+from moonglade import gen_params as gen_params_mod
 from moonglade import models as models_mod
 
 from tests.conftest import login_client
@@ -98,11 +99,13 @@ def test_panelplugin_surface_restored_mirror_gated():
     Inverts the old "must stay gone" grep: the two literals a panelplugin submit cannot do
     without -- the model id and the workflow-id parameter -- must now be PRESENT in core, in the
     restored builder. The CLI flag that fed the API-key path stays gone (the Bridge is web-only)."""
-    assert hasattr(core, "build_panelplugin_parameters")
+    assert hasattr(gen_params_mod, "build_panelplugin_parameters")
     assert hasattr(models_mod, "workflow_catalog")
     core_src = (ROOT / "moonglade" / "backup.py").read_text(encoding="utf-8")
-    assert "pixai-panelplugin" in core_src, "the restored builder must name the panelplugin model"
-    assert "workflowId" in core_src, "the restored builder must address a panelplugin workflow"
+    # the builder lives in moonglade/gen_params.py since 3.22; the CLI parser stays in backup
+    builder_src = (ROOT / "moonglade" / "gen_params.py").read_text(encoding="utf-8")
+    assert "pixai-panelplugin" in builder_src, "the restored builder must name the panelplugin model"
+    assert "workflowId" in builder_src, "the restored builder must address a panelplugin workflow"
     # LEFT INTACT: the CLI --workflow-id flag stays deleted -- the Bridge is web-route-only, and a
     # bare CLI flag could submit a panelplugin task on the API key (the reaped-at-60-min bug).
     assert '"--workflow-id"' not in core_src
@@ -220,10 +223,10 @@ def test_source_media_of_task_derives_enhance_lineage():
     TODO(bridge): re-verify this against a REAL captured COMPLETED panelplugin task from
     getTaskById -- PixAI may camelCase media_id -> mediaId on the persisted read-back. This
     fixture proves the derive branch, not the field name PixAI stores it under."""
-    params = core.build_panelplugin_parameters("SRC123", "1796053397111789217")
+    params = gen_params_mod.build_panelplugin_parameters("SRC123", "1796053397111789217")
     assert core.source_media_of_task({"parameters": params}) == ("SRC123", "enhance")
     # A workflowName preset carries the same inputs.image.media_id shape.
-    p2 = core.build_panelplugin_parameters("SRC456", workflow_name="mymusise/hand-fix")
+    p2 = gen_params_mod.build_panelplugin_parameters("SRC456", workflow_name="mymusise/hand-fix")
     assert core.source_media_of_task({"parameters": p2}) == ("SRC456", "enhance")
     # A plain txt2img (no inputs.image) is still an original -> (None, None), unchanged.
     assert core.source_media_of_task({"parameters": {"modelId": "m", "prompt": "x"}}) == (None, None)

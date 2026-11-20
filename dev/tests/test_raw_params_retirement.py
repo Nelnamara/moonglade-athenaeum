@@ -14,6 +14,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import cards as cards_mod
+from moonglade import gen_params as gen_params_mod
 
 UTC = datetime.timezone.utc
 CUT = datetime.datetime(2026, 11, 23, 3, 0, 0, tzinfo=UTC)
@@ -25,7 +26,7 @@ V32_REF = json.dumps({"referenceVideo": {"model": "v3.2", "prompts": "@image1"}}
 @pytest.fixture()
 def no_network(monkeypatch, tmp_path):
     """Every road off this machine fails the test by name."""
-    monkeypatch.setattr(core, "_video_clock", lambda: CUT)
+    monkeypatch.setattr(gen_params_mod, "_video_clock", lambda: CUT)
     monkeypatch.setattr(core, "_check_read_only", lambda *a, **k: None)
 
     def _boom(name):

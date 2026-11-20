@@ -28,6 +28,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gallery as g
+from moonglade import gen_params as gen_params_mod
 from moonglade import models as models_mod
 from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
 
@@ -336,7 +337,7 @@ def test_video_task_row_is_identical_to_the_old_builder(tmp_path, monkeypatch):
     want = _old_download_video_task(TASK_ID, VOUT, path, tmp_path, "https://x/v.mp4",
                                     result, "a moonlit elf", sent, VSHARED, VDETAIL, FM)
     want.update(model_id=FM["video_model"],                          # V7: the task's engine
-                model_name=core.VIDEO_MODELS[FM["video_model"]]["label"])   # ruling 3
+                model_name=gen_params_mod.VIDEO_MODELS[FM["video_model"]]["label"])   # ruling 3
     _same(_row(tmp_path / "catalog.db", "v-golden"), want)
 
 
@@ -346,7 +347,7 @@ def test_video_task_row_with_a_numeric_task_modelid_files_the_id_and_its_title(t
     top-level modelId: model_id is that id and model_name is its version title. Everything
     else is still the old builder's row."""
     path, result = _stub_video_task(monkeypatch, tmp_path)
-    own = core.video_model_id(FM["video_model"])
+    own = gen_params_mod.video_model_id(FM["video_model"])
     fm = dict(FM, model_id=own)
     monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(fm))
     monkeypatch.setattr(models_mod, "model_name_gql",
@@ -380,7 +381,7 @@ GEN_PARAMS = {"modelId": "V-SUBMITTED", "prompts": "a moonlit elf", "width": 512
 
 def _stub_generate(monkeypatch, out):
     path = _stub_file(out, "old.png", "images")
-    monkeypatch.setattr(core, "_gen_parameters", lambda a: dict(GEN_PARAMS))
+    monkeypatch.setattr(gen_params_mod, "_gen_parameters", lambda a: dict(GEN_PARAMS))
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: dict(RESULT))
     monkeypatch.setattr(core, "_maybe_dump_params", lambda a, r: None)
@@ -439,7 +440,7 @@ EDIT_MODEL_NAME = "Edit Pro"
 
 def _stub_edit(monkeypatch, out):
     path = _stub_file(out, "old.png", "images")
-    monkeypatch.setattr(core, "_edit_config_from_args", lambda a: dict(EDIT_CFG))
+    monkeypatch.setattr(gen_params_mod, "_edit_config_from_args", lambda a: dict(EDIT_CFG))
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: dict(RESULT))
     monkeypatch.setattr(core, "_maybe_dump_params", lambda a, r: None)

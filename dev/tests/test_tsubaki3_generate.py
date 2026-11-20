@@ -30,6 +30,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import cards as cards_mod
+from moonglade import gen_params as gen_params_mod
 from moonglade import models as models_mod
 from moonglade import pricing as pricing_mod
 from tests.test_tsubaki3_image_gate import (
@@ -290,7 +291,7 @@ def test_a_listed_profile_pixai_refuses_is_never_resubmitted_on_the_default(rest
     monkeypatch.setattr(core, "gql_mutate", fake)
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     params = {"prompts": "p", "modelId": T3, "width": 1024, "height": 1024, "batchSize": 1,
-              "inferenceProfile": "ultra", "priority": core.PRIORITY_TURBO}
+              "inferenceProfile": "ultra", "priority": gen_params_mod.PRIORITY_TURBO}
     with pytest.raises(core.PixAIError, match="refused the ultra profile"):
         core.submit_generation(object(), params)
     assert len(sent) == 1
@@ -305,7 +306,7 @@ def test_a_members_only_profile_stands_the_turbo_fallback_down(rest, monkeypatch
     monkeypatch.setattr(core, "gql_mutate", fake)
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     params = {"prompts": "p", "modelId": T3, "width": 1024, "height": 1024, "batchSize": 1,
-              "inferenceProfile": "ultra", "priority": core.PRIORITY_TURBO}
+              "inferenceProfile": "ultra", "priority": gen_params_mod.PRIORITY_TURBO}
     with pytest.raises(core.PixAIError):
         core.submit_generation(object(), params)
     assert len(sent) == 1
@@ -315,13 +316,13 @@ def test_a_members_only_profile_stands_the_turbo_fallback_down(rest, monkeypatch
 
     def fake2(s, q, v=None):
         calls.append(dict(v["parameters"]))
-        if v["parameters"].get("priority") == core.PRIORITY_TURBO:
+        if v["parameters"].get("priority") == gen_params_mod.PRIORITY_TURBO:
             raise core.graphql_error('[{"message": "REQUIRE_MEMBERSHIP"}]', code="REQUIRE_MEMBERSHIP")
         return {"createGenerationTask": {"id": "T1"}}
     monkeypatch.setattr(core, "gql_mutate", fake2)
     monkeypatch.setattr(core, "_turbo_refused", {"seen": False})
     assert core.submit_generation(object(), dict(params, inferenceProfile="pro")) == "T1"
-    assert len(calls) == 2 and calls[1]["priority"] == core.PRIORITY_LOW
+    assert len(calls) == 2 and calls[1]["priority"] == gen_params_mod.PRIORITY_LOW
 
 
 @pytest.mark.parametrize("message,profile", [
@@ -348,7 +349,7 @@ def test_a_partial_success_is_never_resubmitted(rest, monkeypatch, message, prof
     monkeypatch.setattr(models_mod, "_profile_listing", lambda s, p: (False, False))
     monkeypatch.setattr(models_mod, "_gate_image_params", lambda s, p: (p, []))
     params = {"prompts": "p", "modelId": T3, "width": 1024, "height": 1024, "batchSize": 1,
-              "inferenceProfile": profile, "priority": core.PRIORITY_TURBO}
+              "inferenceProfile": profile, "priority": gen_params_mod.PRIORITY_TURBO}
     with pytest.raises(core.PixAIError) as ei:
         core.submit_generation(object(), params)
     assert len(sent) == 1, "a partial success was sent a second time"
@@ -505,7 +506,7 @@ def test_the_edit_bar_request_is_the_sites_smart_reference_shape(rest):
     the very same dict."""
     req = road(bar_payload(high_priority=False))
     assert req.parameters == {
-        "extra": {"naturalPrompts": "make it night"}, "priority": core.PRIORITY_TURBO,
+        "extra": {"naturalPrompts": "make it night"}, "priority": gen_params_mod.PRIORITY_TURBO,
         "width": 1280, "height": 768, "prompts": "make it night", "modelId": T3,
         "inferenceProfile": "pro", "controlNets": [], "contextImages": ["701"],
         "promptHelper": {"forcePromptHelperDetectionSide": "server", "creativity": "medium"}}
@@ -531,7 +532,7 @@ def test_the_edit_bar_is_sent_at_high_priority_and_quoted_at_it(rest, monkeypatc
     carries priority 1000 -- and the quote prices and card-checks that very dict, so the cost line
     shows what is spent: free when a card covers it, the quoted credits when none does."""
     req = road(dict(js_bar))
-    assert req.parameters["priority"] == core.PRIORITY_HIGH == 1000
+    assert req.parameters["priority"] == gen_params_mod.PRIORITY_HIGH == 1000
     assert not req.unlimited and not core.asks_unlimited(dict(js_bar))
     # no card: the quoted credits, priced on the dict that carries priority 1000
     matched = []
@@ -552,9 +553,9 @@ def test_the_edit_bar_is_sent_at_high_priority_and_quoted_at_it(rest, monkeypatc
 def test_nothing_else_changes_priority():
     """Only the bar asks: the web payload without high_priority (the dock's default, the Loom's
     unticked box) is still Turbo, and with it ticked is still High."""
-    assert core._gen_args_from_web_payload({"prompt": "p"}).priority == core.PRIORITY_TURBO
-    assert core._gen_args_from_web_payload({"prompt": "p", "high_priority": False}).priority == core.PRIORITY_TURBO
-    assert core._gen_args_from_web_payload({"prompt": "p", "high_priority": True}).priority == core.PRIORITY_HIGH
+    assert core._gen_args_from_web_payload({"prompt": "p"}).priority == gen_params_mod.PRIORITY_TURBO
+    assert core._gen_args_from_web_payload({"prompt": "p", "high_priority": False}).priority == gen_params_mod.PRIORITY_TURBO
+    assert core._gen_args_from_web_payload({"prompt": "p", "high_priority": True}).priority == gen_params_mod.PRIORITY_HIGH
 
 
 def test_the_price_query_of_a_context_image_request_carries_control_nets(rest):

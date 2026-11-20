@@ -14,6 +14,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gallery as g
+from moonglade import gen_params as gen_params_mod
 from moonglade import integrity as integ
 from moonglade import models as models_mod
 from tests.test_unclear_single_sends import ROUTES, _Resp, rig  # noqa: F401  (rig is a fixture)
@@ -110,7 +111,7 @@ def test_the_two_resubmits_still_fire_on_their_coded_refusals(monkeypatch):
     monkeypatch.setitem(core._turbo_refused, "seen", False)
     cases = [({"prompts": "a", "modelId": "1", "inferenceProfile": "pro"},
               {"message": "unknown inferenceProfile", "extensions": {"code": "BAD_REQUEST"}}),
-             ({"prompts": "a", "modelId": "1", "priority": core.PRIORITY_TURBO},
+             ({"prompts": "a", "modelId": "1", "priority": gen_params_mod.PRIORITY_TURBO},
               {"message": "Only member can use turbo mode", "code": 40300047})]
     for params, err in cases:
         sent = []

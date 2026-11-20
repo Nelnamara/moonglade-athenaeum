@@ -14,6 +14,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gallery as g
+from moonglade import gen_params as gen_params_mod
 from moonglade import models as models_mod
 from moonglade import pricing as pricing_mod
 from moonglade.gallery import CATALOG_FIELDS, save_catalog, load_catalog
@@ -33,16 +34,16 @@ def _row(**kw):
 # =============================================================================
 def test_both_tsubaki_engines_are_in_the_roster_with_their_wire_ids():
     for name, vid in TBKV_IDS.items():
-        assert core.video_model_id(name) == vid
-    assert core.VIDEO_MODELS["tbkv1.0.1"]["label"] == "Tsubaki Video"
-    assert core.VIDEO_MODELS["tbkv1.0"]["label"] == "Tsubaki Video Flash"
-    assert core.DEFAULT_VIDEO_MODEL == "v4.0.1", "the app's default engine stays v4.0.1"
+        assert gen_params_mod.video_model_id(name) == vid
+    assert gen_params_mod.VIDEO_MODELS["tbkv1.0.1"]["label"] == "Tsubaki Video"
+    assert gen_params_mod.VIDEO_MODELS["tbkv1.0"]["label"] == "Tsubaki Video Flash"
+    assert gen_params_mod.DEFAULT_VIDEO_MODEL == "v4.0.1", "the app's default engine stays v4.0.1"
 
 
 def test_gallery_repair_table_matches_the_roster():
     """The catalog repair keeps its own name->id copy (the gallery cannot import the backup
     module at load time). It must be exactly VIDEO_MODELS' engines that publish an id."""
-    want = {n: m["model_id"] for n, m in core.VIDEO_MODELS.items() if m["model_id"]}
+    want = {n: m["model_id"] for n, m in gen_params_mod.VIDEO_MODELS.items() if m["model_id"]}
     assert g._VIDEO_NAME_TO_ID == want
 
 
@@ -51,18 +52,18 @@ def test_gallery_repair_table_matches_the_roster():
 # =============================================================================
 @pytest.mark.parametrize("model", TBKV + ("v4.0", "v3.2"))
 def test_reference_path_sends_the_engines_own_id(model):
-    p = core.build_shot_video_params("R2V", "@image1", image_ids=["1"], model=model)
-    assert p["modelId"] == core.video_model_id(model)
+    p = gen_params_mod.build_shot_video_params("R2V", "@image1", image_ids=["1"], model=model)
+    assert p["modelId"] == gen_params_mod.video_model_id(model)
 
 
 def test_the_default_engine_is_byte_identical():
-    p = core.build_shot_video_params("R2V", "@image1", image_ids=["1"], model="v4.0.1")
-    assert p["modelId"] == core.REFVIDEO_MODEL_ID == "2003969750675682808"
+    p = gen_params_mod.build_shot_video_params("R2V", "@image1", image_ids=["1"], model="v4.0.1")
+    assert p["modelId"] == gen_params_mod.REFVIDEO_MODEL_ID == "2003969750675682808"
 
 
 def test_an_engine_with_no_id_omits_the_key_on_both_paths():
-    r = core.build_shot_video_params("R2V", "@image1", image_ids=["1"], model="v9.9-new")
-    i = core.build_shot_video_params("I2V", "x", image_ids=["1"], model="v9.9-new")
+    r = gen_params_mod.build_shot_video_params("R2V", "@image1", image_ids=["1"], model="v9.9-new")
+    i = gen_params_mod.build_shot_video_params("I2V", "x", image_ids=["1"], model="v9.9-new")
     assert "modelId" not in r and "modelId" not in i
 
 
@@ -72,14 +73,14 @@ def test_tbkv_i2v_goes_out_in_the_sites_name_only_shape(model):
     top-level modelId stays at today's behaviour -- omitted -- on both i2vPro shots, even when
     a caller passes one (review V-R7). The reference path still sends tbkv's own id (V2)."""
     for shot, imgs in (("I2V", ["1"]), ("FLF", ["1", "2"])):
-        assert "modelId" not in core.build_shot_video_params(shot, "x", image_ids=imgs,
+        assert "modelId" not in gen_params_mod.build_shot_video_params(shot, "x", image_ids=imgs,
                                                               model=model)
-    assert "modelId" not in core.build_video_parameters("x", "1", model=model,
+    assert "modelId" not in gen_params_mod.build_video_parameters("x", "1", model=model,
                                                         model_id=TBKV_IDS[model])
-    assert core.build_shot_video_params("R2V", "@image1", image_ids=["1"],
+    assert gen_params_mod.build_shot_video_params("R2V", "@image1", image_ids=["1"],
                                         model=model)["modelId"] == TBKV_IDS[model]
     # the existing engines keep the id their card match needs
-    assert core.build_shot_video_params("I2V", "x", image_ids=["1"],
+    assert gen_params_mod.build_shot_video_params("I2V", "x", image_ids=["1"],
                                         model="v4.0.1")["modelId"] == "2003969750675682808"
 
 
@@ -87,7 +88,7 @@ def test_cli_reference_video_preview_sends_the_chosen_engines_id(tmp_path, capsy
     core.run_reference_video(_refvid_args(tmp_path, video_model="v4.0"))
     out = capsys.readouterr().out
     assert '"modelId": "2003968021137101826"' in out
-    assert core.REFVIDEO_MODEL_ID not in out
+    assert gen_params_mod.REFVIDEO_MODEL_ID not in out
 
 
 # =============================================================================
@@ -95,10 +96,10 @@ def test_cli_reference_video_preview_sends_the_chosen_engines_id(tmp_path, capsy
 # =============================================================================
 @pytest.mark.parametrize("model", TBKV)
 def test_tbkv_renders_15s_and_carries_audio_on_both_paths(model):
-    i = core.build_shot_video_params("I2V", "x", image_ids=["1"], model=model, duration=15,
+    i = gen_params_mod.build_shot_video_params("I2V", "x", image_ids=["1"], model=model, duration=15,
                                      generate_audio=True, audio_language="english")["i2vPro"]
     assert i["duration"] == "15" and i["generateAudio"] is True and i["audioLanguage"] == "english"
-    r = core.build_shot_video_params("R2V", "@image1", image_ids=["1"], model=model,
+    r = gen_params_mod.build_shot_video_params("R2V", "@image1", image_ids=["1"], model=model,
                                      duration=15, generate_audio=True,
                                      audio_language="english")["referenceVideo"]
     assert r["duration"] == 15 and r["generateAudio"] is True and r["audioLanguage"] == "english"
@@ -106,28 +107,28 @@ def test_tbkv_renders_15s_and_carries_audio_on_both_paths(model):
 
 @pytest.mark.parametrize("model", TBKV)
 def test_six_seconds_snaps_to_five_on_tbkv_only(model):
-    assert core._snap_video_duration(6, model) == 5
-    assert core.build_shot_video_params("I2V", "x", image_ids=["1"], model=model,
+    assert gen_params_mod._snap_video_duration(6, model) == 5
+    assert gen_params_mod.build_shot_video_params("I2V", "x", image_ids=["1"], model=model,
                                          duration=6)["i2vPro"]["duration"] == "5"
-    assert core.build_shot_video_params("R2V", "@image1", image_ids=["1"], model=model,
+    assert gen_params_mod.build_shot_video_params("R2V", "@image1", image_ids=["1"], model=model,
                                          duration=6)["referenceVideo"]["duration"] == 5
     a = SimpleNamespace(prompt="p", image="55", tail="", duration=6, model="",
                         video_model=model, vmode="basic", audio=False,
                         audio_language="english", negative="", video_prompt_helper=False,
                         params_json="")
-    assert core._gen_video_parameters(a)["i2vPro"]["duration"] == "5"
+    assert gen_params_mod._gen_video_parameters(a)["i2vPro"]["duration"] == "5"
 
 
 def test_six_seconds_is_unchanged_on_the_existing_engines():
     """The 6 s stop of the existing engines is NOT touched by this branch (pinned by
     test_video_gen.py and test_doc_truth_residuals.py too)."""
     for model in ("v4.0.1", "v4.0", "v3.2", "v3.0.2"):
-        assert core._snap_video_duration(6, model) == 6, model
-    assert core.build_shot_video_params("I2V", "x", image_ids=["1"], model="v4.0.1",
+        assert gen_params_mod._snap_video_duration(6, model) == 6, model
+    assert gen_params_mod.build_shot_video_params("I2V", "x", image_ids=["1"], model="v4.0.1",
                                          duration=6)["i2vPro"]["duration"] == "6"
-    assert core.VIDEO_DURATIONS == (5, 6, 10, 15)
-    assert core.video_model_durations("v4.0.1") == core.VIDEO_DURATIONS
-    assert core.video_model_durations("tbkv1.0.1") == (5, 10, 15)
+    assert gen_params_mod.VIDEO_DURATIONS == (5, 6, 10, 15)
+    assert gen_params_mod.video_model_durations("v4.0.1") == gen_params_mod.VIDEO_DURATIONS
+    assert gen_params_mod.video_model_durations("tbkv1.0.1") == (5, 10, 15)
 
 
 def test_cli_reference_video_preview_snaps_six_to_five_on_tbkv(tmp_path, capsys):
@@ -163,7 +164,7 @@ def test_build_request_says_when_the_engine_snaps_the_length():
 def _rv(**kw):
     base = dict(image_media_ids=["1"], model="tbkv1.0.1")
     base.update(kw)
-    return core.build_reference_video_parameters("@image1", **base)["referenceVideo"]
+    return gen_params_mod.build_reference_video_parameters("@image1", **base)["referenceVideo"]
 
 
 def test_ratio_is_sent_for_tbkv_on_the_reference_path():
@@ -187,7 +188,7 @@ def test_an_unknown_ratio_is_refused_at_build_time():
 
 
 def test_the_ratio_set_is_the_sites_nine():
-    assert core.VIDEO_RATIOS == ("adaptive", "1:1", "2:3", "3:2", "3:4", "4:3",
+    assert gen_params_mod.VIDEO_RATIOS == ("adaptive", "1:1", "2:3", "3:2", "3:4", "4:3",
                                  "9:16", "16:9", "21:9")
 
 
@@ -224,16 +225,16 @@ def test_video_ratio_on_a_non_tbkv_engine_says_it_is_not_sent(tmp_path, capsys):
 # =============================================================================
 def test_input_video_durations_keep_order_and_are_all_or_nothing():
     lens = {"9": 10.04166698455811, "8": 3.5}
-    assert core.input_video_durations(["9", "8"], lens.get) == ([10.04166698455811, 3.5], False)
-    assert core.input_video_durations(["8", "9"], lens.get) == ([3.5, 10.04166698455811], False)
+    assert gen_params_mod.input_video_durations(["9", "8"], lens.get) == ([10.04166698455811, 3.5], False)
+    assert gen_params_mod.input_video_durations(["8", "9"], lens.get) == ([3.5, 10.04166698455811], False)
     # one unknown -> the whole list goes back to [], never a partial list
-    assert core.input_video_durations(["9", "7"], lens.get) == ([], True)
+    assert gen_params_mod.input_video_durations(["9", "7"], lens.get) == ([], True)
     # zero / negative is not a length
-    assert core.input_video_durations(["9"], {"9": 0}.get) == ([], True)
+    assert gen_params_mod.input_video_durations(["9"], {"9": 0}.get) == ([], True)
     # no video refs -> nothing to say
-    assert core.input_video_durations([], lens.get) == ([], False)
+    assert gen_params_mod.input_video_durations([], lens.get) == ([], False)
     # no lookup at all -> today's list, flagged
-    assert core.input_video_durations(["9"], None) == ([], True)
+    assert gen_params_mod.input_video_durations(["9"], None) == ([], True)
 
 
 def test_build_request_fills_input_lengths_through_the_resolver():
@@ -255,7 +256,7 @@ def test_an_unknown_length_sends_the_empty_list_and_a_receipt():
     assert req.parameters["referenceVideo"]["inputVideoDurations"] == []
     (entry,) = req.adjusted
     assert entry["field"] == "inputVideoDurations" and entry["used"] == []
-    assert entry["why"] == core.INPUT_VIDEO_UNKNOWN_WHY
+    assert entry["why"] == gen_params_mod.INPUT_VIDEO_UNKNOWN_WHY
     # never described as the higher (or the honest) price: it can be either
     assert "higher" not in entry["why"] and "honest" not in entry["why"]
 
@@ -337,7 +338,7 @@ def test_lookup_measures_the_local_file_first_then_the_catalog_then_none(tmp_pat
             _row(media_id="700000000000000002", is_video="1", video_duration="5",
                  filename="videos/missing_700000000000000002.mp4")]
     save_catalog(tmp_path / "catalog.db", rows)
-    look = core.make_video_duration_lookup(tmp_path)
+    look = gen_params_mod.make_video_duration_lookup(tmp_path)
     assert look("700000000000000001") == 10.04166698455811          # the file, unrounded
     assert look("700000000000000002") == 5.0                        # no file -> catalog
     assert look("700000000000000003") is None                       # neither
@@ -401,7 +402,7 @@ def test_cli_reference_video_says_when_a_length_is_unknown(tmp_path, monkeypatch
     core.run_reference_video(_refvid_args(tmp_path, ref_image=None,
                                           ref_video=["766390091666197257"]))
     out = capsys.readouterr().out
-    assert '"inputVideoDurations": []' in out and core.INPUT_VIDEO_UNKNOWN_WHY in out
+    assert '"inputVideoDurations": []' in out and gen_params_mod.INPUT_VIDEO_UNKNOWN_WHY in out
 
 
 # =============================================================================
@@ -409,7 +410,7 @@ def test_cli_reference_video_says_when_a_length_is_unknown(tmp_path, monkeypatch
 # =============================================================================
 @pytest.mark.parametrize("model", TBKV)
 def test_tbkv_i2v_block_carries_only_the_sites_fields(model):
-    p = core.build_shot_video_params("FLF", "x", image_ids=["1", "2"], model=model,
+    p = gen_params_mod.build_shot_video_params("FLF", "x", image_ids=["1", "2"], model=model,
                                      negative="blurry", camera_movement="zoom",
                                      generate_audio=True, use_prompt_helper=True)
     assert set(p["i2vPro"]) == {"model", "mediaId", "usePromptsHelper", "prompts", "mode",
@@ -417,7 +418,7 @@ def test_tbkv_i2v_block_carries_only_the_sites_fields(model):
 
 
 def test_negative_and_camera_still_reach_the_existing_engines():
-    i = core.build_shot_video_params("I2V", "x", image_ids=["1"], model="v4.0.1",
+    i = gen_params_mod.build_shot_video_params("I2V", "x", image_ids=["1"], model="v4.0.1",
                                      negative="blurry", camera_movement="zoom")["i2vPro"]
     assert i["negativePrompts"] == "blurry" and i["cameraMovement"] == "zoom"
 
@@ -479,10 +480,10 @@ def test_cli_generate_video_names_the_drops_before_a_confirmed_submit(tmp_path, 
 @pytest.mark.parametrize("model", TBKV)
 def test_video_references_are_refused_on_tbkv(model):
     with pytest.raises(core.PixAIError, match="takes no video references"):
-        core.build_shot_video_params("R2V", "@image1 @video1", image_ids=["1"],
+        gen_params_mod.build_shot_video_params("R2V", "@image1 @video1", image_ids=["1"],
                                      video_ids=["9"], model=model)
     # images + audio are fine
-    p = core.build_shot_video_params("R2V", "@image1 @audio1", image_ids=["1"],
+    p = gen_params_mod.build_shot_video_params("R2V", "@image1 @audio1", image_ids=["1"],
                                      audio_ids=["7"], model=model)
     assert p["referenceVideo"]["referenceAudioMediaIds"] == ["7"]
 

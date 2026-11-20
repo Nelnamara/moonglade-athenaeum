@@ -24,6 +24,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gallery
+from moonglade import gen_params as gen_params_mod
 from moonglade import models as models_mod
 from moonglade.gallery import load_catalog
 from moonglade.scan import DELETED_DIRNAME
@@ -435,7 +436,7 @@ class TestM17UnknownEditModel:
                                                                       edit_task_network):
         """The two models this app knows are still named locally -- no round trip, and the
         label a user already sees on those rows does not change."""
-        known = core.EDIT_MODELS["reference-pro"]["model_id"]
+        known = gen_params_mod.EDIT_MODELS["reference-pro"]["model_id"]
         asked = edit_task_network(_edit_task(known), "should not be called")
         row = _run_edit(tmp_path)
         assert asked == []

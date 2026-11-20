@@ -16,6 +16,7 @@ from moonglade import branding as branding_mod
 from moonglade import container as _mc
 from moonglade import contest_sync as contest_sync_mod
 from moonglade import gallery
+from moonglade import gen_params as gen_params_mod
 from moonglade import health as health_mod
 from moonglade import migrate as moonglade_migrate
 from moonglade import mirror as mirror_mod
@@ -1331,5 +1332,5 @@ def _video_retirement_clock_pinned(monkeypatch):
     as an ordinary engine must mean the same thing on any date, so the clock reads a day before the
     cut; the retirement tests inject their own instant on either side."""
     import datetime
-    monkeypatch.setattr(core, "_video_clock", lambda: datetime.datetime(
+    monkeypatch.setattr(gen_params_mod, "_video_clock", lambda: datetime.datetime(
         2026, 11, 18, 12, 0, tzinfo=datetime.timezone.utc))

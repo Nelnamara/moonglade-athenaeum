@@ -15,6 +15,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import cards as cards_mod
+from moonglade import gen_params as gen_params_mod
 from moonglade import models as models_mod
 from moonglade import pricing as pricing_mod
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
@@ -43,59 +44,59 @@ UPSCALE_KEYS = ("enlarge", "enlargeModel", "upscale", "upscaleDenoisingStrength"
 def test_output_dims_match_the_dialog_the_slider_drives():
     """Their own dialog labelled a 1400x784 source '1952x1096' at Hires 1.4 and
     '2656x1488' at enlarge 1.9 -- the multiple-of-8 snap SD needs, floored."""
-    assert core.upscale_output_dims(1400, 784, 1.4) == (1952, 1096)
-    assert core.upscale_output_dims(1400, 784, 1.9) == (2656, 1488)
-    assert core.upscale_output_dims(1400, 784, 1.0) == (1400, 784)   # 1.0 = identity
+    assert gen_params_mod.upscale_output_dims(1400, 784, 1.4) == (1952, 1096)
+    assert gen_params_mod.upscale_output_dims(1400, 784, 1.9) == (2656, 1488)
+    assert gen_params_mod.upscale_output_dims(1400, 784, 1.0) == (1400, 784)   # 1.0 = identity
 
 
 def test_max_ratio_reproduces_both_measured_hires_sliders():
     """Two real sliders, same mode, DIFFERENT maxima -- which is the whole reason this
     is computed instead of hardcoded."""
-    assert core.max_upscale_ratio(768, 1280, "upscale") == 1.5
-    assert core.max_upscale_ratio(1400, 784, "upscale") == 1.4
+    assert gen_params_mod.max_upscale_ratio(768, 1280, "upscale") == 1.5
+    assert gen_params_mod.max_upscale_ratio(1400, 784, "upscale") == 1.4
 
 
 def test_max_ratio_reproduces_the_measured_enlarge_slider():
-    assert core.max_upscale_ratio(1400, 784, "enlarge") == 1.9
+    assert gen_params_mod.max_upscale_ratio(1400, 784, "enlarge") == 1.9
 
 
 def test_max_ratio_is_derived_from_the_source_size():
     # a small source can go much further than a large one in the SAME mode; a source
     # already past the ceiling cannot be upscaled at all.
-    assert core.max_upscale_ratio(512, 512, "upscale") > core.max_upscale_ratio(1400, 784, "upscale")
-    assert core.max_upscale_ratio(2048, 2048, "upscale") == 1.0
-    assert core.max_upscale_ratio(3000, 3000, "enlarge") == 1.0
+    assert gen_params_mod.max_upscale_ratio(512, 512, "upscale") > gen_params_mod.max_upscale_ratio(1400, 784, "upscale")
+    assert gen_params_mod.max_upscale_ratio(2048, 2048, "upscale") == 1.0
+    assert gen_params_mod.max_upscale_ratio(3000, 3000, "enlarge") == 1.0
 
 
 def test_max_ratio_rejects_an_unknown_mode():
     with pytest.raises(core.PixAIError):
-        core.max_upscale_ratio(512, 512, "hires")
+        gen_params_mod.max_upscale_ratio(512, 512, "hires")
 
 
 # --- the two upscale methods on the generate path ----------------------------
 
 def test_no_upscale_or_booster_keys_unless_asked():
-    p = core._gen_parameters(_gen_args())
+    p = gen_params_mod._gen_parameters(_gen_args())
     for k in UPSCALE_KEYS + ("enableADetailer", "qualityTag"):
         assert k not in p
 
 
 def test_enlarge_emits_ratio_plus_upscaler_and_nothing_else():
-    p = core._gen_parameters(_gen_args(enlarge=1.2))
+    p = gen_params_mod._gen_parameters(_gen_args(enlarge=1.2))
     assert p["enlarge"] == 1.2
-    assert p["enlargeModel"] == core.DEFAULT_ENLARGE_MODEL == "R-ESRGAN 4x+ Anime6B"
+    assert p["enlargeModel"] == gen_params_mod.DEFAULT_ENLARGE_MODEL == "R-ESRGAN 4x+ Anime6B"
     # enlarge is the plain-upscaler method: it has no denoising controls at all
     assert "upscale" not in p and "upscaleDenoisingStrength" not in p
 
 
 def test_enlarge_model_choice_is_carried_and_unknown_names_fall_back():
-    assert core._gen_parameters(_gen_args(enlarge=1.2, enlarge_model="SwinIR_4x"))["enlargeModel"] == "SwinIR_4x"
-    p = core._gen_parameters(_gen_args(enlarge=1.2, enlarge_model="Lanczos"))
-    assert p["enlargeModel"] == core.DEFAULT_ENLARGE_MODEL
+    assert gen_params_mod._gen_parameters(_gen_args(enlarge=1.2, enlarge_model="SwinIR_4x"))["enlargeModel"] == "SwinIR_4x"
+    p = gen_params_mod._gen_parameters(_gen_args(enlarge=1.2, enlarge_model="Lanczos"))
+    assert p["enlargeModel"] == gen_params_mod.DEFAULT_ENLARGE_MODEL
 
 
 def test_hires_emits_the_whole_denoising_block():
-    p = core._gen_parameters(_gen_args(upscale=1.4, width=1400, height=784))
+    p = gen_params_mod._gen_parameters(_gen_args(upscale=1.4, width=1400, height=784))
     assert p["upscale"] == 1.4
     assert p["upscaleDenoisingStrength"] == 0.6
     assert p["upscaleDenoisingSteps"] == 20        # live Hires default (was 26; probe 2026-08-25)
@@ -104,43 +105,43 @@ def test_hires_emits_the_whole_denoising_block():
 
 
 def test_hires_denoising_overrides_clamp_to_the_slider_bounds():
-    p = core._gen_parameters(_gen_args(upscale=1.2, upscale_denoising_strength=0.45,
+    p = gen_params_mod._gen_parameters(_gen_args(upscale=1.2, upscale_denoising_strength=0.45,
                                        upscale_denoising_steps=12))
     assert p["upscaleDenoisingStrength"] == 0.45 and p["upscaleDenoisingSteps"] == 12
-    hi = core._gen_parameters(_gen_args(upscale=1.2, upscale_denoising_strength=5,
+    hi = gen_params_mod._gen_parameters(_gen_args(upscale=1.2, upscale_denoising_strength=5,
                                         upscale_denoising_steps=900))
     assert hi["upscaleDenoisingStrength"] == 0.99 and hi["upscaleDenoisingSteps"] == 50
-    lo = core._gen_parameters(_gen_args(upscale=1.2, upscale_denoising_strength=0,
+    lo = gen_params_mod._gen_parameters(_gen_args(upscale=1.2, upscale_denoising_strength=0,
                                         upscale_denoising_steps=0))
     assert lo["upscaleDenoisingStrength"] == 0.01 and lo["upscaleDenoisingSteps"] == 1
 
 
 def test_the_two_methods_are_mutually_exclusive():
     with pytest.raises(core.PixAIError):
-        core._gen_parameters(_gen_args(enlarge=1.2, upscale=1.4))
+        gen_params_mod._gen_parameters(_gen_args(enlarge=1.2, upscale=1.4))
 
 
 def test_ratio_at_or_below_one_is_not_an_upscale_at_all():
     for kw in ({"enlarge": 1.0}, {"enlarge": 0.5}, {"upscale": 1.0}, {"enlarge": ""},
                {"upscale": None}):
-        p = core._gen_parameters(_gen_args(**kw))
+        p = gen_params_mod._gen_parameters(_gen_args(**kw))
         for k in UPSCALE_KEYS:
             assert k not in p, kw
 
 
 def test_ratio_is_snapped_to_the_slider_step_and_clamped_to_the_computed_max():
     # 1400x784 Hires tops out at 1.4 -- asking for 1.9 must not submit an out-of-range ratio
-    assert core._gen_parameters(_gen_args(upscale=1.9, width=1400, height=784))["upscale"] == 1.4
+    assert gen_params_mod._gen_parameters(_gen_args(upscale=1.9, width=1400, height=784))["upscale"] == 1.4
     # ...while the SAME 1.9 is legal in enlarge mode on that size
-    assert core._gen_parameters(_gen_args(enlarge=1.9, width=1400, height=784))["enlarge"] == 1.9
-    assert core._gen_parameters(_gen_args(enlarge=1.24, width=512, height=512))["enlarge"] == 1.2
+    assert gen_params_mod._gen_parameters(_gen_args(enlarge=1.9, width=1400, height=784))["enlarge"] == 1.9
+    assert gen_params_mod._gen_parameters(_gen_args(enlarge=1.24, width=512, height=512))["enlarge"] == 1.2
 
 
 def test_a_source_already_at_the_ceiling_emits_nothing_rather_than_a_1x_upscale():
     """Clamping to a 1.0 max must DROP the block, not submit `enlarge: 1.0` -- that would
     change the priced shape of a generation that gains nothing from it."""
     for kw in ({"enlarge": 1.5}, {"upscale": 1.5}):
-        p = core._gen_parameters(_gen_args(width=2048, height=2048, **kw))
+        p = gen_params_mod._gen_parameters(_gen_args(width=2048, height=2048, **kw))
         for k in UPSCALE_KEYS:
             assert k not in p, kw
 
@@ -148,15 +149,15 @@ def test_a_source_already_at_the_ceiling_emits_nothing_rather_than_a_1x_upscale(
 # --- boosters ----------------------------------------------------------------
 
 def test_face_fix_is_opt_in_and_boolean():
-    assert core._gen_parameters(_gen_args(face_fix=True))["enableADetailer"] is True
-    assert "enableADetailer" not in core._gen_parameters(_gen_args(face_fix=False))
+    assert gen_params_mod._gen_parameters(_gen_args(face_fix=True))["enableADetailer"] is True
+    assert "enableADetailer" not in gen_params_mod._gen_parameters(_gen_args(face_fix=False))
 
 
 def test_quality_tag_is_a_prefix_object():
-    p = core._gen_parameters(_gen_args(quality_tag="Masterpiece"))
+    p = gen_params_mod._gen_parameters(_gen_args(quality_tag="Masterpiece"))
     assert p["qualityTag"] == {"prefix": "Masterpiece"}
-    assert core._gen_parameters(_gen_args(quality_tag="best quality"))["qualityTag"] == {"prefix": "best quality"}
-    assert "qualityTag" not in core._gen_parameters(_gen_args(quality_tag=""))
+    assert gen_params_mod._gen_parameters(_gen_args(quality_tag="best quality"))["qualityTag"] == {"prefix": "best quality"}
+    assert "qualityTag" not in gen_params_mod._gen_parameters(_gen_args(quality_tag=""))
 
 
 # --- pricing -----------------------------------------------------------------
@@ -167,14 +168,14 @@ def test_the_priced_upscale_params_reach_task_price(monkeypatch):
     seen = {}
     monkeypatch.setattr(core, "_rest_get",
                         lambda s, path, params=None, **k: seen.update(params=params) or {"actualPrice": 3700})
-    pricing_mod.price_task(object(), core._gen_parameters(
+    pricing_mod.price_task(object(), gen_params_mod._gen_parameters(
         _gen_args(width=1400, height=784, upscale=1.4, face_fix=True)))
     q = seen["params"]
     assert q["upscale"] == 1.4 and q["upscaleDenoisingStrength"] == 0.6
     assert q["upscaleDenoisingSteps"] == 20 and q["enableADetailer"] is True
 
     seen.clear()
-    pricing_mod.price_task(object(), core._gen_parameters(
+    pricing_mod.price_task(object(), gen_params_mod._gen_parameters(
         _gen_args(width=1400, height=784, enlarge=1.9)))
     assert seen["params"]["enlarge"] == 1.9
 
@@ -193,10 +194,10 @@ def test_cli_flags_reach_the_builder(monkeypatch, tmp_path):
                                      "--face-fix", "--quality-tag",
                                      "--out", str(tmp_path)])
     core.main()
-    p = core._gen_parameters(captured["args"])
+    p = gen_params_mod._gen_parameters(captured["args"])
     assert p["upscale"] == 1.4 and p["upscaleDenoisingStrength"] == 0.5
     assert p["upscaleDenoisingSteps"] == 30 and p["enableADetailer"] is True
-    assert p["qualityTag"] == {"prefix": core.DEFAULT_QUALITY_TAG}
+    assert p["qualityTag"] == {"prefix": gen_params_mod.DEFAULT_QUALITY_TAG}
 
 
 def test_cli_enlarge_flags_reach_the_builder(monkeypatch, tmp_path):
@@ -206,7 +207,7 @@ def test_cli_enlarge_flags_reach_the_builder(monkeypatch, tmp_path):
                                      "--enlarge", "1.5", "--enlarge-model", "Lollypop",
                                      "--out", str(tmp_path)])
     core.main()
-    p = core._gen_parameters(captured["args"])
+    p = gen_params_mod._gen_parameters(captured["args"])
     assert p["enlarge"] == 1.5 and p["enlargeModel"] == "Lollypop"
 
 
@@ -216,7 +217,7 @@ def test_cli_generate_without_the_new_flags_is_unchanged(monkeypatch, tmp_path):
     monkeypatch.setattr("sys.argv", ["prog", "--generate", "--prompt", "p", "--model", "m",
                                      "--out", str(tmp_path)])
     core.main()
-    p = core._gen_parameters(captured["args"])
+    p = gen_params_mod._gen_parameters(captured["args"])
     for k in UPSCALE_KEYS + ("enableADetailer", "qualityTag"):
         assert k not in p
 
@@ -315,10 +316,10 @@ def test_upscale_constants_reach_the_client_from_core(tmp_path):
         # Two globals ship in one tag now (MG_UPSCALE then MG_LORA), so this splits on the
         # next assignment rather than the tag's end.
         payload = json.loads(blob[1].split(";window.MG_LORA=", 1)[0])
-        assert payload["enlargeModels"] == list(core.ENLARGE_MODELS)
-        assert payload["defaultEnlargeModel"] == core.DEFAULT_ENLARGE_MODEL
-        assert payload["ceiling"] == core.UPSCALE_PIXEL_CEILING
-        for name in core.ENLARGE_MODELS:
+        assert payload["enlargeModels"] == list(gen_params_mod.ENLARGE_MODELS)
+        assert payload["defaultEnlargeModel"] == gen_params_mod.DEFAULT_ENLARGE_MODEL
+        assert payload["ceiling"] == gen_params_mod.UPSCALE_PIXEL_CEILING
+        for name in gen_params_mod.ENLARGE_MODELS:
             assert name in html, name
 
 
@@ -454,7 +455,7 @@ def test_the_upscale_panel_reuses_the_generate_routes(tmp_path):
     # clamps, with nothing on screen to say the number changed.
     assert "window.MG_UPSCALE" in src
     assert "2048" not in src, "the pixel ceilings must come from the server, not be retyped"
-    for name in core.ENLARGE_MODELS:
+    for name in gen_params_mod.ENLARGE_MODELS:
         assert name not in src, name + " is retyped in the component instead of served"
     # CostBadge's real handle is setChecking()/setPrice(). An invented one (.loading()/.show())
     # is silently a no-op -- the panel renders, the price line never updates, nothing reports it.
@@ -514,16 +515,16 @@ def test_lora_weight_bounds_follow_the_base_architecture(tmp_path):
     -2..2 slider offered DiT weights PixAI rejects. The table is served from core so the
     slider and the builder cannot drift apart.
     """
-    assert core.lora_weight_range("DIT7B_MODEL") == (0.0, 1.2)
-    assert core.lora_weight_range("MMDIT26A_MODEL") == (0.0, 1.2)
-    assert core.lora_weight_range("DIT9_MODEL") == (0.0, 1.2)
-    assert core.lora_weight_range("SDXL_MODEL") == (-2.0, 2.0)
-    assert core.lora_weight_range("SD_V1_MODEL") == (-2.0, 2.0)
+    assert gen_params_mod.lora_weight_range("DIT7B_MODEL") == (0.0, 1.2)
+    assert gen_params_mod.lora_weight_range("MMDIT26A_MODEL") == (0.0, 1.2)
+    assert gen_params_mod.lora_weight_range("DIT9_MODEL") == (0.0, 1.2)
+    assert gen_params_mod.lora_weight_range("SDXL_MODEL") == (-2.0, 2.0)
+    assert gen_params_mod.lora_weight_range("SD_V1_MODEL") == (-2.0, 2.0)
     # Unknown or not-yet-picked falls back to the WIDER range, not the narrower: an unknown
     # architecture must not silently remove a capability the account has, and a weight the
     # architecture refuses comes back as a refused submit, which costs nothing.
-    assert core.lora_weight_range("") == (-2.0, 2.0)
-    assert core.lora_weight_range("SOMETHING_NEW") == (-2.0, 2.0)
+    assert gen_params_mod.lora_weight_range("") == (-2.0, 2.0)
+    assert gen_params_mod.lora_weight_range("SOMETHING_NEW") == (-2.0, 2.0)
 
     # 2026-07-26: the table held five architectures when the enum has twenty-five members,
     # enumerated from PixAI's own bundle. Because an unrecognised architecture falls through to
@@ -532,18 +533,18 @@ def test_lora_weight_bounds_follow_the_base_architecture(tmp_path):
     # DIT7_MODEL is the one that mattered: it is what their base-model picker actually SENDS for
     # "DiT.1" (measured off a live request), and only DIT7B_MODEL was listed, so the commonest
     # DiT case was very likely already wrong.
-    assert core.lora_weight_range("DIT7_MODEL") == (0.0, 1.2)
+    assert gen_params_mod.lora_weight_range("DIT7_MODEL") == (0.0, 1.2)
     # DiT.3, which had no entry at all -- its token was unknown to this project until today.
-    assert core.lora_weight_range("MMDIT26B_MODEL") == (0.0, 1.2)
+    assert gen_params_mod.lora_weight_range("MMDIT26B_MODEL") == (0.0, 1.2)
     # A user-TRAINED DiT.2, which is what the owner's own LoRAs are.
-    assert core.lora_weight_range("USER_DIT26A_MODEL") == (0.0, 1.2)
+    assert gen_params_mod.lora_weight_range("USER_DIT26A_MODEL") == (0.0, 1.2)
     for variant in ("DIT7A_MODEL", "DIT7C_MODEL", "DIT7D_MODEL"):
-        assert core.lora_weight_range(variant) == (0.0, 1.2), variant
+        assert gen_params_mod.lora_weight_range(variant) == (0.0, 1.2), variant
 
     # Every DiT-family member the table knows about must be 0..1.2. Guards the real failure mode:
     # someone adds a new DiT token to the browse whitelist and forgets the range, which is
     # silent -- it just widens a slider.
-    for arch, rng in core.LORA_WEIGHT_RANGES.items():
+    for arch, rng in gen_params_mod.LORA_WEIGHT_RANGES.items():
         if "DIT" in arch:
             assert rng == (0.0, 1.2), "{} is a DiT architecture but ranges {}".format(arch, rng)
         else:
@@ -552,9 +553,9 @@ def test_lora_weight_bounds_follow_the_base_architecture(tmp_path):
     # DELIBERATELY unmapped: the owner's ranges covered DiT.1/DiT.2/Community DiT/SD1.5/SDXL and
     # said nothing about these two. They must keep falling through to the widest range rather
     # than being guessed at, since narrowing a slider on a guess removes a real capability.
-    assert "SD3_MEDIUM_MODEL" not in core.LORA_WEIGHT_RANGES
-    assert "Z_IMAGE_V1_MODEL" not in core.LORA_WEIGHT_RANGES
-    assert core.lora_weight_range("SD3_MEDIUM_MODEL") == (-2.0, 2.0)
+    assert "SD3_MEDIUM_MODEL" not in gen_params_mod.LORA_WEIGHT_RANGES
+    assert "Z_IMAGE_V1_MODEL" not in gen_params_mod.LORA_WEIGHT_RANGES
+    assert gen_params_mod.lora_weight_range("SD3_MEDIUM_MODEL") == (-2.0, 2.0)
 
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
@@ -569,8 +570,8 @@ def test_core_clamps_the_lora_weight_to_pixais_bounds():
     """The last place before the submit. A value outside PixAI's own range is a rejected
     generation, not a stronger effect, so it is clamped here the same way the upscale ratio
     is -- and NOT clamped at 0, which would silently discard a legal negative weight."""
-    assert (core.LORA_WEIGHT_MIN, core.LORA_WEIGHT_MAX) == (-2.0, 2.0)
-    m, lst = core._lora_params([("v1", -0.8), ("v2", 5), ("v3", -9), ("v4", "0.55")])
+    assert (gen_params_mod.LORA_WEIGHT_MIN, gen_params_mod.LORA_WEIGHT_MAX) == (-2.0, 2.0)
+    m, lst = gen_params_mod._lora_params([("v1", -0.8), ("v2", 5), ("v3", -9), ("v4", "0.55")])
     assert m["v1"] == -0.8, "a legal negative weight was clamped away"
     assert m["v2"] == 2.0 and m["v3"] == -2.0, "out-of-range weights must clamp to the bounds"
     assert m["v4"] == 0.55
@@ -648,14 +649,14 @@ def test_upscale_works_without_a_recorded_model(monkeypatch, tmp_path, pixai):
                         lambda _s, params: seen.setdefault("params", params) and "t1" or "t1")
     cli = login_client(tmp_path)
     r = cli.post("/api/generate", json={
-        "version_id": core.UPSCALE_FALLBACK_VERSION_ID,
+        "version_id": gen_params_mod.UPSCALE_FALLBACK_VERSION_ID,
         "prompt": "x", "width": 1959, "height": 1097, "count": 1,
-        "enlarge": 1.4, "enlarge_model": core.DEFAULT_ENLARGE_MODEL,
+        "enlarge": 1.4, "enlarge_model": gen_params_mod.DEFAULT_ENLARGE_MODEL,
         "ref_media_id": "u1", "ref_strength": 0.55,
     })
     d = r.get_json()
     assert r.status_code == 200 and not d.get("error"), d
-    assert seen["params"]["modelId"] == core.UPSCALE_FALLBACK_VERSION_ID
+    assert seen["params"]["modelId"] == gen_params_mod.UPSCALE_FALLBACK_VERSION_ID
     assert seen["params"]["enlarge"] == 1.4
 
 
@@ -680,7 +681,7 @@ def test_upscale_panel_offers_the_fallback_instead_of_blocking():
     # the price rides inside the button (look pick round 2, topic 1 B): <SpendButton> is dim on
     # the same gate, and while busy
     assert "disabled={!canGo} busy={busy}" in src
-    assert core.UPSCALE_FALLBACK_VERSION_ID not in src, \
+    assert gen_params_mod.UPSCALE_FALLBACK_VERSION_ID not in src, \
         "the id must come from window.MG_UPSCALE, not a second copy in the component"
     assert "fallbackVersion()" in src
 
@@ -766,7 +767,7 @@ def test_generate_rejects_a_version_id_sent_as_a_model_id(monkeypatch, tmp_path,
     monkeypatch.setattr(core, "submit_generation", lambda *a, **k: "nope")
     cli = login_client(tmp_path)
     r = cli.post("/api/generate", json={
-        "model_id": core.UPSCALE_FALLBACK_VERSION_ID, "prompt": "x",
+        "model_id": gen_params_mod.UPSCALE_FALLBACK_VERSION_ID, "prompt": "x",
         "width": 900, "height": 600, "count": 1, "ref_media_id": "u2",
     })
     assert r.status_code == 400 and "pick a model first" in (r.get_json() or {}).get("error", "")

@@ -20,6 +20,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import cards as cards_mod
+from moonglade import gen_params as gen_params_mod
 from moonglade import mirror as mirror_mod
 from moonglade import models as models_mod
 from moonglade import pricing as pricing_mod
@@ -121,7 +122,7 @@ def test_price_and_submit_read_the_same_parameters_object(
         priced, = road["priced"]
         assert priced is req.parameters
         assert set(priced) == {"mediaId", "boxes"}
-        assert priced == core.build_fixer_body(sent_media, sent_boxes), (
+        assert priced == gen_params_mod.build_fixer_body(sent_media, sent_boxes), (
             "the body submit_fixer builds from what it was handed is not the priced body")
         assert priced["boxes"][0]["tag"] == "hand"
         return

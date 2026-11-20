@@ -25,6 +25,7 @@ import requests
 from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gallery as g
+from moonglade import gen_params as gen_params_mod
 from moonglade import mirror as mirror_mod
 from moonglade import models as models_mod
 from moonglade import pixai_client as pc
@@ -339,7 +340,7 @@ def test_run_generate_exits_with_the_honest_sentence(tmp_path, monkeypatch, caps
     monkeypatch.setattr(models_mod, "_gate_image_params", lambda s, p: (p, []))
     monkeypatch.setattr(models_mod, "_gate_params_for_model", lambda s, p: p)
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "_gen_parameters", lambda args: {"modelId": V, "prompts": "x"})
+    monkeypatch.setattr(gen_params_mod, "_gen_parameters", lambda args: {"modelId": V, "prompts": "x"})
     import argparse
     args = argparse.Namespace(out=str(tmp_path), confirm=True, task_id="", token=None,
                               poll_timeout=1)

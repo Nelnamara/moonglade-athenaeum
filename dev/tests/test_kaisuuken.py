@@ -9,6 +9,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import cards as cards_mod
+from moonglade import gen_params as gen_params_mod
 from moonglade import mirror as mirror_mod
 from moonglade import pricing as pricing_mod
 
@@ -104,7 +105,7 @@ def test_match_enrich_prefers_model_matching_card(monkeypatch, pixai):
     targets the Edit Pro model -- so an edit spends an Edit card, not a Reference one."""
     pixai.on("/kaisuuken/check", _TWO_CARDS)
     monkeypatch.setattr(cards_mod, "list_kaisuukens", lambda s: _SUMMARY)
-    edit_params = core.build_chat_edit_parameters("x", ["10"])   # chat.modelId = Edit Pro
+    edit_params = gen_params_mod.build_chat_edit_parameters("x", ["10"])   # chat.modelId = Edit Pro
     best = cards_mod.match_kaisuuken(pixai, edit_params, enrich=True)
     assert best["id"] == "edit-tkt" and best["templateId"] == "tpl-edit"
     assert best["name"] == "Edit Pro Only"                       # honest label data
@@ -116,7 +117,7 @@ def test_match_without_enrich_keeps_nearest_expiry(monkeypatch, pixai):
     pixai.on("/kaisuuken/check", _TWO_CARDS)
     monkeypatch.setattr(cards_mod, "list_kaisuukens",
                         lambda s: (_ for _ in ()).throw(AssertionError("must not fetch summary")))
-    best = cards_mod.match_kaisuuken(pixai, core.build_chat_edit_parameters("x", ["10"]))
+    best = cards_mod.match_kaisuuken(pixai, gen_params_mod.build_chat_edit_parameters("x", ["10"]))
     assert best["id"] == "ref-tkt"                               # sooner expiry wins, model-blind
     assert "name" not in best
 
@@ -279,17 +280,17 @@ def test_run_cards_lists_with_total(monkeypatch, capsys, pixai):
 # ---- kaisuukenId injection stays as an optional explicit override in the builders ----
 
 def test_video_params_inject_kaisuuken():
-    p = core.build_video_parameters("m", media_id="1", kaisuuken_id="card-9")
+    p = gen_params_mod.build_video_parameters("m", media_id="1", kaisuuken_id="card-9")
     assert p["kaisuukenId"] == "card-9" and "i2vPro" in p
 
 
 def test_edit_params_inject_kaisuuken():
-    p = core.build_chat_edit_parameters("x", ["10"], kaisuuken_id="card-7")
+    p = gen_params_mod.build_chat_edit_parameters("x", ["10"], kaisuuken_id="card-7")
     assert p["kaisuukenId"] == "card-7" and "chat" in p
 
 
 def test_params_no_kaisuuken_by_default():
-    assert "kaisuukenId" not in core.build_video_parameters("m", media_id="1")
+    assert "kaisuukenId" not in gen_params_mod.build_video_parameters("m", media_id="1")
 
 
 # ---- list_kaisuuken_logs: GET /v2/kaisuuken/logs -- the per-redemption "paper trail",
@@ -460,7 +461,7 @@ def test_run_card_history_all_prints_type_catalog(monkeypatch, capsys, pixai):
     assert res == {"templates": 2}
     assert "Tsubaki.2 Only" in out and "Edit Pro Only" in out
     assert "consumed=16" in out and "refunded=1" in out
-    assert "kaisuukenId" not in core.build_chat_edit_parameters("x", ["10"])
+    assert "kaisuukenId" not in gen_params_mod.build_chat_edit_parameters("x", ["10"])
 
 
 # ---- issue #15: multi-ticket cards. /v2/kaisuuken/check `version: 2` is the site's own

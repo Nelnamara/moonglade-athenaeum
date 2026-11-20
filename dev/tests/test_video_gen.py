@@ -8,6 +8,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import cards as cards_mod
+from moonglade import gen_params as gen_params_mod
 from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
 
@@ -17,7 +18,7 @@ def test_build_video_parameters_matches_real_submit():
     # top-level modelId (REQUIRED -- resolved from the .model name) + i2vPro block + privacy
     # flags. Omitting modelId was the "video card won't tap" bug. The new-gen platform
     # (2026-08-25) added a top-level `channel` string alongside `isPrivate` -- both are sent.
-    p = core.build_video_parameters(
+    p = gen_params_mod.build_video_parameters(
         "", media_id="738340964113285867", model="v4.0.1",
         tail_media_id="738340489931639723", duration=5, mode="professional",
         generate_audio=True,
@@ -44,12 +45,12 @@ def test_build_video_parameters_matches_real_submit():
 
 
 def test_single_source_image_omits_tail():
-    p = core.build_video_parameters("motion", media_id="100")
+    p = gen_params_mod.build_video_parameters("motion", media_id="100")
     i2v = p["i2vPro"]
     assert p["channel"] == "normal" and p["isPrivate"] is False   # new-gen switch + legacy
     assert i2v["mediaId"] == "100"
     assert "tailMediaId" not in i2v                 # no tail => single-source i2v
-    assert i2v["model"] == core.DEFAULT_VIDEO_MODEL
+    assert i2v["model"] == gen_params_mod.DEFAULT_VIDEO_MODEL
     assert p["modelId"] == "2003969750675682808"    # DEFAULT (v4.0.1) resolved to its numeric id
 
 
@@ -58,16 +59,16 @@ def test_gen_video_parameters_from_args():
                         model="", video_model="", vmode="basic", audio=False,
                         audio_language="english", negative="",
                         video_prompt_helper=False, params_json="")
-    p = core._gen_video_parameters(a)
+    p = gen_params_mod._gen_video_parameters(a)
     i2v = p["i2vPro"]
     assert i2v["mediaId"] == "55" and i2v["tailMediaId"] == "56"
     assert i2v["duration"] == "10" and i2v["mode"] == "basic"
-    assert i2v["model"] == core.DEFAULT_VIDEO_MODEL   # empty model -> default
+    assert i2v["model"] == gen_params_mod.DEFAULT_VIDEO_MODEL   # empty model -> default
 
 
 def test_params_json_override():
     a = SimpleNamespace(params_json='{"type":"x"}')
-    assert core._gen_video_parameters(a) == {"type": "x"}
+    assert gen_params_mod._gen_video_parameters(a) == {"type": "x"}
 
 
 def test_gen_video_parameters_snaps_duration():
@@ -79,7 +80,7 @@ def test_gen_video_parameters_snaps_duration():
                         model="", video_model="", vmode="basic", audio=False,
                         audio_language="english", negative="",
                         video_prompt_helper=False, params_json="")
-    p = core._gen_video_parameters(a)
+    p = gen_params_mod._gen_video_parameters(a)
     assert p["i2vPro"]["duration"] == "6"
 
 
@@ -107,32 +108,32 @@ def test_generate_video_requires_a_source_image(tmp_path):
 # ---- banked enums: camera movement + channel (2026-07-02) ----
 
 def test_camera_movement_included_when_set():
-    p = core.build_video_parameters("p", media_id="1", camera_movement="zoom")
+    p = gen_params_mod.build_video_parameters("p", media_id="1", camera_movement="zoom")
     assert p["i2vPro"]["cameraMovement"] == "zoom"
 
 
 def test_camera_movement_omitted_by_default_and_on_unset():
-    assert "cameraMovement" not in core.build_video_parameters("p", media_id="1")["i2vPro"]
-    assert "cameraMovement" not in core.build_video_parameters(
+    assert "cameraMovement" not in gen_params_mod.build_video_parameters("p", media_id="1")["i2vPro"]
+    assert "cameraMovement" not in gen_params_mod.build_video_parameters(
         "p", media_id="1", camera_movement="unset")["i2vPro"]
 
 
 def test_is_private_sets_the_channel_and_legacy_flag():
     # New-gen platform (2026-08-25): visibility is now the top-level `channel` string, sent
     # ALONGSIDE the legacy `isPrivate` boolean (server honors whichever -> no privacy regress).
-    priv = core.build_video_parameters("p", media_id="1", is_private=True)
+    priv = gen_params_mod.build_video_parameters("p", media_id="1", is_private=True)
     assert priv["channel"] == "private" and priv["isPrivate"] is True
 
 
 def test_shot_params_carry_correct_modelid():
     # i2v: the numeric modelId must ride along, resolved per model (was missing entirely --
     # PixAI logged "Unknown or removed model" and no card matched without it).
-    assert core.build_shot_video_params(
+    assert gen_params_mod.build_shot_video_params(
         "I2V", "x", image_ids=["1"], model="v4.0.1")["modelId"] == "2003969750675682808"
-    assert core.build_shot_video_params(
+    assert gen_params_mod.build_shot_video_params(
         "I2V", "x", image_ids=["1"], model="v4.0")["modelId"] == "2003968021137101826"
     # R2V: the reference path no longer hardcodes the Lite id -- full V4.0 gets the full id.
-    assert core.build_shot_video_params(
+    assert gen_params_mod.build_shot_video_params(
         "R2V", "@image1", image_ids=["1"], model="v4.0")["modelId"] == "2003968021137101826"
 
 
@@ -226,7 +227,7 @@ class TestOutputsOrRaise:
 # ---- referenceVideo (multi-image/video/audio) -- pinned to the real submit (2026-07-02) ----
 
 def test_build_reference_video_matches_real_submit():
-    p = core.build_reference_video_parameters(
+    p = gen_params_mod.build_reference_video_parameters(
         "make @image1 dance", image_media_ids=["10", "20"],
         model="v4.0.1", duration=15, mode="professional",
         generate_audio=True, audio_language="english")
@@ -240,12 +241,12 @@ def test_build_reference_video_matches_real_submit():
     # modelId is now the model's OWN id (video_model_id), no longer a v4.0.1 default applied
     # to every engine -- which is still exactly REFVIDEO_MODEL_ID for the v4.0.1 submit this
     # test pins, so the default engine's wire is byte-identical.
-    assert p["modelId"] == core.video_model_id("v4.0.1") == core.REFVIDEO_MODEL_ID
+    assert p["modelId"] == gen_params_mod.video_model_id("v4.0.1") == gen_params_mod.REFVIDEO_MODEL_ID
     assert "referenceVideo" in p and "i2vPro" not in p   # distinct from i2v
 
 
 def test_reference_video_refs_private_and_card():
-    p = core.build_reference_video_parameters(
+    p = gen_params_mod.build_reference_video_parameters(
         "x", image_media_ids=["1"], video_media_ids=["v1"], audio_media_ids=["a1"],
         is_private=True, kaisuuken_id="card9")
     rv = p["referenceVideo"]
@@ -299,8 +300,8 @@ def test_reference_video_builder_default_matches_i2v_sibling():
     agree with its i2v sibling (build_video_parameters, default 5) -- it used to be 15,
     a real 3x cost divergence (1 V4.0 card at 5s vs 3 at 15s) baked into the source."""
     import inspect
-    assert inspect.signature(core.build_video_parameters).parameters["duration"].default == 5
-    assert inspect.signature(core.build_reference_video_parameters).parameters["duration"].default == 5
+    assert inspect.signature(gen_params_mod.build_video_parameters).parameters["duration"].default == 5
+    assert inspect.signature(gen_params_mod.build_reference_video_parameters).parameters["duration"].default == 5
 
 
 def test_reference_video_argparse_default_is_5(monkeypatch, tmp_path):
@@ -332,20 +333,20 @@ def test_reference_video_falls_back_to_5_not_15(tmp_path, capsys):
 # ---- shot -> video params (the PixAI provider adapter for the Loom) ----
 
 def test_snap_video_duration():
-    assert core._snap_video_duration(4) == 5
-    assert core._snap_video_duration(12) == 10
-    assert core._snap_video_duration(15) == 15
-    assert core._snap_video_duration("bad") == 5
+    assert gen_params_mod._snap_video_duration(4) == 5
+    assert gen_params_mod._snap_video_duration(12) == 10
+    assert gen_params_mod._snap_video_duration(15) == 15
+    assert gen_params_mod._snap_video_duration("bad") == 5
 
 
 def test_build_shot_video_params_needs_refs():
     import pytest
     with pytest.raises(core.PixAIError):
-        core.build_shot_video_params("R2V", "x")
+        gen_params_mod.build_shot_video_params("R2V", "x")
 
 
 def test_build_shot_video_params_model_and_audio_passthrough():
-    p = core.build_shot_video_params("I2V", "sing", image_ids=["1"], duration=5,
+    p = gen_params_mod.build_shot_video_params("I2V", "sing", image_ids=["1"], duration=5,
                                      model="v3.2", generate_audio=True,
                                      audio_language="japanese", camera_movement="zoom",
                                      quality="basic")
@@ -353,40 +354,40 @@ def test_build_shot_video_params_model_and_audio_passthrough():
     assert i2v["model"] == "v3.2" and i2v["generateAudio"] is True
     assert i2v["audioLanguage"] == "japanese"
     assert i2v["cameraMovement"] == "zoom" and i2v["mode"] == "basic"
-    r = core.build_shot_video_params("R2V", "@image1", image_ids=["1"], model="v4.0")
+    r = gen_params_mod.build_shot_video_params("R2V", "@image1", image_ids=["1"], model="v4.0")
     assert r["referenceVideo"]["model"] == "v4.0"
     # empty model falls back to the default on every path
-    d = core.build_shot_video_params("I2V", "x", image_ids=["1"], model="")
-    assert d["i2vPro"]["model"] == core.DEFAULT_VIDEO_MODEL
+    d = gen_params_mod.build_shot_video_params("I2V", "x", image_ids=["1"], model="")
+    assert d["i2vPro"]["model"] == gen_params_mod.DEFAULT_VIDEO_MODEL
 
 
 def test_build_shot_video_params_negative_and_channel():
     # negative + is_private reach i2vPro (I2V/FLF) -- both fields exist on that submit shape.
-    p = core.build_shot_video_params("I2V", "x", image_ids=["1"], negative="blurry, watermark",
+    p = gen_params_mod.build_shot_video_params("I2V", "x", image_ids=["1"], negative="blurry, watermark",
                                      is_private=True)
     assert p["i2vPro"]["negativePrompts"] == "blurry, watermark"
     # is_private threads through the adapter to BOTH the new channel string and legacy bool.
     assert p["channel"] == "private" and p["isPrivate"] is True
-    f = core.build_shot_video_params("FLF", "x", image_ids=["1", "2"], negative="extra fingers")
+    f = gen_params_mod.build_shot_video_params("FLF", "x", image_ids=["1", "2"], negative="extra fingers")
     assert f["i2vPro"]["negativePrompts"] == "extra fingers"
     # default is_private stays False (today's de-facto Normal-channel behavior, unchanged)
-    default = core.build_shot_video_params("I2V", "x", image_ids=["1"])
+    default = gen_params_mod.build_shot_video_params("I2V", "x", image_ids=["1"])
     assert default["channel"] == "normal" and default["isPrivate"] is False
 
 
 def test_build_shot_video_params_r2v_channel_but_no_negative_field():
     # referenceVideo DOES carry the channel string + legacy isPrivate...
-    r = core.build_shot_video_params("R2V", "@image1", image_ids=["1"], is_private=True)
+    r = gen_params_mod.build_shot_video_params("R2V", "@image1", image_ids=["1"], is_private=True)
     assert r["channel"] == "private" and r["isPrivate"] is True
     # ...but has no negativePrompts field at all -- a genuine PixAI API gap (the captured
     # referenceVideo submit shape has never had one), not a bug: negative is silently
     # dropped for R2V rather than invented into a field PixAI doesn't accept.
-    r2 = core.build_shot_video_params("R2V", "@image1", image_ids=["1"], negative="blurry")
+    r2 = gen_params_mod.build_shot_video_params("R2V", "@image1", image_ids=["1"], negative="blurry")
     assert "negativePrompts" not in r2["referenceVideo"]
 
 
 def test_build_shot_video_params_r2v_video_and_audio_ids_flow_through():
-    p = core.build_shot_video_params("R2V", "@video1 @audio1", video_ids=["9"], audio_ids=["7"])
+    p = gen_params_mod.build_shot_video_params("R2V", "@video1 @audio1", video_ids=["9"], audio_ids=["7"])
     rv = p["referenceVideo"]
     assert rv["referenceVideoMediaIds"] == ["9"] and rv["referenceAudioMediaIds"] == ["7"]
     assert rv["referenceImageMediaIds"] == []
@@ -676,7 +677,7 @@ def test_local_video_reference_uploads_as_VIDEO(monkeypatch):
     seen = []
     monkeypatch.setattr(core, "upload_media",
                         lambda s, p, mt="IMAGE": seen.append(mt) or "up-1")
-    monkeypatch.setattr(core, "_is_local_source", lambda s: str(s).startswith("/local"))
+    monkeypatch.setattr(gen_params_mod, "_is_local_source", lambda s: str(s).startswith("/local"))
 
     assert core._resolve_refs(object(), ["/local/a.png"], "IMAGE") == ["up-1"]
     assert core._resolve_refs(object(), ["/local/b.mp4"], "VIDEO") == ["up-1"]
@@ -712,32 +713,32 @@ def test_15s_snaps_down_for_models_that_cannot_render_it():
     instant decline with no explanation. Found while diagnosing a V3.0 Lite failure on
     2026-07-26 (which turned out to be a different cause; this one was sitting right beside it)."""
     for model in ("v3.0.2", "v3.0", "v3.2", "v3.0.1", "v2.7"):
-        assert core._snap_video_duration(15, model) == 10, model
-        assert core._snap_video_duration(14, model) == 10, model     # snaps to 15, then capped
+        assert gen_params_mod._snap_video_duration(15, model) == 10, model
+        assert gen_params_mod._snap_video_duration(14, model) == 10, model     # snaps to 15, then capped
 
 
 def test_15s_is_allowed_for_the_v4_family():
-    for model in core.VIDEO_15S_MODELS:
-        assert core._snap_video_duration(15, model) == 15, model
+    for model in gen_params_mod.VIDEO_15S_MODELS:
+        assert gen_params_mod._snap_video_duration(15, model) == 15, model
     # Widened ON PURPOSE (SCOPE_2026-09-26 V3): both Tsubaki engines render 15 s -- the
     # owner's two tbkv tasks are 15 s on the wire, and their panel offers 5/10/15.
-    assert set(core.VIDEO_15S_MODELS) == {"v4.0", "v4.0.1", "tbkv1.0", "tbkv1.0.1"}
+    assert set(gen_params_mod.VIDEO_15S_MODELS) == {"v4.0", "v4.0.1", "tbkv1.0", "tbkv1.0.1"}
 
 
 def test_snap_without_a_model_keeps_the_original_behaviour():
     """The CLI preview path and the pre-existing tests call this model-blind. Adding the gate
     must not change what they get -- the restriction only applies when a model is named."""
-    assert core._snap_video_duration(15) == 15
-    assert core._snap_video_duration(15, "") == 15
+    assert gen_params_mod._snap_video_duration(15) == 15
+    assert gen_params_mod._snap_video_duration(15, "") == 15
 
 
 def test_the_shot_builder_applies_the_gate():
     """End to end through the builder the Loom and the gallery drawer both use, since that is
     where a real 15s request arrives."""
-    p3 = core.build_shot_video_params("I2V", "x", image_ids=["1"], duration=15, model="v3.0.2")
+    p3 = gen_params_mod.build_shot_video_params("I2V", "x", image_ids=["1"], duration=15, model="v3.0.2")
     assert p3["i2vPro"]["duration"] == "10"
 
-    p4 = core.build_shot_video_params("I2V", "x", image_ids=["1"], duration=15, model="v4.0.1")
+    p4 = gen_params_mod.build_shot_video_params("I2V", "x", image_ids=["1"], duration=15, model="v4.0.1")
     assert p4["i2vPro"]["duration"] == "15"
 
 
@@ -835,16 +836,16 @@ def test_audio_fields_only_go_to_models_that_take_them():
     Widened ON PURPOSE (SCOPE_2026-09-26 V3): measured, not guessed -- both of the owner's
     tbkv tasks carry generateAudio true + audioLanguage english, and the tbkv panel has an
     audio language."""
-    assert set(core.VIDEO_AUDIO_MODELS) == {"v3.2", "v4.0", "v4.0.1", "tbkv1.0", "tbkv1.0.1"}
+    assert set(gen_params_mod.VIDEO_AUDIO_MODELS) == {"v3.2", "v4.0", "v4.0.1", "tbkv1.0", "tbkv1.0.1"}
 
-    for model in core.VIDEO_AUDIO_MODELS:
-        i2v = core.build_video_parameters("x", "1", model=model, generate_audio=True,
+    for model in gen_params_mod.VIDEO_AUDIO_MODELS:
+        i2v = gen_params_mod.build_video_parameters("x", "1", model=model, generate_audio=True,
                                          audio_language="japanese")["i2vPro"]
         assert i2v["generateAudio"] is True, model
         assert i2v["audioLanguage"] == "japanese", model
 
     for model in ("v3.0.2", "v2.7", "v3.0.1", "v3.0"):
-        i2v = core.build_video_parameters("x", "1", model=model, generate_audio=True,
+        i2v = gen_params_mod.build_video_parameters("x", "1", model=model, generate_audio=True,
                                           audio_language="english")["i2vPro"]
         assert "generateAudio" not in i2v, model + " must omit generateAudio entirely"
         assert "audioLanguage" not in i2v, model + " must omit audioLanguage entirely"
@@ -857,13 +858,13 @@ def test_video_prompt_over_the_limit_is_caught_before_submitting():
     instead of spending a round trip on a cryptic maxLength error."""
     long_prompt = "x" * 2500
     with pytest.raises(core.PixAIError) as e:
-        core.build_shot_video_params("I2V", long_prompt, image_ids=["1"], model="v4.0.1")
+        gen_params_mod.build_shot_video_params("I2V", long_prompt, image_ids=["1"], model="v4.0.1")
     msg = str(e.value)
     assert "2,500" in msg and "2,000" in msg, msg    # actual length AND the limit
     assert "500" in msg                              # how much to cut
     assert "nothing was created or charged" in msg
 
-    ok = core.build_shot_video_params("I2V", "x" * 2000, image_ids=["1"], model="v4.0.1")
+    ok = gen_params_mod.build_shot_video_params("I2V", "x" * 2000, image_ids=["1"], model="v4.0.1")
     assert ok["i2vPro"]["prompts"] == "x" * 2000     # exactly at the limit is fine
 
 
@@ -911,9 +912,9 @@ def test_mode_can_never_ride_absent_on_the_video_spend_path():
     no future caller can 'omit it to be safe' into a triple-price submit."""
     for bad in (None, "", "auto", "pro"):
         with pytest.raises(ValueError):
-            core.build_video_parameters("p", media_id="1", model="v4.0.1", mode=bad)
+            gen_params_mod.build_video_parameters("p", media_id="1", model="v4.0.1", mode=bad)
     for good in ("basic", "professional"):
-        p = core.build_video_parameters("p", media_id="1", model="v4.0.1", mode=good)
+        p = gen_params_mod.build_video_parameters("p", media_id="1", model="v4.0.1", mode=good)
         assert p["i2vPro"]["mode"] == good
 
 def test_r2v_invalid_reference_image_media_id_falls_back_to_upload(tmp_path, monkeypatch, pixai):

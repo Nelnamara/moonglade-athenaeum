@@ -16,6 +16,7 @@ import sqlite3
 import threading
 
 from moonglade import contest_wins
+from moonglade import gen_params as _gen_params
 from moonglade import paths as _paths
 
 # ---------------------------------------------------------------------------
@@ -396,13 +397,13 @@ def telemetry_metrics(out_dir, telem=None):
     try:
         from moonglade import backup as _core
         _non_emotion = set()
-        for pp in getattr(_core, "BRIDGE_ENHANCE_PRESETS", ()):
+        for pp in getattr(_gen_params, "BRIDGE_ENHANCE_PRESETS", ()):
             _k = str(pp.get("key") or "").strip()
             if _k and _k != "emotion":
                 _non_emotion.add(_k)
         _tools = sets.get("enhance_tools")
         _tools = set(_tools) if isinstance(_tools, list) else set()
-        _universe = len(getattr(_core, "ENHANCE_EMOTION_PROMPTS", ()) or ())
+        _universe = len(getattr(_gen_params, "ENHANCE_EMOTION_PROMPTS", ()) or ())
         _emotion_done = _universe > 0 and _card("enhance_emotions") >= _universe
         m["enhance_tools_complete"] = len(_tools & _non_emotion) + (1 if _emotion_done else 0)
     except Exception:

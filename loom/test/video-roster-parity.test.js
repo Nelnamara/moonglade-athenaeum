@@ -12,17 +12,17 @@ import { NUMERIC_TO_NAME, resolveEngine, videoRemixFromRow } from "../../gallery
 
 /* The Tsubaki video engines (SCOPE_2026-09-26 lane V, PROBE_2026-09-26 V01-V07).
 
-   ROSTER PARITY. The engine roster lives twice -- moonglade_backup.VIDEO_MODELS (and its per-
+   ROSTER PARITY. The engine roster lives twice -- VIDEO_MODELS in moonglade/gen_params.py (and its per-
    engine tables) on the server, the drawer's MODELS / NUMERIC_TO_NAME / MODEL_VMODES /
    MODEL_MAXDUR / MODEL_DURATIONS / MODEL_FIELDS / MODEL_REFCAPS in the browser -- and a drift is a
    spend-path bug: an engine the drawer offers but the server pairs with another model's id, a
    15 s stop the server snaps to 10, a field the drawer sends that the server drops unannounced.
-   The Python side is READ from moonglade_backup.py (no Python runtime here), the JS side is the
+   The Python side is READ from moonglade/gen_params.py (no Python runtime here), the JS side is the
    real module. Then the drawer transitions are executed, not grepped. */
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = (p) => readFileSync(path.join(here, "..", "..", p), "utf8").replace(/\r\n/g, "\n");
-const py = src("moonglade/backup.py");
+const py = src("moonglade/gen_params.py");
 
 // VIDEO_MODELS = { "name": {"model_id": "123", "label": "..."}, ... }
 function pyVideoModels() {
@@ -35,7 +35,7 @@ function pyVideoModels() {
 }
 function pyTuple(name) {
   const m = py.match(new RegExp("^" + name + " = \\(([^)]*)\\)", "m"));
-  assert.ok(m, "expected a " + name + " tuple in moonglade_backup.py");
+  assert.ok(m, "expected a " + name + " tuple in moonglade/gen_params.py");
   return [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]);
 }
 const TBKV = pyTuple("TSUBAKI_VIDEO_MODELS");

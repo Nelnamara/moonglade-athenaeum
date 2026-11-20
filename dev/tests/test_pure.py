@@ -2,6 +2,7 @@
 import pytest
 
 from moonglade import backup as core
+from moonglade import gen_params as gen_params_mod
 from moonglade import models as models_mod
 
 
@@ -346,10 +347,10 @@ def test_gen_parameters_builds_request():
     from types import SimpleNamespace
     a = SimpleNamespace(prompt="elf", negative="blurry", model="", width=768,
                         height=512, steps=20, cfg=6.5, count=2, seed=42, params_json="")
-    p = core._gen_parameters(a)
+    p = gen_params_mod._gen_parameters(a)
     assert p["prompts"] == "elf"
     assert p["negativePrompts"] == "blurry"
-    assert p["modelId"] == core.DEFAULT_GEN_MODEL   # blank model -> default
+    assert p["modelId"] == gen_params_mod.DEFAULT_GEN_MODEL   # blank model -> default
     assert p["width"] == 768 and p["height"] == 512
     assert p["samplingSteps"] == 20 and p["cfgScale"] == 6.5
     assert p["batchSize"] == 2 and p["seed"] == 42
@@ -360,39 +361,39 @@ def test_gen_parameters_priority():
     from types import SimpleNamespace
     base = dict(prompt="x", negative="", model="", width=512, height=512,
                 steps=25, cfg=7.0, count=1, seed=None, params_json="")
-    assert core._gen_parameters(SimpleNamespace(**base))["priority"] == 500
-    assert core._gen_parameters(SimpleNamespace(priority=1000, **base))["priority"] == 1000
+    assert gen_params_mod._gen_parameters(SimpleNamespace(**base))["priority"] == 500
+    assert gen_params_mod._gen_parameters(SimpleNamespace(priority=1000, **base))["priority"] == 1000
 
 
 def test_lora_params_builds_both_fields():
-    m, l = core._lora_params(["1686550608832816741:0.7", ("X", 0.5)])
+    m, l = gen_params_mod._lora_params(["1686550608832816741:0.7", ("X", 0.5)])
     assert m == {"1686550608832816741": 0.7, "X": 0.5}
     assert {"weight": 0.7, "versionId": "1686550608832816741"} in l
     assert {"weight": 0.5, "versionId": "X"} in l
-    assert core._lora_params(None) == ({}, [])
-    assert core._lora_params(["abc:notanum"])[0] == {"abc": 0.7}   # bad weight -> 0.7
+    assert gen_params_mod._lora_params(None) == ({}, [])
+    assert gen_params_mod._lora_params(["abc:notanum"])[0] == {"abc": 0.7}   # bad weight -> 0.7
 
 
 def test_gen_parameters_with_lora():
     from types import SimpleNamespace
     base = dict(prompt="x", negative="", model="", width=512, height=512,
                 steps=25, cfg=7.0, count=1, seed=None, params_json="")
-    p = core._gen_parameters(SimpleNamespace(lora=["VER:0.6"], **base))
+    p = gen_params_mod._gen_parameters(SimpleNamespace(lora=["VER:0.6"], **base))
     assert p["lora"] == {"VER": 0.6}
     assert p["loraParameters"] == [{"weight": 0.6, "versionId": "VER"}]
-    assert "lora" not in core._gen_parameters(SimpleNamespace(**base))   # none -> absent
+    assert "lora" not in gen_params_mod._gen_parameters(SimpleNamespace(**base))   # none -> absent
 
 
 def test_gen_parameters_mode_helper_natural():
     from types import SimpleNamespace
     base = dict(prompt="elf", negative="", model="", width=512, height=512,
                 steps=25, cfg=7.0, count=1, seed=None, params_json="")
-    p = core._gen_parameters(SimpleNamespace(**base))
+    p = gen_params_mod._gen_parameters(SimpleNamespace(**base))
     assert "inferenceProfile" not in p                  # auto default omits it (safe)
     assert p["naturalPrompts"] == "elf"                 # not skipped
     assert p["promptHelper"]["userWantToEnable"] is True
-    assert "inferenceProfile" not in core._gen_parameters(SimpleNamespace(mode="auto", **base))
-    p2 = core._gen_parameters(SimpleNamespace(mode="ultra", prompt_helper=False, **base))
+    assert "inferenceProfile" not in gen_params_mod._gen_parameters(SimpleNamespace(mode="auto", **base))
+    p2 = gen_params_mod._gen_parameters(SimpleNamespace(mode="ultra", prompt_helper=False, **base))
     assert p2["inferenceProfile"] == "ultra"            # only sent when explicitly chosen
     assert p2["promptHelper"]["userWantToEnable"] is False
 
@@ -417,12 +418,12 @@ def test_gen_parameters_omits_optionals_and_honors_json():
     from types import SimpleNamespace
     a = SimpleNamespace(prompt="cat", negative="", model="M9", width=512, height=512,
                         steps=25, cfg=7.0, count=1, seed=None, params_json="")
-    p = core._gen_parameters(a)
+    p = gen_params_mod._gen_parameters(a)
     assert "negativePrompts" not in p and "seed" not in p
     assert p["modelId"] == "M9"
     # params_json overrides everything
     a.params_json = '{"prompts":"raw","custom":1}'
-    assert core._gen_parameters(a) == {"prompts": "raw", "custom": 1}
+    assert gen_params_mod._gen_parameters(a) == {"prompts": "raw", "custom": 1}
 
 
 def test_extract_full_meta_partial():

@@ -13,6 +13,7 @@ one of model_id's own real versions (validated server-side against core.list_mod
 network, no spend (everything mocked)."""
 from moonglade import backup as core
 from moonglade import cards as cards_mod
+from moonglade import gen_params as gen_params_mod
 from moonglade import models as models_mod
 
 from tests.conftest import login_client
@@ -26,7 +27,7 @@ def test_generate_reresolves_current_version_over_stale_client_version(tmp_path,
     monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: [{"id": RESOLVED, "modelId": "M1"}])
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     seen = {}
-    monkeypatch.setattr(core, "_gen_parameters",
+    monkeypatch.setattr(gen_params_mod, "_gen_parameters",
                         lambda args: seen.update(model=args.model) or {"modelId": args.model})
     monkeypatch.setattr(core, "submit_generation",
                         lambda s, params: seen.update(submitted=params) or "task123")
@@ -44,7 +45,7 @@ def test_generate_without_model_id_uses_client_version(tmp_path, monkeypatch, pi
     """Backward compat: with no model_id sent, the client's version_id is used as-is."""
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     seen = {}
-    monkeypatch.setattr(core, "_gen_parameters", lambda args: seen.update(model=args.model) or {})
+    monkeypatch.setattr(gen_params_mod, "_gen_parameters", lambda args: seen.update(model=args.model) or {})
     monkeypatch.setattr(core, "submit_generation", lambda s, params: "t")
 
     client = login_client(tmp_path)
@@ -63,7 +64,7 @@ def test_generate_honors_an_explicitly_chosen_non_latest_version(tmp_path, monke
     ])
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     seen = {}
-    monkeypatch.setattr(core, "_gen_parameters",
+    monkeypatch.setattr(gen_params_mod, "_gen_parameters",
                         lambda args: seen.update(model=args.model) or {"modelId": args.model})
     monkeypatch.setattr(core, "submit_generation",
                         lambda s, params: seen.update(submitted=params) or "task123")
@@ -82,7 +83,7 @@ def test_generate_falls_back_to_latest_when_model_has_no_versions_at_all(tmp_pat
     monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: [])
     monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     seen = {}
-    monkeypatch.setattr(core, "_gen_parameters", lambda args: seen.update(model=args.model) or {})
+    monkeypatch.setattr(gen_params_mod, "_gen_parameters", lambda args: seen.update(model=args.model) or {})
     monkeypatch.setattr(core, "submit_generation", lambda s, params: "task123")
 
     client = login_client(tmp_path)

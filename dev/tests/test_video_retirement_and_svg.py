@@ -9,6 +9,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gallery as g
+from moonglade import gen_params as gen_params_mod
 from moonglade import integrity
 from moonglade import scan
 
@@ -28,37 +29,37 @@ class _Session:
 
 @pytest.fixture()
 def after_cut(monkeypatch):
-    monkeypatch.setattr(core, "_video_clock", lambda: CUT)
+    monkeypatch.setattr(gen_params_mod, "_video_clock", lambda: CUT)
 
 
 @pytest.fixture()
 def before_cut(monkeypatch):
-    monkeypatch.setattr(core, "_video_clock", lambda: BEFORE)
+    monkeypatch.setattr(gen_params_mod, "_video_clock", lambda: BEFORE)
 
 
 def test_retired_table_names_the_announced_instant():
-    assert core.VIDEO_MODEL_RETIRED == {"v3.2": "2026-11-23T03:00:00Z"}
-    assert "v3.2" in core.VIDEO_MODELS            # the label map stays: old videos keep "V3.2"
-    assert core.VIDEO_MODELS["v3.2"]["label"] == "V3.2"
+    assert gen_params_mod.VIDEO_MODEL_RETIRED == {"v3.2": "2026-11-23T03:00:00Z"}
+    assert "v3.2" in gen_params_mod.VIDEO_MODELS            # the label map stays: old videos keep "V3.2"
+    assert gen_params_mod.VIDEO_MODELS["v3.2"]["label"] == "V3.2"
 
 
 def test_retired_flips_at_the_instant_not_before():
-    assert not core.video_model_retired("v3.2", BEFORE)
-    assert core.video_model_retired("v3.2", CUT)
-    assert not core.video_model_retired("v4.0.1", CUT + datetime.timedelta(days=400))
-    assert not core.video_model_retired("", CUT)
+    assert not gen_params_mod.video_model_retired("v3.2", BEFORE)
+    assert gen_params_mod.video_model_retired("v3.2", CUT)
+    assert not gen_params_mod.video_model_retired("v4.0.1", CUT + datetime.timedelta(days=400))
+    assert not gen_params_mod.video_model_retired("", CUT)
 
 
 def test_nothing_changes_before_the_cut(before_cut):
-    p = core.build_video_parameters("a", "123", model="v3.2")
+    p = gen_params_mod.build_video_parameters("a", "123", model="v3.2")
     assert p["i2vPro"]["model"] == "v3.2"
-    core.check_video_model_retired("v3.2")                     # no raise
-    core._params_video_models(p)
+    gen_params_mod.check_video_model_retired("v3.2")                     # no raise
+    gen_params_mod._params_video_models(p)
 
 
 def test_builder_refuses_after_the_cut(after_cut):
     with pytest.raises(core.PixAIError) as e:
-        core.build_video_parameters("a", "123", model="v3.2")
+        gen_params_mod.build_video_parameters("a", "123", model="v3.2")
     assert "retired by PixAI on 23 Nov" in str(e.value)
     assert "nothing was created or charged" in str(e.value)
 
@@ -97,7 +98,7 @@ def test_submit_of_another_engine_is_not_refused_by_the_gate(after_cut, monkeypa
 def test_front_end_mirror_matches_server_table():
     src = (Path(__file__).resolve().parents[2] / "gallery" / "src" / "gen" / "videoDrawerCore.js"
            ).read_text(encoding="utf-8")
-    for name, when in core.VIDEO_MODEL_RETIRED.items():
+    for name, when in gen_params_mod.VIDEO_MODEL_RETIRED.items():
         assert 'VIDEO_MODEL_RETIRED = { "%s": "%s" }' % (name, when) in src
 
 

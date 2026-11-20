@@ -17,6 +17,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import cards as cards_mod
+from moonglade import gen_params as gen_params_mod
 from moonglade import models as models_mod
 from tests.conftest import login_client
 from moonglade import mirror as mirror_mod
@@ -138,14 +139,14 @@ def test_a_cover_off_pixais_cdn_is_not_proxied(monkeypatch, tmp_path):
 # ---- the request cleaner ---------------------------------------------------------------
 
 def test_clean_palette_upper_cases_and_keeps_only_the_groups_given():
-    assert core.clean_color_palette(PALETTE) == SENT
-    assert core.clean_color_palette(None) is None
-    assert core.clean_color_palette({}) is None
-    out = core.clean_color_palette({"name": "  ", "palette": {
+    assert gen_params_mod.clean_color_palette(PALETTE) == SENT
+    assert gen_params_mod.clean_color_palette(None) is None
+    assert gen_params_mod.clean_color_palette({}) is None
+    out = gen_params_mod.clean_color_palette({"name": "  ", "palette": {
         "background": {"colors": [{"hex": "#000000", "ratio": 99.6}]}}})
-    assert out == {"name": core.PALETTE_NAME_DEFAULT,
+    assert out == {"name": gen_params_mod.PALETTE_NAME_DEFAULT,
                    "palette": {"background": {"colors": [{"hex": "#000000", "ratio": 100}]}}}
-    assert len(core.clean_color_palette({"name": "x" * 90, "palette": SENT["palette"]})["name"]) == 50
+    assert len(gen_params_mod.clean_color_palette({"name": "x" * 90, "palette": SENT["palette"]})["name"]) == 50
 
 
 @pytest.mark.parametrize("bad", [
@@ -162,7 +163,7 @@ def test_clean_palette_upper_cases_and_keeps_only_the_groups_given():
 ])
 def test_clean_palette_refuses_what_pixai_would(bad):
     with pytest.raises(core.PixAIError) as e:
-        core.clean_color_palette(bad)
+        gen_params_mod.clean_color_palette(bad)
     assert "nothing was sent or charged" in str(e.value)
 
 
