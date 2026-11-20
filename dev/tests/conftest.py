@@ -1074,6 +1074,17 @@ def _no_live_card_network(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_repeat_hold():
+    """The single sends' repeat hold lives in gen_road since 3.22 (DESIGN_3.22 3.4): one record
+    per process, as one server is one process. Cleared around every test, so one test's send
+    can never hold another test's identical one."""
+    from moonglade import gen_road as _gen_road
+    _gen_road._repeat_records.clear()
+    yield
+    _gen_road._repeat_records.clear()
+
+
+@pytest.fixture(autouse=True)
 def _no_live_config(monkeypatch):
     """PixAI's public dynamic config (GET <api>/config/<key> -- trainLoraModels,
     trainLoraStatus) sits OUTSIDE the /v2 routes `_no_live_card_network` blocks, so it gets

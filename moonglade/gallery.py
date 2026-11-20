@@ -16915,59 +16915,37 @@ def create_app(out_dir: Path):
     # DROPPED only when the send is known to have cost nothing: never reached (refused here, or
     # by a read before it), or refused by PixAI in a way that proves no task exists
     # (core.send_outcome). The Loom's journalled render keeps its own journal and is not held
-    # here; a run (/api/generate/run) has its own run id and states.
-    SEND_REPEAT_S = 10.0
-    SEND_UNCLEAR_S = 60.0
-    _UNCLEAR_SEND = ("PixAI may have started this. It was not sent again; check the Activity "
+    # here; a run (/api/generate/run) has its own run id and states. Since 3.22 (DESIGN_3.22
+    # 3.4) the record and its windows live in gen_road (repeat_claim / repeat_settle); these
+    # closures turn its answer into the route's JSON and keep their wording.
+    SEND_REPEAT_S = _gen_road.REPEAT_SENT_S
+    SEND_UNCLEAR_S = _gen_road.REPEAT_UNCLEAR_S
+    _UNCLEAR_SEND =("PixAI may have started this. It was not sent again; check the Activity "
                      "tray (or pixai.art) before sending it again.")
     _UNCLEAR_HELD = ("The last one may still be starting, so this was not sent. Check the "
                      "Activity tray (or pixai.art) before sending it again.")
     _REPEAT_HELD = ("The same request was asked for a few seconds ago; wait a moment before "
                     "sending it again.")
-    _send_recent = {}                    # key -> (until, state): "sending" | "sent" | "unclear"
-    _send_recent_lock = threading.Lock()
-
     def _send_key(kind, body):
-        """(user, kind, the request as sent, canonical JSON). Never raises."""
-        try:
-            blob = json.dumps(body, sort_keys=True, default=str)
-        except Exception:                                    # noqa: BLE001
-            blob = repr(body)
-        return (str(session.get("user") or ""), str(kind), blob)
+        """(user, kind, the request as sent, canonical JSON): gen_road.repeat_key."""
+        return _gen_road.repeat_key(session.get("user") or "", kind, body)
 
     def _send_claim(key, repeat_msg=None, claim=True):
         """The refusal (a JSON response) for a send that matches a standing record, or None
-        -- with the record now claimed as "sending" when `claim` (it holds for SEND_UNCLEAR_S
-        if this request never settles it). A route checks with claim=False before its first
-        network call, and claims (atomically, so two racing requests cannot both pass)
-        immediately before the send itself. Local, no network."""
-        now = time.monotonic()
-        with _send_recent_lock:
-            for k in [k for k, (until, _s) in _send_recent.items() if now >= until]:
-                del _send_recent[k]
-            held = _send_recent.get(key)
-            if held is None:
-                if claim:
-                    _send_recent[key] = (now + SEND_UNCLEAR_S, "sending")
-                return None
-        if held[1] == "unclear":
+        -- with the record now claimed when `claim` (gen_road.repeat_claim). A route checks
+        with claim=False before its first network call, and claims immediately before the
+        send itself. Local, no network."""
+        held = _gen_road.repeat_claim(key, claim=claim)
+        if held is None:
+            return None
+        if held == "unclear":
             return jsonify({"error": _UNCLEAR_HELD, "state": "may_have_started",
                             "unclear": True, "held": True}), 409
         return jsonify({"error": repeat_msg or _REPEAT_HELD, "held": True}), 409
 
     def _send_settle(key, state):
-        """Settle a claimed record: "sent" keeps it SEND_REPEAT_S, "may_have_started" keeps
-        it SEND_UNCLEAR_S, "not_sent" / "refused" (nothing was made) drop it."""
-        if key is None:
-            return
-        now = time.monotonic()
-        with _send_recent_lock:
-            if state == "sent":
-                _send_recent[key] = (now + SEND_REPEAT_S, "sent")
-            elif state == "may_have_started":
-                _send_recent[key] = (now + SEND_UNCLEAR_S, "unclear")
-            else:
-                _send_recent.pop(key, None)
+        """Settle a claimed record by the send's state (gen_road.repeat_settle)."""
+        _gen_road.repeat_settle(key, state)
 
     def _Reached():
         """This request thread's spend mark (core.spend_watch): `.v` turns True once the one
@@ -16994,11 +16972,7 @@ def create_app(out_dir: Path):
                 pass
             return (jsonify({"task_id": task_id}), 200), "", "sent"
         msg = _log_gen_failure(where, exc, params)[:300]
-        try:
-            state = _gen_road.send_outcome(exc, bool(reached))
-        except Exception:                                    # noqa: BLE001 -- never "refused"
-            state = "may_have_started" if reached else "not_sent"
-        _send_settle(key, state)
+        state = _gen_road.repeat_settle_failure(key, exc, reached)
         if state == "may_have_started":
             try:
                 detail = _redact_host_paths(_gen_road.outcome_reason(exc))[:300]

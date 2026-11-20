@@ -1928,3 +1928,73 @@ def quoted_free_hooks(req, expect_free):
     def _before_send(params):
         refuse_if_quoted_free_gone(params)
     return {"before_send": _before_send}
+
+
+# --- the repeat hold (3.21.2, DESIGN_3.22 2.12 and V1) -------------------------
+# Every single send claims a record for (signed-in user, kind, the request as sent) BEFORE
+# anything goes out, and an identical send while it stands is refused before any network call:
+# a double tap, a second tab, a stale bundle or a client retry after a lost answer must not
+# pay twice. The record is KEPT REPEAT_SENT_S after a success (Fix's double-tap window since
+# #93) and REPEAT_UNCLEAR_S after an unknown outcome; it is DROPPED only when the send is known
+# to have cost nothing -- never reached, or refused in a way classify_outcome proves
+# (send_outcome). Nothing links an unclear send to a task id, so no poll or catch-up result
+# clears a record early.
+REPEAT_SENT_S = 10.0
+REPEAT_UNCLEAR_S = 60.0
+_repeat_records = {}                    # key -> (until, state): "sending" | "sent" | "unclear"
+_repeat_lock = threading.Lock()
+
+
+def repeat_key(user, kind, body):
+    """(user, kind, the request as sent, canonical JSON) -- the record's key. Never raises."""
+    try:
+        blob = json.dumps(body, sort_keys=True, default=str)
+    except Exception:                                        # noqa: BLE001
+        blob = repr(body)
+    return (str(user or ""), str(kind), blob)
+
+
+def repeat_claim(key, claim=True):
+    """The standing record's state for `key` -- "sending", "sent" or "unclear" -- when one
+    stands (the send must be refused), else None, with the record now claimed as "sending"
+    when `claim` (it holds REPEAT_UNCLEAR_S if the request never settles it). A route checks
+    with claim=False before its first network call and claims, atomically (two racing
+    requests cannot both pass), immediately before the send itself. Local, no network."""
+    now = time.monotonic()
+    with _repeat_lock:
+        for k in [k for k, (until, _s) in _repeat_records.items() if now >= until]:
+            del _repeat_records[k]
+        held = _repeat_records.get(key)
+        if held is None:
+            if claim:
+                _repeat_records[key] = (now + REPEAT_UNCLEAR_S, "sending")
+            return None
+        return held[1]
+
+
+def repeat_settle(key, state):
+    """Settle a claimed record by the send's state: "sent" keeps it REPEAT_SENT_S,
+    "may_have_started" keeps it REPEAT_UNCLEAR_S, "not_sent" / "refused" (nothing was made)
+    drop it. Any other state keeps it as unclear: only a proven no-cost outcome frees a send."""
+    if key is None:
+        return
+    now = time.monotonic()
+    with _repeat_lock:
+        if state == "sent":
+            _repeat_records[key] = (now + REPEAT_SENT_S, "sent")
+        elif state in ("not_sent", "refused"):
+            _repeat_records.pop(key, None)
+        else:
+            _repeat_records[key] = (now + REPEAT_UNCLEAR_S, "unclear")
+
+
+def repeat_settle_failure(key, exc, reached):
+    """Settle a claimed record after a failed send, by the classifier (send_outcome), and
+    return the state. A classifier that raises reads "may_have_started" when the send was
+    reached -- never "refused"."""
+    try:
+        state = send_outcome(exc, bool(reached))
+    except Exception:                                        # noqa: BLE001 -- never "refused"
+        state = "may_have_started" if reached else "not_sent"
+    repeat_settle(key, state)
+    return state
