@@ -804,7 +804,12 @@ export default function AppMobile({ boot }) {
       raf = 0;
       let floor = 0;
       const half = window.innerHeight / 2;
-      for (const el of document.querySelectorAll(".glm-stage [data-phone-top]")) {
+      // The full-screen viewer covers the gallery's top controls: while it is open, its own top bar
+      // is the chrome, so a notice sits just under that, clear of the ‹ › arrows at mid-height
+      // (a sticky What's new held the › covered on the 3.21.3 suite, 2026-11-19).
+      const viewerBar = document.querySelector(".lbm-root .lbm-topbar");
+      const marked = viewerBar ? [viewerBar] : document.querySelectorAll(".glm-stage [data-phone-top]");
+      for (const el of marked) {
         const r = el.getBoundingClientRect();
         if (r.height > 0 && r.bottom > 0 && r.top < half) floor = Math.max(floor, r.bottom);
       }
@@ -828,7 +833,7 @@ export default function AppMobile({ boot }) {
       if (el) el.removeEventListener("scroll", soon);
       window.removeEventListener("resize", soon);
     };
-  }, [tab, createSection, ctlSection, cmode, heroAway, sideways]);
+  }, [tab, createSection, ctlSection, cmode, heroAway, sideways, lbIndex != null]);
   useEffect(() => () => document.documentElement.style.removeProperty("--mg-phone-toast-top"), []);
   // turned sideways, the header is one slim bar and never slides
   useEffect(() => { if (sideways) setHeroAway(false); }, [sideways]);
