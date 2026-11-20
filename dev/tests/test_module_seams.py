@@ -353,6 +353,7 @@ SOURCE_READERS = {
     "tests/test_community_surface.py": ("moonglade.backup",),
     "tests/test_config_path_routing.py": ("moonglade.backup",),
     "tests/test_contest_wins.py": ("moonglade.backup", "moonglade.gallery"),
+    "tests/test_create_door.py": ("moonglade.backup",),
     "tests/test_csrf_coverage.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_design_kit_sync.py": ("moonglade.gallery",),
     "tests/test_doc_truth_residuals.py": ("moonglade.gallery",),
@@ -1258,6 +1259,12 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_training_advanced.py', 'moonglade.contests'),
     ('tests/test_training_parity.py', 'moonglade.contests'),
     ('tests/test_web_auth.py', 'moonglade.contests'),
+    # 3.22 S2a: the create door's test reads only backup's `_create` delegate (and
+    # pixai_client's own source), neither of which any move touched.
+    *(("tests/test_create_door.py", "moonglade." + _m) for _m in (
+        "cards", "cloud_delete", "contests", "gen_cli", "gen_params", "gen_road", "jobs",
+        "media_tools", "mirror", "models", "organize", "pixai_client", "pricing", "task_feed",
+        "task_reads", "training")),
 }
 
 

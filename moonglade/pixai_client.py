@@ -81,6 +81,39 @@ _key_refused = {"until": 0.0}
 _PIXAI_API_PREFIX = "https://api.pixai.art/"
 
 
+# ---------------------------------------------------------------------------
+# THE CREATE DOOR's tables (DESIGN_3.22 2.2). A closed map of kind -> route: a path is never
+# built from caller text. `image` and `edit` share PixAI's task.createTask route, whose body is
+# {"parameters": P}; the other three take their body as given. Video and reference video are
+# not here: they stay on GraphQL createGenerationTask through mutate() (gen_road.CREATE_ROAD).
+# ---------------------------------------------------------------------------
+CREATE_PATHS = {
+    "image": "/task/create",
+    "edit": "/task/create",
+    "scene": "/task/chat-editing-scene",
+    "enhance": "/task/enhance",
+    "fix": "/task/fixer",
+}
+#: The kinds the door wraps as {"parameters": P} (PixAI's `ys` wrapper).
+CREATE_WRAPPED_KINDS = frozenset(("image", "edit"))
+#: The kinds that run only on the Mirror's website sign-in: an API-key scene or panelplugin
+#: task was accepted, charged and reaped unstarted (DECISIONS 2026-08-18).
+CREATE_WEB_JWT_KINDS = frozenset(("scene", "enhance"))
+#: PixAI's QUOTE routes. Each sits one segment from a spend route, so none may ever be a door
+#: path. The check below is an `if`, not an `assert`, so `python -O` cannot strip it, and it
+#: pins every door path to its exact literal.
+CREATE_QUOTE_PATHS = frozenset(("/task/fixer/price", "/task/enhance/price", "/task-price"))
+if (set(CREATE_PATHS.values()) & CREATE_QUOTE_PATHS
+        or sorted(set(CREATE_PATHS.values())) != ["/task/chat-editing-scene", "/task/create",
+                                                  "/task/enhance", "/task/fixer"]):
+    raise ImportError("CREATE_PATHS must be exactly the four create routes, and no quote route")
+#: (connect, read) seconds: one POST, and a lost answer is "may have started", never a resend.
+CREATE_TIMEOUT = (10, 120)
+#: The READ_ONLY refusal wording per kind (the same sentences the creates raised before).
+_CREATE_ACTIONS = {"fix": "submit a hand/face fix (spends credits)"}
+_CREATE_ACTION_DEFAULT = "submit a generation (spends credits)"
+
+
 def _is_mutation_document(query):
     """True when `query` is a GraphQL MUTATION document rather than a query.
 
@@ -363,18 +396,155 @@ class PixAIClient:
             raise _rest_error("PUT", path, r)
         return r.json()
 
+    # -- THE CREATE DOOR (DESIGN_3.22 2.2-2.5) ---------------------------------
+    def create(self, kind, body):
+        """THE one way a generation, an edit, an AI-Tools scene, an enhance or a Fix is sent:
+        ONE POST to the route `kind` names in CREATE_PATHS, and PixAI's answer back (a dict
+        carrying a non-empty string `id`). There is no `retries` parameter and no loop: a lost
+        answer is indistinguishable from a lost request, and a second POST pays twice.
+
+        In order, and nothing reaches the network until every step has passed:
+          1. the kind is one of the table's (the path is the table's, never caller text);
+          2. READ_ONLY (`_check_read_only`);
+          3. the shape agrees with the kind (V10): a video block (`i2vPro`,
+             `referenceVideo`) never rides `image` or `edit`, `chat` means `edit`, and an
+             `edit` without `chat` is refused -- the kind comes from the caller's own mode,
+             never sniffed from the parameters;
+          4. the identity (2.5): `scene` and `enhance` only on a `web-jwt` client;
+          5. the final wire step (2.4): the REST known-drop rule (gen_params.rest_wire), the
+             {"parameters": P} wrapper on /task/create, serialised ONCE; the recursive
+             allowlist (gen_params.check_wire) then reads those very bytes back and refuses
+             on any key PixAI would drop, at any depth. The bytes checked are the bytes sent.
+        Every refusal is a LocalRefusal: nothing was sent.
+
+        The send is `allow_redirects=False` with a (10, 120) s timeout. The answer:
+          - a 2xx JSON object with a non-empty string `id` -> returned (the evidence per
+            kind is in DESIGN_3.22 2.2; scene and enhance await R6/R7, so a wrong guess makes
+            a success read unclear, the fail-safe direction);
+          - any other status -> PixAIRestError (status, code, body), which
+            gen_road.classify_outcome reads;
+          - a timeout, a dropped connection, a 3xx, a non-JSON or id-less 2xx ->
+            CreateOutcomeUnknown, which is outside the PixAIError tree on purpose.
+
+        The log line names the kind, the path, the true identity, a short digest of the body
+        and whether a card is attached -- never the prompt, never the credential."""
+        from moonglade.backup import (REST_API_BASE, _check_read_only, _is_redirect_status,
+                                      _rest_error, _ssl_help, LocalRefusal,
+                                      CreateOutcomeUnknown)
+        from moonglade import gen_params as _gen_params
+        path = CREATE_PATHS.get(kind) if isinstance(kind, str) else None
+        if path is None:
+            raise LocalRefusal("Moonglade has no create route named {!r}, so nothing was "
+                               "sent.".format(str(kind)[:40]))
+        try:
+            _check_read_only(_CREATE_ACTIONS.get(kind, _CREATE_ACTION_DEFAULT))
+        except LocalRefusal:
+            raise
+        except Exception as e:                              # noqa: BLE001 -- nothing was sent
+            raise LocalRefusal(str(e)) from e
+        if not isinstance(body, dict):
+            raise LocalRefusal("This request has no body to send, so nothing was sent.")
+        if kind in CREATE_WRAPPED_KINDS:
+            if "i2vPro" in body or "referenceVideo" in body:
+                raise LocalRefusal("A video request can't be sent as an {}, so nothing was "
+                                   "sent.".format("edit" if kind == "edit" else "image"))
+            if kind == "edit" and "chat" not in body:
+                raise LocalRefusal("An edit request carries no edit block, so nothing was "
+                                   "sent.")
+            if kind == "image" and "chat" in body:
+                raise LocalRefusal("An edit request can't be sent as an image, so nothing "
+                                   "was sent.")
+        if kind in CREATE_WEB_JWT_KINDS and self.auth_kind != "web-jwt":
+            raise LocalRefusal("This runs only on your PixAI website sign-in (Mirror to "
+                               "PixAI), so nothing was sent.")
+        inner = _gen_params.rest_wire(kind, body)
+        final = {"parameters": inner} if kind in CREATE_WRAPPED_KINDS else inner
+        try:
+            blob = json.dumps(final, separators=(",", ":"), ensure_ascii=False,
+                              allow_nan=False).encode("utf-8")
+        except (TypeError, ValueError):
+            raise LocalRefusal("This request holds a value that can't be sent as JSON, so "
+                               "nothing was sent.")
+        _gen_params.check_wire(kind, json.loads(blob.decode("utf-8")))
+        _log_create(kind, path, self.auth_kind, blob,
+                    bool(isinstance(inner, dict) and inner.get("kaisuukenId")))
+        try:
+            r = self._session.post(REST_API_BASE + path, data=blob,
+                                   headers={"Content-Type": "application/json"},
+                                   timeout=CREATE_TIMEOUT, allow_redirects=False)
+        except requests.exceptions.SSLError as e:
+            raise CreateOutcomeUnknown(_ssl_help(), kind=kind) from e
+        except requests.RequestException as e:
+            raise CreateOutcomeUnknown("POST {} -> no answer ({}): PixAI may have started "
+                                       "this.".format(path, type(e).__name__), kind=kind) from e
+        status = getattr(r, "status_code", None)
+        if _is_redirect_status(r):
+            raise CreateOutcomeUnknown("POST {} -> {}: PixAI redirected this request; nothing "
+                                       "was re-sent.".format(path, status), kind=kind,
+                                       status=status)
+        if not (isinstance(status, int) and 200 <= status < 300):
+            raise _rest_error("POST", path, r)
+        try:
+            answer = r.json()
+        except ValueError:
+            raise CreateOutcomeUnknown("POST {} -> {} that is not JSON: PixAI may have started "
+                                       "this.".format(path, status), kind=kind, status=status)
+        tid = answer.get("id") if isinstance(answer, dict) else None
+        if not (isinstance(tid, str) and tid.strip()):
+            raise CreateOutcomeUnknown("POST {} -> {} with no task id: PixAI may have started "
+                                       "this.".format(path, status), kind=kind, status=status)
+        return answer
+
     # -- which credential a create rides -------------------------------------
-    def for_create(self):
+    #: True on a client for_create() chose for one send. _session_for_create hands such a
+    #: client straight back, so the identity is chosen ONCE per send (V8): the card check and
+    #: the door see the same client even if the Mirror toggle moves in between.
+    _create_chosen = False
+
+    def for_create(self, require=None):
         """The client a CREATE must POST through: the browser-JWT mirror when the 'Mirror
         to PixAI' toggle is on (so the generation lands in the pixai.art web library),
-        this same client otherwise. Refuses (raises) rather than falling back to the API
+        this same credential otherwise. Refuses (raises) rather than falling back to the API
         key when the mirror is armed but unavailable. Callers must have already passed
-        `_check_read_only` -- building the mirror session may make a renewal call."""
-        from moonglade.mirror import _session_for_create
-        chosen = _session_for_create(self)
-        if chosen is self:
-            return self
-        return PixAIClient(chosen, auth_kind="web-jwt")
+        `_check_read_only` -- building the mirror session may make a renewal call.
+
+        The answer is a MARKED client (`_create_chosen`, DESIGN_3.22 2.5): `auth_kind` is the
+        identity it truly rides ("web-jwt" for the Mirror), and asking a marked client again
+        returns it unchanged, so one send never chooses twice. `require="web-jwt"` (scene,
+        enhance) refuses, with nothing sent, unless the Mirror is armed and usable."""
+        from moonglade.backup import LocalRefusal
+        if getattr(self, "_create_chosen", False) is True:
+            chosen = self
+        else:
+            from moonglade.mirror import _session_for_create
+            got = _session_for_create(self)
+            if got is self:
+                chosen = PixAIClient(self._session, auth_kind=self._auth_kind,
+                                     user_id=self._user_id)
+                chosen._create_chosen = True
+            elif getattr(got, "_is_pixai_client", False) is True:
+                chosen = got
+            else:
+                chosen = PixAIClient(got, auth_kind="web-jwt")
+                chosen._create_chosen = True
+        if require is not None and getattr(chosen, "auth_kind", None) != require:
+            raise LocalRefusal("This runs only on your PixAI website sign-in: switch Mirror to "
+                               "PixAI on and connect it. Nothing was sent.")
+        return chosen
+
+
+def _log_create(kind, path, identity, blob, card):
+    """The door's one log line: kind, route, identity, a 12-hex digest of the exact body and
+    whether a card rides it. Never the body itself (it holds the prompt), never a credential.
+    Fail-soft: logging never stops or changes a send."""
+    try:
+        import hashlib
+        import logging
+        logging.getLogger("moonglade.create").info(
+            "create %s -> POST %s as %s; body %s; card %s", kind, path, identity,
+            hashlib.sha256(blob).hexdigest()[:12], "attached" if card else "none")
+    except Exception:                                       # noqa: BLE001
+        pass
 
 
 def _client_of(session):

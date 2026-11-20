@@ -376,11 +376,17 @@ class TestRetryPolicy:
 # ---------------------------------------------------------------------------
 
 class TestForCreate:
-    def test_mirror_off_is_the_same_client(self, monkeypatch):
+    def test_mirror_off_is_the_same_credential_marked_for_this_send(self, monkeypatch):
+        """3.22 (DESIGN_3.22 2.5, V8): the answer is a MARKED client over the same session
+        and identity, never the caller's long-lived client itself -- marking that one would
+        pin every later send to the key even after the Mirror is switched on."""
         monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: False)
         c = pixai_client_mod.PixAIClient(RecordingSession())
-        assert c.for_create() is c
-        assert c.for_create().auth_kind == "api-key"
+        made = c.for_create()
+        assert made is not c and made.session is c.session
+        assert made.auth_kind == "api-key" and made._create_chosen is True
+        assert c._create_chosen is False
+        assert made.for_create() is made                  # chosen once per send
 
     def test_mirror_on_returns_a_web_jwt_client_over_the_mirror_session(self, monkeypatch):
         mirror = RecordingSession()
@@ -407,7 +413,7 @@ class TestForCreate:
         monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: False)
         c = pixai_client_mod.PixAIClient(RecordingSession())
         assert mirror_mod._session_for_create(c) is c
-        assert c.for_create() is mirror_mod._session_for_create(c)
+        assert c.for_create().session is mirror_mod._session_for_create(c).session
 
 
 # ---------------------------------------------------------------------------
@@ -415,7 +421,7 @@ class TestForCreate:
 # ---------------------------------------------------------------------------
 
 class TestFakePixAISatisfiesTheSameInterface:
-    VERBS = ("query", "mutate", "rest_get", "rest_post", "for_create")
+    VERBS = ("query", "mutate", "rest_get", "rest_post", "for_create", "create")
 
     @pytest.mark.parametrize("verb", VERBS)
     def test_the_fake_offers_the_same_verb_with_the_same_signature(self, verb):

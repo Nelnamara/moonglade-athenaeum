@@ -1164,8 +1164,15 @@ def _session_for_create(api_session):
 
     Callers must have already passed _check_read_only, since make_mirror_session may make a
     renewal network call (review F12). free-card (/v2/kaisuuken/check) still runs on the
-    API-key session at the call site -- only the create rides the JWT."""
+    API-key session at the call site -- only the create rides the JWT.
+
+    3.22 (DESIGN_3.22 2.5): the Mirror's answer is a MARKED client, PixAIClient(...,
+    auth_kind="web-jwt"), so the door and every log line know the identity it truly rides;
+    and a client PixAIClient.for_create already chose for this send (`_create_chosen`) is
+    handed straight back, so one send never chooses its identity twice (V8)."""
     from moonglade.backup import PixAIError
+    if getattr(api_session, "_create_chosen", False) is True:
+        return api_session
     if not mirror_enabled():
         return api_session
     m = make_mirror_session()
@@ -1175,7 +1182,12 @@ def _session_for_create(api_session):
             "click your Connect from PixAI bookmark on a signed-in pixai.art tab (it is on "
             "the Mirror to PixAI tile in the Control Panel). Nothing was submitted and no "
             "credits were spent.")
-    return m
+    if getattr(m, "_is_pixai_client", False) is True:
+        return m
+    from moonglade.pixai_client import PixAIClient
+    client = PixAIClient(m, auth_kind="web-jwt")
+    client._create_chosen = True
+    return client
 
 
 def run_mirror_check(args):

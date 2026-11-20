@@ -1686,6 +1686,31 @@ ANY_PIXAI_CODE = None
 # A REST timeout (408) or a closed-request (499) answer is never a refusal, whatever its body
 # says: PixAI, or an edge in front of it, may have accepted the request before it said so.
 _UNKNOWN_OUTCOME_STATUSES = frozenset({408, 499})
+# The definite-code table per route family (DESIGN_3.22 2.6, V5): `classify_outcome(e, family)`
+# takes the family of the route that answered. The fixer route's own error map is stripped from
+# PixAI's contract and its site sorts the Fix's refusals with the same `ye` list, so `fixer`
+# reads DEFINITE_CODES; training reads its own table, and never the create one.
+OUTCOME_FAMILIES = {"create": DEFINITE_CODES, "fixer": DEFINITE_CODES,
+                    "training": TRAINING_CODES}
+
+# ONE ROAD PER KIND (DESIGN_3.22 2.11): which road each create kind is sent on, in this build.
+#   "graphql"    createGenerationTask (image, edit, video, reference video) or
+#                createChatEditingSceneTask (scene) through gql_mutate
+#   "rest"       THE create door, PixAIClient.create (core._create)
+#   "rest_post"  the Fix's own POST /v2/task/fixer through rest_post, until the door takes it
+# Each kind moves in its own commit, its web and CLI senders together (V6); a test pins one
+# reachable sender per kind. There is no fallback between roads and no setting: rolling back
+# means installing the previous release. Video and reference video stay on GraphQL (owner,
+# 2026-11-19); enhance cannot use /task/create, so it moves regardless.
+CREATE_ROAD = {
+    "image": "graphql",
+    "edit": "graphql",
+    "scene": "graphql",
+    "enhance": "graphql",
+    "fix": "rest_post",
+    "video": "graphql",
+    "refvideo": "graphql",
+}
 
 
 def classify_outcome(exc, codes=DEFINITE_CODES):
@@ -1706,8 +1731,17 @@ def classify_outcome(exc, codes=DEFINITE_CODES):
         refused only when its `data` resolved nothing. A root field that came back non-null
         beside `errors` is a PARTIAL SUCCESS -- the task exists and may be charged (waves 2+3
         review, F2) -- so it is unknown.
-      - anything else (a timeout, a dropped connection, a non-JSON or id-less answer): unknown."""
-    from moonglade.backup import LocalRefusal, PixAIAuthError, PixAIError, PixAIRestError
+      - CreateOutcomeUnknown (the create door's answer that proves nothing): unknown.
+      - anything else (a timeout, a dropped connection, a non-JSON or id-less answer): unknown.
+
+    `codes` is a code table, None (any PixAI code), or a route family's name from
+    OUTCOME_FAMILIES ("create", "fixer", "training")."""
+    from moonglade.backup import (LocalRefusal, PixAIAuthError, PixAIError, PixAIRestError,
+                                  PixAIOutcomeError)
+    if isinstance(codes, str):
+        codes = OUTCOME_FAMILIES[codes]
+    if isinstance(exc, PixAIOutcomeError):
+        return "unknown"
     if isinstance(exc, LocalRefusal):
         return "local"
     if isinstance(exc, PixAIRestError):

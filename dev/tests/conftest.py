@@ -1064,6 +1064,9 @@ def _no_live_card_network(monkeypatch):
     # The training routes' PUT and PATCH (Session J) ride the same /v2 road.
     monkeypatch.setattr(core, "_rest_put", _blocked, raising=False)
     monkeypatch.setattr(core, "_rest_patch", _blocked, raising=False)
+    # The create door (3.22, DESIGN_3.22 2.2) rides the same /v2 road: blocked the same way,
+    # and restored to the real delegate by the `pixai` fixture so it reaches the FAKE.
+    monkeypatch.setattr(core, "_create", _blocked, raising=False)
     # Pin USER_ID so _make_session (now reached from generation previews) never triggers a
     # live resolve_user_id lookup. Setting the global -- not stubbing the function -- keeps
     # resolve_user_id itself testable in test_auth.
@@ -1111,6 +1114,7 @@ _REAL_REST_GET = core._rest_get
 _REAL_REST_POST = core._rest_post
 _REAL_REST_PUT = core._rest_put
 _REAL_REST_PATCH = core._rest_patch
+_REAL_CREATE = core._create
 
 
 @pytest.fixture()
@@ -1139,6 +1143,7 @@ def pixai(monkeypatch):
     monkeypatch.setattr(core, "_rest_post", _REAL_REST_POST)
     monkeypatch.setattr(core, "_rest_put", _REAL_REST_PUT)
     monkeypatch.setattr(core, "_rest_patch", _REAL_REST_PATCH)
+    monkeypatch.setattr(core, "_create", _REAL_CREATE)
     return fake
 
 

@@ -221,6 +221,26 @@ class PixAIRestError(PixAIError):
         return d if isinstance(d, dict) else {}
 
 
+class PixAIOutcomeError(Exception):
+    """A send reached PixAI and its answer proves neither that a task was made nor that it was
+    not (DESIGN_3.22 2.2). Deliberately NOT a PixAIError: no `except PixAIError` written before
+    the create door existed, and no message test, can read it as a refusal. Every caller names
+    it, or reads it through gen_road.classify_outcome, which answers "unknown"."""
+
+
+class CreateOutcomeUnknown(PixAIOutcomeError):
+    """The create door (PixAIClient.create) sent its one POST and got no answer that proves
+    either way: a timeout, a dropped connection, a 3xx, or a 2xx its kind's success extractor
+    rejects (not JSON, no non-empty string `id`). The task may exist and may be charged, so a
+    spend guard reads it as "may have started" and nothing is ever sent again after it.
+    `kind` is the door's kind and `status` the HTTP status when there was one."""
+
+    def __init__(self, message, kind=None, status=None):
+        super().__init__(message)
+        self.kind = kind
+        self.status = status
+
+
 def _rest_error(verb, path, r):
     try:
         body = r.json()
@@ -4377,6 +4397,17 @@ def _rest_post(session, path, body, timeout=60):
     THIN DELEGATE onto `PixAIClient.rest_post`, which carries the no-retry-loop rule that
     keeps `submit_fixer` and `claim_reward` single-attempt."""
     return _pixai_client._client_of(session).rest_post(path, body, timeout=timeout)
+
+
+def _create(session, kind, body):
+    """THE create door (DESIGN_3.22 2.2): one POST of `body` to the route `kind` names in
+    PixAIClient's closed path table, checked on its final bytes, never retried, never
+    redirected. Returns PixAI's answer (a dict with a non-empty string `id`).
+
+    THIN DELEGATE onto `PixAIClient.create`, kept under this name so the suite can block it the
+    way it blocks `_rest_post` (dev/tests/conftest.py's `_no_live_card_network`). `session` is
+    the client `for_create()` chose for this one send."""
+    return _pixai_client._client_of(session).create(kind, body)
 
 
 def _rest_patch(session, path, body, timeout=60):

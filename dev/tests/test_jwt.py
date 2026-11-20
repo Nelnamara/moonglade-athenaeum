@@ -314,7 +314,9 @@ def test_session_for_create_routing(monkeypatch):
     assert mirror_mod._session_for_create(api) is api                 # OFF -> passthrough
     monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
     monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda: mir)
-    assert mirror_mod._session_for_create(api) is mir                 # ON -> the mirror session
+    got = mirror_mod._session_for_create(api)                  # ON -> the mirror session,
+    assert got.session is mir and got.auth_kind == "web-jwt"   # as a marked client (3.22 2.5)
+    assert mirror_mod._session_for_create(got) is got          # chosen once per send (V8)
     monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda: None)
     with pytest.raises(mj.PixAIError):                         # ON + unavailable -> refuse (F5)
         mirror_mod._session_for_create(api)

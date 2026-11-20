@@ -1589,3 +1589,237 @@ def build_fixer_body(media_id, boxes):
     if len({b["tag"] for b in clean}) > 1:
         raise PixAIError(FIX_ONE_KIND)
     return {"mediaId": str(media_id), "boxes": clean}
+
+
+# =============================================================================
+# THE WIRE GUARD (DESIGN_3.22 2.4): priced = sent, checked on the final bytes
+# =============================================================================
+# PixAI's REST create routes strip every key their schema does not name, at every depth,
+# silently (zod `object`, harvest 938fb68efeea `vendor-validation-D9eDNToB.js`). A key the app
+# priced and card-checked but PixAI then dropped is a job nobody quoted. So the create door
+# checks the exact object it is about to send against the schema below and REFUSES on any key
+# outside it -- never strips. Each object cites the harvest symbol it mirrors
+# (`BaseTaskSubmitForm-BYhygXK9.js` unless named; re-diffed by the monthly P9).
+#
+# A spec is: _SCALAR (a str, number, bool or null -- never an object or a list, so nothing can
+# hide under it), a dict (an object with exactly these keys allowed), a one-item list (an
+# array whose every element is that spec), or _RECORD (an object with free keys and scalar
+# values: `lora`'s versionId -> weight map, `It`).
+_SCALAR = "scalar"
+_RECORD = "record"
+_PALETTE_GROUP = {"colors": [{"hex": _SCALAR, "ratio": _SCALAR}]}        # paletteData-qnWMp3nI m, n
+_WIRE_IMAGE = {                                                        # `yt`, the plain image keys
+    # prompt and model
+    "prompts": _SCALAR, "negativePrompts": _SCALAR, "modelId": _SCALAR, "model": _SCALAR,
+    "modelStyle": {"type": _SCALAR, "keyId": _SCALAR, "custom": _SCALAR,   # `Wa` (a union)
+                   "refId": _SCALAR},
+    "vaeModelId": _SCALAR, "characterId": _SCALAR, "sceneId": _SCALAR,
+    # size and sampling
+    "width": _SCALAR, "height": _SCALAR, "seed": _SCALAR, "samplingSteps": _SCALAR,
+    "samplingMethod": _SCALAR, "cfgScale": _SCALAR, "clipSkip": _SCALAR, "batchSize": _SCALAR,
+    "priority": _SCALAR,
+    # inputs
+    "mediaId": _SCALAR, "contextImages": [_SCALAR],                     # `Fn`
+    "controlNets": [{"type": _SCALAR, "mediaId": _SCALAR, "weight": _SCALAR,   # `Un` of `Vn`
+                     "thresholdA": _SCALAR, "maskMediaId": _SCALAR}],
+    "lora": _RECORD,                                                    # `It`
+    "loraParameters": [{"versionId": _SCALAR, "triggerWords": _SCALAR,  # `Gn` of `Bn`
+                        "weight": _SCALAR,
+                        "positionInfo": {"startIndex": _SCALAR, "endIndex": _SCALAR}}],  # `jn`
+    "recipeIds": [_SCALAR],                                             # `es`
+    "colorPalette": {"source": _SCALAR, "id": _SCALAR, "name": _SCALAR,  # `xi` = paletteData g
+                     "createdAt": _SCALAR, "updatedAt": _SCALAR,
+                     "palette": {"overall": _PALETTE_GROUP, "background": _PALETTE_GROUP,
+                                 "character": _PALETTE_GROUP}},          # paletteData b
+    "maskMediaId": _SCALAR, "strength": _SCALAR,
+    "sdedit": {"spectralScale": _SCALAR, "hfsBlurSigma": _SCALAR,       # `va` = inpaint-CusgHKxP S
+               "hfsEnd": _SCALAR, "colorCorrection": _SCALAR},
+    "latentCouple": {"type": _SCALAR, "divisions": [_SCALAR],           # `Jn`
+                     "positions": [_SCALAR], "weights": [_SCALAR]},
+    # boosters and upscale
+    "qualityTag": {"prefix": _SCALAR, "suffix": _SCALAR},               # `Ya`
+    "styleMix": {"enabled": _SCALAR, "seed": _SCALAR, "weight": _SCALAR},   # `as`
+    "enableADetailer": _SCALAR, "upscale": _SCALAR, "upscaleDenoisingSteps": _SCALAR,
+    "upscaleDenoisingStrength": _SCALAR, "upscaleSampler": _SCALAR, "enlarge": _SCALAR,
+    "enlargeModel": _SCALAR, "enableTile": _SCALAR,
+    # profile and helper
+    "inferenceProfile": _SCALAR,
+    "inferenceConfig": {"rescaleCFG": _SCALAR,                          # `Ka`
+                        "modelSampling": {"inputs": {"shift": _SCALAR}}},
+    "promptHelper": {k: _SCALAR for k in (                              # `Et`
+        "withStage", "userWantToEnable", "enable", "creativity",
+        "forcePromptHelperDetectionSide", "creativeMode", "agentic", "agenticCompare")},
+    # lanes and cards (`kaisuukenExtraCredits` is in PixAI's schema and never in this one: D2)
+    "lane": _SCALAR, "channel": _SCALAR, "kaisuukenId": _SCALAR,
+    # other
+    "extra": {"naturalPrompts": _SCALAR, "referenceImagePrompts": _SCALAR,   # `Hn` = he.extend
+              "triggerWords": _SCALAR, "source": _SCALAR},
+    "watermark": _SCALAR,
+}
+_WIRE_CHAT = {                                                         # `rs`
+    "prompts": _SCALAR, "mediaId": _SCALAR, "mediaIds": [_SCALAR], "modelId": _SCALAR,
+    "workspaceId": _SCALAR,
+    "modelConfig": {k: _SCALAR for k in (                               # `Ln`
+        "resolution", "aspectRatio", "quality", "layerDecomposition", "background",
+        "colorTone", "outputFormat", "frameCount", "frameDurationMs")},
+}
+#: The final body per door kind -- the wrapper included for /task/create (`ys` takes
+#: `parameters` and `thread`; the app never sends a thread, so only `parameters` is allowed).
+#: The edit shape is `ns`: the image keys and `chat`. The video, t2i2v, inpaint and remix
+#: blocks the union also knows are not this app's to send on these kinds, so they are refused.
+WIRE_SCHEMA = {
+    "image": {"parameters": _WIRE_IMAGE},
+    "edit": {"parameters": dict(_WIRE_IMAGE, chat=_WIRE_CHAT)},
+    # POST /v2/task/chat-editing-scene, `ChatEditingPresetWrapper-BSt4gUa4.js` via create-*.js
+    "scene": {"sceneId": _SCALAR, "mediaIds": [_SCALAR], "preset": _SCALAR, "custom": _SCALAR,
+              "selectorValues": [{"id": _SCALAR, "value": _SCALAR}]},
+    # POST /v2/task/enhance, `task-CtewRxby.js`
+    "enhance": {"enhanceType": _SCALAR, "mediaId": _SCALAR, "prompt": _SCALAR},
+    # POST /v2/task/fixer: build_fixer_body's {mediaId, boxes} (the route the app sends today)
+    "fix": {"mediaId": _SCALAR,
+            "boxes": [{"x": _SCALAR, "y": _SCALAR, "width": _SCALAR, "height": _SCALAR,
+                       "tag": _SCALAR}]},
+}
+#: PixAI's `Es` guard: workflow and art-filter tasks are created through GraphQL, never here.
+WIRE_WORKFLOW_KEYS = ("workflow", "workflowId", "workflowName", "workflowVersionId", "inputs")
+#: What the REST create routes drop and the app may still build (the video and panelplugin
+#: builders): dropped by rest_wire, by name, never silently (DESIGN_3.22 2.4 rule 4).
+WIRE_KNOWN_DROPS = ("enablePreview", "hidePrompts", "isPrivate")
+_WIRE_ENUMS = {"channel": ("normal", "private"),                     # `Ne`
+               "lane": ("normal", "infinite"),                       # `Xn`
+               "watermark": ("pixai",)}
+_WIRE_OUTPUT_FORMATS = ("png", "svg", "gif")                          # chatEditing-DtzDRo8B.js
+
+
+def _wire_refusal(why):
+    from moonglade.backup import LocalRefusal
+    return LocalRefusal("PixAI's create route would not take this request as built ({}), so "
+                        "nothing was sent.".format(why))
+
+
+def rest_wire(kind, params):
+    """The REST half of to_wire, for one door kind: a COPY of `params` with the known-drop
+    list applied (pure). `isPrivate` follows one rule: with no `channel` it becomes the channel
+    ("private" when true, else "normal"); when both are present and disagree the request is
+    refused; then it is dropped. `enablePreview` and `hidePrompts` are dropped. A kind whose
+    body is not a generation's parameters (scene, enhance, fix) comes back as a plain copy."""
+    import copy
+    p = copy.deepcopy(params)
+    if kind not in ("image", "edit") or not isinstance(p, dict):
+        return p
+    if "isPrivate" in p:
+        if not isinstance(p.get("isPrivate"), bool):
+            raise _wire_refusal("isPrivate must be true or false")
+        want = "private" if p["isPrivate"] else "normal"
+        if "channel" not in p:
+            p["channel"] = want
+        elif p.get("channel") != want:
+            raise _wire_refusal("isPrivate and channel disagree")
+        p.pop("isPrivate")
+    for k in ("enablePreview", "hidePrompts"):
+        p.pop(k, None)
+    return p
+
+
+def wire_drops(kind, params):
+    """The keys rest_wire drops from `params` for `kind`, by name -- for the Inspector's
+    request record. [] for a GraphQL kind, or when nothing is dropped. Pure."""
+    from moonglade.gen_road import CREATE_ROAD
+    if CREATE_ROAD.get(kind) != "rest" or kind not in ("image", "edit") \
+            or not isinstance(params, dict):
+        return []
+    return [k for k in WIRE_KNOWN_DROPS if k in params]
+
+
+def to_wire(kind, params):
+    """THE road-aware wire step (DESIGN_3.22 2.4 rule 2), pure. On a kind gen_road.CREATE_ROAD
+    sends over GraphQL it returns `params` itself, unchanged (the video and reference-video
+    bodies stay byte for byte what they were); on a REST kind it returns rest_wire's copy. It is
+    the last step of build_request, so the badge, the card check and the preview see the shape
+    the door will send; the door runs rest_wire again on the final object, and that is the run
+    that counts."""
+    from moonglade.gen_road import CREATE_ROAD
+    if CREATE_ROAD.get(kind) != "rest":
+        return params
+    return rest_wire(kind, params)
+
+
+def _wire_walk(spec, value, path, misses):
+    if spec == _SCALAR:
+        if isinstance(value, (dict, list)):
+            misses.append("{} must be a single value".format(path))
+        return
+    if spec == _RECORD:
+        if not isinstance(value, dict):
+            misses.append("{} must be an object".format(path))
+            return
+        for k, v in value.items():
+            if isinstance(v, (dict, list)):
+                misses.append("{}.{} must be a single value".format(path, k))
+        return
+    if isinstance(spec, list):
+        if not isinstance(value, list):
+            misses.append("{} must be a list".format(path))
+            return
+        for i, item in enumerate(value):
+            _wire_walk(spec[0], item, "{}[{}]".format(path, i), misses)
+        return
+    if not isinstance(value, dict):
+        misses.append("{} must be an object".format(path))
+        return
+    for k, v in value.items():
+        sub = "{}.{}".format(path, k) if path else str(k)
+        if k not in spec:
+            misses.append("{} is not a field it takes".format(sub))
+            continue
+        _wire_walk(spec[k], v, sub, misses)
+
+
+def check_wire(kind, body):
+    """THE recursive allowlist (DESIGN_3.22 2.4 rule 3, 5): refuse (LocalRefusal, nothing sent)
+    unless every key of `body` -- the FINAL object the door is about to send, wrapper included
+    -- is in WIRE_SCHEMA[kind] at its depth, and the cheap load-bearing value rules hold.
+    Never strips. Returns None."""
+    if kind not in WIRE_SCHEMA or not isinstance(body, dict):
+        raise _wire_refusal("no wire schema for {!r}".format(str(kind)[:40]))
+    inner = body.get("parameters") if kind in ("image", "edit") else body
+    if not isinstance(inner, dict):
+        raise _wire_refusal("no parameters")
+    # The named refusals first, so the sentence says what is wrong, not only where.
+    if _wire_has_key(body, "kaisuukenExtraCredits"):
+        raise _wire_refusal("a free card never carries extra credits")
+    if kind in ("scene", "enhance", "fix") and _wire_has_key(body, "kaisuukenId"):
+        raise _wire_refusal("a free card never rides this kind")
+    if kind in ("image", "edit"):
+        hit = [k for k in WIRE_WORKFLOW_KEYS if k in inner]
+        if hit:
+            raise _wire_refusal("workflow tasks are not created on this route: " + hit[0])
+    misses = []
+    _wire_walk(WIRE_SCHEMA[kind], body, "", misses)
+    if misses:
+        raise _wire_refusal(misses[0])
+    for k, allowed in _WIRE_ENUMS.items():
+        if k in inner and inner[k] not in allowed:
+            raise _wire_refusal("{} must be one of {}".format(k, "/".join(allowed)))
+    mc = (inner.get("chat") or {}).get("modelConfig") if kind == "edit" else None
+    if isinstance(mc, dict):
+        fmt = mc.get("outputFormat")
+        if fmt is not None and fmt not in _WIRE_OUTPUT_FORMATS:
+            raise _wire_refusal("outputFormat must be png, svg or gif")
+        for key, lo, hi in (("frameCount", 2, 16), ("frameDurationMs", 20, 2000)):
+            if key not in mc:
+                continue
+            v = mc[key]
+            if fmt != "gif":
+                raise _wire_refusal("{} goes only with a gif".format(key))
+            if isinstance(v, bool) or not isinstance(v, int) or not lo <= v <= hi:
+                raise _wire_refusal("{} must be a whole number {}-{}".format(key, lo, hi))
+
+
+def _wire_has_key(value, key):
+    """True when `key` is an object key anywhere inside `value`."""
+    if isinstance(value, dict):
+        return key in value or any(_wire_has_key(v, key) for v in value.values())
+    if isinstance(value, list):
+        return any(_wire_has_key(v, key) for v in value)
+    return False
