@@ -16873,14 +16873,9 @@ def create_app(out_dir: Path):
     # console line to say so. So that case is refused before anything goes out, in words the
     # drawer shows. A send whose badge showed a PRICE carries nothing and goes out exactly as
     # before (issue #15: a card that covers only part still spends, the full price stated).
-    _QUOTED_FREE_GONE = ("The free card this was priced with is gone (used elsewhere or "
-                         "expired), so sending it would spend credits. Nothing was sent. "
-                         "Check the price again before you send.")
-
-    def _pop_expect_free(body):
-        """The client's 'my badge said FREE' flag, popped so it never reaches build_request,
-        the single-send record or PixAI."""
-        return bool(body.pop("expect_free", False)) if isinstance(body, dict) else False
+    # Since 3.22 (DESIGN_3.22 3.4) the rule itself lives in gen_road; these names call it.
+    _QUOTED_FREE_GONE = _gen_road.QUOTED_FREE_GONE
+    _pop_expect_free = _gen_road.pop_expect_free
 
     def _pop_loom_target(body):
         """The Loom's {board_id, card_id} on a send from one of its tabs (Image, Edit,
@@ -16905,16 +16900,8 @@ def create_app(out_dir: Path):
                         cost=0 if (params or {}).get("kaisuukenId") else None)
 
     def _quoted_free_hooks(core, req, expect_free):
-        """core.submit's before_send for a send quoted FREE: runs after the card step, before
-        the one mutation, and refuses when no card was attached. An Unlimited Mode request is
-        free by the entitlement, never by a card, so it is never held to this."""
-        if not expect_free or req.unlimited:
-            return {}
-
-        def _before_send(params):
-            if not params.get("kaisuukenId"):
-                raise core.LocalRefusal(_QUOTED_FREE_GONE)
-        return {"before_send": _before_send}
+        """submit's before_send for a send quoted FREE: gen_road.quoted_free_hooks (3.22)."""
+        return _gen_road.quoted_free_hooks(req, expect_free)
 
     # THE SINGLE SENDS' REPEAT HOLD (3.21.2, DESIGN_3.22 "Live in master today" L1 and 2.12).
     # Every single send -- /api/generate, /api/edit, /api/enhance, /api/scene, /api/fix and the
@@ -20257,8 +20244,10 @@ __DESIGN_TOKENS__
         def _before_send(params):
             # Review F13: the confirm skipped because the shot priced FREE; if the card that
             # quote found is gone by now, sending would charge credits nobody confirmed.
-            if expect_free and not params.get("kaisuukenId"):
-                raise _core.LocalRefusal(
+            # The rule is gen_road's (3.22, DESIGN_3.22 3.4); the wording stays the Loom's.
+            if expect_free:
+                _gen_road.refuse_if_quoted_free_gone(
+                    params,
                     "The free card this render was priced with was used elsewhere, so it would "
                     "spend credits. Nothing was sent. Press Render again to see the new price."
                     if journalled else _QUOTED_FREE_GONE)

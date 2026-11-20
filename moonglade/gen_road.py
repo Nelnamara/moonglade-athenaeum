@@ -1884,3 +1884,47 @@ def _cli_create_once(create_session, params):
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
         return task_id
     return _cli_send_once(_send)
+
+
+# =============================================================================
+# THE GALLERY'S SPEND RULES, as plain functions (DESIGN_3.22 3.4, step S2b)
+# =============================================================================
+# These lived inside create_app's route closures. They are spend rules, so they live here,
+# beside the road they guard, and the later Phase 4 route moves can be pure moves with no
+# second spend review. The routes keep their wording and call these.
+
+# --- the FREE-quote rule (2026-11-18) ----------------------------------------
+# A gallery send whose cost badge said FREE carries `expect_free`. The card is matched again
+# at send time (_apply_kaisuuken); if the card the quote found is gone by then, sending would
+# charge a price nobody was shown, so that case is refused before anything goes out. A send
+# whose badge showed a PRICE carries nothing and goes out exactly as before.
+QUOTED_FREE_GONE = ("The free card this was priced with is gone (used elsewhere or "
+                    "expired), so sending it would spend credits. Nothing was sent. "
+                    "Check the price again before you send.")
+
+
+def pop_expect_free(body):
+    """The client's 'my badge said FREE' flag, popped so it never reaches build_request, the
+    single-send record or PixAI."""
+    return bool(body.pop("expect_free", False)) if isinstance(body, dict) else False
+
+
+def refuse_if_quoted_free_gone(params, message=QUOTED_FREE_GONE):
+    """The rule itself: a send quoted FREE goes out only with a card attached. Raises
+    LocalRefusal(`message`) -- nothing sent -- when `params` carries no kaisuukenId."""
+    from moonglade.backup import LocalRefusal
+    if not (params or {}).get("kaisuukenId"):
+        raise LocalRefusal(message)
+
+
+def quoted_free_hooks(req, expect_free):
+    """submit()'s before_send for a send quoted FREE: runs after the card step and before the
+    one send, and refuses when no card was attached. An Unlimited Mode request is free by the
+    entitlement, never by a card, so it is never held to this. {} when there is nothing to
+    hold the send to."""
+    if not expect_free or req.unlimited:
+        return {}
+
+    def _before_send(params):
+        refuse_if_quoted_free_gone(params)
+    return {"before_send": _before_send}
