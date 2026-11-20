@@ -34,6 +34,7 @@ from moonglade import backup as core
 from moonglade import media_tools as media_tools_mod
 from moonglade import telemetry as telemetry_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import models as models_mod
 
 
 @pytest.fixture()
@@ -346,7 +347,7 @@ class TestM05Claims:
 def _model_cache():
     """model_name_gql memoises into a module-level default arg; reach it to assert WHAT got
     cached, since caching a failure as if it were an answer is half of this bug."""
-    cache = core.model_name_gql.__defaults__[0]
+    cache = models_mod.model_name_gql.__defaults__[0]
     assert isinstance(cache, dict)
     return cache
 
@@ -385,9 +386,9 @@ class TestM18ModelLookupFailure:
         mid = "m18-strict-0001"
 
         with pytest.raises(core.PixAIError, match="lookup failed"):
-            core.model_name_gql(mock_session, mid, strict=True)
+            models_mod.model_name_gql(mock_session, mid, strict=True)
         # every other caller only wants a label, and keeps the old fallback unchanged
-        assert core.model_name_gql(mock_session, mid) == mid
+        assert models_mod.model_name_gql(mock_session, mid) == mid
 
     def test_failure_is_not_memoised_as_a_name(self, mock_session):
         """--sync runs the full-meta pass and --fix-models in ONE process, sharing this
@@ -396,10 +397,10 @@ class TestM18ModelLookupFailure:
         mock_session.post.side_effect = requests.RequestException("timeout")
         mid = "m18-cache-0001"
 
-        assert core.model_name_gql(mock_session, mid) == mid        # soft caller goes first
-        assert _model_cache().get(mid) is core._MODEL_LOOKUP_FAILED
+        assert models_mod.model_name_gql(mock_session, mid) == mid        # soft caller goes first
+        assert _model_cache().get(mid) is models_mod._MODEL_LOOKUP_FAILED
         with pytest.raises(core.PixAIError):                        # the verdict survives
-            core.model_name_gql(mock_session, mid, strict=True)
+            models_mod.model_name_gql(mock_session, mid, strict=True)
 
     def test_an_unknown_version_is_a_real_cannot_resolve_not_a_failure(self, mock_session,
                                                                         mocker):
@@ -411,7 +412,7 @@ class TestM18ModelLookupFailure:
             mocker, {"data": {"generationModelVersion": None}})
         mid = "m18-unknown-0001"
 
-        assert core.model_name_gql(mock_session, mid, strict=True) == mid
+        assert models_mod.model_name_gql(mock_session, mid, strict=True) == mid
         assert mock_session.post.call_count == 1
         assert _model_cache().get(mid) == mid
 
@@ -480,7 +481,7 @@ class TestM18ModelLookupFailure:
         assert row["model_name"] == vid, what
         assert res["relabeled"] == 0 and res["lookup_failed"] == 1
         assert core._needs_model_fix(row) == vid        # still repairable by a re-run
-        assert _model_cache().get(vid) is core._MODEL_LOOKUP_FAILED
+        assert _model_cache().get(vid) is models_mod._MODEL_LOOKUP_FAILED
 
     def test_a_200_with_errors_is_not_laundered_through_the_cache_into_sync(
             self, mock_session, mocker):
@@ -491,10 +492,10 @@ class TestM18ModelLookupFailure:
         mock_session.post.return_value = _reply(
             mocker, {"errors": [{"message": "PersistedQueryNotFound"}]})
 
-        assert core.model_name_gql(mock_session, mid) == mid     # soft caller: label only
-        assert _model_cache().get(mid) is core._MODEL_LOOKUP_FAILED
+        assert models_mod.model_name_gql(mock_session, mid) == mid     # soft caller: label only
+        assert _model_cache().get(mid) is models_mod._MODEL_LOOKUP_FAILED
         with pytest.raises(core.PixAIError, match="lookup failed"):
-            core.model_name_gql(mock_session, mid, strict=True)
+            models_mod.model_name_gql(mock_session, mid, strict=True)
 
     def test_relabel_removed_still_relabels_a_genuinely_removed_model(self, tmp_path,
                                                                       mocker):

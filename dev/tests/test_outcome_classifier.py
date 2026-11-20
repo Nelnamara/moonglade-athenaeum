@@ -11,6 +11,7 @@ import requests
 
 from moonglade import backup as core
 from moonglade import pixai_client as pc
+from moonglade import models as models_mod
 
 DECLARED_OUTSIDE = ["FILE_NOT_FOUND", "NOT_FOUND", "LORA_NUM_EXCEEDED", "MODEL_LORA_INCOMPATIBLE",
                     "IMAGE_SIZE_NOT_ALLOWED", "INPUT_IMAGE_TOO_LARGE", "NSFW_DETECTED",
@@ -137,7 +138,7 @@ def test_the_lane_branch_reads_the_graphql_attributes_not_the_prefix(monkeypatch
     words; a plain PixAIError shaped like one is passed on as it came (unknown)."""
     monkeypatch.setattr(core, "_check_read_only", lambda *a: None)
     monkeypatch.setattr(core._mirror, "_session_for_create", lambda s: s)
-    monkeypatch.setattr(core, "_gate_params_for_model", lambda s, p: p)
+    monkeypatch.setattr(models_mod, "_gate_params_for_model", lambda s, p: p)
     lane = {"modelId": "1", "prompts": "x", "lane": "infinite"}
     fake_text = core.PixAIError('GraphQL error: [{"message": "no"}]')
     monkeypatch.setattr(core, "gql_mutate", lambda *a, **k: (_ for _ in ()).throw(fake_text))

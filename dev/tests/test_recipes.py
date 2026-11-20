@@ -13,6 +13,7 @@ import json
 import pytest
 
 from moonglade import backup as core
+from moonglade import models as models_mod
 from moonglade import recipes as rec
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 from tests.conftest import login_client, login_test_client
@@ -209,7 +210,7 @@ def test_the_send_refuses_recipes_beside_context_images(monkeypatch):
     """The build saw a plain reference; the backstop gate converted it late. Nothing is
     sent (review finding 1)."""
     fake = FakePixAI()
-    monkeypatch.setattr(core, "_gate_params_for_model",
+    monkeypatch.setattr(models_mod, "_gate_params_for_model",
                         lambda s, p: dict({k: v for k, v in p.items() if k != "mediaId"},
                                           contextImages=[p["mediaId"]]))
     with pytest.raises(core.PixAIError, match="held while context images"):
@@ -230,7 +231,7 @@ def test_a_recipe_refusal_is_never_resubmitted_whatever_its_words(monkeypatch):
     err = _refused("RECIPE_INCOMPATIBLE", "mutually_exclusive_feature", [RID])
     err.args = ("GraphQL error: inferenceProfile clashes with a recipe",)
     fake.fail("createGenerationTask", err)
-    monkeypatch.setattr(core, "_gate_params_for_model", lambda s, p: p)
+    monkeypatch.setattr(models_mod, "_gate_params_for_model", lambda s, p: p)
     with pytest.raises(core.PixAIError):
         core.submit_generation(fake, {"modelId": "1", "inferenceProfile": "pro",
                                       "recipeIds": [RID]})
@@ -659,14 +660,14 @@ def test_make_a_recipe_checks_the_pictures_model_and_refuses_a_stranger(tmp_path
     _seed(tmp_path, [{"media_id": "501", "task_id": "9001", "model_id": "1983308862240288769",
                       "model_name": "Tsubaki.3", "prompt_full": "a moon"}])
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "_model_features",
+    monkeypatch.setattr(models_mod, "_model_features",
                         lambda s, v: {"model_type": "MMDIT26B_MODEL", "status": {}})
     cli = login_test_client(create_app(tmp_path))
     d = cli.get("/api/recipes/from-image?media_id=501&check=1").get_json()
     assert d["capable"] is True and d["model_type"] == "MMDIT26B_MODEL"
     r = cli.get("/api/recipes/from-image?media_id=999&check=1")
     assert r.status_code == 404 and r.get_json()["capable"] is False
-    monkeypatch.setattr(core, "_model_features",
+    monkeypatch.setattr(models_mod, "_model_features",
                         lambda s, v: {"model_type": "VIDEO_MODEL", "status": {}})
     assert cli.get("/api/recipes/from-image?media_id=501&check=1").get_json()["capable"] \
         is False
@@ -772,7 +773,7 @@ def test_recipes_beside_context_images_refuse_in_one_wording_and_nothing_is_pric
     assert str(err.value) == rec.HELD_WITH_CONTEXT
     # the gate's own check on a hand-built dict (w2-gen review S4) says the same words
     with pytest.raises(core.PixAIError) as err:
-        core._gate_image_params(object(), {"prompts": "p", "modelId": T3, "width": 1024,
+        models_mod._gate_image_params(object(), {"prompts": "p", "modelId": T3, "width": 1024,
                                            "height": 1024, "batchSize": 1,
                                            "contextImages": ["701"], "recipeIds": [RID]})
     assert str(err.value) == rec.HELD_WITH_CONTEXT
@@ -781,7 +782,7 @@ def test_recipes_beside_context_images_refuse_in_one_wording_and_nothing_is_pric
 
 def test_the_send_backstop_uses_the_same_wording(monkeypatch):
     fake = FakePixAI()
-    monkeypatch.setattr(core, "_gate_params_for_model", lambda s, p: p)
+    monkeypatch.setattr(models_mod, "_gate_params_for_model", lambda s, p: p)
     with pytest.raises(core.PixAIError) as err:
         core.submit_generation(fake, {"modelId": "1", "contextImages": ["9"],
                                       "recipeIds": [RID]})

@@ -15,6 +15,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade import integrity as integ
+from moonglade import models as models_mod
 from tests.test_unclear_single_sends import ROUTES, _Resp, rig  # noqa: F401  (rig is a fixture)
 
 INTERNAL = lambda: _Resp(200, {"errors": [{"message": "Internal server error",
@@ -104,8 +105,8 @@ def test_the_two_resubmits_still_fire_on_their_coded_refusals(monkeypatch):
     fires on an uncoded one."""
     monkeypatch.setattr(core, "_check_read_only", lambda *a: None)
     monkeypatch.setattr(core._mirror, "_session_for_create", lambda s: s)
-    monkeypatch.setattr(core, "_gate_params_for_model", lambda s, p: p)
-    monkeypatch.setattr(core, "_profile_listing", lambda s, p: (False, False))
+    monkeypatch.setattr(models_mod, "_gate_params_for_model", lambda s, p: p)
+    monkeypatch.setattr(models_mod, "_profile_listing", lambda s, p: (False, False))
     monkeypatch.setitem(core._turbo_refused, "seen", False)
     cases = [({"prompts": "a", "modelId": "1", "inferenceProfile": "pro"},
               {"message": "unknown inferenceProfile", "extensions": {"code": "BAD_REQUEST"}}),

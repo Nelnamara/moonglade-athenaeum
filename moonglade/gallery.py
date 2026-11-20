@@ -47,6 +47,7 @@ from moonglade import jobs as _jobs
 from moonglade import living as _living
 from moonglade import media_tools as _media_tools
 from moonglade import mirror as _mirror
+from moonglade import models as _models
 from moonglade import organize as _organize
 from moonglade import paths as _paths
 from moonglade import pixai_client as _pixai_client
@@ -11574,7 +11575,7 @@ def create_app(out_dir: Path):
                                          cursor=cursor, query=q,
                                          lora_base=(request.args.get("base") or "").strip())
                 if usage == "LORA" and base_type:
-                    payload["results"] = core.annotate_lora_compat(payload["results"], base_type)
+                    payload["results"] = _models.annotate_lora_compat(payload["results"], base_type)
                 payload["read_only"] = _read_only_flag(core)
                 return jsonify(payload)
             session = _mirror.present_as_web(session)
@@ -11582,7 +11583,7 @@ def create_app(out_dir: Path):
                 # Its own operation -- the market connection has no bookmark argument, so this
                 # cannot be folded into the call below. Same row shape, so the grid does not care.
                 def _bookmark_page(after):
-                    return core.model_bookmarks_gql(
+                    return _models.model_bookmarks_gql(
                         session, keyword=q, usage=usage, limit=size, after=after,
                         lora_base_type=server_lora_type)
                 payload = _hunt_by_name(_bookmark_page, q, size) if q else _bookmark_page(cursor or None)
@@ -11590,7 +11591,7 @@ def create_app(out_dir: Path):
                 # "My LoRAs" is NOT a separate operation: it is the ordinary market connection
                 # filtered by the signed-in user's own id, exactly as their MY LORA tab does it.
                 def _mine_page(after):
-                    return core.model_search_market_gql(
+                    return _models.model_search_market_gql(
                         session, keyword=q, category=category, sort=sort, usage=usage,
                         limit=size, after=after,
                         lora_base_type=server_lora_type,
@@ -11601,10 +11602,10 @@ def create_app(out_dir: Path):
             # to fall through to REST, whose own docstring says it "silently ignores market
             # filters". REST survives only for a bare, unfiltered base browse, where its richer
             # rows (description / refCount / official badge) are worth having.
-            elif (usage == "LORA" or category in core.MARKET_CATEGORIES
+            elif (usage == "LORA" or category in _models.MARKET_CATEGORIES
                   or posted or license_ or model_types
                   or (sort and sort not in ("trending", "popular"))):
-                payload = core.model_search_market_gql(
+                payload = _models.model_search_market_gql(
                     session, keyword=q, category=category, sort=sort, usage=usage,
                     limit=size, after=(cursor or None),
                     # The same caller-supplied value that feeds the compat sort/badge
@@ -11613,15 +11614,15 @@ def create_app(out_dir: Path):
                     # any architecture off its whitelist.
                     lora_base_type=server_lora_type,
                     source=source, permitted_use=license_,
-                    time_range=core.posted_at_range(posted),
+                    time_range=_models.posted_at_range(posted),
                     model_types=model_types)
             else:
                 offset = int(cursor) if cursor.isdigit() else 0
-                payload = core.model_search_rest(session, keyword=q, usage=usage,
+                payload = _models.model_search_rest(session, keyword=q, usage=usage,
                                                   size=size, offset=offset)
                 payload["next_cursor"] = str(offset + size) if payload.get("has_more") else ""
             if usage == "LORA" and base_type:
-                payload["results"] = core.annotate_lora_compat(payload["results"], base_type)
+                payload["results"] = _models.annotate_lora_compat(payload["results"], base_type)
             # Session S: every card's ⊕ Save dims under READ_ONLY before any tap (a local check)
             payload["read_only"] = _read_only_flag(core)
             return jsonify(payload)
@@ -11653,7 +11654,7 @@ def create_app(out_dir: Path):
             try:
                 core, session = _gen_session()
                 session = _mirror.present_as_web(session)   # same policy as the search that found it
-                return jsonify({"model_id": core.resolve_model_base_id(session, version_id)})
+                return jsonify({"model_id": _models.resolve_model_base_id(session, version_id)})
             except Exception as e:
                 return jsonify({"error": _redact_host_paths(str(e))[:200], "model_id": ""}), 200
         mid = (request.args.get("model_id") or "").strip()
@@ -11663,7 +11664,7 @@ def create_app(out_dir: Path):
             core, session = _gen_session()
             session = _mirror.present_as_web(session)   # same policy as the search that found it
             if (request.args.get("all") or "").strip() in ("1", "true"):
-                return jsonify({"versions": core.list_model_versions(session, mid)})
+                return jsonify({"versions": _models.list_model_versions(session, mid)})
             # with_profiles: this is a BASE-model resolve whose answer feeds the composer's
             # mode bar, so it is one of the two places that pays the second, version-keyed
             # inference-profiles read (the ?all=1 branch's own is_latest row is the other).
@@ -11672,7 +11673,7 @@ def create_app(out_dir: Path):
             # The same opt-in carries the version's size rule, the false compatibility
             # entries from /features and whether a reference goes out as a context image
             # (core._attach_features, SCOPE_2026-09-26) -- read from the gate's own cache.
-            return jsonify(core.resolve_version_meta(session, mid, with_profiles=True))
+            return jsonify(_models.resolve_version_meta(session, mid, with_profiles=True))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "version_id": ""}), 200
 
@@ -11730,7 +11731,7 @@ def create_app(out_dir: Path):
                     except (TypeError, ValueError):
                         unresolved += 1
                         continue
-                    base = core.resolve_model_base_id(session, str(vid))
+                    base = _models.resolve_model_base_id(session, str(vid))
                     if not base:
                         unresolved += 1
                         continue
@@ -11739,12 +11740,12 @@ def create_app(out_dir: Path):
                         # and a LoRA never renders a mode bar, so asking for it would cost a
                         # second PixAI GET per unique LoRA base for a field this route drops
                         # (red team 2026-09-07).
-                        meta_cache[base] = core.resolve_version_meta(session, base) or {}
+                        meta_cache[base] = _models.resolve_version_meta(session, base) or {}
                     meta = meta_cache[base]
                     lbt = str(meta.get("lora_base_model_type") or "")
                     rows.append({
                         "model_id": base, "version_id": str(vid), "weight": w,
-                        "title": str(core.model_name_gql(session, str(vid)) or "") or base,
+                        "title": str(_models.model_name_gql(session, str(vid)) or "") or base,
                         "preview_url": "",
                         "lora_base_model_type": lbt,
                         "model_type": str(meta.get("model_type") or ""),
@@ -15285,7 +15286,7 @@ def create_app(out_dir: Path):
         try:
             try:
                 core_, session = _gen_session()
-                m = core.generation_model_brief(session, mid)
+                m = _models.generation_model_brief(session, mid)
             except Exception as e:                      # noqa: BLE001
                 return _train_refusal(e)
             me = str(getattr(session, "user_id", "") or core.USER_ID or "")
@@ -16443,7 +16444,7 @@ def create_app(out_dir: Path):
             gate=core.gate_resolver(gsession),
             video_duration=_video_duration_lookup,
             unlimited=core.unlimited_resolver(gsession),
-            features=core.features_resolver(gsession))
+            features=_models.features_resolver(gsession))
 
     def _submit_resolver(core, gsession):
         """For a SPEND. The price resolver plus the input resolver: a catalog media_id is
@@ -16458,7 +16459,7 @@ def create_app(out_dir: Path):
             gate=core.gate_resolver(gsession),
             video_duration=_video_duration_lookup,
             unlimited=core.unlimited_resolver(gsession),
-            features=core.features_resolver(gsession))
+            features=_models.features_resolver(gsession))
 
     def _lane_job_running(core):
         """True while the app's own job log holds an Unlimited Mode task that has not
@@ -17295,7 +17296,7 @@ def create_app(out_dir: Path):
         if not add:
             return
         try:
-            feats = core.features_resolver(gsession)(built[0]["req"].model_version_id)
+            feats = _models.features_resolver(gsession)(built[0]["req"].model_version_id)
         except Exception:                                    # noqa: BLE001
             feats = None
         limit = _prompt_limit((feats or {}).get("model_type"))
@@ -21948,7 +21949,7 @@ __DESIGN_TOKENS__
         picker self-updates the day PixAI opens the connection to us."""
         try:
             core, session = _gen_session()
-            return jsonify({"workflows": core.workflow_catalog(session)})
+            return jsonify({"workflows": _models.workflow_catalog(session)})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "workflows": []}), 200
 
@@ -22101,14 +22102,14 @@ __DESIGN_TOKENS__
         rec = _recipes()
         try:
             core, gsession = _gen_session()
-            feats = core._model_features(gsession, vid)
+            feats = _models._model_features(gsession, vid)
             mtype = (feats or {}).get("model_type") or ""
             capable = bool(mtype) and mtype in rec.model_types(gsession)
             out = {"capable": capable, "model_type": mtype, "version_id": vid,
                    "model_title": str(row.get("model_name") or "")}
             if request.args.get("check") or not capable:
                 return jsonify(out)
-            base = core.resolve_model_base_id(gsession, vid)
+            base = _models.resolve_model_base_id(gsession, vid)
             prompt = str(row.get("prompt_full") or row.get("prompt_preview") or "")
             loras, unresolved = [], 0
             tid = str(row.get("task_id") or "").strip()
@@ -22123,11 +22124,11 @@ __DESIGN_TOKENS__
                 except (TypeError, ValueError):
                     unresolved += 1
                     continue
-                lbase = core.resolve_model_base_id(gsession, str(lvid))
-                rows = core.list_model_versions(gsession, lbase) if lbase else []
+                lbase = _models.resolve_model_base_id(gsession, str(lvid))
+                rows = _models.list_model_versions(gsession, lbase) if lbase else []
                 vrow = next((r for r in rows if r.get("version_id") == str(lvid)), None) or {}
                 loras.append({"version_id": str(lvid), "model_id": lbase, "weight": w,
-                              "title": str(core.model_name_gql(gsession, str(lvid)) or "")
+                              "title": str(_models.model_name_gql(gsession, str(lvid)) or "")
                               or str(lvid),
                               "trigger_words": str(vrow.get("trigger_words") or "")})
             out.update({"model_id": base, "prompt": prompt, "loras": loras,

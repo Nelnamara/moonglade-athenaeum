@@ -43,6 +43,7 @@ import requests
 
 from moonglade import backup as core
 from moonglade import gallery as g
+from moonglade import models as models_mod
 from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.fake_pixai import FakePixAI, UnregisteredOperation, operation_name
@@ -59,7 +60,7 @@ MODELS = RECORDED["models"]
 KINDS = sorted(TASKS)
 
 TASK_DETAIL = operation_name(task_reads_mod._TASK_DETAIL_DOC)        # what the fake keys it by
-MODEL_VERSION = operation_name(core._MODEL_VERSION_DOC)
+MODEL_VERSION = operation_name(models_mod._MODEL_VERSION_DOC)
 
 # The fixed part of task_detail_gql's sentence (the task id and PixAI's error sit in front).
 SENTENCE = ("Nothing was spent and nothing is lost -- this call only READS a task, so the "
@@ -154,7 +155,7 @@ def fresh_model_caches():
     """model_name_gql and _resolve_model_preset memoise into module-level default dicts, and
     other tests use the same public version ids: start these tests empty, put them back
     after."""
-    caches = [core.model_name_gql.__defaults__[0], core._resolve_model_preset.__defaults__[0]]
+    caches = [models_mod.model_name_gql.__defaults__[0], core._resolve_model_preset.__defaults__[0]]
     kept = [dict(c) for c in caches]
     for c in caches:
         c.clear()
@@ -187,7 +188,7 @@ def test_the_task_document_selects_every_key_the_saved_answer_carried(kind):
 
 
 def test_the_model_document_is_the_query_the_probe_validated():
-    doc = " ".join(core._MODEL_VERSION_DOC.split())
+    doc = " ".join(models_mod._MODEL_VERSION_DOC.split())
     assert doc == RECORDED["documents"]["ModelVersion"]
     assert pixai_client_mod._is_mutation_document(doc) is False
     assert MODEL_VERSION == "ModelVersion"
@@ -473,9 +474,9 @@ def test_a_model_read_is_one_post_of_the_full_document_never_a_saved_get(fresh_m
     the GET below raises, the lookup is a failure, and the name is not this one."""
     t = MODELS["tsubaki"]
     s = _Session(_Response({"data": t["document"]}))
-    assert core.model_name_gql(pixai_client_mod.PixAIClient(s), t["version_id"]) == "Tsubaki.2 v1"
+    assert models_mod.model_name_gql(pixai_client_mod.PixAIClient(s), t["version_id"]) == "Tsubaki.2 v1"
     [post] = s.posts
-    assert post.json == {"query": core._MODEL_VERSION_DOC,
+    assert post.json == {"query": models_mod._MODEL_VERSION_DOC,
                          "variables": {"id": t["version_id"]}}
 
 
@@ -484,8 +485,8 @@ def test_each_recorded_model_reads_as_the_saved_request_read_it(pixai, kind,
                                                                 fresh_model_caches):
     m = MODELS[kind]
     pixai.on(MODEL_VERSION, m["document"])
-    assert core.model_name_gql(pixai, m["version_id"], strict=True) == m["name"]
-    assert core.resolve_model_base_id(pixai, m["version_id"]) == \
+    assert models_mod.model_name_gql(pixai, m["version_id"], strict=True) == m["name"]
+    assert models_mod.resolve_model_base_id(pixai, m["version_id"]) == \
         m["document"]["generationModelVersion"]["model"]["id"]
     assert [(c.op, c.variables, c.retries) for c in pixai.calls] == [
         (MODEL_VERSION, {"id": m["version_id"]}, 0)] * 2
@@ -524,25 +525,25 @@ def test_a_lookup_that_answered_nothing_is_a_failure_memoised_as_one(body, what,
     vid = "918273645591000001"
     s = _Session(_Response(body))
     client = pixai_client_mod.PixAIClient(s)
-    assert core.model_name_gql(client, vid) == vid, what        # a soft caller: the label
-    assert fresh_model_caches[vid] is core._MODEL_LOOKUP_FAILED, what
+    assert models_mod.model_name_gql(client, vid) == vid, what        # a soft caller: the label
+    assert fresh_model_caches[vid] is models_mod._MODEL_LOOKUP_FAILED, what
     with pytest.raises(core.PixAIError, match="failed earlier this run"):
-        core.model_name_gql(client, vid, strict=True)
+        models_mod.model_name_gql(client, vid, strict=True)
     assert len(s.posts) == 1                                    # memoised, not re-asked
 
 
 def test_strict_raises_on_a_failed_lookup(fresh_model_caches):
     s = _Session(_Response({"errors": [{"message": "nope"}], "data": None}))
     with pytest.raises(core.PixAIError, match="lookup failed"):
-        core.model_name_gql(pixai_client_mod.PixAIClient(s), "918273645591000002", strict=True)
+        models_mod.model_name_gql(pixai_client_mod.PixAIClient(s), "918273645591000002", strict=True)
 
 
 def test_a_network_error_is_a_failure_asked_once(fresh_model_caches):
     s = _Session(requests.ConnectionError("reset"))
     vid = "918273645591000003"
     with pytest.raises(core.PixAIError, match="lookup failed"):
-        core.model_name_gql(pixai_client_mod.PixAIClient(s), vid, strict=True)
-    assert len(s.posts) == 1 and fresh_model_caches[vid] is core._MODEL_LOOKUP_FAILED
+        models_mod.model_name_gql(pixai_client_mod.PixAIClient(s), vid, strict=True)
+    assert len(s.posts) == 1 and fresh_model_caches[vid] is models_mod._MODEL_LOOKUP_FAILED
 
 
 def test_an_unknown_version_is_the_removed_answer_not_a_failure(pixai, fresh_model_caches):
@@ -551,15 +552,15 @@ def test_an_unknown_version_is_the_removed_answer_not_a_failure(pixai, fresh_mod
     u = MODELS["unknown"]
     assert u["document"] == {"generationModelVersion": None}
     pixai.on(MODEL_VERSION, u["document"])
-    assert core.model_name_gql(pixai, u["version_id"], strict=True) == u["version_id"]
+    assert models_mod.model_name_gql(pixai, u["version_id"], strict=True) == u["version_id"]
     assert fresh_model_caches[u["version_id"]] == u["version_id"]
 
 
 def test_the_cache_answers_a_repeat_without_asking(pixai, fresh_model_caches):
     t = MODELS["tsubaki"]
     pixai.on(MODEL_VERSION, t["document"])
-    assert core.model_name_gql(pixai, t["version_id"]) == "Tsubaki.2 v1"
-    assert core.model_name_gql(pixai, t["version_id"], strict=True) == "Tsubaki.2 v1"
+    assert models_mod.model_name_gql(pixai, t["version_id"]) == "Tsubaki.2 v1"
+    assert models_mod.model_name_gql(pixai, t["version_id"], strict=True) == "Tsubaki.2 v1"
     assert len(pixai.calls) == 1
 
 
@@ -595,15 +596,15 @@ def test_the_reuse_reader_and_the_preset_fail_soft(pixai, answer, fresh_model_ca
         pixai.fail(MODEL_VERSION, answer)
     else:
         pixai.on(MODEL_VERSION, answer)
-    assert core.resolve_model_base_id(pixai, "918273645591000006") == ""
+    assert models_mod.resolve_model_base_id(pixai, "918273645591000006") == ""
     assert core._resolve_model_preset(pixai, "918273645591000007") in (
         {}, {"steps": "", "sampler": "", "cfg_scale": ""})
     assert not core._resolve_model_preset(pixai, "918273645591000007").get("steps")
 
 
 @pytest.mark.parametrize("read", [
-    lambda c: core.model_name_gql(c, "918273645591000008"),
-    lambda c: core.resolve_model_base_id(c, "918273645591000009"),
+    lambda c: models_mod.model_name_gql(c, "918273645591000008"),
+    lambda c: models_mod.resolve_model_base_id(c, "918273645591000009"),
     lambda c: core._resolve_model_preset(c, "918273645591000010"),
 ], ids=["model_name_gql", "resolve_model_base_id", "_resolve_model_preset"])
 def test_each_model_reader_asks_once_on_a_5xx(read, fresh_model_caches, no_backoff):
@@ -629,7 +630,7 @@ def test_the_retired_saved_requests_leave_nothing_behind():
         assert not hits, "{} still names a retired saved request: {}".format(module.name, hits)
     example = (REPO / "config.example.json").read_text(encoding="utf-8")
     assert "TASK_DETAIL_HASH" not in example and "MODEL_DETAIL_HASH" not in example
-    for reader in (task_reads_mod.task_detail_gql, core._model_version_gql, core.model_name_gql,
-                   core.resolve_model_base_id, core._resolve_model_preset,
+    for reader in (task_reads_mod.task_detail_gql, models_mod._model_version_gql, models_mod.model_name_gql,
+                   models_mod.resolve_model_base_id, core._resolve_model_preset,
                    core._task_detail_query):
         assert ".persisted(" not in inspect.getsource(reader), reader.__name__

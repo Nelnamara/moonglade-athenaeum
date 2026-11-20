@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 
 from moonglade import backup as core
+from moonglade import models as models_mod
 from moonglade.gallery import (CATALOG_FIELDS, catalog, delete_from_catalog, load_catalog,
                                merge_over_current, save_catalog, save_catalog_over_snapshot,
                                update_prompt_full, update_rating)
@@ -128,7 +129,7 @@ def test_the_backfill_step_keeps_edits_made_while_it_ran(tmp_path, monkeypatch):
 
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: SimpleNamespace())
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", detail)
-    monkeypatch.setattr(core, "model_name_gql", lambda *a, **k: "Model")
+    monkeypatch.setattr(models_mod, "model_name_gql", lambda *a, **k: "Model")
     monkeypatch.setattr(core, "resolve_loras", lambda s, t: "")
     monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, t: fm)
     monkeypatch.setattr(core, "_BACKFILL_CHECKPOINT_TASKS", 1)
@@ -153,7 +154,7 @@ def test_the_fix_models_step_keeps_edits_made_while_it_ran(tmp_path, monkeypatch
         return "Tsubaki"
 
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: SimpleNamespace())
-    monkeypatch.setattr(core, "model_name_gql", name_lookup)
+    monkeypatch.setattr(models_mod, "model_name_gql", name_lookup)
 
     core.run_fix_models(SimpleNamespace(out=str(tmp_path), token=None, workers=1, delay=0,
                                         progress=None, relabel_removed=False))

@@ -100,6 +100,7 @@ from tests.conftest import _SEALED_DONOR, stub_code_module
 from moonglade import account_prefs as account_prefs_mod
 from moonglade import backup as core
 from moonglade import jobs as jobs_mod
+from moonglade import models as models_mod
 from moonglade import paths as moonglade_paths
 from moonglade import updater as updater_mod
 from moonglade.gallery import CATALOG_FIELDS, create_app, load_catalog, save_catalog
@@ -5382,8 +5383,8 @@ def _fake_market_pages(monkeypatch, per_page=24, pages=3, overlap=0):
             return hits(keyword)
         n = int(after[1:]) if after else 1
         return page(n)
-    monkeypatch.setattr(core, "model_search_market_gql", fake_search)
-    monkeypatch.setattr(core, "model_search_rest", fake_search)
+    monkeypatch.setattr(models_mod, "model_search_market_gql", fake_search)
+    monkeypatch.setattr(models_mod, "model_search_rest", fake_search)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     return calls
 
@@ -6353,8 +6354,8 @@ def _fake_unlimited_pixai(monkeypatch, days=9.5):
                 "has_more": False, "next_cursor": ""}
     matched = []
     monkeypatch.setattr(core, "_rest_get", fake_rest_get)
-    monkeypatch.setattr(core, "model_search_market_gql", fake_search)
-    monkeypatch.setattr(core, "model_search_rest", fake_search)
+    monkeypatch.setattr(models_mod, "model_search_market_gql", fake_search)
+    monkeypatch.setattr(models_mod, "model_search_rest", fake_search)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "match_kaisuuken",
                         lambda s, params, **k: matched.append(dict(params)) or None)

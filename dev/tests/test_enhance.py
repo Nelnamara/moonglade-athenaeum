@@ -7,6 +7,7 @@ from pathlib import Path
 
 from moonglade import backup as core
 from moonglade import gallery as moonglade_gallery
+from moonglade import models as models_mod
 
 from tests.conftest import login_client
 from moonglade import mirror as mirror_mod
@@ -97,7 +98,7 @@ def test_panelplugin_surface_restored_mirror_gated():
     without -- the model id and the workflow-id parameter -- must now be PRESENT in core, in the
     restored builder. The CLI flag that fed the API-key path stays gone (the Bridge is web-only)."""
     assert hasattr(core, "build_panelplugin_parameters")
-    assert hasattr(core, "workflow_catalog")
+    assert hasattr(models_mod, "workflow_catalog")
     core_src = (ROOT / "moonglade" / "backup.py").read_text(encoding="utf-8")
     assert "pixai-panelplugin" in core_src, "the restored builder must name the panelplugin model"
     assert "workflowId" in core_src, "the restored builder must address a panelplugin workflow"

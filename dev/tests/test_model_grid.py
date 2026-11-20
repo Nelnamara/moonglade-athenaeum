@@ -6,6 +6,7 @@ from moonglade import gallery as moonglade_gallery
 from moonglade import backup as core
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import models as models_mod
 
 _SEARCH = {"data": [
     {"id": "1982880136609467518", "title": "Tsubaki.2", "type": "MMDIT26A_MODEL",
@@ -25,7 +26,7 @@ def test_model_search_rest_shapes_rows(monkeypatch):
         seen["params"] = params
         return _SEARCH
     monkeypatch.setattr(core, "_rest_get", fake_get)
-    out = core.model_search_rest(object(), keyword="tsu", usage="MODEL", size=10, offset=0)
+    out = models_mod.model_search_rest(object(), keyword="tsu", usage="MODEL", size=10, offset=0)
     assert seen["path"] == "/generation-model/search"
     assert seen["params"]["usageType"] == "MODEL" and seen["params"]["keyword"] == "tsu"
     assert out["has_more"] is True and len(out["results"]) == 2
@@ -46,7 +47,7 @@ def test_model_search_rest_preview_card_fields(monkeypatch):
          "curations": ["inhouse"], "commentCount": 42, "refCount": 999, "authorId": "77"},
     ], "hasMore": False}
     monkeypatch.setattr(core, "_rest_get", lambda *a, **k: rich)
-    m = core.model_search_rest(object())["results"][0]
+    m = models_mod.model_search_rest(object())["results"][0]
     assert len(m["description"]) == 600                 # truncated at 600
     assert m["base_model"] == "uploaded-sdxl"           # base-model family chip
     assert m["official"] is True and m["curations"] == ["inhouse"]
@@ -54,7 +55,7 @@ def test_model_search_rest_preview_card_fields(monkeypatch):
     assert m["cover_url"] == "p"                        # full-res preferred for the card
 
     monkeypatch.setattr(core, "_rest_get", lambda *a, **k: _SEARCH)
-    m = core.model_search_rest(object())["results"][0]  # fields absent in response
+    m = models_mod.model_search_rest(object())["results"][0]  # fields absent in response
     assert m["description"] == "" and m["base_model"] == "" and m["official"] is False
     assert m["comment_count"] == 0 and m["cover_url"] == "https://cdn/pub/x"
 
@@ -68,7 +69,7 @@ def test_model_search_rest_defaults_the_graphql_only_viewer_flags(monkeypatch):
     bookmarked" -- same as `official: False` on a GraphQL row, which likewise only means the
     connection doesn't carry curations."""
     monkeypatch.setattr(core, "_rest_get", lambda *a, **k: _SEARCH)
-    m = core.model_search_rest(object())["results"][0]
+    m = models_mod.model_search_rest(object())["results"][0]
     assert m["bookmarked"] is False and m["liked"] is False
 
 
@@ -76,19 +77,19 @@ def test_model_search_rest_omits_empty_keyword(monkeypatch):
     seen = {}
     monkeypatch.setattr(core, "_rest_get",
                         lambda s, path, params=None, **k: seen.update(params=params) or {"data": []})
-    core.model_search_rest(object(), keyword="", usage="lora", size=5)
+    models_mod.model_search_rest(object(), keyword="", usage="lora", size=5)
     assert "keyword" not in seen["params"] and seen["params"]["usageType"] == "LORA"
 
 
 def test_resolve_latest_version_picks_first(monkeypatch):
     monkeypatch.setattr(core, "_rest_get",
                         lambda s, path, **k: [{"id": "1983308862240288769", "modelId": "1982880136609467518"}])
-    assert core.resolve_latest_version(object(), "1982880136609467518") == "1983308862240288769"
+    assert models_mod.resolve_latest_version(object(), "1982880136609467518") == "1983308862240288769"
 
 
 def test_resolve_latest_version_empty(monkeypatch):
     monkeypatch.setattr(core, "_rest_get", lambda *a, **k: [])
-    assert core.resolve_latest_version(object(), "x") == ""
+    assert models_mod.resolve_latest_version(object(), "x") == ""
 
 
 def test_resolve_version_meta_full_shape(monkeypatch):
@@ -98,7 +99,7 @@ def test_resolve_version_meta_full_shape(monkeypatch):
                  "extra": {"triggerWords": "Eris_Adult, <lora:ErisV14:1>",
                            "previewArtworkIds": ["9"]}}]
     monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: lora_row)
-    m = core.resolve_version_meta(object(), "L1")
+    m = models_mod.resolve_version_meta(object(), "L1")
     assert m["version_id"] == "V1" and m["model_type"] == "MULTI_LORA"
     assert m["lora_base_model_type"] == "SDXL_MODEL"          # the base family the LoRA needs
     assert m["trigger_words"] == "Eris_Adult, <lora:ErisV14:1>"
@@ -108,7 +109,7 @@ def test_resolve_version_meta_full_shape(monkeypatch):
                            "samplingSteps": 28, "cfgScale": 5,
                            "capabilities": ["better-hands", 7]}}]  # non-str filtered
     monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: base_row)
-    b = core.resolve_version_meta(object(), "B1")
+    b = models_mod.resolve_version_meta(object(), "B1")
     assert b["model_type"] == "SDXL_MODEL" and b["lora_base_model_type"] == ""  # null -> ""
     assert b["trigger_words"] == "" and b["negative_prompt"] == "nsfw, worst quality"
     assert b["sampling_method"] == "Euler a" and b["sampling_steps"] == 28 and b["cfg_scale"] == 5
@@ -116,7 +117,7 @@ def test_resolve_version_meta_full_shape(monkeypatch):
     assert b["compatibility"] == {} and b["restrictions"] == {}   # none given -> empty, not missing
 
     monkeypatch.setattr(core, "_rest_get", lambda *a, **k: [])   # no versions -> empty shape
-    e = core.resolve_version_meta(object(), "x")
+    e = models_mod.resolve_version_meta(object(), "x")
     assert e["version_id"] == "" and e["model_type"] == "" and e["capabilities"] == []
     assert e["compatibility"] == {} and e["restrictions"] == {}
 
@@ -135,7 +136,7 @@ def test_resolve_version_meta_extracts_compatibility_and_restrictions(monkeypatc
                                          "negativePrompt": True, "styleKey": True, "watermark": True},
                       "restrictions": {"samplingSteps": {"min": 16, "max": 50}}}}]
     monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: row)
-    m = core.resolve_version_meta(object(), "B9")
+    m = models_mod.resolve_version_meta(object(), "B9")
     assert m["compatibility"] == {"cfgScale": False, "samplingSteps": False, "controlnet": False,
                                    "vae": False, "upscale": False, "negativePrompt": True,
                                    "styleKey": True, "watermark": True}
@@ -144,19 +145,19 @@ def test_resolve_version_meta_extracts_compatibility_and_restrictions(monkeypatc
     # non-dict/garbage values must fail open to {} (never crash, never mis-shape the picker)
     monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: [
         {"id": "V10", "extra": {"compatibility": "not-a-dict", "restrictions": None}}])
-    g = core.resolve_version_meta(object(), "B10")
+    g = models_mod.resolve_version_meta(object(), "B10")
     assert g["compatibility"] == {} and g["restrictions"] == {}
 
 
 def test_is_lora_compatible_exact_equality_fails_open():
     # exact enum equality
-    assert core.is_lora_compatible("SDXL_MODEL", "SDXL_MODEL") is True
-    assert core.is_lora_compatible("DIT7B_MODEL", "SDXL_MODEL") is False   # architecture mismatch
-    assert core.is_lora_compatible("sdxl_model", "SDXL_MODEL") is True     # case-insensitive
+    assert models_mod.is_lora_compatible("SDXL_MODEL", "SDXL_MODEL") is True
+    assert models_mod.is_lora_compatible("DIT7B_MODEL", "SDXL_MODEL") is False   # architecture mismatch
+    assert models_mod.is_lora_compatible("sdxl_model", "SDXL_MODEL") is True     # case-insensitive
     # fails OPEN on unknown/empty -> never block a submit on missing data
-    assert core.is_lora_compatible("", "SDXL_MODEL") is True
-    assert core.is_lora_compatible("SDXL_MODEL", "") is True
-    assert core.is_lora_compatible(None, None) is True
+    assert models_mod.is_lora_compatible("", "SDXL_MODEL") is True
+    assert models_mod.is_lora_compatible("SDXL_MODEL", "") is True
+    assert models_mod.is_lora_compatible(None, None) is True
 
 
 def test_list_model_versions_full_shape_and_labels(monkeypatch):
@@ -174,7 +175,7 @@ def test_list_model_versions_full_shape_and_labels(monkeypatch):
          "createdAt": "", "extra": {}},
     ]
     monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: rows)
-    out = core.list_model_versions(object(), "M1")
+    out = models_mod.list_model_versions(object(), "M1")
     assert [v["version_id"] for v in out] == ["V3", "V2", "V1"]     # server order preserved
     assert out[0]["label"] == "Latest · 2026-07-20" and out[0]["is_latest"] is True
     assert out[1]["label"] == "v2 · 2026-06-01" and out[1]["is_latest"] is False
@@ -187,19 +188,19 @@ def test_list_model_versions_full_shape_and_labels(monkeypatch):
 def test_list_model_versions_skips_rows_with_no_id(monkeypatch):
     rows = [{"id": "", "modelType": "SDXL_MODEL"}, {"id": "V1", "modelType": "SDXL_MODEL"}]
     monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: rows)
-    out = core.list_model_versions(object(), "M1")
+    out = models_mod.list_model_versions(object(), "M1")
     assert [v["version_id"] for v in out] == ["V1"]
     assert out[0]["is_latest"] is False    # it was rows[1] by ORIGINAL position, not rows[0]
 
 
 def test_list_model_versions_empty_and_network_error(monkeypatch):
     monkeypatch.setattr(core, "_rest_get", lambda *a, **k: [])
-    assert core.list_model_versions(object(), "x") == []
+    assert models_mod.list_model_versions(object(), "x") == []
 
     def boom(*a, **k):
         raise core.PixAIError("nope")
     monkeypatch.setattr(core, "_rest_get", boom)
-    assert core.list_model_versions(object(), "x") == []
+    assert models_mod.list_model_versions(object(), "x") == []
 
 
 def test_resolve_version_meta_and_list_model_versions_agree_on_rows0(monkeypatch):
@@ -209,8 +210,8 @@ def test_resolve_version_meta_and_list_model_versions_agree_on_rows0(monkeypatch
              "extra": {"triggerWords": "trig"}},
             {"id": "V1", "modelType": "MULTI_LORA", "loraBaseModelType": "SDXL_MODEL", "extra": {}}]
     monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: rows)
-    single = core.resolve_version_meta(object(), "M1")
-    listed = core.list_model_versions(object(), "M1")
+    single = models_mod.resolve_version_meta(object(), "M1")
+    listed = models_mod.list_model_versions(object(), "M1")
     assert listed[0]["version_id"] == single["version_id"] == "V2"
     assert listed[0]["trigger_words"] == single["trigger_words"] == "trig"
     assert listed[0]["model_type"] == single["model_type"]
@@ -260,7 +261,7 @@ def _route(versions=_VERSIONS, profiles=_TSUBAKI2, calls=None):
 def test_version_meta_carries_the_models_allowed_profiles(monkeypatch):
     calls = []
     monkeypatch.setattr(core, "_rest_get", _route(calls=calls))
-    m = core.resolve_version_meta(object(), "M1", with_profiles=True)
+    m = models_mod.resolve_version_meta(object(), "M1", with_profiles=True)
     assert m["version_id"] == "V7"
     # plain profileNames, in the order the site returned them -- membershipOnly Ultra
     # INCLUDED (the site's own rejection path owns membership, not this display gate)
@@ -272,8 +273,8 @@ def test_version_meta_carries_the_models_allowed_profiles(monkeypatch):
     monkeypatch.setattr(core, "_rest_get", _route(profiles={"profiles": [
         {"profileName": "pro", "profileFlag": "default"},
         {"profileName": "ultra", "profileFlag": "custom"}]}))
-    core._profile_cache.clear()
-    assert core.resolve_version_meta(
+    models_mod._profile_cache.clear()
+    assert models_mod.resolve_version_meta(
         object(), "M1", with_profiles=True)["profiles"] == ["pro", "ultra"]
 
 
@@ -281,26 +282,26 @@ def test_version_meta_profiles_survive_a_failed_read(monkeypatch):
     """A failed/unparseable profile read must never break the resolve or lose the rest of
     the meta -- it leaves profiles=None, which the drawer reads as "unknown, dim nothing"."""
     monkeypatch.setattr(core, "_rest_get", _route(profiles=core.PixAIError("nope")))
-    m = core.resolve_version_meta(object(), "M1", with_profiles=True)
+    m = models_mod.resolve_version_meta(object(), "M1", with_profiles=True)
     assert m["profiles"] is None and m["version_id"] == "V7"
     assert m["model_type"] == "MMDIT26A_MODEL"          # the rest of the shape is intact
 
-    core._profile_cache.clear()
+    models_mod._profile_cache.clear()
     monkeypatch.setattr(core, "_rest_get", _route(profiles=RuntimeError("socket")))
-    assert core.resolve_version_meta(object(), "M1", with_profiles=True)["profiles"] is None
+    assert models_mod.resolve_version_meta(object(), "M1", with_profiles=True)["profiles"] is None
 
-    core._profile_cache.clear()
+    models_mod._profile_cache.clear()
     monkeypatch.setattr(core, "_rest_get", _route(profiles={"data": []}))   # wrong body key
-    assert core.resolve_version_meta(object(), "M1", with_profiles=True)["profiles"] is None
+    assert models_mod.resolve_version_meta(object(), "M1", with_profiles=True)["profiles"] is None
 
     # An SDXL model answers a definitive `{"profiles": []}` -- a real answer, not a failure.
-    core._profile_cache.clear()
+    models_mod._profile_cache.clear()
     monkeypatch.setattr(core, "_rest_get", _route(profiles={"profiles": []}))
-    assert core.resolve_version_meta(object(), "M1", with_profiles=True)["profiles"] == []
+    assert models_mod.resolve_version_meta(object(), "M1", with_profiles=True)["profiles"] == []
 
     # No version at all -> the empty shape still carries the key.
     monkeypatch.setattr(core, "_rest_get", lambda *a, **k: [])
-    assert core.resolve_version_meta(object(), "x", with_profiles=True)["profiles"] is None
+    assert models_mod.resolve_version_meta(object(), "x", with_profiles=True)["profiles"] is None
 
 
 def test_version_meta_does_not_read_profiles_unless_asked(monkeypatch):
@@ -310,7 +311,7 @@ def test_version_meta_does_not_read_profiles_unless_asked(monkeypatch):
     route's PixAI reads for a field it drops. Default: ONE GET, profiles present but None."""
     calls = []
     monkeypatch.setattr(core, "_rest_get", _route(calls=calls))
-    m = core.resolve_version_meta(object(), "M1")
+    m = models_mod.resolve_version_meta(object(), "M1")
     assert m["version_id"] == "V7"                       # the rest of the shape is untouched
     assert m["profiles"] is None                         # the key is still always present
     assert calls == ["/generation-model/M1/versions"]    # exactly one read, no /inference-profiles
@@ -325,8 +326,8 @@ def test_version_meta_does_not_read_profiles_unless_asked(monkeypatch):
     # no feature list, so the architecture is unknown and /size-config is not read;
     # dev/tests/test_generate_model_id.py pins the DiT case with a real /features answer.
     calls.clear()
-    core._profile_cache.clear()
-    m2 = core.resolve_version_meta(object(), "M1", with_profiles=True)
+    models_mod._profile_cache.clear()
+    m2 = models_mod.resolve_version_meta(object(), "M1", with_profiles=True)
     assert m2["profiles"] == ["lite", "standard", "pro", "ultra"]
     assert calls == ["/generation-model/M1/versions",
                      "/generation-model/V7/inference-profiles",
@@ -338,7 +339,7 @@ def test_resolve_latest_version_stays_a_one_read_wrapper(monkeypatch):
     for a profiles read either."""
     calls = []
     monkeypatch.setattr(core, "_rest_get", _route(calls=calls))
-    assert core.resolve_latest_version(object(), "M1") == "V7"
+    assert models_mod.resolve_latest_version(object(), "M1") == "V7"
     assert calls == ["/generation-model/M1/versions"]
 
 
@@ -350,27 +351,27 @@ def test_a_failed_profiles_read_is_not_repeated_within_the_short_ttl(monkeypatch
     calls = []
     monkeypatch.setattr(core, "_rest_get", _route(profiles=core.PixAIError("502"), calls=calls))
     for _ in range(4):
-        assert core._model_profiles(object(), "V7") is None
+        assert models_mod._model_profiles(object(), "V7") is None
     assert calls.count("/generation-model/V7/inference-profiles") == 1
 
     # An unparseable 200 body is the same kind of miss and is bounded the same way.
     calls.clear()
-    core._profile_cache.clear()
+    models_mod._profile_cache.clear()
     monkeypatch.setattr(core, "_rest_get", _route(profiles={"data": []}, calls=calls))
     for _ in range(4):
-        assert core._model_profiles(object(), "V7") is None
+        assert models_mod._model_profiles(object(), "V7") is None
     assert calls.count("/generation-model/V7/inference-profiles") == 1
 
     # ...but it is a SHORT memory: once the fail TTL is behind it, the next call retries and
     # a recovered route is picked up. (Pinned by rewinding the entry's timestamp, so the test
     # neither sleeps nor depends on the constant's exact value beyond it being finite.)
-    core._profile_cache["V7"] = (core._profile_cache["V7"][0] - core._PROFILE_FAIL_TTL - 1, None)
+    models_mod._profile_cache["V7"] = (models_mod._profile_cache["V7"][0] - models_mod._PROFILE_FAIL_TTL - 1, None)
     calls.clear()
     monkeypatch.setattr(core, "_rest_get", _route(profiles=_TSUBAKI2, calls=calls))
-    assert core._model_profiles(object(), "V7") == _TSUBAKI2["profiles"]
+    assert models_mod._model_profiles(object(), "V7") == _TSUBAKI2["profiles"]
     assert calls.count("/generation-model/V7/inference-profiles") == 1
     # and a SUCCESS keeps the long TTL, not the short one
-    assert core._PROFILE_FAIL_TTL < core._PROFILE_CACHE_TTL
+    assert models_mod._PROFILE_FAIL_TTL < models_mod._PROFILE_CACHE_TTL
 
 
 def test_list_model_versions_reads_profiles_once_for_the_applied_row(monkeypatch):
@@ -379,7 +380,7 @@ def test_list_model_versions_reads_profiles_once_for_the_applied_row(monkeypatch
     the second read; the others carry profiles=None, which dims nothing."""
     calls = []
     monkeypatch.setattr(core, "_rest_get", _route(calls=calls))
-    out = core.list_model_versions(object(), "M1")
+    out = models_mod.list_model_versions(object(), "M1")
     assert [v["version_id"] for v in out] == ["V7", "V6"]
     assert out[0]["is_latest"] is True and out[0]["profiles"] == ["lite", "standard", "pro", "ultra"]
     assert out[1]["profiles"] is None
@@ -400,7 +401,7 @@ def test_annotate_lora_compat_sorts_compatible_first_and_tags_every_row():
         {"model_id": "3", "title": "Unknown-arch LoRA", "lora_base_model_type": ""},
         {"model_id": "4", "title": "Another match", "lora_base_model_type": "MMDIT26A_MODEL"},
     ]
-    out = core.annotate_lora_compat(rows, "MMDIT26A_MODEL")
+    out = models_mod.annotate_lora_compat(rows, "MMDIT26A_MODEL")
     # SOFT sort: compatible + unknown float to the front (fail-open, same rule as
     # is_lora_compatible), a CONFIRMED mismatch sinks to the back -- nothing is ever hidden,
     # and each group keeps its original relative order (stable partition).
@@ -410,20 +411,20 @@ def test_annotate_lora_compat_sorts_compatible_first_and_tags_every_row():
 
 def test_annotate_lora_compat_case_insensitive_like_is_lora_compatible():
     rows = [{"model_id": "1", "lora_base_model_type": "sdxl_model"}]
-    assert core.annotate_lora_compat(rows, "SDXL_MODEL")[0]["compat"] == "yes"
+    assert models_mod.annotate_lora_compat(rows, "SDXL_MODEL")[0]["compat"] == "yes"
 
 
 def test_annotate_lora_compat_passthrough_when_no_base_selected():
     """Browsing LoRAs before picking a base must be completely untouched -- no sort, no tag."""
     rows = [{"model_id": "1", "lora_base_model_type": "SDXL_MODEL"}]
-    out = core.annotate_lora_compat(rows, "")
+    out = models_mod.annotate_lora_compat(rows, "")
     assert out is rows and "compat" not in out[0]
-    assert core.annotate_lora_compat(rows, None) is rows
+    assert models_mod.annotate_lora_compat(rows, None) is rows
 
 
 def test_annotate_lora_compat_does_not_mutate_input_rows():
     rows = [{"model_id": "1", "lora_base_model_type": "SDXL_MODEL"}]
-    core.annotate_lora_compat(rows, "SDXL_MODEL")
+    models_mod.annotate_lora_compat(rows, "SDXL_MODEL")
     assert "compat" not in rows[0]   # a fresh copy is returned -- the caller's own list/dicts are untouched
 
 
@@ -432,7 +433,7 @@ def test_annotate_lora_compat_all_incompatible_still_returns_everything():
     only reorder + tag them, even when NOTHING matches."""
     rows = [{"model_id": "1", "lora_base_model_type": "SD_V1_MODEL"},
             {"model_id": "2", "lora_base_model_type": "SD3_MODEL"}]
-    out = core.annotate_lora_compat(rows, "MMDIT26A_MODEL")
+    out = models_mod.annotate_lora_compat(rows, "MMDIT26A_MODEL")
     assert len(out) == 2 and all(r["compat"] == "no" for r in out)
 
 
@@ -460,7 +461,7 @@ def test_model_search_market_gql(monkeypatch):
     # (Since 2026-09-07 a keyword re-points a ranking feed at the relevance one, so -createdAt is
     # NOT expected here -- test_a_keyword_search_goes_to_the_search_index_not_a_ranking_feed
     # pins both halves of that; the keywordless Latest orderBy is asserted just below.)
-    r = core.model_search_market_gql(object(), keyword="anime", category="style",
+    r = models_mod.model_search_market_gql(object(), keyword="anime", category="style",
                                      sort="newest", usage="MODEL", limit=24)
     assert 'category:"style"' in captured["query"] and 'feed:"meilisearch"' in captured["query"]
     assert captured["vars"]["k"] == "anime"           # keyword stays a bound var (no injection)
@@ -473,12 +474,12 @@ def test_model_search_market_gql(monkeypatch):
 
     # the same category + Newest browse WITHOUT a keyword -- what this test has always been
     # about -- still interpolates the Latest feed and its -createdAt, which REST silently ignores
-    core.model_search_market_gql(object(), category="style", sort="newest", usage="MODEL", limit=24)
+    models_mod.model_search_market_gql(object(), category="style", sort="newest", usage="MODEL", limit=24)
     assert 'category:"style"' in captured["query"] and 'orderBy:"-createdAt"' in captured["query"]
     assert 'feed:"latest"' in captured["query"]
 
     # LoRA usage keeps only LoRA rows; a bad category is ignored (no category arg emitted)
-    r2 = core.model_search_market_gql(object(), category="concept", usage="LORA")
+    r2 = models_mod.model_search_market_gql(object(), category="concept", usage="LORA")
     assert 'category:' not in captured["query"]          # 'concept' not whitelisted
     assert [m["model_id"] for m in r2["results"]] == ["2"] and r2["results"][0]["should_blur"] is True
 
@@ -505,7 +506,7 @@ def test_a_keyword_search_goes_to_the_search_index_not_a_ranking_feed(monkeypatc
 
     # trending + a keyword -> relevance search, and NO orderBy at all (that empty orderBy IS
     # the relevance ranking; any orderBy would re-sort the matches and bury them again).
-    core.model_search_market_gql(object(), keyword="Perfect Hands", sort="trending", usage="LORA",
+    models_mod.model_search_market_gql(object(), keyword="Perfect Hands", sort="trending", usage="LORA",
                                  lora_base_type="MMDIT26A_MODEL")
     assert 'feed:"meilisearch"' in captured["query"]
     assert "orderBy:" not in captured["query"]
@@ -514,36 +515,36 @@ def test_a_keyword_search_goes_to_the_search_index_not_a_ranking_feed(monkeypatc
     assert "loraBaseModelTypes:[MMDIT26A_MODEL]" in captured["query"]
 
     # the SAME call with no keyword is untouched -- plain browsing is what the ranking is for
-    core.model_search_market_gql(object(), sort="trending", usage="LORA",
+    models_mod.model_search_market_gql(object(), sort="trending", usage="LORA",
                                  lora_base_type="MMDIT26A_MODEL")
     assert 'feed:"trending"' in captured["query"] and "meilisearch" not in captured["query"]
     # a whitespace-only box is not a search
-    core.model_search_market_gql(object(), keyword="   ", sort="trending", usage="LORA")
+    models_mod.model_search_market_gql(object(), keyword="   ", sort="trending", usage="LORA")
     assert 'feed:"trending"' in captured["query"]
 
     # Latest is a ranking too, so a keyword re-points it the same way (and drops -createdAt).
-    core.model_search_market_gql(object(), keyword="eyes", sort="newest", usage="LORA")
+    models_mod.model_search_market_gql(object(), keyword="eyes", sort="newest", usage="LORA")
     assert 'feed:"meilisearch"' in captured["query"] and "orderBy:" not in captured["query"]
-    core.model_search_market_gql(object(), sort="newest", usage="LORA")
+    models_mod.model_search_market_gql(object(), sort="newest", usage="LORA")
     assert 'feed:"latest"' in captured["query"] and 'orderBy:"-createdAt"' in captured["query"]
 
     # liked/used are ALREADY meilisearch and KEEP their orderBy -- measured returning exact
     # matches first ('Perfect Hands SDXL'), so there is nothing here to fix.
-    core.model_search_market_gql(object(), keyword="Perfect Hands", sort="liked", usage="LORA")
+    models_mod.model_search_market_gql(object(), keyword="Perfect Hands", sort="liked", usage="LORA")
     assert 'feed:"meilisearch"' in captured["query"]
     assert 'orderBy:"-markInfo.likedCount"' in captured["query"]
-    core.model_search_market_gql(object(), keyword="Perfect Hands", sort="used", usage="LORA")
+    models_mod.model_search_market_gql(object(), keyword="Perfect Hands", sort="used", usage="LORA")
     assert 'orderBy:"-markInfo.refCount"' in captured["query"]
 
     # The pair lives in MARKET_SORTS as `relevance` rather than being written out here, so the
     # feed table stays the one place a feed name is spelled.
-    assert core.MARKET_SORTS["relevance"] == ("meilisearch", "")
+    assert models_mod.MARKET_SORTS["relevance"] == ("meilisearch", "")
     # It is a FALLBACK, not a fifth sort the picker offers -- the four it does offer are intact.
-    assert core.market_sort("trending") == ("trending", "")
-    assert core.market_sort("newest") == ("latest", "-createdAt")
+    assert models_mod.market_sort("trending") == ("trending", "")
+    assert models_mod.market_sort("newest") == ("latest", "-createdAt")
 
     # Base-model search gets it too: the feed is a property of the connection, not of the kind.
-    core.model_search_market_gql(object(), keyword="Tsubaki", sort="trending", usage="MODEL")
+    models_mod.model_search_market_gql(object(), keyword="Tsubaki", sort="trending", usage="MODEL")
     assert 'feed:"meilisearch"' in captured["query"]
 
 
@@ -563,23 +564,23 @@ def test_market_asks_the_server_for_the_right_KIND_of_model(monkeypatch):
         return {"generationModels": {"pageInfo": {}, "edges": []}}
     monkeypatch.setattr(core, "gql_adhoc", fake_gql)
 
-    core.model_search_market_gql(object(), usage="LORA")
+    models_mod.model_search_market_gql(object(), usage="LORA")
     assert captured["vars"]["ty"] == ["ANY_LORA"]
-    core.model_search_market_gql(object(), usage="MODEL")
+    models_mod.model_search_market_gql(object(), usage="MODEL")
     assert captured["vars"]["ty"] == ["ANY_MODEL"]
 
     # An explicit Source narrows further and REPLACES ANY_LORA (their own mapping).
-    core.model_search_market_gql(object(), usage="LORA", source="pixai")
+    models_mod.model_search_market_gql(object(), usage="LORA", source="pixai")
     assert captured["vars"]["ty"] == ["ANY_USER_LORA"]
-    core.model_search_market_gql(object(), usage="LORA", source="external")
+    models_mod.model_search_market_gql(object(), usage="LORA", source="external")
     assert captured["vars"]["ty"] == ["ANY_NON_USER_LORA"]
 
     # Source is a LoRA concept; a base search must ignore it rather than narrow to user LoRAs.
-    core.model_search_market_gql(object(), usage="MODEL", source="pixai")
+    models_mod.model_search_market_gql(object(), usage="MODEL", source="pixai")
     assert captured["vars"]["ty"] == ["ANY_MODEL"]
 
     # Unrecognised source falls open to the plain kind rather than being interpolated or refused.
-    core.model_search_market_gql(object(), usage="LORA", source="; DROP TABLE")
+    models_mod.model_search_market_gql(object(), usage="LORA", source="; DROP TABLE")
     assert captured["vars"]["ty"] == ["ANY_LORA"]
 
     # BOUND, never interpolated -- no enum token may appear in the document text itself.
@@ -609,11 +610,11 @@ def test_model_search_market_gql_supports_cursor_pagination(monkeypatch):
                                        "tags": [], "author": {}}}]}}
     monkeypatch.setattr(core, "gql_adhoc", fake_gql)
 
-    r = core.model_search_market_gql(object(), usage="MODEL", limit=24)
+    r = models_mod.model_search_market_gql(object(), usage="MODEL", limit=24)
     assert "after:" not in captured["query"] and "$a" not in captured["query"]
     assert r["has_more"] is True and r["next_cursor"] == "CURSOR_ABC"
 
-    r2 = core.model_search_market_gql(object(), usage="MODEL", limit=24, after="CURSOR_ABC")
+    r2 = models_mod.model_search_market_gql(object(), usage="MODEL", limit=24, after="CURSOR_ABC")
     assert "after:$a" in captured["query"] and "$a:String" in captured["query"]
     assert captured["vars"]["a"] == "CURSOR_ABC"
 
@@ -621,7 +622,7 @@ def test_model_search_market_gql_supports_cursor_pagination(monkeypatch):
     # could accidentally keep paging on forever
     monkeypatch.setattr(core, "gql_adhoc", lambda s, q, vars=None: {
         "generationModels": {"pageInfo": {"hasNextPage": False, "endCursor": "IGNORED"}, "edges": []}})
-    r3 = core.model_search_market_gql(object(), usage="MODEL")
+    r3 = models_mod.model_search_market_gql(object(), usage="MODEL")
     assert r3["has_more"] is False and r3["next_cursor"] == ""
 
 
@@ -645,7 +646,7 @@ def test_model_search_market_gql_requests_and_surfaces_architecture_fields(monke
                       "tags": [], "author": {}, "createdAt": ""}},
         ]}}
     monkeypatch.setattr(core, "gql_adhoc", fake_gql)
-    r = core.model_search_market_gql(object(), usage="LORA")
+    r = models_mod.model_search_market_gql(object(), usage="LORA")
     assert "modelType loraBaseModelType" in captured["query"]
     assert r["results"][0]["model_type"] == "MULTI_LORA"
     assert r["results"][0]["lora_base_model_type"] == "SD_V1_MODEL"
@@ -676,7 +677,7 @@ def test_model_search_market_gql_surfaces_viewer_bookmarked_and_liked(monkeypatc
                       "latestVersion": {}, "media": {"urls": []}, "tags": [], "author": {}}},
         ]}}
     monkeypatch.setattr(core, "gql_adhoc", fake_gql)
-    r = core.model_search_market_gql(object(), usage="MODEL")
+    r = models_mod.model_search_market_gql(object(), usage="MODEL")
     # asserted as the exact selection fragment: a bare "liked" substring would also match
     # likedCount, which the query has requested all along
     assert "likedCount bookmarked liked" in captured["query"]
@@ -715,7 +716,7 @@ def _gql_capture(monkeypatch, rows=None):
 
 def test_lora_base_type_emits_an_unquoted_enum_token(monkeypatch):
     captured = _gql_capture(monkeypatch)
-    core.model_search_market_gql(object(), usage="LORA", lora_base_type="MMDIT26A_MODEL")
+    models_mod.model_search_market_gql(object(), usage="LORA", lora_base_type="MMDIT26A_MODEL")
     assert "loraBaseModelTypes:[MMDIT26A_MODEL]" in captured["query"]
     # the failure mode that cost real time: quoted strings are a server-side TYPE error
     assert 'loraBaseModelTypes:["MMDIT26A_MODEL"]' not in captured["query"]
@@ -733,13 +734,13 @@ def test_lora_base_type_is_whitelisted_never_interpolated_raw(monkeypatch):
     for bad in ["MMDIT26A_MODEL] evil", "SDXL_MODEL, SD_V1_MODEL", '"] {__typename} #',
                 "MULTI_LORA", "VIDEO_MODEL", "SD3_MODEL", "", "   ", None]:
         captured = _gql_capture(monkeypatch)
-        core.model_search_market_gql(object(), usage="LORA", lora_base_type=bad)
+        models_mod.model_search_market_gql(object(), usage="LORA", lora_base_type=bad)
         assert "loraBaseModelTypes" not in captured["query"], bad
         assert "__typename" not in captured["query"]
     # every whitelisted value, on the other hand, does get through
-    for good in core.LORA_BASE_MODEL_TYPES:
+    for good in models_mod.LORA_BASE_MODEL_TYPES:
         captured = _gql_capture(monkeypatch)
-        core.model_search_market_gql(object(), usage="LORA", lora_base_type=good.lower())
+        models_mod.model_search_market_gql(object(), usage="LORA", lora_base_type=good.lower())
         assert "loraBaseModelTypes:[%s]" % good in captured["query"]
 
 
@@ -747,7 +748,7 @@ def test_lora_base_type_is_ignored_for_a_base_model_search(monkeypatch):
     """There is nothing to filter a base-model list by -- a base model has no LoRA base
     family. kind=base must produce the exact same query it always did."""
     captured = _gql_capture(monkeypatch)
-    core.model_search_market_gql(object(), usage="MODEL", lora_base_type="SDXL_MODEL")
+    models_mod.model_search_market_gql(object(), usage="MODEL", lora_base_type="SDXL_MODEL")
     assert "loraBaseModelTypes" not in captured["query"]
 
 
@@ -757,7 +758,7 @@ def test_lora_base_type_filter_survives_category_sort_and_pagination(monkeypatch
     silently dropped it would append unfiltered rows onto filtered ones."""
     for arch in ("SDXL_MODEL", "DIT9_MODEL"):
         captured = _gql_capture(monkeypatch)
-        r = core.model_search_market_gql(object(), keyword="eris", category="style",
+        r = models_mod.model_search_market_gql(object(), keyword="eris", category="style",
                                          sort="newest", usage="LORA", limit=24,
                                          lora_base_type=arch)
         q = captured["query"]
@@ -770,7 +771,7 @@ def test_lora_base_type_filter_survives_category_sort_and_pagination(monkeypatch
         assert r["next_cursor"] == "C1"
 
         captured2 = _gql_capture(monkeypatch)
-        core.model_search_market_gql(object(), keyword="eris", category="style", sort="newest",
+        models_mod.model_search_market_gql(object(), keyword="eris", category="style", sort="newest",
                                      usage="LORA", limit=24, after=r["next_cursor"],
                                      lora_base_type=arch)
         assert "loraBaseModelTypes:[%s]" % arch in captured2["query"]
@@ -792,9 +793,9 @@ def test_lora_base_type_filter_does_not_replace_the_per_row_compat_badge(monkeyp
          "media": {"urls": []}, "tags": [], "author": {}},
     ]
     _gql_capture(monkeypatch, rows=mixed)
-    res = core.model_search_market_gql(object(), usage="LORA",
+    res = models_mod.model_search_market_gql(object(), usage="LORA",
                                        lora_base_type="DIT7B_MODEL")["results"]
-    tagged = core.annotate_lora_compat(res, "DIT7B_MODEL")
+    tagged = models_mod.annotate_lora_compat(res, "DIT7B_MODEL")
     assert {t["model_id"]: t["compat"] for t in tagged} == {"1": "yes", "2": "no"}
 
 

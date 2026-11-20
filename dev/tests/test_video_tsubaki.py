@@ -13,6 +13,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gallery as g
+from moonglade import models as models_mod
 from moonglade.gallery import CATALOG_FIELDS, save_catalog, load_catalog
 from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
@@ -541,7 +542,7 @@ def _collect(tmp_path, monkeypatch, task, names=None):
     monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
     monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
     looked = []
-    monkeypatch.setattr(core, "model_name_gql",
+    monkeypatch.setattr(models_mod, "model_name_gql",
                         lambda s, mid, **k: looked.append(mid) or (names or {}).get(mid, mid))
     core._download_video_task(object(), task, "T-v", tmp_path,
                               SimpleNamespace(name_length=60), task["parameters"])
@@ -651,7 +652,7 @@ def _recover_i2v(tmp_path, monkeypatch, task, lookup=None):
 
     def _no_title(s, mid, **k):
         raise core.PixAIError("lookup failed")
-    monkeypatch.setattr(core, "model_name_gql", lookup or _no_title)
+    monkeypatch.setattr(models_mod, "model_name_gql", lookup or _no_title)
     got = core.run_generate_video(_i2v_args(tmp_path, task_id="T-v", image=""))
     assert got["submitted"] is True and got["videos"] == 1
     return {r["media_id"]: r for r in load_catalog(tmp_path / "catalog.db")}["780000000000000001"]

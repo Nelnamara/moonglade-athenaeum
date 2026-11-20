@@ -1,6 +1,7 @@
 """Model/LoRA search surfaces a directly-displayable cover thumbnail for the picker
 (so you don't need the PixAI website open to browse LoRAs)."""
 from moonglade import backup as core
+from moonglade import models as models_mod
 
 
 def test_model_preview_url_picks_thumb_variant():
@@ -9,13 +10,13 @@ def test_model_preview_url_picks_thumb_variant():
         {"url": "https://images-ng.pixai.art/images/thumb/abc"},
         {"url": "https://images-ng.pixai.art/images/stillThumb/abc"},
     ]}
-    assert core._model_preview_url(media) == "https://images-ng.pixai.art/images/thumb/abc"
+    assert models_mod._model_preview_url(media) == "https://images-ng.pixai.art/images/thumb/abc"
 
 
 def test_model_preview_url_falls_back_and_handles_empty():
-    assert core._model_preview_url({"urls": [{"url": "x/orig/y"}]}) == "x/orig/y"
-    assert core._model_preview_url(None) == ""
-    assert core._model_preview_url({"urls": []}) == ""
+    assert models_mod._model_preview_url({"urls": [{"url": "x/orig/y"}]}) == "x/orig/y"
+    assert models_mod._model_preview_url(None) == ""
+    assert models_mod._model_preview_url({"urls": []}) == ""
 
 
 def test_model_search_surfaces_preview(monkeypatch):
@@ -25,7 +26,7 @@ def test_model_search_surfaces_preview(monkeypatch):
                   "media": {"urls": [{"url": "cdn/thumb/p"}]}}},
     ]}}
     monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None: fake)
-    res = core.model_search_gql(object(), "cool", lora_only=True)
+    res = models_mod.model_search_gql(object(), "cool", lora_only=True)
     assert res[0]["preview_url"] == "cdn/thumb/p"
     assert res[0]["liked_count"] == 42
     assert res[0]["version_id"] == "v1"

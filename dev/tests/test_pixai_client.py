@@ -26,6 +26,7 @@ import pytest
 import requests
 
 from moonglade import backup as core
+from moonglade import models as models_mod
 from tests.fake_pixai import FakePixAI, UnregisteredOperation, operation_name
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import mirror as mirror_mod
@@ -248,8 +249,8 @@ class TestTheDetailReadsRideTheClient:
 
     @pytest.mark.parametrize("name", DOCUMENT_READERS)
     def test_a_detail_read_rides_the_document_and_speaks_no_http_itself(self, name):
-        # task_reads_mod holds the task detail read since 3.22
-        home = next(m for m in (core, task_reads_mod) if hasattr(m, name))
+        # task_reads_mod holds the task detail read, models_mod the model readers, since 3.22
+        home = next(m for m in (core, task_reads_mod, models_mod) if hasattr(m, name))
         src = inspect.getsource(getattr(home, name))
         assert "gql_adhoc(" in src or "_model_version_gql(" in src, \
             "{} no longer reads its document".format(name)
@@ -272,23 +273,23 @@ class TestTheDetailReadsRideTheClient:
 
     def test_model_name_gql_wire(self):
         kw = self._post(
-            lambda c: core.model_name_gql(c, "wire-model-id-0001"),
+            lambda c: models_mod.model_name_gql(c, "wire-model-id-0001"),
             {"generationModelVersion": {"name": "v1", "model": {"title": "T"}}})
-        assert kw["json"] == {"query": core._MODEL_VERSION_DOC,
+        assert kw["json"] == {"query": models_mod._MODEL_VERSION_DOC,
                               "variables": {"id": "wire-model-id-0001"}}
 
     def test_resolve_model_base_id_wire(self):
         kw = self._post(
-            lambda c: core.resolve_model_base_id(c, "V-wire-1"),
+            lambda c: models_mod.resolve_model_base_id(c, "V-wire-1"),
             {"generationModelVersion": {"model": {"id": "B1"}}})
-        assert kw["json"] == {"query": core._MODEL_VERSION_DOC,
+        assert kw["json"] == {"query": models_mod._MODEL_VERSION_DOC,
                               "variables": {"id": "V-wire-1"}}
 
     def test_resolve_model_preset_wire(self):
         kw = self._post(
             lambda c: core._resolve_model_preset(c, "V-preset-wire-1"),
             {"generationModelVersion": {"extra": {}}})
-        assert kw["json"] == {"query": core._MODEL_VERSION_DOC,
+        assert kw["json"] == {"query": models_mod._MODEL_VERSION_DOC,
                               "variables": {"id": "V-preset-wire-1"}}
 
     # -- FakePixAI is the second adapter on this same road -------------------------------

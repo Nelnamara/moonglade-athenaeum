@@ -16,6 +16,7 @@ import re
 import pytest
 
 from moonglade import backup as core
+from moonglade import models as models_mod
 from tests.conftest import login_client
 from moonglade import mirror as mirror_mod
 
@@ -219,20 +220,20 @@ def test_a_context_image_takes_no_palette_one_receipt(rest):
 def test_a_dict_carrying_context_images_or_an_upscale_loses_the_palette_at_the_gate(rest):
     base = {"prompts": "<p>", "modelId": T3, "width": 1024, "height": 1024, "batchSize": 1,
             "colorPalette": SENT}
-    out, adj = core._gate_image_params(object(), dict(base, contextImages=["M1"]))
+    out, adj = models_mod._gate_image_params(object(), dict(base, contextImages=["M1"]))
     assert "colorPalette" not in out and adj[0]["why"] == "a context image takes no colour palette"
-    out, adj = core._gate_image_params(object(), dict(base, mediaId="M1", enlarge=2.0))
+    out, adj = models_mod._gate_image_params(object(), dict(base, mediaId="M1", enlarge=2.0))
     assert "colorPalette" not in out
     assert [a["why"] for a in adj if a["field"] == "colorPalette"] == ["an upscale takes no colour palette"]
     # and the backstop form is idempotent on an already-gated dict
     gated = _road(_img(T3)).parameters
-    assert core._gate_params_for_model(object(), gated) is gated
+    assert models_mod._gate_params_for_model(object(), gated) is gated
 
 
 def test_the_meta_says_which_versions_take_a_palette(rest):
-    assert core._attach_features(object(), {"version_id": T3})["color_palette"] is True
-    assert core._attach_features(object(), {"version_id": FLASH_OFF})["color_palette"] is False
-    assert core._attach_features(object(), {"version_id": "V-UNREAD"})["color_palette"] is None
+    assert models_mod._attach_features(object(), {"version_id": T3})["color_palette"] is True
+    assert models_mod._attach_features(object(), {"version_id": FLASH_OFF})["color_palette"] is False
+    assert models_mod._attach_features(object(), {"version_id": "V-UNREAD"})["color_palette"] is None
 
 
 def test_api_price_quotes_without_it_and_refuses_a_bad_one(tmp_path, rest, monkeypatch):

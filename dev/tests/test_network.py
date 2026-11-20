@@ -4,12 +4,13 @@ import pytest
 import requests
 
 from moonglade import backup as core
+from moonglade import models as models_mod
 from moonglade import paths
 from moonglade import task_reads as task_reads_mod
 from tests.fake_pixai import FakePixAI, operation_name
 
 TASK_DETAIL = operation_name(task_reads_mod._TASK_DETAIL_DOC)        # "TaskDetail"
-MODEL_VERSION = operation_name(core._MODEL_VERSION_DOC)    # "ModelVersion"
+MODEL_VERSION = operation_name(models_mod._MODEL_VERSION_DOC)    # "ModelVersion"
 
 
 def _make_response(mocker, status_code=200, json_body=None, text="", raises=None):
@@ -216,11 +217,11 @@ class TestModelNameGql:
         mv = {"name": "v1", "model": {"title": "Tsubaki.2"}}
         fake = FakePixAI().on(MODEL_VERSION, {"generationModelVersion": mv})
         # A unique id keeps the module-level lookup cache from answering with a prior test's.
-        assert core.model_name_gql(fake, "unique_model_id_test_123") == "Tsubaki.2 v1"
+        assert models_mod.model_name_gql(fake, "unique_model_id_test_123") == "Tsubaki.2 v1"
 
     def test_returns_empty_for_empty_id(self):
-        assert core.model_name_gql(FakePixAI(), "") == ""
-        assert core.model_name_gql(FakePixAI(), None) == ""
+        assert models_mod.model_name_gql(FakePixAI(), "") == ""
+        assert models_mod.model_name_gql(FakePixAI(), None) == ""
 
 
 class TestResolveModelBaseId:
@@ -232,34 +233,34 @@ class TestResolveModelBaseId:
     def test_returns_the_base_models_own_id(self):
         mv = {"name": "v1", "model": {"id": "1982880136609467518", "title": "Tsubaki.2"}}
         fake = FakePixAI().on(MODEL_VERSION, {"generationModelVersion": mv})
-        assert core.resolve_model_base_id(fake, "1983308862240288769") == "1982880136609467518"
+        assert models_mod.resolve_model_base_id(fake, "1983308862240288769") == "1982880136609467518"
 
     def test_empty_id_short_circuits(self):
-        assert core.resolve_model_base_id(FakePixAI(), "") == ""
-        assert core.resolve_model_base_id(FakePixAI(), None) == ""
+        assert models_mod.resolve_model_base_id(FakePixAI(), "") == ""
+        assert models_mod.resolve_model_base_id(FakePixAI(), None) == ""
 
     def test_an_answer_that_is_not_graphql_fails_soft(self):
         """No hash to be unconfigured any more (#91). A body that is not GraphQL comes back
         from the ad-hoc POST as {}: no model in it, so ''."""
         fake = FakePixAI().on(MODEL_VERSION, {})
-        assert core.resolve_model_base_id(fake, "V1") == ""
+        assert models_mod.resolve_model_base_id(fake, "V1") == ""
 
     def test_graphql_error_fails_soft_not_raises(self):
         """A GraphQL error is raised at the seam (the ad-hoc POST turns an `errors` array into
         a PixAIError); this soft-restore path swallows it and returns '' rather than surfacing
         a wrong-id toast for a case that is not the user's mistake."""
         fake = FakePixAI().fail(MODEL_VERSION, core.PixAIError("GraphQL error: nope"))
-        assert core.resolve_model_base_id(fake, "V1") == ""
+        assert models_mod.resolve_model_base_id(fake, "V1") == ""
 
     def test_removed_model_fails_soft(self):
         """generationModelVersion: null (the model/version is gone) -- same '' answer as
         any other unresolvable case, never a crash."""
         fake = FakePixAI().on(MODEL_VERSION, {"generationModelVersion": None})
-        assert core.resolve_model_base_id(fake, "V1") == ""
+        assert models_mod.resolve_model_base_id(fake, "V1") == ""
 
     def test_network_exception_fails_soft(self):
         fake = FakePixAI().fail(MODEL_VERSION, RuntimeError("boom"))
-        assert core.resolve_model_base_id(fake, "V1") == ""
+        assert models_mod.resolve_model_base_id(fake, "V1") == ""
 
 
 class TestQuickCount:
@@ -944,7 +945,7 @@ def test_sync_artworks_counts_failed_video_downloads_as_a_failure(tmp_path, mock
 
 
 def test_resolve_loras(mocker):
-    mocker.patch.object(core, "model_name_gql",
+    mocker.patch.object(models_mod, "model_name_gql",
                         side_effect=lambda s, vid: {"111": "DetailLora", "222": "222"}.get(str(vid), str(vid)))
     task = {"parameters": {"lora": {"111": 0.7, "222": 0.5}}}
     out = core.resolve_loras(mocker.MagicMock(), task)
@@ -977,7 +978,7 @@ def test_fix_models_resolves_numeric_names(tmp_path, mocker, pixai):
         {f: "" for f in CATALOG_FIELDS} | {"media_id": "m3", "filename": "c.png",
                                            "model_id": "111", "model_name": "Already Named"},
     ])
-    mocker.patch.object(core, "model_name_gql", return_value="Tsubaki.2 v1")
+    mocker.patch.object(models_mod, "model_name_gql", return_value="Tsubaki.2 v1")
 
     res = core.run_fix_models(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
 
@@ -1227,14 +1228,14 @@ def test_a_freshly_captured_generation_gets_its_model_NAME_not_just_its_id(monke
     happened past. Reported from the owner's own gallery: "Model 1983308862240288769".
     """
     assert core._resolved_model_name(object(), {"model_name": "Reference Pro"}, "1") ==         "Reference Pro", "a chat task's locally-resolved label must win"
-    monkeypatch.setattr(core, "model_name_gql", lambda s, mid: "Tsubaki .2")
+    monkeypatch.setattr(models_mod, "model_name_gql", lambda s, mid: "Tsubaki .2")
     assert core._resolved_model_name(object(), {}, "1983308862240288769") == "Tsubaki .2"
     assert core._resolved_model_name(object(), {}, "") == "", "no id, nothing to resolve"
 
     def boom(s, mid):
         raise core.PixAIError("lookup down")
 
-    monkeypatch.setattr(core, "model_name_gql", boom)
+    monkeypatch.setattr(models_mod, "model_name_gql", boom)
     assert core._resolved_model_name(object(), {}, "1") == "", (
         "a failed lookup must cost the label, never the row")
 
@@ -1250,7 +1251,7 @@ def test_the_backfill_separates_errors_from_tasks_that_carried_no_prompt(tmp_pat
     save_catalog(tmp_path / "catalog.db",
                  [base | {"media_id": "m%d" % i, "task_id": "t%d" % i,
                           "filename": "%d.png" % i} for i in range(4)])
-    mocker.patch.object(core, "model_name_gql", side_effect=lambda s, m: "M")
+    mocker.patch.object(models_mod, "model_name_gql", side_effect=lambda s, m: "M")
     mocker.patch.object(core, "resolve_loras", side_effect=lambda s, t: "")
 
     def detail(_s, tid):
@@ -1428,7 +1429,7 @@ def test_backfill_full_meta_refetches_rows_that_have_only_a_prompt(tmp_path, moc
             "outputs": {"seed": 5, "detailParameters": {"samplingSteps": 25,
                                                         "samplingMethod": "Euler a"}}}
     mocker.patch.object(task_reads_mod, "task_detail_gql", side_effect=lambda s, tid: task)
-    mocker.patch.object(core, "model_name_gql", side_effect=lambda s, mid: "WAI v17")
+    mocker.patch.object(models_mod, "model_name_gql", side_effect=lambda s, mid: "WAI v17")
     mocker.patch.object(core, "resolve_loras", side_effect=lambda s, t: "")
 
     core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))

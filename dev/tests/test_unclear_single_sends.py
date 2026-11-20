@@ -25,6 +25,7 @@ import requests
 from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade import mirror as mirror_mod
+from moonglade import models as models_mod
 from moonglade import pixai_client as pc
 from tests.conftest import _REAL_REST_GET, _REAL_REST_POST, login_client
 
@@ -117,7 +118,7 @@ def rig(tmp_path, monkeypatch):
     monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
     monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: client)
     monkeypatch.setattr(core, "build_request", lambda payload, *a, mode=None, **k: _req_for(mode, payload))
-    monkeypatch.setattr(core, "_gate_params_for_model", lambda s, p: p)
+    monkeypatch.setattr(models_mod, "_gate_params_for_model", lambda s, p: p)
     monkeypatch.setattr(core, "upload_media", lambda *a, **k: pytest.fail("no upload here"))
     monkeypatch.setattr(core.time, "sleep", lambda s: None)
     clock = [1000.0]
@@ -334,8 +335,8 @@ def test_run_generate_exits_with_the_honest_sentence(tmp_path, monkeypatch, caps
     client = pc.PixAIClient(wire)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: client)
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
-    monkeypatch.setattr(core, "_gate_image_params", lambda s, p: (p, []))
-    monkeypatch.setattr(core, "_gate_params_for_model", lambda s, p: p)
+    monkeypatch.setattr(models_mod, "_gate_image_params", lambda s, p: (p, []))
+    monkeypatch.setattr(models_mod, "_gate_params_for_model", lambda s, p: p)
     monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "_gen_parameters", lambda args: {"modelId": V, "prompts": "x"})
     import argparse

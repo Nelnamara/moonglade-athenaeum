@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from moonglade import backup as core
+from moonglade import models as models_mod
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client
@@ -603,7 +604,7 @@ def test_model_type_filter_mapping_is_measured_not_guessed():
     Recorded because a wrong token here does not error -- `types` with an unrecognised member
     would simply return the wrong rows, or none, and look like an empty result.
     """
-    m = dict(core.MODEL_TYPE_FILTERS)
+    m = dict(models_mod.MODEL_TYPE_FILTERS)
     # Measured 2026-07-26 by driving their base-model picker and reading the request.
     assert m["All"] == "ANY_MODEL", "All sends ANY_MODEL; it does NOT omit the argument"
     assert m["DiT.3"] == "MMDIT26B_MODEL"
@@ -615,11 +616,11 @@ def test_model_type_filter_mapping_is_measured_not_guessed():
     # option, no new chip, no new label.
     assert m["Community DiT"] == ("USER_DIT26A_MODEL", "USER_DIT26B_MODEL")
     # Every mapped token must be one this app is willing to send.
-    for label, tokens in core.MODEL_TYPE_FILTERS:
+    for label, tokens in models_mod.MODEL_TYPE_FILTERS:
         for token in (tokens if isinstance(tokens, tuple) else (tokens,)):
             if token.startswith("ANY_"):
                 continue
-            assert token in core.LORA_BASE_MODEL_TYPES, \
+            assert token in models_mod.LORA_BASE_MODEL_TYPES, \
                 "{} maps to {}, which is not on the send whitelist".format(label, token)
 
 
@@ -759,7 +760,7 @@ def test_generate_rejects_a_version_id_sent_as_a_model_id(monkeypatch, tmp_path,
                  [_row(media_id="u2", filename="u2.png", created_at="2026-07-01T00:00:00",
                        width="900", height="600")])
     monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "list_model_versions", lambda *a, **k: [])   # not a model id
+    monkeypatch.setattr(models_mod, "list_model_versions", lambda *a, **k: [])   # not a model id
     monkeypatch.setattr(core, "submit_generation", lambda *a, **k: "nope")
     cli = login_client(tmp_path)
     r = cli.post("/api/generate", json={

@@ -24,6 +24,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gallery
+from moonglade import models as models_mod
 from moonglade.gallery import load_catalog
 from moonglade.scan import DELETED_DIRNAME
 from moonglade import media_tools as media_tools_mod
@@ -49,7 +50,7 @@ def _fake_pixai(schema_has_blur, node_facts, calls):
     """
     def _gql(session, query, variables=None, retries=None):
         calls.append(query)
-        asked = core._MODEL_BLUR_FIELD in query
+        asked = models_mod._MODEL_BLUR_FIELD in query
         if asked and not schema_has_blur:
             raise core.PixAIError(
                 'GraphQL error: [{"message": "Cannot query field \\"shouldBlur\\" on type '
@@ -77,24 +78,24 @@ class TestM02BlurParity:
         The refusal tally feeding it is process-wide too, so it resets here as well -- a test
         that started life one strike down would latch a call early and pass for the wrong
         reason."""
-        monkeypatch.setattr(core, "_model_blur_supported", None)
-        monkeypatch.setattr(core, "_model_blur_refusals", 0)
+        monkeypatch.setattr(models_mod, "_model_blur_supported", None)
+        monkeypatch.setattr(models_mod, "_model_blur_refusals", 0)
 
     def _rest_row(self, monkeypatch, payload):
         """One row out of the REST /generation-model/search path."""
         monkeypatch.setattr(core, "_rest_get",
                             lambda s, path, params=None, **k: {"data": [payload]})
-        return core.model_search_rest(object())["results"][0]
+        return models_mod.model_search_rest(object())["results"][0]
 
     def _market_rows(self, monkeypatch, facts, schema_has_blur=True, calls=None):
         monkeypatch.setattr(core, "gql_adhoc",
                             _fake_pixai(schema_has_blur, facts, calls if calls is not None else []))
-        return core.model_search_market_gql(object(), usage="MODEL")["results"]
+        return models_mod.model_search_market_gql(object(), usage="MODEL")["results"]
 
     def _bookmark_rows(self, monkeypatch, facts, schema_has_blur=True, calls=None):
         monkeypatch.setattr(core, "gql_adhoc",
                             _fake_pixai(schema_has_blur, facts, calls if calls is not None else []))
-        return core.model_bookmarks_gql(object(), usage="MODEL")["results"]
+        return models_mod.model_bookmarks_gql(object(), usage="MODEL")["results"]
 
     # -- the queries must actually ASK for the flag ---------------------------------------
 
@@ -105,8 +106,8 @@ class TestM02BlurParity:
         market, books = [], []
         self._market_rows(monkeypatch, [{"isNsfw": False}], calls=market)
         self._bookmark_rows(monkeypatch, [{"isNsfw": False}], calls=books)
-        assert core._MODEL_BLUR_FIELD in market[0]
-        assert core._MODEL_BLUR_FIELD in books[0]
+        assert models_mod._MODEL_BLUR_FIELD in market[0]
+        assert models_mod._MODEL_BLUR_FIELD in books[0]
 
     # -- one model, three sources, one answer ---------------------------------------------
 
@@ -165,22 +166,22 @@ class TestM02BlurParity:
         rows = self._market_rows(monkeypatch, [{"isNsfw": True}], schema_has_blur=False,
                                  calls=calls)
         assert [r["should_blur"] for r in rows] == [True]
-        assert len(calls) == 2 and core._MODEL_BLUR_FIELD not in calls[1]
+        assert len(calls) == 2 and models_mod._MODEL_BLUR_FIELD not in calls[1]
 
     def test_a_repeated_refusal_is_remembered_so_it_stops_costing_a_retry(self, monkeypatch):
         """A retry on every search would double the picker's request count against a schema
         that will never carry the field -- so the refusal does eventually latch. It just takes
         TWO consecutive refusals to get there (see the next test for why)."""
         calls = []
-        for _ in range(core._MODEL_BLUR_REFUSALS_BEFORE_GIVING_UP):
+        for _ in range(models_mod._MODEL_BLUR_REFUSALS_BEFORE_GIVING_UP):
             self._market_rows(monkeypatch, [{"isNsfw": True}], schema_has_blur=False,
                               calls=calls)
-        assert core._model_blur_supported is False
-        assert len(calls) == 2 * core._MODEL_BLUR_REFUSALS_BEFORE_GIVING_UP
+        assert models_mod._model_blur_supported is False
+        assert len(calls) == 2 * models_mod._MODEL_BLUR_REFUSALS_BEFORE_GIVING_UP
 
         self._market_rows(monkeypatch, [{"isNsfw": True}], schema_has_blur=False, calls=calls)
-        assert len(calls) == 2 * core._MODEL_BLUR_REFUSALS_BEFORE_GIVING_UP + 1
-        assert core._MODEL_BLUR_FIELD not in calls[-1]   # field-less from here on
+        assert len(calls) == 2 * models_mod._MODEL_BLUR_REFUSALS_BEFORE_GIVING_UP + 1
+        assert models_mod._MODEL_BLUR_FIELD not in calls[-1]   # field-less from here on
 
     def test_one_transient_refusal_does_not_disable_the_field_for_the_whole_run(self,
                                                                                monkeypatch):
@@ -200,11 +201,11 @@ class TestM02BlurParity:
             return real(session, query, variables, retries)
         monkeypatch.setattr(core, "gql_adhoc", _one_blip)
 
-        core.model_search_market_gql(object(), usage="MODEL")          # eats the blip
-        assert core._model_blur_supported is not False                 # NOT written off
+        models_mod.model_search_market_gql(object(), usage="MODEL")          # eats the blip
+        assert models_mod._model_blur_supported is not False                 # NOT written off
 
-        rows = core.model_search_market_gql(object(), usage="MODEL")["results"]
-        assert core._MODEL_BLUR_FIELD in calls[-1]                     # still asking
+        rows = models_mod.model_search_market_gql(object(), usage="MODEL")["results"]
+        assert models_mod._MODEL_BLUR_FIELD in calls[-1]                     # still asking
         assert [r["should_blur"] for r in rows] == [False]             # viewer's own setting wins
 
     def test_a_real_failure_is_not_mistaken_for_a_missing_field(self, monkeypatch):
@@ -217,8 +218,8 @@ class TestM02BlurParity:
         monkeypatch.setattr(core, "gql_adhoc", _always_refuse)
 
         with pytest.raises(core.PixAIError, match="401"):
-            core.model_search_market_gql(object(), usage="MODEL")
-        assert core._model_blur_supported is None
+            models_mod.model_search_market_gql(object(), usage="MODEL")
+        assert models_mod._model_blur_supported is None
 
     def test_a_refused_flag_is_answered_without_it_on_bookmarks(self, monkeypatch):
         """A refusal of the blur leaf alone is answered by re-asking the same ad-hoc document
@@ -226,7 +227,7 @@ class TestM02BlurParity:
         calls = []
         monkeypatch.setattr(core, "gql_adhoc",
                             _fake_pixai(False, [{"isNsfw": True}], calls))
-        res = core.model_bookmarks_gql(object(), usage="MODEL")
+        res = models_mod.model_bookmarks_gql(object(), usage="MODEL")
         assert "_path" not in res                            # one road, nothing to report (#92)
         assert [r["should_blur"] for r in res["results"]] == [True]
 
@@ -238,7 +239,7 @@ class TestM02BlurParity:
             raise core.PixAIError("401 Unauthorized -- API key missing/expired.")
         monkeypatch.setattr(core, "gql_adhoc", _always_refuse)
         with pytest.raises(core.PixAIError, match="401"):
-            core.model_bookmarks_gql(object(), usage="MODEL")
+            models_mod.model_bookmarks_gql(object(), usage="MODEL")
 
 
 # ---------------------------------------------------------------------------
@@ -396,7 +397,7 @@ def edit_task_network(monkeypatch):
             asked.append(mid)
             return resolved_name(mid) if callable(resolved_name) else resolved_name
 
-        monkeypatch.setattr(core, "model_name_gql", fake_name)
+        monkeypatch.setattr(models_mod, "model_name_gql", fake_name)
         return asked
 
     return _install

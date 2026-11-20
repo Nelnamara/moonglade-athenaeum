@@ -20,6 +20,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import mirror as mirror_mod
+from moonglade import models as models_mod
 
 
 # --- the table ---------------------------------------------------------------
@@ -299,7 +300,7 @@ def test_a_stale_client_version_resolves_identically_for_price_and_submit(monkey
     validated the client's version_id against the model's real version list. Two rules is a
     badge quoting one model while the submit sends another. One rule now, so the same
     payload resolves to the same modelId on both surfaces."""
-    monkeypatch.setattr(core, "list_model_versions",
+    monkeypatch.setattr(models_mod, "list_model_versions",
                         lambda s, mid: [{"version_id": "V-LATEST"}, {"version_id": "V-OLD"}])
     resolve = core.RequestResolver(model_version=core.model_version_resolver(FakeSession()))
     stale = {"model_id": "M1", "version_id": "V-FROM-ANOTHER-MODEL", "prompt": "x"}

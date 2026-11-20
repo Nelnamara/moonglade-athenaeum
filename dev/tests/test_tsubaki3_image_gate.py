@@ -30,6 +30,7 @@ from types import SimpleNamespace
 import pytest
 
 from moonglade import backup as core
+from moonglade import models as models_mod
 
 from tests.conftest import login_client
 from moonglade import jobs as jobs_mod
@@ -135,7 +136,7 @@ def rest(monkeypatch):
 
 
 def gate(params):
-    return core._gate_image_params(object(), params)
+    return models_mod._gate_image_params(object(), params)
 
 
 def img(vid, **kw):
@@ -220,23 +221,23 @@ def test_on_grid_sizes_never_move_and_768x432_becomes_912x512_with_a_receipt(res
 def test_the_dit_step_table_and_step_aligned_bounds():
     for t in ("DIT7_MODEL", "DIT7B_MODEL", "MMDIT26A_MODEL", "MMDIT26B_MODEL",
               "USER_DIT26A_MODEL", "USER_DIT26B_MODEL"):
-        assert core._size_rule(t)["step"] == 16, t
+        assert models_mod._size_rule(t)["step"] == 16, t
     for t in ("SDXL_MODEL", "SD_V1_MODEL", "DIT9_MODEL", ""):
-        assert core._size_rule(t)["step"] == 8, t
+        assert models_mod._size_rule(t)["step"] == 8, t
     # the UNION of the ranges, aligned inward to the step
-    assert core._size_rule("MMDIT26B_MODEL", [(500, 2500, 510, 2490), (512, 1800, 512, 1800)]) \
+    assert models_mod._size_rule("MMDIT26B_MODEL", [(500, 2500, 510, 2490), (512, 1800, 512, 1800)]) \
         == {"step": 16, "lo": 512, "hi": 2496}
-    assert core._size_rule("MMDIT26B_MODEL", [(512, 2496, 512, 2496)]) == T3_RULE
+    assert models_mod._size_rule("MMDIT26B_MODEL", [(512, 2496, 512, 2496)]) == T3_RULE
     # no ranges -> today's 64..4096, on the step
-    assert core._size_rule("MMDIT26A_MODEL", None) == {"step": 16, "lo": 64, "hi": 4096}
-    assert core._size_rule("SDXL_MODEL", []) == {"step": 8, "lo": 64, "hi": 4096}
+    assert models_mod._size_rule("MMDIT26A_MODEL", None) == {"step": 16, "lo": 64, "hi": 4096}
+    assert models_mod._size_rule("SDXL_MODEL", []) == {"step": 8, "lo": 64, "hi": 4096}
     # a published restrictions step wins (the drawer's rule; none is published today)
-    assert core._size_rule("SDXL_MODEL", None, {"width": {"step": 32}})["step"] == 32
+    assert models_mod._size_rule("SDXL_MODEL", None, {"width": {"step": 32}})["step"] == 32
     # rounding is half-UP, never Python's half-to-even: 680 -> 688, 1016 -> 1024
-    assert core._snap_size(1024, 680, T3_RULE) == (1024, 688)
-    assert core._snap_size(1016, 1016, {"step": 16, "lo": 64, "hi": 4096}) == (1024, 1024)
+    assert models_mod._snap_size(1024, 680, T3_RULE) == (1024, 688)
+    assert models_mod._snap_size(1016, 1016, {"step": 16, "lo": 64, "hi": 4096}) == (1024, 1024)
     # the long side wins when both bounds cannot hold (a 6:1 frame)
-    assert core._snap_size(3072, 512, T3_RULE) == (2496, 512)
+    assert models_mod._snap_size(3072, 512, T3_RULE) == (2496, 512)
 
 
 def test_a_dit_version_without_a_size_config_answer_snaps_to_the_step_only(rest):
@@ -292,7 +293,7 @@ def test_js_and_python_give_identical_results_for_all_32_presets(rest, tmp_path)
         if row["label"] != "custom":
             r = dict(ASPECTS)[row["label"]]
             assert tuple(row["raw"]) == drawer_raw(r, row["size"]), row
-        assert tuple(row["snapped"]) == core._snap_size(*row["raw"], T3_RULE), row
+        assert tuple(row["snapped"]) == models_mod._snap_size(*row["raw"], T3_RULE), row
         # ...and the gate, handed the drawer's own /8 output, sends exactly that
         out, _adj = gate(img(T3, width=row["raw"][0], height=row["raw"][1]))
         assert [out["width"], out["height"]] == row["snapped"], row
@@ -670,7 +671,7 @@ def test_the_gate_is_idempotent_on_the_twelve_tsubaki3_wire_shapes(rest):
         g2, a2 = gate(g1)
         assert g2 is g1 and a2 == []
         # the backstop form hands the already-gated dict straight back too
-        assert core._gate_params_for_model(object(), g1) is g1
+        assert models_mod._gate_params_for_model(object(), g1) is g1
     # the site's own shapes are already in the site's form: untouched, same object
     for p in sites:
         out, adjusted = gate(p)
@@ -791,7 +792,7 @@ def test_run_generate_confirm_refuses_read_only_before_the_gates_pixai_reads(ext
 # =============================================================================
 
 def test_quality_tag_cases_on_the_version_row():
-    row = lambda extra: core._version_row_to_meta({"id": "V", "modelType": "SDXL_MODEL",
+    row = lambda extra: models_mod._version_row_to_meta({"id": "V", "modelType": "SDXL_MODEL",
                                                    "extra": extra})
     assert row({"qualityTags": [{"prefix": "", "suffix": "<suffix>"}]})["quality_tag"] == \
         {"prefix": "", "suffix": "<suffix>"}
@@ -801,7 +802,7 @@ def test_quality_tag_cases_on_the_version_row():
     assert row({"qualityTags": []})["quality_tag"] is None
     assert row({})["quality_tag"] is None
     assert row({"qualityTags": "junk"})["quality_tag"] is None
-    assert core._empty_version_meta()["quality_tag"] is None
+    assert models_mod._empty_version_meta()["quality_tag"] is None
 
 
 def _with_row(row):
@@ -832,7 +833,7 @@ def test_the_quality_tag_booster_sends_the_versions_own_tag():
 def test_routed_negative_prompts_prefill_on_mmdit26b_only():
     routed = {"default": "<routed-default>", "contextImage": "<routed-context>"}
     extra = {"negativePrompts": "<legacy>", "routedNegativePrompts": routed}
-    meta = lambda mt, ex: core._version_row_to_meta({"id": "V", "modelType": mt, "extra": ex})
+    meta = lambda mt, ex: models_mod._version_row_to_meta({"id": "V", "modelType": mt, "extra": ex})
     assert meta("MMDIT26B_MODEL", extra)["negative_prompt"] == "<routed-default>"
     assert meta("MMDIT26A_MODEL", extra)["negative_prompt"] == "<legacy>"
     # both keys, both strings <= 4096, or the legacy field stands
@@ -846,8 +847,8 @@ def test_a_hidden_profile_is_filtered_only_from_the_drawers_list(monkeypatch):
     rows = [{"profileName": "secret", "profileFlag": "hidden"},
             {"profileName": "pro", "profileFlag": "default"},
             {"profileName": "ultra", "profileFlag": "membershipOnly"}]
-    monkeypatch.setattr(core, "_model_profiles", lambda s, vid: rows)
-    meta = core._attach_profiles(object(), {"version_id": "V"})
+    monkeypatch.setattr(models_mod, "_model_profiles", lambda s, vid: rows)
+    meta = models_mod._attach_profiles(object(), {"version_id": "V"})
     assert meta["profiles"] == ["pro", "ultra"]
     # the gate keeps the full list: its default fill is unchanged, and a hidden profile a
     # CLI or Remix sends is not refused
@@ -862,9 +863,9 @@ def test_a_hidden_profile_is_filtered_only_from_the_drawers_list(monkeypatch):
 # =============================================================================
 
 def test_attach_features_merges_only_false_and_never_overwrites(rest):
-    meta = core._version_row_to_meta({"id": FLASH, "modelType": "MMDIT26B_MODEL", "extra": {
+    meta = models_mod._version_row_to_meta({"id": FLASH, "modelType": "MMDIT26B_MODEL", "extra": {
         "compatibility": {"styleKey": True, "negativePrompt": False, "upscale": True}}})
-    core._attach_features(object(), meta)
+    models_mod._attach_features(object(), meta)
     c = meta["compatibility"]
     assert c["negativePrompt"] is False and c["enableADetailer"] is False
     assert c["upscale"] is True                  # an explicit extra value is never overwritten
@@ -875,16 +876,16 @@ def test_attach_features_merges_only_false_and_never_overwrites(rest):
 
 
 def test_attach_features_model_type_rule_and_unknowns(rest):
-    meta = core._version_row_to_meta({"id": T2, "modelType": "MMDIT26A_MODEL", "extra": {}})
-    core._attach_features(object(), meta)
+    meta = models_mod._version_row_to_meta({"id": T2, "modelType": "MMDIT26A_MODEL", "extra": {}})
+    models_mod._attach_features(object(), meta)
     assert meta["compatibility"] == {"enableADetailer": False, "upscale": False}
     assert meta["context_images"] is False
-    blind = core._version_row_to_meta({"id": BLIND, "modelType": "SDXL_MODEL", "extra": {}})
-    core._attach_features(object(), blind)
+    blind = models_mod._version_row_to_meta({"id": BLIND, "modelType": "SDXL_MODEL", "extra": {}})
+    models_mod._attach_features(object(), blind)
     assert blind["compatibility"] == {} and blind["context_images"] is None
     assert blind["size_rule"] is None                # today's drawer rule, as the gate does
-    sdxl = core._version_row_to_meta({"id": SDXL, "modelType": "SDXL_MODEL", "extra": {}})
-    core._attach_features(object(), sdxl)
+    sdxl = models_mod._version_row_to_meta({"id": SDXL, "modelType": "SDXL_MODEL", "extra": {}})
+    models_mod._attach_features(object(), sdxl)
     assert sdxl["size_rule"] == {"step": 8, "lo": 64, "hi": 4096}
 
 
@@ -895,9 +896,9 @@ def test_attach_features_takes_the_architecture_from_features_only(rest):
     modelType -- what it shows stays what is sent."""
     rest.models["V-DOWN"] = {"features": core.PixAIError("503"), "size-config": SIZE_CONFIG,
                              "inference-profiles": T3_PROFILES}
-    meta = core._version_row_to_meta({"id": "V-DOWN", "modelType": "MMDIT26A_MODEL",
+    meta = models_mod._version_row_to_meta({"id": "V-DOWN", "modelType": "MMDIT26A_MODEL",
                                       "extra": {}})
-    core._attach_features(object(), meta)
+    models_mod._attach_features(object(), meta)
     assert meta["compatibility"] == {}
     assert meta["size_rule"] is None and meta["context_images"] is None
     assert not [c for c in rest.calls if c.endswith("/size-config")]
@@ -929,9 +930,9 @@ def test_the_drawers_all_versions_read_carries_the_rule_features_and_compat(rest
             assert [c for c in rest.calls if c.endswith(suffix)] == \
                 ["/generation-model/" + T3 + suffix], suffix
 
-    check(core.list_model_versions(object(), "M"))
+    check(models_mod.list_model_versions(object(), "M"))
     # ...and through the route the drawer actually calls (fresh caches, fresh call log)
-    for cache in (core._features_cache, core._size_config_cache, core._profile_cache):
+    for cache in (models_mod._features_cache, models_mod._size_config_cache, models_mod._profile_cache):
         cache.clear()
     rest.calls.clear()
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
@@ -946,9 +947,9 @@ def test_the_drawers_all_versions_read_carries_the_rule_features_and_compat(rest
 
 def test_user_dit26b_joins_the_dit_tables():
     assert core.lora_weight_range("USER_DIT26B_MODEL") == (0.0, 1.2)
-    assert "USER_DIT26B_MODEL" in core.LORA_BASE_MODEL_TYPES
-    assert "USER_DIT26B_MODEL" in core.DIT_SIZE_STEP_TYPES
-    assert "USER_DIT26B_MODEL" in core.NO_HIRES_FACEFIX_TYPES
+    assert "USER_DIT26B_MODEL" in models_mod.LORA_BASE_MODEL_TYPES
+    assert "USER_DIT26B_MODEL" in models_mod.DIT_SIZE_STEP_TYPES
+    assert "USER_DIT26B_MODEL" in models_mod.NO_HIRES_FACEFIX_TYPES
 
 
 def test_lora_weights_are_clamped_to_the_architectures_range(rest):
@@ -1002,28 +1003,28 @@ def test_api_price_returns_adjusted_for_a_flash_negative(tmp_path, monkeypatch):
 
 def test_gate_caches_fill_during_a_test(rest):
     gate(img(T3))
-    assert T3 in core._features_cache and T3 in core._size_config_cache
+    assert T3 in models_mod._features_cache and T3 in models_mod._size_config_cache
 
 
 def test_gate_caches_start_empty_in_every_test():
     """Order-independent (review F10/R3): true when run alone, and after the test above it
     still catches a missing conftest clear."""
-    assert core._features_cache == {} and core._size_config_cache == {}
+    assert models_mod._features_cache == {} and models_mod._size_config_cache == {}
 
 
 def test_the_conftest_fixture_clears_both_caches_before_and_after_the_test():
     from tests import conftest
     fixture = getattr(conftest._clear_gate_caches, "__wrapped__", conftest._clear_gate_caches)
     gen = fixture()
-    core._features_cache["X"] = (0, {})
-    core._size_config_cache["X"] = (0, [])
+    models_mod._features_cache["X"] = (0, {})
+    models_mod._size_config_cache["X"] = (0, [])
     next(gen)                                        # the setup half
-    assert core._features_cache == {} and core._size_config_cache == {}
-    core._features_cache["Y"] = (0, {})
-    core._size_config_cache["Y"] = (0, [])
+    assert models_mod._features_cache == {} and models_mod._size_config_cache == {}
+    models_mod._features_cache["Y"] = (0, {})
+    models_mod._size_config_cache["Y"] = (0, [])
     with pytest.raises(StopIteration):
         next(gen)                                    # the teardown half
-    assert core._features_cache == {} and core._size_config_cache == {}
+    assert models_mod._features_cache == {} and models_mod._size_config_cache == {}
 
 
 # =============================================================================
@@ -1220,7 +1221,7 @@ def test_a_refused_lane_request_is_never_resubmitted_as_anything_else(refusal, m
         sent.append(dict(v["parameters"]))
         raise core.graphql_error(refusal[len("GraphQL error: "):])   # as the transport raises it
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
-    monkeypatch.setattr(core, "_gate_params_for_model", lambda s, p: p)
+    monkeypatch.setattr(models_mod, "_gate_params_for_model", lambda s, p: p)
     monkeypatch.setattr(core, "gql_mutate", _refuse)
     monkeypatch.setitem(core._turbo_refused, "seen", False)
     # a CLI --params-json shape: lane AND the app's Turbo, which only the web road strips
@@ -1328,23 +1329,23 @@ def test_status_is_read_and_cached_under_the_identity_that_creates(lane, monkeyp
 
 
 def test_the_drawers_version_meta_offers_the_lane_on_tsubaki3_only(lane):
-    meta = core._version_row_to_meta({"id": T3, "modelType": "MMDIT26B_MODEL", "extra": {}})
-    core._attach_unlimited(object(), core._attach_features(object(), meta))
+    meta = models_mod._version_row_to_meta({"id": T3, "modelType": "MMDIT26B_MODEL", "extra": {}})
+    models_mod._attach_unlimited(object(), models_mod._attach_features(object(), meta))
     u = meta["unlimited"]
     assert u["owned"] is True and u["days_left"] == 30
     assert u["size"] == {"max_area": 1800 * 1800, "max_side": 1792,
                          "ranges": [[512, 2496, 512, 2496], [512, 2200, 512, 2200],
                                     [512, 1800, 512, 1800]]}
-    flash = core._version_row_to_meta({"id": FLASH, "modelType": "MMDIT26B_MODEL",
+    flash = models_mod._version_row_to_meta({"id": FLASH, "modelType": "MMDIT26B_MODEL",
                                        "extra": {}})
-    core._attach_unlimited(object(), core._attach_features(object(), flash))
+    models_mod._attach_unlimited(object(), models_mod._attach_features(object(), flash))
     assert flash["unlimited"] is None
     assert [c for c in lane.calls if LANE_PATH.match(c)] == [
         "/generation-model-version/%s/infinite-mode" % T3]
     lane.grants[T3] = core.PixAIError("503")
     core._unlimited_cache.clear()
-    assert core._attach_unlimited(object(), dict(meta))["unlimited"] is None
-    assert core._empty_version_meta()["unlimited"] is None
+    assert models_mod._attach_unlimited(object(), dict(meta))["unlimited"] is None
+    assert models_mod._empty_version_meta()["unlimited"] is None
 
 
 def test_the_drawers_all_versions_read_carries_the_status_on_the_latest_row(lane, monkeypatch,

@@ -19,6 +19,7 @@ from moonglade import gallery
 from moonglade import health as health_mod
 from moonglade import migrate as moonglade_migrate
 from moonglade import mirror as mirror_mod
+from moonglade import models as models_mod
 from moonglade import paths as moonglade_paths
 from moonglade import telemetry as telemetry_mod
 
@@ -980,9 +981,9 @@ def _clear_profile_cache():
     (keyed by version_id, with a TTL) so the submit/price gate avoids a network GET on every
     /api/price keystroke. Clear it around every test so one test's profiles can't leak into
     another. Same isolation contract as the gallery cache resets above."""
-    core._profile_cache.clear()
+    models_mod._profile_cache.clear()
     yield
-    core._profile_cache.clear()
+    models_mod._profile_cache.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -994,15 +995,15 @@ def _clear_gate_caches():
     Unlimited Mode status cache (SCOPE_2026-09-26_unlimited-mode) is the same kind of read
     and is cleared with them, and so is Session H's /model-config read (the live context-image
     max)."""
-    core._features_cache.clear()
-    core._size_config_cache.clear()
+    models_mod._features_cache.clear()
+    models_mod._size_config_cache.clear()
     core._unlimited_cache.clear()
-    core._model_config_cache.clear()
+    models_mod._model_config_cache.clear()
     yield
-    core._features_cache.clear()
-    core._size_config_cache.clear()
+    models_mod._features_cache.clear()
+    models_mod._size_config_cache.clear()
     core._unlimited_cache.clear()
-    core._model_config_cache.clear()
+    models_mod._model_config_cache.clear()
 
 
 @pytest.fixture(autouse=True)

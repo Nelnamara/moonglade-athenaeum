@@ -6,6 +6,7 @@ import tempfile
 import types
 
 from moonglade import backup as core
+from moonglade import models as models_mod
 from moonglade.gallery import CATALOG_FIELDS, save_catalog, load_catalog
 from moonglade import task_reads as task_reads_mod
 
@@ -193,7 +194,7 @@ def test_with_surface_gate_readmits_pre18_rows(monkeypatch, tmp_path, pixai):
                 "moderationAction": {"promptsModerationAction": "PASS"}}
 
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", detail)
-    monkeypatch.setattr(core, "model_name_gql", lambda s, mid: "My Model")
+    monkeypatch.setattr(models_mod, "model_name_gql", lambda s, mid: "My Model")
     monkeypatch.setattr(core, "resolve_loras", lambda s, t: "")
     monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, t: fm)
 
@@ -240,7 +241,7 @@ def test_backfill_checkpoints_incrementally_not_only_at_the_end(monkeypatch, tmp
                 "outputs": {}, "updatedAt": "2026-08-1" + tid[-1]}
 
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", detail)
-    monkeypatch.setattr(core, "model_name_gql", lambda s, mid: "M")
+    monkeypatch.setattr(models_mod, "model_name_gql", lambda s, mid: "M")
     monkeypatch.setattr(core, "resolve_loras", lambda s, t: "")
     monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, t: fm)
     monkeypatch.setattr(core, "_BACKFILL_CHECKPOINT_TASKS", 1)     # flush after every task

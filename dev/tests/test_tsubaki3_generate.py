@@ -29,6 +29,7 @@ from pathlib import Path
 import pytest
 
 from moonglade import backup as core
+from moonglade import models as models_mod
 from tests.test_tsubaki3_image_gate import (
     FLASH, MODELS, SDXL, SIZE_CONFIG, T3, T3_PROFILES, FakeRest, features, T3_STATUS,
 )
@@ -95,7 +96,7 @@ def rest(monkeypatch):
 def road(payload, **kw):
     s = object()
     return core.build_request(payload, mode="image", resolve=core.RequestResolver(
-        gate=core.gate_resolver(s), features=core.features_resolver(s),
+        gate=core.gate_resolver(s), features=models_mod.features_resolver(s),
         unlimited=core.unlimited_resolver(s)), **kw)
 
 
@@ -173,7 +174,7 @@ def test_the_live_max_comes_from_model_config_and_falls_back_to_three(rest):
         "media": {"maxCount": 2}}}}}}
     with pytest.raises(core.PixAIError, match="up to 2 context images — remove 1"):
         road(ctx_payload(context_images=["701", "702", "703"], prompt="p"))
-    core._model_config_cache.clear()
+    models_mod._model_config_cache.clear()
     rest.model_config = core.PixAIError("503")
     assert road(ctx_payload(context_images=["701", "702", "703"], prompt="p")).parameters[
         "contextImages"] == ["701", "702", "703"]
@@ -194,7 +195,7 @@ def test_the_gate_refuses_a_hand_built_context_image_dict(extra, words, rest):
          "contextImages": ["701"]}
     p.update(extra)
     with pytest.raises(core.PixAIError) as err:
-        core._gate_image_params(object(), p)
+        models_mod._gate_image_params(object(), p)
     assert words in str(err.value)
 
 
@@ -234,7 +235,7 @@ def test_recipes_run_the_helper_one_step_lower_at_build(rest):
     """The site's own rule (task-*.js): hasRecipes ? (medium -> low, else off). Keyed on the
     BUILT params' recipeIds (the passthrough is lane w2-recipes'), so it fires only when the
     recipes are really sent."""
-    rs = core.RequestResolver(features=core.features_resolver(object()))
+    rs = core.RequestResolver(features=models_mod.features_resolver(object()))
     for asked, used in (("medium", "low"), ("low", "off"), ("off", "off")):
         params, adjusted = {"recipeIds": ["1"], "modelId": T3}, []
         core._shape_creativity(params, asked, rs, T3, adjusted)
@@ -264,8 +265,8 @@ def test_the_gate_is_idempotent_on_every_creativity_shape(ctx, level, with_extra
         p["contextImages"] = ["701"]
     if with_extra:
         p["extra"] = {"other": 1}
-    once, _ = core._gate_image_params(object(), p)
-    twice, adjusted = core._gate_image_params(object(), once)
+    once, _ = models_mod._gate_image_params(object(), p)
+    twice, adjusted = models_mod._gate_image_params(object(), once)
     assert twice is once and adjusted == []
 
 
@@ -342,8 +343,8 @@ def test_a_partial_success_is_never_resubmitted(rest, monkeypatch, message, prof
     monkeypatch.setattr(core, "_turbo_refused", {"seen": False})
     # Reach the two resubmit branches: the profile is not one the version lists (so the
     # inferenceProfile drop is the road taken) and not members-only (so Turbo may step down).
-    monkeypatch.setattr(core, "_profile_listing", lambda s, p: (False, False))
-    monkeypatch.setattr(core, "_gate_image_params", lambda s, p: (p, []))
+    monkeypatch.setattr(models_mod, "_profile_listing", lambda s, p: (False, False))
+    monkeypatch.setattr(models_mod, "_gate_image_params", lambda s, p: (p, []))
     params = {"prompts": "p", "modelId": T3, "width": 1024, "height": 1024, "batchSize": 1,
               "inferenceProfile": profile, "priority": core.PRIORITY_TURBO}
     with pytest.raises(core.PixAIError) as ei:
@@ -387,8 +388,8 @@ def test_no_breakdown_on_the_default_profile_or_a_card_covered_quote(rest, monke
 
 def test_the_meta_carries_tiers_the_live_max_creativity_and_the_profile_rows(rest):
     rest.models[T3] = dict(rest.models[T3], **{"size-config": SIZE_CONFIG_PRESETS})
-    meta = core._attach_features(object(), core._attach_profiles(
-        object(), dict(core._empty_version_meta(), version_id=T3)))
+    meta = models_mod._attach_features(object(), models_mod._attach_profiles(
+        object(), dict(models_mod._empty_version_meta(), version_id=T3)))
     assert meta["context_images"] is True and meta["context_max"] == 3
     assert meta["creativity"] is True
     xl, l = meta["size_tiers"]
@@ -402,12 +403,12 @@ def test_the_meta_carries_tiers_the_live_max_creativity_and_the_profile_rows(res
     assert rows[1] == {"name": "ultra", "title": "Ultra", "desc": "Maximum detail.",
                        "base_price": 3500, "flag": "membershipOnly", "required_tier": 1}
     # the gate still reads plain ranges off the same cached body
-    assert list(core._model_size_config(object(), T3)) == [(512, 2496, 512, 2496),
+    assert list(models_mod._model_size_config(object(), T3)) == [(512, 2496, 512, 2496),
                                                            (512, 2200, 512, 2200)]
 
 
 def test_an_sdxl_version_has_no_tiers_no_max_and_no_creativity(rest):
-    meta = core._attach_features(object(), dict(core._empty_version_meta(), version_id=SDXL))
+    meta = models_mod._attach_features(object(), dict(models_mod._empty_version_meta(), version_id=SDXL))
     assert meta["size_tiers"] is None and meta["context_max"] is None
     assert meta["creativity"] is False
 

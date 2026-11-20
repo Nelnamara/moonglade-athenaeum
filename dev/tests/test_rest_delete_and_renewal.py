@@ -51,6 +51,7 @@ import pytest
 import requests
 
 from moonglade import backup as core
+from moonglade import models as models_mod
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client
@@ -753,7 +754,7 @@ def test_a_renewal_redirect_carries_no_cookie_and_is_not_followed():
 def test_a_refused_bookmarks_read_raises_and_tries_no_second_road():
     fake = FakePixAI().fail("me", core.PixAIError("401 Unauthorized -- API key missing/expired."))
     with pytest.raises(core.PixAIError, match="401"):
-        core.model_bookmarks_gql(fake, usage="MODEL")
+        models_mod.model_bookmarks_gql(fake, usage="MODEL")
     assert fake.calls and {c.verb for c in fake.calls} == {"query"}
 
 

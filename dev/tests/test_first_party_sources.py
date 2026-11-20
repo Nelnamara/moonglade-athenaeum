@@ -22,7 +22,7 @@ _TODAY = (
     "moonglade/gallery.py", "moonglade/health.py", "moonglade/inbox.py", "moonglade/integrity.py", "moonglade/jobs.py",
     "moonglade/living.py",
     "moonglade/logs.py", "moonglade/mcp_server.py", "moonglade/media_tools.py", "moonglade/migrate.py",
-    "moonglade/mirror.py",
+    "moonglade/mirror.py", "moonglade/models.py",
     "moonglade/narrator.py", "moonglade/organize.py", "moonglade/outside.py", "moonglade/paths.py", "moonglade/pixai_client.py", "moonglade/recipes.py", "moonglade/runs.py", "moonglade/scan.py", "moonglade/series.py",
     "moonglade/similar.py", "moonglade/task_reads.py", "moonglade/telemetry.py",
     "moonglade/updater.py",

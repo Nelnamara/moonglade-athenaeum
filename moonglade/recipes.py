@@ -29,6 +29,7 @@ import threading
 import time
 
 from moonglade import backup as core
+from moonglade import models as _models
 from moonglade import pixai_client as _pixai_client
 
 MAX_RECIPES = 10                 # recipeIds per task (the site's .slice(0, 10), stepUp qr)
@@ -799,7 +800,7 @@ def set_items(session, set_id, cursor="", ref_type="recipe", model_types="", lor
     if kind == "model":
         if model_types in MODEL_KINDS.values():
             q["modelTypes"] = model_types
-        if lora_base and lora_base in core.LORA_BASE_MODEL_TYPES:
+        if lora_base and lora_base in _models.LORA_BASE_MODEL_TYPES:
             q["loraBaseModelTypes"] = lora_base
         if str(query or "").strip():
             q["query"] = str(query).strip()[:100]
@@ -1138,7 +1139,7 @@ def model_item(it):
     if (m is None or ref in ("", "-1")
             or str(it.get("effectiveStatus") or "available") != "available"):
         return None
-    row = core.rest_model_row(m)
+    row = _models.rest_model_row(m)
     lv = m.get("latestAvailableVersion")
     lv = lv if isinstance(lv, dict) else {}
     row["model_type"] = str(lv.get("modelType") or "")
@@ -1264,7 +1265,7 @@ def model_old_bookmarks(session, web_session, owner_id, kind):
         rows, seen, after = [], set(), None
         usage = "LORA" if kind == "lora" else "MODEL"
         for _ in range(_OLD_WALK_PAGES):
-            page = core.model_bookmarks_gql(web_session, usage=usage, limit=50, after=after) or {}
+            page = _models.model_bookmarks_gql(web_session, usage=usage, limit=50, after=after) or {}
             for r in page.get("results") or []:
                 mid = str(r.get("model_id") or "")
                 if mid and mid not in held and mid not in seen and _pickable(r, kind):

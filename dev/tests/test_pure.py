@@ -2,6 +2,7 @@
 import pytest
 
 from moonglade import backup as core
+from moonglade import models as models_mod
 
 
 # ---------------------------------------------------------------------------
@@ -404,7 +405,7 @@ def test_model_search_extracts_version_id(monkeypatch):
                   "isNsfw": True, "latestVersion": {"id": "VER2"}}},
     ]}}
     monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: fake)
-    res = core.model_search_gql(None, "mid")
+    res = models_mod.model_search_gql(None, "mid")
     # version_id is latestVersion.id (the generatable id), NOT the model node id
     assert res[0] == {"title": "Midsummer", "type": "SD_V1_MODEL", "is_nsfw": False,
                       "liked_count": 0, "model_id": "MODEL1", "version_id": "VER1",

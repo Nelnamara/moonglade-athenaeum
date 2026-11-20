@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from moonglade import backup as core
+from moonglade import models as models_mod
 from moonglade import paths
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 from moonglade.account_prefs import _account_key
@@ -203,9 +204,9 @@ def test_model_search_lora_always_uses_graphql_even_without_market_filters(tmp_p
     model_search_market_gql (GraphQL), regardless of category/sort. Base-model search
     (kind=base) is UNCHANGED -- REST by default, GraphQL only for category/Newest."""
     calls = {"rest": 0, "gql": 0}
-    monkeypatch.setattr(core, "model_search_rest",
+    monkeypatch.setattr(models_mod, "model_search_rest",
                         lambda *a, **k: calls.__setitem__("rest", calls["rest"] + 1) or {"results": [], "has_more": False})
-    monkeypatch.setattr(core, "model_search_market_gql",
+    monkeypatch.setattr(models_mod, "model_search_market_gql",
                         lambda *a, **k: calls.__setitem__("gql", calls["gql"] + 1) or {"results": [], "has_more": False})
     cli = _authed_client(tmp_path, [])
     # plain keyword LoRA search, no category, no sort=newest -- would have hit REST before this pass
@@ -231,10 +232,10 @@ def test_base_filters_never_fall_through_to_the_backend_that_ignores_them(tmp_pa
     worth keeping and there is nothing to ignore.
     """
     calls = {"rest": 0, "gql": 0}
-    monkeypatch.setattr(core, "model_search_rest",
+    monkeypatch.setattr(models_mod, "model_search_rest",
                         lambda *a, **k: calls.__setitem__("rest", calls["rest"] + 1)
                         or {"results": [], "has_more": False})
-    monkeypatch.setattr(core, "model_search_market_gql",
+    monkeypatch.setattr(models_mod, "model_search_market_gql",
                         lambda *a, **k: calls.__setitem__("gql", calls["gql"] + 1)
                         or {"results": [], "has_more": False})
     cli = _authed_client(tmp_path, [])
@@ -263,30 +264,30 @@ def test_market_sorts_are_the_four_pixai_actually_has(monkeypatch):
     A wrong feed does not error -- it returns a differently-ordered list that looks plausible --
     so these are pinned rather than trusted to stay right.
     """
-    assert core.market_sort("trending") == ("trending", "")
-    assert core.market_sort("liked") == ("meilisearch", "-markInfo.likedCount")
-    assert core.market_sort("used") == ("meilisearch", "-markInfo.refCount")
-    assert core.market_sort("newest") == ("latest", "-createdAt")
+    assert models_mod.market_sort("trending") == ("trending", "")
+    assert models_mod.market_sort("liked") == ("meilisearch", "-markInfo.likedCount")
+    assert models_mod.market_sort("used") == ("meilisearch", "-markInfo.refCount")
+    assert models_mod.market_sort("newest") == ("latest", "-createdAt")
 
     # markInfo.refCount is the "uses" figure printed on their cards -- the same field identified
     # earlier as the number on a card -- so Most Used is genuinely most-used, not liked again.
-    assert core.market_sort("used")[1] != core.market_sort("liked")[1]
+    assert models_mod.market_sort("used")[1] != models_mod.market_sort("liked")[1]
 
     # The old two-button vocabulary keeps working, so an older client does not lose its sort.
-    assert core.market_sort("popular") == core.market_sort("trending")
-    assert core.market_sort("") == core.market_sort("trending")
+    assert models_mod.market_sort("popular") == models_mod.market_sort("trending")
+    assert models_mod.market_sort("") == models_mod.market_sort("trending")
     # Anything unrecognised falls back instead of building a broken query.
-    assert core.market_sort("nonsense; DROP TABLE") == core.market_sort("trending")
+    assert models_mod.market_sort("nonsense; DROP TABLE") == models_mod.market_sort("trending")
 
 
 def test_model_search_base_type_annotates_lora_results_only(tmp_path, monkeypatch, pixai):
     """base_type= (the caller's already-resolved selected base model_type) threads into
     annotate_lora_compat for kind=lora only -- a base-model search has nothing to
     compat-sort against, so it ignores the param entirely even if sent."""
-    monkeypatch.setattr(core, "model_search_market_gql",
+    monkeypatch.setattr(models_mod, "model_search_market_gql",
                         lambda *a, **k: {"results": [{"model_id": "1", "lora_base_model_type": "SDXL_MODEL"}],
                                           "has_more": False})
-    monkeypatch.setattr(core, "model_search_rest",
+    monkeypatch.setattr(models_mod, "model_search_rest",
                         lambda *a, **k: {"results": [{"model_id": "9"}], "has_more": False})
     cli = _authed_client(tmp_path, [])
     d = cli.get("/api/model-search?kind=lora&base_type=SDXL_MODEL").get_json()
@@ -305,10 +306,10 @@ def test_model_search_threads_base_type_into_the_server_side_filter(tmp_path, mo
     app had never used -- the reason a DiT.2 user's LoRA browse came back 24-of-24 SD 1.5.
     One caller-supplied value, reused at every layer rather than a second parameter."""
     gql = []
-    monkeypatch.setattr(core, "model_search_market_gql", lambda *a, **k: (
+    monkeypatch.setattr(models_mod, "model_search_market_gql", lambda *a, **k: (
         gql.append(k) or {"results": [{"model_id": "1", "lora_base_model_type": "MMDIT26A_MODEL"}],
                           "has_more": False, "next_cursor": ""}))
-    monkeypatch.setattr(core, "model_search_rest",
+    monkeypatch.setattr(models_mod, "model_search_rest",
                         lambda *a, **k: {"results": [{"model_id": "9"}], "has_more": False})
     cli = _authed_client(tmp_path, [])
 
@@ -342,10 +343,10 @@ def test_a_keyword_search_does_not_send_the_server_side_base_filter(tmp_path, mo
     server_side_filter above still pins that), which is the 2026-07-24 ruling refined, not
     reversed."""
     gql, bmk = [], []
-    monkeypatch.setattr(core, "model_search_market_gql", lambda *a, **k: (
+    monkeypatch.setattr(models_mod, "model_search_market_gql", lambda *a, **k: (
         gql.append(k) or {"results": [{"model_id": "1", "lora_base_model_type": "SDXL_MODEL"}],
                           "has_more": False, "next_cursor": ""}))
-    monkeypatch.setattr(core, "model_bookmarks_gql", lambda *a, **k: (
+    monkeypatch.setattr(models_mod, "model_bookmarks_gql", lambda *a, **k: (
         bmk.append(k) or {"results": [], "has_more": False, "next_cursor": ""}))
     cli = _authed_client(tmp_path, [])
 
@@ -376,10 +377,10 @@ def test_model_search_threads_cursor_to_whichever_path_is_in_use(tmp_path, monke
     literal cursor string, passed through as `after=`. REST: a plain base-10 offset,
     computed here (not inside model_search_rest, which only knows a raw int offset)."""
     gql_calls = []
-    monkeypatch.setattr(core, "model_search_market_gql", lambda *a, **k: (
+    monkeypatch.setattr(models_mod, "model_search_market_gql", lambda *a, **k: (
         gql_calls.append(k) or {"results": [], "has_more": True, "next_cursor": "GQL_NEXT"}))
     rest_calls = []
-    monkeypatch.setattr(core, "model_search_rest", lambda *a, **k: (
+    monkeypatch.setattr(models_mod, "model_search_rest", lambda *a, **k: (
         rest_calls.append(k) or {"results": [], "has_more": True}))
     cli = _authed_client(tmp_path, [])
 
@@ -404,7 +405,7 @@ def test_model_search_threads_cursor_to_whichever_path_is_in_use(tmp_path, monke
     # has_more False -> next_cursor must be empty, on EITHER path, regardless of what the
     # underlying offset math would otherwise compute -- never hand back a cursor that
     # would page a client past the real end of the list.
-    monkeypatch.setattr(core, "model_search_rest", lambda *a, **k: {"results": [], "has_more": False})
+    monkeypatch.setattr(models_mod, "model_search_rest", lambda *a, **k: {"results": [], "has_more": False})
     d3 = cli.get("/api/model-search?kind=base&cursor=24").get_json()
     assert d3["next_cursor"] == ""
 
@@ -2009,7 +2010,7 @@ def test_price_route_prices_the_loom_image_edit_and_reference_bodies(tmp_path, m
     # core.model_version_resolver, so this pins list_model_versions (the validating resolve
     # /api/generate always used) rather than the weaker rows[0] resolve_version_meta the
     # price route used to run on its own. Stubbed so the test needs no network.
-    monkeypatch.setattr(core, "list_model_versions",
+    monkeypatch.setattr(models_mod, "list_model_versions",
                         lambda s, mid: [{"version_id": "ver_" + str(mid)}])
     cli = _authed_client(tmp_path, [_row(media_id="99", filename="b_99.png",
                                          created_at="2025-01-01T00:00:00")])
@@ -2065,7 +2066,7 @@ def test_bookmark_tab_search_keeps_only_rows_that_carry_the_words(tmp_path, monk
     def fake_bookmarks(session, keyword="", usage="MODEL", limit=24, after=None, lora_base_type=""):
         calls.append(after)
         return pages[after]
-    monkeypatch.setattr(core, "model_bookmarks_gql", fake_bookmarks)
+    monkeypatch.setattr(models_mod, "model_bookmarks_gql", fake_bookmarks)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     cli = login_client(tmp_path)
     d = cli.get("/api/model-search?kind=lora&size=24&q=eyes&src=bookmark").get_json()
@@ -2080,7 +2081,7 @@ def test_mine_tab_search_walks_the_authors_own_list_and_matches_every_word(tmp_p
     def fake_market(session, keyword="", category="", sort="", usage="MODEL", limit=24, after=None, **kw):
         assert kw.get("author_id") is not None, "the Mine tab is the market connection filtered by author"
         return pages[after]
-    monkeypatch.setattr(core, "model_search_market_gql", fake_market)
+    monkeypatch.setattr(models_mod, "model_search_market_gql", fake_market)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
 
     class _C:
@@ -2097,7 +2098,7 @@ def test_bookmark_tab_without_a_keyword_is_one_plain_page(tmp_path, monkeypatch)
     def fake_bookmarks(session, keyword="", usage="MODEL", limit=24, after=None, lora_base_type=""):
         calls.append(after)
         return _hunt_pages()[None]
-    monkeypatch.setattr(core, "model_bookmarks_gql", fake_bookmarks)
+    monkeypatch.setattr(models_mod, "model_bookmarks_gql", fake_bookmarks)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     cli = login_client(tmp_path)
     d = cli.get("/api/model-search?kind=lora&size=24&q=&src=bookmark").get_json()

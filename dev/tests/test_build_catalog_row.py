@@ -28,6 +28,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gallery as g
+from moonglade import models as models_mod
 from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.conftest import login_test_client
@@ -348,7 +349,7 @@ def test_video_task_row_with_a_numeric_task_modelid_files_the_id_and_its_title(t
     own = core.video_model_id(FM["video_model"])
     fm = dict(FM, model_id=own)
     monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(fm))
-    monkeypatch.setattr(core, "model_name_gql",
+    monkeypatch.setattr(models_mod, "model_name_gql",
                         lambda s, mid, **k: {own: "V3.0 Lite v3.0.2"}.get(mid, mid))
     sent = {"model": "i2v-pro", "negativePrompts": "blurry", "duration": 9}
     core._download_video_task(object(), result, TASK_ID, tmp_path, _Args(),

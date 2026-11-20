@@ -220,6 +220,30 @@ SEAMS = {
         "deleted_batch_media", "route_image_delete", "_DELETE_BATCH_MEDIA_MUT",
         "delete_batch_media_gql", "delete_task", "ImageDeletePlan", "task_artwork_ids",
         "_image_delete_plan", "plan_image_delete", "NO_CONFIRMED_PLAN", "delete_image_routed"]},
+    "moonglade.models": {"from": "moonglade.backup", "names": [
+        "model_search_gql", "_model_preview_url", "_row_should_blur", "model_search_rest",
+        "rest_model_row", "MARKET_CATEGORIES", "LORA_BASE_MODEL_TYPES", "MARKET_SORTS",
+        "MARKET_SORT_ALIASES", "market_sort", "MODEL_TYPE_FILTERS", "LORA_SOURCE_TYPES",
+        "PERMITTED_USES", "POSTED_AT_DAYS", "posted_at_range", "_market_row", "_MODEL_BLUR_FIELD",
+        "_model_blur_supported", "_model_blur_refusals", "_MODEL_BLUR_REFUSALS_BEFORE_GIVING_UP",
+        "_model_conn_query", "model_search_market_gql", "_bookmark_node_fields",
+        "model_bookmarks_gql", "workflow_catalog", "_empty_version_meta", "_version_quality_tag",
+        "_routed_default_negative", "_version_row_to_meta", "_attach_profiles", "_profile_row",
+        "_attach_features", "_attach_unlimited", "resolve_version_meta", "list_model_versions",
+        "resolve_latest_version", "is_lora_compatible", "annotate_lora_compat",
+        "_MODEL_LOOKUP_FAILED", "_MODEL_VERSION_DOC", "_model_version_gql", "model_name_gql",
+        "resolve_model_base_id", "_PROFILE_CACHE_TTL", "_PROFILE_FAIL_TTL", "_profile_cache",
+        "_model_profiles", "DIT_SIZE_STEP_TYPES", "NO_HIRES_FACEFIX_TYPES", "_HIRES_FIELDS",
+        "_FEATURE_STRIP_FIELDS", "_GATE_READ_TIMEOUT", "_SIZE_FALLBACK_RANGE", "_features_cache",
+        "_size_config_cache", "_CONTEXT_REF_LORA_REFUSAL", "_CONTEXT_LORA_REFUSAL",
+        "_cached_version_read", "_parse_features", "_SizeRanges", "_parse_size_config",
+        "_size_tier_row", "_model_features", "_model_size_config", "_model_config_cache",
+        "_parse_model_config_context_max", "_model_context_max", "features_resolver",
+        "_context_images_on", "_size_rule", "_snap_size", "_lora_out_of_range",
+        "_CREATIVITY_LEVELS", "CONTEXT_IMAGES_FALLBACK_MAX", "_CONTEXT_UNREAD",
+        "_CONTEXT_NOT_TAKEN", "_check_context_images", "_gate_image_params",
+        "_gate_params_for_model", "_LOST_UPSCALE_REFUSAL", "_refuse_lost_upscale",
+        "_profile_listing", "generation_model_brief"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -898,6 +922,35 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_training_advanced.py', 'moonglade.cloud_delete'),
     ('tests/test_training_parity.py', 'moonglade.cloud_delete'),
     ('tests/test_web_auth.py', 'moonglade.cloud_delete'),
+    # 3.22 phase 5, models: no reader reads text that left backup.py. The model readers' source
+    # (test_pixai_client's loop, test_task_model_detail_document, test_network's document names) is
+    # read through models_mod; test_enhance's workflow_catalog and test_unclear_single_sends' gate
+    # names are reached through models_mod; the whole-file readers look for names that stayed.
+    ('loom/test/ledger-known-reasons.test.js', 'moonglade.models'),
+    ('loom/test/video-roster-parity.test.js', 'moonglade.models'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.models'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.models'),
+    ('tests/test_config_path_routing.py', 'moonglade.models'),
+    ('tests/test_csrf_coverage.py', 'moonglade.models'),
+    ('tests/test_enhance.py', 'moonglade.models'),
+    ('tests/test_evidence_counters.py', 'moonglade.models'),
+    ('tests/test_gen_surface.py', 'moonglade.models'),
+    ('tests/test_history_feed_document.py', 'moonglade.models'),
+    ('tests/test_jwt.py', 'moonglade.models'),
+    ('tests/test_living_library.py', 'moonglade.models'),
+    ('tests/test_loom_notify.py', 'moonglade.models'),
+    ('tests/test_network.py', 'moonglade.models'),
+    ('tests/test_pixai_client.py', 'moonglade.models'),
+    ('tests/test_settings_store.py', 'moonglade.models'),
+    ('tests/test_setup_prepare.py', 'moonglade.models'),
+    ('tests/test_spend_no_retry.py', 'moonglade.models'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.models'),
+    ('tests/test_telemetry.py', 'moonglade.models'),
+    ('tests/test_training_advanced.py', 'moonglade.models'),
+    ('tests/test_training_parity.py', 'moonglade.models'),
+    ('tests/test_unclear_single_sends.py', 'moonglade.models'),
+    ('tests/test_video_tsubaki.py', 'moonglade.models'),
+    ('tests/test_web_auth.py', 'moonglade.models'),
 }
 
 

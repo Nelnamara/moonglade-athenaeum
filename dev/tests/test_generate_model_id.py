@@ -12,6 +12,7 @@ one of model_id's own real versions (validated server-side against core.list_mod
 -- never trusted blind), and falls back to the newest exactly like before otherwise. No
 network, no spend (everything mocked)."""
 from moonglade import backup as core
+from moonglade import models as models_mod
 
 from tests.conftest import login_client
 
@@ -116,7 +117,7 @@ def test_model_version_version_id_param_reverse_resolves_the_base_model(tmp_path
     """/api/model-version?version_id=X (2026-08-02): the Runs reel's reuse-prefill reverse
     lookup -- a run's catalog model_id is a VERSION id, and this is how prefillFromRun turns
     it back into the base model id applyModelRow's own version-listing flow expects."""
-    monkeypatch.setattr(core, "resolve_model_base_id", lambda s, vid: "BASE-M1" if vid == "V1" else "")
+    monkeypatch.setattr(models_mod, "resolve_model_base_id", lambda s, vid: "BASE-M1" if vid == "V1" else "")
     client = login_client(tmp_path)
     r = client.get("/api/model-version?version_id=V1")
     assert r.status_code == 200, r.data
