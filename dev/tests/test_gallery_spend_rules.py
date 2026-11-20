@@ -114,3 +114,19 @@ def test_the_key_is_per_user_kind_and_payload():
     assert base != gen_road.repeat_key("v", "image", {"a": 1, "b": 2})
     assert base != gen_road.repeat_key("u", "edit", {"a": 1, "b": 2})
     assert gen_road.repeat_key("u", "image", {"x": object()})      # never raises
+
+# --- the Inspector's request record -----------------------------------------------------------
+
+def test_the_request_record_names_the_road_the_kind_rides(monkeypatch):
+    p = {"prompts": "a cat", "isPrivate": True}
+    monkeypatch.setitem(gen_road.CREATE_ROAD, "image", "graphql")
+    assert gen_road.request_record("image", p) == {
+        "operation": "createGenerationTask", "variables": {"parameters": p}}
+    monkeypatch.setitem(gen_road.CREATE_ROAD, "image", "rest")
+    rec = gen_road.request_record("image", p)
+    assert rec["operation"] == "task.createTask"
+    assert rec["route"] == "POST /v2/task/create"
+    assert rec["dropped"] == ["isPrivate"]
+    assert rec["variables"] == {"parameters": p}                # the Inspector's reader key
+    assert gen_road.request_record("video", {"i2vPro": {}})["operation"] == \
+        "createGenerationTask"

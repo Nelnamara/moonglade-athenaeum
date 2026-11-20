@@ -17471,8 +17471,7 @@ def create_app(out_dir: Path):
                     "cell": b["cell"], "prompt": b["job"]["prompt"], "vars": b["job"]["vars"],
                     "seed": b["req"].parameters.get("seed"), "count": b["job"]["batch"],
                     "no_card": bool(b["no_card"]),
-                    "request": {"operation": "createGenerationTask",
-                                "variables": {"parameters": req}},
+                    "request": _gen_road.request_record("image", req),
                     "cli": runs.cli_command(core, req, no_card=bool(b["no_card"]))})
         return out
 
@@ -17766,8 +17765,7 @@ def create_app(out_dir: Path):
                    "template": run.get("template") or "", "vars": job.get("vars") or [],
                    "prompt": job.get("prompt") or "", "state": job.get("state")}
             if isinstance(params, dict):
-                out["request"] = {"operation": "createGenerationTask",
-                                  "variables": {"parameters": params}}
+                out["request"] = _gen_road.request_record("image", params)
                 out["cli"] = runs.cli_command(core, params, no_card=bool(job.get("no_card")))
             return jsonify(out)
         if not get_row_by_task(db_path, tid):
@@ -17781,8 +17779,10 @@ def create_app(out_dir: Path):
             return jsonify({"error": "couldn't read the task from PixAI"}), 200
         params = _strip_request(task.get("parameters") or {})
         return jsonify({"source": "pixai", "task_id": tid,
-                        "request": {"operation": "createGenerationTask",
-                                    "variables": {"parameters": params}},
+                        "request": _gen_road.request_record(
+                            "edit" if "chat" in params else "video" if (
+                                "i2vPro" in params or "referenceVideo" in params) else "image",
+                            params),
                         "cli": runs.cli_command(core, params)})
 
     def _run_note_paid(tid, paid):

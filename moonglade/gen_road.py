@@ -1998,3 +1998,18 @@ def repeat_settle_failure(key, exc, reached):
         state = "may_have_started" if reached else "not_sent"
     repeat_settle(key, state)
     return state
+
+
+# --- the Inspector's request record (DESIGN_3.22 3.4) ---------------------------
+def request_record(kind, params):
+    """What the Inspector shows a request was sent as. On a kind CREATE_ROAD sends through the
+    create door, PixAI's REST operation (`task.createTask`, its route) with the wire step's
+    drops named; on a GraphQL kind, createGenerationTask as before. `variables.parameters`
+    stays the parameters either way (the Inspector's reader keys on it). Pure."""
+    rec = {"operation": "createGenerationTask", "variables": {"parameters": params}}
+    if CREATE_ROAD.get(kind) == "rest" and kind in ("image", "edit"):
+        from moonglade.pixai_client import CREATE_PATHS
+        rec["operation"] = "task.createTask"
+        rec["route"] = "POST /v2" + CREATE_PATHS[kind]
+        rec["dropped"] = _gen_params.wire_drops(kind, params)
+    return rec
