@@ -1,8 +1,8 @@
 /* spend-button.css -- the second line inside a button that spends (SpendButton.jsx; 3.21.x look
    pick round 2, topic 1 option B, LOOK_BOARD_2026-11-19_round2.html #price). The board's own
-   three pieces and nothing more: the price in small type under the word (.gbtn .s: block,
-   9.5 on 11.5 = .82em, weight 500, opacity .8), the emerald ring of a free answer (.gbtn.free)
-   and the gold ring of an armed confirm (.armed). Everything else -- size, metal, the dim
+   two pieces and nothing more: the price in small type under the word (.gbtn .s: block,
+   9.5 on 11.5 = .82em, weight 500, opacity .8) and the emerald ring of a free answer
+   (.gbtn.free). Everything else -- size, metal, the dim
    state -- is the host button's own class. The rings are outlines, not box-shadows, so the
    host's own shadows (the metal's inset highlights) stay as they are. */
 .mgspend { line-height: 1.25; text-align: center; }
@@ -16,4 +16,3 @@ button.mgspend { flex-direction: column; justify-content: center; align-items: c
    (cost-badge.css .mgc-inf; SCOPE_2026-09-26_unlimited-mode C5) */
 .mgspend .mgspend-inf { margin-left: .3em; font-weight: 600; color: var(--green); }
 .mgspend.free { outline: 1.5px solid var(--emerald); outline-offset: 0; }
-.mgspend.armed { outline: 1.5px solid var(--gold); outline-offset: 0; }

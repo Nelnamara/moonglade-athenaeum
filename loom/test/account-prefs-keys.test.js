@@ -12,7 +12,6 @@ import { GUIDE_SURFACES, NOTES_HIDDEN_KEY, guideKey } from "../../gallery/src/he
 import { SEEN_KEY as FOLIO_SEEN_KEY } from "../../gallery/src/folio/maskedFeatsCore.js";
 import { LISTS_KEY } from "../../gallery/src/gen/templateCore.js";
 import { LAST_KEY, NEG_KEY, PRESETS_KEY, QUICK_KEY } from "../../gallery/src/gen/powerCore.js";
-import { SPEND_ASK_KEY } from "../../gallery/src/gen/spendButtonCore.js";
 
 /* The account store (/api/account/prefs, one document per account) is shared by three lanes
    that never saw each other: wave 2's dock settings (gen.image), palettes (palette.mine) and
@@ -42,8 +41,6 @@ const OWNERS = {
   "wave 2 recipes": [DRAFT_PREFIX + draftId(1759000000000, "abc123"), PICKER_SIZE],
   "wave 3 help": GUIDE_SURFACES.map(guideKey).concat([NOTES_HIDDEN_KEY, SEEN_KEY]),
   "wave 4 folio": [FOLIO_SEEN_KEY],
-  // 3.21.x look pick round 2, topic 1: the one-time ask's amount (the Panel's PixAI account tile)
-  "spend ask": [SPEND_ASK_KEY],
 };
 
 describe("the shared account store's keys", () => {

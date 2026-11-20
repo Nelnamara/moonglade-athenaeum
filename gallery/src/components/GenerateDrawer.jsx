@@ -1572,12 +1572,10 @@ function GenerateDrawer({ open, onClose, account, request }) {
                     quote on the badge must have been priced off the payload this click submits
                     (gen/priceProbeCore.js). generate() refuses the same way, for the keyboard
                     Enter that fires against a stale render. The price rides inside the button
-                    (look pick round 2, topic 1 B); a send of more than one already asks
-                    through the Run confirm, so only a single send takes the one-time ask. */}
+                    (look pick round 2, topic 1 B). */}
                 <SpendButton className="mgdock-gen" quote={imgQuote} sends={quoteSends(g.run.plan)}
                   idle="pick a model first"
                   disabled={!!gate || g.busy || prefillBusy || g.power.restoring || !g.canSubmit}
-                  ask={g.run.route !== "confirm"}
                   title={prefillBusy || g.power.restoring ? "Restoring the recipe…"
                     : gate ? (s.unlimited || g.run.templateGate ? gate : "Pick a model and write a prompt first")
                       : s.unlimited ? "Submit in Unlimited Mode"

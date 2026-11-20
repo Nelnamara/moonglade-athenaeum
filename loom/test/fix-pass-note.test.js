@@ -61,5 +61,5 @@ test("the desktop Loom's Fix keeps the pass note above a button that carries the
   const sb = read("../master-storyboard.jsx");
   assert.match(sb, /import \{ scaleBoxes, fixPassNote, FIX_NO_BOX_ON_PICTURE \} from "\.\.\/gallery\/src\/gen\/editCore\.js";/);
   assert.match(sb, /\{fixNote && fixPriceEntry && fixPriceEntry\.pr && typeof fixPriceEntry\.pr\.cost === "number" \? \(\s*<div className="lv-dim"[^>]*>\{fixNote\}<\/div>/);
-  assert.match(sb, /<SpendButton className="lv-go" offClass="" ask=\{false\} quote=\{quoteFromEntry\(fixPriceEntry\)\}/);
+  assert.match(sb, /<SpendButton className="lv-go" offClass="" quote=\{quoteFromEntry\(fixPriceEntry\)\}/);
 });

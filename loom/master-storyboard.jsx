@@ -3607,9 +3607,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               made the tab's very FIRST click, before any model is picked, a dead end that only
               printed an error line. Same shape as the Edit/Reference Go buttons below, which
               already gate on their own required input (!src / !refs.length). The price rides
-              inside it (look pick round 2, topic 1 B) and it stays dim until priced;
-              genImage's own confirm stays the ask, so the one-time ask stands down here. */}
-          <SpendButton className="lv-go" offClass="" ask={false} quote={imgQuote}
+              inside it (look pick round 2, topic 1 B) and it stays dim until priced. */}
+          <SpendButton className="lv-go" offClass="" quote={imgQuote}
             idle={!imgModel ? "pick a model first" : "write a prompt first"}
             disabled={busyI || !imgModel || !(active.c.imgPrompt || "").trim() || anyLoraUnresolved(imgLoras) || imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) || overLoraCap(imgLoras, acct && acct.lora_cap)}
             busy={busyI} busyLabel={gi.msg || "generating…"}
@@ -3668,7 +3667,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                 onChange={(ev) => patch((c) => ({ ...c, editPrompt: ev.target.value }))} />
               </div>
               <CostBadge ref={editCostBind} hint="Add a source image and instruction to see the cost." cardLabel="an Edit card" onButton onCost={setEditQuote} />
-              <SpendButton className="lv-go" offClass="" ask={false} quote={editQuote}
+              <SpendButton className="lv-go" offClass="" quote={editQuote}
                 idle={!src ? "pick an open frame first" : "write an instruction first"}
                 disabled={!src} busy={busyE} busyLabel={ge.msg || "editing…"}
                 label="✦ Edit the open frame" onPress={() => genEdit(active)} />
@@ -3719,7 +3718,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                 <div className="lv-dim" style={{ padding: "4px 2px" }}>{fixNote}</div>
               ) : null}
               {/* off when no box is on the picture (a null or empty scale): nothing to repair */}
-              <SpendButton className="lv-go" offClass="" ask={false} quote={quoteFromEntry(fixPriceEntry)}
+              <SpendButton className="lv-go" offClass="" quote={quoteFromEntry(fixPriceEntry)}
                 idle={!src ? "pick a source image first" : !fixBoxes.length ? "drag a box first"
                   : fixPriceEntry && fixPriceEntry.offPicture ? FIX_NO_BOX_ON_PICTURE : "checking the price…"}
                 disabled={!src || !fixBoxes.length || !(scaleBoxes(fixBoxes, fixImgRef.current) || []).length}
@@ -3766,7 +3765,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             onChange={(ev) => patch((c) => ({ ...c, refPrompt: ev.target.value }))} />
           </div>
           <CostBadge ref={refCostBind} hint="Add references and a prompt to see the cost." cardLabel="an Edit card" onButton onCost={setRefQuote} />
-          <SpendButton className="lv-go" offClass="" ask={false} quote={refQuote}
+          <SpendButton className="lv-go" offClass="" quote={refQuote}
             idle={!refs.length ? "add a reference first" : "write a prompt first"}
             disabled={!refs.length} busy={busyR} busyLabel={gr.msg || "generating…"}
             label="✦ Generate from references" onPress={() => genRef(active)} />
@@ -6871,7 +6870,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                       onChange={(ev) => setImgAdv((a) => ({ ...a, promptHelper: ev.target.checked }))} /> Prompt helper</label>
                   {priceNote(imgPrice, c.id)}
                   {/* the price rides inside the button (look pick round 2, topic 1 B) */}
-                  <SpendButton className="lm-genbtn" offClass="" ask={false} quote={quoteFromEntry(imgPrice[c.id])}
+                  <SpendButton className="lm-genbtn" offClass="" quote={quoteFromEntry(imgPrice[c.id])}
                     idle={!imgModel ? "pick a model first" : "write a prompt first"}
                     disabled={busyI || !imgModel || !(c.imgPrompt || "").trim() || anyLoraUnresolved(imgLoras) || imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) || overLoraCap(imgLoras, acct && acct.lora_cap)}
                     busy={busyI} busyLabel={gi.msg || "generating…"}
@@ -6929,7 +6928,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                   <textarea className="lm-ta" value={c.editPrompt || ""} placeholder="e.g. make it night, add rain, warmer key light…"
                     onChange={(ev) => dfPatch((cc) => ({ ...cc, editPrompt: ev.target.value }))} />
                   {priceNote(editPrice, c.id)}
-                  <SpendButton className="lm-genbtn" offClass="" ask={false} quote={quoteFromEntry(editPrice[c.id])}
+                  <SpendButton className="lm-genbtn" offClass="" quote={quoteFromEntry(editPrice[c.id])}
                     idle={!src ? "pick an open frame first" : "write an instruction first"}
                     disabled={!src} busy={busyE} busyLabel={ge.msg || "editing…"}
                     label="✦ Edit the open frame" onPress={() => genEdit(dfLive)} />
@@ -6980,7 +6979,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                   )}
                   <div className="lm-fixwarn">A fix can't be card-covered — it always spends, and always asks first.</div>
                   {priceNote(genFixPrice, c.id)}
-                  <SpendButton className="lm-genbtn" offClass="" ask={false} quote={quoteFromEntry(genFixPrice[c.id])}
+                  <SpendButton className="lm-genbtn" offClass="" quote={quoteFromEntry(genFixPrice[c.id])}
                     idle={!src ? "pick a source image first" : !fixBoxes.length ? "drag a box first"
                       : genFixPrice[c.id] && genFixPrice[c.id].offPicture ? FIX_NO_BOX_ON_PICTURE : "checking the price…"}
                     disabled={!src || !fixBoxes.length || !(phoneFixBoxes() || []).length}
@@ -7048,7 +7047,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                   <textarea className="lm-ta" value={c.refPrompt || ""} placeholder="compose a new still from the references…"
                     onChange={(ev) => dfPatch((cc) => ({ ...cc, refPrompt: ev.target.value }))} />
                   {priceNote(refPrice, c.id)}
-                  <SpendButton className="lm-genbtn" offClass="" ask={false} quote={quoteFromEntry(refPrice[c.id])}
+                  <SpendButton className="lm-genbtn" offClass="" quote={quoteFromEntry(refPrice[c.id])}
                     idle={!refs.length ? "add a reference first" : "write a prompt first"}
                     disabled={!refs.length} busy={busyR} busyLabel={gr.msg || "generating…"}
                     label="✦ Generate from references" onPress={() => genRef(dfLive)} />
@@ -7243,7 +7242,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                   dialog belongs to this screen. The price rides inside the button (look pick
                   round 2, topic 1 B), read off the same genPrice entry the line above it
                   used to show; that confirm stays the ask. */}
-              <SpendButton className="lm-genbtn" offClass="" ask={false} quote={quoteFromEntry(gp)}
+              <SpendButton className="lm-genbtn" offClass="" quote={quoteFromEntry(gp)}
                 idle={gp.noInput ? "attach a frame or cast image first" : "checking the price…"}
                 disabled={!!gp.noInput} busy={genBusy || genSubmitting}
                 busyLabel={genBusy ? (sendUnclear(c) ? "not confirmed yet — see below" : sendHeld(c, gsSelf) ? "still being sent — see below" : "already rendering…") : "submitting…"}

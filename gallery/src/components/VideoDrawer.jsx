@@ -861,12 +861,11 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
       stack={inDock || undefined} balance={inDock ? dock.balance : undefined} />
   );
   // The price rides inside the button (look pick round 2, topic 1 B), and the button stays
-  // dim until it knows -- before this the Video button looked lit with nothing priced. In the
-  // Loom the host's own confirm asks before every paid render, so the one-time ask stands down.
+  // dim until it knows -- before this the Video button looked lit with nothing priced.
   const goIdle = isR2v ? "pick a reference first" : flfMissingStart() ? "pick a start frame first" : "pick a picture first";
   const goButton = (
     <SpendButton className={inDock ? "mgdock-gen" : "mgd-go"} offClass={inDock ? "off" : ""}
-      quote={quote} idle={goIdle} ask={!loomCtx}
+      quote={quote} idle={goIdle}
       disabled={!canGo} busy={!!s.rendering} busyLabel="Rendering…"
       title={s.rendering ? "Rendering…" : canGo ? "Submit — this spends credits or a card"
         : "Waiting for the cost to settle for these settings"}

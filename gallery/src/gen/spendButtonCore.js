@@ -11,49 +11,18 @@
    yet, checking, a failed check and a "nothing to price" note all leave it dim, with the reason
    on its second line.
 
-   THE ONE-TIME ASK (same board, "The same in every choice"): an amount the account sets in the
-   Control Panel's PixAI account tile ("Ask before spending more than [ 10,000 ] credits", off
-   until set). A paid send above it turns the button into "Confirm — spend ≈ N" on the first
-   press and sends on the second -- the Panel's own Delete / Undo two-step. A free card never
-   asks. Stored on the account (/api/account/prefs) under SPEND_ASK_KEY.
-
    No React, no DOM, no network -- pinned by loom/test/spend-button-core.test.js. */
 import { classify, isShort } from "./costBadgeCore.js";
 
-export const SPEND_ASK_KEY = "spend.ask_above";
 // The board's own words for the failed check, and the dim line while a check is out.
 export const UNPRICED_LINE = "Couldn't check the price";
 export const CHECKING_LINE = "checking the price…";
 export const DEFAULT_IDLE = "nothing to price yet";
-// How long an armed "Confirm — spend" waits for its second press before it stands down.
-export const ASK_ARM_MS = 6000;
-// The largest amount the setting takes (a typo of extra zeros is refused, not stored).
-export const ASK_MAX = 100000000;
 
 function fmt(n) { return Number(n).toLocaleString(); }
 function count(v) {
   const n = Number(v);
   return (v != null && v !== "" && isFinite(n) && n >= 1) ? Math.floor(n) : 1;
-}
-
-/* The stored threshold, read back: a whole number of credits from 1 to ASK_MAX, else 0 (off).
-   A value of the wrong type is OFF, never repaired into an amount the owner did not set. */
-export function askThreshold(v) {
-  if (typeof v !== "number" || !isFinite(v)) return 0;
-  if (v < 1 || v > ASK_MAX || Math.floor(v) !== v) return 0;
-  return v;
-}
-
-/* What the Control Panel's field holds -> what is stored. "" (or 0) turns the ask off (null:
-   the key is removed); a whole positive number up to ASK_MAX is stored; anything else is
-   refused with a plain sentence. Separators people type ("10,000", "10 000") are allowed. */
-export function parseAskInput(text) {
-  const t = String(text == null ? "" : text).replace(/[\s,._']/g, "");
-  if (!t || /^0+$/.test(t)) return { value: null, error: "" };
-  if (!/^\d+$/.test(t)) return { value: null, error: "Type a whole number of credits, or leave it empty to turn the ask off." };
-  const n = Number(t);
-  if (n > ASK_MAX) return { value: null, error: "That is more than " + fmt(ASK_MAX) + " credits." };
-  return { value: n, error: "" };
 }
 
 /* The button's view of one quote.
@@ -99,28 +68,6 @@ export function spendView(quote, { idle = "", sends = 1 } = {}) {
   const hint = (q && typeof q.text === "string") ? q.text : "";
   return { state: "idle", priced: false, free: false, total: 0,
     sub: note || String(idle || "").trim() || hint || DEFAULT_IDLE, title: "" };
-}
-
-/* Does this press ask first? Only a priced, PAID send whose total is above the account's
-   amount. A free answer never asks; an unpriced button cannot be pressed at all. */
-export function needsAsk(view, threshold) {
-  const t = askThreshold(threshold);
-  return !!(view && view.priced && !view.free && t > 0 && Number(view.total) > t);
-}
-
-/* The armed button's words (the board's "Confirm — spend ≈ 27,500"). */
-export function askText(view) {
-  return "Confirm — spend ≈ " + fmt(view && view.total ? view.total : 0);
-}
-
-/* What one press does, given whether the button is already armed:
-     "send"  go -- the press is the spend (or the confirming second press);
-     "arm"   turn into the confirm and wait for a second press;
-     "none"  the button is dim: nothing. */
-export function pressAction(view, threshold, armed) {
-  if (!view || !view.priced) return "none";
-  if (armed) return "send";
-  return needsAsk(view, threshold) ? "arm" : "send";
 }
 
 /* A parsed /api/price answer (null = the check itself failed) in the shape spendView reads --

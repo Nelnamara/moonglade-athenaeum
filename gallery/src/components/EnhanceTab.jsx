@@ -246,7 +246,7 @@ export default function EnhanceTab({ source, armed, onOpenFilters }) {
         <ResultLines lines={lines} />
         {/* The price rides inside the button as its second line (look pick round 2, topic 1
             B), read off the preset list's own price; the confirm before each send stays. */}
-        <SpendButton className="mgdock-enhgen" quote={presetQuote(loading, priced)} ask={false}
+        <SpendButton className="mgdock-enhgen" quote={presetQuote(loading, priced)}
           idle="pick a preset first" disabled={genOff}
           title={!source ? "Add a source image in SOURCE above"
             : needEmotion ? "Pick a target expression first"

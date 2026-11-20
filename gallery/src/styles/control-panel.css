@@ -840,9 +840,3 @@ button.mgcp-updgo:disabled { opacity: .6; cursor: not-allowed; }
   .mgcp-tileghost, .mgcp-tab-arrive::after { display: none; }
 }
 
-/* The one-time ask's row in the PixAI account tile (SpendAskRow.jsx; look pick round 2,
-   topic 1): the blur switch's row and the Bonjour port's number box, with the unit word kept
-   at its own width beside the box. A refused value says why in the tile's note line, red. */
-.mgcp-devrow > .mgcp-spendask-unit { flex: none; color: var(--subtext); }
-.mgcp-spendask .mgcp-bjport { text-align: right; }
-.mgcp-tilenote.mgcp-spendask-err { color: var(--red); padding-top: 4px; }

@@ -244,11 +244,10 @@ export default function FixTab({ visible, dock, source }) {
     <CostBadge ref={costRef} hint="Drag a box over a hand or face to see the cost." onButton onCost={setQuote}
       stack={inDock || undefined} balance={inDock ? dock.balance : undefined} />
   );
-  // The price rides inside the button (look pick round 2, topic 1 B). No one-time ask: a Fix
-  // already asks before every send, with the number.
+  // The price rides inside the button (look pick round 2, topic 1 B).
   const goButton = (
     <SpendButton className={inDock ? "mgdock-gen" : "gen"} offClass={inDock ? "off" : ""}
-      quote={quote} ask={false} disabled={goOff} title={goTitle}
+      quote={quote} disabled={goOff} title={goTitle}
       idle={!source ? "pick an image first" : "drag a box first"}
       label={inDock ? <>&#10022; Fix {tag}</> : <>&#10022; Fix</>} onPress={run} />
   );

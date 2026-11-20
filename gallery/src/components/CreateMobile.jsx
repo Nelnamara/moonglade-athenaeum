@@ -795,12 +795,10 @@ export default function CreateMobile({
           {/* Gated on the price probe's verdict IN ADDITION to goGate/busy: the quote on the
               badge must have been priced off the payload this click submits. generate()
               refuses the same way (gen/priceProbeCore.js). The price rides inside the button
-              (look pick round 2, topic 1 B); a send of more than one already asks through the
-              Run confirm, so only a single send takes the one-time ask. */}
+              (look pick round 2, topic 1 B). */}
           <SpendButton className="cm-generate" quote={imgQuote} idle="pick a model first"
             sends={run ? quoteSends(run.plan) : 1}
             disabled={!!gate || !priceOk} busy={busy} busyLabel="◌ Queued…"
-            ask={!(run && run.route === "confirm")}
             title={gate || (s.unlimited ? "Submit in Unlimited Mode"
               : run && run.images > 1 ? "Send " + run.images + " — a confirm shows the total first"
                 : "Submit — this spends credits or a card")}

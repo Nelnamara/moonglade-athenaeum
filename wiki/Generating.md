@@ -57,13 +57,6 @@ Enhance presets and The Loom's send buttons. The button stays **dim until the pr
 it says why instead ("pick a model first", "checking the price…"), and if the price check fails
 it stays dim and says **Couldn't check the price**. Your balance sits beside it.
 
-**Ask before a big spend.** In the Control Panel's **PixAI account** tile, set **Ask before
-spending more than [ ] credits** (it is off until you type an amount, and it follows your
-account to every device). A single paid send above that amount turns the button into
-**Confirm — spend ≈ N** on the first press; press again within a few seconds to send. A free
-card never asks. Sends that already ask before every spend (a run of several, the Fixer, the
-Enhance presets, The Loom) keep their own question instead.
-
 **Choosing a video model.** The Video tab lists every engine as a card: its tags, the shot
 modes it takes, its price **for the picture you picked** at 5, 10 and 15 seconds, and what your
 free card does ("Your free card covers this", "Never card-covered"). The prices fill in as

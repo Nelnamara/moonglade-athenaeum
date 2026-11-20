@@ -3952,10 +3952,6 @@ button.mgspend {
   outline: 1.5px solid var(--emerald);
   outline-offset: 0;
 }
-.mgspend.armed {
-  outline: 1.5px solid var(--gold);
-  outline-offset: 0;
-}
 
 /* ../gallery/src/styles/gen-drawer.css */
 .gen-drawer {

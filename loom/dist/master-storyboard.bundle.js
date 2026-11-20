@@ -6508,23 +6508,15 @@ ${"=".repeat(48)}
   var CostBadge_default = CostBadge;
 
   // ../gallery/src/gen/spendButtonCore.js
-  var SPEND_ASK_KEY = "spend.ask_above";
   var UNPRICED_LINE = "Couldn't check the price";
   var CHECKING_LINE = "checking the price\u2026";
   var DEFAULT_IDLE = "nothing to price yet";
-  var ASK_ARM_MS = 6e3;
-  var ASK_MAX = 1e8;
   function fmt4(n) {
     return Number(n).toLocaleString();
   }
   function count(v) {
     const n = Number(v);
     return v != null && v !== "" && isFinite(n) && n >= 1 ? Math.floor(n) : 1;
-  }
-  function askThreshold(v) {
-    if (typeof v !== "number" || !isFinite(v)) return 0;
-    if (v < 1 || v > ASK_MAX || Math.floor(v) !== v) return 0;
-    return v;
   }
   function spendView(quote, { idle = "", sends = 1 } = {}) {
     const q = quote && typeof quote === "object" ? quote : null;
@@ -6572,18 +6564,6 @@ ${"=".repeat(48)}
       title: ""
     };
   }
-  function needsAsk(view, threshold) {
-    const t = askThreshold(threshold);
-    return !!(view && view.priced && !view.free && t > 0 && Number(view.total) > t);
-  }
-  function askText(view) {
-    return "Confirm \u2014 spend \u2248 " + fmt4(view && view.total ? view.total : 0);
-  }
-  function pressAction(view, threshold, armed) {
-    if (!view || !view.priced) return "none";
-    if (armed) return "send";
-    return needsAsk(view, threshold) ? "arm" : "send";
-  }
   function quoteFromPrice(pr) {
     const v = classify(pr);
     const d = v.raw || {};
@@ -6605,21 +6585,6 @@ ${"=".repeat(48)}
   }
 
   // ../gallery/src/components/SpendButton.jsx
-  var NOOP_SUB = () => () => {
-  };
-  var NOOP_SNAP = () => null;
-  function useAskThreshold(on = true) {
-    const store = on ? accountPrefs() : null;
-    const snap = useSyncExternalStore(
-      store ? store.subscribe : NOOP_SUB,
-      store ? store.getSnapshot : NOOP_SNAP,
-      store ? store.getSnapshot : NOOP_SNAP
-    );
-    useEffect(() => {
-      if (store) store.ensureLoaded();
-    }, [store]);
-    return on && snap ? askThreshold(readPref(snap.prefs, SPEND_ASK_KEY, 0)) : 0;
-  }
   function SpendButton({
     quote,
     label,
@@ -6628,7 +6593,6 @@ ${"=".repeat(48)}
     idle,
     sends,
     disabled,
-    ask = true,
     onPress,
     className = "",
     offClass = "off",
@@ -6637,31 +6601,13 @@ ${"=".repeat(48)}
     "aria-label": ariaLabel
   }) {
     const view = spendView(quote, { idle, sends });
-    const threshold = useAskThreshold(ask);
-    const [armed, setArmed] = useState(false);
-    const timer3 = useRef(0);
     const off = !!disabled || !!busy || !view.priced;
-    useEffect(() => {
-      setArmed(false);
-    }, [view.state, view.total, off]);
-    useEffect(() => {
-      clearTimeout(timer3.current);
-      if (armed) timer3.current = setTimeout(() => setArmed(false), ASK_ARM_MS);
-      return () => clearTimeout(timer3.current);
-    }, [armed]);
     const press = (e) => {
       if (off) return;
-      const act = pressAction(view, ask ? threshold : 0, armed);
-      if (act === "arm") {
-        setArmed(true);
-        return;
-      }
-      if (act !== "send") return;
-      setArmed(false);
       if (onPress) onPress(e);
     };
-    const cls = (className ? className + " " : "") + "mgspend" + (view.free && !off ? " free" : "") + (armed ? " armed" : "") + (off && offClass ? " " + offClass : "");
-    const tip = armed ? "Press again to send \u2014 this is above the amount you set to be asked about" : [title, view.title].filter(Boolean).join(" \u2014 ") || void 0;
+    const cls = (className ? className + " " : "") + "mgspend" + (view.free && !off ? " free" : "") + (off && offClass ? " " + offClass : "");
+    const tip = [title, view.title].filter(Boolean).join(" \u2014 ") || void 0;
     return /* @__PURE__ */ react_global_shim_default.createElement(
       "button",
       {
@@ -6670,14 +6616,13 @@ ${"=".repeat(48)}
         className: cls,
         disabled: off,
         onClick: press,
-        onBlur: () => setArmed(false),
         title: tip,
         "aria-label": ariaLabel,
         "data-priced": view.priced ? "1" : void 0,
-        "data-free": view.free ? "1" : void 0,
-        "data-armed": armed ? "1" : void 0
+        "data-free": view.free ? "1" : void 0
       },
-      armed ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgspend-a" }, askText(view)) : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgspend-a" }, busy && busyLabel ? busyLabel : label), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgspend-s" }, view.sub, view.lane ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgspend-inf" }, "\u221E") : null))
+      /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgspend-a" }, busy && busyLabel ? busyLabel : label),
+      /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgspend-s" }, view.sub, view.lane ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgspend-inf" }, "\u221E") : null)
     );
   }
 
@@ -7842,7 +7787,6 @@ ${"=".repeat(48)}
         offClass: inDock ? "off" : "",
         quote,
         idle: goIdle,
-        ask: !loomCtx,
         disabled: !canGo,
         busy: !!s.rendering,
         busyLabel: "Rendering\u2026",
@@ -16892,7 +16836,6 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           {
             className: "lv-go",
             offClass: "",
-            ask: false,
             quote: imgQuote,
             idle: !imgModel ? "pick a model first" : "write a prompt first",
             disabled: busyI || !imgModel || !(active.c.imgPrompt || "").trim() || anyLoraUnresolved(imgLoras) || imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) || overLoraCap(imgLoras, acct && acct.lora_cap),
@@ -16923,7 +16866,6 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           {
             className: "lv-go",
             offClass: "",
-            ask: false,
             quote: editQuote,
             idle: !src ? "pick an open frame first" : "write an instruction first",
             disabled: !src,
@@ -16946,7 +16888,6 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           {
             className: "lv-go",
             offClass: "",
-            ask: false,
             quote: quoteFromEntry(fixPriceEntry),
             idle: !src ? "pick a source image first" : !fixBoxes.length ? "drag a box first" : fixPriceEntry && fixPriceEntry.offPicture ? FIX_NO_BOX_ON_PICTURE : "checking the price\u2026",
             disabled: !src || !fixBoxes.length || !(scaleBoxes(fixBoxes, fixImgRef.current) || []).length,
@@ -16976,7 +16917,6 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           {
             className: "lv-go",
             offClass: "",
-            ask: false,
             quote: refQuote,
             idle: !refs.length ? "add a reference first" : "write a prompt first",
             disabled: !refs.length,
@@ -19801,7 +19741,6 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           {
             className: "lm-genbtn",
             offClass: "",
-            ask: false,
             quote: quoteFromEntry(imgPrice[c.id]),
             idle: !imgModel ? "pick a model first" : "write a prompt first",
             disabled: busyI || !imgModel || !(c.imgPrompt || "").trim() || anyLoraUnresolved(imgLoras) || imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) || overLoraCap(imgLoras, acct && acct.lora_cap),
@@ -19854,7 +19793,6 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           {
             className: "lm-genbtn",
             offClass: "",
-            ask: false,
             quote: quoteFromEntry(editPrice[c.id]),
             idle: !src ? "pick an open frame first" : "write an instruction first",
             disabled: !src,
@@ -19911,7 +19849,6 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           {
             className: "lm-genbtn",
             offClass: "",
-            ask: false,
             quote: quoteFromEntry(genFixPrice[c.id]),
             idle: !src ? "pick a source image first" : !fixBoxes.length ? "drag a box first" : genFixPrice[c.id] && genFixPrice[c.id].offPicture ? FIX_NO_BOX_ON_PICTURE : "checking the price\u2026",
             disabled: !src || !fixBoxes.length || !(phoneFixBoxes() || []).length,
@@ -19967,7 +19904,6 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           {
             className: "lm-genbtn",
             offClass: "",
-            ask: false,
             quote: quoteFromEntry(refPrice[c.id]),
             idle: !refs.length ? "add a reference first" : "write a prompt first",
             disabled: !refs.length,
@@ -20075,7 +20011,6 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         {
           className: "lm-genbtn",
           offClass: "",
-          ask: false,
           quote: quoteFromEntry(gp),
           idle: gp.noInput ? "attach a frame or cast image first" : "checking the price\u2026",
           disabled: !!gp.noInput,
