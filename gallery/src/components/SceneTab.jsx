@@ -57,7 +57,9 @@ export default function SceneTab({ scene, source, armed }) {
   const hasCustom = !!(cfg && cfg.custom);
   const presets = (cfg && cfg.presets) || [];
   const selectors = (cfg && cfg.selectors) || [];
-  const thumb = "/branding/bridge/scene_" + slug + ".webp";
+  // The catalog tile's rule: only ask for the curated local art when /api/scenes says it exists.
+  const thumb = scene.localArt === false && scene.thumb ? scene.thumb
+    : "/branding/bridge/scene_" + slug + ".webp";
   const missing = !source || (needsTwo && !ref2);
   const genOff = loading || busy || missing || failed;
 

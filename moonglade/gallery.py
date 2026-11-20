@@ -6029,6 +6029,24 @@ def scene_thumb_url(images):
     return ""
 
 
+def scene_local_art(slug):
+    """True when a curated local picture for this scene exists: bridge/scene_<slug>.webp, loose
+    in the branding tree or packed in the container (the order /branding/<path> serves them).
+    The AI Tools grid asks this before it requests the file, so a scene with no local art goes
+    straight to the catalog's own picture instead of a 404 per tile."""
+    slug = str(slug or "")
+    if not slug or "/" in slug or "\\" in slug or ".." in slug:
+        return False
+    try:
+        coded = _branding._public_rel_to_coded("bridge/scene_{}.webp".format(slug))
+        if (_branding.branding_root() / coded).is_file():
+            return True
+        box = _branding._get_container()
+        return bool(box is not None and box.has(coded))
+    except Exception:
+        return False
+
+
 def scene_row(sc):
     """One raw chatEditingScene -> the row both scene surfaces render.
 
@@ -11092,6 +11110,16 @@ def create_app(out_dir: Path):
                                            mimetype="image/jpeg")
                 resp.headers["Cache-Control"] = _STRIP_CACHE
                 return harden_file_response(resp, p.name)
+        # An SVG has no server thumbnail by design (DESIGN_3.22 5.3): every grid, picker and
+        # viewer builds /thumbs/<id>.jpg, so for an SVG row this route points the <img> (or CSS
+        # background-image) at the library file route instead, which already serves it under
+        # the 5.4 headers. A redirect, never the SVG's text inlined or a different element.
+        if "/" not in media_id and "\\" not in media_id and ".." not in media_id \
+                and not (Path(str(thumb_dir)) / "{}.jpg".format(media_id)).exists():
+            row = get_row(db_path, media_id)
+            sp = find_image_file(out_dir, media_id, row.get("filename") if row else "")
+            if sp and str(sp).lower().endswith(".svg"):
+                return redirect("/full/{}".format(media_id))
         resp = send_from_directory(str(thumb_dir), "{}.jpg".format(media_id),
                                    max_age=300, mimetype="image/jpeg")
         resp.headers["Cache-Control"] = _THUMB_CACHE
@@ -18227,7 +18255,10 @@ def create_app(out_dir: Path):
             raw = scene_catalog(core, _mirror.make_mirror_session())
         except Exception as e:
             return jsonify({"error": _log_gen_failure("/api/scenes", e, None)[:200]}), 200
-        return jsonify({"scenes": [scene_row(sc) for sc in raw if sc.get("sceneId")]})
+        rows = [scene_row(sc) for sc in raw if sc.get("sceneId")]
+        for r in rows:
+            r["local_art"] = scene_local_art(r["sceneId"])
+        return jsonify({"scenes": rows})
 
     @app.route("/api/scene", methods=["POST"])
     @tier(LOGIN)

@@ -419,8 +419,9 @@ class PixAIClient:
 
         The send is `allow_redirects=False` with a (10, 120) s timeout. The answer:
           - a 2xx JSON object with a non-empty string `id` -> returned (the evidence per
-            kind is in DESIGN_3.22 2.2; scene and enhance await R6/R7, so a wrong guess makes
-            a success read unclear, the fail-safe direction);
+            kind is in DESIGN_3.22 2.2; scene and enhance were proven by real runs R6/R7 on
+            2026-11-20, and a shape that ever drifts still reads as unclear, the fail-safe
+            direction);
           - any other status -> PixAIRestError (status, code, body), which
             gen_road.classify_outcome reads;
           - a timeout, a dropped connection, a 3xx, a non-JSON or id-less 2xx ->

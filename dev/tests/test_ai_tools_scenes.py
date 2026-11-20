@@ -270,3 +270,22 @@ def test_two_route_reads_share_the_memo(tmp_path, monkeypatch):
     cli.get("/api/scenes")
     cli.get("/api/scenes")
     assert up.calls == 1
+
+
+def test_api_scenes_says_which_scenes_have_curated_local_art(tmp_path, monkeypatch):
+    """3.22 review: the grid must not request scene_<slug>.webp for a scene with no local art
+    (a 404 per tile); /api/scenes says which ones exist."""
+    broot = tmp_path / "brand"
+    monkeypatch.setattr(g._branding, "branding_root", lambda: broot)
+    monkeypatch.setattr(g._branding, "_get_container", lambda: None)
+    coded = g._branding._public_rel_to_coded("bridge/scene_daily-fortune.webp")
+    (broot / coded).parent.mkdir(parents=True, exist_ok=True)
+    (broot / coded).write_bytes(b"RIFF")
+    up = _Upstream()
+    _armed(monkeypatch, up)
+    save_catalog(tmp_path / "catalog.db", [])
+    d = login_client(tmp_path).get("/api/scenes").get_json()
+    by_id = {s["sceneId"]: s for s in d["scenes"]}
+    assert by_id["daily-fortune"]["local_art"] is True
+    assert by_id["daily-setlog"]["local_art"] is False
+    assert g.scene_local_art("../x") is False

@@ -1600,3 +1600,32 @@ def test_resolve_server_settings_precedence_and_bonjour_defaults(tmp_path):
     assert g.resolve_server_settings(None, None)["host"] == "192.168.1.9"
     # an explicit --host is trusted as typed, even a hostname
     assert g.resolve_server_settings("myhost.lan", None)["host"] == "myhost.lan"
+
+
+class TestDownloadTempNameIsUniquePerProcessAndThread:
+    """3.22 review N2: two collectors on one account must not share one .part name."""
+    def test_part_name_carries_pid_and_thread_and_still_ends_in_part(
+            self, mock_session, mocker, tmp_path):
+        import os
+        import threading
+        seen = []
+
+        def chunks():
+            seen.extend(p.name for p in tmp_path.glob("*.part"))
+            yield b"abc"
+
+        resp = mocker.MagicMock()
+        resp.status_code = 200
+        resp.headers = {"Content-Type": "image/webp"}
+        resp.raise_for_status.return_value = None
+        resp.iter_content.return_value = chunks()
+        resp.__enter__ = mocker.Mock(return_value=resp)
+        resp.__exit__ = mocker.Mock(return_value=False)
+        mock_session.get.return_value = resp
+
+        status, path = core.download(mock_session, "http://x/img", tmp_path / "stem", retries=0)
+
+        assert status == "ok" and path.read_bytes() == b"abc"
+        assert len(seen) == 1 and seen[0].endswith(".part")
+        assert str(os.getpid()) in seen[0] and str(threading.get_ident()) in seen[0]
+        assert not list(tmp_path.glob("*.part"))

@@ -1883,7 +1883,10 @@ def download(session, url, stem, retries=3, convert=None,
                 r.raise_for_status()
                 ext = ext_from_ct(r.headers.get("Content-Type"))
                 dest = stem.with_name(stem.name + ext)
-                tmp = dest.with_suffix(dest.suffix + ".part")
+                # Unique per process AND thread, still ending in .part (every scan skips that):
+                # two collectors mirroring one account would otherwise share one temp name.
+                tmp = dest.with_name("{}.{}-{}.part".format(
+                    dest.name, os.getpid(), threading.get_ident()))
                 dest.parent.mkdir(parents=True, exist_ok=True)   # fresh backup dir may lack images/
                 # Content-Length is only comparable to bytes-written when the body is NOT
                 # content-encoded: requests decompresses gzip/br inside iter_content, so a

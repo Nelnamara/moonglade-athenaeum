@@ -55,8 +55,8 @@ const BY_SLUG = new Map(CURATION.map((r) => [r[1], r]));
 
 /** One display tile. `thumb` is the CATALOG's own art (or "") -- the local
     /branding/bridge/scene_<slug>.webp is still tried first by the tile itself. */
-function row(name, slug, shape, tier, detail, thumb) {
-  return { name, slug, shape, tier: !!tier, detail: detail || "", thumb: thumb || "" };
+function row(name, slug, shape, tier, detail, thumb, localArt) {
+  return { name, slug, shape, tier: !!tier, detail: detail || "", thumb: thumb || "", localArt };
 }
 
 /** The offline grid: the 28 curated tiles, exactly as they shipped. No catalog thumbnails --
@@ -79,7 +79,10 @@ export function mergeScenes(live) {
                  // (or out from behind) tier 1 must re-badge itself without a code change.
                  s.tier != null ? !!s.tier : !!(cur && cur[3]),
                  cur ? cur[4] : (s.detail || ""),
-                 s.thumb || "");
+                 s.thumb || "",
+                 // The server says whether the curated local picture exists; false means the
+                 // tile never asks for it (no 404 per tile). Absent (older server) = try it.
+                 s.local_art === false ? false : undefined);
     });
   rows.sort((a, b) => a.name.localeCompare(b.name, "en"));
   return rows;

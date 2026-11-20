@@ -833,3 +833,18 @@ def test_a_train_submit_alone_counts_no_lora_trained(tmp_path, monkeypatch):
     d = cli.post("/api/train/submit", json=body).get_json()
     assert d.get("submitted") is True
     assert telemetry_mod.telemetry_metrics(tmp_path)["loras_trained"] == 0
+
+
+def test_save_telemetry_failure_is_logged_and_leaves_no_tmp(tmp_path, monkeypatch, caplog):
+    """3.22 review: a failed telemetry write stays non-fatal but warns, and the
+    .tmp-<pid> file it staged is removed."""
+    import logging
+
+    def boom(src, dst):
+        raise OSError("disk says no")
+
+    monkeypatch.setattr(telemetry_mod.os, "replace", boom)
+    with caplog.at_level(logging.WARNING, logger="moonglade.telemetry"):
+        telemetry_mod._save_telemetry(tmp_path, {"counters": {}})
+    assert any("could not save telemetry" in r.getMessage() for r in caplog.records)
+    assert not list(tmp_path.rglob("*.tmp-*")), "the staged temp file was left behind"
