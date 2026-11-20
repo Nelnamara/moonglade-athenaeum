@@ -60,6 +60,7 @@ from moonglade import scan as _scan
 from moonglade import series as _series
 from moonglade import hostcheck as _hostcheck
 from moonglade import settings as _settings
+from moonglade import task_feed as _task_feed
 from moonglade import task_reads as _task_reads
 from moonglade import telemetry as _telemetry
 from moonglade import training as _training
@@ -8088,7 +8089,7 @@ def create_app(out_dir: Path):
             # header, so there's nothing else to check here before subscribing.
             session = core._make_session(None)
             auth = session.headers.get("Authorization")
-            asyncio.run(core._watch_events_async(auth, _on, None))
+            asyncio.run(_task_feed._watch_events_async(auth, _on, None))
             close = {"kind": "clean"}
         except core.WatchStaleError as e:
             # core._watch_events_async's own recv() timeout fired: the socket
@@ -8133,7 +8134,7 @@ def create_app(out_dir: Path):
             _log.warning("live mirror: socket went silent (no traffic for %ss) -- "
                          "reconnecting in %ss; the catch-up reads back anything that "
                          "completed during the silence.",
-                         getattr(core, "_WS_STALE_TIMEOUT", "?"), wait)
+                         getattr(_task_feed, "_WS_STALE_TIMEOUT", "?"), wait)
         else:
             _log.warning("live mirror: %s (close %s) after %s -- reconnecting in %ss",
                          err, close.get("code") if close.get("kind") == "closed"

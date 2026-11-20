@@ -328,6 +328,9 @@ SEAMS = {
         "create_advanced_training_draft", "replace_training_media", "start_training_captions",
         "save_training_caption", "submit_advanced_training", "retry_training",
         "publish_training"]},
+    "moonglade.task_feed": {"from": "moonglade.backup", "names": [
+        "_WS_URI", "_WS_SUBSCRIPTION", "_WS_DONE_STATUS", "_WS_STALE_TIMEOUT", "_WS_HEARTBEAT",
+        "_watch_events_async", "run_watch"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -1204,6 +1207,29 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_training_advanced.py', 'moonglade.training'),
     ('tests/test_training_parity.py', 'moonglade.training'),
     ('tests/test_web_auth.py', 'moonglade.training'),
+    # 3.22 phase 5, task_feed: no reader reads text that left backup.py. test_watch drives the
+    # socket through task_feed_mod and its gallery check also bans `_task_feed._WS_DONE_STATUS`;
+    # test_pixai_client's run_watch mention is prose.
+    ('tests/test_artworks_adhoc.py', 'moonglade.task_feed'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.task_feed'),
+    ('tests/test_config_path_routing.py', 'moonglade.task_feed'),
+    ('tests/test_csrf_coverage.py', 'moonglade.task_feed'),
+    ('tests/test_enhance.py', 'moonglade.task_feed'),
+    ('tests/test_evidence_counters.py', 'moonglade.task_feed'),
+    ('tests/test_gen_surface.py', 'moonglade.task_feed'),
+    ('tests/test_history_feed_document.py', 'moonglade.task_feed'),
+    ('tests/test_jwt.py', 'moonglade.task_feed'),
+    ('tests/test_living_library.py', 'moonglade.task_feed'),
+    ('tests/test_loom_notify.py', 'moonglade.task_feed'),
+    ('tests/test_pixai_client.py', 'moonglade.task_feed'),
+    ('tests/test_settings_store.py', 'moonglade.task_feed'),
+    ('tests/test_setup_prepare.py', 'moonglade.task_feed'),
+    ('tests/test_spend_no_retry.py', 'moonglade.task_feed'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.task_feed'),
+    ('tests/test_telemetry.py', 'moonglade.task_feed'),
+    ('tests/test_training_advanced.py', 'moonglade.task_feed'),
+    ('tests/test_training_parity.py', 'moonglade.task_feed'),
+    ('tests/test_web_auth.py', 'moonglade.task_feed'),
 }
 
 
