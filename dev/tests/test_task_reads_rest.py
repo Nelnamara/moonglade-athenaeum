@@ -104,11 +104,20 @@ def test_an_id_that_could_leave_its_path_is_never_read(pixai, bad):
     assert pixai["calls"] == []
 
 
-# --- the rich read's REST fallback -------------------------------------------------------------
+# --- the rich read's REST fallback: opt-in, degraded, never routes a delete -------------------
 
-def test_the_rich_read_falls_back_to_rest_with_parameters(pixai):
+def test_the_fallback_is_off_unless_a_caller_asks(pixai):
+    """Security review of 67310d6b: every existing caller of task_detail_gql keeps None when
+    GraphQL cannot be read -- the deletes, the catalog writers, the collectors -- because the
+    REST record lacks the tombstones, the video outputs and the seeds they read."""
     pixai["rest"][BATCH["id"]] = BATCH
-    t = task_reads.task_detail_gql(object(), BATCH["id"])
+    assert task_reads.task_detail_gql(object(), BATCH["id"]) is None
+    assert not [c for c in pixai["calls"] if c[0] == "GET"], "the fallback was read unasked"
+
+
+def test_the_rich_read_falls_back_to_rest_with_parameters_when_asked(pixai):
+    pixai["rest"][BATCH["id"]] = BATCH
+    t = task_reads.task_detail_gql(object(), BATCH["id"], rest_fallback=True)
     assert t["_rest_fallback"] is True and t["parameters"] == BATCH["parameters"]
     assert t["outputs"] == {"batch": [{"mediaId": m} for m in ("m1", "m2", "m3", "m4")]}
     assert t["paidCredit"] == 3000
@@ -117,16 +126,41 @@ def test_the_rich_read_falls_back_to_rest_with_parameters(pixai):
 
 
 def test_the_fallback_is_none_when_rest_fails_too(pixai):
-    assert task_reads.task_detail_gql(object(), "404404") is None
+    assert task_reads.task_detail_gql(object(), "404404", rest_fallback=True) is None
 
 
-def test_delete_routing_from_rests_live_set(pixai):
-    """P1's batch with two deleted members: REST lists the two live ones. A live member routes
-    per image; a deleted one (not in the set) is refused; a lone live image is the whole-task
-    delete -- the set the site routes on."""
-    pixai["rest"][DELETED["id"]] = DELETED
-    assert cloud_delete.plan_image_delete(object(), DELETED["id"], "live1").plan == "per-image"
-    gone = cloud_delete.plan_image_delete(object(), DELETED["id"], "deleted1")
-    assert gone.plan == "refuse"
-    pixai["rest"][LONE["id"]] = LONE
-    assert cloud_delete.plan_image_delete(object(), LONE["id"], "only").plan == "whole-task"
+def _fallback_of(task, monkeypatch):
+    """The fallback record the REST read builds for `task`."""
+    monkeypatch.setattr(core, "_rest_get", lambda s, path, params=None, **k: task)
+    return task_reads._rest_detail_fallback(object(), task["id"])
+
+
+@pytest.mark.parametrize("task, target", [
+    (LONE, "only"),                                         # looks like a lone image
+    (DELETED, "live1"),                                     # a batch member
+    (dict(LONE, outputs={"mediaIds": ["poster"], "videoMediaId": "clip"}), "poster"),  # video
+], ids=["lone-image", "batch-member", "video-shaped"])
+def test_the_router_refuses_a_fallback_record(task, target, monkeypatch):
+    rec = _fallback_of(task, monkeypatch)
+    assert rec["_rest_fallback"] is True
+    route = cloud_delete.route_image_delete(rec, target)
+    assert route.plan == "refuse" and route.reason == cloud_delete.REST_FALLBACK_REFUSAL
+
+
+@pytest.mark.parametrize("confirmed", ["per-image", "whole-task"])
+def test_plan_and_confirm_send_nothing_when_the_read_degrades(monkeypatch, confirmed):
+    """plan_image_delete and the confirm-time re-read inside delete_image_routed: a read that
+    degraded to the REST fallback sends no delete of either kind."""
+    rec = _fallback_of(DELETED, monkeypatch)
+    monkeypatch.setattr(task_reads, "task_detail_gql", lambda s, t, **k: rec)
+    monkeypatch.setattr(core, "READ_ONLY", False)
+    monkeypatch.setattr(core, "_read_only_now", lambda: False)
+    fired = []
+    monkeypatch.setattr(cloud_delete, "delete_task", lambda *a: fired.append("task"))
+    monkeypatch.setattr(cloud_delete, "delete_batch_media_gql", lambda *a: fired.append("media"))
+    if hasattr(cloud_delete, "delete_task_media"):
+        monkeypatch.setattr(cloud_delete, "delete_task_media", lambda *a: fired.append("media"))
+    assert cloud_delete.plan_image_delete(object(), DELETED["id"], "live1").plan == "refuse"
+    plan = cloud_delete.delete_image_routed(object(), DELETED["id"], "live1",
+                                            confirmed_plan=confirmed)
+    assert plan.plan == "refuse" and fired == []

@@ -40,7 +40,7 @@ _TASK_DETAIL_DOC = (
     "flag { shouldBlur } } stages { id } } }")
 
 
-def task_detail_gql(session, task_id, retries=3, timeout=60):
+def task_detail_gql(session, task_id, retries=3, timeout=60, rest_fallback=False):
     """Read one task back from PixAI: `_TASK_DETAIL_DOC` POSTed through `gql_adhoc`, a query.
     Returns the task dict or None on failure.
 
@@ -76,8 +76,12 @@ def task_detail_gql(session, task_id, retries=3, timeout=60):
             raise PixAIError("PixAI answered, but with no task in it")
     except (PixAIError, requests.RequestException) as e:
         # 3.22 S3-poll (DESIGN_3.22 2.8): the REST read with its stored parameters, before
-        # giving up. A read fallback cannot spend; per-image seeds are then unknown.
-        fallback = _rest_detail_fallback(session, task_id)
+        # giving up -- ONLY for a caller that asks (`rest_fallback=True`). The fallback is a
+        # DEGRADED record (no deletedAt tombstones, no video outputs, no artworkIds, no
+        # per-image seeds; marked `_rest_fallback`), so only a reader of `parameters` alone may
+        # take it; every delete, catalog write and outputs-shape branch keeps None, the
+        # fail-safe answer (security review of 67310d6b).
+        fallback = _rest_detail_fallback(session, task_id) if rest_fallback else None
         if fallback is not None:
             return fallback
         print("  could not read task {} back from PixAI ({}). Nothing was spent and nothing "
@@ -150,10 +154,11 @@ def _status_read(session, task_id):
 def _rest_detail_fallback(session, task_id):
     """The rich read's fallback when GraphQL task(id) could not be read (DESIGN_3.22 2.8): REST
     getById with its stored parameters, in task_detail_gql's shape -- `parameters`, and
-    `outputs` rebuilt from the LIVE media ids (one id: outputs.mediaId, so a delete of it
-    routes to the whole-task delete; more: outputs.batch, one entry per live image, so a delete
-    of one routes per image; a target not in the set is refused by the router). Per-image seeds
-    are unknown (`_rest_fallback` says so). None on any failure. A read: it cannot spend."""
+    `outputs` rebuilt from the LIVE media ids (one id: outputs.mediaId; more: outputs.batch, one
+    entry per live image). It is DEGRADED and says so (`_rest_fallback`): no deletedAt
+    tombstones, no video outputs, no artworkIds, no per-image seeds. Only a caller that reads
+    `parameters` alone takes it (task_detail_gql(..., rest_fallback=True)), and
+    cloud_delete.route_image_delete refuses it outright. None on any failure. A read."""
     try:
         t = _rest_task(session, task_id, with_parameters=True)
     except Exception:                                       # noqa: BLE001 -- None, as before

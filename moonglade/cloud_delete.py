@@ -110,6 +110,10 @@ def deleted_batch_media(batch):
             if isinstance(e, dict) and e.get("mediaId") and e.get("deletedAt")]
 
 
+REST_FALLBACK_REFUSAL = ("PixAI's full record of this task could not be read, so nothing was "
+                         "deleted. Try again in a minute.")
+
+
 def route_image_delete(task, media_id):
     """Decide, from a task record PixAI just answered with, which delete to send for ONE
     image -- or that nothing may be sent. Returns an `ImageDeleteRoute`.
@@ -122,6 +126,9 @@ def route_image_delete(task, media_id):
       refuse      the record is missing -- the read failed. The fail-safe direction is
                   ALWAYS refuse: answering "I could not look" with the whole-task mutation
                   would delete a whole generation off a dropped packet.
+      refuse      the record is the task read's REST fallback (`_rest_fallback`): PixAI's
+                  full record could not be read, and the fallback lacks the tombstones and
+                  the video outputs every row below depends on.
       refuse      a video task (its clips hang off outputs.videos). Out of scope; guessing a
                   destructive mutation is not an option.
       refuse      the id is the batch's combined preview picture, not one of its images.
@@ -142,6 +149,13 @@ def route_image_delete(task, media_id):
         return ImageDeleteRoute(
             "refuse",
             "Couldn't read the task from PixAI; nothing was deleted, try again.", 0, None)
+    if task.get("_rest_fallback"):
+        # 3.22 security review of S3-poll: the task read's REST fallback is a DEGRADED read
+        # -- no deletedAt tombstones, no video outputs, no artworkIds -- so a video task or a
+        # batch whose siblings went on the website can look like a lone image. A failed full
+        # read is a failed read: refuse, never route a destructive delete off it.
+        return ImageDeleteRoute(
+            "refuse", REST_FALLBACK_REFUSAL, 0, None)
 
     outputs = task.get("outputs") or {}
     videos = outputs.get("videos")
