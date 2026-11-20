@@ -1,6 +1,7 @@
 """Change Emotion wiring: the staged-options list endpoint + the picked-emotion pass-through
 into the panelplugin submit (and only for that one preset)."""
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import gallery as g
 from tests.conftest import login_client
 from moonglade import mirror as mirror_mod
@@ -47,7 +48,7 @@ def _arm(monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
     monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "submit_generation", _submit)
     return calls
 

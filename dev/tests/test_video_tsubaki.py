@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import gallery as g
 from moonglade import models as models_mod
 from moonglade import pricing as pricing_mod
@@ -303,7 +304,7 @@ def test_a_true_length_can_raise_the_quote_above_the_empty_list_and_can_lower_it
         sent_lengths[rv["referenceVideoMediaIds"][0]] = list(rv["inputVideoDurations"])
         return _site_price_task(session, params)
     monkeypatch.setattr(pricing_mod, "price_task", _price)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
     cli = login_test_client(g.create_app(tmp_path))
 
     def quote(vid):
@@ -354,8 +355,8 @@ def test_price_and_loom_submit_send_byte_identical_reference_blocks(tmp_path, mo
     save_catalog(tmp_path / "catalog.db", [_video_file(tmp_path, vid)])
     priced, sent = {}, {}
     monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: priced.update(params) or 105000)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "submit_generation",
                         lambda s, params: sent.update(params) or "task-rv")
     cli = login_test_client(g.create_app(tmp_path))
@@ -379,7 +380,7 @@ def test_a_missing_local_file_with_no_catalog_length_prices_the_empty_list(tmp_p
                                                 filename="videos/gone_%s.mp4" % vid)])
     priced = {}
     monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: priced.update(params) or 126000)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
     cli = login_test_client(g.create_app(tmp_path))
     d = cli.post("/api/price", json={"mode": "R2V", "video_refs": [vid], "prompt": "@video1",
                                      "duration": 15}).get_json()
@@ -467,7 +468,7 @@ def test_cli_generate_video_names_the_drops_before_a_confirmed_submit(tmp_path, 
 
     def _no_submit(*a, **k):
         raise _Stop()
-    monkeypatch.setattr(core, "_apply_kaisuuken", _no_submit)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", _no_submit)
     with pytest.raises(_Stop):
         core.run_generate_video(_i2v_args(tmp_path, video_model="tbkv1.0", negative="blurry",
                                           confirm=True))
@@ -830,7 +831,7 @@ def test_the_quote_and_the_submit_carry_the_same_ratio(tmp_path, monkeypatch):
     seen = {}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(priced=params) or 21000)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "submit",
                         lambda s, req, **k: seen.update(sent=req.parameters) or {"task_id": "v1"})
     cli = login_client(tmp_path)

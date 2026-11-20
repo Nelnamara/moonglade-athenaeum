@@ -42,6 +42,7 @@ from types import SimpleNamespace as NS
 import pytest
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 
 P_TURBO, P_HIGH, P_LOW = core.PRIORITY_TURBO, core.PRIORITY_HIGH, core.PRIORITY_LOW
 
@@ -261,7 +262,7 @@ def test_submit_road_cannot_force_a_kaisuuken_id(monkeypatch):
     seen = {}
     monkeypatch.setattr(core, "_check_read_only", lambda *a, **k: None)
     monkeypatch.setattr(core, "submit_generation", lambda s, p: "TASK-1")
-    monkeypatch.setattr(core, "_apply_kaisuuken",
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken",
                         lambda s, p, args: seen.setdefault("args", args))
     req = core.GenerationRequest(mode="image", parameters={"prompts": "x"}, no_card=False)
     out = core.submit(None, req)

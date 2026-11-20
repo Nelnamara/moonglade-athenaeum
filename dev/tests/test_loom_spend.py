@@ -18,6 +18,7 @@ from urllib.parse import quote
 import pytest
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import paths as _paths
 from moonglade.account_prefs import _account_key
 from moonglade.gallery import CATALOG_FIELDS, create_app, loom_backfill_sends, save_catalog
@@ -49,7 +50,7 @@ def rig(tmp_path, monkeypatch):
 
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "upload_media", lambda *a, **k: "999000111222")
-    monkeypatch.setattr(core, "_apply_kaisuuken", _apply)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", _apply)
     monkeypatch.setattr(core, "submit_generation", _submit_gen)
     app = create_app(tmp_path)
     rec.update(cli=login_test_client(app), app=app, tmp=tmp_path)

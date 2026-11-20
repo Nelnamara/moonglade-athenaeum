@@ -32,6 +32,7 @@ from types import SimpleNamespace
 import pytest
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import task_reads as task_reads_mod
 
 
@@ -66,7 +67,7 @@ class TestRunGenerateReadOnly:
         # auto-match directly (no card) rather than let it hit conftest's blocked
         # _rest_post, which _apply_kaisuuken now correctly treats as a real failure
         # and aborts on (see match_kaisuuken/_apply_kaisuuken, fail-open fix).
-        monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+        monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
         resp = mocker.MagicMock()
         resp.status_code = 200
         resp.json.return_value = {"data": {"createGenerationTask": {"id": "t1"}}}

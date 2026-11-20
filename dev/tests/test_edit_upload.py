@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import pricing as pricing_mod
 
@@ -225,7 +226,7 @@ def test_the_priced_auto_edit_is_the_submitted_one(tmp_path, monkeypatch):
     seen = {}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(priced=params) or 8000)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "submit",
                         lambda s, req, **k: seen.update(sent=req.parameters) or {"task_id": "t1"})
     cli = login_test_client(create_app(tmp_path))
@@ -382,7 +383,7 @@ def test_the_priced_v4_edit_is_the_submitted_one(tmp_path, monkeypatch):
     seen = {}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(priced=params) or 9000)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "submit",
                         lambda s, req, **k: seen.update(sent=req.parameters) or {"task_id": "t1"})
     cli = login_test_client(create_app(tmp_path))
@@ -469,7 +470,7 @@ def test_the_priced_edit_pro_v2_edit_is_the_submitted_one(tmp_path, monkeypatch)
     seen = {}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(priced=params) or 27800)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "submit",
                         lambda s, req, **k: seen.update(sent=req.parameters) or {"task_id": "t1"})
     cli = login_test_client(create_app(tmp_path))

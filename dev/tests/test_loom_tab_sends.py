@@ -13,6 +13,7 @@ No network: the `pixai` fake and test_generate_runs' counting rig."""
 import threading
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import pricing as pricing_mod
 from moonglade.gallery import save_catalog, CATALOG_FIELDS
 from tests.conftest import _TEST_PASSWORD, _TEST_USERNAME, _do_login
@@ -127,12 +128,12 @@ def test_presets_check_cards_the_way_the_send_does(gen, monkeypatch):
     _armed(monkeypatch, gen["pixai"])
     monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: 1500)
     seen = []
-    real = core.match_kaisuuken
+    real = cards_mod.match_kaisuuken
 
     def _match(session, params, *a, **k):
         seen.append(k.get("enrich"))
         return real(session, params, *a, **k)
-    monkeypatch.setattr(core, "match_kaisuuken", _match)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", _match)
     gen["pixai"].on("/kaisuuken/check", _CARD)
     gen["cli"].get("/api/enhance/presets")
     assert seen and all(e is True for e in seen)

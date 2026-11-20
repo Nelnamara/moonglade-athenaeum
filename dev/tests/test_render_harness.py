@@ -99,6 +99,7 @@ from tests.conftest import _SEALED_DONOR, stub_code_module
 
 from moonglade import account_prefs as account_prefs_mod
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import jobs as jobs_mod
 from moonglade import models as models_mod
 from moonglade import paths as moonglade_paths
@@ -6357,7 +6358,7 @@ def _fake_unlimited_pixai(monkeypatch, days=9.5):
     monkeypatch.setattr(models_mod, "model_search_market_gql", fake_search)
     monkeypatch.setattr(models_mod, "model_search_rest", fake_search)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "match_kaisuuken",
+    monkeypatch.setattr(cards_mod, "match_kaisuuken",
                         lambda s, params, **k: matched.append(dict(params)) or None)
     return matched
 

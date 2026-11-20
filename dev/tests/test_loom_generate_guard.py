@@ -13,6 +13,7 @@ import time
 
 import pytest
 
+from moonglade import cards as cards_mod
 from moonglade import paths as _paths
 from moonglade import backup as core
 from moonglade.gallery import create_app
@@ -54,7 +55,7 @@ def rig(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", _session)
     monkeypatch.setattr(core, "upload_media", _upload)
     monkeypatch.setattr(core, "build_request", _build)
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "submit_generation", _submit_gen)
     app = create_app(tmp_path)
     cli = login_test_client(app)
@@ -327,7 +328,7 @@ def test_a_free_quote_whose_card_is_gone_refuses_and_sends_nothing(rig):
 
 
 def test_a_free_quote_with_its_card_attached_sends(rig, monkeypatch):
-    monkeypatch.setattr(core, "_apply_kaisuuken",
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken",
                         lambda session, params, args: params.update(kaisuukenId="card-1"))
     r = rig["cli"].post("/api/loom/generate", json=_body(expect_free=True)).get_json()
     assert r["task_id"] and rig["submits"][0]["kaisuukenId"] == "card-1"

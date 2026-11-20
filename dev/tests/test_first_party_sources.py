@@ -25,6 +25,7 @@ _TODAY = (
     "moonglade/mirror.py", "moonglade/models.py",
     "moonglade/narrator.py", "moonglade/organize.py", "moonglade/outside.py", "moonglade/paths.py", "moonglade/pixai_client.py", "moonglade/recipes.py", "moonglade/runs.py", "moonglade/scan.py", "moonglade/series.py",
     "moonglade/pricing.py",
+    "moonglade/cards.py",
     "moonglade/similar.py", "moonglade/task_reads.py", "moonglade/telemetry.py",
     "moonglade/updater.py",
 )

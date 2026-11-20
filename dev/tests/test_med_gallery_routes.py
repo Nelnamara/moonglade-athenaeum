@@ -21,6 +21,7 @@ All mocked -- no network, no spend.
 import logging
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import gallery as moonglade_gallery
 from moonglade.gallery import CATALOG_FIELDS, create_app, query_catalog, save_catalog
 
@@ -43,7 +44,7 @@ def _generate_capture(tmp_path, monkeypatch, payload, out=None):
     what the CALLER was told as well as what PixAI was sent."""
     seen = {}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "submit_generation",
                         lambda s, params: seen.update(params=params) or "t1")
     client = login_client(tmp_path)

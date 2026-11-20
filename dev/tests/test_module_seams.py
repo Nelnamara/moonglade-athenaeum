@@ -247,6 +247,14 @@ SEAMS = {
     "moonglade.pricing": {"from": "moonglade.backup", "names": [
         "_FIXER_PRICE_PATH", "price_fixer", "_PRICE_SCALARS", "_PRICE_NESTED", "_task_price_query",
         "price_task", "queue_wait_estimate"]},
+    "moonglade.cards": {"from": "moonglade.backup", "names": [
+        "_bump_card_use", "_normalize_kaisuuken", "_expiry_counts", "list_kaisuukens",
+        "list_kaisuuken_logs", "kaisuuken_type_catalog", "COUPON_STATUSES_ON_HAND",
+        "COUPON_STATUSES_HISTORY", "list_extra_package_boosts", "_QUOTA_LOG_QUERY",
+        "CREDIT_LOG_REASONS", "list_credit_log", "_target_model_id", "_KAISUUKEN_CHECK_VERSION",
+        "match_kaisuuken", "card_covers", "_card_uses_note", "card_short_note",
+        "_SIGNIN_REFUSED_MIRROR", "_SIGNIN_REFUSED_API_KEY", "_is_signin_refusal",
+        "_apply_kaisuuken", "_preview_card_note"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -309,7 +317,7 @@ SOURCE_READERS = {
     "tools/export_design_kit.py": ("moonglade.gallery",),     # reads DESIGN_TOKENS_CSS by path
     "tools/split_names.py": ("moonglade.backup", "moonglade.gallery"),   # the move proof's sweep
     "loom/test/import-batches.test.js": ("moonglade.scan",),
-    "loom/test/ledger-known-reasons.test.js": ("moonglade.backup",),
+    "loom/test/ledger-known-reasons.test.js": ("moonglade.cards",),
     "loom/test/med-loom-bundle-missing-report.test.js": ("moonglade.gallery",),
     "loom/test/mg-art-filters.test.js": ("moonglade.gallery",),
     "loom/test/mg-notify-queue-phase.test.js": ("moonglade.gallery",),
@@ -982,6 +990,36 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_training_parity.py', 'moonglade.pricing'),
     ('tests/test_video_tsubaki.py', 'moonglade.pricing'),
     ('tests/test_web_auth.py', 'moonglade.pricing'),
+    # 3.22 phase 5, cards: the one reader that read moved text is loom/test/ledger-known-reasons,
+    # whose CREDIT_LOG_REASONS table it now reads from moonglade/cards.py (its SOURCE_READERS entry
+    # says so). The others reach the card names through cards_mod (test_training_parity,
+    # test_edit_upload, test_video_tsubaki, test_unclear_single_sends, test_telemetry) or look for
+    # names that stayed.
+    ('loom/test/video-roster-parity.test.js', 'moonglade.cards'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.cards'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.cards'),
+    ('tests/test_config_path_routing.py', 'moonglade.cards'),
+    ('tests/test_csrf_coverage.py', 'moonglade.cards'),
+    ('tests/test_edit_upload.py', 'moonglade.cards'),
+    ('tests/test_enhance.py', 'moonglade.cards'),
+    ('tests/test_evidence_counters.py', 'moonglade.cards'),
+    ('tests/test_gen_surface.py', 'moonglade.cards'),
+    ('tests/test_history_feed_document.py', 'moonglade.cards'),
+    ('tests/test_jwt.py', 'moonglade.cards'),
+    ('tests/test_living_library.py', 'moonglade.cards'),
+    ('tests/test_loom_notify.py', 'moonglade.cards'),
+    ('tests/test_network.py', 'moonglade.cards'),
+    ('tests/test_pixai_client.py', 'moonglade.cards'),
+    ('tests/test_settings_store.py', 'moonglade.cards'),
+    ('tests/test_setup_prepare.py', 'moonglade.cards'),
+    ('tests/test_spend_no_retry.py', 'moonglade.cards'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.cards'),
+    ('tests/test_telemetry.py', 'moonglade.cards'),
+    ('tests/test_training_advanced.py', 'moonglade.cards'),
+    ('tests/test_training_parity.py', 'moonglade.cards'),
+    ('tests/test_unclear_single_sends.py', 'moonglade.cards'),
+    ('tests/test_video_tsubaki.py', 'moonglade.cards'),
+    ('tests/test_web_auth.py', 'moonglade.cards'),
 }
 
 

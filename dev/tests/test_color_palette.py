@@ -16,6 +16,7 @@ import re
 import pytest
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import models as models_mod
 from tests.conftest import login_client
 from moonglade import mirror as mirror_mod
@@ -237,7 +238,7 @@ def test_the_meta_says_which_versions_take_a_palette(rest):
 
 
 def test_api_price_quotes_without_it_and_refuses_a_bad_one(tmp_path, rest, monkeypatch):
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
     cli = login_client(tmp_path)
     d = cli.post("/api/price", json=_img(T3)).get_json()
     assert d["cost"] == 5100 and not d.get("adjusted")
@@ -257,7 +258,7 @@ def _web(monkeypatch, tmp_path):
 def test_api_generate_sends_the_palette_it_quoted(tmp_path, rest, monkeypatch):
     cli = _web(monkeypatch, tmp_path)
     cards = []
-    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, **k: cards.append(dict(params)))
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, **k: cards.append(dict(params)))
     sent = []
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     monkeypatch.setattr(core, "gql_mutate",
@@ -273,7 +274,7 @@ def test_read_only_refuses_a_palette_generate_before_anything_is_sent(tmp_path, 
     cli = _web(monkeypatch, tmp_path)
     sent = []
     monkeypatch.setattr(core, "gql_mutate", lambda *a, **k: sent.append(a) or {})
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "READ_ONLY", True)
     d = cli.post("/api/generate", json=_img(T3)).get_json()
     assert "READ_ONLY" in d["error"] and sent == []

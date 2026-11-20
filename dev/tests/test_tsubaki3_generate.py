@@ -29,6 +29,7 @@ from pathlib import Path
 import pytest
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import models as models_mod
 from moonglade import pricing as pricing_mod
 from tests.test_tsubaki3_image_gate import (
@@ -360,7 +361,7 @@ def test_a_partial_success_is_never_resubmitted(rest, monkeypatch, message, prof
 
 def test_the_breakdown_names_the_context_charge_and_a_non_default_profile(rest, monkeypatch):
     matched = []
-    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, **k: matched.append(params))
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, **k: matched.append(params))
     req = road(ctx_payload(mode="ultra"))
     out = core.price(object(), req)
     assert out["cost"] == 4000 + 1800 + 500
@@ -372,13 +373,13 @@ def test_the_breakdown_names_the_context_charge_and_a_non_default_profile(rest, 
 
 
 def test_no_breakdown_on_the_default_profile_or_a_card_covered_quote(rest, monkeypatch):
-    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, **k: None)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, **k: None)
     out = core.price(object(), road({"version_id": T3, "prompt": "p", "mode": "pro",
                                      "width": 1024, "height": 1024}))
     assert "profile" not in out and "context_images" not in out
-    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, **k: {
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, **k: {
         "total": 3, "consumeAmount": 1, "covered": True, "name": "card"})
-    monkeypatch.setattr(core, "card_covers", lambda best: True)
+    monkeypatch.setattr(cards_mod, "card_covers", lambda best: True)
     out = core.price(object(), road(ctx_payload()))
     assert out["free"] is True and "context_charge" not in out
 
@@ -534,7 +535,7 @@ def test_the_edit_bar_is_sent_at_high_priority_and_quoted_at_it(rest, monkeypatc
     assert not req.unlimited and not core.asks_unlimited(dict(js_bar))
     # no card: the quoted credits, priced on the dict that carries priority 1000
     matched = []
-    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, **k: matched.append(params))
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, **k: matched.append(params))
     rest.priced.clear()
     out = core.price(object(), req)
     assert out["free"] is False and out["cost"] == 4000 + 900
@@ -542,7 +543,7 @@ def test_the_edit_bar_is_sent_at_high_priority_and_quoted_at_it(rest, monkeypatc
     assert matched == [req.parameters] and matched[0]["priority"] == 1000
     # a card that covers it: free, checked against the same dict
     seen = []
-    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, **k: seen.append(params) or {
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda s, params, **k: seen.append(params) or {
         "total": 2, "consumeAmount": 1, "covered": True, "name": "card"})
     out = core.price(object(), req)
     assert out["free"] is True and seen[0]["priority"] == 1000

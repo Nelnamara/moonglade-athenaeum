@@ -8,15 +8,15 @@ import path from "node:path";
    is one the app knows, and "raw" otherwise. The list it checks against was written with
    spaces ("event gift") while the server sends PixAI's own type keys ("event_gift"), so every
    chip on the ledger was drawn raw. The list must be exactly the server's keys:
-   moonglade_backup.CREDIT_LOG_REASONS, the one table of confirmed types. */
+   CREDIT_LOG_REASONS (moonglade/cards.py since 3.22), the one table of confirmed types. */
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = (p) => readFileSync(path.join(here, "..", "..", p), "utf8").replace(/\r\n/g, "\n");
 
 test("the ledger's known reasons are the server's own type keys", () => {
-  const py = src("moonglade/backup.py");
+  const py = src("moonglade/cards.py");
   const table = py.match(/CREDIT_LOG_REASONS = \{([^}]*)\}/);
-  assert.ok(table, "moonglade_backup.CREDIT_LOG_REASONS is where it was");
+  assert.ok(table, "moonglade/cards.py CREDIT_LOG_REASONS is where it was");
   const serverKeys = [...table[1].matchAll(/"([a-z_]+)"\s*:/g)].map((m) => m[1]).sort();
   assert.ok(serverKeys.length > 0);
 

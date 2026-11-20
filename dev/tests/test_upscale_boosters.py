@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import models as models_mod
 from moonglade import pricing as pricing_mod
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
@@ -235,7 +236,7 @@ def _priced(monkeypatch, tmp_path, body):
 
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(pricing_mod, "price_task", fake_price)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
     r = cli.post("/api/price", json=body)
     return seen.get("params"), r.get_json()
 
@@ -642,7 +643,7 @@ def test_upscale_works_without_a_recorded_model(monkeypatch, tmp_path, pixai):
                  [_row(media_id="u1", filename="u1.png", source="local",
                        created_at="2026-07-01T00:00:00", width="1959", height="1097")])
     seen = {}
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "submit_generation",
                         lambda _s, params: seen.setdefault("params", params) and "t1" or "t1")
     cli = login_client(tmp_path)
@@ -760,7 +761,7 @@ def test_generate_rejects_a_version_id_sent_as_a_model_id(monkeypatch, tmp_path,
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="u2", filename="u2.png", created_at="2026-07-01T00:00:00",
                        width="900", height="600")])
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(models_mod, "list_model_versions", lambda *a, **k: [])   # not a model id
     monkeypatch.setattr(core, "submit_generation", lambda *a, **k: "nope")
     cli = login_client(tmp_path)

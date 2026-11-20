@@ -30,6 +30,7 @@ from types import SimpleNamespace
 import pytest
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import models as models_mod
 from moonglade import pricing as pricing_mod
 
@@ -418,7 +419,7 @@ def test_an_upscale_whose_ratio_the_build_drops_is_refused_not_billed_as_a_new_g
         _road(hires)
     # ...and the CLI, before anything is priced or submitted
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: pytest.fail("card check"))
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: pytest.fail("card check"))
     with pytest.raises(core.PixAIError) as err:
         core.run_generate(_cli_args(tmp_path, ref_media_id="M1", enlarge=ratio, width=size,
                                     height=size, face_fix=False, confirm=False))
@@ -695,7 +696,7 @@ CARD = {"id": "card-1", "name": "Tsubaki.3", "total": 3, "consumeAmount": 1,
 
 def test_price_and_submit_card_match_and_send_the_gated_dict(rest, monkeypatch):
     matched, sent = [], []
-    monkeypatch.setattr(core, "match_kaisuuken",
+    monkeypatch.setattr(cards_mod, "match_kaisuuken",
                         lambda s, params, **k: matched.append(params) or dict(CARD))
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     monkeypatch.setattr(core, "gql_mutate",
@@ -739,7 +740,7 @@ def test_run_generate_card_matches_and_submits_the_gated_dict(rest, monkeypatch,
     matched, sent = [], []
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
-    monkeypatch.setattr(core, "match_kaisuuken",
+    monkeypatch.setattr(cards_mod, "match_kaisuuken",
                         lambda s, params, **k: matched.append(params) or dict(CARD))
     monkeypatch.setattr(core, "submit_generation",
                         lambda s, params: sent.append(params) or "T1")
@@ -759,7 +760,7 @@ def test_run_generate_preview_prints_and_card_checks_the_gated_dict(rest, monkey
                                                                      tmp_path, capsys):
     matched = []
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "match_kaisuuken",
+    monkeypatch.setattr(cards_mod, "match_kaisuuken",
                         lambda s, params, **k: matched.append(params) or None)
     assert core.run_generate(_cli_args(tmp_path, confirm=False)) == {"submitted": False}
     out = capsys.readouterr().out
@@ -981,7 +982,7 @@ def test_api_price_returns_adjusted_for_a_flash_negative(tmp_path, monkeypatch):
     fake = FakeRest(price=950)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "_rest_get", fake)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
     cli = login_client(tmp_path)
     d = cli.post("/api/price", json={"version_id": FLASH, "prompt": "<prompt>",
                                      "negative": "<negative>", "width": 1024,
@@ -1098,7 +1099,7 @@ def _no_card(monkeypatch):
     def _trip(*a, **k):
         calls.append(a)
         raise AssertionError("a lane request reached the card check")
-    monkeypatch.setattr(core, "match_kaisuuken", _trip)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", _trip)
     return calls
 
 
@@ -1243,12 +1244,12 @@ def test_any_params_carrying_the_lane_never_touch_a_card(monkeypatch, capsys):
     calls = _no_card(monkeypatch)
     args = SimpleNamespace(kaisuuken_id="", no_card=False)
     params = {"modelId": T3, "lane": "infinite"}
-    assert core._apply_kaisuuken(object(), params, args) == ""
+    assert cards_mod._apply_kaisuuken(object(), params, args) == ""
     assert "kaisuukenId" not in params and calls == []
     for bad_params, bad_args in (({"modelId": T3, "lane": "infinite", "kaisuukenId": "c"}, args),
                                  (params, SimpleNamespace(kaisuuken_id="c", no_card=False))):
         with pytest.raises(core.PixAIError) as err:
-            core._apply_kaisuuken(object(), dict(bad_params), bad_args)
+            cards_mod._apply_kaisuuken(object(), dict(bad_params), bad_args)
         assert "never uses a free card" in str(err.value)
 
     def _no_mutation(*a, **k):
@@ -1258,7 +1259,7 @@ def test_any_params_carrying_the_lane_never_touch_a_card(monkeypatch, capsys):
         core.submit_generation(object(), {"modelId": T3, "lane": "infinite",
                                           "kaisuukenId": "c"})
     # ...and the CLI preview quotes it without a card check either
-    core._preview_card_note(SimpleNamespace(no_card=False, kaisuuken_id="", token=None),
+    cards_mod._preview_card_note(SimpleNamespace(no_card=False, kaisuuken_id="", token=None),
                             params)
     assert "no free card is checked" in capsys.readouterr().out and calls == []
 
@@ -1378,9 +1379,10 @@ def test_api_generate_refuses_a_lane_request_under_read_only_before_any_read(mon
         def _boom(*a, **k):
             raise AssertionError("PixAI was reached before READ_ONLY: " + name)
         return _boom
-    for fn in ("_rest_get", "_rest_post", "account_info", "match_kaisuuken", "gql_mutate",
-               "gql_adhoc"):
+    for fn in ("_rest_get", "_rest_post", "account_info", "gql_mutate", "gql_adhoc"):
         monkeypatch.setattr(core, fn, tripwire(fn))
+    for fn in ("match_kaisuuken",):                              # in cards since 3.22
+        monkeypatch.setattr(cards_mod, fn, tripwire(fn))
     monkeypatch.setattr(core, "READ_ONLY", True)
     d = cli.post("/api/generate", json=dict(LANE_OK, unlimited=True)).get_json()
     assert "READ_ONLY" in d["error"]

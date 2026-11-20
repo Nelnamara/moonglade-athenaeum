@@ -37,6 +37,7 @@ from moonglade import account_prefs as _account_prefs
 from moonglade import achievements as _achievements
 from moonglade import assets as moonglade_assets
 from moonglade import branding as _branding
+from moonglade import cards as _cards
 from moonglade import cloud_delete as _cloud_delete
 from moonglade import container as moonglade_container
 from moonglade import contest_sync as _contest_sync
@@ -12774,7 +12775,7 @@ def create_app(out_dir: Path):
                 credits = None
             cards = 0
             cards_by, expiries = [], []
-            for k in core.list_kaisuukens(session):
+            for k in _cards.list_kaisuukens(session):
                 try:
                     n = int(k.get("count") or 0)
                 except (TypeError, ValueError):
@@ -12875,9 +12876,9 @@ def create_app(out_dir: Path):
         try:
             core, session = _gen_session()
             if request.args.get("all") in ("1", "true", "yes"):
-                return jsonify(core.kaisuuken_type_catalog(session))
+                return jsonify(_cards.kaisuuken_type_catalog(session))
             after = request.args.get("after") or None
-            return jsonify(core.list_kaisuuken_logs(session, first=_acct_count(20), after=after))
+            return jsonify(_cards.list_kaisuuken_logs(session, first=_acct_count(20), after=after))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
@@ -12890,9 +12891,9 @@ def create_app(out_dir: Path):
         try:
             core, session = _gen_session()
             history = request.args.get("history") in ("1", "true", "yes")
-            statuses = core.COUPON_STATUSES_HISTORY if history else core.COUPON_STATUSES_ON_HAND
+            statuses = _cards.COUPON_STATUSES_HISTORY if history else _cards.COUPON_STATUSES_ON_HAND
             after = request.args.get("after") or None
-            return jsonify(core.list_extra_package_boosts(session, statuses=statuses,
+            return jsonify(_cards.list_extra_package_boosts(session, statuses=statuses,
                                                           first=_acct_count(20), after=after))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
@@ -12905,7 +12906,7 @@ def create_app(out_dir: Path):
         try:
             core, session = _gen_session()
             before = request.args.get("before") or None
-            return jsonify(core.list_credit_log(session, last=_acct_count(30),
+            return jsonify(_cards.list_credit_log(session, last=_acct_count(30),
                                                 before=before))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
@@ -14394,7 +14395,7 @@ def create_app(out_dir: Path):
             # card_covers() assumes a 1-ticket job is covered: PixAI's own training check
             # keeps only matches with consumeAmount <= total, so it would not attach it
             # either -- and here it would skip the paid acknowledgement on a 25k-100k run.
-            if best and best.get("id") and core.card_covers(best) \
+            if best and best.get("id") and _cards.card_covers(best) \
                     and not best.get("balance_unknown"):
                 card = best
         free_by_card = card is not None
@@ -17455,7 +17456,7 @@ def create_app(out_dir: Path):
                 card_note = "Free cards don’t cover queued matrix runs."
             elif not first.no_card:
                 try:
-                    best = core.match_kaisuuken(_card_session(core, gsession),
+                    best = _cards.match_kaisuuken(_card_session(core, gsession),
                                                 first.parameters, enrich=True,
                                                 raise_on_error=True)
                 except Exception:                            # noqa: BLE001
@@ -17464,7 +17465,7 @@ def create_app(out_dir: Path):
                 if best:
                     need = max(1, int(best.get("consumeAmount") or 1))
                     held = best.get("total")
-                    if core.card_covers(best):
+                    if _cards.card_covers(best):
                         if len(built) == 1 or held is None:
                             covered = 1
                         else:
@@ -17472,7 +17473,7 @@ def create_app(out_dir: Path):
                     card = {"name": best.get("name") or "", "held": held, "needed": need,
                             "left_after": (int(held) - covered * need) if held is not None
                             else None,
-                            "short": not core.card_covers(best)}
+                            "short": not _cards.card_covers(best)}
                     if covered and first.parameters.get("recipeIds"):
                         card_note = rec.CARD_NOTE
         out.update(each=each, covered=covered, total=each * (len(built) - covered),
@@ -17963,8 +17964,8 @@ def create_app(out_dir: Path):
                     row["price"] = _pricing.price_task(s, params)
                     # card_covers, the one coverage verdict the send reads too (2026-11-18): a
                     # card that matched but does not cover the job is not "free".
-                    row["free_card"] = core.card_covers(
-                        core.match_kaisuuken(s, params, enrich=True))
+                    row["free_card"] = _cards.card_covers(
+                        _cards.match_kaisuuken(s, params, enrich=True))
                 except Exception:
                     row["price"] = None
             return row

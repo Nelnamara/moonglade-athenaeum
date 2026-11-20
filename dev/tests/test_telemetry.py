@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from moonglade import cards as cards_mod
 from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
@@ -623,7 +624,7 @@ def _arm_mirror_bridge(monkeypatch, core):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
     monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "submit_generation", lambda *a, **k: "T-ENH-9")
 
 

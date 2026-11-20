@@ -2,6 +2,7 @@
 conftest blocks live /v2; no network, no spend."""
 from types import SimpleNamespace
 
+from moonglade import cards as cards_mod
 from moonglade import gallery as moonglade_gallery
 from moonglade import backup as core
 from moonglade import pixai_client as pixai_client_mod
@@ -885,7 +886,7 @@ def test_task_image_media_single_and_legacy():
 
 def _stub_generate_network(monkeypatch, outputs):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: "")
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: "")
     monkeypatch.setattr(pixai_client_mod.PixAIClient, "_graphql_post", lambda s, q, v=None, retries=None: {"createGenerationTask": {"id": "T1"}})
     monkeypatch.setattr(task_reads_mod, "_poll_task_status", lambda *a, **k: None)
     monkeypatch.setattr(task_reads_mod, "task_detail_gql",

@@ -23,6 +23,7 @@ import pytest
 import requests
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import gallery as g
 from moonglade import mirror as mirror_mod
 from moonglade import models as models_mod
@@ -337,7 +338,7 @@ def test_run_generate_exits_with_the_honest_sentence(tmp_path, monkeypatch, caps
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     monkeypatch.setattr(models_mod, "_gate_image_params", lambda s, p: (p, []))
     monkeypatch.setattr(models_mod, "_gate_params_for_model", lambda s, p: p)
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "_gen_parameters", lambda args: {"modelId": V, "prompts": "x"})
     import argparse
     args = argparse.Namespace(out=str(tmp_path), confirm=True, task_id="", token=None,

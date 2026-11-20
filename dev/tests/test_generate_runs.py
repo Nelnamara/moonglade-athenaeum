@@ -33,6 +33,7 @@ import pytest
 import requests
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import gallery as moonglade_gallery
 from moonglade import pricing as pricing_mod
 from moonglade import recipes as moonglade_recipes
@@ -120,10 +121,10 @@ def rig(monkeypatch):
     monkeypatch.setattr(core, "_rest_post", rest_post)
     monkeypatch.setattr(core, "account_info", account_info)
     monkeypatch.setattr(pricing_mod, "price_task", price_task)
-    monkeypatch.setattr(core, "match_kaisuuken", match)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", match)
     monkeypatch.setattr(core, "gql_mutate", gql_mutate)
     monkeypatch.setattr(core, "gql_adhoc", gql_adhoc)
-    monkeypatch.setattr(core, "_bump_card_use", lambda params: None)
+    monkeypatch.setattr(cards_mod, "_bump_card_use", lambda params: None)
     monkeypatch.setattr(core, "RUN_SEND_GAP_S", 0)
     monkeypatch.setattr(core, "READ_ONLY", False)
     monkeypatch.setattr(core, "_read_only_now", lambda: False)

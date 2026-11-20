@@ -32,6 +32,7 @@ import pytest
 import requests
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import mirror as mirror_mod
 from moonglade import task_reads as task_reads_mod
@@ -133,7 +134,7 @@ def cli_stubs(mock_session, monkeypatch):
     """The minimum needed to drive a CLI runner as far as its submit: a session, no free
     card (the spend-time check is a live REST call), and no polling."""
     monkeypatch.setattr(core, "_make_session", lambda token: mock_session)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(task_reads_mod, "_poll_task_status", lambda *a, **k: None)
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda *a, **k: {})
     monkeypatch.setattr(core, "_maybe_dump_params", lambda *a, **k: None)
@@ -263,7 +264,7 @@ class TestSpendingPathsAreSingleAttempt:
     def test_send_run(self, mock_session, gql_calls, monkeypatch):
         """Session M's run sender: N jobs, N mutations, each single-attempt through the one
         verb that offers no retries (submit -> submit_generation(exact=True) -> gql_mutate)."""
-        monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+        monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
         hooks = SimpleNamespace(sending=lambda cell: None, sent=lambda *a: None,
                                 failed=lambda *a: None)
         jobs = [{"cell": k, "req": core.GenerationRequest(mode="image",

@@ -6,6 +6,7 @@ Pure/mocked -- no live network (conftest blocks gql_adhoc), no spend."""
 from types import SimpleNamespace
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 
 
 def _node(ref_id="r-1", amount=-2100, type_="task_cost", extra=None,
@@ -35,7 +36,7 @@ def test_list_credit_log_normalizes_real_shape_via_me(monkeypatch):
         return _resp([_node()])
 
     monkeypatch.setattr(core, "gql_adhoc", fake_gql)
-    result = core.list_credit_log(object(), last=30)
+    result = cards_mod.list_credit_log(object(), last=30)
     # No userId is sent -- the query is on `me`, and it must be (private field).
     assert seen["variables"] == {"last": 30}
     assert "me {" in seen["query"] and "user(id" not in seen["query"]
@@ -48,7 +49,7 @@ def test_list_credit_log_unmapped_type_falls_back_to_raw(monkeypatch):
     monkeypatch.setattr(core, "USER_ID", "u-1")
     monkeypatch.setattr(core, "gql_adhoc",
                          lambda s, q, variables=None: _resp([_node(type_="mio2_gem_exchange")]))
-    row = core.list_credit_log(object())["entries"][0]
+    row = cards_mod.list_credit_log(object())["entries"][0]
     assert row["type"] == "mio2_gem_exchange" and row["label"] == "mio2_gem_exchange"
 
 
@@ -62,7 +63,7 @@ def test_list_credit_log_passes_before(monkeypatch):
     monkeypatch.setattr(core, "gql_adhoc", fake_gql)
     # The `me` connection offers no type filter, so there is no `reason` argument at all
     # (the dead one was removed 2026-10-15). `before` still pages backward.
-    core.list_credit_log(object(), last=10, before="cursor-past")
+    cards_mod.list_credit_log(object(), last=10, before="cursor-past")
     assert seen["variables"] == {"last": 10, "before": "cursor-past"}
 
 
@@ -73,7 +74,7 @@ def test_list_credit_log_backward_pagination_reads_previous_and_start_cursor(mon
     monkeypatch.setattr(core, "USER_ID", "u-1")
     monkeypatch.setattr(core, "gql_adhoc", lambda s, q, variables=None: _resp(
         [_node()], has_previous=True, start_cursor="cursor-older"))
-    result = core.list_credit_log(object())
+    result = cards_mod.list_credit_log(object())
     assert result["has_more"] is True and result["next_cursor"] == "cursor-older"
 
 
@@ -81,14 +82,14 @@ def test_list_credit_log_fails_soft(monkeypatch):
     def boom(*a, **k):
         raise core.PixAIError("network down")
     monkeypatch.setattr(core, "gql_adhoc", boom)
-    assert core.list_credit_log(object()) == {
+    assert cards_mod.list_credit_log(object()) == {
         "entries": [], "has_more": False, "next_cursor": None}
 
 
 # ---- run_credit_log display (list_credit_log stubbed) ----
 
 def test_run_credit_log_empty(monkeypatch, capsys, pixai):
-    monkeypatch.setattr(core, "list_credit_log", lambda s, **k: {
+    monkeypatch.setattr(cards_mod, "list_credit_log", lambda s, **k: {
         "entries": [], "has_more": False, "next_cursor": None})
     res = core.run_credit_log(SimpleNamespace(
         token=None, credit_log_count=0, credit_log_before=""))
@@ -97,7 +98,7 @@ def test_run_credit_log_empty(monkeypatch, capsys, pixai):
 
 
 def test_run_credit_log_lists_signed_amounts_and_more_hint(monkeypatch, capsys, pixai):
-    monkeypatch.setattr(core, "list_credit_log", lambda s, **k: {
+    monkeypatch.setattr(cards_mod, "list_credit_log", lambda s, **k: {
         "entries": [
             {"ref_id": "r-1", "amount": 30000, "type": "daily", "label": "Daily Claim",
              "extra": None, "created_at": "2026-08-01T10:12:00Z", "updated_at": ""},

@@ -13,6 +13,7 @@ import json
 import pytest
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import models as models_mod
 from moonglade import pricing as pricing_mod
 from moonglade import recipes as rec
@@ -155,7 +156,7 @@ def _req(params):
 def _no_card(monkeypatch):
     def boom(*a, **k):
         raise AssertionError("the card check must not run for this quote")
-    monkeypatch.setattr(core, "match_kaisuuken", boom)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", boom)
 
 
 def test_a_recipe_422_on_the_quote_becomes_the_structured_refusal(monkeypatch):
@@ -186,7 +187,7 @@ def test_a_recipe_quote_that_fails_otherwise_is_unverified_and_never_free(monkey
 
 def test_a_quote_without_recipes_keeps_todays_card_behaviour(monkeypatch):
     monkeypatch.setattr(pricing_mod, "price_task", lambda s, p: None)
-    monkeypatch.setattr(core, "match_kaisuuken",
+    monkeypatch.setattr(cards_mod, "match_kaisuuken",
                         lambda *a, **k: {"id": "k1", "total": 3, "consumeAmount": 1,
                                          "covered": True, "name": "Tsubaki"})
     out = core.price(object(), _req({"modelId": "1"}))
@@ -195,7 +196,7 @@ def test_a_quote_without_recipes_keeps_todays_card_behaviour(monkeypatch):
 
 def test_a_card_over_a_priced_recipe_quote_carries_the_note(monkeypatch):
     monkeypatch.setattr(pricing_mod, "price_task", lambda s, p: 3000)
-    monkeypatch.setattr(core, "match_kaisuuken",
+    monkeypatch.setattr(cards_mod, "match_kaisuuken",
                         lambda *a, **k: {"id": "k1", "total": 3, "consumeAmount": 1,
                                          "covered": True, "name": "Tsubaki"})
     out = core.price(object(), _req({"modelId": "1", "recipeIds": [RID]}))
@@ -793,7 +794,7 @@ def test_the_send_backstop_uses_the_same_wording(monkeypatch):
 
 def test_the_task_price_query_of_a_built_recipe_request_carries_its_recipe_ids(t3rest,
                                                                              monkeypatch):
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
     req = road(_t3(recipeIds=[RID2, RID]))
     out = core.price(object(), req)
     assert out["cost"] == 4000

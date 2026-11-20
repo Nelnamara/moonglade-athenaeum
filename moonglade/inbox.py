@@ -44,6 +44,7 @@ from urllib.parse import urlparse
 import requests
 
 from moonglade import backup as core
+from moonglade import cards as _cards
 from moonglade import pixai_client as _pixai_client
 
 # ---------------------------------------------------------------------------------------
@@ -1073,7 +1074,7 @@ def credit_bonuses(session):
     """The credit-pack bonuses on hand (PixAI's Credit Boost coupons that are available):
     shown with "Open on PixAI ↗", never redeemed here. Fails soft to []."""
     out = []
-    for c in (core.list_extra_package_boosts(session) or {}).get("coupons") or []:
+    for c in (_cards.list_extra_package_boosts(session) or {}).get("coupons") or []:
         if c.get("status") == "available" and c.get("boost_percent"):
             out.append({"code": c.get("code") or "", "percent": c.get("boost_percent"),
                         "until": c.get("available_until") or ""})

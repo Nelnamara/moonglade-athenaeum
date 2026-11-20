@@ -13,6 +13,7 @@ import pytest
 import requests
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import gallery as moonglade_gallery
 from moonglade import pricing as pricing_mod
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
@@ -305,7 +306,7 @@ def _price_client(tmp_path, monkeypatch, answer=None):
     seen = {}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(pricing_mod, "price_task", _tripwire("price_task (GET /v2/task-price)"))
-    monkeypatch.setattr(core, "match_kaisuuken",
+    monkeypatch.setattr(cards_mod, "match_kaisuuken",
                         lambda s, params, **k: seen.setdefault("card_checked", True)
                         and {"id": "c1", "total": 9})
     seen["posts"] = _record_posts(monkeypatch, answer)

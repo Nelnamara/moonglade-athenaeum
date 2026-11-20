@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade.gallery import CATALOG_FIELDS, create_app, media_dims, save_catalog
 from tests.conftest import login_test_client
 
@@ -214,12 +215,12 @@ def test_the_card_check_uses_the_sites_training_shape(pixai):
     best = core.match_training_kaisuuken(pixai, T3)
     body = pixai.calls_for("/kaisuuken/check")[0].body
     assert body == {"type": "training-task", "baseModelId": T3, "version": 2}
-    assert best["id"] == "K1" and core.card_covers(best)
+    assert best["id"] == "K1" and cards_mod.card_covers(best)
 
 
 def test_the_generation_check_is_unchanged(pixai):
     pixai.on("/kaisuuken/check", {"matches": []})
-    core.match_kaisuuken(pixai, {"modelId": "5"})
+    cards_mod.match_kaisuuken(pixai, {"modelId": "5"})
     body = pixai.calls_for("/kaisuuken/check")[0].body
     assert body == {"type": "generation-task", "parameters": {"modelId": "5"}, "version": 2}
 

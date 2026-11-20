@@ -6,6 +6,7 @@ for free). All pure/mocked -- no network, no spend (submit is always mocked)."""
 from pathlib import Path
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import gallery as moonglade_gallery
 from moonglade import models as models_mod
 
@@ -37,7 +38,7 @@ def _arm_mirror(monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(mirror_mod, "mirror_enabled", lambda: True)
     monkeypatch.setattr(mirror_mod, "make_mirror_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "submit_generation", _submit)
     return calls
 

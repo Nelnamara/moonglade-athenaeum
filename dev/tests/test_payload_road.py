@@ -19,6 +19,7 @@ BEFORE any of them is reachable.
 import pytest
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 from moonglade import mirror as mirror_mod
 from moonglade import models as models_mod
 from moonglade import pricing as pricing_mod
@@ -73,7 +74,7 @@ def road(monkeypatch):
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
     monkeypatch.setattr(pricing_mod, "price_task",
                         lambda s, params: seen["priced"].append(params) or 1200)
-    monkeypatch.setattr(core, "match_kaisuuken",
+    monkeypatch.setattr(cards_mod, "match_kaisuuken",
                         lambda s, params, **k: seen["matched"].append(params) or dict(CARD))
     monkeypatch.setattr(core, "submit_generation",
                         lambda s, params: seen["submitted"].append(params) or "task-1")
@@ -161,7 +162,7 @@ def test_a_covering_card_is_attached_on_submit_and_reported_by_price():
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(mirror_mod, "_session_for_create", lambda s: s)
         mp.setattr(pricing_mod, "price_task", lambda s, params: 1200)
-        mp.setattr(core, "match_kaisuuken", lambda s, params, **k: dict(CARD))
+        mp.setattr(cards_mod, "match_kaisuuken", lambda s, params, **k: dict(CARD))
         mp.setattr(core, "submit_generation",
                    lambda s, params: seen.update(params=params) or "t")
         req = _build({"version_id": "V1", "prompt": "x"})
@@ -181,7 +182,7 @@ def test_price_says_paid_when_the_card_is_short_and_submit_attaches_nothing():
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(mirror_mod, "_session_for_create", lambda s: s)
         mp.setattr(pricing_mod, "price_task", lambda s, params: 27500)
-        mp.setattr(core, "match_kaisuuken", lambda s, params, **k: dict(short))
+        mp.setattr(cards_mod, "match_kaisuuken", lambda s, params, **k: dict(short))
         mp.setattr(core, "submit_generation",
                    lambda s, params: seen.update(params=params) or "t")
         req = _build({"mode": "R2V", "images": ["77"], "prompt": "x"})
@@ -210,9 +211,10 @@ def test_submit_refuses_under_read_only_before_any_network_call(
 
     req = _build(payload)
     monkeypatch.setattr(core, "READ_ONLY", True)
-    for fn in ("match_kaisuuken", "_apply_kaisuuken",
-               "submit_generation", "submit_fixer", "gql_mutate", "_rest_post"):
+    for fn in ("submit_generation", "submit_fixer", "gql_mutate", "_rest_post"):
         monkeypatch.setattr(core, fn, tripwire(fn))
+    for fn in ("match_kaisuuken", "_apply_kaisuuken"):          # in cards since 3.22
+        monkeypatch.setattr(cards_mod, fn, tripwire(fn))
     for fn in ("price_task", "price_fixer"):                     # in pricing since 3.22
         monkeypatch.setattr(pricing_mod, fn, tripwire(fn))
     monkeypatch.setattr(mirror_mod, "_session_for_create", tripwire("_session_for_create"))
@@ -412,7 +414,7 @@ def test_a_lane_request_is_quoted_and_sent_as_one_object_with_no_card_anywhere(r
                                                                               monkeypatch):
     def _no_card_step(*a, **k):
         raise AssertionError("a lane spend reached the free-card step")
-    monkeypatch.setattr(core, "_apply_kaisuuken", _no_card_step)
+    monkeypatch.setattr(cards_mod, "_apply_kaisuuken", _no_card_step)
     sess = FakeSession()
     req = _lane_build(GATED_IMAGE)
     assert req.unlimited is True and req.parameters["lane"] == "infinite"

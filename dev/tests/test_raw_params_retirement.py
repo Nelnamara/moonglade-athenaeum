@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from moonglade import backup as core
+from moonglade import cards as cards_mod
 
 UTC = datetime.timezone.utc
 CUT = datetime.datetime(2026, 11, 23, 3, 0, 0, tzinfo=UTC)
@@ -32,9 +33,10 @@ def no_network(monkeypatch, tmp_path):
             raise AssertionError(name + " was reached before the retirement refusal")
         return f
 
-    for name in ("_make_session", "_apply_kaisuuken", "gql_mutate", "_preview_card_note",
-                 "upload_media", "_resolve_refs"):
+    for name in ("_make_session", "gql_mutate", "upload_media", "_resolve_refs"):
         monkeypatch.setattr(core, name, _boom(name))
+    for name in ("_apply_kaisuuken", "_preview_card_note"):    # in cards since 3.22
+        monkeypatch.setattr(cards_mod, name, _boom(name))
     return tmp_path
 
 
