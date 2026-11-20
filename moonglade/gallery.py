@@ -16990,7 +16990,7 @@ def create_app(out_dir: Path):
         local or LAN).
 
         This route and every create route build their shape through the SAME
-        core.build_request, so the badge quotes the request that will actually submit --
+        gen_road.build_request, so the badge quotes the request that will actually submit --
         it is not a second, price-flavoured road that happens to agree. /api/price is the
         one caller that does NOT pin a mode: it serves every road, so the payload's own
         `mode` picks one.
@@ -17991,7 +17991,7 @@ def create_app(out_dir: Path):
             core, session = _gen_session()
             # Same road as every other create: build_request resolves the source image,
             # translates the Change-Emotion control and calls build_panelplugin_parameters;
-            # core.submit is the READ_ONLY + free-card choke. A panelplugin task can never
+            # gen_road.submit is the READ_ONLY + free-card choke. A panelplugin task can never
             # be covered by a card (measured 2026-08-18) -- the check simply returns no
             # match -- but it costs nothing to ride the same choke and it is one fewer
             # spend path with a guard of its own to get wrong.
@@ -18169,7 +18169,7 @@ def create_app(out_dir: Path):
     # nothing created) -- so a fixed-up retry goes straight through (#93 review 2, F2).
     # Since 3.21.2 this is the single sends' repeat hold (_send_claim, above) keyed on the
     # cleaned fixer body: SEND_REPEAT_S after an accepted Fix, SEND_UNCLEAR_S after an unknown
-    # outcome, dropped only when the Fix is known to have cost nothing (core.send_outcome: never
+    # outcome, dropped only when the Fix is known to have cost nothing (gen_road.send_outcome: never
     # reached, or a definite refusal -- the classifier's rule, so a 408, a 499 or a bare 4xx
     # keeps it, L2).
     _FIX_REPEAT_MSG = ("The same Fix was asked for a few seconds ago; wait a moment before "
@@ -18201,7 +18201,7 @@ def create_app(out_dir: Path):
         pixel coords. Login required; returns {task_id} for the async poller.
 
         The Fix rides REST, not createGenerationTask: /v2/task/fixer takes {mediaId, boxes},
-        built by core.build_fixer_body -- the builder /api/price's quote uses too, so the
+        built by gen_params.build_fixer_body -- the builder /api/price's quote uses too, so the
         badge and the spend carry the SAME boxes (kind, count, coordinates). The media id is
         the one deliberate difference: this route's resolver uploads the local file first and
         sends the upload-kind id (PixAI refuses an output id as an input here), while the quote
@@ -18212,7 +18212,7 @@ def create_app(out_dir: Path):
         One Fix at a time: an identical submit (same user, picture and boxes) inside
         SEND_REPEAT_S seconds of the last one is refused before any network call -- a
         double tap, or a client retry after a lost response, must not pay twice -- unless
-        that last one is known to have cost nothing (core.send_outcome)."""
+        that last one is known to have cost nothing (gen_road.send_outcome)."""
         fix_key = None
         reached = _Reached()
         try:
