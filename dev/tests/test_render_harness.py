@@ -11785,6 +11785,11 @@ def test_the_phone_video_mode_shows_the_model_cards_inside_the_screen(logged_in_
     cards = _video_cards(page, ".cm-videohost")
     assert len(cards) >= 8 and all(c["left"] >= 0 and c["right"] <= c["vw"] for c in cards), cards
     assert all(c["lines"][1] == "pick a picture" for c in cards)
+    # Entering Video mode re-prices at once: usePriceProbe.refresh blanks the button to
+    # "checking the price…" synchronously and settles on the idle words only after
+    # PRICE_DEBOUNCE_MS (250ms); _settle is two frames. Wait for the settled state.
+    page.wait_for_function("() => { const s = document.querySelector('.cm-videohost .mgd-go .mgspend-s');"
+                           " return s && s.textContent === 'pick a picture first'; }")
     g = _spend_button(page, ".cm-videohost .mgd-go")
     assert g["disabled"] and g["sub"] == "pick a picture first", g
     page.evaluate("() => document.querySelector('.cm-videohost .gen-drawer')"
