@@ -331,6 +331,10 @@ SEAMS = {
     "moonglade.task_feed": {"from": "moonglade.backup", "names": [
         "_WS_URI", "_WS_SUBSCRIPTION", "_WS_DONE_STATUS", "_WS_STALE_TIMEOUT", "_WS_HEARTBEAT",
         "_watch_events_async", "run_watch"]},
+    "moonglade.contests": {"from": "moonglade.backup", "names": [
+        "_CONTEST_PAGE_SIZE", "_CONTEST_MAX_PAGES", "_CONTEST_PAGE_PAUSE", "_contest_title",
+        "_contest_rule", "list_contests", "run_contests", "_contest_rows", "contest_my_entries",
+        "contest_winners", "contest_artworks", "contest_enter"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -1230,6 +1234,30 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_training_advanced.py', 'moonglade.task_feed'),
     ('tests/test_training_parity.py', 'moonglade.task_feed'),
     ('tests/test_web_auth.py', 'moonglade.task_feed'),
+    # 3.22 phase 5, contests: no reader reads text that left backup.py. test_contest_wins and
+    # test_contest reach the contest reads and the entry through contests_mod; the whole-file
+    # readers look for names that stayed.
+    ('tests/test_artworks_adhoc.py', 'moonglade.contests'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.contests'),
+    ('tests/test_config_path_routing.py', 'moonglade.contests'),
+    ('tests/test_contest_wins.py', 'moonglade.contests'),
+    ('tests/test_csrf_coverage.py', 'moonglade.contests'),
+    ('tests/test_enhance.py', 'moonglade.contests'),
+    ('tests/test_evidence_counters.py', 'moonglade.contests'),
+    ('tests/test_gen_surface.py', 'moonglade.contests'),
+    ('tests/test_history_feed_document.py', 'moonglade.contests'),
+    ('tests/test_jwt.py', 'moonglade.contests'),
+    ('tests/test_living_library.py', 'moonglade.contests'),
+    ('tests/test_loom_notify.py', 'moonglade.contests'),
+    ('tests/test_pixai_client.py', 'moonglade.contests'),
+    ('tests/test_settings_store.py', 'moonglade.contests'),
+    ('tests/test_setup_prepare.py', 'moonglade.contests'),
+    ('tests/test_spend_no_retry.py', 'moonglade.contests'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.contests'),
+    ('tests/test_telemetry.py', 'moonglade.contests'),
+    ('tests/test_training_advanced.py', 'moonglade.contests'),
+    ('tests/test_training_parity.py', 'moonglade.contests'),
+    ('tests/test_web_auth.py', 'moonglade.contests'),
 }
 
 

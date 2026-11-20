@@ -8,6 +8,7 @@ import json
 import time
 
 from moonglade import backup as core
+from moonglade import contests as contests_mod
 from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
@@ -44,8 +45,8 @@ def test_every_contest_reader_shares_one_board_snapshot(tmp_path, monkeypatch):
         calls.append(k.get("max_pages"))
         return [{"id": "c1", "slug": "s1", "title": "Deep one", "type": "community",
                  "prize_amount": 0, "active": True, "end_at": "", "result_at": "", "url": ""}]
-    monkeypatch.setattr(core, "list_contests", _list)
-    monkeypatch.setattr(core, "contest_enter", lambda s, slug, aid: {"success": True})
+    monkeypatch.setattr(contests_mod, "list_contests", _list)
+    monkeypatch.setattr(contests_mod, "contest_enter", lambda s, slug, aid: {"success": True})
     cli = _client(tmp_path)
     assert cli.get("/api/contests").get_json()["contests"]
     cli.get("/api/contest/mine")
@@ -60,7 +61,7 @@ def test_the_board_memo_serves_both_list_variants(tmp_path, monkeypatch):
     """?all=1 is derived from the same snapshot rather than a second upstream read."""
     calls = []
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "list_contests", lambda s, **k: calls.append(1) or [
+    monkeypatch.setattr(contests_mod, "list_contests", lambda s, **k: calls.append(1) or [
         {"id": "a", "slug": "a", "title": "Running", "type": "official",
          "prize_amount": 0, "active": True},
         {"id": "b", "slug": "b", "title": "Ended", "type": "community",
@@ -79,13 +80,13 @@ def test_a_nested_artwork_id_survives_normalization():
     """The identity bug. An entry row can carry its artwork as a nested object; stripping
     it left only the ENTRY id, so the sweep keyed the same real entry differently from the
     enter/publish paths -- two keys, one entry, in a grow-only set."""
-    rows = core._contest_rows([{"id": "entry-1", "artwork": {"id": "art-9", "title": "x"},
+    rows = contests_mod._contest_rows([{"id": "entry-1", "artwork": {"id": "art-9", "title": "x"},
                                 "authorId": "u1"}])
     assert rows[0]["artworkId"] == "art-9"
     assert rows[0]["id"] == "entry-1"          # the entry id is still there, unchanged
     assert "artwork" not in rows[0]            # ...and the nested object still does not ride along
     # an explicit flat artworkId always wins over the nested one
-    rows = core._contest_rows([{"id": "e", "artworkId": "flat", "artwork": {"id": "nested"}}])
+    rows = contests_mod._contest_rows([{"id": "e", "artworkId": "flat", "artwork": {"id": "nested"}}])
     assert rows[0]["artworkId"] == "flat"
 
 
@@ -93,12 +94,12 @@ def test_the_sweep_keys_entries_by_artwork_not_entry_id(tmp_path, monkeypatch, p
     """End to end: the sweep must produce the SAME key the enter path would."""
     monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": 0.0})
     monkeypatch.setattr(contest_sync_mod, "_CONTEST_SYNC_PAUSE", 0)
-    monkeypatch.setattr(core, "list_contests", lambda s, **k: [
+    monkeypatch.setattr(contests_mod, "list_contests", lambda s, **k: [
         {"id": "c1", "slug": "s1", "active": True, "result_at": "", "end_at": ""}])
-    monkeypatch.setattr(core, "contest_my_entries",
-                        lambda s, slug, uid: core._contest_rows(
+    monkeypatch.setattr(contests_mod, "contest_my_entries",
+                        lambda s, slug, uid: contests_mod._contest_rows(
                             [{"id": "entry-1", "artwork": {"id": "art-9"}}]))
-    monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
+    monkeypatch.setattr(contests_mod, "contest_winners", lambda s, slug: [])
     contest_sync_mod._contest_detection_sync(tmp_path)
     assert telemetry_mod.load_telemetry(tmp_path)["sets"]["contest_entry_keys"] == ["c1:art-9"]
 
@@ -116,12 +117,12 @@ def test_the_sweep_heals_a_legacy_double_key(tmp_path, monkeypatch, pixai):
     # a store poisoned the old way: the entry id, from a pre-fix sweep
     telemetry_mod.telem_set_add("contest_entry_keys", "c1:entry-1", out_dir=tmp_path)
     assert telemetry_mod.telemetry_metrics(tmp_path)["contest_entries"] == 1
-    monkeypatch.setattr(core, "list_contests", lambda s, **k: [
+    monkeypatch.setattr(contests_mod, "list_contests", lambda s, **k: [
         {"id": "c1", "slug": "s1", "active": True, "result_at": "", "end_at": ""}])
-    monkeypatch.setattr(core, "contest_my_entries",
-                        lambda s, slug, uid: core._contest_rows(
+    monkeypatch.setattr(contests_mod, "contest_my_entries",
+                        lambda s, slug, uid: contests_mod._contest_rows(
                             [{"id": "entry-1", "artwork": {"id": "art-9"}}]))
-    monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
+    monkeypatch.setattr(contests_mod, "contest_winners", lambda s, slug: [])
     contest_sync_mod._contest_detection_sync(tmp_path)
     # one entry, one key -- the true one
     assert telemetry_mod.load_telemetry(tmp_path)["sets"]["contest_entry_keys"] == ["c1:art-9"]
@@ -135,11 +136,11 @@ def test_the_sweep_leaves_an_unpaired_key_alone(tmp_path, monkeypatch, pixai):
     monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": 0.0})
     monkeypatch.setattr(contest_sync_mod, "_CONTEST_SYNC_PAUSE", 0)
     telemetry_mod.telem_set_add("contest_entry_keys", "c1:somebody-else", out_dir=tmp_path)
-    monkeypatch.setattr(core, "list_contests", lambda s, **k: [
+    monkeypatch.setattr(contests_mod, "list_contests", lambda s, **k: [
         {"id": "c1", "slug": "s1", "active": True, "result_at": "", "end_at": ""}])
-    monkeypatch.setattr(core, "contest_my_entries",
+    monkeypatch.setattr(contests_mod, "contest_my_entries",
                         lambda s, slug, uid: [{"artworkId": "art-9"}])   # no entry id
-    monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
+    monkeypatch.setattr(contests_mod, "contest_winners", lambda s, slug: [])
     contest_sync_mod._contest_detection_sync(tmp_path)
     assert sorted(telemetry_mod.load_telemetry(tmp_path)["sets"]["contest_entry_keys"]) == [
         "c1:art-9", "c1:somebody-else"]
@@ -223,10 +224,10 @@ def test_publish_and_enter_records_the_entry_itself(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "task_media_index", lambda s, t, m: 0)
     monkeypatch.setattr(core, "publish_artwork_from_task",
                         lambda s, t, **kw: {"id": "newart1"})
-    monkeypatch.setattr(core, "list_contests", lambda s, **k: [
+    monkeypatch.setattr(contests_mod, "list_contests", lambda s, **k: [
         {"id": "c7", "slug": "ice-pop", "title": "Ice", "type": "community",
          "prize_amount": 0, "active": True}])
-    monkeypatch.setattr(core, "contest_enter", lambda s, slug, aid: {"success": True})
+    monkeypatch.setattr(contests_mod, "contest_enter", lambda s, slug, aid: {"success": True})
     # hold the sweep lock: the kick MUST no-op, which is exactly the case that lost the record
     assert contest_sync_mod._contest_sync_lock.acquire(False)
     try:
@@ -245,7 +246,7 @@ def test_publish_and_enter_records_the_entry_itself(tmp_path, monkeypatch):
 
 def test_sync_requires_csrf(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "list_contests", lambda s, **k: [])
+    monkeypatch.setattr(contests_mod, "list_contests", lambda s, **k: [])
     cli = _client(tmp_path)
     r = cli.post("/api/contest/sync", json={})
     assert r.status_code == 400 and "session expired" in r.get_json()["error"]
@@ -274,7 +275,7 @@ def test_sync_returns_immediately_and_runs_off_thread(tmp_path, monkeypatch):
 
 def test_sync_reports_recent_and_busy_without_starting_work(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "list_contests", lambda s, **k: [])
+    monkeypatch.setattr(contests_mod, "list_contests", lambda s, **k: [])
     cli = _client(tmp_path)
     token = _csrf(cli)
     monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": time.time()})
@@ -292,7 +293,7 @@ def test_sync_reports_recent_and_busy_without_starting_work(tmp_path, monkeypatc
 def test_mine_exposes_the_sync_watch_flags(tmp_path, monkeypatch):
     """What the client watches instead of holding a request open."""
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "list_contests", lambda s, **k: [])
+    monkeypatch.setattr(contests_mod, "list_contests", lambda s, **k: [])
     cli = _client(tmp_path)
     d = cli.get("/api/contest/mine").get_json()
     assert d["sync_running"] is False and "last_sync_at" in d
@@ -311,7 +312,7 @@ def test_entering_a_contest_is_read_only_guarded(mock_session, monkeypatch):
     monkeypatch.setattr(core, "READ_ONLY", True)
     import pytest
     with pytest.raises(core.PixAIError, match="READ_ONLY"):
-        core.contest_enter(mock_session, "slug", "art1")
+        contests_mod.contest_enter(mock_session, "slug", "art1")
     mock_session.post.assert_not_called()
 
 

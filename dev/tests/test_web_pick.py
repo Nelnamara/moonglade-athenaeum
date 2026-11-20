@@ -9,6 +9,7 @@ from pathlib import Path
 
 from moonglade import backup as core
 from moonglade import cards as cards_mod
+from moonglade import contests as contests_mod
 from moonglade import gen_params as gen_params_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import models as models_mod
@@ -1168,7 +1169,7 @@ def test_redaction_does_not_over_redact_when_out_dir_is_a_relative_path(tmp_path
 
     def boom(*a, **k):
         raise RuntimeError("retry in 0.5s. version 2.1.0. see release notes.")
-    monkeypatch.setattr(core, "list_contests", boom)
+    monkeypatch.setattr(contests_mod, "list_contests", boom)
 
     r = cli.get("/api/contests")
     body = r.get_data(as_text=True)
@@ -1224,7 +1225,7 @@ def test_redaction_covers_a_second_independent_call_site(tmp_path, monkeypatch, 
 
     def boom(*a, **k):
         raise RuntimeError("upstream call failed, see {}\\log.txt".format(tmp_path))
-    monkeypatch.setattr(core, "list_contests", boom)
+    monkeypatch.setattr(contests_mod, "list_contests", boom)
 
     r = cli.get("/api/contests")
     body = r.get_data(as_text=True)
@@ -1288,7 +1289,7 @@ def test_redaction_still_does_not_eat_ordinary_messages(tmp_path, monkeypatch, p
 
     def boom(*a, **k):
         raise RuntimeError("upstream said: retry in 0.5s (attempt 2 of 3)")
-    monkeypatch.setattr(core, "list_contests", boom)
+    monkeypatch.setattr(contests_mod, "list_contests", boom)
 
     body = cli.get("/api/contests").get_data(as_text=True)
     assert "<host-path>" not in body, "redacted an ordinary message: " + body[:300]
@@ -1351,7 +1352,7 @@ _CONTEST_PAGES = {
 def test_list_contests_normalizes_and_pages(pixai):
     pixai.on("/contest/list", lambda call: _CONTEST_PAGES[call.params["page"]])
     # active_only walks BOTH pages (a running contest hides on page 2) and keeps only 'running'
-    active = core.list_contests(pixai, active_only=True)
+    active = contests_mod.list_contests(pixai, active_only=True)
     assert [c["id"] for c in active] == ["1", "2", "4"]      # the 'ended' one dropped, page-2 kept
     seen = [(c.path, c.params.get("page")) for c in pixai.calls]
     assert ("/contest/list", 2) in seen                      # paged through
@@ -1361,7 +1362,7 @@ def test_list_contests_normalizes_and_pages(pixai):
     assert c0["cover_url"] == "https://api.pixai.art/v1/media/M1/thumbnail"
     assert c0["prize_amount"] == 29000000
     # all -> the ended one is included
-    allc = core.list_contests(pixai, active_only=False)
+    allc = contests_mod.list_contests(pixai, active_only=False)
     assert any(c["id"] == "3" and c["active"] is False for c in allc)
 
 
@@ -1371,7 +1372,7 @@ def test_list_contests_carries_the_whole_brief_and_the_entry_requirements(pixai)
     used to be sliced to 600 chars -- a cut that can sever a **bold** run or a link and
     hand the renderer half a construct."""
     pixai.on("/contest/list", lambda call: _CONTEST_PAGES[call.params["page"]])
-    rows = {c["id"]: c for c in core.list_contests(pixai, active_only=False)}
+    rows = {c["id"]: c for c in contests_mod.list_contests(pixai, active_only=False)}
     c1 = rows["1"]
     # WHOLE, not sliced -- and still English-first off the {en, ja, ...} bundle.
     assert c1["description"] == _LONG_BRIEF
@@ -1403,7 +1404,7 @@ def test_rule_ids_reach_the_browser_as_strings_with_every_digit(pixai):
                                      {"type": "required_widget_ids", "widget_ids": [big]}]}],
                  "page": 1, "pageSize": 50, "totalPage": 1, "totalCount": 1}}
     pixai.on("/contest/list", lambda call: pages[call.params["page"]])
-    rules = core.list_contests(pixai)[0]["rules"]
+    rules = contests_mod.list_contests(pixai)[0]["rules"]
     assert rules[0]["recipe_ids"] == ["2049376847228801627", "77"]
     assert rules[1]["model_ids"] == ["12"]
     assert rules[2]["widget_ids"] == ["2049376847228801627"]

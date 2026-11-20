@@ -42,6 +42,7 @@ from moonglade import cloud_delete as _cloud_delete
 from moonglade import container as moonglade_container
 from moonglade import contest_sync as _contest_sync
 from moonglade import contest_wins
+from moonglade import contests as _contests
 from moonglade import dupes as _dupes
 from moonglade import gen_cli as _gen_cli
 from moonglade import gen_params as _gen_params
@@ -13264,7 +13265,7 @@ def create_app(out_dir: Path):
             page = 1
         try:
             core, session = _gen_session()
-            env = core.contest_artworks(session, slug, page=page)
+            env = _contests.contest_artworks(session, slug, page=page)
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200],
                             "entries": [], "total_count": 0, "total_page": 0}), 200
@@ -13299,7 +13300,7 @@ def create_app(out_dir: Path):
         Soft-error-as-200, like every other read on this surface."""
         try:
             core, session = _gen_session()
-            rows = core.contest_winners(session, slug)
+            rows = _contests.contest_winners(session, slug)
             uid = str(_pixai_client._client_of(session).user_id or "")
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "winners": []}), 200
@@ -13462,7 +13463,7 @@ def create_app(out_dir: Path):
         if not contest_id:
             return jsonify({"error": "unknown contest"}), 400
         try:
-            resp = core.contest_enter(session, slug, artwork_id)
+            resp = _contests.contest_enter(session, slug, artwork_id)
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 502
         # A 2xx that says success:false is a refusal wearing a success code. Default True
@@ -13838,7 +13839,7 @@ def create_app(out_dir: Path):
                                                      "board — the artwork was published, "
                                                      "but not entered")
                         else:
-                            resp = core.contest_enter(session, slug, new_art_id)
+                            resp = _contests.contest_enter(session, slug, new_art_id)
                             if isinstance(resp, dict) and not resp.get("success", True):
                                 result["entry_error"] = "the contest refused the entry"
                             else:

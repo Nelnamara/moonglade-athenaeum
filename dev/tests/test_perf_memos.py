@@ -10,6 +10,7 @@ import threading
 import time
 
 from moonglade import backup as core
+from moonglade import contests as contests_mod
 from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
@@ -144,7 +145,7 @@ def _board_stub(monkeypatch, calls):
         calls.append(active_only)
         return [{"id": "c1", "slug": "s1", "title": "One", "type": "official",
                  "prize_amount": 0, "active": True}]
-    monkeypatch.setattr(core, "list_contests", _list)
+    monkeypatch.setattr(contests_mod, "list_contests", _list)
 
 
 def test_the_contest_board_is_memoized(tmp_path, monkeypatch):
@@ -173,7 +174,7 @@ def test_the_boards_ceiling_rides_the_memo_to_the_route(tmp_path, monkeypatch):
                         truncated=True)
         return [{"id": "c1", "slug": "s1", "title": "One", "type": "official",
                  "prize_amount": 0, "active": True}]
-    monkeypatch.setattr(core, "list_contests", _list)
+    monkeypatch.setattr(contests_mod, "list_contests", _list)
     cli = _client(tmp_path)
     first = cli.get("/api/contests").get_json()
     assert first["board"] == {"truncated": True, "limit": 1000, "total_count": 1200}
@@ -195,7 +196,7 @@ def test_both_board_variants_come_off_the_one_snapshot(tmp_path, monkeypatch):
     monkeypatch.setattr(contest_sync_mod, "_contests_cache", {})
     calls = []
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "list_contests", lambda s, **k: calls.append(1) or [
+    monkeypatch.setattr(contests_mod, "list_contests", lambda s, **k: calls.append(1) or [
         {"id": "a", "slug": "a", "title": "Running", "type": "official",
          "prize_amount": 0, "active": True},
         {"id": "b", "slug": "b", "title": "Ended", "type": "community",
@@ -222,7 +223,7 @@ def test_a_board_failure_is_not_cached(tmp_path, monkeypatch):
     """An offline blip must not pin an empty board for the whole TTL."""
     monkeypatch.setattr(contest_sync_mod, "_contests_cache", {})
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "list_contests",
+    monkeypatch.setattr(contests_mod, "list_contests",
                         lambda s, **k: (_ for _ in ()).throw(core.PixAIError("board down")))
     cli = _client(tmp_path)
     d = cli.get("/api/contests").get_json()
@@ -241,7 +242,7 @@ def test_a_recent_sweep_short_circuits(tmp_path, monkeypatch, pixai):
     monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": 0.0})
     monkeypatch.setattr(contest_sync_mod, "_CONTEST_SYNC_PAUSE", 0)
     calls = []
-    monkeypatch.setattr(core, "list_contests", lambda s, **k: calls.append(1) or [])
+    monkeypatch.setattr(contests_mod, "list_contests", lambda s, **k: calls.append(1) or [])
     assert contest_sync_mod._contest_detection_sync(tmp_path) is True     # the real one
     assert len(calls) == 1
     assert contest_sync_mod._contest_detection_sync(tmp_path) is True     # ...and the skip
@@ -254,7 +255,7 @@ def test_force_bypasses_the_recency_guard(tmp_path, monkeypatch, pixai):
     monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": time.time()})
     monkeypatch.setattr(contest_sync_mod, "_CONTEST_SYNC_PAUSE", 0)
     calls = []
-    monkeypatch.setattr(core, "list_contests", lambda s, **k: calls.append(1) or [])
+    monkeypatch.setattr(contests_mod, "list_contests", lambda s, **k: calls.append(1) or [])
     assert contest_sync_mod._contest_detection_sync(tmp_path, force=True) is True
     assert len(calls) == 1
 
@@ -266,11 +267,11 @@ def test_a_failed_sweep_does_not_count_as_recent(tmp_path, monkeypatch, pixai):
 
     def _boom(*a, **k):
         raise core.PixAIError("the board is unreachable")
-    monkeypatch.setattr(core, "list_contests", _boom)
+    monkeypatch.setattr(contests_mod, "list_contests", _boom)
     assert contest_sync_mod._contest_detection_sync(tmp_path) is False
     assert contest_sync_mod._contest_sync_last_ok["at"] == 0.0
     calls = []
-    monkeypatch.setattr(core, "list_contests", lambda s, **k: calls.append(1) or [])
+    monkeypatch.setattr(contests_mod, "list_contests", lambda s, **k: calls.append(1) or [])
     assert contest_sync_mod._contest_detection_sync(tmp_path) is True
     assert len(calls) == 1
 
@@ -281,7 +282,7 @@ def test_the_sync_route_tells_the_client_it_skipped(tmp_path, monkeypatch, pixai
     first call is run inline to make the sweep actually happen.)"""
     monkeypatch.setattr(contest_sync_mod, "_contest_sync_last_ok", {"at": 0.0})
     monkeypatch.setattr(contest_sync_mod, "_CONTEST_SYNC_PAUSE", 0)
-    monkeypatch.setattr(core, "list_contests", lambda s, **k: [])
+    monkeypatch.setattr(contests_mod, "list_contests", lambda s, **k: [])
     cli = _client(tmp_path)
     token = cli.get("/api/myart/items").get_json()["csrf"]
     real = g.threading.Thread

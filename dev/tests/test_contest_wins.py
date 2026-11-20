@@ -21,6 +21,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import contest_wins as cw
+from moonglade import contests as contests_mod
 from moonglade import gallery as g
 from tests.conftest import login_client, record_own_sleeps
 from moonglade import telemetry as telemetry_mod
@@ -98,7 +99,7 @@ def _winners_calls(pixai, slug):
 class TestMapperKeepsTheEntry:
     def test_a_winner_keeps_rank_prize_source_and_submitted_at(self, pixai):
         pixai.on("/contest/s1/winners", [_placed("a1", "u-1", 3, 100000)])
-        (row,) = core.contest_winners(pixai, "s1")
+        (row,) = contests_mod.contest_winners(pixai, "s1")
         assert row["entry"] == {"rank": 3, "prizeAmount": 100000, "source": "manual",
                                 "submittedAt": "2026-09-10T00:00:00.000Z"}
         assert row["id"] == "a1" and row["authorId"] == "u-1"
@@ -108,7 +109,7 @@ class TestMapperKeepsTheEntry:
         pixai.on("/contest/s1/artwork/u-test", {"data": [_raw_winner(
             "a2", "u-test", {"rank": None, "prizeAmount": 0, "source": "tack",
                              "submittedAt": "2026-09-11T00:00:00.000Z"})]})
-        (row,) = core.contest_my_entries(pixai, "s1", "u-test")
+        (row,) = contests_mod.contest_my_entries(pixai, "s1", "u-test")
         assert row["entry"]["rank"] is None and row["entry"]["source"] == "tack"
         assert row["entry"]["prizeAmount"] == 0
 
@@ -117,19 +118,19 @@ class TestMapperKeepsTheEntry:
         pixai.on("/contest/s1/winners", [_raw_winner("a1", "u", {"rank": "1", "prizeAmount": 5}),
                                          _raw_winner("a2", "u", {"rank": True}),
                                          _raw_winner("a3", "u", {"rank": 2})])
-        got = core.contest_winners(pixai, "s1")
+        got = contests_mod.contest_winners(pixai, "s1")
         assert [r["entry"]["rank"] for r in got] == [None, None, 2]
 
     def test_a_row_without_the_block_maps_exactly_as_before(self, pixai):
         pixai.on("/contest/s1/winners", [{"id": "a1", "authorId": "u-9", "rank": 2}])
-        assert core.contest_winners(pixai, "s1") == [{"id": "a1", "authorId": "u-9", "rank": 2}]
+        assert contests_mod.contest_winners(pixai, "s1") == [{"id": "a1", "authorId": "u-9", "rank": 2}]
 
     def test_the_board_carries_the_settlement_fields(self, pixai):
         _register_board(pixai, [_board_row("c1", "s1", T0, reward="distributed")])
-        (c,) = core.list_contests(pixai)
+        (c,) = contests_mod.list_contests(pixai)
         assert c["reward_status"] == "distributed" and c["result_at"] == _iso(T0)
         _register_board(pixai, [{"id": "c2", "slug": "s2"}])
-        assert core.list_contests(pixai)[0]["reward_status"] == ""
+        assert contests_mod.list_contests(pixai)[0]["reward_status"] == ""
 
 
 # ============================================================================ what counts as a win

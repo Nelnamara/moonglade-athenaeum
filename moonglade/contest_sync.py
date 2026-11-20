@@ -14,6 +14,7 @@ import threading
 import time
 
 from moonglade import contest_wins
+from moonglade import contests as _contests
 from moonglade import pixai_client as _pixai_client
 from moonglade import series as _series
 from moonglade import telemetry as _telemetry
@@ -60,7 +61,7 @@ def contest_board(core, session, force=False):
         if not force and ent and (now - ent["at"]) < CONTESTS_TTL:
             return ent["rows"]
     meta = {}
-    rows = core.list_contests(session, active_only=False, meta=meta)
+    rows = _contests.list_contests(session, active_only=False, meta=meta)
     with _contests_cache_lock:
         _contests_cache["board"] = {"at": time.time(), "rows": rows, "meta": meta}
     return rows
@@ -169,7 +170,7 @@ def _contest_detection_sync(out_dir, force=False):
                 slug = str(c.get("slug") or "")
                 if not cid or not slug:
                     continue
-                for row in core.contest_my_entries(session, slug, uid) or []:
+                for row in _contests.contest_my_entries(session, slug, uid) or []:
                     # MIGRATION, deliberate and narrow. Before 2026-09-03 this keyed by the
                     # ENTRY id when the artwork id was nested (and therefore stripped), so
                     # an old store can hold "cid:<entry id>" for a piece now keyed
@@ -382,7 +383,7 @@ def contest_win_pass(out_dir, now=None, pause=None):
         try:
             if not slug:
                 raise ValueError("no slug known for this contest")
-            rows = core.contest_winners(session, slug)          # one GET, nothing else
+            rows = _contests.contest_winners(session, slug)          # one GET, nothing else
         except Exception as e:                                # noqa: BLE001
             out["errors"] += 1
             log.warning("contest win check: one contest failed: %s: %s", type(e).__name__,
@@ -509,7 +510,7 @@ def contest_win_check(out_dir, body, now=None):
         uid = str(_pixai_client._client_of(session).user_id or "")
         if not uid:
             raise ValueError("no account id resolved")
-        rows = core.contest_winners(session, slug)              # one GET, nothing else
+        rows = _contests.contest_winners(session, slug)              # one GET, nothing else
     except Exception as e:                                    # noqa: BLE001
         return _say("failed", entry, cid=cid, slug=slug,
                     detail=_redact_host_paths_cli(out_dir, str(e))[:200])
