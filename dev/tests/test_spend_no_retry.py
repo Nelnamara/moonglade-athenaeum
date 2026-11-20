@@ -39,6 +39,7 @@ from moonglade import pixai_client as pixai_client_mod
 from moonglade import mirror as mirror_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import cloud_delete as cloud_delete_mod
+from moonglade import training as training_mod
 
 
 # Every function that fires a credit-spending or account-mutating GraphQL call. When a new
@@ -69,7 +70,7 @@ SPEND_PATHS = ("submit_generation", "run_generate", "run_generate_video",
                "send_run")
 
 # Where each spend path lives: backup, or the split module it moved to (3.22, phase 5).
-_HOMES = (core, cloud_delete_mod, gen_road_mod, gen_cli_mod)
+_HOMES = (core, cloud_delete_mod, gen_road_mod, gen_cli_mod, training_mod)
 
 
 def _spend_path(name):
@@ -314,9 +315,9 @@ class TestSpendingPathsAreSingleAttempt:
         """LoRA training spends real credits once the free-training quota is gone; a re-POST
         after a lost response would start (and pay for) a SECOND training. validate_training
         is stubbed so the test exercises the submit, not the (separately-tested) form rules."""
-        monkeypatch.setattr(core, "validate_training", lambda *a, **k: ["trigger"])
-        core.submit_training(mock_session, "base1", ["m1"], "Title", "trig", "style")
-        _assert_single_attempt(gql_calls, core._CREATE_TRAINING)
+        monkeypatch.setattr(training_mod, "validate_training", lambda *a, **k: ["trigger"])
+        training_mod.submit_training(mock_session, "base1", ["m1"], "Title", "trig", "style")
+        _assert_single_attempt(gql_calls, training_mod._CREATE_TRAINING)
 
     def test_publish_artwork_from_task(self, mock_session, gql_calls):
         """No credits, but a re-POST after a lost response publishes the artwork twice."""

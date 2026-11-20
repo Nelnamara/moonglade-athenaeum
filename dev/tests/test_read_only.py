@@ -17,6 +17,7 @@ from moonglade import gen_road as gen_road_mod
 from moonglade import organize as organize_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import cloud_delete as cloud_delete_mod
+from moonglade import training as training_mod
 
 
 def test_read_only_defaults_to_false():
@@ -154,7 +155,7 @@ class TestTrainingAndArtworkMutationsReadOnly:
         # _check_read_only runs before validate_training, so even wholly-invalid args must
         # be refused at the guard, not fall through to a validation error.
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.submit_training(mock_session, "base1", ["m1"], "Title", "trig", "style")
+            training_mod.submit_training(mock_session, "base1", ["m1"], "Title", "trig", "style")
         mock_session.post.assert_not_called()
 
     def test_publish_artwork_blocked(self, mock_session, monkeypatch):

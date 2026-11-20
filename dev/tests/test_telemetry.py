@@ -13,6 +13,7 @@ from moonglade import cards as cards_mod
 from moonglade import gallery as g
 from moonglade import gen_params as gen_params_mod
 from moonglade import gen_road as gen_road_mod
+from moonglade import training as training_mod
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import STARFALL_EVENT, ach_event, ach_nonce, login_client, login_test_client, _SEALED_DONOR
@@ -795,12 +796,12 @@ def test_a_train_submit_alone_counts_no_lora_trained(tmp_path, monkeypatch):
     validate/quota/submit stubbing shape test_panel already uses."""
     from moonglade import backup as core
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "validate_training", lambda *a, **k: "nel druid")
-    monkeypatch.setattr(core, "training_free_quota", lambda s: 9)
+    monkeypatch.setattr(training_mod, "validate_training", lambda *a, **k: "nel druid")
+    monkeypatch.setattr(training_mod, "training_free_quota", lambda s: 9)
     # (v, config=None): the route prices off the config object it validated with (review fix
     # 2026-09-26, SCOPE_2026-09-26 E7), so the stub takes that second argument too.
-    monkeypatch.setattr(core, "training_price_for_version", lambda v, config=None: None)
-    monkeypatch.setattr(core, "submit_training", lambda *a, **k: {"id": "trn1", "refId": "model9"})
+    monkeypatch.setattr(training_mod, "training_price_for_version", lambda v, config=None: None)
+    monkeypatch.setattr(training_mod, "submit_training", lambda *a, **k: {"id": "trn1", "refId": "model9"})
     save_catalog(tmp_path / "catalog.db", [])
     cli = login_client(tmp_path)
     csrf = cli.get("/api/panel/summary").get_json()["csrf"]

@@ -22,6 +22,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import cards as cards_mod
+from moonglade import training as training_mod
 from moonglade.gallery import CATALOG_FIELDS, create_app, media_dims, save_catalog
 from tests.conftest import login_test_client
 
@@ -40,14 +41,14 @@ def _row(**kw):
 def test_a_failed_config_read_still_offers_and_prices_tsubaki3():
     """conftest blocks the /config reader, which is exactly a failed read: the snapshot
     answers, and it is the 2026-09-26 capture -- Tsubaki.3 at 100,000 included."""
-    cfg = core.training_config()
+    cfg = training_mod.training_config()
     assert cfg["live"] is False
     assert any(m["version_id"] == T3 and m["model_type"] == "MMDIT26B_MODEL"
                for m in cfg["models"])
-    assert core.training_price_for_version(T3) == 100000
-    assert core.training_price_for_version(ILLUSTRIOUS) == 25000       # price, never originalPrice
+    assert training_mod.training_price_for_version(T3) == 100000
+    assert training_mod.training_price_for_version(ILLUSTRIOUS) == 25000       # price, never originalPrice
     assert cfg["image_constraints"] == {"minWidth": 512, "minHeight": 512, "maxAspectRatio": 3}
-    labels = [g["label"] for g in core.list_trainable_base_models()]
+    labels = [g["label"] for g in training_mod.list_trainable_base_models()]
     assert labels[0] == "DiT.3"
 
 
@@ -85,13 +86,13 @@ def _live_config(monkeypatch, answers):
 
 def test_the_live_config_drives_list_price_default_and_image_rule(monkeypatch):
     reads = _live_config(monkeypatch, {"trainLoraModels": _LIVE})
-    cfg = core.training_config()
+    cfg = training_mod.training_config()
     assert cfg["live"] is True
-    assert core.training_price_for_version("900") == 90000
-    assert core.training_price_for_version("800") == 30000
-    assert core.training_price_for_version(T3) is None          # not on the live list
-    assert core.default_training_base() == "900"                # the Recommended DiT.3 row
-    groups = core.list_trainable_base_models()
+    assert training_mod.training_price_for_version("900") == 90000
+    assert training_mod.training_price_for_version("800") == 30000
+    assert training_mod.training_price_for_version(T3) is None          # not on the live list
+    assert training_mod.default_training_base() == "900"                # the Recommended DiT.3 row
+    groups = training_mod.list_trainable_base_models()
     assert [g["label"] for g in groups] == ["DiT.3", "SDXL"]    # unlabelled arch left out
     assert cfg["image_constraints"]["minWidth"] == 256.0
     assert cfg["image_constraints"]["maxAspectRatio"] == 4.0
@@ -100,12 +101,12 @@ def test_the_live_config_drives_list_price_default_and_image_rule(monkeypatch):
 
 def test_the_config_cache_holds_a_failure_for_a_minute_then_retries(monkeypatch):
     reads = _live_config(monkeypatch, {"trainLoraModels": core.PixAIError("down")})
-    core.training_config()
-    core.training_config()
+    training_mod.training_config()
+    training_mod.training_config()
     assert reads == ["trainLoraModels"]                          # the failure is cached
     at, val = core._config_cache["trainLoraModels"]
     core._config_cache["trainLoraModels"] = (at - core._CONFIG_FAIL_TTL - 1, val)
-    core.training_config()
+    training_mod.training_config()
     assert reads == ["trainLoraModels", "trainLoraModels"]      # ...for a minute only
 
 
@@ -128,8 +129,8 @@ def test_the_default_base_is_the_recommended_tsubaki3():
     SCOPE_2026-09-26 E7 rule (the first SDXL row) that avoided Tsubaki.3 for its price; the
     price now sits on the review footer before Start, and a paid start still needs its amount
     ticked (test_the_acknowledged_amount_must_be_this_runs_price)."""
-    assert core.default_training_base() == T3
-    groups = core.list_trainable_base_models()
+    assert training_mod.default_training_base() == T3
+    groups = training_mod.list_trainable_base_models()
     assert groups[0]["label"] == "DiT.3" and groups[0]["recommended"] is True
     assert [g["recommended"] for g in groups[1:]] == [False] * (len(groups) - 1)
 
@@ -137,13 +138,13 @@ def test_the_default_base_is_the_recommended_tsubaki3():
 def test_with_no_dit3_row_the_default_falls_back_to_sdxl_then_the_first(monkeypatch):
     live = {"models": [m for m in _LIVE["models"] if m["modelType"] != "MMDIT26B_MODEL"]}
     _live_config(monkeypatch, {"trainLoraModels": live})
-    assert core.default_training_base() == "800"                 # the first SDXL row
+    assert training_mod.default_training_base() == "800"                 # the first SDXL row
     core._config_cache.clear()
     live2 = {"models": [
         {"versionId": "600", "modelId": "601", "modelName": "Old DiT", "modelType": "DIT7_MODEL"},
         {"versionId": "700", "modelType": "SOMETHING_NEW_MODEL", "modelName": "Unlabelled"}]}
     _live_config(monkeypatch, {"trainLoraModels": live2})
-    assert core.default_training_base() == "600"                 # the first offered row
+    assert training_mod.default_training_base() == "600"                 # the first offered row
 
 
 # Session J moved the desktop panel's state and calls out of TrainOverlay.jsx into
@@ -194,7 +195,7 @@ def test_the_models_route_names_the_default_and_offers_tsubaki3(tmp_path, monkey
 ])
 def test_free_quota_counts_only_for_a_member(pixai, me, expected):
     pixai.on("me", {"me": me})
-    assert core.training_free_quota(pixai) == expected
+    assert training_mod.training_free_quota(pixai) == expected
     call = pixai.calls_for("me")[0]
     # ONE query reads both, so the tier and the quota can never come from different moments
     assert "membership { tier }" in call.document and "quotaAmount" in call.document
@@ -202,7 +203,7 @@ def test_free_quota_counts_only_for_a_member(pixai, me, expected):
 
 def test_a_failed_quota_read_is_not_free(pixai):
     pixai.fail("me", core.PixAIError("boom"))
-    assert core.training_free_quota(pixai) == 0
+    assert training_mod.training_free_quota(pixai) == 0
 
 
 # ------------------------------------------------------------ the training card
@@ -212,7 +213,7 @@ def test_the_card_check_uses_the_sites_training_shape(pixai):
         {"templateId": "tpl", "total": 1, "consumeAmount": 1,
          "kaisuukens": [{"id": "K1", "expiresAt": "2026-12-01T00:00:00Z"}]}]})
     pixai.on("/kaisuuken/summary", {"kaisuukens": []})
-    best = core.match_training_kaisuuken(pixai, T3)
+    best = training_mod.match_training_kaisuuken(pixai, T3)
     body = pixai.calls_for("/kaisuuken/check")[0].body
     assert body == {"type": "training-task", "baseModelId": T3, "version": 2}
     assert best["id"] == "K1" and cards_mod.card_covers(best)
@@ -238,14 +239,14 @@ def test_the_generation_check_is_unchanged(pixai):
     (None, ""),
 ])
 def test_trigger_words_normalize_in_the_sites_order(raw, want):
-    assert core.normalize_trigger_words(raw) == want
+    assert training_mod.normalize_trigger_words(raw) == want
 
 
 _OK = dict(media_ids=[str(i) for i in range(10)], title="t", category="character")
 
 
 def _validate(base, trigger):
-    return core.validate_training(base, _OK["media_ids"], _OK["title"], trigger,
+    return training_mod.validate_training(base, _OK["media_ids"], _OK["title"], trigger,
                                   _OK["category"])
 
 
@@ -269,7 +270,7 @@ def test_the_normalized_trigger_words_are_what_is_submitted(monkeypatch):
     sent = {}
     monkeypatch.setattr(core, "gql_mutate", lambda s, q, v: sent.update(v) or
                         {"createTrainingTask": {"id": "t", "refId": "m"}})
-    core.submit_training(object(), ILLUSTRIOUS, _OK["media_ids"], "t",
+    training_mod.submit_training(object(), ILLUSTRIOUS, _OK["media_ids"], "t",
                          "Nel\nDruid,,  Moon", "character", kaisuuken_id="K9")
     assert sent["input"]["triggerWords"] == "nel, druid, moon"
     assert sent["input"]["kaisuukenId"] == "K9"
@@ -281,7 +282,7 @@ def test_the_per_side_image_rule():
     dims = {"ok": (1024, 1024), "square_min": (512, 512), "tall3": (512, 1536),
             "wide_short": (800, 400),       # passes the site's pixel count, fails per side
             "thin": (600, 1900), "tiny": (300, 300)}
-    rejected, unchecked = core.check_training_images(
+    rejected, unchecked = training_mod.check_training_images(
         list(dims) + ["nosize"], dims, {"minWidth": 512, "minHeight": 512, "maxAspectRatio": 3})
     assert {r["media_id"] for r in rejected} == {"wide_short", "thin", "tiny"}
     assert unchecked == ["nosize"]
@@ -291,11 +292,11 @@ def test_the_per_side_image_rule():
 
 def test_the_live_image_rule_wins(monkeypatch):
     _live_config(monkeypatch, {"trainLoraModels": _LIVE})
-    rejected, _ = core.check_training_images(["a"], {"a": (400, 280)})
+    rejected, _ = training_mod.check_training_images(["a"], {"a": (400, 280)})
     assert [r["media_id"] for r in rejected] == ["a"]            # height under the live 300
-    rejected, _ = core.check_training_images(["c"], {"c": (300, 300)})
+    rejected, _ = training_mod.check_training_images(["c"], {"c": (300, 300)})
     assert rejected == []                                         # under 512, over the live 256/300
-    rejected, _ = core.check_training_images(["b"], {"b": (300, 1200)})
+    rejected, _ = training_mod.check_training_images(["b"], {"b": (300, 1200)})
     assert rejected == []                                         # ratio 4 allowed live
 
 
@@ -313,19 +314,19 @@ def _train_client(tmp_path, monkeypatch, rows=None, quota=0, card=None, card_err
     save_catalog(tmp_path / "catalog.db", rows or [_row(media_id="1", filename="a_1.png")])
     calls = []
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "training_free_quota", lambda s: quota)
+    monkeypatch.setattr(training_mod, "training_free_quota", lambda s: quota)
 
     def _card(session, base, raise_on_error=False):
         calls.append(("card", base))
         if card_error is not None:
             raise card_error
         return card
-    monkeypatch.setattr(core, "match_training_kaisuuken", _card)
+    monkeypatch.setattr(training_mod, "match_training_kaisuuken", _card)
 
     def _submit(session, *a, **kw):
         calls.append(("submit", a, kw))
         return {"id": "trn1", "refId": "model9"}
-    monkeypatch.setattr(core, "submit_training", _submit)
+    monkeypatch.setattr(training_mod, "submit_training", _submit)
     cli = login_test_client(create_app(tmp_path))
     csrf = cli.get("/api/panel/summary").get_json()["csrf"]
     return (lambda body: cli.post("/api/train/submit", json=dict(body, csrf=csrf))), calls
@@ -404,9 +405,9 @@ def test_a_non_member_with_quota_pays_and_must_accept(tmp_path, monkeypatch, pix
     acknowledgement applies."""
     pixai.on("me", {"me": {"id": "1", "membership": None, "quotaAmount": 5}})
     save_catalog(tmp_path / "catalog.db", [_row(media_id="1", filename="a_1.png")])
-    monkeypatch.setattr(core, "match_training_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(training_mod, "match_training_kaisuuken", lambda *a, **k: None)
     submitted = []
-    monkeypatch.setattr(core, "submit_training",
+    monkeypatch.setattr(training_mod, "submit_training",
                         lambda *a, **k: submitted.append(1) or {"id": "t", "refId": "m"})
     cli = login_test_client(create_app(tmp_path))
     assert cli.get("/api/train/quota").get_json()["free_trainings"] == 0
@@ -539,11 +540,11 @@ def test_one_request_prices_off_the_config_it_validated_with(tmp_path, monkeypat
     """The route reads the training config once and prices from THAT read: a cache entry
     expiring between validation and pricing must not mix a live answer with the snapshot."""
     post, _ = _train_client(tmp_path, monkeypatch, quota=0)
-    live = core.training_config()
+    live = training_mod.training_config()
     live["pricing"] = dict(live["pricing"], SDXL_MODEL={"price": 31000})
-    snapshot = core.training_config()                  # SDXL at the snapshot's 25,000
+    snapshot = training_mod.training_config()                  # SDXL at the snapshot's 25,000
     answers = iter([live])                             # the first read answers live...
-    monkeypatch.setattr(core, "training_config", lambda: next(answers, snapshot))
+    monkeypatch.setattr(training_mod, "training_config", lambda: next(answers, snapshot))
     assert post(_BODY).get_json()["price"] == 31000    # ...and the price is that read's
 
 
@@ -561,14 +562,14 @@ def test_trigger_words_are_counted_as_the_site_counts_them(base, trigger, ok):
     else:
         with pytest.raises(core.PixAIError):
             _validate(base, trigger)
-    assert core.trigger_word_length("\U0001F319a") == 3
+    assert training_mod.trigger_word_length("\U0001F319a") == 3
 
 
 def test_the_image_refusal_reads_right_for_one_image():
-    one = core.describe_rejected_training_images(
+    one = training_mod.describe_rejected_training_images(
         [{"media_id": "4", "width": 800, "height": 400, "why": "smaller than 512x512"}])
     assert one.startswith("PixAI won't train on 1 of these images — remove it and try again")
-    two = core.describe_rejected_training_images(
+    two = training_mod.describe_rejected_training_images(
         [{"media_id": str(i), "width": 300, "height": 300, "why": "smaller than 512x512"}
          for i in range(2)])
     assert "2 of these images — remove them" in two

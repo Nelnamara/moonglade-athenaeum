@@ -103,6 +103,7 @@ from moonglade import cards as cards_mod
 from moonglade import jobs as jobs_mod
 from moonglade import models as models_mod
 from moonglade import paths as moonglade_paths
+from moonglade import training as training_mod
 from moonglade import updater as updater_mod
 from moonglade.gallery import CATALOG_FIELDS, create_app, load_catalog, save_catalog
 from moonglade.achievements import achievement_metrics, compute_achievements, save_ach_state
@@ -5595,8 +5596,8 @@ def _fake_training(pixai, monkeypatch, quota=0):
     def _no_cdn(*a, **k):
         raise core.PixAIError("the CDN is not reachable from the render harness")
     monkeypatch.setattr(_requests, "get", _no_cdn)
-    monkeypatch.setattr(core, "training_free_quota", lambda s: quota)
-    monkeypatch.setattr(core, "match_training_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(training_mod, "training_free_quota", lambda s: quota)
+    monkeypatch.setattr(training_mod, "match_training_kaisuuken", lambda *a, **k: None)
 
     def task(tid, status, progress=None):
         return {"trainingTask": {
@@ -6044,7 +6045,7 @@ def _fake_advanced(pixai, monkeypatch):
         pixai.on(base + "/submit", {"trainingTaskId": tid, "status": "waiting"})
     for tid in tasks:
         register(tid)
-    monkeypatch.setattr(core, "fetch_caption_text", lambda url, limit=0:
+    monkeypatch.setattr(training_mod, "fetch_caption_text", lambda url, limit=0:
                         "night elf, moonwell, image " + url.rsplit("/", 1)[-1])
     return tasks
 

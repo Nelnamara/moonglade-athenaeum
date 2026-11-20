@@ -62,6 +62,7 @@ from moonglade import hostcheck as _hostcheck
 from moonglade import settings as _settings
 from moonglade import task_reads as _task_reads
 from moonglade import telemetry as _telemetry
+from moonglade import training as _training
 from moonglade import updater as _updater
 from moonglade import secure_files as _secure_files
 from moonglade import web_sessions as _web_sessions
@@ -14171,7 +14172,7 @@ def create_app(out_dir: Path):
         base (core.match_training_kaisuuken). Read-only, free."""
         try:
             core, session = _gen_session()
-            return jsonify({"free_trainings": core.training_free_quota(session)})
+            return jsonify({"free_trainings": _training.training_free_quota(session)})
         except Exception as e:
             return jsonify({"free_trainings": 0,
                             "error": _redact_host_paths(str(e))[:200]}), 200
@@ -14191,22 +14192,22 @@ def create_app(out_dir: Path):
         model, which with DiT.3 listed first would be the 100,000-credit base."""
         try:
             core, session = _gen_session()
-            cfg = core.training_config()
-            pause = core.training_pause()
-            return jsonify({"groups": core.list_trainable_base_models(config=cfg),
+            cfg = _training.training_config()
+            pause = _training.training_pause()
+            return jsonify({"groups": _training.list_trainable_base_models(config=cfg),
                             "pricing": cfg["pricing"],
-                            "default_version_id": core.default_training_base(cfg),
+                            "default_version_id": _training.default_training_base(cfg),
                             # Session J: the Recommended tab (6a), Advanced's two bases, the
                             # four goals, PixAI's own estimate at its default length, the set
                             # rule, and its pause switch -- all read here, nothing written
-                            "recommended_arch": core.TRAIN_RECOMMENDED_TYPE,
-                            "advanced_bases": core.advanced_training_bases(cfg),
-                            "goals": [{"value": v, "label": lab} for v, lab in core.TRAIN_GOALS],
-                            "eta": core.training_eta(
-                                core.TRAIN_DEFAULT_OPTIONS["trainingSteps"]),
+                            "recommended_arch": _training.TRAIN_RECOMMENDED_TYPE,
+                            "advanced_bases": _training.advanced_training_bases(cfg),
+                            "goals": [{"value": v, "label": lab} for v, lab in _training.TRAIN_GOALS],
+                            "eta": _training.training_eta(
+                                _training.TRAIN_DEFAULT_OPTIONS["trainingSteps"]),
                             "image_constraints": cfg["image_constraints"],
-                            "min_images": core.TRAIN_MIN_IMAGES,
-                            "max_images": core.TRAIN_MAX_IMAGES,
+                            "min_images": _training.TRAIN_MIN_IMAGES,
+                            "max_images": _training.TRAIN_MAX_IMAGES,
                             "paused": pause is not None,
                             "resumes_at": (pause or {}).get("resumes_at") or ""})
         except Exception as e:
@@ -14262,7 +14263,7 @@ def create_app(out_dir: Path):
         check; spend review, finding 7). Anything else, a failed read included, is a fresh
         set priced and sent in full. Never raises."""
         try:
-            loras = core.list_my_trained_loras(session, pages=5)
+            loras = _training.list_my_trained_loras(session, pages=5)
         except Exception:                               # noqa: BLE001
             return False
         posted = [str(m) for m in (media_ids or [])]
@@ -14350,21 +14351,21 @@ def create_app(out_dir: Path):
         except Exception as e:
             return jsonify({"error": "PixAI session unavailable: %s" % e}), 502
 
-        cfg = core.training_config()
+        cfg = _training.training_config()
         reuse = bool(dataset_task_id) and dataset_task_id.isdigit() and \
             _reuse_ok(core, session, dataset_task_id, media_ids)
         try:
-            tw = core.validate_training(base_model_id, media_ids, title, trigger, category,
+            tw = _training.validate_training(base_model_id, media_ids, title, trigger, category,
                                         training_task_id=dataset_task_id if reuse else "",
                                         config=cfg)
         except Exception as e:
             return jsonify({"error": str(e)}), 400
         unchecked, image_note = [], ""
         if not reuse:
-            rejected, unchecked = core.check_training_images(
+            rejected, unchecked = _training.check_training_images(
                 media_ids, media_dims(db_path, media_ids), cfg["image_constraints"])
             if rejected:
-                return jsonify({"error": core.describe_rejected_training_images(rejected),
+                return jsonify({"error": _training.describe_rejected_training_images(rejected),
                                 "rejected_images": rejected}), 400
             image_note = ("" if not unchecked else
                           "%d image%s could not be checked against PixAI's size rule (this "
@@ -14372,12 +14373,12 @@ def create_app(out_dir: Path):
                               len(unchecked), "" if len(unchecked) == 1 else "s",
                               "its" if len(unchecked) == 1 else "their"))
 
-        free_left = core.training_free_quota(session)
+        free_left = _training.training_free_quota(session)
         free_by_quota = free_left > 0
         # credits, or None -- off `cfg`, the very config the validation above read, so one
         # request can never validate against the live config and price off the snapshot
-        list_price = core.training_price_for_version(base_model_id, cfg)
-        price = core.training_price_tier(base_model_id, "reuse", cfg) if reuse else list_price
+        list_price = _training.training_price_for_version(base_model_id, cfg)
+        price = _training.training_price_tier(base_model_id, "reuse", cfg) if reuse else list_price
         # The training free card (owner ruling 4): checked only when the quota does not
         # already make the run free -- "before a paid run", as SCOPE_2026-09-26 E7 words it.
         # A DELIBERATE DIFFERENCE FROM THE SITE: PixAI's basic trainer runs the card check
@@ -14390,7 +14391,7 @@ def create_app(out_dir: Path):
         card, card_checked = None, True
         if not free_by_quota:
             try:
-                best = core.match_training_kaisuuken(session, base_model_id,
+                best = _training.match_training_kaisuuken(session, base_model_id,
                                                      raise_on_error=True)
             except Exception:                         # noqa: BLE001
                 best, card_checked = None, False
@@ -14432,7 +14433,7 @@ def create_app(out_dir: Path):
                          if card else None),
                 "price": price, "list_price": list_price, "reuse": reuse,
                 "price_reason": reason, "cost_note": cost_note,
-                "eta": core.training_eta(core.TRAIN_DEFAULT_OPTIONS["trainingSteps"]),
+                "eta": _training.training_eta(_training.TRAIN_DEFAULT_OPTIONS["trainingSteps"]),
                 "unchecked_images": unchecked, "image_note": image_note,
             })
         if not _basic_start_lock.acquire(blocking=False):
@@ -14444,7 +14445,7 @@ def create_app(out_dir: Path):
             blocked = train_guard.basic_blocked(key)
             if blocked:
                 return jsonify({"error": blocked}), 409
-            pause = core.training_pause()
+            pause = _training.training_pause()
             if pause is not None:
                 return jsonify({"error": "PixAI has paused new LoRA training runs%s, so nothing "
                                          "was submitted. Runs already training carry on." %
@@ -14479,7 +14480,7 @@ def create_app(out_dir: Path):
                                                  "{:,}".format(price))}), 409
             train_guard.basic_arm(key)
             try:
-                task = core.submit_training(
+                task = _training.submit_training(
                     session, base_model_id, [] if reuse else media_ids, title, trigger,
                     category, training_task_id=dataset_task_id if reuse else "",
                     kaisuuken_id=(card["id"] if free_by_card else ""), config=cfg)
@@ -14543,7 +14544,7 @@ def create_app(out_dir: Path):
     def _train_refusal(e, status=502):
         from moonglade import backup as core
         if isinstance(e, core.PixAIRestError):
-            payload = {"error": core.training_error_words(e), "code": e.code}
+            payload = {"error": _training.training_error_words(e), "code": e.code}
             ids = e.data.get("mediaIds")
             if isinstance(ids, list):
                 payload["rejected_ids"] = [str(x) for x in ids]
@@ -14558,7 +14559,7 @@ def create_app(out_dir: Path):
         return None
 
     def _pause_refusal(core):
-        pause = core.training_pause()
+        pause = _training.training_pause()
         if pause is None:
             return None
         return jsonify({"error": "PixAI has paused LoRA training%s, so nothing was sent. Runs "
@@ -14607,7 +14608,7 @@ def create_app(out_dir: Path):
         trigger_words, category, base_version_id, media_ids, count, cover}. Read-only."""
         try:
             core, session = _gen_session()
-            loras = core.list_my_trained_loras(session, pages=3)
+            loras = _training.list_my_trained_loras(session, pages=3)
         except Exception as e:                          # noqa: BLE001
             return jsonify({"datasets": [], "error": _redact_host_paths(str(e))[:200]}), 200
         out = []
@@ -14717,17 +14718,17 @@ def create_app(out_dir: Path):
             core, session = _gen_session()
         except Exception as e:                          # noqa: BLE001
             return jsonify({"runs": [], "running": [], "error": str(e)[:200]}), 200
-        cfg = core.training_config()
+        cfg = _training.training_config()
         names = _base_names(cfg)
         rows, details = [], []
         try:
-            for t in core.list_training_in_progress(session, 100):
+            for t in _training.list_training_in_progress(session, 100):
                 rows.append(_run_row_advanced(t, names))
         except Exception as e:                          # noqa: BLE001
             errors.append("advanced runs: " + _redact_host_paths(str(e))[:120])
         loras = []
         try:
-            loras = core.list_my_trained_loras(session, pages=1 if light else 2)
+            loras = _training.list_my_trained_loras(session, pages=1 if light else 2)
         except Exception as e:                          # noqa: BLE001
             errors.append("your LoRAs: " + _redact_host_paths(str(e))[:120])
         by_model = {m["model_id"]: m for m in loras}
@@ -14740,7 +14741,7 @@ def create_app(out_dir: Path):
                     and str((m.get("task") or {}).get("status") or "") == "completed"]
         if not light:
             try:
-                for t in core.list_training_completed(session, 100):
+                for t in _training.list_training_completed(session, 100):
                     if t.get("id"):
                         finished.append(str(t["id"]))
                     r = _run_row_advanced(t, names, done=True)
@@ -14783,7 +14784,7 @@ def create_app(out_dir: Path):
                 details.append(r)
         for r in details:
             try:
-                _apply_detail(r, core.training_task(session, r["id"]))
+                _apply_detail(r, _training.training_task(session, r["id"]))
             except Exception:                           # noqa: BLE001
                 pass
         guarded = train_guard.retried()
@@ -14818,12 +14819,12 @@ def create_app(out_dir: Path):
             return jsonify({"error": "not a training task"}), 400
         try:
             core, session = _gen_session()
-            t = core.training_task(session, tid)
+            t = _training.training_task(session, tid)
         except Exception as e:                          # noqa: BLE001
             return _train_refusal(e)
         if t.get("trainingMode") != "advanced":
             return jsonify({"error": "that run isn't an advanced one"}), 400
-        cfg = core.training_config()
+        cfg = _training.training_config()
         p = t.get("parameters") or {}
         ids = [str(x) for x in (p.get("mediaIds") or [])]
         status = str(t.get("status") or "")
@@ -14834,20 +14835,20 @@ def create_app(out_dir: Path):
                         "base_name": _base_names(cfg).get(str(p.get("baseModelId") or ""), ""),
                         "media_ids": ids},
                "captions": {}, "caption_quote": None, "quote": None,
-               "eta": core.training_eta(core.TRAIN_DEFAULT_OPTIONS["trainingSteps"]),
-               "caption_max": core.TRAIN_CAPTION_MAX, "errors": []}
+               "eta": _training.training_eta(_training.TRAIN_DEFAULT_OPTIONS["trainingSteps"]),
+               "caption_max": _training.TRAIN_CAPTION_MAX, "errors": []}
         if status != "draft":
             try:
-                items = core.training_captions(session, tid)
+                items = _training.training_captions(session, tid)
             except Exception as e:                      # noqa: BLE001
                 items = []
                 out["errors"].append("descriptions: " + _redact_host_paths(str(e))[:120])
             from concurrent.futures import ThreadPoolExecutor
 
             def _texts(it):
-                text = core.fetch_caption_text(it["caption_url"])
+                text = _training.fetch_caption_text(it["caption_url"])
                 machine = text if it["source"] != "user" else \
-                    core.fetch_caption_text(it["machine_url"]) if it["machine_url"] else None
+                    _training.fetch_caption_text(it["machine_url"]) if it["machine_url"] else None
                 return it["media_id"], {"source": it["source"], "text": text,
                                         "machine_text": machine}
             with ThreadPoolExecutor(max_workers=8) as ex:
@@ -14855,12 +14856,12 @@ def create_app(out_dir: Path):
                     out["captions"][mid] = c
         if status in ("draft", "captionReady") and ids:
             try:
-                out["caption_quote"] = core.training_caption_quote(session, tid)
+                out["caption_quote"] = _training.training_caption_quote(session, tid)
             except Exception as e:                      # noqa: BLE001
                 out["errors"].append("describe price: " + _redact_host_paths(str(e))[:120])
         if status == "captionReady":
             try:
-                out["quote"] = core.training_quote(session, tid)
+                out["quote"] = _training.training_quote(session, tid)
             except Exception as e:                      # noqa: BLE001
                 out["errors"].append("price: " + _redact_host_paths(str(e))[:120])
         return jsonify(out)
@@ -14883,7 +14884,7 @@ def create_app(out_dir: Path):
             return refused
         try:
             core_, session = _gen_session()
-            d = core.create_advanced_training_draft(
+            d = _training.create_advanced_training_draft(
                 session, str(body.get("base_model_id") or ""), str(body.get("title") or ""),
                 str(body.get("trigger_words") or ""), str(body.get("category") or ""))
         except core.PixAIError as e:
@@ -14908,11 +14909,11 @@ def create_app(out_dir: Path):
         if not tid.isdigit() or ids is None:
             return jsonify({"error": "which run, and which images?"}), 400
         ids = [str(m) for m in ids if str(m).strip()]
-        cfg = core.training_config()
-        rejected, _unchecked = core.check_training_images(
+        cfg = _training.training_config()
+        rejected, _unchecked = _training.check_training_images(
             ids, media_dims(db_path, ids), cfg["image_constraints"])
         if rejected:
-            return jsonify({"error": core.describe_rejected_training_images(rejected),
+            return jsonify({"error": _training.describe_rejected_training_images(rejected),
                             "rejected_ids": [r["media_id"] for r in rejected]}), 400
         refused = _read_only_refusal(core, "change a LoRA training set")
         if refused:
@@ -14922,7 +14923,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _BUSY}), 409
         try:
             core_, session = _gen_session()
-            saved = core.replace_training_media(session, tid, ids)
+            saved = _training.replace_training_media(session, tid, ids)
         except Exception as e:                          # noqa: BLE001
             return _train_refusal(e)
         finally:
@@ -14943,9 +14944,9 @@ def create_app(out_dir: Path):
         text = str(body.get("text") or "").strip()
         if not tid.isdigit() or not mid.isdigit():
             return jsonify({"error": "which image?"}), 400
-        if not text or len(text) > core.TRAIN_CAPTION_MAX:
+        if not text or len(text) > _training.TRAIN_CAPTION_MAX:
             return jsonify({"error": "A description is 1 to %s characters."
-                                     % "{:,}".format(core.TRAIN_CAPTION_MAX)}), 400
+                                     % "{:,}".format(_training.TRAIN_CAPTION_MAX)}), 400
         refused = _read_only_refusal(core, "edit a LoRA training description")
         if refused:
             return refused
@@ -14954,7 +14955,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _BUSY}), 409
         try:
             core_, session = _gen_session()
-            saved = core.save_training_caption(session, tid, mid, text)
+            saved = _training.save_training_caption(session, tid, mid, text)
         except Exception as e:                          # noqa: BLE001
             return _train_refusal(e)
         finally:
@@ -14994,7 +14995,7 @@ def create_app(out_dir: Path):
                     return refused
             try:
                 core_, session = _gen_session()
-                t = core.training_task(session, tid)
+                t = _training.training_task(session, tid)
             except Exception as e:                      # noqa: BLE001
                 return _train_refusal(e)
             st = str(t.get("status") or "")
@@ -15007,12 +15008,12 @@ def create_app(out_dir: Path):
                                          "now. Nothing was sent." %
                                          ("already describing" if st == "captioning"
                                           else "past that step on")}), 409
-            if n < core.TRAIN_MIN_IMAGES:
+            if n < _training.TRAIN_MIN_IMAGES:
                 return jsonify({"error": "Add at least %d more image%s first. Nothing was sent."
-                                         % (core.TRAIN_MIN_IMAGES - n,
-                                            "" if core.TRAIN_MIN_IMAGES - n == 1 else "s")}), 400
+                                         % (_training.TRAIN_MIN_IMAGES - n,
+                                            "" if _training.TRAIN_MIN_IMAGES - n == 1 else "s")}), 400
             try:
-                q = core.training_caption_quote(session, tid)
+                q = _training.training_caption_quote(session, tid)
             except Exception as e:                      # noqa: BLE001
                 return _train_refusal(e)
             per = (q["total_price"] // q["image_count"]) if q["image_count"] else None
@@ -15027,7 +15028,7 @@ def create_app(out_dir: Path):
                 return _amount_refusal(accepted, q["total_price"], "Describing these images")
             train_guard.paid_arm("caption", tid, st)
             try:
-                status = core.start_training_captions(session, tid)
+                status = _training.start_training_captions(session, tid)
             except Exception as e:                      # noqa: BLE001
                 if _gen_road.definite_refusal(e, codes=_gen_road.TRAINING_CODES):
                     train_guard.paid_resolve("caption", tid, "refused")
@@ -15079,7 +15080,7 @@ def create_app(out_dir: Path):
                     return refused
             try:
                 core_, session = _gen_session()
-                t = core.training_task(session, tid)
+                t = _training.training_task(session, tid)
                 if confirming and train_guard.paid_blocked("submit", tid,
                                                            str(t.get("status") or "")):
                     return jsonify({"error": _PAID_MAYBE_REFUSAL % "this run",
@@ -15088,27 +15089,27 @@ def create_app(out_dir: Path):
                     return jsonify({"error": "This run isn't waiting to start (PixAI says: %s). "
                                              "Nothing was sent." % (t.get("status") or "?")}), 409
                 ids = [str(x) for x in ((t.get("parameters") or {}).get("mediaIds") or [])]
-                described = {c["media_id"] for c in core.training_captions(session, tid)}
+                described = {c["media_id"] for c in _training.training_captions(session, tid)}
                 left = [m for m in ids if m not in described]
                 if left:
                     return jsonify({"error": "Describe the %d remaining image%s first. Nothing "
                                              "was sent." % (len(left),
                                                             "" if len(left) == 1 else "s"),
                                     "undescribed": left}), 409
-                price = core.training_quote(session, tid)
+                price = _training.training_quote(session, tid)
             except Exception as e:                      # noqa: BLE001
                 return _train_refusal(e)
-            eta = core.training_eta(core.TRAIN_DEFAULT_OPTIONS["trainingSteps"])
+            eta = _training.training_eta(_training.TRAIN_DEFAULT_OPTIONS["trainingSteps"])
             if not confirming:
                 return jsonify({"preview": True, "price": price, "eta": eta,
                                 "image_count": len(ids), "is_free": price == 0})
             accepted = body.get("accept_credit_cost")
             if price > 0 and not _exact_amount(accepted, price):
                 return _amount_refusal(accepted, price, "This training")
-            before = core.training_free_quota(session)
+            before = _training.training_free_quota(session)
             train_guard.paid_arm("submit", tid, t.get("status"))
             try:
-                status = core.submit_advanced_training(session, tid)
+                status = _training.submit_advanced_training(session, tid)
             except Exception as e:                      # noqa: BLE001
                 if _gen_road.definite_refusal(e, codes=_gen_road.TRAINING_CODES):
                     train_guard.paid_resolve("submit", tid, "refused")
@@ -15119,7 +15120,7 @@ def create_app(out_dir: Path):
                                          "started. Check Runs before starting it again.",
                                 "maybe_started": True}), 502
             train_guard.paid_resolve("submit", tid, "done")
-            after = core.training_free_quota(session)
+            after = _training.training_free_quota(session)
         finally:
             lk.release()
         _runs_dirty()
@@ -15163,23 +15164,23 @@ def create_app(out_dir: Path):
                     return refused
             try:
                 core_, session = _gen_session()
-                t = core.training_task(session, tid)
+                t = _training.training_task(session, tid)
                 if t.get("trainingMode") != "advanced" or t.get("status") != "failed":
                     return jsonify({"error": "Only a failed advanced run can be retried. "
                                              "Nothing was sent."}), 409
-                price = core.training_quote(session, tid)
+                price = _training.training_quote(session, tid)
             except Exception as e:                      # noqa: BLE001
                 return _train_refusal(e)
             if not confirming:
                 return jsonify({"preview": True, "price": price, "is_free": price == 0,
-                                "eta": core.training_eta(
-                                    core.TRAIN_DEFAULT_OPTIONS["trainingSteps"])})
+                                "eta": _training.training_eta(
+                                    _training.TRAIN_DEFAULT_OPTIONS["trainingSteps"])})
             accepted = body.get("accept_credit_cost")
             if price > 0 and not _exact_amount(accepted, price):
                 return _amount_refusal(accepted, price, "Retrying this run")
             train_guard.retry_arm(tid)
             try:
-                res = core.retry_training(session, tid)
+                res = _training.retry_training(session, tid)
             except Exception as e:                      # noqa: BLE001
                 if _gen_road.definite_refusal(e, codes=_gen_road.TRAINING_CODES):
                     train_guard.retry_resolve(tid, "refused")
@@ -15229,7 +15230,7 @@ def create_app(out_dir: Path):
         try:
             try:
                 core_, session = _gen_session()
-                done = {str(t.get("id")): t for t in core.list_training_completed(session, 100)}
+                done = {str(t.get("id")): t for t in _training.list_training_completed(session, 100)}
             except Exception as e:                      # noqa: BLE001
                 return _train_refusal(e)
             t = done.get(tid)
@@ -15240,7 +15241,7 @@ def create_app(out_dir: Path):
                 return jsonify({"error": "That run is published already. Nothing was "
                                          "sent."}), 409
             try:
-                res = core.publish_training(session, tid, vis, rebate)
+                res = _training.publish_training(session, tid, vis, rebate)
             except Exception as e:                      # noqa: BLE001
                 return _train_refusal(e)
         finally:

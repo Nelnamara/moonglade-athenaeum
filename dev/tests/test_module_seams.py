@@ -309,6 +309,25 @@ SEAMS = {
         "_video_row_model", "_download_video_task", "_task_image_media", "_task_detail_query",
         "_fix_source_label", "_download_image_task", "_i2v_cli_unsent_notes", "run_generate_video",
         "_resolve_refs", "run_reference_video", "run_upload", "run_edit_image"]},
+    "moonglade.training": {"from": "moonglade.backup", "names": [
+        "_TRAIN_FREE_CURRENCY", "_CREATE_TRAINING", "TRAIN_CATEGORIES", "TRAIN_MIN_IMAGES",
+        "TRAIN_MAX_IMAGES", "_TRAIN_ARCHS", "_TRAIN_BASE_MODELS", "_TRAIN_PRICING",
+        "_TRAIN_IMAGE_CONSTRAINTS", "_TRAIN_LONG_TRIGGER_TYPES", "TRAIN_TRIGGER_MAX",
+        "TRAIN_TRIGGER_MIN_DIT", "_train_models_from", "_train_pricing_from",
+        "_train_constraints_from", "training_config", "training_model_type",
+        "training_price_for_version", "TRAIN_RECOMMENDED_TYPE", "default_training_base",
+        "list_trainable_base_models", "training_free_quota", "match_training_kaisuuken",
+        "_TRAIN_STATUS_TTL", "training_pause", "normalize_trigger_words", "trigger_word_length",
+        "validate_training", "check_training_images", "describe_rejected_training_images",
+        "submit_training", "TRAIN_GOALS", "TRAIN_ADVANCED_TYPES", "TRAIN_DEFAULT_OPTIONS",
+        "TRAIN_CAPTION_MAX", "_TRAINING_TASK_FIELDS", "_TRAINING_TASK_Q", "_MY_LORAS_Q",
+        "training_eta", "advanced_training_bases", "training_price_tier", "_TRAIN_ERROR_WORDS",
+        "training_error_words", "_task_path", "training_task", "list_training_in_progress",
+        "list_training_completed", "list_my_trained_loras", "training_caption_quote",
+        "training_quote", "training_captions", "fetch_caption_text",
+        "create_advanced_training_draft", "replace_training_media", "start_training_captions",
+        "save_training_caption", "submit_advanced_training", "retry_training",
+        "publish_training"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -1161,6 +1180,30 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_unclear_single_sends.py', 'moonglade.gen_cli'),
     ('tests/test_video_tsubaki.py', 'moonglade.gen_cli'),
     ('tests/test_web_auth.py', 'moonglade.gen_cli'),
+    # 3.22 phase 5, training: no reader reads text that left backup.py. test_training_advanced,
+    # test_training_parity, test_read_only, test_spend_no_retry (_spend_path) and test_telemetry
+    # reach the training names through training_mod; the whole-file readers look for names that
+    # stayed (the config road among them).
+    ('tests/test_artworks_adhoc.py', 'moonglade.training'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.training'),
+    ('tests/test_config_path_routing.py', 'moonglade.training'),
+    ('tests/test_csrf_coverage.py', 'moonglade.training'),
+    ('tests/test_enhance.py', 'moonglade.training'),
+    ('tests/test_evidence_counters.py', 'moonglade.training'),
+    ('tests/test_gen_surface.py', 'moonglade.training'),
+    ('tests/test_history_feed_document.py', 'moonglade.training'),
+    ('tests/test_jwt.py', 'moonglade.training'),
+    ('tests/test_living_library.py', 'moonglade.training'),
+    ('tests/test_loom_notify.py', 'moonglade.training'),
+    ('tests/test_pixai_client.py', 'moonglade.training'),
+    ('tests/test_settings_store.py', 'moonglade.training'),
+    ('tests/test_setup_prepare.py', 'moonglade.training'),
+    ('tests/test_spend_no_retry.py', 'moonglade.training'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.training'),
+    ('tests/test_telemetry.py', 'moonglade.training'),
+    ('tests/test_training_advanced.py', 'moonglade.training'),
+    ('tests/test_training_parity.py', 'moonglade.training'),
+    ('tests/test_web_auth.py', 'moonglade.training'),
 }
 
 
