@@ -287,15 +287,15 @@ def test_a_read_that_fails_plans_a_refusal_and_sends_nothing(monkeypatch):
     assert dbl.sent() == 0, "it deleted something after a failed read"
 
 
-def test_the_per_image_branch_sends_delete_batch_media(monkeypatch):
+def test_the_per_image_branch_sends_the_rest_media_delete(monkeypatch):
+    """3.22 S3-delete (DESIGN_3.22 2.9): the per-image branch is PixAI's REST route, POST
+    /v2/task/{id}/media/{mediaId}/delete, no longer the GraphQL deleteBatchMedia."""
     monkeypatch.setattr(core, "READ_ONLY", False)
     dbl = _Double(_batch_task(False, False, False))
     plan = cloud_delete_mod.delete_image_routed(dbl, "TASK-BATCH", "m1", confirmed_plan="per-image")
     assert plan.plan == "per-image"
-    assert len(dbl.mutations) == 1 and not dbl.rest_posts
-    doc, variables = dbl.mutations[0]
-    assert "updateGenerationTask" in doc
-    assert variables["input"] == {"deleteBatchMedia": {"mediaId": "m1"}}
+    assert not dbl.mutations, "the GraphQL per-image mutation was sent"
+    assert dbl.rest_posts == [("/task/TASK-BATCH/media/m1/delete", {})]
 
 
 def test_the_whole_task_branch_sends_the_task_delete(monkeypatch):
@@ -326,7 +326,7 @@ def test_a_matching_confirmed_plan_goes_through(monkeypatch):
     dbl = _Double(_batch_task(False, False))
     plan = cloud_delete_mod.delete_image_routed(dbl, "TASK-BATCH", "m0", confirmed_plan="per-image")
     assert plan.plan == "per-image"
-    assert len(dbl.mutations) == 1
+    assert dbl.rest_posts == [("/task/TASK-BATCH/media/m0/delete", {})] and not dbl.mutations
 
 
 @pytest.mark.parametrize("plan", [None, "", "   "], ids=["none", "empty", "blank"])

@@ -48,6 +48,8 @@ from moonglade import training as training_mod
 SPEND_PATHS = ("submit_generation", "run_generate", "run_generate_video",
                "run_reference_video", "run_edit_image", "upload_media",
                "delete_batch_media_gql",
+               # the per-image delete since 3.22 S3-delete: POST /v2/task/{id}/media/{mid}/delete
+               "delete_task_media",
                # The per-image delete's router (2026-09-06): it fires one of the two
                # delete mutations after reading the live task, so it is an
                # account-mutating path in its own right.

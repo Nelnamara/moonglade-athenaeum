@@ -245,6 +245,64 @@ def delete_batch_media_gql(session, task_id, media_id):
                       {"id": task_id, "input": {"deleteBatchMedia": {"mediaId": media_id}}})
 
 
+#: PixAI's per-image delete route (task.deleteTaskMedia, `delete-D3VOBDdK.js`, routed in
+#: `task-CtewRxby.js`): both ids in the path, `{}` as the body. 3.22 S3-delete.
+TASK_MEDIA_DELETE_PATH = "/task/{}/media/{}/delete"
+
+
+def delete_task_media(session, task_id, media_id):
+    """Delete ONE image out of a task: `POST /v2/task/{id}/media/{mediaId}/delete` on the API
+    key, through rest_post (3.22 S3-delete, DESIGN_3.22 2.9). It replaces the GraphQL
+    deleteBatchMedia (updateGenerationTask), which PixAI's own site no longer sends. IRREVERSIBLE.
+
+    READ_ONLY FIRST, then both ids must look like PixAI ids (_TASK_ID_RE) or nothing is sent, so
+    neither can step out of its path segment. SINGLE ATTEMPT (rest_post: no retry loop, no
+    redirect followed).
+
+    THE SUCCESS SHAPE IS AN ASSUMPTION, and it fails safe: PixAI's contract strips this route's
+    output, so `{"success": true}` -- the whole-task delete's shape -- is the only success, and
+    any other 2xx, a non-JSON body, any non-2xx or a network error raises PixAIError: the image
+    counts as NOT deleted, its local copy stays, and the user is told to try again. A repeat is
+    harmless: the plan's live read refuses a member that is already gone. The first live delete
+    is proven by the re-read (the member missing from REST mediaIds), not by this answer.
+    Returns True."""
+    from moonglade.backup import (_check_read_only, PixAIAuthError, PixAIError, PixAIRestError,
+                                  _ssl_help, vlog)
+    _check_read_only("delete one image from a task on your PixAI account")   # FIRST
+    tid, mid = str(task_id or "").strip(), str(media_id or "").strip()
+    if not _TASK_ID_RE.match(tid) or not _TASK_ID_RE.match(mid):
+        raise PixAIError("refusing to delete image {!r} of task {!r}: not PixAI ids. Nothing "
+                         "was sent.".format(mid[:64], tid[:64]))
+    _t = time.monotonic()
+    try:
+        answer = _pixai_client._client_of(session).rest_post(
+            TASK_MEDIA_DELETE_PATH.format(tid, mid), {})
+    except requests.exceptions.SSLError:
+        raise PixAIError(_ssl_help())
+    except PixAIRestError as e:
+        if e.status == 401:
+            raise PixAIAuthError("401 Unauthorized -- PixAI refused the API key; the image was "
+                                 "not deleted.")
+        raise PixAIError("HTTP {} deleting image {} of task {}: {}; it is treated as not "
+                         "deleted.".format(e.status, mid, tid, str(e)[:300]))
+    except ValueError as e:
+        if isinstance(e, requests.RequestException) and not isinstance(
+                e, getattr(requests.exceptions, "JSONDecodeError", ())):
+            raise PixAIError("network error deleting image {}: {}".format(mid, e))
+        raise PixAIError("PixAI answered the delete of image {} with something that is not "
+                         "JSON; it is treated as not deleted and its local copy stays."
+                         .format(mid))
+    except requests.RequestException as e:
+        raise PixAIError("network error deleting image {}: {}. PixAI may or may not have "
+                         "deleted it; it is treated as not deleted and its local copy stays."
+                         .format(mid, e))
+    if not (isinstance(answer, dict) and answer.get("success") is True):
+        raise PixAIError("PixAI answered the delete of image {} without confirming it; it is "
+                         "treated as not deleted and its local copy stays.".format(mid))
+    vlog("image delete {}/{} -> ok in {:.2f}s".format(tid, mid, time.monotonic() - _t))
+    return True
+
+
 def delete_task(session, task_id):
     """Delete ONE whole generation (task) from your PixAI account: `POST /v2/task/{id}/delete`.
 
@@ -423,7 +481,7 @@ def delete_image_routed(session, task_id, media_id, confirmed_plan=None):
             plan.live_siblings, plan.keep_media, plan.cloud_deleted_at,
             plan.keep_media_deleted_at, plan.artwork_ids)
     if plan.plan == "per-image":
-        delete_batch_media_gql(session, task_id, media_id)
+        delete_task_media(session, task_id, media_id)        # REST since 3.22 S3-delete
     else:
         delete_task(session, task_id)
     return plan

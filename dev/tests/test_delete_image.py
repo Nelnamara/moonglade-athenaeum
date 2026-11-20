@@ -110,7 +110,7 @@ def test_it_deletes_only_the_named_image_and_leaves_its_siblings(tmp_path, monke
     seen = {}
     monkeypatch.setattr(core, "_make_session", _session_stub)
     _reads(monkeypatch, _all_live())
-    monkeypatch.setattr(cloud_delete_mod, "delete_batch_media_gql",
+    monkeypatch.setattr(cloud_delete_mod, "delete_task_media",
                         lambda s, tid, mid: seen.update(task=tid, media=mid))
     for f in ("a.png", "b.png", "c.png"):
         (tmp_path / f).write_bytes(b"x")
@@ -138,7 +138,7 @@ def test_a_failed_cloud_delete_leaves_the_local_copy_alone(tmp_path, monkeypatch
     def boom(s, tid, mid):
         raise core.PixAIError("HTTP 500 from PixAI")
 
-    monkeypatch.setattr(cloud_delete_mod, "delete_batch_media_gql", boom)
+    monkeypatch.setattr(cloud_delete_mod, "delete_task_media", boom)
     (tmp_path / "b.png").write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
 
@@ -158,7 +158,7 @@ def test_a_failed_local_purge_comes_back_as_an_error_body(tmp_path, monkeypatch)
     quietly stays in the catalog."""
     monkeypatch.setattr(core, "_make_session", _session_stub)
     _reads(monkeypatch, _all_live())
-    monkeypatch.setattr(cloud_delete_mod, "delete_batch_media_gql", lambda s, tid, mid: None)
+    monkeypatch.setattr(cloud_delete_mod, "delete_task_media", lambda s, tid, mid: None)
     (tmp_path / "b.png").write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
 
@@ -185,7 +185,7 @@ def test_a_failed_local_purge_comes_back_as_an_error_body(tmp_path, monkeypatch)
 
 def _nothing_deletes(monkeypatch):
     """Both delete mutations wired to fail the test if either one is reached."""
-    monkeypatch.setattr(cloud_delete_mod, "delete_batch_media_gql", lambda *a, **k: pytest.fail(
+    monkeypatch.setattr(cloud_delete_mod, "delete_task_media", lambda *a, **k: pytest.fail(
         "the per-image mutation fired"))
     monkeypatch.setattr(cloud_delete_mod, "delete_task", lambda *a, **k: pytest.fail(
         "the whole-task mutation fired"))
@@ -260,7 +260,7 @@ def test_the_whole_task_branch_keeps_what_pixai_already_deleted(tmp_path, monkey
     _reads(monkeypatch, _live_task(("a", True), ("c", False)))
     monkeypatch.setattr(cloud_delete_mod, "delete_task",
                         lambda s, tid: fired.update(task=tid))
-    monkeypatch.setattr(cloud_delete_mod, "delete_batch_media_gql", lambda *a, **k: pytest.fail(
+    monkeypatch.setattr(cloud_delete_mod, "delete_task_media", lambda *a, **k: pytest.fail(
         "the per-image mutation fired on the last live image of a batch"))
     for f in ("a.png", "b.png", "c.png"):
         (tmp_path / f).write_bytes(b"x")
@@ -336,7 +336,7 @@ def test_a_confirmed_delete_writes_one_activity_row(tmp_path, monkeypatch):
     """
     monkeypatch.setattr(core, "_make_session", _session_stub)
     _reads(monkeypatch, _all_live())
-    monkeypatch.setattr(cloud_delete_mod, "delete_batch_media_gql", lambda s, tid, mid: None)
+    monkeypatch.setattr(cloud_delete_mod, "delete_task_media", lambda s, tid, mid: None)
     for f in ("a.png", "b.png", "c.png"):
         (tmp_path / f).write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
@@ -415,7 +415,7 @@ def test_a_cloud_delete_that_errors_is_logged_as_a_failure(tmp_path, monkeypatch
     def boom(s, tid, mid):
         raise core.PixAIError("HTTP 500 from PixAI")
 
-    monkeypatch.setattr(cloud_delete_mod, "delete_batch_media_gql", boom)
+    monkeypatch.setattr(cloud_delete_mod, "delete_task_media", boom)
     (tmp_path / "b.png").write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
 
@@ -433,7 +433,7 @@ def test_a_lone_image_uses_the_whole_task_mutation(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", _session_stub)
     _reads(monkeypatch, _lone_task("b"))
     monkeypatch.setattr(cloud_delete_mod, "delete_task", lambda s, tid: fired.update(task=tid))
-    monkeypatch.setattr(cloud_delete_mod, "delete_batch_media_gql", lambda *a, **k: pytest.fail(
+    monkeypatch.setattr(cloud_delete_mod, "delete_task_media", lambda *a, **k: pytest.fail(
         "the per-image mutation fired on a task with no batch -- PixAI answers 403"))
     (tmp_path / "b.png").write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
@@ -534,7 +534,7 @@ def test_it_refuses_without_the_confirm_flag(tmp_path, monkeypatch):
     could delete."""
     called = []
     monkeypatch.setattr(core, "_make_session", _session_stub)
-    monkeypatch.setattr(cloud_delete_mod, "delete_batch_media_gql",
+    monkeypatch.setattr(cloud_delete_mod, "delete_task_media",
                         lambda s, t, m: called.append((t, m)))
     cli = _cli(tmp_path, _batch(tmp_path))
     r = cli.post("/api/delete-image", json={"media_id": "b"})
@@ -567,7 +567,7 @@ def test_an_imported_file_says_so_instead_of_erroring(tmp_path, monkeypatch):
     blank task id."""
     called = []
     monkeypatch.setattr(core, "_make_session", _session_stub)
-    monkeypatch.setattr(cloud_delete_mod, "delete_batch_media_gql",
+    monkeypatch.setattr(cloud_delete_mod, "delete_task_media",
                         lambda s, t, m: called.append((t, m)))
     cli = _cli(tmp_path, _batch(tmp_path))
     d = cli.post("/api/delete-image", json=_confirmed(cli, "z")).get_json()
