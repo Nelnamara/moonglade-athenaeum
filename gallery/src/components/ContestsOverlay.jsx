@@ -57,7 +57,7 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
   const ct = useContests({ mine: true });
   const { d, err, contests, official, community, featured, restOfficial,
           dateRange, daysLeft, mine, mineRows, mineErr, entriesFor, enteredCount,
-          syncing, reloadMine, qualifyFor } = ct;
+          syncing, reloadMine, qualifyFor, updating, refreshFailed } = ct;
   const [tab, setTab] = useState("contests");     // "contests" | "mine"
   const [detail, setDetail] = useState(null);     // the contest whose detail is open
   const [picking, setPicking] = useState(null);   // the contest we are picking art for
@@ -139,6 +139,12 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
 
           {tab === "contests" && !d && !err && <div className="mgh-loading">loading live contests…</div>}
           {tab === "contests" && err && <div className="mgh-loading">couldn't load — {err}</div>}
+
+          {tab === "contests" && d && (updating || refreshFailed) && (
+            <div className="mgh-loading" style={{ padding: "0 0 10px" }}>
+              {updating ? "Updating\u2026" : "Couldn\u2019t refresh \u2014 showing the saved list"}
+            </div>
+          )}
 
           {tab === "contests" && d && (
             <>

@@ -89,6 +89,51 @@ def contest_board(core, session, force=False, full=False):
         return rows
 
 
+_contests_bg = {"running": False}          # a background refresh walk is in flight (memo lock)
+
+
+def contest_board_swr(core, session):
+    """The board for a cold open, stale-while-revalidate -> (rows, saved_at).
+
+    `saved_at` is None for a current answer (the memo, or a walk this call waited for). When
+    the 90 s memo has nothing current but there are rows to show -- the expired memo's, else
+    the on-disk board cache's -- those rows are answered AT ONCE with the time they were
+    saved, and one walk is started on a background thread. The walk is contest_board's own, so
+    it queues on the same single-flight lock (never two walks) and its result lands in the
+    memo for the next ask. No rows anywhere (no cache file): behave as contest_board does and
+    wait for the walk."""
+    asked = time.time()
+    with _contests_cache_lock:
+        ent = _contests_cache.get("board")
+        if ent and (asked - ent["at"]) < CONTESTS_TTL:
+            return ent["rows"], None
+        have = (ent["rows"], ent["at"]) if ent else None
+    if have is None:
+        have = _contests.cached_board(_contests.contest_cache_path())
+    if have is None:
+        return contest_board(core, session), None
+    with _contests_cache_lock:
+        start = not _contests_bg["running"]
+        _contests_bg["running"] = True
+    if start:
+        def _go():
+            try:
+                contest_board(core, session)
+            except Exception as e:                            # noqa: BLE001 -- the next poll retries
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "contest board: background refresh failed: %s", type(e).__name__)
+            finally:
+                with _contests_cache_lock:
+                    _contests_bg["running"] = False
+        try:
+            threading.Thread(target=_go, daemon=True).start()
+        except Exception:                                     # noqa: BLE001
+            with _contests_cache_lock:
+                _contests_bg["running"] = False
+    return have
+
+
 def contest_board_meta():
     """How the memoized board's walk ended (list_contests' `meta`: truncated, limit,
     total_count ...), or {} when nothing is cached. A copy, so a caller cannot edit the memo."""

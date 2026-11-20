@@ -93,3 +93,38 @@ def test_the_route_answers_per_running_contest(tmp_path, monkeypatch, pixai):
     cli = login_test_client(create_app(tmp_path))
     d = cli.get("/api/contests/qualify").get_json()
     assert d["contests"] == {"run": [{"kind": "model", "need": 1, "used": 1, "unknown": 0}]}
+
+
+def test_the_version_map_survives_a_restart_and_skips_the_reads(tmp_path, monkeypatch):
+    db = _catalog(tmp_path)
+    cq._cache.clear()
+    cq._loaded_from = None
+    asked = []
+    monkeypatch.setattr(cq, "model_version_ids",
+                        lambda core_, s, mid: asked.append(mid) or {"VER-A", "V-" + mid})
+    contests = [{"id": "c%d" % i, "rules": [{"type": "required_model_ids", "model_ids": ["M%d" % i]}]}
+                for i in range(3)]
+    first = cq.board_qualify(None, None, contests, db, sleep=lambda s: None, now=1000.0)
+    assert asked == ["M0", "M1", "M2"]
+    from moonglade import paths
+    assert (paths.cache_dir() / cq.STORE_NAME).is_file()
+    # a "restart": fresh module state, same folder
+    cq._cache.clear()
+    cq._loaded_from = None
+    asked.clear()
+    again = cq.board_qualify(None, None, contests, db, sleep=lambda s: None, now=2000.0)
+    assert asked == [] and again == first
+    # the same 24 h TTL per entry: past it the reads come back
+    cq._cache.clear()
+    cq._loaded_from = None
+    cq.board_qualify(None, None, contests, db, sleep=lambda s: None, now=1000.0 + cq.VERSIONS_TTL_S + 1)
+    assert asked == ["M0", "M1", "M2"]
+
+
+def test_a_corrupt_version_file_is_an_empty_map(tmp_path, monkeypatch):
+    from moonglade import paths
+    (paths.cache_dir()).mkdir(parents=True, exist_ok=True)
+    (paths.cache_dir() / cq.STORE_NAME).write_text("{not json", encoding="utf-8")
+    cq._cache.clear()
+    cq._loaded_from = None
+    assert cq.cached_versions("M") is None

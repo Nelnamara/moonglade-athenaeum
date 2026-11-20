@@ -310,3 +310,121 @@ def test_the_cache_temp_names_are_unique_and_leave_nothing_behind(tmp_path, monk
     c._save_contest_cache(str(path), {"v": 1, "rows": {}})        # logged, never raised
     assert sorted(x.name for x in path.parent.iterdir()) == ["contest_cache.json"], \
         "a failed swap leaves no temp file"
+
+
+# ---- the cold open: the saved list answers at once, a walk refreshes behind ---------------------
+
+def _row(i, active=True):
+    return {"id": str(i), "title": "C%s" % i, "slug": "c%s" % i, "type": "community", "active": active}
+
+
+class _GatedWalk:
+    """list_contests stand-in: counts walks, blocks each on an event, returns fresh rows."""
+    def __init__(self):
+        import threading
+        self.gate, self.lock = threading.Event(), threading.Lock()
+        self.n, self.live, self.peak = 0, 0, 0
+
+    def __call__(self, session, **kw):
+        with self.lock:
+            self.n += 1
+            self.live += 1
+            self.peak = max(self.peak, self.live)
+        try:
+            self.gate.wait(10)
+            return [_row(9, True)]
+        finally:
+            with self.lock:
+                self.live -= 1
+
+
+def _wait(pred, secs=5.0):
+    import time
+    end = time.time() + secs
+    while not pred() and time.time() < end:
+        time.sleep(0.01)
+    return pred()
+
+
+def _cold_client(tmp_path, monkeypatch, with_cache):
+    from moonglade.gallery import create_app
+    from tests.conftest import login_test_client
+    walk = _GatedWalk()
+    monkeypatch.setattr(c, "list_contests", walk)
+    contest_sync._contests_cache.clear()
+    contest_sync._contests_bg["running"] = False
+    if with_cache:
+        c._save_contest_cache(c.contest_cache_path(), {
+            "v": 1, "saved_at": 1234.5, "full_at": 1234.5,
+            "rows": {str(i): {"row": _row(i), "updated_at": "u", "page": 1, "seen_at": 1.0,
+                              "settled": True} for i in (1, 2)}})
+    return login_test_client(create_app(tmp_path)), walk
+
+
+def test_a_cold_open_with_a_saved_list_answers_stale_without_waiting_for_the_walk(
+        tmp_path, monkeypatch, pixai):
+    cli, walk = _cold_client(tmp_path, monkeypatch, True)
+    try:
+        d = cli.get("/api/contests").get_json()          # the walk is blocked: this must not wait
+        assert d["stale"] is True and d["saved_at"] == 1234.5
+        assert [x["id"] for x in d["contests"]] == ["2", "1"]
+        assert _wait(lambda: walk.n == 1)
+        # the title lookup of My entries does not wait either, and starts no second walk
+        assert cli.get("/api/contest/mine").status_code == 200
+        again = cli.get("/api/contests").get_json()
+        assert again["stale"] is True
+        assert walk.n == 1 and walk.peak == 1, "one walk at a time"
+    finally:
+        walk.gate.set()
+    assert _wait(lambda: "board" in contest_sync._contests_cache)
+    done = cli.get("/api/contests").get_json()
+    assert "stale" not in done and [x["id"] for x in done["contests"]] == ["9"]
+    assert _wait(lambda: not contest_sync._contests_bg["running"])
+
+
+def test_a_cold_open_with_no_saved_list_waits_for_the_walk(tmp_path, monkeypatch, pixai):
+    import threading
+    cli, walk = _cold_client(tmp_path, monkeypatch, False)
+    got = []
+    t = threading.Thread(target=lambda: got.append(cli.get("/api/contests").get_json()))
+    t.start()
+    try:
+        assert _wait(lambda: walk.n == 1)
+        t.join(0.4)
+        assert t.is_alive() and not got, "no cache file: it waits, as before"
+    finally:
+        walk.gate.set()
+    t.join(10)
+    assert got and "stale" not in got[0] and [x["id"] for x in got[0]["contests"]] == ["9"]
+
+
+def test_a_forced_refresh_still_waits_for_the_real_walk(tmp_path, monkeypatch, pixai):
+    import threading
+    cli, walk = _cold_client(tmp_path, monkeypatch, True)
+    got = []
+    t = threading.Thread(target=lambda: got.append(cli.get("/api/contests?refresh=1").get_json()))
+    t.start()
+    try:
+        assert _wait(lambda: walk.n == 1)
+        t.join(0.4)
+        assert t.is_alive() and not got, "refresh=1 does not answer from the saved list"
+    finally:
+        walk.gate.set()
+    t.join(10)
+    assert got and "stale" not in got[0] and [x["id"] for x in got[0]["contests"]] == ["9"]
+
+
+def test_an_expired_memo_answers_stale_from_its_own_rows(monkeypatch):
+    import time
+    walk = _GatedWalk()
+    monkeypatch.setattr(c, "list_contests", walk)
+    contest_sync._contests_bg["running"] = False
+    contest_sync._contests_cache["board"] = {
+        "at": time.time() - contest_sync.CONTESTS_TTL - 5, "rows": [_row(5)], "meta": {}}
+    try:
+        rows, saved = contest_sync.contest_board_swr(None, object())
+        assert rows == [_row(5)] and saved is not None
+        assert _wait(lambda: walk.n == 1)
+    finally:
+        walk.gate.set()
+    assert _wait(lambda: not contest_sync._contests_bg["running"])

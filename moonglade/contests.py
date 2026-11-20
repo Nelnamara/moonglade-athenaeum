@@ -172,6 +172,21 @@ def _save_contest_cache(path, cache):
             "contest board: could not write the cache (%s: %s)", type(e).__name__, str(e)[:120])
 
 
+def cached_board(path):
+    """(rows, saved_at) from the cache file as it stands -- every row it holds, settled or not,
+    newest-first -- or None when there is no cache or it holds no rows. Local only, no network:
+    the stale-while-revalidate open serves this at once while a walk refreshes it."""
+    cache = _load_contest_cache(path)
+    if not cache or not cache["rows"]:
+        return None
+    rows = [e["row"] for e in cache["rows"].values()
+            if isinstance(e, dict) and isinstance(e.get("row"), dict)]
+    if not rows:
+        return None
+    rows.sort(key=_id_key, reverse=True)
+    return rows, float(cache.get("saved_at") or 0.0)
+
+
 def _board_page(session, page):
     from moonglade.backup import _rest_get
     return _rest_get(session, "/contest/list",

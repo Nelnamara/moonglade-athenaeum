@@ -88,7 +88,39 @@ export default function useContests(opts) {
   // ride useSwrGet -- it has a sync handshake and a poll wrapped around its read, so it
   // seeds from peek() and writes through with put() inside reloadMine instead, leaving
   // that handshake byte-for-byte as it was.
-  const { data: d, err } = useSwrGet("/api/contests");
+  const { data: d0, err } = useSwrGet("/api/contests");
+
+  // A cold server answers from its saved list at once and marks it `stale` while a walk
+  // refreshes it behind. Re-ask every 2 s until a current answer lands, for at most 30 s;
+  // past that the saved list stays and the overlay says it could not refresh.
+  const [fresh, setFresh] = useState(null);
+  const [staleGaveUp, setStaleGaveUp] = useState(false);
+  useEffect(() => {
+    if (!d0 || !d0.stale) return undefined;
+    let dead = false;
+    let timer = null;
+    const started = Date.now();
+    const tick = () => {
+      timer = setTimeout(() => {
+        apiGet("/api/contests").then((r) => {
+          if (dead) return;
+          if (r && !r.error && !r.stale) {
+            put("/api/contests", r);
+            setFresh(r);
+            setStaleGaveUp(false);
+            return;
+          }
+          if (Date.now() - started >= 30000) { setStaleGaveUp(true); return; }
+          tick();
+        });
+      }, 2000);
+    };
+    tick();
+    return () => { dead = true; if (timer) clearTimeout(timer); };
+  }, [d0]);
+  const d = d0 && d0.stale && fresh ? fresh : d0;
+  const updating = !!(d && d.stale && !staleGaveUp);
+  const refreshFailed = !!(d && d.stale && staleGaveUp);
 
   const contests = d ? d.contests || [] : [];
   const official = contests.filter((c) => c.type === "official");
@@ -282,5 +314,5 @@ export default function useContests(opts) {
   return { d, err, contests, official, community, featured, restOfficial, openContest,
            dateRange, daysLeft,
            mine, mineErr, mineRows, mineBy, entriesFor, enteredCount, totalEntries,
-           syncing, reloadMine, qualifyFor };
+           syncing, reloadMine, qualifyFor, updating, refreshFailed };
 }
