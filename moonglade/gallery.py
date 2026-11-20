@@ -13238,9 +13238,11 @@ def create_app(out_dir: Path):
         Soft-fail semantics are unchanged, and a failure is NOT cached: an offline blip
         must not pin an empty board for the next minute and a half."""
         show_all = request.args.get("all") == "1"
+        # The board's Refresh: one full walk that rewrites the settled-row cache.
+        refresh = request.args.get("refresh") == "1"
         try:
             core, session = _gen_session()
-            rows = _contest_sync.contest_board(core, session)
+            rows = _contest_sync.contest_board(core, session, force=refresh, full=refresh)
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "contests": []}), 200
         # Both variants come off the ONE snapshot -- `active` is the server's own

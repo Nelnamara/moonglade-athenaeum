@@ -39,7 +39,7 @@ _contests_cache = {}
 _contests_cache_lock = threading.Lock()
 
 
-def contest_board(core, session, force=False):
+def contest_board(core, session, force=False, full=False):
     """The WHOLE contest board, memoized for CONTESTS_TTL -- and the one read every
     consumer goes through.
 
@@ -61,7 +61,8 @@ def contest_board(core, session, force=False):
         if not force and ent and (now - ent["at"]) < CONTESTS_TTL:
             return ent["rows"]
     meta = {}
-    rows = _contests.list_contests(session, active_only=False, meta=meta)
+    rows = _contests.list_contests(session, active_only=False, meta=meta,
+                                   cache_path=_contests.contest_cache_path(), full=full)
     with _contests_cache_lock:
         _contests_cache["board"] = {"at": time.time(), "rows": rows, "meta": meta}
     return rows
