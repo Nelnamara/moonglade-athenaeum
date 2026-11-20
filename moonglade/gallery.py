@@ -14487,7 +14487,7 @@ def create_app(out_dir: Path):
                     category, training_task_id=dataset_task_id if reuse else "",
                     kaisuuken_id=(card["id"] if free_by_card else ""), config=cfg)
             except Exception as e:
-                if _gen_road.definite_refusal(e, codes=_gen_road.TRAINING_CODES):
+                if _gen_road.definite_refusal(e, "training"):
                     train_guard.basic_resolve(key, "refused")
                     return jsonify({"error": str(e)}), 502
                 train_guard.basic_resolve(key, "ambiguous")
@@ -15032,7 +15032,7 @@ def create_app(out_dir: Path):
             try:
                 status = _training.start_training_captions(session, tid)
             except Exception as e:                      # noqa: BLE001
-                if _gen_road.definite_refusal(e, codes=_gen_road.TRAINING_CODES):
+                if _gen_road.definite_refusal(e, "training"):
                     train_guard.paid_resolve("caption", tid, "refused")
                     return _train_refusal(e)
                 train_guard.paid_resolve("caption", tid, "ambiguous")
@@ -15113,7 +15113,7 @@ def create_app(out_dir: Path):
             try:
                 status = _training.submit_advanced_training(session, tid)
             except Exception as e:                      # noqa: BLE001
-                if _gen_road.definite_refusal(e, codes=_gen_road.TRAINING_CODES):
+                if _gen_road.definite_refusal(e, "training"):
                     train_guard.paid_resolve("submit", tid, "refused")
                     return _train_refusal(e)
                 train_guard.paid_resolve("submit", tid, "ambiguous")
@@ -15184,7 +15184,7 @@ def create_app(out_dir: Path):
             try:
                 res = _training.retry_training(session, tid)
             except Exception as e:                      # noqa: BLE001
-                if _gen_road.definite_refusal(e, codes=_gen_road.TRAINING_CODES):
+                if _gen_road.definite_refusal(e, "training"):
                     train_guard.retry_resolve(tid, "refused")
                     return _train_refusal(e)
                 train_guard.retry_resolve(tid, "ambiguous")

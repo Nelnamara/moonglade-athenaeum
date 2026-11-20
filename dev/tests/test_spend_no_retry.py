@@ -64,6 +64,10 @@ SPEND_PATHS = ("submit_generation", "run_generate", "run_generate_video",
                # draft (createTrainingTask -- a re-POST would make a second draft) and
                # making a LoRA public (upsertGenerationModel -- irreversible).
                "create_advanced_training_draft", "make_model_public",
+               # The advanced training REST spend paths (3.22 S3-training, DESIGN_3.22 2.10):
+               # start, retry, describe and publish a run, each one rest_post on the API key.
+               "submit_advanced_training", "retry_training", "start_training_captions",
+               "publish_training",
                # Artwork mutations: no credits, but they change the public account and
                # a retry would publish twice / delete something already gone.
                "publish_artwork_from_task", "update_artwork", "delete_artwork",

@@ -957,3 +957,20 @@ def test_the_training_table_is_the_harvested_one_and_never_the_create_table():
         exc = core.PixAIRestError("x", 409, {"code": code})
         assert gen_road_mod.definite_refusal(exc, codes=gen_road_mod.TRAINING_CODES)
         assert not gen_road_mod.definite_refusal(exc), "a training code read with the create table"
+
+def test_the_training_guards_read_the_training_family_by_name():
+    """3.22 S3-training (DESIGN_3.22 2.6, V5): the four paid training guards read
+    definite_refusal(e, "training") -- OUTCOME_FAMILIES' table by name -- and that is the
+    harvested TRAINING_CODES, never the create table. A training code read in family "create"
+    is unknown; read in "training" it is a refusal, so a clear refusal never holds Start."""
+    assert gen_road_mod.OUTCOME_FAMILIES["training"] is gen_road_mod.TRAINING_CODES
+    for code in sorted(gen_road_mod.TRAINING_CODES):
+        exc = core.PixAIRestError("x", 400, {"code": code})
+        assert gen_road_mod.classify_outcome(exc, "training") == "refused", code
+    for code in ("TRAINING_IMAGE_REJECTED", "TRAINING_DATASET_TOO_SMALL", "CONFLICT",
+                 "MODEL_PUBLISH_CONFLICT", "LORA_REBATE_REQUIRES_PUBLIC", "NOT_FOUND"):
+        exc = core.PixAIRestError("x", 400, {"code": code})
+        assert gen_road_mod.classify_outcome(exc, "create") == "unknown", code
+    # an unknown outcome stays unknown in the training family too
+    assert gen_road_mod.classify_outcome(core.PixAIRestError("x", 408, {"code": "CONFLICT"}),
+                                         "training") == "unknown"
