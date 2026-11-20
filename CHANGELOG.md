@@ -33,6 +33,12 @@ git tags. Full prose notes for tagged versions live on
 - **A half-read generation can no longer lead to a delete.** If PixAI's full record of a task can't be read, a single-picture delete is refused ("Couldn't read the task from PixAI; nothing was deleted, try again.") and nothing is routed from a partial record. Collecting with full details and the full-details backfill now fall back to PixAI's plainer record for the prompt and settings, leaving the per-picture seed and position blank rather than guessing. (2026-11-20)
 - **The picker no longer scrolls the library behind it.** While the Gallery picker is open the page behind it stays still, which also stops the flicker on a Mac in Chrome. (2026-11-20)
 - **SVG files draw in the gallery and still download safely.** They are served with their real type so a picture can show them, as a download only, under a strict sandbox. (2026-11-20)
+- **SVG tiles are no longer blank.** An SVG has no thumbnail, so its tile, picker tile and viewer now draw the SVG itself. (2026-11-20)
+- **The Activity row says when a free card went unused.** If a send meant for a free card was charged instead, its row reads "Your free card wasn't used. PixAI charged N credits.", and the note survives a restart. (2026-11-20)
+- **The AI Tools confirm says what it knows about the cost.** A scene's price can't be read before it runs, so the confirm now says it couldn't verify the cost and may spend credits, in the same words as Enhance. (2026-11-20)
+- **The command-line edit names its model and price first.** With no `--edit-model` the preview's first line says it is using Edit Pro and its price, and an edit model id the app doesn't know is refused before anything is sent. (2026-11-20)
+- **The AI Tools catalog stops asking for pictures that aren't there.** It asks for a scene's own art only when the library has it, and uses PixAI's picture otherwise. (2026-11-20)
+- **Two copies collecting the same account no longer share a download's temp file,** and a usage-tally save that fails is now logged instead of dropped silently. (2026-11-20)
 
 ## [3.21.4] - 2026-11-20 — The Extra Day
 
