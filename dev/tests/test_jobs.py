@@ -513,6 +513,36 @@ def test_empty_output_task_is_logged_failed_not_left_running(tmp_path, monkeypat
     assert job["status"] == "failed", "empty-output task left spinning at 'running'"
 
 
+def test_an_edit_card_note_survives_a_server_restart(tmp_path, monkeypatch, pixai):
+    """3.22 review F2 follow-up: an edit sent with a free card is noted on its job event at the
+    send, so the terminal card check still knows a card was sent after the server restarted
+    (a new app on the same library), and the done event and answer say the card went unused."""
+    from moonglade import cards as cards_mod
+    from tests.conftest import login_test_client
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    monkeypatch.setattr(cards_mod, "match_kaisuuken", lambda *a, **k: None)
+
+    def _submit(session, req, **k):
+        req.parameters["kaisuukenId"] = "K1"         # the card step attached a free card
+        return {"task_id": "777"}
+    monkeypatch.setattr(gen_road_mod, "submit", _submit)
+    first = login_test_client(create_app(tmp_path))
+    assert first.post("/api/edit", json={"source": "1", "instruction": "night"}
+                      ).get_json().get("task_id") == "777"
+
+    restarted = login_test_client(create_app(tmp_path))
+    monkeypatch.setattr(task_reads_mod, "generation_status",
+                        lambda s, tid: {"status": "completed", "phase": "done",
+                                        "paid_credit": 8000})
+    monkeypatch.setattr(gen_road_mod, "collect_generation",
+                        lambda session, tid, out, **kw: {"media_ids": ["M7"], "saved": 1})
+    body = restarted.get("/api/task-status?task_id=777").get_json()
+    assert body["phase"] == "done" and body.get("card_unused") is True
+    job = {j["job_id"]: j for j in jobs_mod.read_jobs(tmp_path)}["777"]
+    assert job["card_unused"] is True and job["paid_credit"] == 8000
+
+
 def test_a_transient_blip_still_does_not_write_a_false_failure(tmp_path, monkeypatch, pixai):
     """The other half of the same contract, and the reason a bare `except PixAIError`
     would have been the wrong fix: an ordinary error during collect (5xx/429/timeout,

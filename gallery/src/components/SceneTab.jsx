@@ -16,7 +16,8 @@ import { apiGet } from "../api.js";
    source"); dual adds its own 2nd slot here via the same askPicker() the rest of the drawer
    uses. Generate -> POST /api/scene (mirror-gated, JWT) -> the runs/History reel shows the
    result, identical to every other gen. Scenes carry no pre-price (PixAI exposes no scene
-   task-price op), so the confirm names the spend and the reel reports the real cost after. */
+   task-price op, and the catalog carries no price field), so the confirm says it couldn't
+   verify the cost and the reel reports the real cost after. */
 
 export default function SceneTab({ scene, source, armed }) {
   const [cfg, setCfg] = useState(null);       // null = loading; the matched control schema else
@@ -67,8 +68,10 @@ export default function SceneTab({ scene, source, armed }) {
 
   const run = async () => {
     if (busyRef.current || genOff) return;
-    if (!window.confirm((scene.name || "This scene") + " on your source — this spends credits and "
-      + "runs on the PixAI mirror. Go?")) return;
+    // Quoted the way EnhanceTab's confirm is. No scene price exists to quote (see the header),
+    // so it says it couldn't verify the cost, in the cost badge's words.
+    if (!window.confirm((scene.name || "This scene") + " on your source?\n\n"
+      + "couldn't verify the cost, so this may spend credits — runs on the PixAI mirror.")) return;
     busyRef.current = true; setBusy(true);
     const emit = openLine("Submitting " + (scene.name || "scene") + "…");
     const media = needsTwo ? [source, ref2 && ref2.media_id].filter(Boolean) : [source];

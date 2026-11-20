@@ -705,7 +705,7 @@ python -m moonglade --edit-image --edit-src "C:\pics\her.png" --prompt "..." --c
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--edit-model` | Edit Pro | edit model id (e.g. Reference Pro's id for reference-style edits) |
+| `--edit-model` | Edit Pro | edit model id (e.g. Reference Pro's id for reference-style edits). Only an id of an edit model the app knows is accepted; any other is refused with the known ones listed. With no `--edit-model`, the preview's first line says Edit Pro is being used and what it costs |
 | `--edit-resolution` | `1K` | output resolution (`1K`/`2K`/…) |
 | `--edit-aspect` | the model's own | output aspect ratio. Edit Pro defaults to `3:5` (it also offers `5:3`). Reference Pro defaults to `auto`, which sends no aspect ratio and lets PixAI choose the frame — it does not promise to keep your source's shape |
 | `--edit-quality` | `medium` | quality tier |

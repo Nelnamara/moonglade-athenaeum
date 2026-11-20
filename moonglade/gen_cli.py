@@ -979,6 +979,26 @@ def run_upload(args):
     return {"media_id": mid}
 
 
+def _edit_preview_model_line(args, params, override):
+    """The edit preview's first line: the model the shape names. With no --edit-model (and no
+    --params-json) the default is used, so the line says that, with PixAI's read-only quote
+    for this shape, or "couldn't verify the cost" when it cannot be read."""
+    from moonglade.backup import _make_session
+    chat = params.get("chat") if isinstance(params, dict) else None
+    mid = str((chat or {}).get("modelId") or "") if isinstance(chat, dict) else ""
+    label = (_gen_params.edit_model_by_id(mid) or {}).get("label") or "model {}".format(
+        mid or "(none named)")
+    if override or str(getattr(args, "edit_model", "") or "").strip():
+        return "Edit model: {} ({}).".format(label, mid or "none named")
+    try:
+        from moonglade import pricing as _pricing
+        price = _pricing.price_task(_make_session(getattr(args, "token", None)), params)
+    except Exception:
+        price = None
+    cost = "~{:,} credits".format(price) if price is not None else "couldn't verify the cost"
+    return "No --edit-model given: using {} ({}), {}.".format(label, mid, cost)
+
+
 def run_edit_image(args):
     """Instruct-edit an image via PixAI (createGenerationTask with a `chat` block):
     describe the change in --prompt and pass source(s) via --edit-src (a catalog
@@ -1019,8 +1039,6 @@ def run_edit_image(args):
 
     # PREVIEW: no upload, no submit, no credits. Local files shown as placeholders.
     if not existing_task and not getattr(args, "confirm", False):
-        print("=== PixAI task.createTask, POST /v2/task/create -- EDIT (PREVIEW, no credits "
-              "spent) ===")
         if override:
             params = json.loads(override)
         else:
@@ -1033,6 +1051,12 @@ def run_edit_image(args):
         # V12 (DESIGN_3.22 2.3): the wire step before the preview and the card check.
         params = _gen_params.to_wire("edit", params)
         _gen_params.preview_wire("edit", params)         # 3.22 review F10: as the door checks
+        # 3.22 review: the first line names the model, and says so plainly (with its price)
+        # when no --edit-model was given and the default -- the gallery Edit tab's, Edit Pro --
+        # is the one this would send.
+        print(_edit_preview_model_line(args, params, bool(override)))
+        print("=== PixAI task.createTask, POST /v2/task/create -- EDIT (PREVIEW, no credits "
+              "spent) ===")
         print(json.dumps({"parameters": params}, indent=2))
         _cards._preview_card_note(args, params)
         print("\nThis would SPEND PixAI credits (unless free above). "

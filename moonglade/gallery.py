@@ -17900,20 +17900,31 @@ def create_app(out_dir: Path):
         except Exception:                                    # noqa: BLE001
             return None
 
-    # Task ids this process sent with a free card on a road the Runs store does not record
-    # (an edit, a Loom send). The store's own `card` column covers /api/generate's single sends
-    # and every run, and survives a restart; this set does not. Read by the terminal card check.
+    # Task ids sent with a free card on a road the Runs store does not record (an edit, a Loom
+    # send). The store's own `card` column covers /api/generate's single sends and every run.
+    # For the others the note is the task's own job event (`card_sent`), written by the server
+    # at the send the way the Unlimited lane mark is, so it survives a server restart (3.22
+    # review F2 follow-up); the set is this process's copy of it. Read by the terminal check.
     _card_sent_tasks = set()
 
     def _note_card_sent(task_id, params):
         if task_id and isinstance(params, dict) and params.get("kaisuukenId"):
             _card_sent_tasks.add(str(task_id))
+            _log_job(str(task_id), status="running", type="generate", card_sent=True,
+                     source="web")
 
     def _card_was_sent(tid):
-        """True when the send behind task `tid` carried a free card (2.4 rule 7): the Runs
-        store's row, else this process's own note. Fail-soft: unknown is False."""
+        """True when the send behind task `tid` carried a free card (2.4 rule 7): this
+        process's note, the task's job event (`card_sent`, written at the send), else the Runs
+        store's row. Fail-soft: unknown is False."""
         if str(tid) in _card_sent_tasks:
             return True
+        try:
+            jobs_by_id, _order, _n = _jobs._reconstruct_jobs(out_dir)
+            if (jobs_by_id.get(str(tid)) or {}).get("card_sent"):
+                return True
+        except Exception:                                    # noqa: BLE001
+            pass
         try:
             from moonglade import runs
             found = runs.RunsStore(out_dir).find_task(tid)

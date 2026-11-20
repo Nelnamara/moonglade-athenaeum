@@ -133,6 +133,40 @@ def test_edit_requires_a_source(tmp_path):
         gen_cli_mod.run_edit_image(_edit_args(tmp_path, edit_src=[], params_json="", task_id=""))
 
 
+@pytest.mark.parametrize("confirm", [False, True])
+def test_an_unknown_edit_model_id_is_refused_before_anything_moves(tmp_path, monkeypatch,
+                                                                    confirm):
+    """3.22 review N1: `--edit-model <id>` with an id no edit model has is refused, preview and
+    --confirm alike, before a session, an upload or a price read, naming the known models."""
+    def boom(*a, **k):
+        raise AssertionError("nothing may move for an unknown edit model")
+    monkeypatch.setattr(core, "_make_session", boom)
+    monkeypatch.setattr(core, "upload_media", boom)
+    with pytest.raises(core.LocalRefusal) as ei:
+        gen_cli_mod.run_edit_image(_edit_args(tmp_path, edit_model="1234567890", confirm=confirm))
+    msg = str(ei.value)
+    assert "1234567890" in msg and "nothing was sent" in msg
+    for spec in gen_params_mod.EDIT_MODELS.values():
+        assert spec["label"] in msg and spec["model_id"] in msg
+
+
+@pytest.mark.parametrize("quote, cost", [(8000, "~8,000 credits"),
+                                         (None, "couldn't verify the cost")])
+def test_edit_preview_first_line_names_the_default_model_and_its_price(
+        tmp_path, monkeypatch, capsys, quote, cost):
+    """3.22 review: with no --edit-model the preview's FIRST line says the default (the
+    gallery Edit tab's own, Edit Pro) is used, with its quote; a named model is named."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, p: quote)
+    gen_cli_mod.run_edit_image(_edit_args(tmp_path, no_card=True))
+    first = capsys.readouterr().out.splitlines()[0]
+    assert first == "No --edit-model given: using Edit Pro ({}), {}.".format(
+        gen_params_mod.EDIT_PRO_MODEL_ID, cost)
+    gen_cli_mod.run_edit_image(_edit_args(tmp_path, no_card=True, edit_model=REF_PRO))
+    assert capsys.readouterr().out.splitlines()[0] == "Edit model: Reference Pro ({}).".format(
+        REF_PRO)
+
+
 def test_edit_config_from_args_clamps_to_model_caps(tmp_path):
     """The CLI's own --edit-resolution/--edit-quality DEFAULTS (1K/medium) are exactly
     what used to reach the server unclamped -- a real model like reference-pro (no

@@ -161,6 +161,18 @@ def test_the_catalog_carries_no_price_so_no_row_pretends_to():
     assert not {k for k in r if k.lower() in ("price", "cost", "credit", "credits")}
 
 
+def test_the_scene_confirm_says_it_could_not_verify_the_cost():
+    """3.22 review: the AI Tools scene confirm quotes its cost the way EnhanceTab's does.
+    With no scene price anywhere (above), that is the cost badge's "couldn't verify the cost";
+    and the confirm stays a window.confirm before the send (DECISIONS: Fix keeps its confirm)."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[2] / "gallery/src/components/SceneTab.jsx"
+           ).read_text(encoding="utf-8")
+    send = src.index('submitTask("/api/scene"')
+    gate = src[src.index("if (!window.confirm("):send]
+    assert "couldn't verify the cost" in gate and "may spend credits" in gate
+
+
 # --- the memo ------------------------------------------------------------------------
 
 def test_catalog_is_memoized_so_both_scene_surfaces_share_one_upstream_read(_core):

@@ -1715,9 +1715,26 @@ def build_chat_edit_parameters(prompt, media_ids, model_id=EDIT_PRO_MODEL_ID, *,
     return params
 
 
+def known_edit_models_note():
+    """The known edit models in plain words, '<label> (<model id>)' each, for a refusal."""
+    return ", ".join("{} ({})".format(s["label"], s["model_id"]) for s in EDIT_MODELS.values())
+
+
+def check_cli_edit_model(model_id):
+    """3.22 review N1: `--edit-model` takes a model id, and only an id EDIT_MODELS knows is
+    sent. Any other id is refused here, before a preview, an upload or a network call, with
+    the known ones listed. An empty id is the default (Edit Pro) and passes."""
+    from moonglade.backup import LocalRefusal
+    mid = str(model_id or "").strip()
+    if mid and edit_model_by_id(mid) is None:
+        raise LocalRefusal("--edit-model {} is not an edit model this app knows, so nothing "
+                           "was sent. Known edit models: {}.".format(mid, known_edit_models_note()))
+
+
 def _edit_config_from_args(args):
     """Pull the modelConfig knobs (with defaults) out of CLI/GUI args."""
-    model_id = getattr(args, "edit_model", "") or EDIT_PRO_MODEL_ID
+    check_cli_edit_model(getattr(args, "edit_model", ""))
+    model_id = str(getattr(args, "edit_model", "") or "").strip() or EDIT_PRO_MODEL_ID
     resolution = getattr(args, "edit_resolution", "") or "1K"
     # No --edit-aspect -> the model's own default (Edit Pro 3:5, Reference Pro auto), not a
     # fixed 3:4 that clamp would then keep on every model offering it (SCOPE_2026-09-26 E1).
