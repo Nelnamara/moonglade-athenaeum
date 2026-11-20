@@ -90,3 +90,66 @@ def test_old_see_through_thumbnails_rebuild_once(tmp_path):
     (thumbs / "1.jpg").write_bytes(b"sentinel")
     g.build_thumbnails(rows, tmp_path, thumbs, workers=1)
     assert (thumbs / "1.jpg").read_bytes() == b"sentinel"
+
+def _old_style_library(tmp_path):
+    from PIL import Image
+    thumbs = tmp_path / "gallery" / "thumbs"
+    thumbs.mkdir(parents=True)
+    _holey_png(tmp_path / "a_1.png")
+    Image.new("RGB", (50, 50), (9, 9, 9)).save(tmp_path / "b_2.png")
+    for mid in ("1", "2"):
+        Image.new("RGB", (50, 50), (0, 0, 0)).save(thumbs / (mid + ".jpg"))
+    rows = [_row(media_id="1", filename="a_1.png"), _row(media_id="2", filename="b_2.png")]
+    return thumbs, rows
+
+
+def test_start_build_does_not_run_the_recheck_inline(tmp_path):
+    thumbs, rows = _old_style_library(tmp_path)
+    before = (thumbs / "1.jpg").read_bytes()
+    g.build_thumbnails(rows, tmp_path, thumbs, workers=1, recheck=False)
+    assert (thumbs / "1.jpg").read_bytes() == before         # old thumbnail untouched
+    assert not (thumbs / g.CHECKER_MARKER).exists()
+    # a MISSING thumbnail is still built by the same call, as before the re-check existed
+    (thumbs / "2.jpg").unlink()
+    g.build_thumbnails(rows, tmp_path, thumbs, workers=1, recheck=False)
+    assert (thumbs / "2.jpg").exists()
+
+
+def test_background_pass_recuts_see_through_and_writes_marker(tmp_path):
+    from PIL import Image
+    thumbs, rows = _old_style_library(tmp_path)
+    old_opaque = (thumbs / "2.jpg").read_bytes()
+    th = g.start_see_through_recheck(rows, tmp_path, thumbs)
+    assert th is not None
+    th.join(30)
+    with Image.open(thumbs / "1.jpg") as t:
+        assert _close(t.convert("RGB").getpixel((5, 5)), g.CHECKER_A)
+    assert (thumbs / "2.jpg").read_bytes() == old_opaque
+    assert (thumbs / g.CHECKER_MARKER).exists()
+    assert g.start_see_through_recheck(rows, tmp_path, thumbs) is None   # marker: nothing to do
+
+
+def test_interrupted_pass_leaves_no_marker(tmp_path, monkeypatch):
+    import threading
+    thumbs, rows = _old_style_library(tmp_path)
+    cancel = threading.Event()
+    cancel.set()
+    assert g.recheck_see_through_thumbnails(rows, tmp_path, thumbs, workers=1, cancel=cancel) is False
+    assert not (thumbs / g.CHECKER_MARKER).exists()
+    # a failed recut also leaves no marker, so the pass runs again next start
+    monkeypatch.setattr(g, "make_thumbnail", lambda *a, **k: False)
+    assert g.recheck_see_through_thumbnails(rows, tmp_path, thumbs, workers=2) is False
+    assert not (thumbs / g.CHECKER_MARKER).exists()
+
+
+def test_header_decides_candidates_before_any_alpha_decode(tmp_path, monkeypatch):
+    from PIL import Image
+    Image.new("RGB", (30, 30), (1, 2, 3)).save(tmp_path / "o.png")
+    _holey_png(tmp_path / "h.png")
+    calls = []
+    real = g._see_through_rgba
+    monkeypatch.setattr(g, "_see_through_rgba", lambda im: calls.append(1) or real(im))
+    assert g.source_is_see_through(tmp_path / "o.png") is False
+    assert calls == []                                   # opaque RGB: header only
+    assert g.source_is_see_through(tmp_path / "h.png") is True
+    assert calls == [1]

@@ -4327,15 +4327,22 @@ def thumb_rgb(im, size, resample=None):
     return board
 
 
+def _could_be_see_through(im):
+    """Header-only test: the mode or the `transparency` info says the picture MAY have
+    see-through pixels. Reads no pixel data, so an opaque RGB/L original costs one header read."""
+    return im.mode in ("RGBA", "LA", "PA", "La", "RGBa") or "transparency" in im.info
+
+
 def source_is_see_through(img_path):
     """True when the original file has see-through pixels (a GIF is judged on its first
-    frame, the one make_thumbnail draws). False on any read problem."""
+    frame, the one make_thumbnail draws). False on any read problem. The header (mode and
+    `transparency` info) is looked at first; the alpha is decoded only for those candidates."""
     if Image is None:
         return False
     try:
         with Image.open(img_path) as im:
-            if getattr(im, "n_frames", 1) > 1:
-                im.seek(0)
+            if not _could_be_see_through(im):
+                return False                 # opened on frame 0: no n_frames scan, no decode
             return _see_through_rgba(im) is not None
     except Exception:
         return False
@@ -5099,7 +5106,8 @@ def probe_duration(path, timeout=None):
     return _media_tools.duration(path, timeout=timeout)
 
 
-def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, workers=8):
+def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, workers=8,
+                     recheck=True):
     """Generate JPEG thumbnails for rows that have a file. CPU-bound (Pillow),
     so a thread pool gives a real multi-core speedup (Pillow releases the GIL
     during decode/encode). workers<=1 runs serially. Each worker writes a distinct
@@ -5109,7 +5117,12 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
     poster made it already when one existed): a poster-less video gets a local
     ffmpeg frame-extract instead of staying blank forever. `force` deliberately
     does NOT overwrite an existing video thumb -- the poster came from the
-    network and can't be regenerated from the local file."""
+    network and can't be regenerated from the local file.
+
+    `recheck` (default True) runs the one-time see-through re-check inline for the batch
+    jobs (--sync, --rebuild-thumbs, after an update). The gallery start passes False so a
+    missing-thumbnail build is all it waits for, and schedules recheck_see_through_thumbnails()
+    to run behind the started server instead."""
     from moonglade import backup as core
     if Image is None:
         print("Warning: Pillow not installed -- thumbnails will not be generated.")
@@ -5123,7 +5136,7 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
     # thumbnail is re-checked ONCE against its original and only the see-through ones are
     # recut (opaque thumbnails are left alone). A forced rebuild recuts everything anyway.
     marker = thumb_dir / CHECKER_MARKER
-    recheck = not force and not marker.exists()
+    recheck = recheck and not force and not marker.exists()
     for row in rows:
         if not row.get("filename"):
             continue
@@ -5184,13 +5197,78 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
                 done += 1
             _tick()
     if recheck or force:
-        try:
-            thumb_dir.mkdir(parents=True, exist_ok=True)
-            marker.write_text("see-through thumbnails sit on a checkerboard\n", encoding="utf-8")
-        except OSError:
-            pass
+        _write_checker_marker(thumb_dir)
     if total and not progress_cb:
         print()
+
+
+def _write_checker_marker(thumb_dir):
+    try:
+        thumb_dir.mkdir(parents=True, exist_ok=True)
+        (thumb_dir / CHECKER_MARKER).write_text(
+            "see-through thumbnails sit on a checkerboard\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def recheck_see_through_thumbnails(rows, out_dir, thumb_dir, workers=2, cancel=None):
+    """The one-time see-through re-check (3.22 walk) as its own pass, for running BEHIND a
+    started gallery. Every already-built image thumbnail is checked against its original
+    (header first, alpha only for candidates) and only see-through ones are recut. The marker
+    is written ONLY when every item was handled; a cancel (`cancel.is_set()`), a worker error
+    or a failed recut leaves no marker, so the pass simply runs again next start. Returns True
+    when the marker was written, False otherwise (including: nothing to do, marker already there)."""
+    marker = thumb_dir / CHECKER_MARKER
+    if Image is None or marker.exists():
+        return False
+    items = []
+    for row in rows:
+        fn = row.get("filename")
+        if not fn or row.get("is_video") == "1" or not thumbnail_renders(fn):
+            continue
+        thumb_path = thumb_dir / "{}.jpg".format(row["media_id"])
+        if thumb_path.exists():
+            items.append((row["media_id"], thumb_path, fn))
+
+    def _one(item):
+        if cancel is not None and cancel.is_set():
+            return False
+        mid, thumb_path, fn = item
+        src = find_image_file(out_dir, mid, fn)
+        if not src or not source_is_see_through(src):
+            return True                  # opaque (or unreadable): the old thumbnail stands
+        return bool(make_thumbnail(src, thumb_path))
+
+    ok = True
+    if workers and workers > 1 and items:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            for res in ex.map(_one, items):
+                ok = ok and res
+    else:
+        for it in items:
+            ok = _one(it) and ok
+    if not ok or (cancel is not None and cancel.is_set()):
+        return False
+    _write_checker_marker(thumb_dir)
+    return True
+
+
+def start_see_through_recheck(rows, out_dir, thumb_dir, workers=2, cancel=None):
+    """Run recheck_see_through_thumbnails() on a daemon thread (the same off-thread startup
+    idiom as _health_prime / _outside_prime), after the server is listening. Returns the thread,
+    or None when the marker says there is nothing to do."""
+    if (thumb_dir / CHECKER_MARKER).exists():
+        return None
+
+    def _run():
+        try:
+            recheck_see_through_thumbnails(rows, out_dir, thumb_dir, workers=workers, cancel=cancel)
+        except Exception:                # noqa: BLE001 -- background polish, never a crash
+            pass
+    th = threading.Thread(target=_run, daemon=True, name="moonglade-thumb-recheck")
+    th.start()
+    return th
 
 
 # ---------------------------------------------------------------------------
@@ -23243,7 +23321,9 @@ def main():
         print("Skipping thumbnail build (--skip-thumbs).")
     else:
         print("Building thumbnails (new only — use --rebuild-thumbs to force all)...")
-        build_thumbnails(rows, out_dir, thumb_dir, force=args.rebuild_thumbs)
+        # recheck=False: the gallery must not wait on the one-time see-through re-check (it
+        # opens every original); it is scheduled behind the started server below instead.
+        build_thumbnails(rows, out_dir, thumb_dir, force=args.rebuild_thumbs, recheck=False)
 
     # Secrets at rest (app security review 2026-11-19, finding 5): the copies already on disk
     # are limited to this user's account once per start; every later write does the same.
@@ -23393,6 +23473,9 @@ def main():
     # Look for things outside the app that still name its old files (a scheduled task, a
     # Claude registration, a shortcut): off-thread, for the notice (server_notice).
     _outside_prime()
+    # The one-time see-through thumbnail check, behind the started server, two workers.
+    if not args.skip_thumbs and not args.rebuild_thumbs:
+        start_see_through_recheck(rows, out_dir, thumb_dir)
     clean_stop = False
     interrupted = False
     try:
