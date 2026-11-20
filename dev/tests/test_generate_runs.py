@@ -34,6 +34,7 @@ import requests
 
 from moonglade import backup as core
 from moonglade import gallery as moonglade_gallery
+from moonglade import pricing as pricing_mod
 from moonglade import recipes as moonglade_recipes
 from moonglade import runs
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
@@ -118,7 +119,7 @@ def rig(monkeypatch):
     monkeypatch.setattr(core, "_rest_get", rest_get)
     monkeypatch.setattr(core, "_rest_post", rest_post)
     monkeypatch.setattr(core, "account_info", account_info)
-    monkeypatch.setattr(core, "price_task", price_task)
+    monkeypatch.setattr(pricing_mod, "price_task", price_task)
     monkeypatch.setattr(core, "match_kaisuuken", match)
     monkeypatch.setattr(core, "gql_mutate", gql_mutate)
     monkeypatch.setattr(core, "gql_adhoc", gql_adhoc)
@@ -929,7 +930,7 @@ def test_more_than_one_price_group_is_refused(cli, rig, monkeypatch):
     def varying(session, params):
         seen["n"] += 1
         return {"width": seen["n"]}
-    monkeypatch.setattr(core, "_task_price_query", varying)
+    monkeypatch.setattr(pricing_mod, "_task_price_query", varying)
     d = plan(cli, prompt="{a|b} x", count=2).get_json()
     assert "don't all cost the same" in d["error"]
 

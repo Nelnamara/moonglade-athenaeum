@@ -11,6 +11,7 @@ No network: the run road uses test_generate_runs' counting rig, the rest the `pi
 import json
 
 from moonglade import backup as core
+from moonglade import pricing as pricing_mod
 from tests.test_generate_runs import CARD as RUN_CARD
 from tests.test_generate_runs import cli, rig, run  # noqa: F401  (fixtures + helper)
 from tests.test_single_send_quoted_free import (  # noqa: F401  (fixture + helpers)
@@ -47,7 +48,7 @@ def _armed(monkeypatch, fake):
     monkeypatch.setattr(_mirror, "mirror_enabled", lambda: True)
     monkeypatch.setattr(_mirror, "make_mirror_session", lambda *a, **k: fake)
     monkeypatch.setattr(_mirror, "_session_for_create", lambda s: fake)
-    monkeypatch.setattr(core, "price_task", lambda s, params: 1500)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: 1500)
     monkeypatch.setattr(core, "build_request", lambda payload, *a, **k: _Req("enhance"))
 
 
@@ -112,7 +113,7 @@ def test_the_quote_checks_cards_under_the_identity_the_send_will_use(gen, monkey
     mirror.on("/kaisuuken/check", _CARD)
     gen["pixai"].on("/kaisuuken/check", _NO_CARD)
     monkeypatch.setattr(_mirror, "_session_for_create", lambda s: mirror)
-    monkeypatch.setattr(core, "price_task", lambda s, params: 400)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: 400)
     q = gen["cli"].post("/api/price", json=dict(_body(), mode="image")).get_json()
     assert q.get("free") is True, q
     assert mirror.calls_for("/kaisuuken/check")
@@ -126,6 +127,6 @@ def test_a_mirror_that_cannot_be_reached_still_quotes_on_the_api_key(gen, monkey
         raise core.PixAIError("Mirror to PixAI is ON but its website sign-in is expired")
     monkeypatch.setattr(_mirror, "_session_for_create", _down)
     gen["pixai"].on("/kaisuuken/check", _CARD)
-    monkeypatch.setattr(core, "price_task", lambda s, params: 400)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: 400)
     q = gen["cli"].post("/api/price", json=dict(_body(), mode="image")).get_json()
     assert q.get("free") is True and "error" not in q, q

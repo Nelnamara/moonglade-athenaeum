@@ -31,6 +31,7 @@ import time
 from moonglade import backup as core
 from moonglade import models as _models
 from moonglade import pixai_client as _pixai_client
+from moonglade import pricing as _pricing
 
 MAX_RECIPES = 10                 # recipeIds per task (the site's .slice(0, 10), stepUp qr)
 MAX_SLOTS = 8                    # payload.slots
@@ -351,7 +352,7 @@ def price_refusal(session, params):
     price_task itself uses, so this cannot ask about a different request."""
     if not isinstance(params, dict) or not params.get("recipeIds"):
         return None
-    q = core._task_price_query(session, params)
+    q = _pricing._task_price_query(session, params)
     if not q:
         return None
     try:

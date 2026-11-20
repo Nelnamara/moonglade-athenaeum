@@ -14,6 +14,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade import models as models_mod
+from moonglade import pricing as pricing_mod
 from moonglade.gallery import CATALOG_FIELDS, save_catalog, load_catalog
 from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
@@ -301,7 +302,7 @@ def test_a_true_length_can_raise_the_quote_above_the_empty_list_and_can_lower_it
         rv = params["referenceVideo"]
         sent_lengths[rv["referenceVideoMediaIds"][0]] = list(rv["inputVideoDurations"])
         return _site_price_task(session, params)
-    monkeypatch.setattr(core, "price_task", _price)
+    monkeypatch.setattr(pricing_mod, "price_task", _price)
     monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
     cli = login_test_client(g.create_app(tmp_path))
 
@@ -352,7 +353,7 @@ def test_price_and_loom_submit_send_byte_identical_reference_blocks(tmp_path, mo
     vid = "766390091666197254"
     save_catalog(tmp_path / "catalog.db", [_video_file(tmp_path, vid)])
     priced, sent = {}, {}
-    monkeypatch.setattr(core, "price_task", lambda s, params: priced.update(params) or 105000)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: priced.update(params) or 105000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "submit_generation",
@@ -377,7 +378,7 @@ def test_a_missing_local_file_with_no_catalog_length_prices_the_empty_list(tmp_p
     save_catalog(tmp_path / "catalog.db", [_row(media_id=vid, is_video="1",
                                                 filename="videos/gone_%s.mp4" % vid)])
     priced = {}
-    monkeypatch.setattr(core, "price_task", lambda s, params: priced.update(params) or 126000)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: priced.update(params) or 126000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
     cli = login_test_client(g.create_app(tmp_path))
     d = cli.post("/api/price", json={"mode": "R2V", "video_refs": [vid], "prompt": "@video1",
@@ -487,7 +488,7 @@ def test_video_references_are_refused_on_tbkv(model):
 
 def test_the_badge_shows_the_video_ref_refusal_as_its_note(tmp_path, monkeypatch, pixai):
     from tests.conftest import login_test_client
-    monkeypatch.setattr(core, "price_task", lambda *a: pytest.fail("a refusal is not priced"))
+    monkeypatch.setattr(pricing_mod, "price_task", lambda *a: pytest.fail("a refusal is not priced"))
     save_catalog(tmp_path / "catalog.db", [_row(media_id="1", filename="a_1.png")])
     cli = login_test_client(g.create_app(tmp_path))
     d = cli.post("/api/price", json={"mode": "R2V", "images": ["1"], "video_refs": ["9"],
@@ -828,7 +829,7 @@ def test_the_quote_and_the_submit_carry_the_same_ratio(tmp_path, monkeypatch):
     from tests.conftest import login_client
     seen = {}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(priced=params) or 21000)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(priced=params) or 21000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "submit",
                         lambda s, req, **k: seen.update(sent=req.parameters) or {"task_id": "v1"})

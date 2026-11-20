@@ -244,6 +244,9 @@ SEAMS = {
         "_CONTEXT_NOT_TAKEN", "_check_context_images", "_gate_image_params",
         "_gate_params_for_model", "_LOST_UPSCALE_REFUSAL", "_refuse_lost_upscale",
         "_profile_listing", "generation_model_brief"]},
+    "moonglade.pricing": {"from": "moonglade.backup", "names": [
+        "_FIXER_PRICE_PATH", "price_fixer", "_PRICE_SCALARS", "_PRICE_NESTED", "_task_price_query",
+        "price_task", "queue_wait_estimate"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -951,6 +954,34 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_unclear_single_sends.py', 'moonglade.models'),
     ('tests/test_video_tsubaki.py', 'moonglade.models'),
     ('tests/test_web_auth.py', 'moonglade.models'),
+    # 3.22 phase 5, pricing: no reader reads text that left backup.py. test_edit_upload and
+    # test_video_tsubaki reach price_task through pricing_mod; test_fix's quote-path checks read
+    # _FIXER_PRICE_PATH there; the whole-file readers look for names that stayed.
+    ('loom/test/ledger-known-reasons.test.js', 'moonglade.pricing'),
+    ('loom/test/video-roster-parity.test.js', 'moonglade.pricing'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.pricing'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.pricing'),
+    ('tests/test_config_path_routing.py', 'moonglade.pricing'),
+    ('tests/test_csrf_coverage.py', 'moonglade.pricing'),
+    ('tests/test_edit_upload.py', 'moonglade.pricing'),
+    ('tests/test_enhance.py', 'moonglade.pricing'),
+    ('tests/test_evidence_counters.py', 'moonglade.pricing'),
+    ('tests/test_gen_surface.py', 'moonglade.pricing'),
+    ('tests/test_history_feed_document.py', 'moonglade.pricing'),
+    ('tests/test_jwt.py', 'moonglade.pricing'),
+    ('tests/test_living_library.py', 'moonglade.pricing'),
+    ('tests/test_loom_notify.py', 'moonglade.pricing'),
+    ('tests/test_network.py', 'moonglade.pricing'),
+    ('tests/test_pixai_client.py', 'moonglade.pricing'),
+    ('tests/test_settings_store.py', 'moonglade.pricing'),
+    ('tests/test_setup_prepare.py', 'moonglade.pricing'),
+    ('tests/test_spend_no_retry.py', 'moonglade.pricing'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.pricing'),
+    ('tests/test_telemetry.py', 'moonglade.pricing'),
+    ('tests/test_training_advanced.py', 'moonglade.pricing'),
+    ('tests/test_training_parity.py', 'moonglade.pricing'),
+    ('tests/test_video_tsubaki.py', 'moonglade.pricing'),
+    ('tests/test_web_auth.py', 'moonglade.pricing'),
 }
 
 

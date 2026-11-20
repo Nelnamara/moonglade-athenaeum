@@ -21,6 +21,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import mirror as mirror_mod
 from moonglade import models as models_mod
+from moonglade import pricing as pricing_mod
 
 
 # --- the table ---------------------------------------------------------------
@@ -70,7 +71,7 @@ def road(monkeypatch):
     seen = {"priced": [], "matched": [], "submitted": [], "fixed": []}
 
     monkeypatch.setattr(mirror_mod, "_session_for_create", lambda s: s)
-    monkeypatch.setattr(core, "price_task",
+    monkeypatch.setattr(pricing_mod, "price_task",
                         lambda s, params: seen["priced"].append(params) or 1200)
     monkeypatch.setattr(core, "match_kaisuuken",
                         lambda s, params, **k: seen["matched"].append(params) or dict(CARD))
@@ -79,7 +80,7 @@ def road(monkeypatch):
     monkeypatch.setattr(core, "submit_fixer",
                         lambda s, mid, boxes: seen["fixed"].append((mid, boxes)) or "task-2")
     # A Fix is priced on PixAI's own Fix price route (#93), off the submit body itself.
-    monkeypatch.setattr(core, "price_fixer",
+    monkeypatch.setattr(pricing_mod, "price_fixer",
                         lambda s, body: seen["priced"].append(body)
                         or {"cost": 1200, "original": None})
     # _apply_kaisuuken is deliberately NOT stubbed: attaching the card is the one legal
@@ -159,7 +160,7 @@ def test_a_covering_card_is_attached_on_submit_and_reported_by_price():
     seen = {}
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(mirror_mod, "_session_for_create", lambda s: s)
-        mp.setattr(core, "price_task", lambda s, params: 1200)
+        mp.setattr(pricing_mod, "price_task", lambda s, params: 1200)
         mp.setattr(core, "match_kaisuuken", lambda s, params, **k: dict(CARD))
         mp.setattr(core, "submit_generation",
                    lambda s, params: seen.update(params=params) or "t")
@@ -179,7 +180,7 @@ def test_price_says_paid_when_the_card_is_short_and_submit_attaches_nothing():
     seen = {}
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(mirror_mod, "_session_for_create", lambda s: s)
-        mp.setattr(core, "price_task", lambda s, params: 27500)
+        mp.setattr(pricing_mod, "price_task", lambda s, params: 27500)
         mp.setattr(core, "match_kaisuuken", lambda s, params, **k: dict(short))
         mp.setattr(core, "submit_generation",
                    lambda s, params: seen.update(params=params) or "t")
@@ -209,9 +210,11 @@ def test_submit_refuses_under_read_only_before_any_network_call(
 
     req = _build(payload)
     monkeypatch.setattr(core, "READ_ONLY", True)
-    for fn in ("match_kaisuuken", "_apply_kaisuuken", "price_task", "price_fixer",
+    for fn in ("match_kaisuuken", "_apply_kaisuuken",
                "submit_generation", "submit_fixer", "gql_mutate", "_rest_post"):
         monkeypatch.setattr(core, fn, tripwire(fn))
+    for fn in ("price_task", "price_fixer"):                     # in pricing since 3.22
+        monkeypatch.setattr(pricing_mod, fn, tripwire(fn))
     monkeypatch.setattr(mirror_mod, "_session_for_create", tripwire("_session_for_create"))
 
     with pytest.raises(core.PixAIError) as err:

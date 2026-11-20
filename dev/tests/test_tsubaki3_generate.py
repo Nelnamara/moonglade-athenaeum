@@ -30,6 +30,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import models as models_mod
+from moonglade import pricing as pricing_mod
 from tests.test_tsubaki3_image_gate import (
     FLASH, MODELS, SDXL, SIZE_CONFIG, T3, T3_PROFILES, FakeRest, features, T3_STATUS,
 )
@@ -508,7 +509,7 @@ def test_the_edit_bar_request_is_the_sites_smart_reference_shape(rest):
         "inferenceProfile": "pro", "controlNets": [], "contextImages": ["701"],
         "promptHelper": {"forcePromptHelperDetectionSide": "server", "creativity": "medium"}}
     rest.priced.clear()
-    core.price_task(object(), req.parameters)
+    pricing_mod.price_task(object(), req.parameters)
     assert rest.priced and all("batchSize" not in q for q in rest.priced)
     assert rest.priced[-1]["width"] in (1280, "1280") and rest.priced[-1]["height"] in (768, "768")
 
@@ -561,7 +562,7 @@ def test_the_price_query_of_a_context_image_request_carries_control_nets(rest):
     with and without it (3,900), and +1,000 at priority 1000 -- so the empty list is safe to quote,
     and this pins the shape."""
     req = road(bar_payload())
-    q = core._task_price_query(object(), req.parameters)
+    q = pricing_mod._task_price_query(object(), req.parameters)
     assert q["controlNets"] == "[]"
     assert json.loads(q["contextImages"]) == ["701"]
     assert "batchSize" not in q

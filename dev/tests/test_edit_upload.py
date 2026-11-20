@@ -7,6 +7,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import pixai_client as pixai_client_mod
+from moonglade import pricing as pricing_mod
 
 
 # ---- build_chat_edit_parameters (pinned to the captured Edit-Pro submit) ----
@@ -223,7 +224,7 @@ def test_the_priced_auto_edit_is_the_submitted_one(tmp_path, monkeypatch):
                                                 media_id="1", filename="a_1.png")])
     seen = {}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(priced=params) or 8000)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(priced=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "submit",
                         lambda s, req, **k: seen.update(sent=req.parameters) or {"task_id": "t1"})
@@ -380,7 +381,7 @@ def test_the_priced_v4_edit_is_the_submitted_one(tmp_path, monkeypatch):
                                                 media_id="1", filename="a_1.png")])
     seen = {}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(priced=params) or 9000)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(priced=params) or 9000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "submit",
                         lambda s, req, **k: seen.update(sent=req.parameters) or {"task_id": "t1"})
@@ -467,7 +468,7 @@ def test_the_priced_edit_pro_v2_edit_is_the_submitted_one(tmp_path, monkeypatch)
                                                 media_id="1", filename="a_1.png")])
     seen = {}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(priced=params) or 27800)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(priced=params) or 27800)
     monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "submit",
                         lambda s, req, **k: seen.update(sent=req.parameters) or {"task_id": "t1"})

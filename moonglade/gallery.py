@@ -51,6 +51,7 @@ from moonglade import models as _models
 from moonglade import organize as _organize
 from moonglade import paths as _paths
 from moonglade import pixai_client as _pixai_client
+from moonglade import pricing as _pricing
 from moonglade import scan as _scan
 from moonglade import series as _series
 from moonglade import hostcheck as _hostcheck
@@ -17424,7 +17425,7 @@ def create_app(out_dir: Path):
         # --- the quote (step 9): one price group, a read price, the free cards ---
         queries = []
         for b in built:
-            q = core._task_price_query(gsession, b["req"].parameters)
+            q = _pricing._task_price_query(gsession, b["req"].parameters)
             if not q:
                 raise _RunRefused(_cell_label(plan, b["job"]) + "this request can't be "
                                   "priced, so nothing was sent.")
@@ -17438,7 +17439,7 @@ def create_app(out_dir: Path):
             each, covered = 0, len(built)
             out["unlimited"] = True
         else:
-            cost = core.price_task(gsession, first.parameters)
+            cost = _pricing.price_task(gsession, first.parameters)
             if cost is None:
                 if first.parameters.get("recipeIds"):
                     v = rec.price_verdict(gsession, first.parameters, None) or {}
@@ -17959,7 +17960,7 @@ def create_app(out_dir: Path):
                 try:
                     params = core.build_panelplugin_parameters(
                         "1", row["workflow_id"], workflow_name=row["workflow_name"])
-                    row["price"] = core.price_task(s, params)
+                    row["price"] = _pricing.price_task(s, params)
                     # card_covers, the one coverage verdict the send reads too (2026-11-18): a
                     # card that matched but does not cover the job is not "free".
                     row["free_card"] = core.card_covers(
@@ -21556,7 +21557,7 @@ __DESIGN_TOKENS__
             params = (core._task_detail_query(session, tid) or {}).get("parameters") or {}
             if not isinstance(params, dict):
                 return None
-            return core.queue_wait_estimate(session, params.get("priority"),
+            return _pricing.queue_wait_estimate(session, params.get("priority"),
                                             params.get("modelId"))
         except Exception:                          # noqa: BLE001 -- a nicety, never fatal
             return None

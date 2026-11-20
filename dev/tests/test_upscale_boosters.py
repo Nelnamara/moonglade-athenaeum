@@ -15,6 +15,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import models as models_mod
+from moonglade import pricing as pricing_mod
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client
@@ -165,14 +166,14 @@ def test_the_priced_upscale_params_reach_task_price(monkeypatch):
     seen = {}
     monkeypatch.setattr(core, "_rest_get",
                         lambda s, path, params=None, **k: seen.update(params=params) or {"actualPrice": 3700})
-    core.price_task(object(), core._gen_parameters(
+    pricing_mod.price_task(object(), core._gen_parameters(
         _gen_args(width=1400, height=784, upscale=1.4, face_fix=True)))
     q = seen["params"]
     assert q["upscale"] == 1.4 and q["upscaleDenoisingStrength"] == 0.6
     assert q["upscaleDenoisingSteps"] == 20 and q["enableADetailer"] is True
 
     seen.clear()
-    core.price_task(object(), core._gen_parameters(
+    pricing_mod.price_task(object(), core._gen_parameters(
         _gen_args(width=1400, height=784, enlarge=1.9)))
     assert seen["params"]["enlarge"] == 1.9
 
@@ -233,7 +234,7 @@ def _priced(monkeypatch, tmp_path, body):
         return 1200
 
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "price_task", fake_price)
+    monkeypatch.setattr(pricing_mod, "price_task", fake_price)
     monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
     r = cli.post("/api/price", json=body)
     return seen.get("params"), r.get_json()

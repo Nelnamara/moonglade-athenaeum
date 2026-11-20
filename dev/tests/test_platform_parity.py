@@ -16,6 +16,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import mirror as mirror_mod
 from moonglade import models as models_mod
+from moonglade import pricing as pricing_mod
 
 
 def _dit_profiles(default="lite"):
@@ -106,7 +107,7 @@ def test_price_and_submit_apply_identical_gating(monkeypatch):
     base = {"modelId": "DIT3VER", "prompts": "a cat", "samplingSteps": 28, "cfgScale": 5,
             "samplingMethod": "Euler a", "width": 768, "height": 1280, "priority": 1000}
     assert core.submit_generation(object(), dict(base)) == "T1"
-    core.price_task(object(), dict(base))
+    pricing_mod.price_task(object(), dict(base))
 
     # DiT-auto now carries the model's REAL default profile ("pro"), on BOTH paths
     assert submitted.get("inferenceProfile") == "pro"

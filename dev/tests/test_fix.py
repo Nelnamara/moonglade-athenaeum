@@ -14,6 +14,7 @@ import requests
 
 from moonglade import backup as core
 from moonglade import gallery as moonglade_gallery
+from moonglade import pricing as pricing_mod
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client
@@ -255,7 +256,7 @@ def test_a_non_finite_box_is_dropped_not_raised(bad, monkeypatch):
     box = {"x": bad, "y": 1, "width": 5, "height": 5, "tag": "face"}
     assert core.clean_fix_boxes([box, FACE]) == [FACE]
     monkeypatch.setattr(core, "_rest_post", _tripwire("_rest_post"))
-    assert core.price_fixer(object(), {"mediaId": "700", "boxes": [box]}) is None
+    assert pricing_mod.price_fixer(object(), {"mediaId": "700", "boxes": [box]}) is None
 
 
 @pytest.mark.parametrize("raw", ["Infinity", "-Infinity", "NaN"])
@@ -303,7 +304,7 @@ def test_submit_fixer_refuses_two_kinds_before_any_network(monkeypatch):
 def _price_client(tmp_path, monkeypatch, answer=None):
     seen = {}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "price_task", _tripwire("price_task (GET /v2/task-price)"))
+    monkeypatch.setattr(pricing_mod, "price_task", _tripwire("price_task (GET /v2/task-price)"))
     monkeypatch.setattr(core, "match_kaisuuken",
                         lambda s, params, **k: seen.setdefault("card_checked", True)
                         and {"id": "c1", "total": 9})
@@ -353,10 +354,10 @@ def test_price_route_omits_the_list_price_unless_it_is_higher(tmp_path, monkeypa
 
 def test_fix_price_never_touches_the_spend_route(tmp_path, monkeypatch):
     import inspect
-    assert core._FIXER_PRICE_PATH == "/task/fixer/price"
-    assert core._FIXER_PRICE_PATH != "/task/fixer"
+    assert pricing_mod._FIXER_PRICE_PATH == "/task/fixer/price"
+    assert pricing_mod._FIXER_PRICE_PATH != "/task/fixer"
     # price_fixer takes no path: nothing a caller hands it can turn the quote into a spend
-    assert list(inspect.signature(core.price_fixer).parameters) == ["session", "body"]
+    assert list(inspect.signature(pricing_mod.price_fixer).parameters) == ["session", "body"]
     # it rides the session it is handed -- never the mirror's create session
     monkeypatch.setattr(mirror_mod, "_session_for_create", _tripwire("_session_for_create"))
     cli, seen = _price_client(tmp_path, monkeypatch)
@@ -382,20 +383,20 @@ def test_fix_price_fails_soft(exc, tmp_path, monkeypatch):
     d = r.get_json()
     assert r.status_code == 200 and "error" not in d
     assert d["cost"] is None and d["free"] is False and "original_cost" not in d
-    assert core.price_fixer(object(), {"mediaId": "700", "boxes": [FACE]}) is None
+    assert pricing_mod.price_fixer(object(), {"mediaId": "700", "boxes": [FACE]}) is None
 
 
 @pytest.mark.parametrize("answer", [{}, {"originalPrice": 8000}, [], None, {"actualPrice": "n/a"}])
 def test_fix_price_without_a_price_is_no_price(answer, monkeypatch):
     monkeypatch.setattr(core, "_rest_post", lambda *a, **k: answer)
-    assert core.price_fixer(object(), {"mediaId": "700", "boxes": [FACE]}) is None
+    assert pricing_mod.price_fixer(object(), {"mediaId": "700", "boxes": [FACE]}) is None
 
 
 def test_price_fixer_refuses_a_hand_built_body_before_any_network(monkeypatch):
     monkeypatch.setattr(core, "_rest_post", _tripwire("_rest_post"))
     for body in ({"mediaId": "700", "boxes": [FACE, HAND]}, {"mediaId": "700", "boxes": []},
                  {"mediaId": "", "boxes": [FACE]}, {}, None):
-        assert core.price_fixer(object(), body) is None
+        assert pricing_mod.price_fixer(object(), body) is None
 
 
 def test_price_route_two_kinds_is_a_note_not_a_price(tmp_path, monkeypatch):

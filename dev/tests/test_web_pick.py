@@ -10,6 +10,7 @@ from pathlib import Path
 from moonglade import backup as core
 from moonglade import models as models_mod
 from moonglade import paths
+from moonglade import pricing as pricing_mod
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 from moonglade.account_prefs import _account_key
 
@@ -474,7 +475,7 @@ def test_tag_suggest_route_returns_tags(tmp_path, monkeypatch, pixai):
 def test_price_route_video_mode(tmp_path, monkeypatch, pixai):
     """Video payloads price through build_shot_video_params + report the card count."""
     seen = {}
-    monkeypatch.setattr(core, "price_task",
+    monkeypatch.setattr(pricing_mod, "price_task",
                         lambda s, params: seen.update(params=params) or 27500)
     monkeypatch.setattr(core, "match_kaisuuken",
                         lambda s, params, enrich=False: {"id": "c1", "total": 9, "expiresAt": 1})
@@ -495,7 +496,7 @@ def test_price_route_free_only_when_the_card_covers_the_whole_job(tmp_path, monk
     nothing and charges the full price, so the badge must never say FREE for it. The route
     also reports the ticket accounting (cards_needed / cards_held / card_short) the badge
     renders honestly, and keeps `cards` (= held) for the existing "(N left)" wording."""
-    monkeypatch.setattr(core, "price_task", lambda s, params: 27500)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: 27500)
     body = {"mode": "I2V", "images": ["55"], "prompt": "pan", "duration": 15,
             "video_model": "v3.2"}
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
@@ -535,7 +536,7 @@ def test_price_route_reads_generate_audio_key_too(tmp_path, monkeypatch, pixai):
     the actual generation correctly included it (a real, if smaller, mismatch fixed alongside
     wiring audio into the Loom for the first time)."""
     seen = {}
-    monkeypatch.setattr(core, "price_task",
+    monkeypatch.setattr(pricing_mod, "price_task",
                         lambda s, params: seen.update(params=params) or 27500)
     monkeypatch.setattr(core, "match_kaisuuken",
                         lambda s, params, enrich=False: {"id": "c1", "total": 9, "expiresAt": 1})
@@ -553,7 +554,7 @@ def test_price_route_reads_generate_audio_key_too(tmp_path, monkeypatch, pixai):
 def test_price_route_video_needs_an_image(tmp_path, monkeypatch, pixai):
     def boom(*a, **k):
         raise AssertionError("no pricing without a source image")
-    monkeypatch.setattr(core, "price_task", boom)
+    monkeypatch.setattr(pricing_mod, "price_task", boom)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/price", json={"mode": "R2V", "images": []}).get_json()
@@ -565,7 +566,7 @@ def test_price_route_i2v_still_needs_an_image_even_with_video_refs(tmp_path, mon
     # for those two modes, only for R2V (which the multi-parity build made a genuine option).
     def boom(*a, **k):
         raise AssertionError("no pricing without a source frame")
-    monkeypatch.setattr(core, "price_task", boom)
+    monkeypatch.setattr(pricing_mod, "price_task", boom)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/price", json={"mode": "I2V", "images": [], "video_refs": ["9"]}).get_json()
@@ -578,7 +579,7 @@ def test_price_route_r2v_prices_video_only_multiref(tmp_path, monkeypatch, pixai
     failed pricing with 'pick a source image' even though the submit itself would have
     worked. R2V must accept ANY reference kind alone."""
     seen = {}
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(params=params) or 27500)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(params=params) or 27500)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
@@ -596,7 +597,7 @@ def test_price_route_r2v_prices_video_only_multiref(tmp_path, monkeypatch, pixai
 
 def test_price_route_threads_negative_and_channel(tmp_path, monkeypatch, pixai):
     seen = {}
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(params=params) or 27500)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(params=params) or 27500)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
@@ -1049,7 +1050,7 @@ def test_presets_import_and_use(tmp_path, monkeypatch, pixai):
     assert "prompt" not in lst["character-card"]          # GET never leaks the prompt body
     # price path uses the banked preset: canned prompt + sceneId + its model
     seen = {}
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli.post("/api/price", json={"mode": "edit", "source": "55",
                                  "preset": "character-card"})
@@ -1582,7 +1583,7 @@ def test_edit_price_uses_selected_model(tmp_path, monkeypatch, pixai):
     """The Edit card's model picker drives the submitted modelId + valid option set:
     Reference Pro -> model 1948..., 4K/21:9, no quality; Edit Pro -> Edit Pro model + quality."""
     seen = {}
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli.post("/api/price", json={"mode": "edit", "edit_model": "reference-pro", "source": "55",
@@ -1615,7 +1616,7 @@ def test_edit_price_clamps_invalid_knobs(tmp_path, monkeypatch, pixai):
     """End-to-end: Reference Pro sent with Edit-Pro-style knobs (the preset-mismatch case) is
     clamped server-side to valid values before the params ever reach PixAI."""
     seen = {}
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli.post("/api/price", json={"mode": "edit", "edit_model": "reference-pro", "source": "55",
@@ -1628,7 +1629,7 @@ def test_edit_multi_reference_sources(tmp_path, monkeypatch, pixai):
     """Multi-image references: the Edit card sends sources[] -> chat.mediaIds carries them all
     (primary first), capped to the model's ref limit; falls back to [source] when absent."""
     seen = {}
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli.post("/api/price", json={"mode": "edit", "edit_model": "edit-pro", "source": "100",
@@ -1748,7 +1749,7 @@ def test_price_enhance_mode_returns_no_cost(tmp_path, monkeypatch, pixai):
     no misleading price is shown. (Adding the workflow-id scalar needs a live measurement first
     -- a separately authorized step.)"""
     seen = {}
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     r = cli.post("/api/price", json={"mode": "enhance", "source": "55",
@@ -2003,7 +2004,7 @@ def test_price_route_prices_the_loom_image_edit_and_reference_bodies(tmp_path, m
     Bites: revert any of confirmSpend's price bodies to a mismatched key and the matching
     cost assertion drops from 1200 to None."""
     seen = {}
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(params=params) or 1200)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: seen.update(params=params) or 1200)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)  # no free card
     # The Loom Image picker emits model_id only (no version_id); /api/price resolves it to a
     # version the same way /api/generate does -- literally the same way now, through

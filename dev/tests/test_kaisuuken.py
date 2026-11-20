@@ -9,6 +9,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import mirror as mirror_mod
+from moonglade import pricing as pricing_mod
 
 
 # ---- _normalize_kaisuuken: the real summary template-row shape ----
@@ -572,7 +573,7 @@ def test_apply_short_attaches_nothing_and_prints_short_note(monkeypatch, capsys)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, p, enrich=False, **k: {
         "id": "tkt-1", "expiresAt": "2026-09-01T00:00:00Z", "templateId": "tpl-1",
         "total": 2, "consumeAmount": 3, "covered": False, "name": "V4.0 Lite"})
-    monkeypatch.setattr(core, "price_task", lambda s, p: 1200)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, p: 1200)
     params = _video_params(15)
     assert core._apply_kaisuuken(object(), params, _args()) == ""
     assert "kaisuukenId" not in params and "kaisuukenIds" not in params
@@ -591,7 +592,7 @@ def test_preview_free_when_covered_names_n_of_h(monkeypatch, capsys, pixai):
         return {"id": "tkt-1", "expiresAt": "2026-09-01T00:00:00Z", "templateId": "tpl-1",
                 "total": 5, "consumeAmount": 3, "covered": True, "name": "V4.0 Lite"}
     monkeypatch.setattr(core, "match_kaisuuken", fake_match)
-    monkeypatch.setattr(core, "price_task", lambda s, p: 1200)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, p: 1200)
     core._preview_card_note(_args(token=None), _video_params(15))
     out = capsys.readouterr().out
     assert seen["enrich"] is True                              # same template as the spend path
@@ -605,7 +606,7 @@ def test_preview_not_free_when_short(monkeypatch, capsys, pixai):
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, p, enrich=False, **k: {
         "id": "tkt-1", "expiresAt": "2026-09-01T00:00:00Z", "templateId": "tpl-1",
         "total": 2, "consumeAmount": 3, "covered": False, "name": "V4.0 Lite"})
-    monkeypatch.setattr(core, "price_task", lambda s, p: 1200)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, p: 1200)
     core._preview_card_note(_args(token=None), _video_params(15))
     out = capsys.readouterr().out
     assert out.startswith("NOT free -- ")
@@ -632,7 +633,7 @@ def test_price_task_fails_soft_on_a_network_error_not_just_pixai_errors(pixai):
     the spend path, so a transient timeout there aborted a confirmed submit with a traceback."""
     import requests
     pixai.fail("/task-price", requests.exceptions.ConnectionError("reset"))
-    assert core.price_task(pixai, {"modelId": "m", "width": 512}) is None
+    assert pricing_mod.price_task(pixai, {"modelId": "m", "width": 512}) is None
 
 
 def test_apply_short_branch_never_aborts_the_submit_when_the_cost_lookup_raises(monkeypatch, capsys):
@@ -643,7 +644,7 @@ def test_apply_short_branch_never_aborts_the_submit_when_the_cost_lookup_raises(
         "total": 2, "consumeAmount": 3, "covered": False, "name": "V4.0 Lite"})
     def boom(s, p):
         raise RuntimeError("anything at all")
-    monkeypatch.setattr(core, "price_task", boom)
+    monkeypatch.setattr(pricing_mod, "price_task", boom)
     params = _video_params(15)
     assert core._apply_kaisuuken(object(), params, _args()) == ""     # proceeds, does not raise
     assert "kaisuukenId" not in params

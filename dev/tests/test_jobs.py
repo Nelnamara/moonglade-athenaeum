@@ -11,6 +11,7 @@ import threading
 import time
 
 from moonglade import backup as core
+from moonglade import pricing as pricing_mod
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_client, login_test_client
@@ -980,7 +981,7 @@ def _queued(tid_status="waiting", started=False):
 def _no_estimate(monkeypatch):
     """Silence the queue-estimate side trip for the phase-only tests below."""
     monkeypatch.setattr(core, "_task_detail_query", lambda s, tid: {"parameters": {}})
-    monkeypatch.setattr(core, "queue_wait_estimate", lambda *a, **k: None)
+    monkeypatch.setattr(pricing_mod, "queue_wait_estimate", lambda *a, **k: None)
 
 
 def _raw_lines(tmp_path):
@@ -1083,7 +1084,7 @@ def test_pixais_own_queue_estimate_is_recorded_when_a_job_is_seen_queued(tmp_pat
     monkeypatch.setattr(core, "_task_detail_query",
                         lambda s, tid: {"parameters": {"modelId": "1983308862240288769",
                                                        "priority": 1000}})
-    monkeypatch.setattr(core, "queue_wait_estimate",
+    monkeypatch.setattr(pricing_mod, "queue_wait_estimate",
                         lambda s, pri, mid: asked.append((pri, mid)) or 27)
 
     for _ in range(3):
@@ -1105,7 +1106,7 @@ def test_a_job_that_starts_before_its_first_poll_costs_no_extra_calls(tmp_path, 
     monkeypatch.setattr(task_reads_mod, "generation_status", _queued("processing", started=True))
     monkeypatch.setattr(core, "_task_detail_query",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not ask")))
-    monkeypatch.setattr(core, "queue_wait_estimate",
+    monkeypatch.setattr(pricing_mod, "queue_wait_estimate",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not ask")))
 
     cli.get("/api/task-status?task_id=7006")
@@ -1162,7 +1163,7 @@ def test_a_slow_eta_fetch_cannot_overwrite_a_newer_rendering_phase(tmp_path, mon
         b_done.wait(timeout=5)
         return 42
     monkeypatch.setattr(core, "_task_detail_query", lambda *a, **k: {"parameters": {}})
-    monkeypatch.setattr(core, "queue_wait_estimate", _slow_estimate)
+    monkeypatch.setattr(pricing_mod, "queue_wait_estimate", _slow_estimate)
 
     a_err = []
     def _poll_a():

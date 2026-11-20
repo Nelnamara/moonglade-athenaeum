@@ -14,6 +14,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import models as models_mod
+from moonglade import pricing as pricing_mod
 from moonglade import recipes as rec
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 from tests.conftest import login_client, login_test_client
@@ -143,7 +144,7 @@ def test_task_price_query_carries_recipe_ids_as_json(monkeypatch):
         seen["params"] = params
         return {"actualPrice": 3100}
     monkeypatch.setattr(core, "_rest_get", fake_get)
-    assert core.price_task(object(), {"modelId": "1", "recipeIds": [RID, RID2]}) == 3100
+    assert pricing_mod.price_task(object(), {"modelId": "1", "recipeIds": [RID, RID2]}) == 3100
     assert seen["params"]["recipeIds"] == json.dumps([RID, RID2])
 
 
@@ -184,7 +185,7 @@ def test_a_recipe_quote_that_fails_otherwise_is_unverified_and_never_free(monkey
 
 
 def test_a_quote_without_recipes_keeps_todays_card_behaviour(monkeypatch):
-    monkeypatch.setattr(core, "price_task", lambda s, p: None)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, p: None)
     monkeypatch.setattr(core, "match_kaisuuken",
                         lambda *a, **k: {"id": "k1", "total": 3, "consumeAmount": 1,
                                          "covered": True, "name": "Tsubaki"})
@@ -193,7 +194,7 @@ def test_a_quote_without_recipes_keeps_todays_card_behaviour(monkeypatch):
 
 
 def test_a_card_over_a_priced_recipe_quote_carries_the_note(monkeypatch):
-    monkeypatch.setattr(core, "price_task", lambda s, p: 3000)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, p: 3000)
     monkeypatch.setattr(core, "match_kaisuuken",
                         lambda *a, **k: {"id": "k1", "total": 3, "consumeAmount": 1,
                                          "covered": True, "name": "Tsubaki"})

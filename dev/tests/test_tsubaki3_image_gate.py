@@ -31,6 +31,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import models as models_mod
+from moonglade import pricing as pricing_mod
 
 from tests.conftest import login_client
 from moonglade import jobs as jobs_mod
@@ -532,7 +533,7 @@ def test_a_reference_plus_a_lora_on_tsubaki3_is_refused_never_trimmed(rest):
     args.model = T3
     raw = core._gen_parameters(args)
     assert raw["mediaId"] == "M1" and raw["lora"] == {"L1": 0.7}
-    assert core.price_task(object(), raw) is None
+    assert pricing_mod.price_task(object(), raw) is None
 
 
 def test_the_reference_plus_lora_refusal_covers_every_form_on_mmdit26b(rest):
@@ -565,8 +566,8 @@ def test_the_reference_plus_lora_refusal_covers_every_form_on_mmdit26b(rest):
 
 def test_context_images_are_priced(rest):
     """_PRICE_NESTED carries contextImages (live quote: 5,100 for one, 6,000 for two)."""
-    assert "contextImages" in core._PRICE_NESTED
-    core.price_task(object(), {"modelId": T3, "contextImages": ["A", "B"],
+    assert "contextImages" in pricing_mod._PRICE_NESTED
+    pricing_mod.price_task(object(), {"modelId": T3, "contextImages": ["A", "B"],
                                "inferenceProfile": "pro", "width": 1632, "height": 912,
                                "promptHelper": {"creativity": "medium",
                                                 "forcePromptHelperDetectionSide": "server"}})

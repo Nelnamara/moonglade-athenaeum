@@ -13,6 +13,7 @@ No network: the `pixai` fake and test_generate_runs' counting rig."""
 import threading
 
 from moonglade import backup as core
+from moonglade import pricing as pricing_mod
 from moonglade.gallery import save_catalog, CATALOG_FIELDS
 from tests.conftest import _TEST_PASSWORD, _TEST_USERNAME, _do_login
 from tests.test_generate_runs import CARD as RUN_CARD
@@ -113,7 +114,7 @@ def test_a_presets_read_overtaken_by_a_send_is_not_cached(gen, monkeypatch):
                 r = other.post("/api/enhance", json={"source": "1", "workflow_id": "42"})
                 assert r.get_json().get("task_id"), r.get_json()
         return 1500
-    monkeypatch.setattr(core, "price_task", _price)
+    monkeypatch.setattr(pricing_mod, "price_task", _price)
     first = gen["cli"].get("/api/enhance/presets").get_json()["presets"]
     assert all(r["free_card"] for r in first), "the read answers what it saw"
     # The card is gone now; the overtaken answer must not have been cached.
@@ -124,7 +125,7 @@ def test_a_presets_read_overtaken_by_a_send_is_not_cached(gen, monkeypatch):
 
 def test_presets_check_cards_the_way_the_send_does(gen, monkeypatch):
     _armed(monkeypatch, gen["pixai"])
-    monkeypatch.setattr(core, "price_task", lambda s, params: 1500)
+    monkeypatch.setattr(pricing_mod, "price_task", lambda s, params: 1500)
     seen = []
     real = core.match_kaisuuken
 
