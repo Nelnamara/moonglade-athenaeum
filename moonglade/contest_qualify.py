@@ -34,6 +34,52 @@ KINDS = {"required_model_ids": ("model", "model_ids"),
 _cache = {}                     # model id -> (at, frozenset(version ids))
 _lock = threading.Lock()
 
+# The map also lives in local/cache/contest_model_versions.json (through moonglade.paths, written
+# the way the contest board's cache is: atomic), so a restart does not repeat up to 24 paced reads.
+# Loaded at first use of a given folder; every entry keeps its own saved time and the same TTL.
+STORE_NAME = "contest_model_versions.json"
+_STORE_VERSION = 1
+_loaded_from = None             # the file the memory map was last loaded from
+
+
+def _store_path():
+    from moonglade import paths as _paths
+    return _paths.cache_dir() / STORE_NAME
+
+
+def _load_store():
+    """Merge the saved map into memory once per file. Anything unreadable is just an empty map
+    (the reads come back, the file is rebuilt)."""
+    global _loaded_from
+    path = str(_store_path())
+    with _lock:
+        if _loaded_from == path:
+            return
+        _loaded_from = path
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            models = data.get("models") if (isinstance(data, dict)
+                                            and data.get("v") == _STORE_VERSION) else None
+            for mid, ent in (models if isinstance(models, dict) else {}).items():
+                if (isinstance(ent, dict) and isinstance(ent.get("versions"), list)
+                        and isinstance(ent.get("at"), (int, float))):
+                    _cache.setdefault(str(mid), (float(ent["at"]),
+                                                 frozenset(str(v) for v in ent["versions"])))
+        except (OSError, ValueError):
+            pass
+
+
+def _save_store(now=None):
+    """Write the in-date entries (an old one is dropped here) atomically; a failed write is
+    logged by the writer and never fails the answer."""
+    from moonglade import contests as _contests
+    now = time.time() if now is None else now
+    with _lock:
+        models = {mid: {"at": at, "versions": sorted(vs)} for mid, (at, vs) in _cache.items()
+                  if now - at < VERSIONS_TTL_S}
+    _contests._save_contest_cache(str(_store_path()), {"v": _STORE_VERSION, "models": models})
+
 
 def used_version_ids(db_path):
     """Every model and LoRA version id the catalog's pictures were made with."""
@@ -66,6 +112,7 @@ def used_version_ids(db_path):
 
 def cached_versions(model_id, now=None):
     now = time.time() if now is None else now
+    _load_store()
     with _lock:
         hit = _cache.get(str(model_id))
     if hit and now - hit[0] < VERSIONS_TTL_S:
@@ -73,9 +120,12 @@ def cached_versions(model_id, now=None):
     return None
 
 
-def remember_versions(model_id, versions, now=None):
+def remember_versions(model_id, versions, now=None, save=True):
+    _load_store()
     with _lock:
         _cache[str(model_id)] = (time.time() if now is None else now, frozenset(versions))
+    if save:
+        _save_store(now)
 
 
 def rule_status(rule, used, versions_of):
@@ -127,6 +177,7 @@ def board_qualify(core, session, contests, db_path, sleep=time.sleep, now=None):
     `qualify` with whatever is known."""
     used = used_version_ids(db_path)
     lookups = 0
+    learned = []
 
     def versions_of(model_id):
         nonlocal lookups
@@ -142,7 +193,11 @@ def board_qualify(core, session, contests, db_path, sleep=time.sleep, now=None):
             vs = model_version_ids(core, session, model_id)
         except Exception:                    # noqa: BLE001 -- unknown, never "not used"
             return None
-        remember_versions(model_id, vs, now)
+        remember_versions(model_id, vs, now, save=False)
+        learned.append(model_id)
         return frozenset(vs)
 
-    return qualify(contests, used, versions_of)
+    out = qualify(contests, used, versions_of)
+    if learned:
+        _save_store(now)                     # once per answer, not once per read
+    return out
