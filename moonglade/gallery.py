@@ -4275,6 +4275,72 @@ def thumbnail_renders(path):
 _PIL_EXTS = None                                  # Pillow's openable extensions, read once
 
 
+# See-through pictures (RGBA/LA/P-with-transparency) used to lose their alpha to a bare
+# convert("RGB") and showed a black box with junk colours. They are flattened onto a dim
+# checkerboard instead (owner's pick, 3.22 walk): 12px squares at the thumbnail's FINAL
+# size, top-left square CHECKER_A. Opaque pictures keep the old convert path untouched.
+CHECKER_A = (46, 49, 72)
+CHECKER_B = (32, 35, 54)
+CHECKER_SQUARE = 12
+# One-time rebuild marker (see build_thumbnails): its presence means every see-through
+# thumbnail already on disk was cut by the checkerboard-aware code.
+CHECKER_MARKER = ".checkerboard-v1"
+
+
+def _see_through_rgba(im):
+    """The picture as RGBA when it has any genuinely see-through pixel, else None.
+    A fully opaque RGBA (or a palette image whose transparent index is unused) is NOT
+    see-through, so it keeps today's exact convert("RGB") path."""
+    if im.mode in ("RGBA", "LA", "PA", "La", "RGBa") or "transparency" in im.info:
+        rgba = im.convert("RGBA")
+        if rgba.getchannel("A").getextrema()[0] < 255:
+            return rgba
+    return None
+
+
+def _checkerboard(size):
+    from PIL import ImageDraw
+    w, h = size
+    board = Image.new("RGB", (w, h), CHECKER_B)
+    draw = ImageDraw.Draw(board)
+    n = CHECKER_SQUARE
+    for ty in range(0, h, n):
+        for tx in range(0, w, n):
+            if ((tx // n) + (ty // n)) % 2 == 0:
+                draw.rectangle([tx, ty, min(tx + n, w) - 1, min(ty + n, h) - 1], fill=CHECKER_A)
+    return board
+
+
+def thumb_rgb(im, size, resample=None):
+    """`im` shrunk to fit `size` as an RGB image ready for a JPEG. Opaque: exactly the old
+    convert-then-thumbnail. See-through: shrunk as RGBA, then pasted (alpha as the mask)
+    onto the checkerboard laid out at the final size."""
+    resample = Image.LANCZOS if resample is None else resample
+    rgba = _see_through_rgba(im)
+    if rgba is None:
+        out = im.convert("RGB")
+        out.thumbnail(size, resample)
+        return out
+    rgba.thumbnail(size, resample)
+    board = _checkerboard(rgba.size)
+    board.paste(rgba.convert("RGB"), (0, 0), rgba.getchannel("A"))
+    return board
+
+
+def source_is_see_through(img_path):
+    """True when the original file has see-through pixels (a GIF is judged on its first
+    frame, the one make_thumbnail draws). False on any read problem."""
+    if Image is None:
+        return False
+    try:
+        with Image.open(img_path) as im:
+            if getattr(im, "n_frames", 1) > 1:
+                im.seek(0)
+            return _see_through_rgba(im) is not None
+    except Exception:
+        return False
+
+
 def make_thumbnail(img_path, thumb_path):
     """Render one gallery thumbnail. ATOMIC: Pillow writes a same-directory temp file and
     the finished JPEG is os.replace()d into position -- the idiom download's own `.part`
@@ -4308,8 +4374,7 @@ def make_thumbnail(img_path, thumb_path):
             # how the grid animates one is the look board's call, never this file's.
             if getattr(im, "n_frames", 1) > 1:
                 im.seek(0)
-            im = im.convert("RGB")
-            im.thumbnail(THUMB_SIZE, Image.LANCZOS)
+            im = thumb_rgb(im, THUMB_SIZE, Image.LANCZOS)
             im.save(tmp, "JPEG", quality=THUMB_QUALITY)
         # _atomic_replace, not a bare os.replace: on Windows an antivirus or the Search
         # Indexer briefly opens a file the instant it is created, and renaming it then
@@ -5052,6 +5117,13 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
     total = 0
     done = 0
     work = []
+    # ONE-TIME REBUILD (3.22 walk): thumbnails cut before the checkerboard existed flattened
+    # see-through pictures to a black box, and "is it built?" is thumb_path.exists(), so they
+    # would never be redone. Until the marker file is written, every already-built IMAGE
+    # thumbnail is re-checked ONCE against its original and only the see-through ones are
+    # recut (opaque thumbnails are left alone). A forced rebuild recuts everything anyway.
+    marker = thumb_dir / CHECKER_MARKER
+    recheck = not force and not marker.exists()
     for row in rows:
         if not row.get("filename"):
             continue
@@ -5059,15 +5131,23 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
         total += 1
         thumb_path = thumb_dir / "{}.jpg".format(row["media_id"])
         if thumb_path.exists() and (is_vid or not force):
-            done += 1
+            if recheck and not is_vid and thumbnail_renders(row.get("filename")):
+                work.append((row["media_id"], thumb_path, row.get("filename"), is_vid, True))
+            else:
+                done += 1
             continue
         if not is_vid and not thumbnail_renders(row.get("filename")):
             done += 1            # an SVG has no thumbnail by design: skipped, not a failure (L3)
             continue
-        work.append((row["media_id"], thumb_path, row.get("filename"), is_vid))
+        work.append((row["media_id"], thumb_path, row.get("filename"), is_vid, False))
 
     def _one(item):
-        mid, thumb_path, filename, is_vid = item
+        mid, thumb_path, filename, is_vid, only_if_see_through = item
+        if only_if_see_through:
+            src = find_image_file(out_dir, mid, filename)
+            if not src or not source_is_see_through(src):
+                return True              # opaque (or unreadable): the old thumbnail stands
+            return bool(make_thumbnail(src, thumb_path))
         if is_vid:
             vp = Path(out_dir) / (filename or "")
             if not vp.exists():
@@ -5103,6 +5183,12 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
             if _one(it):
                 done += 1
             _tick()
+    if recheck or force:
+        try:
+            thumb_dir.mkdir(parents=True, exist_ok=True)
+            marker.write_text("see-through thumbnails sit on a checkerboard\n", encoding="utf-8")
+        except OSError:
+            pass
     if total and not progress_cb:
         print()
 
