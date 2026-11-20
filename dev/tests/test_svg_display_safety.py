@@ -58,3 +58,18 @@ def test_an_svg_named_file_gets_the_svg_policy_whatever_type_a_route_guessed():
         assert resp.headers["Content-Security-Policy"] == g.SVG_FILE_CSP, mime
         assert resp.headers["Content-Disposition"].startswith("attachment"), mime
         assert resp.headers["X-Content-Type-Options"] == "nosniff", mime
+
+
+def test_an_svg_row_thumb_url_points_the_img_at_the_file_route(tmp_path):
+    """3.22 review: an SVG has no thumbnail, so /thumbs/<id>.jpg sends <img> to /full/<id>."""
+    cli = _library(tmp_path)
+    r = cli.get("/thumbs/123456789.jpg")
+    assert r.status_code in (301, 302, 307, 308)
+    assert r.headers["Location"].endswith("/full/123456789")
+    r.close()
+    r = cli.get("/thumbs/123456789.jpg", follow_redirects=True)
+    assert r.status_code == 200 and r.mimetype == "image/svg+xml"
+    assert r.headers["Content-Security-Policy"] == g.SVG_FILE_CSP
+    r.close()
+    # a raster with no thumb is still a plain 404, never redirected
+    assert cli.get("/thumbs/987654321.jpg").status_code == 404

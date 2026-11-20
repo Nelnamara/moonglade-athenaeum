@@ -11092,6 +11092,16 @@ def create_app(out_dir: Path):
                                            mimetype="image/jpeg")
                 resp.headers["Cache-Control"] = _STRIP_CACHE
                 return harden_file_response(resp, p.name)
+        # An SVG has no server thumbnail by design (DESIGN_3.22 5.3): every grid, picker and
+        # viewer builds /thumbs/<id>.jpg, so for an SVG row this route points the <img> (or CSS
+        # background-image) at the library file route instead, which already serves it under
+        # the 5.4 headers. A redirect, never the SVG's text inlined or a different element.
+        if "/" not in media_id and "\\" not in media_id and ".." not in media_id \
+                and not (Path(str(thumb_dir)) / "{}.jpg".format(media_id)).exists():
+            row = get_row(db_path, media_id)
+            sp = find_image_file(out_dir, media_id, row.get("filename") if row else "")
+            if sp and str(sp).lower().endswith(".svg"):
+                return redirect("/full/{}".format(media_id))
         resp = send_from_directory(str(thumb_dir), "{}.jpg".format(media_id),
                                    max_age=300, mimetype="image/jpeg")
         resp.headers["Cache-Control"] = _THUMB_CACHE
