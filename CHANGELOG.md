@@ -16,6 +16,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.21.3] - 2026-11-19 — The Second Look
+
 ### Added
 - **Download and Remix on the viewer's top bar**, on the desktop and the phone. The bar is now two groups with a thin line between: Edit, To Video, Remix, Upscale, then Download, Publish, Make a recipe, Similar, Details, then Slideshow and Close. Download is the bright button, as it is on a picture's record; Publish is a plain button now. `D` downloads the open picture. Remix loads the recipe into the Generate drawer and spends nothing, exactly as on the record. (2026-11-19)
 - **My Art has an All time / 30 days switch.** Beside Sort, it changes the totals, each card's views bar and hearts, and the Most viewed and Most liked sorts to the last 30 days. PixAI only reports lifetime counts, so Moonglade now keeps one reading per day; until 30 days of them exist the totals say "since" and the first day instead of "30 days". (2026-11-19)
@@ -34,6 +36,10 @@ git tags. Full prose notes for tagged versions live on
 - **The phone's Control tab is in sections: Jobs, Health and This phone.** Jobs opens first, with Sync now and Tidy side by side, the last sync under them and the job console as a list, with Sync in it once: how often it runs and whether it is on, as the desktop Panel reads it. The standing order is in the Ledger. Tidy opens the duplicates. Health has the counts and Collection Health; it was the Menu's Health screen. This phone has Library paging, Data saver and About, then the blur switch, Branding and the skins. (2026-11-19)
 - **The phone's Menu is a grid of cards.** Each card has a name and one line under it: My Art, Collections, Publish, Contests, Train a LoRA, Inbox, Gift box, Import, Activity and Guide, with Log Out under the grid. Activity and the guide were round buttons in the old header. When something is running, the Menu button shows a dot. Contests no longer has a trophy. (2026-11-19)
 - **On the phone, notices appear under the top controls.** A corner notice used to sit at a fixed height that now covered Create's and Control's top rows, and one that stays until dismissed kept them covered. Notices now sit just under the header and the row of controls below it, on every tab. (2026-11-19)
+- **The second row of buttons on a picture's record is full size**, the same as the first row, only dimmer. (2026-11-19)
+
+### Fixed
+- **The Mirror to PixAI tile is tidy again.** The two Connect buttons are their own height, the bookmark hint is one line under them instead of three cramped columns, and Disconnect is a real button. From another device, the arm switch says it is turned on or off on the PC Moonglade runs on, instead of "localhost-only". (2026-11-19)
 
 ## [3.21.2] - 2026-11-19 — The Spare Key
 
