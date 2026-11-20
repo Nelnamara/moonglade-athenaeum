@@ -16,6 +16,11 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.21.4] - 2026-11-20 — The Extra Day
+
+### Fixed
+- **iPhones, Macs and the Apple TV accept Moonglade's HTTPS certificate.** It ran 826 days, one past Apple's limit, so Apple devices refused it as "not standards compliant" even with Moonglade's certificate installed. The next start replaces it with one that fits, under the same authority, so the fingerprint on the LAN discovery card stays the same and nothing needs installing again. (2026-11-20)
+
 ## [3.21.3] - 2026-11-19 — The Second Look
 
 ### Added
