@@ -1,4 +1,4 @@
-﻿"""See-through pictures' thumbnails sit on a dim checkerboard; opaque ones are unchanged;
+"""See-through pictures' thumbnails sit on a dim checkerboard; opaque ones are unchanged;
 old thumbnails of see-through sources rebuild themselves exactly once."""
 import io
 
