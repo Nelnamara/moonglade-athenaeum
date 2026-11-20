@@ -203,6 +203,7 @@ FM = {
     "priority": "1500", "render_seconds": "12.5", "backend": "pdr",
     "started_at": "S", "ended_at": "E", "updated_at": "U", "retry_count": "1",
     "moderation": "PASS", "video_mode": "professional", "video_model": "v3.0.2",
+    "output_format": "gif", "frame_count": "9", "frame_duration_ms": "200",   # 3.22 S5
     "source_media_id": "src-1", "derive_kind": "edit",
 }
 RESULT = {"createdAt": CREATED, "paidCredit": 42, "outputs": {"mediaId": "m-golden"},

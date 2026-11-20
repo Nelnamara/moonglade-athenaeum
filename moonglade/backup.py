@@ -1984,6 +1984,7 @@ _FULL_META_FIELDS = (
     "inference_profile", "quality_tag", "prompt_helper", "control_nets", "lora_parameters",
     "priority", "render_seconds", "backend", "started_at", "ended_at", "updated_at",
     "retry_count", "moderation", "video_mode", "video_model",
+    "output_format", "frame_count", "frame_duration_ms",
     # Batch identity (issue #33): PixAI's own 0-based output number + batch size from
     # getTaskById outputs.batch. Per-ROW, unlike everything else here -- extract_full_meta
     # leaves both blank at task level (fm is cached once per task) and each row resolves
@@ -2152,6 +2153,8 @@ _GEN_SURFACE_FIELDS = (
     "inference_profile", "quality_tag", "prompt_helper", "control_nets", "lora_parameters",
     "priority", "render_seconds", "backend", "started_at", "ended_at", "updated_at",
     "retry_count", "moderation", "video_mode", "video_model",
+    # Edit Pro's output format and a GIF's frames (3.22 S5, DESIGN_3.22 5.3).
+    "output_format", "frame_count", "frame_duration_ms",
 )
 # What EVERY create-time row-builder copies from extract_full_meta: the surface fields PLUS
 # lineage (source_media_id/derive_kind). The builders used to spread only _GEN_SURFACE_FIELDS,
@@ -2170,6 +2173,26 @@ def _prompt_helper_label(params, task):
         return ""
     base = "on" if ph.get("enable") else "off"
     return "{} ({})".format(base, reason) if reason else base
+
+
+_RECORDED_OUTPUT_FORMATS = ("svg", "gif")
+
+
+def _output_format_of(outputs, model_config):
+    """"svg" / "gif" for an Edit Pro output, else "" (3.22 S5): the task's outputs.outputFormat
+    (what PixAI made) first, then the request's chat.modelConfig.outputFormat. Pure."""
+    for v in ((outputs or {}).get("outputFormat"), (model_config or {}).get("outputFormat")):
+        v = str(v or "").strip().lower()
+        if v:
+            return v if v in _RECORDED_OUTPUT_FORMATS else ""
+    return ""
+
+
+def _mc_int_str(model_config, key):
+    """A whole-number modelConfig value as a catalog string, '' when absent or not a whole
+    number (a bool included). Pure."""
+    v = (model_config or {}).get(key)
+    return str(v) if isinstance(v, int) and not isinstance(v, bool) else ""
 
 
 def extract_full_meta(task):
@@ -2192,6 +2215,8 @@ def extract_full_meta(task):
     ii = outputs.get("inferenceInfo") if isinstance(outputs.get("inferenceInfo"), dict) else {}
     stages = ii.get("stages") if isinstance(ii.get("stages"), dict) else {}
     qtag = params.get("qualityTag") if isinstance(params.get("qualityTag"), dict) else {}
+    _chat = params.get("chat") if isinstance(params.get("chat"), dict) else {}
+    chat_mc = _chat.get("modelConfig") if isinstance(_chat.get("modelConfig"), dict) else {}
     cnets = params.get("controlNets") or []
     lparams = params.get("loraParameters") or []
     run_s = stages.get("pipeline_run_s")
@@ -2250,6 +2275,13 @@ def extract_full_meta(task):
         "moderation":        str((task.get("moderationAction") or {}).get("promptsModerationAction") or ""),
         "video_mode":        str(vblock.get("mode") or ""),
         "video_model":       str(vblock.get("model") or ""),
+        # Edit Pro's output (3.22 S5, DESIGN_3.22 5.3): what PixAI says it made (the task's
+        # outputs.outputFormat), else what the request asked for; a GIF's frames from the
+        # request. Only the two non-default formats are recorded, so a png edit and every
+        # ordinary picture stay blank.
+        "output_format":     _output_format_of(outputs, chat_mc),
+        "frame_count":       _mc_int_str(chat_mc, "frameCount"),
+        "frame_duration_ms": _mc_int_str(chat_mc, "frameDurationMs"),
         # BATCH IDENTITY (issue #33): blank at TASK level on purpose -- outputs.batch is an
         # ordered array with one entry per output, so the index is a per-ROW fact. The raw
         # list is parked under _batch (private, never persisted: _merge_full and the backfill

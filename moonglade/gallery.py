@@ -197,6 +197,14 @@ CATALOG_FIELDS = [
     "views_prev",      # the sweep before that -- the spike baseline
     "views_at",        # ISO timestamp of the sweep that wrote `views`
     "views_prev_at",   # ISO timestamp of the sweep that wrote `views_prev`
+    # EDIT PRO'S OUTPUT FORMAT (3.22 S5, DESIGN_3.22 5.3): what PixAI made -- the task's own
+    # outputs.outputFormat, else the request's chat.modelConfig.outputFormat -- "svg" or "gif"
+    # (a png edit sends none and is blank, like every ordinary picture). The source rules read
+    # it before the file's extension. A GIF's frame count and frame length come from the
+    # request; blank when it sent none (PixAI's own defaults then ran).
+    "output_format",
+    "frame_count",
+    "frame_duration_ms",
 ]
 
 THUMB_SIZE = (768, 768)
@@ -270,7 +278,10 @@ CREATE TABLE IF NOT EXISTS catalog (
     views             TEXT DEFAULT '',
     views_prev        TEXT DEFAULT '',
     views_at          TEXT DEFAULT '',
-    views_prev_at     TEXT DEFAULT ''
+    views_prev_at     TEXT DEFAULT '',
+    output_format     TEXT DEFAULT '',
+    frame_count       TEXT DEFAULT '',
+    frame_duration_ms TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_created_at ON catalog(created_at);
 CREATE INDEX IF NOT EXISTS idx_model_name ON catalog(model_name);
@@ -423,6 +434,12 @@ _MIGRATIONS = [
     # image's entry in its task's outputs.batch. Per-ROW and permanent, unlike the
     # task-level deleted_remote above, which --reconcile-deleted rewrites on every run.
     "ALTER TABLE catalog ADD COLUMN cloud_deleted_at TEXT DEFAULT ''",
+    # EDIT PRO'S OUTPUT FORMAT (3.22 S5) -- see CATALOG_FIELDS. Blank on every existing row
+    # (a --backfill-full-meta fills an SVG or GIF edit's), and the source rules fall back to
+    # the file's extension, which collect has named .svg / .gif since 3.21.1.
+    "ALTER TABLE catalog ADD COLUMN output_format TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN frame_count TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN frame_duration_ms TEXT DEFAULT ''",
     # ONE-TIME DATA REPAIRS (2026-09-26). A repair that must run ONCE -- not on every new
     # process, which is how often migrate() replays this list -- records its name here and
     # guards its own statement on that name, so each repair is three idempotent statements:
@@ -1833,8 +1850,11 @@ def _operator_clause(key, value):
 
 def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
                  published_only=False, art_tag="", lora="", media_type="", source="",
-                 collection=""):
-    """Return (where_clause, params) for the common filter set."""
+                 collection="", no_svg=False):
+    """Return (where_clause, params) for the common filter set. `no_svg` leaves SVG rows
+    out (by the recorded output format, then the file's extension): the picture list the
+    create pickers and the Apple TV client read, since tvOS cannot draw one and no create
+    road takes one as a source (3.22 S5)."""
     clauses = ["filename != ''"]
     params  = []
     if collection:
@@ -1900,6 +1920,9 @@ def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
     if date_to:
         clauses.append("SUBSTR(created_at,1,7) <= ?")
         params.append(date_to)
+    if no_svg:
+        clauses.append("COALESCE(output_format,'') != 'svg' "
+                       "AND LOWER(COALESCE(filename,'')) NOT LIKE '%.svg'")
     return " AND ".join(clauses), params
 
 
@@ -2617,8 +2640,9 @@ def curate_restore(db_path, prev):
 def query_catalog(db_path, q="", model="", date_from="", date_to="",
                   sort="newest", page=1, page_size=100, batch="", rating_min=0,
                   published_only=False, art_tag="", lora="", media_type="", source="",
-                  collection="", series=""):
-    """Return (rows, total) with filtering, sorting and pagination done in SQL.
+                  collection="", series="", no_svg=False):
+    """Return (rows, total) with filtering, sorting and pagination done in SQL. `no_svg`
+    leaves SVG rows out (see _build_where).
 
     `series` constrains the result to one dial-in series' members (#34 direction
     B, the ?series=<sid> "open a stack" view): the sid resolves through the series
@@ -2642,7 +2666,7 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
     q, collection = _expand_smart(db_path, q, collection)
     where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
                                  published_only, art_tag, lora, media_type, source,
-                                 collection)
+                                 collection, no_svg=no_svg)
     where, params = _narrow_to_series(db_path, series, where, params)
     order, order_params = _order_sql(sort, collection)
     with catalog(db_path) as con:
@@ -4270,6 +4294,10 @@ def make_thumbnail(img_path, thumb_path):
         # ("*.jpg")) cannot mistake a live temp file for a stale thumbnail.
         tmp = thumb_path.with_name(thumb_path.name + ".tmp-%d" % os.getpid())
         with Image.open(img_path) as im:
+            # A GIF (Edit Pro's animation, 3.22 S5) is drawn from its FIRST frame, a still:
+            # how the grid animates one is the look board's call, never this file's.
+            if getattr(im, "n_frames", 1) > 1:
+                im.seek(0)
             im = im.convert("RGB")
             im.thumbnail(THUMB_SIZE, Image.LANCZOS)
             im.save(tmp, "JPEG", quality=THUMB_QUALITY)
@@ -11978,7 +12006,11 @@ def create_app(out_dir: Path):
             db_path, q=q, sort=sort, page=page, page_size=limit,
             collection=(request.args.get("collection") or "").strip(),
             source=(request.args.get("source") or "").strip(),
-            rating_min=rating_min, media_type=media_type)
+            rating_min=rating_min, media_type=media_type,
+            # No SVG on this list (3.22 S5, DESIGN_3.22 5.3): the Apple TV client reads it and
+            # tvOS cannot draw one, and no create surface may take one as a source. In SQL, so
+            # the page and the total stay true.
+            no_svg=True)
         out = []
         for r in rows:
             mid = r.get("media_id")
