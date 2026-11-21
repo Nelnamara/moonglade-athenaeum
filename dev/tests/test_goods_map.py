@@ -20,11 +20,12 @@ import pytest
 
 from moonglade import container as mc
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client, login_test_client
 from moonglade import achievements as achievements_mod
 from moonglade import branding as branding_mod
+from moonglade import pages as pages_mod
 
 # A real (tiny) PNG so PIL-facing paths get decodable bytes.
 PNG_1PX = bytes.fromhex(
@@ -541,6 +542,6 @@ def test_loom_shell_also_carries_the_favicon_link():
     MUST still point a rel=icon at the .png like the other two, so the Loom browser tab stops
     404'ing on its icon. _LOOM_SHELL is spliced verbatim into LOOM_PAGE_BUNDLE, so asserting
     the module string is asserting what /loom serves."""
-    assert 'rel="icon"' in g._LOOM_SHELL
-    assert 'href="/branding/favicon.png"' in g._LOOM_SHELL
-    assert "/branding/favicon.ico" not in g._LOOM_SHELL
+    assert 'rel="icon"' in pages_mod._LOOM_SHELL
+    assert 'href="/branding/favicon.png"' in pages_mod._LOOM_SHELL
+    assert "/branding/favicon.ico" not in pages_mod._LOOM_SHELL

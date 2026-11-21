@@ -27,10 +27,15 @@ from moonglade import gallery
 from moonglade import gen_cli as gen_cli_mod
 from moonglade import gen_params as gen_params_mod
 from moonglade import models as models_mod
-from moonglade.gallery import load_catalog
+from moonglade.catalog import load_catalog
 from moonglade.scan import DELETED_DIRNAME
 from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import catalog as catalog_mod
+from moonglade import thumbs as thumbs_mod
+from moonglade import media_fetch as media_fetch_mod
+from moonglade import full_meta as full_meta_mod
+from moonglade import library_runs as library_runs_mod
 
 
 # ---------------------------------------------------------------------------
@@ -266,7 +271,7 @@ class TestM06TrashedImagesAreNotTheLibrary:
         """Excluding it silently would just swap one wrong number for another: the totals
         would stop matching the folder with nothing on screen to explain the gap."""
         _seed_backup_tree(tmp_path)
-        counts = core._count_backup_images(tmp_path)
+        counts = library_runs_mod._count_backup_images(tmp_path)
         assert counts.trashed == 1 and counts.trashed_bytes == 400
 
     def test_catalog_stats_does_not_count_trash_as_library(self, tmp_path, capsys):
@@ -274,11 +279,11 @@ class TestM06TrashedImagesAreNotTheLibrary:
         what to clean up, and it reported the trashed image as part of the collection."""
         _seed_backup_tree(tmp_path)
         db = tmp_path / "catalog.db"
-        gallery.init_db(db)
-        row = {f: "" for f in gallery.CATALOG_FIELDS}
+        catalog_mod.init_db(db)
+        row = {f: "" for f in catalog_mod.CATALOG_FIELDS}
         row.update({"media_id": "1", "filename": "images/live_1.png"})
-        gallery.save_catalog(db, [row])
-        core.run_catalog_stats(SimpleNamespace(out=str(tmp_path)))
+        catalog_mod.save_catalog(db, [row])
+        library_runs_mod.run_catalog_stats(SimpleNamespace(out=str(tmp_path)))
         out = capsys.readouterr().out
         assert "Image files on disk : 1" in out
         assert "1 soft-deleted in {}/".format(DELETED_DIRNAME) in out
@@ -301,11 +306,11 @@ def video_task_network(monkeypatch):
     """Stub every network touch of a --task-id recovery whose task turns out to be a video."""
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: _VIDEO_TASK)
-    monkeypatch.setattr(core, "media_file_gql",
+    monkeypatch.setattr(full_meta_mod, "media_file_gql",
                         lambda s, mid: {"fileUrl": "https://cdn/{}.mp4".format(mid)})
     # A video's media object resolves to a perfectly good URL -- which is exactly why the old
     # path could download the mp4 through the IMAGE loop and never notice.
-    monkeypatch.setattr(core, "resolve_media",
+    monkeypatch.setattr(media_fetch_mod, "resolve_media",
                         lambda s, mid: ("https://cdn/{}.png".format(mid), {"width": 8, "height": 8}))
 
     def fake_download(session, url, stem, **kw):
@@ -314,10 +319,10 @@ def video_task_network(monkeypatch):
         path.write_bytes(b"\x00binary")
         return "ok", path
 
-    monkeypatch.setattr(core, "download", fake_download)
+    monkeypatch.setattr(media_fetch_mod, "download", fake_download)
     monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: True)
     monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
-    monkeypatch.setattr(gallery, "make_thumbnail", lambda *a, **k: None)
+    monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
 
 
 class TestM16VideoTaskRecoveredThroughGenerate:
@@ -382,7 +387,7 @@ def edit_task_network(monkeypatch):
     def _install(task, resolved_name):
         monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
         monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: task)
-        monkeypatch.setattr(core, "resolve_media",
+        monkeypatch.setattr(media_fetch_mod, "resolve_media",
                             lambda s, mid: ("https://cdn/{}.png".format(mid),
                                             {"width": 8, "height": 8}))
 
@@ -392,8 +397,8 @@ def edit_task_network(monkeypatch):
             path.write_bytes(b"\x00png")
             return "ok", path
 
-        monkeypatch.setattr(core, "download", fake_download)
-        monkeypatch.setattr(gallery, "make_thumbnail", lambda *a, **k: None)
+        monkeypatch.setattr(media_fetch_mod, "download", fake_download)
+        monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
 
         def fake_name(session, mid, **kw):
             asked.append(mid)
@@ -431,7 +436,7 @@ class TestM17UnknownEditModel:
         edit_task_network(_edit_task("3111000000000000002"), lambda mid: mid)
         row = _run_edit(tmp_path)
         assert row["model_name"] != "Edit"
-        assert core._needs_model_fix(row) == "3111000000000000002"
+        assert library_runs_mod._needs_model_fix(row) == "3111000000000000002"
 
     def test_a_known_edit_model_keeps_its_local_label_without_a_lookup(self, tmp_path,
                                                                       edit_task_network):
@@ -451,4 +456,4 @@ class TestM17UnknownEditModel:
         edit_task_network(_edit_task(None), "unused")
         row = _run_edit(tmp_path)
         assert row["model_name"] == "Edit"
-        assert core._needs_model_fix(row) == ""
+        assert library_runs_mod._needs_model_fix(row) == ""

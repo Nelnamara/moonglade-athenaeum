@@ -13,7 +13,7 @@ that actually works is moonglade_backup itself (the very object `_gen_session` h
 plus a real catalog row so the file resolver resolves a real file.
 """
 from moonglade import backup as core
-from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_client
 from moonglade import media_tools as media_tools_mod
 

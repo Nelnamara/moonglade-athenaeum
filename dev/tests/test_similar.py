@@ -11,6 +11,7 @@ pytest.importorskip("pixeltable")  # optional heavy dep, not in requirements.txt
 # documented way to exclude this file explicitly; this is the fallback for someone who
 # doesn't know that yet.
 from moonglade import similar as S
+from moonglade import library_runs as library_runs_mod
 
 
 def test_pgserver_start_timeout_is_widened(monkeypatch):
@@ -158,7 +159,7 @@ def test_similar_excludes_self_and_limits_k(monkeypatch):
 def test_api_similar_route(tmp_path, monkeypatch):
     """Hydrates neighbours like /api/gallery-images, drops ids no longer in the catalog,
     and soft-404s an unknown media_id — the sidecar itself is mocked."""
-    from moonglade.gallery import save_catalog, CATALOG_FIELDS
+    from moonglade.catalog import save_catalog, CATALOG_FIELDS
     from tests.conftest import login_client
 
     def row(**kw):
@@ -218,7 +219,7 @@ def test_run_sync_similar_tops_up_and_never_rebuilds(tmp_path, monkeypatch):
         out = str(tmp_path)
         progress = None
 
-    core.run_sync_similar(Args())
+    library_runs_mod.run_sync_similar(Args())
 
     assert calls == ["sync"]
 
@@ -242,4 +243,4 @@ def test_run_sync_similar_reports_an_already_complete_index(tmp_path, monkeypatc
         out = str(tmp_path)
         progress = None
 
-    core.run_sync_similar(Args())   # must not raise, must not sys.exit
+    library_runs_mod.run_sync_similar(Args())   # must not raise, must not sys.exit

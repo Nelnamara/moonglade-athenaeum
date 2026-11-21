@@ -16,6 +16,8 @@ from moonglade import backup as core
 from moonglade import gen_cli
 from moonglade import gen_params
 from moonglade import gen_road
+from moonglade import catalog as catalog_mod
+from moonglade import account_api as account_api_mod
 
 
 @pytest.fixture(autouse=True)
@@ -111,8 +113,8 @@ def test_a_plain_source_still_builds():
 def app(tmp_path, monkeypatch):
     from moonglade import gallery as g
     from tests.conftest import login_test_client
-    blank = {f: "" for f in g.CATALOG_FIELDS}
-    g.save_catalog(tmp_path / "catalog.db", [
+    blank = {f: "" for f in catalog_mod.CATALOG_FIELDS}
+    catalog_mod.save_catalog(tmp_path / "catalog.db", [
         dict(blank, media_id="71", filename="images/logo_71.svg"),
         dict(blank, media_id="72", filename="images/anim_72.png", output_format="gif"),
         dict(blank, media_id="73", filename="images/plain_73.png")])
@@ -121,7 +123,7 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "upload_media", lambda *a, **k: pytest.fail("uploaded"))
     monkeypatch.setattr(gen_road, "submit",
                         lambda s, req, **k: sent.append(req) or {"task_id": "t1"})
-    monkeypatch.setattr(core, "suggest_prompt", lambda s, mid: sent.append(mid) or ["a tag"])
+    monkeypatch.setattr(account_api_mod, "suggest_prompt", lambda s, mid: sent.append(mid) or ["a tag"])
     return SimpleNamespace(cli=login_test_client(g.create_app(tmp_path)), sent=sent)
 
 
@@ -170,8 +172,8 @@ def test_the_scene_route_refuses_before_any_upload(app, monkeypatch):
 @pytest.fixture
 def library(tmp_path, monkeypatch):
     from moonglade import gallery as g
-    blank = {f: "" for f in g.CATALOG_FIELDS}
-    g.save_catalog(tmp_path / "catalog.db", [
+    blank = {f: "" for f in catalog_mod.CATALOG_FIELDS}
+    catalog_mod.save_catalog(tmp_path / "catalog.db", [
         dict(blank, media_id="81", filename="images/a_81.svg"),
         dict(blank, media_id="82", filename="images/a_82.png", output_format="gif")])
     (tmp_path / "logo.svg").write_text("<svg/>", encoding="utf-8")
@@ -211,8 +213,8 @@ def test_each_cli_runner_refuses_before_any_upload(library, runner, kw, words, c
 
 def test_the_cli_suggest_prompt_refuses_an_svg_file(library):
     with pytest.raises(core.LocalRefusal, match="An SVG can't be read for a prompt"):
-        core.run_suggest_prompt(SimpleNamespace(suggest_prompt=str(library / "logo.svg"),
+        account_api_mod.run_suggest_prompt(SimpleNamespace(suggest_prompt=str(library / "logo.svg"),
                                                 out=str(library), token=None))
     with pytest.raises(core.LocalRefusal, match="An SVG can't be read"):
-        core.run_suggest_prompt(SimpleNamespace(suggest_prompt="81", out=str(library),
+        account_api_mod.run_suggest_prompt(SimpleNamespace(suggest_prompt="81", out=str(library),
                                                 token=None))

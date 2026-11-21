@@ -24,7 +24,8 @@ import pytest
 from PIL import Image
 
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import clear_sealed_caches, login_test_client, session_csrf
 from moonglade import branding as branding_mod

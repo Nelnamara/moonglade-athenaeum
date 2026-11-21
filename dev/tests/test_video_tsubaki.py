@@ -19,9 +19,13 @@ from moonglade import gen_params as gen_params_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import models as models_mod
 from moonglade import pricing as pricing_mod
-from moonglade.gallery import CATALOG_FIELDS, save_catalog, load_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog, load_catalog
 from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import catalog as catalog_mod
+from moonglade import media_fetch as media_fetch_mod
+from moonglade import full_meta as full_meta_mod
+from moonglade import library_runs as library_runs_mod
 
 TBKV = ("tbkv1.0", "tbkv1.0.1")
 TBKV_IDS = {"tbkv1.0": "2042030623542642408", "tbkv1.0.1": "2054378086834851904"}
@@ -46,7 +50,7 @@ def test_gallery_repair_table_matches_the_roster():
     """The catalog repair keeps its own name->id copy (the gallery cannot import the backup
     module at load time). It must be exactly VIDEO_MODELS' engines that publish an id."""
     want = {n: m["model_id"] for n, m in gen_params_mod.VIDEO_MODELS.items() if m["model_id"]}
-    assert g._VIDEO_NAME_TO_ID == want
+    assert catalog_mod._VIDEO_NAME_TO_ID == want
 
 
 # =============================================================================
@@ -530,20 +534,20 @@ _RV_TBKV = {"referenceVideo": {"mode": "professional", "model": "tbkv1.0", "rati
 
 
 def test_extract_full_meta_reads_the_reference_video_block():
-    fm = core.extract_full_meta(_vtask(_RV_TBKV, TBKV_IDS["tbkv1.0"]))
+    fm = full_meta_mod.extract_full_meta(_vtask(_RV_TBKV, TBKV_IDS["tbkv1.0"]))
     assert fm["video_model"] == "tbkv1.0" and fm["video_mode"] == "professional"
     assert fm["model_id"] == TBKV_IDS["tbkv1.0"]
 
 
 def _collect(tmp_path, monkeypatch, task, names=None):
     from pathlib import Path
-    monkeypatch.setattr(core, "media_file_gql", lambda s, m: {"fileUrl": "https://x/v.mp4"})
+    monkeypatch.setattr(full_meta_mod, "media_file_gql", lambda s, m: {"fileUrl": "https://x/v.mp4"})
 
     def _dl(session, url, stem, **kw):
         p = Path(str(stem) + ".mp4")
         p.write_bytes(b"\x00\x00\x00\x18ftypmp42")
         return "ok", p
-    monkeypatch.setattr(core, "download", _dl)
+    monkeypatch.setattr(media_fetch_mod, "download", _dl)
     monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
     monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
     looked = []
@@ -591,12 +595,12 @@ def test_a_task_with_no_numeric_id_keeps_the_engine_name_never_blank(tmp_path, m
 
 def test_needs_model_fix_never_hands_a_name_to_the_version_lookup():
     for name in ("tbkv1.0.1", "v4.0.1", "v3.0.1"):
-        assert core._needs_model_fix({"model_id": name, "model_name": "",
+        assert library_runs_mod._needs_model_fix({"model_id": name, "model_name": "",
                                       "is_video": "1"}) == ""
     # ruling 3: a VIDEO row with a numeric id and a blank name IS filled
-    assert core._needs_model_fix({"model_id": TBKV_IDS["tbkv1.0.1"], "model_name": "",
+    assert library_runs_mod._needs_model_fix({"model_id": TBKV_IDS["tbkv1.0.1"], "model_name": "",
                                   "is_video": "1"}) == TBKV_IDS["tbkv1.0.1"]
-    assert core._needs_model_fix({"model_id": TBKV_IDS["tbkv1.0.1"], "model_name": "",
+    assert library_runs_mod._needs_model_fix({"model_id": TBKV_IDS["tbkv1.0.1"], "model_name": "",
                                   "is_video": "1", "video_model": "tbkv1.0.1"}) \
         == TBKV_IDS["tbkv1.0.1"]
 
@@ -627,13 +631,13 @@ def test_an_engine_the_roster_does_not_know_still_takes_its_numeric_id(tmp_path,
 
 def test_needs_model_fix_never_titles_a_video_row_with_another_models_id():
     v27 = {"model_id": IMAGE_CKPT, "model_name": "", "is_video": "1", "video_model": "v2.7"}
-    assert core._needs_model_fix(v27) == ""
+    assert library_runs_mod._needs_model_fix(v27) == ""
     # a v4.0 row filed under v4.0.1's id is not v4.0's to title either
-    assert core._needs_model_fix({"model_id": "2003969750675682808", "model_name": "",
+    assert library_runs_mod._needs_model_fix({"model_id": "2003969750675682808", "model_name": "",
                                   "is_video": "1", "video_model": "v4.0"}) == ""
     # no engine recorded (older rows) and image rows keep today's rule
-    assert core._needs_model_fix(dict(v27, video_model="")) == IMAGE_CKPT
-    assert core._needs_model_fix(dict(v27, is_video="", video_model="")) == IMAGE_CKPT
+    assert library_runs_mod._needs_model_fix(dict(v27, video_model="")) == IMAGE_CKPT
+    assert library_runs_mod._needs_model_fix(dict(v27, is_video="", video_model="")) == IMAGE_CKPT
 
 
 # =============================================================================
@@ -645,13 +649,13 @@ def _recover_i2v(tmp_path, monkeypatch, task, lookup=None):
     from pathlib import Path
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t, **k: task)
-    monkeypatch.setattr(core, "media_file_gql", lambda s, m: {"fileUrl": "https://x/v.mp4"})
+    monkeypatch.setattr(full_meta_mod, "media_file_gql", lambda s, m: {"fileUrl": "https://x/v.mp4"})
 
     def _dl(session, url, stem, **kw):
         p = Path(str(stem) + ".mp4")
         p.write_bytes(b"\x00\x00\x00\x18ftypmp42")
         return "ok", p
-    monkeypatch.setattr(core, "download", _dl)
+    monkeypatch.setattr(media_fetch_mod, "download", _dl)
     monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
     monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
 
@@ -685,7 +689,7 @@ def test_recovering_a_task_with_no_numeric_id_keeps_its_engine_name(tmp_path, mo
 
 def _seed_raw(db, rows):
     save_catalog(db, rows)
-    g._MIGRATED.discard(g._catalog_key(db))
+    catalog_mod._MIGRATED.discard(catalog_mod._catalog_key(db))
 
 
 def test_the_video_row_repair_migration_is_idempotent(tmp_path):
@@ -705,9 +709,9 @@ def test_the_video_row_repair_migration_is_idempotent(tmp_path):
         _row(media_id="h", is_video="1", model_id="v4.0", model_name="v4.0"),
         _row(media_id="i", is_video="1", model_id="v3.2", model_name="V3.2 by hand"),
     ])
-    g.migrate(db, force=True)
+    catalog_mod.migrate(db, force=True)
     first = {r["media_id"]: r for r in load_catalog(db)}
-    g.migrate(db, force=True)
+    catalog_mod.migrate(db, force=True)
     second = {r["media_id"]: r for r in load_catalog(db)}
     assert first == second, "a second run changes nothing"
     assert (first["a"]["model_id"], first["a"]["video_model"]) == (TBKV_IDS["tbkv1.0.1"],
@@ -721,10 +725,10 @@ def test_the_video_row_repair_migration_is_idempotent(tmp_path):
     assert first["f"]["model_id"] == "2042030623542642408"
     assert first["f"]["model_name"] == "Tsubaki Video Flash v1.0"
     # and the repaired row is now something --fix-models can title
-    assert core._needs_model_fix(first["a"]) == TBKV_IDS["tbkv1.0.1"]
+    assert library_runs_mod._needs_model_fix(first["a"]) == TBKV_IDS["tbkv1.0.1"]
     # a stamp the name-as-id lookup left behind is cleared, so the real title can land
     assert (first["g"]["model_id"], first["g"]["model_name"]) == (TBKV_IDS["tbkv1.0"], "")
-    assert core._needs_model_fix(first["g"]) == TBKV_IDS["tbkv1.0"]
+    assert library_runs_mod._needs_model_fix(first["g"]) == TBKV_IDS["tbkv1.0"]
     assert (first["h"]["model_id"], first["h"]["model_name"]) == ("2003968021137101826", "")
     # a name that is neither is somebody's, and stays
     assert first["i"]["model_name"] == "V3.2 by hand"
@@ -732,8 +736,8 @@ def test_the_video_row_repair_migration_is_idempotent(tmp_path):
 
 def test_the_repair_clears_exactly_the_label_fix_models_stamps():
     import inspect
-    assert "'Unknown or removed model'" in g._VIDEO_ROW_REPAIR_SQL
-    assert '"Unknown or removed model"' in inspect.getsource(core.run_fix_models)
+    assert "'Unknown or removed model'" in catalog_mod._VIDEO_ROW_REPAIR_SQL
+    assert '"Unknown or removed model"' in inspect.getsource(library_runs_mod.run_fix_models)
 
 
 def test_video_task_params_route_reports_the_sources_ratio(tmp_path, monkeypatch, pixai):

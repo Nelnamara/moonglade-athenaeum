@@ -322,7 +322,7 @@ def video_poster_thumb(video_path, thumb_path):
     guard stays here because import-local and sync-videos gate on it."""
     if not ffmpeg_path():
         return False
-    from moonglade.gallery import make_video_thumbnail
+    from moonglade.thumbs import make_video_thumbnail
     return make_video_thumbnail(video_path, thumb_path)
 
 

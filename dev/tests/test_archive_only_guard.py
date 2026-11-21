@@ -13,10 +13,11 @@ The owner's ruling (walk, 2026-10-03): warn, don't block. Keeping them back was 
     can badge them and the confirms can count them.
 """
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.conftest import login_client
 from moonglade import scan as scan_mod
+from moonglade import catalog as catalog_mod
 
 
 def _row(**kw):
@@ -48,12 +49,12 @@ def _three(tmp_path):
 
 
 def test_the_rule(tmp_path):
-    assert g.is_archive_only({"deleted_remote": "1"}) is True
-    assert g.is_archive_only({"cloud_deleted_at": "2026-09-20T10:00:00Z"}) is True
-    assert g.is_archive_only({"deleted_remote": "", "cloud_deleted_at": "  "}) is False
-    assert g.is_archive_only({"deleted_remote": "0"}) is False
-    assert g.is_archive_only({}) is False
-    assert g.is_archive_only(None) is False
+    assert catalog_mod.is_archive_only({"deleted_remote": "1"}) is True
+    assert catalog_mod.is_archive_only({"cloud_deleted_at": "2026-09-20T10:00:00Z"}) is True
+    assert catalog_mod.is_archive_only({"deleted_remote": "", "cloud_deleted_at": "  "}) is False
+    assert catalog_mod.is_archive_only({"deleted_remote": "0"}) is False
+    assert catalog_mod.is_archive_only({}) is False
+    assert catalog_mod.is_archive_only(None) is False
 
 
 # ---------------------------------------------------------------------------

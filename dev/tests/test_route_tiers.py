@@ -73,16 +73,14 @@ import pytest
 
 from moonglade import gallery as moonglade_gallery
 from moonglade import backup as core
+from moonglade import account_api as account_api_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import cloud_delete as cloud_delete_mod
-from moonglade.gallery import (
-    LOCALHOST,
-    LOGIN,
-    PUBLIC,
-    create_app,
-    route_tier,
-    assert_every_route_declares_a_tier,
-)
+from moonglade.gallery import create_app
+from moonglade.web_tiers import (LOCALHOST, LOGIN, PUBLIC, route_tier,
+                                 assert_every_route_declares_a_tier)
+from moonglade import web_tiers as web_tiers_mod
+from moonglade import web_accounts as web_accounts_mod
 
 
 LAN = "203.0.113.5"      # TEST-NET-3 -- the "some other device on the LAN" stand-in
@@ -556,8 +554,10 @@ def armed(monkeypatch):
     for name in ("Popen", "run", "call", "check_output", "check_call"):
         monkeypatch.setattr(subprocess, name, blocked("subprocess." + name),
                             raising=False)
-    for name in ("gql_adhoc", "claim_reward"):
+    for name in ("gql_adhoc",):
         monkeypatch.setattr(core, name, blocked("core." + name), raising=False)
+    for name in ("claim_reward",):                        # in account_api since 3.22
+        monkeypatch.setattr(account_api_mod, name, blocked("core." + name), raising=False)
     for name in ("submit_generation", "submit_fixer"):  # in gen_road since 3.22
         monkeypatch.setattr(gen_road_mod, name, blocked("core." + name), raising=False)
     for name in ("delete_task",):                         # in cloud_delete since 3.22
@@ -571,7 +571,7 @@ def armed(monkeypatch):
 def _login(app, username="tier-probe", password="a-real-test-password-1"):
     """A real, fully-authenticated client -- used ONLY to prove that being logged
     in is still not enough for a LOCALHOST route."""
-    core.add_or_update_web_user(username, password)
+    web_accounts_mod.add_or_update_web_user(username, password)
     cli = app.test_client()
     html = cli.get("/login").get_data(as_text=True)
     # The React shell's window.MG_BOOT JSON blob (the ONLY login page since the
@@ -852,7 +852,7 @@ def test_localhost_refusal_body_is_the_declared_one(app, armed):
                         environ_overrides={"REMOTE_ADDR": LAN},
                         **PROBE_BODIES.get((endpoint, method), {}))
         body = resp.get_json(silent=True)
-        expected = moonglade_gallery.route_tier_message(app.view_functions[endpoint])
+        expected = web_tiers_mod.route_tier_message(app.view_functions[endpoint])
         if body != {"error": expected}:
             failures.append("  {} ({}): expected {!r}, got {!r}".format(
                 method, endpoint, {"error": expected}, body))

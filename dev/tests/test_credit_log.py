@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from moonglade import backup as core
 from moonglade import cards as cards_mod
+from moonglade import account_api as account_api_mod
 
 
 def _node(ref_id="r-1", amount=-2100, type_="task_cost", extra=None,
@@ -91,7 +92,7 @@ def test_list_credit_log_fails_soft(monkeypatch):
 def test_run_credit_log_empty(monkeypatch, capsys, pixai):
     monkeypatch.setattr(cards_mod, "list_credit_log", lambda s, **k: {
         "entries": [], "has_more": False, "next_cursor": None})
-    res = core.run_credit_log(SimpleNamespace(
+    res = account_api_mod.run_credit_log(SimpleNamespace(
         token=None, credit_log_count=0, credit_log_before=""))
     assert res == {"entries": 0}
     assert "No credit log entries" in capsys.readouterr().out
@@ -106,7 +107,7 @@ def test_run_credit_log_lists_signed_amounts_and_more_hint(monkeypatch, capsys, 
              "label": "Generation Task", "extra": None,
              "created_at": "2026-08-01T10:08:00Z", "updated_at": ""},
         ], "has_more": True, "next_cursor": "cursor-older"})
-    res = core.run_credit_log(SimpleNamespace(
+    res = account_api_mod.run_credit_log(SimpleNamespace(
         token=None, credit_log_count=0, credit_log_before=""))
     out = capsys.readouterr().out
     assert res == {"entries": 2}

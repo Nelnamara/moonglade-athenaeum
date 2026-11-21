@@ -19,10 +19,15 @@ from moonglade import gen_cli as gen_cli_mod
 from moonglade import gen_params as gen_params_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import pricing as pricing_mod
-from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client
 from moonglade import mirror as mirror_mod
+from moonglade import catalog as catalog_mod
+from moonglade import thumbs as thumbs_mod
+from moonglade import history as history_mod
+from moonglade import media_fetch as media_fetch_mod
+from moonglade import full_meta as full_meta_mod
 
 
 REFERENCE_PRO = gen_params_mod.EDIT_MODELS["reference-pro"]["model_id"]
@@ -62,28 +67,28 @@ def _row(**kw):
 # ---------------------------------------------------------------------------
 
 def test_fixer_block_only_matches_a_real_fix():
-    assert core.fixer_block(_fixer_task())["boxes"][0]["tag"] == "hand"
+    assert history_mod.fixer_block(_fixer_task())["boxes"][0]["tag"] == "hand"
     # an instruct Edit is also a chat task, but carries no fixer sub-block
-    assert core.fixer_block({"parameters": {"chat": {"prompts": "make it night"}}}) is None
-    assert core.fixer_block({"parameters": {"prompts": "a druid"}}) is None
-    assert core.fixer_block(None) is None
+    assert history_mod.fixer_block({"parameters": {"chat": {"prompts": "make it night"}}}) is None
+    assert history_mod.fixer_block({"parameters": {"prompts": "a druid"}}) is None
+    assert history_mod.fixer_block(None) is None
 
 
 def test_fix_marker_names_the_regions_that_were_repaired():
-    assert core.fix_marker([{"tag": "face"}]) == "fix-face"
-    assert core.fix_marker([{"tag": "hand"}]) == "fix-hand"
+    assert history_mod.fix_marker([{"tag": "face"}]) == "fix-face"
+    assert history_mod.fix_marker([{"tag": "hand"}]) == "fix-hand"
     # stable order regardless of the order the boxes were drawn in, and deduped
-    assert core.fix_marker([{"tag": "hand"}, {"tag": "face"}, {"tag": "hand"}]) == "fix-face-hand"
+    assert history_mod.fix_marker([{"tag": "hand"}, {"tag": "face"}, {"tag": "hand"}]) == "fix-face-hand"
     # an untagged box degrades to a plain marker rather than guessing which it was
-    assert core.fix_marker([{}]) == "fix"
-    assert core.fix_marker([]) == "fix"
+    assert history_mod.fix_marker([{}]) == "fix"
+    assert history_mod.fix_marker([]) == "fix"
 
 
 def test_build_fix_stem_name_keeps_the_media_id_last():
     """Invariant 7 (the shared media_id -> file matcher) is what resume and every
     already_downloaded() check rely on: the readable text may be anything, but the file
     must still end in `_<media_id>`."""
-    stem = core.build_fix_stem_name("a night elf druid", [{"tag": "face"}], "T1", "M9", 60)
+    stem = history_mod.build_fix_stem_name("a night elf druid", [{"tag": "face"}], "T1", "M9", 60)
     assert stem == "a_night_elf_druid_fix-face_T1_M9"
     assert stem.endswith("_M9")
 
@@ -92,21 +97,21 @@ def test_build_fix_stem_name_marker_survives_a_long_source_label():
     """The length cap applies to the source slug ONLY. If the marker could be truncated
     away, a long-prompted source would produce exactly the unreadable name this scheme
     exists to replace."""
-    stem = core.build_fix_stem_name("x" * 200, [{"tag": "hand"}], "T1", "M9", 20)
+    stem = history_mod.build_fix_stem_name("x" * 200, [{"tag": "hand"}], "T1", "M9", 20)
     assert "_fix-hand_T1_M9" in stem
     assert stem.startswith("x" * 20 + "_")
 
 
 def test_build_fix_stem_name_without_a_source_label():
-    assert core.build_fix_stem_name("", [{"tag": "face"}], "T1", "M9", 60) == "fix-face_T1_M9"
+    assert history_mod.build_fix_stem_name("", [{"tag": "face"}], "T1", "M9", 60) == "fix-face_T1_M9"
 
 
 def _stub_collect(monkeypatch, tmp_path):
-    monkeypatch.setattr(core, "resolve_media",
+    monkeypatch.setattr(media_fetch_mod, "resolve_media",
                         lambda s, m: ("https://cdn/" + m, {"width": 1024, "height": 1536}))
-    monkeypatch.setattr(core, "download",
+    monkeypatch.setattr(media_fetch_mod, "download",
                         lambda s, url, stem, **k: ("ok", stem.with_suffix(".jpg")))
-    monkeypatch.setattr(moonglade_gallery, "make_thumbnail", lambda *a, **k: None)
+    monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
 
 
 def test_collect_names_a_fix_from_its_source_image_not_the_template(monkeypatch, tmp_path):
@@ -119,7 +124,7 @@ def test_collect_names_a_fix_from_its_source_image_not_the_template(monkeypatch,
     _stub_collect(monkeypatch, tmp_path)
     monkeypatch.setattr(gen_cli_mod, "_task_detail_query", lambda s, t: _fixer_task())
     gen_road_mod.collect_generation(object(), "T1", str(tmp_path))
-    row = next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
+    row = next(r for r in catalog_mod.load_catalog(tmp_path / "catalog.db")
                if r["media_id"] == "M9")
     assert row["filename"] == "images/a_night_elf_druid_moonlight_fix-hand_T1_M9.jpg"
     assert "Image_2_shows" not in row["filename"]
@@ -132,7 +137,7 @@ def test_collect_falls_back_to_the_source_media_id_when_it_is_not_in_the_catalog
     _stub_collect(monkeypatch, tmp_path)
     monkeypatch.setattr(gen_cli_mod, "_task_detail_query", lambda s, t: _fixer_task(source="700"))
     gen_road_mod.collect_generation(object(), "T1", str(tmp_path))
-    row = next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
+    row = next(r for r in catalog_mod.load_catalog(tmp_path / "catalog.db")
                if r["media_id"] == "M9")
     assert row["filename"] == "images/700_fix-hand_T1_M9.jpg"
 
@@ -145,7 +150,7 @@ def test_collect_still_names_an_ordinary_generation_from_its_prompt(monkeypatch,
         "parameters": {"prompts": "a night elf druid", "modelId": "V1"},
         "outputs": {"mediaId": "M9", "seed": 42}})
     gen_road_mod.collect_generation(object(), "T1", str(tmp_path))
-    row = next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
+    row = next(r for r in catalog_mod.load_catalog(tmp_path / "catalog.db")
                if r["media_id"] == "M9")
     assert row["filename"] == "images/a_night_elf_druid_T1_M9.jpg"
 
@@ -155,7 +160,7 @@ def test_collect_still_names_an_ordinary_generation_from_its_prompt(monkeypatch,
 # ---------------------------------------------------------------------------
 
 def test_extract_full_meta_reads_a_fixer_tasks_model():
-    fm = core.extract_full_meta(_fixer_task())
+    fm = full_meta_mod.extract_full_meta(_fixer_task())
     assert fm["model_id"] == REFERENCE_PRO
     assert fm["model_name"] == "Reference Pro"
 
@@ -163,14 +168,14 @@ def test_extract_full_meta_reads_a_fixer_tasks_model():
 def test_extract_full_meta_falls_back_to_the_chat_blocks_model_id():
     """build_chat_edit_parameters sets modelId INSIDE the chat block and nowhere else, so a
     chat task built by this app has no top-level modelId at all."""
-    fm = core.extract_full_meta(_fixer_task(top_model=False))
+    fm = full_meta_mod.extract_full_meta(_fixer_task(top_model=False))
     assert fm["model_id"] == REFERENCE_PRO
 
 
 def test_extract_full_meta_invents_no_seed_sampler_steps_or_cfg_for_a_fix():
     """A fixer task has no outputs.detailParameters and no seed. Those fields stay empty --
     the detail page's em-dash is the honest answer; a borrowed number would be a lie."""
-    fm = core.extract_full_meta(_fixer_task())
+    fm = full_meta_mod.extract_full_meta(_fixer_task())
     assert fm["seed"] == "" and fm["steps"] == ""
     assert fm["sampler"] == "" and fm["cfg_scale"] == ""
 
@@ -181,7 +186,7 @@ def test_collect_writes_the_fix_model_and_leaves_the_rest_empty(monkeypatch, tmp
     _stub_collect(monkeypatch, tmp_path)
     monkeypatch.setattr(gen_cli_mod, "_task_detail_query", lambda s, t: _fixer_task())
     gen_road_mod.collect_generation(object(), "T1", str(tmp_path))
-    row = next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
+    row = next(r for r in catalog_mod.load_catalog(tmp_path / "catalog.db")
                if r["media_id"] == "M9")
     assert row["model_id"] == REFERENCE_PRO and row["model_name"] == "Reference Pro"
     assert row["width"] == "1024" and row["height"] == "1536"     # dimensions already survived
@@ -593,7 +598,7 @@ def _collect_fix(monkeypatch, tmp_path, fixer):
     task["parameters"]["chat"]["fixer"] = fixer
     monkeypatch.setattr(gen_cli_mod, "_task_detail_query", lambda s, t: task)
     gen_road_mod.collect_generation(object(), "T1", str(tmp_path))
-    return next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
+    return next(r for r in catalog_mod.load_catalog(tmp_path / "catalog.db")
                 if r["media_id"] == "M9")["filename"]
 
 

@@ -5,8 +5,10 @@ from types import SimpleNamespace
 
 from moonglade import gallery as g
 from moonglade import backup as core
-from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from moonglade import media_tools as media_tools_mod
+from moonglade import thumbs as thumbs_mod
+from moonglade import sync as sync_mod
 
 
 def _row(**kw):
@@ -38,8 +40,8 @@ def test_build_thumbnails_video_fallback(tmp_path, monkeypatch):
         called.append(str(video_path))
         _png(thumb_path)
         return True
-    monkeypatch.setattr(g, "make_video_thumbnail", fake_vthumb)
-    g.build_thumbnails(rows, tmp_path, thumbs, force=True, workers=1)
+    monkeypatch.setattr(thumbs_mod, "make_video_thumbnail", fake_vthumb)
+    thumbs_mod.build_thumbnails(rows, tmp_path, thumbs, force=True, workers=1)
     # the poster-less video got the ffmpeg fallback...
     assert len(called) == 1 and called[0].endswith("v_2.mp4")
     assert (thumbs / "2.jpg").exists()
@@ -51,7 +53,7 @@ def test_build_thumbnails_video_fallback(tmp_path, monkeypatch):
 def test_make_video_thumbnail_fail_soft(tmp_path, monkeypatch):
     from moonglade import backup as core
     monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "")    # no ffmpeg anywhere
-    assert g.make_video_thumbnail(tmp_path / "nope.mp4",
+    assert thumbs_mod.make_video_thumbnail(tmp_path / "nope.mp4",
                                   tmp_path / "t.jpg") is False
     assert not (tmp_path / "t.jpg").exists()
 
@@ -63,7 +65,7 @@ def test_rebuild_thumbs_sweeps_orphans_and_regens(tmp_path, monkeypatch):
     _png(thumbs / "1.jpg")            # stale-quality thumb -> regenerated
     _png(thumbs / "999.jpg")          # orphan (media gone) -> swept
     before = (thumbs / "1.jpg").stat().st_mtime_ns
-    out = core.run_rebuild_thumbs(SimpleNamespace(out=str(tmp_path), workers=1,
+    out = sync_mod.run_rebuild_thumbs(SimpleNamespace(out=str(tmp_path), workers=1,
                                                   progress=None))
     assert out["swept"] == 1
     assert not (thumbs / "999.jpg").exists()

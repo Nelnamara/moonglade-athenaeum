@@ -181,7 +181,7 @@ def test_launch_args_hold_only_lasting_switches(tmp_path):
 
 @pytest.fixture
 def cli(tmp_path):
-    from moonglade.gallery import CATALOG_FIELDS, save_catalog
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "1", "filename": "a.png", "created_at": "2025-01-01T00:00:00"}])
     c = login_client(tmp_path)
@@ -228,7 +228,72 @@ def test_the_branding_picks_write_settings_and_leave_each_other_alone(tmp_path):
 def test_config_json_keeps_only_hand_edited_values():
     """The keys the app used to write into config.json are gone from every writer."""
     import inspect
+    from moonglade import routes_generate as routes_generate_mod    # gallery's create routes
+    from moonglade import routes_loom as routes_loom_mod            # and the Loom's
+    from moonglade import web_loom_store as web_loom_store_mod
+    from moonglade import routes_gate as routes_gate_mod            # and the front door's
+    from moonglade import web_threads as web_threads_mod            # and the background jobs'
+    from moonglade import routes_panel as routes_panel_mod          # and the Control Panel's
+    from moonglade import routes_delete as routes_delete_mod        # and the delete routes'
+    from moonglade import routes_recipes as routes_recipes_mod      # and the recipe routes'
+    from moonglade import routes_library as routes_library_mod      # and the library routes'
+    from moonglade import routes_account as routes_account_mod      # and the account routes'
+    from moonglade import routes_community as routes_community_mod  # and the community routes'
+    from moonglade import routes_train as routes_train_mod          # and the training routes'
+    from moonglade import routes_ach as routes_ach_mod              # and the achievement routes'
+    from moonglade import routes_mirror as routes_mirror_mod        # and the Mirror's routes'
+    from moonglade import routes_branding as routes_branding_mod    # and the branding routes'
+    from moonglade import routes_import as routes_import_mod        # and the import routes'
+    from moonglade import redact as redact_mod
+    from moonglade import web_tiers as web_tiers_mod
+    from moonglade import watch_plans as watch_plans_mod
+    from moonglade import name_hunt as name_hunt_mod
+    from moonglade import ach_beacon as ach_beacon_mod
+    from moonglade import scenes as scenes_mod
+    from moonglade import pages as pages_mod
+    from moonglade import web_policy as web_policy_mod
+    from moonglade import loom_files as loom_files_mod
+    from moonglade import catalog_search as catalog_search_mod
+    from moonglade import catalog as catalog_mod
+    from moonglade import curation as curation_mod
+    from moonglade import train_guard as train_guard_mod
+    from moonglade import catalog_verbs as catalog_verbs_mod
+    from moonglade import thumbs as thumbs_mod
+    from moonglade import trash as trash_mod
+    from moonglade import dupe_review as dupe_review_mod
+    from moonglade import web_accounts as web_accounts_mod
     src = (inspect.getsource(g) + inspect.getsource(core) + inspect.getsource(mirror_mod)
-           + inspect.getsource(branding_mod))
+           + inspect.getsource(branding_mod) + inspect.getsource(routes_generate_mod)
+           + inspect.getsource(routes_loom_mod) + inspect.getsource(web_loom_store_mod)
+           + inspect.getsource(routes_gate_mod) + inspect.getsource(web_threads_mod)
+           + inspect.getsource(routes_panel_mod)
+           + inspect.getsource(routes_delete_mod)
+           + inspect.getsource(routes_recipes_mod)
+           + inspect.getsource(routes_library_mod)
+           + inspect.getsource(routes_account_mod)
+           + inspect.getsource(routes_community_mod)
+           + inspect.getsource(routes_train_mod)
+           + inspect.getsource(routes_ach_mod)
+           + inspect.getsource(routes_mirror_mod)
+           + inspect.getsource(routes_branding_mod)
+           + inspect.getsource(routes_import_mod)
+           + inspect.getsource(redact_mod)
+           + inspect.getsource(web_tiers_mod)
+           + inspect.getsource(watch_plans_mod)
+           + inspect.getsource(name_hunt_mod)
+           + inspect.getsource(ach_beacon_mod)
+           + inspect.getsource(scenes_mod)
+           + inspect.getsource(pages_mod)
+           + inspect.getsource(web_policy_mod)
+           + inspect.getsource(loom_files_mod)
+           + inspect.getsource(catalog_search_mod)
+           + inspect.getsource(catalog_mod)
+           + inspect.getsource(curation_mod)
+           + inspect.getsource(train_guard_mod)
+           + inspect.getsource(catalog_verbs_mod)
+           + inspect.getsource(thumbs_mod)
+           + inspect.getsource(trash_mod)
+           + inspect.getsource(dupe_review_mod)
+           + inspect.getsource(web_accounts_mod))
     for key in ('"LIBRARY_DIR"', '"BONJOUR_ENABLED"', '"BONJOUR_NAME"', '"MIRROR_TO_PIXAI"'):
         assert key not in src, key

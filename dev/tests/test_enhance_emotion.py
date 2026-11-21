@@ -8,10 +8,11 @@ from moonglade import gen_road as gen_road_mod
 from tests.conftest import login_client
 from moonglade import mirror as mirror_mod
 from moonglade import branding as branding_mod
+from moonglade import catalog as catalog_mod
 
 
 def _client(tmp_path):
-    g.save_catalog(tmp_path / "catalog.db", [])
+    catalog_mod.save_catalog(tmp_path / "catalog.db", [])
     return login_client(tmp_path)
 
 

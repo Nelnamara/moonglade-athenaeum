@@ -182,7 +182,8 @@ def test_p2s_broken_chunked_ending_after_a_healthy_run_is_a_drop_not_a_failure()
 def test_the_stream_never_writes_the_websockets_status_fields(tmp_path):
     """T-F10: frames go through the watcher's handler, which touches only events_seen and
     last_event_at; connected, last_error and last_close_at stay the socket's."""
-    from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade.gallery import create_app
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "1", "filename": "a_1.png", "created_at": "2025-01-01T00:00:00"}])
     app = create_app(tmp_path)

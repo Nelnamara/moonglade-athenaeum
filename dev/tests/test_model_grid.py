@@ -10,6 +10,10 @@ from moonglade import gen_road as gen_road_mod
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import models as models_mod
+from moonglade import catalog as catalog_mod
+from moonglade import thumbs as thumbs_mod
+from moonglade import media_fetch as media_fetch_mod
+from moonglade import full_meta as full_meta_mod
 
 _SEARCH = {"data": [
     {"id": "1982880136609467518", "title": "Tsubaki.2", "type": "MMDIT26A_MODEL",
@@ -899,9 +903,9 @@ def _stub_generate_network(monkeypatch, outputs):
     def fake_resolve(s, mid):
         seen_mids.append(mid)
         return "https://cdn/" + mid, {"width": 512, "height": 512}
-    monkeypatch.setattr(core, "resolve_media", fake_resolve)
-    monkeypatch.setattr(core, "download", lambda s, url, stem, **k: ("ok", stem.with_suffix(".png")))
-    monkeypatch.setattr(moonglade_gallery, "make_thumbnail", lambda *a, **k: None)
+    monkeypatch.setattr(media_fetch_mod, "resolve_media", fake_resolve)
+    monkeypatch.setattr(media_fetch_mod, "download", lambda s, url, stem, **k: ("ok", stem.with_suffix(".png")))
+    monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
     return seen_mids
 
 
@@ -1078,7 +1082,7 @@ def test_generation_status_phases(monkeypatch):
 
 def test_collect_generation(monkeypatch, tmp_path):
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: {"outputs": {"mediaId": "M1"}})
-    monkeypatch.setattr(core, "extract_full_meta", lambda r: {"prompt_full": "p"})
+    monkeypatch.setattr(full_meta_mod, "extract_full_meta", lambda r: {"prompt_full": "p"})
     monkeypatch.setattr(gen_cli_mod, "_download_image_task", lambda *a, **k: ["/M1.webp"])
     got = gen_road_mod.collect_generation(object(), "T", str(tmp_path))
     assert got["media_ids"] == ["M1"] and got["saved"] == 1
@@ -1119,7 +1123,7 @@ def test_run_generate_persists_paid_credit(monkeypatch, tmp_path):
     args = SimpleNamespace(out=str(tmp_path), params_json='{"prompts": "x", "modelId": "v"}',
                            confirm=True, task_id="", token=None)
     gen_cli_mod.run_generate(args)
-    rows = moonglade_gallery.load_catalog(tmp_path / "catalog.db")
+    rows = catalog_mod.load_catalog(tmp_path / "catalog.db")
     assert {r["media_id"]: r.get("paid_credit") for r in rows} == {"A": "2750", "B": "2750"}
 
 
@@ -1131,12 +1135,12 @@ def test_collect_generation_persists_paid_credit_zero_not_blank(monkeypatch, tmp
                         lambda s, t: {"createdAt": "2026-07-23T00:00:00Z",
                                       "outputs": {"mediaId": "M1", "seed": "9"},
                                       "paidCredit": 0})
-    monkeypatch.setattr(core, "resolve_media",
+    monkeypatch.setattr(media_fetch_mod, "resolve_media",
                         lambda s, m: ("https://cdn/" + m, {"width": 8, "height": 8}))
-    monkeypatch.setattr(core, "download",
+    monkeypatch.setattr(media_fetch_mod, "download",
                         lambda s, url, stem, **k: ("ok", stem.with_suffix(".png")))
-    monkeypatch.setattr(moonglade_gallery, "make_thumbnail", lambda *a, **k: None)
+    monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
     got = gen_road_mod.collect_generation(object(), "T1", str(tmp_path))
     assert got["media_ids"] == ["M1"]
-    rows = moonglade_gallery.load_catalog(tmp_path / "catalog.db")
+    rows = catalog_mod.load_catalog(tmp_path / "catalog.db")
     assert rows[0].get("paid_credit") == "0"

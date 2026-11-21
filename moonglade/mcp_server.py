@@ -38,6 +38,11 @@ from fastmcp.utilities.types import Image
 from moonglade import gallery as g   # catalog helpers -- the single source of truth for SQL
 from moonglade.backup import __version__   # gallery already imports backup: no new cost
 from moonglade import dupes as _dupes
+from moonglade import catalog as _catalog
+from moonglade import curation as _curation
+from moonglade import catalog_verbs as _catalog_verbs
+from moonglade import thumbs as _thumbs
+from moonglade import account_api as _account_api
 
 # The library the tools read: bound by main() once the move has run and the library is
 # resolved (bind_library). Importing this module reads nothing.
@@ -107,7 +112,7 @@ def search_catalog(query: str = "", model: str = "", collection: str = "",
     collection, minimum star rating (0-5), source (api/local), media_type
     (image/video), art_tag, lora, a created-at range (date_from/date_to as YYYY-MM-DD),
     or published_only. sort: newest|oldest|rating. Returns {total, count, rows}."""
-    rows, total = g.query_catalog(
+    rows, total = _curation.query_catalog(
         DB, q=query, model=model, collection=collection,
         rating_min=max(0, min(rating_min, 5)), source=source, media_type=media_type,
         art_tag=art_tag, lora=lora, date_from=date_from, date_to=date_to,
@@ -120,13 +125,13 @@ def search_catalog(query: str = "", model: str = "", collection: str = "",
 def get_image(media_id: str, include_image: bool = True):
     """Full metadata for ONE image and, by default, a downscaled view so you can
     actually see it. Returns metadata; when include_image, also an image block."""
-    row = g.get_row(DB, media_id)
+    row = _catalog.get_row(DB, media_id)
     if not row:
         return {"error": "no such media_id", "media_id": media_id}
     meta = _slim(row)
     if not include_image:
         return meta
-    path = g.find_image_file(OUT, media_id, row.get("filename") or "")
+    path = _catalog_verbs.find_image_file(OUT, media_id, row.get("filename") or "")
     if not path:
         return {**meta, "note": "image file not found on disk"}
     if str(path).lower().endswith(".svg") or str(row.get("output_format") or "") == "svg":
@@ -136,7 +141,7 @@ def get_image(media_id: str, include_image: bool = True):
         import PIL.Image
         im = PIL.Image.open(path)
         buf = io.BytesIO()
-        g.thumb_rgb(im, (640, 640), PIL.Image.BICUBIC).save(buf, format="JPEG", quality=85)
+        _thumbs.thumb_rgb(im, (640, 640), PIL.Image.BICUBIC).save(buf, format="JPEG", quality=85)
         return [meta, Image(data=buf.getvalue(), format="jpeg")]
     except Exception as e:
         return {**meta, "note": "could not render image: {}".format(e)}
@@ -149,10 +154,10 @@ def similar(media_id: str, limit: int = 24) -> dict:
     `stale_index_entries` counts neighbours the index still holds but the catalog no
     longer does -- when it is non-zero, `count` is short of `requested` for that
     reason and not because the library ran out of similar images."""
-    row = g.get_row(DB, media_id)
+    row = _catalog.get_row(DB, media_id)
     if not row:
         return {"error": "no such media_id", "neighbors": []}
-    path = g.find_image_file(OUT, media_id, row.get("filename") or "")
+    path = _catalog_verbs.find_image_file(OUT, media_id, row.get("filename") or "")
     if not path:
         return {"error": "image file not on disk", "neighbors": []}
     k = max(1, min(limit, 96))
@@ -164,7 +169,7 @@ def similar(media_id: str, limit: int = 24) -> dict:
     neighbors = []
     stale = []
     for mid, score in hits:
-        r = g.get_row(DB, mid)
+        r = _catalog.get_row(DB, mid)
         if r:
             neighbors.append({**_slim(r), "score": round(float(score), 4)})
         else:
@@ -203,9 +208,9 @@ def set_rating(media_id: str, rating: int) -> dict:
     # through a review queue marks the image done, and it stays unrated forever. The check
     # lives here rather than in update_rating because the gallery helper has other callers
     # whose contract (silent no-op on a missing row) this tool has no business changing.
-    if not g.get_row(DB, media_id):
+    if not _catalog.get_row(DB, media_id):
         return {"ok": False, "error": "no such media_id", "media_id": media_id}
-    g.update_rating(DB, media_id, value)
+    _catalog.update_rating(DB, media_id, value)
     return {"ok": True, "media_id": media_id, "rating": value}
 
 
@@ -217,8 +222,8 @@ def add_to_collection(media_ids: list[str], collection: str) -> dict:
     if not name:
         return {"ok": False, "error": "collection name required"}
     try:
-        n = g.add_to_collection(DB, [str(m) for m in media_ids], name)
-    except g.CurationError as e:      # a smart collection is a saved search, not a list
+        n = _catalog.add_to_collection(DB, [str(m) for m in media_ids], name)
+    except _curation.CurationError as e:      # a smart collection is a saved search, not a list
         return {"ok": False, "error": str(e)}
     return {"ok": True, "collection": name, "added": n}
 
@@ -229,7 +234,7 @@ def pull_for_review(limit: int = 20, unrated_only: bool = True,
     """Fetch images that likely need curation -- newest first, unrated by default.
     Set uncollected_only to surface images in NO collection instead (a common curation
     target). Review, then set_rating / add_to_collection. Returns {count, rows}."""
-    rows, _ = g.query_catalog(DB, source=source, sort="newest", page=1,
+    rows, _ = _curation.query_catalog(DB, source=source, sort="newest", page=1,
                               page_size=max(1, min(limit * 5, 300)))
     picked = []
     for r in rows:
@@ -249,8 +254,8 @@ def list_collections() -> dict:
     add_to_collection / remove_from_collection are blind to on their own. Returns
     {count, collections:[{name, count}]}."""
     out = []
-    for name in g.unique_collections(DB):
-        _, total = g.query_catalog(DB, collection=name, page=1, page_size=1)
+    for name in _catalog.unique_collections(DB):
+        _, total = _curation.query_catalog(DB, collection=name, page=1, page_size=1)
         out.append({"name": name, "count": total})
     return {"count": len(out), "collections": out}
 
@@ -262,7 +267,7 @@ def remove_from_collection(media_ids: list[str], collection: str) -> dict:
     name = (collection or "").strip()
     if not name:
         return {"ok": False, "error": "collection name required"}
-    n = g.remove_from_collection(DB, [str(m) for m in media_ids], name)
+    n = _catalog.remove_from_collection(DB, [str(m) for m in media_ids], name)
     return {"ok": True, "collection": name, "removed": n}
 
 
@@ -274,7 +279,7 @@ def get_images(media_ids: list[str]) -> dict:
     come back under `missing`."""
     rows, missing = [], []
     for mid in [str(m) for m in media_ids][:100]:
-        row = g.get_row(DB, mid)
+        row = _catalog.get_row(DB, mid)
         if row:
             rows.append(_slim(row))
         else:
@@ -292,7 +297,7 @@ def catalog_stats() -> dict:
     span, and every collection with its size. Read-only, built from query_catalog totals
     (no reimplemented SQL)."""
     def total(**kw):
-        _, t = g.query_catalog(DB, page=1, page_size=1, **kw)
+        _, t = _curation.query_catalog(DB, page=1, page_size=1, **kw)
         return t
     # exact-rating buckets from the cumulative rating_min filter: rating r is
     # (>= r) minus (>= r+1); rating 0 is "unrated" (all minus rated-1-or-more).
@@ -300,8 +305,8 @@ def catalog_stats() -> dict:
     for r in range(0, 6):
         hi = total(rating_min=r + 1) if r < 5 else 0
         by_rating[str(r)] = total(rating_min=r) - hi
-    newest, _ = g.query_catalog(DB, sort="newest", page=1, page_size=1)
-    oldest, _ = g.query_catalog(DB, sort="oldest", page=1, page_size=1)
+    newest, _ = _curation.query_catalog(DB, sort="newest", page=1, page_size=1)
+    oldest, _ = _curation.query_catalog(DB, sort="oldest", page=1, page_size=1)
     return {
         "total": total(),
         "images": total(media_type="image"),
@@ -309,7 +314,7 @@ def catalog_stats() -> dict:
         "by_source": {src: total(source=src) for src in ("api", "local")},
         "by_rating": by_rating,
         "collections": [{"name": n, "count": total(collection=n)}
-                        for n in g.unique_collections(DB)],
+                        for n in _catalog.unique_collections(DB)],
         "newest": (newest[0].get("created_at") if newest else None),
         "oldest": (oldest[0].get("created_at") if oldest else None),
     }
@@ -331,9 +336,8 @@ def tag_suggest(media_id: str) -> dict:
     seed a search. FREE and read-only -- no credits, no mutation -- but it is the first
     tool that reaches the PixAI ACCOUNT, so it needs the session (config.json's
     PIXAI_API_KEY). Returns {media_id, suggestions:[...]} or {..., error} on failure."""
-    from moonglade import backup as mb
     try:
-        out = mb.suggest_prompt(_session(), str(media_id))
+        out = _account_api.suggest_prompt(_session(), str(media_id))
     except Exception as e:
         return {"media_id": media_id, "suggestions": [], "error": str(e)}
     return {"media_id": media_id, "suggestions": list(out or [])}

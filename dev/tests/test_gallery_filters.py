@@ -2,8 +2,9 @@
 year dropdowns, and per-page (via query_catalog)."""
 import pytest
 
-from moonglade.gallery import (CATALOG_FIELDS, init_db, save_catalog, query_catalog, catalog_years,
-                               _like_pattern)
+from moonglade.catalog_verbs import catalog_years
+from moonglade.curation import query_catalog
+from moonglade.catalog import CATALOG_FIELDS, init_db, save_catalog, _like_pattern
 from moonglade.branding import _role_dir
 from moonglade.health import collection_health
 
@@ -294,8 +295,7 @@ def test_source_filter(tmp_path):
 
 
 def test_collections_add_remove_filter(tmp_path):
-    from moonglade.gallery import (add_to_collection, remove_from_collection,
-                               unique_collections)
+    from moonglade.catalog import add_to_collection, remove_from_collection, unique_collections
     db = tmp_path / "catalog.db"
     save_catalog(db, [_row(media_id=m, filename=m + ".png") for m in ("a", "b", "c")])
     assert add_to_collection(db, ["a", "b"], "Elf Portraits") == 2
@@ -585,7 +585,7 @@ def test_video_row_flagged_and_serves(tmp_path):
 
 
 def test_edit_prompt_and_bulk_replace_routes(tmp_path):
-    from moonglade.gallery import load_catalog
+    from moonglade.catalog import load_catalog
     from tests.conftest import login_client
     db = tmp_path / "catalog.db"
     save_catalog(db, [

@@ -12,6 +12,7 @@ from moonglade import cards as cards_mod
 from moonglade import gen_params as gen_params_mod
 from moonglade import mirror as mirror_mod
 from moonglade import pricing as pricing_mod
+from moonglade import account_api as account_api_mod
 
 
 # ---- _normalize_kaisuuken: the real summary template-row shape ----
@@ -257,7 +258,7 @@ def test_apply_kaisuuken_401_with_mirror_off_blames_the_api_key(monkeypatch, pix
 
 def test_run_cards_empty(monkeypatch, capsys, pixai):
     monkeypatch.setattr(cards_mod, "list_kaisuukens", lambda s: [])
-    assert core.run_cards(SimpleNamespace(token=None)) == {"cards": 0}
+    assert account_api_mod.run_cards(SimpleNamespace(token=None)) == {"cards": 0}
     assert "No free cards" in capsys.readouterr().out
 
 
@@ -271,7 +272,7 @@ def test_run_cards_lists_with_total(monkeypatch, capsys, pixai):
          "task_types": ["image-gen"], "model_version_id": "2006468692917575683",
          "template_code": "common-edit-pro", "template_id": "t2",
          "expires": "2026-07-17T20:11:09.504Z"}])
-    res = core.run_cards(SimpleNamespace(token=None))
+    res = account_api_mod.run_cards(SimpleNamespace(token=None))
     out = capsys.readouterr().out
     assert res == {"cards": 2, "total": 36}                 # 16 + 20
     assert "Tsubaki.2 Only" in out and "16x" in out and "1983308862240288769" in out
@@ -422,7 +423,7 @@ def test_kaisuuken_type_catalog_empty_history(pixai):
 def test_run_card_history_empty(monkeypatch, capsys, pixai):
     monkeypatch.setattr(cards_mod, "list_kaisuuken_logs", lambda s, **k: {
         "logs": [], "has_next": False, "end_cursor": None})
-    res = core.run_card_history(SimpleNamespace(token=None, card_history_all=False,
+    res = account_api_mod.run_card_history(SimpleNamespace(token=None, card_history_all=False,
                                                  card_history_count=0))
     assert res == {"logs": 0}
     assert "No benefit-card history" in capsys.readouterr().out
@@ -435,7 +436,7 @@ def test_run_card_history_lists_recent(monkeypatch, capsys, pixai):
                   "category": "Model Card", "task_type": "image-gen", "credit_cost": 3200,
                   "record_id": "rec-1"}],
         "has_next": True, "end_cursor": "cursor-abc"})
-    res = core.run_card_history(SimpleNamespace(token=None, card_history_all=False,
+    res = account_api_mod.run_card_history(SimpleNamespace(token=None, card_history_all=False,
                                                  card_history_count=0))
     out = capsys.readouterr().out
     assert res == {"logs": 1}
@@ -455,7 +456,7 @@ def test_run_card_history_all_prints_type_catalog(monkeypatch, capsys, pixai):
                                "first_seen": "2026-07-06T00:00:00Z",
                                "last_seen": "2026-07-10T19:44:00Z"},
         }, "pages_read": 3, "hit_page_cap": False})
-    res = core.run_card_history(SimpleNamespace(token=None, card_history_all=True,
+    res = account_api_mod.run_card_history(SimpleNamespace(token=None, card_history_all=True,
                                                  card_history_count=0))
     out = capsys.readouterr().out
     assert res == {"templates": 2}
@@ -622,7 +623,7 @@ def test_run_cards_explains_multi_ticket_videos(monkeypatch, capsys, pixai):
         {"name": "V4.0 Preview Lite Only", "count": 2, "category": "Video Card",
          "task_types": ["i2vpro"], "model_version_id": "", "template_code": "v4-lite",
          "template_id": "t3", "expires": "2026-09-01T00:00:00Z"}])
-    core.run_cards(SimpleNamespace(token=None))
+    account_api_mod.run_cards(SimpleNamespace(token=None))
     out = capsys.readouterr().out
     assert "15s clip needs 3" in out and "FULL credit price" in out
 

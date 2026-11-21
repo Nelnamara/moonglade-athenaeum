@@ -55,7 +55,9 @@ def main(argv):
     from moonglade import backup as core
     from moonglade import paths
     from moonglade import settings as mg_settings
+    from moonglade import branding
     from moonglade import gallery
+    from moonglade import web_accounts
 
     # Resolve the real library and the real pack BEFORE anything is re-pointed.
     real_lib = Path(mg_settings.library_path()).resolve()
@@ -91,7 +93,7 @@ def main(argv):
         paths.local_dir = lambda: local
         paths.local_path = lambda name: local / name
         paths.library_anchor = lambda: scratch
-        gallery.branding_root = lambda: scratch / "branding"
+        branding.branding_root = lambda: scratch / "branding"
 
         def _blocked(*a, **k):
             raise core.PixAIError("live PixAI blocked: tv_fixtures is read-only")
@@ -102,9 +104,9 @@ def main(argv):
 
         # Sign in for real through the login route, as conftest.login_client does, with a
         # throwaway account that exists only in the scratch config.json.
-        core.WEB_PASSWORD_HASH_METHOD = "scrypt:256:1:1"
+        web_accounts.WEB_PASSWORD_HASH_METHOD = "scrypt:256:1:1"
         user, pw = "tv-fixtures", secrets.token_urlsafe(18)
-        core.add_or_update_web_user(user, pw)
+        web_accounts.add_or_update_web_user(user, pw)
         app = gallery.create_app(lib)
         cli = app.test_client()
         html = cli.get("/login").get_data(as_text=True)

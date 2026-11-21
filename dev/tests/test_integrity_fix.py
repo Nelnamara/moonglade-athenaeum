@@ -29,6 +29,7 @@ from tests.conftest import login_test_client, with_csrf
 from tests.test_integrity import _mp4, _png, _webp
 from tests.test_integrity_broken import _broken_library
 from moonglade import jobs as jobs_mod
+from moonglade import catalog as catalog_mod
 
 
 class _Resp:
@@ -183,7 +184,7 @@ def test_a_missing_file_is_re_downloaded_to_the_catalogs_own_path(tmp_path):
 def test_a_missing_file_with_a_folder_in_its_path_goes_back_there(tmp_path):
     out = _broken_library(tmp_path)
     from tests.test_integrity import _row as _r
-    g.save_catalog(out / "catalog.db", [_r(media_id="105", filename="2026-01/p_t1_105.png")])
+    catalog_mod.save_catalog(out / "catalog.db", [_r(media_id="105", filename="2026-01/p_t1_105.png")])
     session = FakeMediaSession({"105": (_png(3, 3), "image/png")})
     res = integ.redownload_one(out, out / "catalog.db", "105", session_factory=lambda: session)
     assert res["ok"] is True
@@ -209,7 +210,7 @@ def test_a_missing_file_with_a_folder_in_its_path_goes_back_there(tmp_path):
 def test_a_crafted_path_is_refused_before_anything_is_fetched(tmp_path, crafted):
     out = _broken_library(tmp_path / "lib")
     from tests.test_integrity import _row as _r
-    g.save_catalog(out / "catalog.db", [_r(media_id="105", filename=crafted)])
+    catalog_mod.save_catalog(out / "catalog.db", [_r(media_id="105", filename=crafted)])
     before = {p for p in tmp_path.rglob("*")}
     res = integ.redownload_one(out, out / "catalog.db", "105", session_factory=_no_network)
     assert res["ok"] is False and res["refused"] == "bad_path", crafted
@@ -232,7 +233,7 @@ def test_the_path_rule_on_its_own(tmp_path):
 def test_a_missing_file_pixai_no_longer_has_is_refused_by_the_runner(tmp_path):
     out = _broken_library(tmp_path)
     from tests.test_integrity import _row as _r
-    g.save_catalog(out / "catalog.db", [_r(media_id="113", filename="p_t1_113.png",
+    catalog_mod.save_catalog(out / "catalog.db", [_r(media_id="113", filename="p_t1_113.png",
                                            deleted_remote="1")])
     integ.verify_library(out, out / "catalog.db", deep=True)
     res = integ.redownload_one(out, out / "catalog.db", "113", session_factory=_no_network)
@@ -246,7 +247,7 @@ def test_a_re_download_never_lands_on_another_pictures_file(tmp_path):
     own media id stands between 120's picture and 109's file."""
     out = _broken_library(tmp_path)
     from tests.test_integrity import _row as _r
-    g.save_catalog(out / "catalog.db", [_r(media_id="120", filename="images/p_t1_109.png")])
+    catalog_mod.save_catalog(out / "catalog.db", [_r(media_id="120", filename="images/p_t1_109.png")])
     res = integ.redownload_one(out, out / "catalog.db", "120", session_factory=_no_network)
     assert res["ok"] is False and res["refused"] == "not_this_picture"
     assert _bytes(out, "images/p_t1_109.png") == b""
@@ -255,7 +256,7 @@ def test_a_re_download_never_lands_on_another_pictures_file(tmp_path):
 def test_a_rebuild_never_draws_another_pictures_thumbnail(tmp_path):
     out = _broken_library(tmp_path)
     from tests.test_integrity import _row as _r
-    g.save_catalog(out / "catalog.db", [_r(media_id="121", filename="images/p_t1_106.png")])
+    catalog_mod.save_catalog(out / "catalog.db", [_r(media_id="121", filename="images/p_t1_106.png")])
     res = integ.rebuild_one(out, out / "catalog.db", "121")
     assert res["ok"] is False and res["refused"] == "not_this_picture"
     assert not (out / "gallery" / "thumbs" / "121.jpg").exists()
@@ -302,7 +303,7 @@ def test_a_thumbnail_is_never_taken_for_the_picture(tmp_path):
 def test_the_new_picture_must_be_the_size_the_catalog_says(tmp_path):
     out = _broken_library(tmp_path)
     from tests.test_integrity import _row as _r
-    g.save_catalog(out / "catalog.db", [_r(media_id="102", filename="p_t1_102.png",
+    catalog_mod.save_catalog(out / "catalog.db", [_r(media_id="102", filename="p_t1_102.png",
                                            width="8", height="8")])
     session = FakeMediaSession({"102": (_png(4, 4), "image/png")})
     res = integ.redownload_one(out, out / "catalog.db", "102", session_factory=lambda: session)
@@ -352,7 +353,7 @@ def test_a_video_is_re_downloaded_the_way_the_backup_downloads_videos(tmp_path):
     out = _broken_library(tmp_path)
     (out / "videos" / "p_t1_114.mp4").write_bytes(b"")
     from tests.test_integrity import _row as _r
-    g.save_catalog(out / "catalog.db", [_r(media_id="114", filename="videos/p_t1_114.mp4",
+    catalog_mod.save_catalog(out / "catalog.db", [_r(media_id="114", filename="videos/p_t1_114.mp4",
                                            is_video="1")])
     integ.verify_library(out, out / "catalog.db", deep=True)
     row = {r["media_id"]: r for r in integ.broken_list(out, out / "catalog.db")["rows"]}["114"]

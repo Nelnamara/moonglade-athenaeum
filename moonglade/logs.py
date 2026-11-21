@@ -31,25 +31,28 @@ from moonglade import paths as _paths
 
 LOGGER_NAME = "moonglade"
 
-# The web server's OWN module logger, under both names it can have. moonglade/gallery.py's
+# The web server's OWN module logger, under every name it has had. moonglade/gallery.py's
 # background workers do not use get_logger() -- they use logging.getLogger(__name__), which
-# resolves to "__main__" when the server runs as the main module (which is how it always runs
-# in production: "Moonglade Launcher.pyw" launches `python -m moonglade.gallery` as a child) and to
-# "moonglade.gallery" when it is imported. Before 3.20 the imported name was the flat
+# resolves to "moonglade.gallery": "Moonglade Launcher.pyw" launches `python -m moonglade.gallery`
+# as a child, and since split phase 4 that entry runs main() in the imported, registered module
+# (gallery.py's __main__ block re-dispatches; dev/tests/test_server_one_module.py). Before that,
+# the server ran as the main module and logged as "__main__" in production, which stays levelled
+# for a server still running an older file. Before 3.20 the imported name was the flat
 # "moonglade_gallery", and neither name was under LOGGER_NAME, so until 2026-09-07
 # every one of those lines inherited root's WARNING ceiling and reached the file only if it
 # happened to be a warning. The live mirror is the case that made it matter: its whole
 # lifecycle -- "connected and subscribed", "task N reported completed -- mirroring",
 # "disconnected cleanly; reconnecting" -- is logged at INFO and was therefore absent from
 # moonglade.log entirely, which is the one record that could answer "was the socket up when
-# that generation finished?" after the fact. Both names are levelled because both are real:
-# the script name in production, the module name under the test suite and anything that
-# imports the app.
+# that generation finished?" after the fact. Both names are levelled because both have been
+# real: the module name in production (since split phase 4) and under the test suite, and the
+# script name a server running an older file still uses.
 #
-# "gallery" is Flask's own app.logger in production: Flask names it after the main FILE's stem
-# when the app's import name is "__main__" (moonglade/gallery.py since 3.20; it was
-# "moonglade_gallery" before the move, which this tuple already levelled). Without it the move
-# would have put the app logger back under root's WARNING ceiling.
+# "gallery" was Flask's own app.logger in production before split phase 4: Flask names it after
+# the main FILE's stem when the app's import name is "__main__" (moonglade/gallery.py since 3.20;
+# it was "moonglade_gallery" before the move, which this tuple already levelled). Since split
+# phase 4 the app's import name is "moonglade.gallery", so app.logger is "moonglade.gallery" too;
+# "gallery" stays levelled for a server still running an older file.
 GALLERY_LOGGER_NAMES = ("moonglade.gallery", "__main__", "gallery")
 
 _configured = False

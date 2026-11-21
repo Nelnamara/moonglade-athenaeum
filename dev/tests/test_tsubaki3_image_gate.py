@@ -30,6 +30,7 @@ from types import SimpleNamespace
 import pytest
 
 from moonglade import backup as core
+from moonglade import account_api as account_api_mod
 from moonglade import cards as cards_mod
 from moonglade import gen_cli as gen_cli_mod
 from moonglade import gen_params as gen_params_mod
@@ -1393,7 +1394,7 @@ def test_the_drawers_all_versions_read_carries_the_status_on_the_latest_row(lane
 
 def _web_lane(monkeypatch, tmp_path):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "account_info",
+    monkeypatch.setattr(account_api_mod, "account_info",
                         lambda *a, **k: (_ for _ in ()).throw(core.PixAIError("offline")))
     return login_client(tmp_path)
 
@@ -1408,9 +1409,10 @@ def test_api_generate_refuses_a_lane_request_under_read_only_before_any_read(mon
         def _boom(*a, **k):
             raise AssertionError("PixAI was reached before READ_ONLY: " + name)
         return _boom
-    for fn in ("_rest_get", "_rest_post", "account_info", "gql_mutate", "gql_adhoc",
-               "_create"):
+    for fn in ("_rest_get", "_rest_post", "gql_mutate", "gql_adhoc", "_create"):
         monkeypatch.setattr(core, fn, tripwire(fn))
+    for fn in ("account_info",):                                 # in account_api since 3.22
+        monkeypatch.setattr(account_api_mod, fn, tripwire(fn))
     for fn in ("match_kaisuuken",):                              # in cards since 3.22
         monkeypatch.setattr(cards_mod, fn, tripwire(fn))
     monkeypatch.setattr(core, "READ_ONLY", True)

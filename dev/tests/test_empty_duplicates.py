@@ -19,7 +19,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import organize as organize_mod
-from moonglade.gallery import init_db
+from moonglade.catalog import init_db
 
 P = organize_mod.RESULT_PREFIX
 
@@ -247,7 +247,8 @@ def test_the_cli_flag_exists_and_previews_by_default(monkeypatch):
 def test_the_panel_action_is_destructive_and_localhost_only(tmp_path, monkeypatch):
     import io
     import subprocess
-    from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade.gallery import create_app
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     from tests.conftest import login_test_client
     spawned = []
 

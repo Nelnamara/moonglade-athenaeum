@@ -246,6 +246,51 @@ def first_party_sources(root=None, suffixes=(".py", ".pyw")):
     return found
 
 
+def _server_seams():
+    """The SEAMS map (new module -> {"from", "names"}) read as a literal, so conftest never
+    imports a test module."""
+    import ast
+    path = DEV_DIR / "tests" / "test_module_seams.py"
+    for node in ast.parse(path.read_text(encoding="utf-8")).body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "SEAMS"
+                                                for t in node.targets):
+            return ast.literal_eval(node.value)
+    raise AssertionError("test_module_seams.py has no SEAMS literal")
+
+
+def server_source_modules():
+    """The modules that make up the server's and the engine's source: the two old modules and
+    every module that received code from them (the targets of SEAMS, the route and web modules
+    included though they own no view or hook of their own)."""
+    return sorted({"moonglade.gallery", "moonglade.backup"} | set(_server_seams()))
+
+
+def server_sources(function=None, parts=False):
+    """THE collector for a test that reads the gallery's or the engine's source text.
+
+    No argument: the text of every module in server_source_modules(). `function="create_app"`:
+    create_app plus every module's `register`. Any other `function`: that top-level function or
+    class, found wherever SEAMS says it went (AssertionError if no collected module has it).
+    Returns one string, or `{module: text}` with `parts=True`. A reader that wants the code it
+    names, not the file it once lived in, reads it here, so a move never leaves it reading less."""
+    import ast
+    out = {}
+    for mod in server_source_modules():
+        path = REPO_ROOT / Path(*mod.split(".")).with_suffix(".py")
+        text = path.read_text(encoding="utf-8")
+        if function is None:
+            out[mod] = text
+            continue
+        wanted = {"create_app", "register"} if function == "create_app" else {function}
+        segs = [ast.get_source_segment(text, n) for n in ast.parse(text).body
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                and n.name in wanted]
+        if segs:
+            out[mod] = "\n\n".join(segs)
+    if function is not None and not out:
+        raise AssertionError("no collected module defines %s" % function)
+    return out if parts else "\n\n".join(out[m] for m in sorted(out))
+
 def stub_code_module(monkeypatch, name, module):
     """Stand `module` in for `moonglade.<name>` for one test. The app imports its own modules
     as `from moonglade import <name>`, which reads the PACKAGE's attribute first and falls
@@ -1104,6 +1149,7 @@ def _no_live_config(monkeypatch):
 
 
 from moonglade import bonjour as _bonjour_mod   # noqa: E402 -- beside the fixture that stubs it
+from moonglade import web_accounts as web_accounts_mod
 
 # Captured at import, before `_no_lan_probe` swaps it, for the one test that is about it.
 REAL_LAN_IP = _bonjour_mod.lan_ip
@@ -1178,7 +1224,7 @@ def mock_session(mocker):
 # Password hashing for the suite's own accounts
 # ---------------------------------------------------------------------------
 # What moonglade.backup ships, read at import -- before the session fixture below swaps it.
-SHIPPED_PASSWORD_HASH_METHOD = core.WEB_PASSWORD_HASH_METHOD
+SHIPPED_PASSWORD_HASH_METHOD = web_accounts_mod.WEB_PASSWORD_HASH_METHOD
 # scrypt at a token cost: the same "scrypt:" hash format and the same code path, in a fraction
 # of a millisecond. (werkzeug sizes scrypt's memory limit from n, so n much below this fails.)
 TEST_PASSWORD_HASH_METHOD = "scrypt:256:1:1"
@@ -1199,7 +1245,7 @@ def _cheap_test_password_hashes():
     the stored format) take `real_password_hashing` and run with the shipped cost, and
     test_web_auth holds that shipped cost to full strength."""
     mp = pytest.MonkeyPatch()
-    mp.setattr(core, "WEB_PASSWORD_HASH_METHOD", TEST_PASSWORD_HASH_METHOD)
+    mp.setattr(web_accounts_mod, "WEB_PASSWORD_HASH_METHOD", TEST_PASSWORD_HASH_METHOD)
     try:
         yield
     finally:
@@ -1209,7 +1255,7 @@ def _cheap_test_password_hashes():
 @pytest.fixture()
 def real_password_hashing(monkeypatch):
     """The shipped password hashing for one test, instead of the suite's cheap one."""
-    monkeypatch.setattr(core, "WEB_PASSWORD_HASH_METHOD", SHIPPED_PASSWORD_HASH_METHOD)
+    monkeypatch.setattr(web_accounts_mod, "WEB_PASSWORD_HASH_METHOD", SHIPPED_PASSWORD_HASH_METHOD)
 
 
 # ---------------------------------------------------------------------------
@@ -1262,7 +1308,7 @@ def login_existing_client(cli, username=_TEST_USERNAME, password=_TEST_PASSWORD)
     to make some calls anonymously first (e.g. to prove an unauthenticated/LAN request
     is refused) and then continue as a logged-in session against the very same client/
     app instance."""
-    core.add_or_update_web_user(username, password)
+    web_accounts_mod.add_or_update_web_user(username, password)
     return _do_login(cli, username, password)
 
 
@@ -1270,7 +1316,7 @@ def login_test_client(app, username=_TEST_USERNAME, password=_TEST_PASSWORD):
     """Given an already-built create_app(tmp_path) app (e.g. one a test file's own
     helper seeded with a catalog), create a real account and return a FRESH,
     now-authenticated test_client() for it."""
-    core.add_or_update_web_user(username, password)
+    web_accounts_mod.add_or_update_web_user(username, password)
     return _do_login(app.test_client(), username, password)
 
 

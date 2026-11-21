@@ -17,9 +17,10 @@ import re
 import pytest
 
 from moonglade import backup as core
-from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client
+from moonglade import account_api as account_api_mod
 
 
 def _row(**kw):
@@ -73,7 +74,7 @@ class TestSaveKeyEndpoint:
     def test_writes_config_only_after_successful_validation(self, tmp_path, monkeypatch):
         _redirect_config_to(monkeypatch, tmp_path)
         cfg_path = tmp_path / "config.json"
-        monkeypatch.setattr(core, "account_info", lambda session, raise_on_error=False: {"quotaAmount": 500})
+        monkeypatch.setattr(account_api_mod, "account_info", lambda session, raise_on_error=False: {"quotaAmount": 500})
         cli = _authed_client(tmp_path)
         r = cli.post("/api/setup/save-key", data=json.dumps({"api_key": "sk-real-key"}),
                      content_type="application/json")
@@ -92,7 +93,7 @@ class TestSaveKeyEndpoint:
 
         def _reject(session, raise_on_error=False):
             raise core.PixAIError("HTTP 401 Unauthorized")
-        monkeypatch.setattr(core, "account_info", _reject)
+        monkeypatch.setattr(account_api_mod, "account_info", _reject)
         cli = _authed_client(tmp_path)
         r = cli.post("/api/setup/save-key", data=json.dumps({"api_key": "totally-bogus"}),
                      content_type="application/json")
@@ -114,7 +115,7 @@ class TestSaveKeyEndpoint:
         def _capture(session, raise_on_error=False):
             seen_auth.append(session.headers.get("Authorization"))
             raise core.PixAIError("401 Unauthorized")  # the NEW key is bogus; must be rejected
-        monkeypatch.setattr(core, "account_info", _capture)
+        monkeypatch.setattr(account_api_mod, "account_info", _capture)
         cli = _authed_client(tmp_path)
         r = cli.post("/api/setup/save-key", data=json.dumps({"api_key": "brand-new-bogus-key"}),
                      content_type="application/json")
@@ -131,7 +132,7 @@ class TestSaveKeyEndpoint:
         _redirect_config_to(monkeypatch, tmp_path)
         cfg_path = tmp_path / "config.json"
         cfg_path.write_text(json.dumps({"READ_ONLY": True, "USER_ID": "123"}))
-        monkeypatch.setattr(core, "account_info", lambda session, raise_on_error=False: {"quotaAmount": 0})
+        monkeypatch.setattr(account_api_mod, "account_info", lambda session, raise_on_error=False: {"quotaAmount": 0})
         cli = _authed_client(tmp_path)
         cli.post("/api/setup/save-key", data=json.dumps({"api_key": "sk-new"}),
                  content_type="application/json")
@@ -152,7 +153,7 @@ class TestSaveKeyEndpoint:
         Bite: revert either .format(e) call back to a bare str(e) (no
         _redact_host_paths wrapper) and this fails."""
         _redirect_config_to(monkeypatch, tmp_path)
-        monkeypatch.setattr(core, "account_info", lambda session, raise_on_error=False: {"quotaAmount": 500})
+        monkeypatch.setattr(account_api_mod, "account_info", lambda session, raise_on_error=False: {"quotaAmount": 500})
         # The route saves through the atomic writer (core._save_config: a temp, then a swap),
         # so that is where a refusal shows up.
         def boom_save(cfg):

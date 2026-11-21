@@ -15,7 +15,8 @@ from moonglade import gen_road as gen_road_mod
 from moonglade import models as models_mod
 from moonglade import paths
 from moonglade import pricing as pricing_mod
-from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from moonglade.account_prefs import _account_key
 
 from tests.conftest import login_client, login_existing_client, with_csrf
@@ -26,6 +27,10 @@ from moonglade import pixai_client as pixai_client_mod
 from moonglade import media_tools as media_tools_mod
 from moonglade import living as living_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import catalog as catalog_mod
+from moonglade import curation as curation_mod
+from moonglade import catalog_verbs as catalog_verbs_mod
+from moonglade import account_api as account_api_mod
 
 
 def _row(**kw):
@@ -453,7 +458,7 @@ def test_tag_search_gql_shapes_names(pixai):
     pixai.on("tags", {"tags": {"edges": [{"node": {"name": "no humans"}},
                                          {"node": {"name": "no shoes"}},
                                          {"node": {}}]}})
-    out = core.tag_search_gql(pixai, "no hu", first=8)
+    out = account_api_mod.tag_search_gql(pixai, "no hu", first=8)
     assert out == ["no humans", "no shoes"]          # nameless node dropped
     sent, = pixai.calls
     assert "tags(q:" in sent.document and sent.variables == {"k": "no hu", "n": 8}
@@ -470,7 +475,7 @@ def test_tag_suggest_route_short_prefix_is_free(tmp_path, monkeypatch):
 
 
 def test_tag_suggest_route_returns_tags(tmp_path, monkeypatch, pixai):
-    monkeypatch.setattr(core, "tag_search_gql", lambda s, q, first=8: ["no humans"])
+    monkeypatch.setattr(account_api_mod, "tag_search_gql", lambda s, q, first=8: ["no humans"])
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     assert cli.get("/api/tag-suggest?q=no hu").get_json() == {"tags": ["no humans"]}
@@ -625,7 +630,7 @@ def _account_reads(pixai):
 
 def test_account_route_sums_cards_and_coverage(tmp_path, monkeypatch, pixai):
     _account_reads(pixai)
-    monkeypatch.setattr(core, "account_info", lambda s: {
+    monkeypatch.setattr(account_api_mod, "account_info", lambda s: {
         "quotaAmount": 330990, "tasks": {"totalCount": 4}, "followerCount": 30, "followingCount": 4})
     monkeypatch.setattr(cards_mod, "list_kaisuukens",
                         lambda s: [{"count": 16}, {"count": 34}, {"count": None}])
@@ -728,7 +733,7 @@ def test_the_legacy_shared_snippets_are_given_to_each_login_by_the_move(tmp_path
 
 
 def test_suggest_prompt_route(tmp_path, monkeypatch, pixai):
-    monkeypatch.setattr(core, "suggest_prompt", lambda s, mid: ["1girl, night", "a girl at night"])
+    monkeypatch.setattr(account_api_mod, "suggest_prompt", lambda s, mid: ["1girl, night", "a girl at night"])
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     assert cli.get("/api/suggest-prompt?media_id=55").get_json() == {
@@ -759,8 +764,8 @@ def test_rows_for_media_ids_preserves_order_drops_missing():
             return False
 
     import unittest.mock as mock
-    with mock.patch.object(g, "catalog", return_value=FakeCon()):
-        rows = g.rows_for_media_ids("db", ["3", "1", "99", "2"])
+    with mock.patch.object(catalog_mod, "catalog", return_value=FakeCon()):
+        rows = catalog_verbs_mod.rows_for_media_ids("db", ["3", "1", "99", "2"])
     assert [r["media_id"] for r in rows] == ["3", "1", "2"]   # order kept, 99 dropped
 
 
@@ -1298,27 +1303,27 @@ def test_redaction_still_does_not_eat_ordinary_messages(tmp_path, monkeypatch, p
 
 def test_catalog_counts(tmp_path):
     from moonglade import gallery as g
-    g.save_catalog(tmp_path / "catalog.db", [
+    catalog_mod.save_catalog(tmp_path / "catalog.db", [
         _row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00",
              collections="faves,wips"),
         _row(media_id="2", filename="b_2.png", created_at="2025-01-02T00:00:00",
              collections="faves"),
         _row(media_id="3", filename="c_3.mp4", is_video="1", created_at="2025-01-03T00:00:00"),
     ])
-    c = g.catalog_counts(tmp_path / "catalog.db")
+    c = curation_mod.catalog_counts(tmp_path / "catalog.db")
     assert c == {"images": 2, "videos": 1, "collections": 2}   # faves + wips distinct
 
 
 def test_distinct_task_count(tmp_path):
     from moonglade import gallery as g
-    g.save_catalog(tmp_path / "catalog.db", [
+    catalog_mod.save_catalog(tmp_path / "catalog.db", [
         _row(media_id="1", task_id="tA", filename="a_1.png", created_at="2025-01-01T00:00:00"),
         _row(media_id="2", task_id="tA", filename="b_2.png", created_at="2025-01-02T00:00:00"),  # same task (batch)
         _row(media_id="3", task_id="tB", filename="c_3.png", created_at="2025-01-03T00:00:00"),
         _row(media_id="4", task_id="",   filename="d_4.png", created_at="2025-01-04T00:00:00"),  # no task id
     ])
     # 2 distinct tasks (tA, tB); the batch-sibling and the empty task_id don't inflate it
-    assert g.distinct_task_count(tmp_path / "catalog.db") == 2
+    assert catalog_verbs_mod.distinct_task_count(tmp_path / "catalog.db") == 2
 
 
 # A brief longer than the 600 chars the normalizer used to slice it to, so the
@@ -1481,7 +1486,7 @@ def test_your_art_never_swept_reads_null_views_not_zero(tmp_path, pixai):
 
 
 def test_artwork_views_route(tmp_path, monkeypatch, pixai):
-    monkeypatch.setattr(core, "artwork_views", lambda s, aid: 174)
+    monkeypatch.setattr(account_api_mod, "artwork_views", lambda s, aid: 174)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     assert cli.get("/api/artwork-views?id=aw9").get_json() == {"views": 174}
@@ -1863,12 +1868,12 @@ def test_account_surfaces_cards_claim_and_subscription(tmp_path, monkeypatch, pi
     expiry, claimable free credits, and the subscription cliff — the data the chip/badge/
     warnings render. Category was fetched by list_kaisuukens all along but used to be dropped
     before reaching cards_by, so the tooltip could never say "Model Card" vs "Video Card"."""
-    monkeypatch.setattr(core, "account_info", lambda s: {
+    monkeypatch.setattr(account_api_mod, "account_info", lambda s: {
         "quotaAmount": 140, "subscription": {"endAt": "2026-07-27T00:00:00Z", "cancelAtPeriodEnd": True}})
     monkeypatch.setattr(cards_mod, "list_kaisuukens", lambda s: [
         {"name": "Edit Pro Only", "count": 17, "expires": "2026-07-17T20:11:09Z", "category": "Model Card"},
         {"name": "Reference Pro Only", "count": 5, "expires": "2026-07-17T20:11:09Z", "category": "Model Card"}])
-    monkeypatch.setattr(core, "list_claims", lambda s: [
+    monkeypatch.setattr(account_api_mod, "list_claims", lambda s: [
         {"id": "pixai-daily-credits", "amount": 30000, "canClaim": True},
         {"id": "agent-daily-stamina", "amount": 20, "canClaim": True}])
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
@@ -1885,10 +1890,10 @@ def test_account_cards_by_category_defaults_empty_when_absent(tmp_path, monkeypa
     own list_kaisuukens() before this field existed) must not blow up the route -- category
     defaults to '' rather than None, so the JS tooltip's `k.category ? ... : ''` check is
     always comparing against a string, never null."""
-    monkeypatch.setattr(core, "account_info", lambda s: {"quotaAmount": 140})
+    monkeypatch.setattr(account_api_mod, "account_info", lambda s: {"quotaAmount": 140})
     monkeypatch.setattr(cards_mod, "list_kaisuukens", lambda s: [
         {"name": "Legacy Card", "count": 1, "expires": ""}])
-    monkeypatch.setattr(core, "list_claims", lambda s: [])
+    monkeypatch.setattr(account_api_mod, "list_claims", lambda s: [])
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     d = cli.get("/api/account").get_json()
     assert d["cards_by"][0]["category"] == ""
@@ -1906,7 +1911,7 @@ def test_account_endpoint_still_serves_credits_after_the_roles_removal(tmp_path,
     that the roles work silently broke: the endpoint still serves real credits.
     """
     _account_reads(pixai)
-    monkeypatch.setattr(core, "account_info", lambda s: {"quotaAmount": 1850640})
+    monkeypatch.setattr(account_api_mod, "account_info", lambda s: {"quotaAmount": 1850640})
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                          created_at="2025-01-01T00:00:00")])
     body = cli.get("/api/account").get_json()
@@ -1922,7 +1927,7 @@ def test_account_surfaces_the_real_membership_lora_cap(tmp_path, monkeypatch, pi
     present (mirrors the CLI's own field-check order); `free_user_lora` is the fallback for
     an account with no paid `lora` entitlement at all."""
     _account_reads(pixai)
-    monkeypatch.setattr(core, "account_info", lambda s: {
+    monkeypatch.setattr(account_api_mod, "account_info", lambda s: {
         "quotaAmount": 140,
         "membership": {"privilege": {"lora": 15, "freeUserLora": 2}}})
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
@@ -1932,7 +1937,7 @@ def test_account_surfaces_the_real_membership_lora_cap(tmp_path, monkeypatch, pi
 
 def test_account_lora_cap_falls_back_to_free_user_lora(tmp_path, monkeypatch, pixai):
     _account_reads(pixai)
-    monkeypatch.setattr(core, "account_info", lambda s: {
+    monkeypatch.setattr(account_api_mod, "account_info", lambda s: {
         "quotaAmount": 140,
         "membership": {"privilege": {"freeUserLora": 2}}})
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
@@ -1952,10 +1957,10 @@ def test_account_lora_cap_is_the_free_tier_when_membership_absent(tmp_path, monk
     section, so 3 is measured, not assumed.
     """
     _account_reads(pixai)
-    monkeypatch.setattr(core, "account_info", lambda s: {"quotaAmount": 140})
+    monkeypatch.setattr(account_api_mod, "account_info", lambda s: {"quotaAmount": 140})
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     d = cli.get("/api/account").get_json()
-    assert d["lora_cap"] == core.FREE_LORA_CAP == 3
+    assert d["lora_cap"] == account_api_mod.FREE_LORA_CAP == 3
     assert d["is_member"] is False
 
 
@@ -1963,7 +1968,7 @@ def test_account_entitlements_unknown_when_account_unreadable(tmp_path, monkeypa
     """An account we could not READ is the only real unknown, and it must fail OPEN --
     a transient GraphQL blip must never strip a paying member's entitlements."""
     _account_reads(pixai)
-    monkeypatch.setattr(core, "account_info", lambda s: {})
+    monkeypatch.setattr(account_api_mod, "account_info", lambda s: {})
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     d = cli.get("/api/account").get_json()
     assert d["lora_cap"] is None
@@ -1971,11 +1976,11 @@ def test_account_entitlements_unknown_when_account_unreadable(tmp_path, monkeypa
 
 
 def test_claim_endpoint_claims_ready(tmp_path, monkeypatch, pixai):
-    monkeypatch.setattr(core, "list_claims", lambda s: [
+    monkeypatch.setattr(account_api_mod, "list_claims", lambda s: [
         {"id": "pixai-daily-credits", "amount": 30000, "canClaim": True},
         {"id": "agent-startup-stamina", "amount": 15, "canClaim": False}])   # not ready -> skipped
     claimed = []
-    monkeypatch.setattr(core, "claim_reward", lambda s, cid: claimed.append(cid))
+    monkeypatch.setattr(account_api_mod, "claim_reward", lambda s, cid: claimed.append(cid))
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli = login_existing_client(cli)
     d = cli.post("/api/claim").get_json()

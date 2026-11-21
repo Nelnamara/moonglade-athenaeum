@@ -41,6 +41,20 @@ from tests.conftest import login_test_client, session_csrf, with_csrf
 from moonglade import task_reads as task_reads_mod
 
 _GALLERY = Path(__file__).resolve().parents[2] / "moonglade" / "gallery.py"
+# Where routes are defined: gallery.create_app, and the families split out of it (phase 4).
+_ROUTE_SOURCES = (_GALLERY, _GALLERY.with_name("routes_generate.py"),
+                  _GALLERY.with_name("web_loom_store.py"), _GALLERY.with_name("routes_loom.py"),
+                  _GALLERY.with_name("routes_gate.py"), _GALLERY.with_name("routes_panel.py"),
+                  _GALLERY.with_name("routes_delete.py"),
+                  _GALLERY.with_name("routes_recipes.py"),
+                  _GALLERY.with_name("routes_library.py"),
+                  _GALLERY.with_name("routes_account.py"),
+                  _GALLERY.with_name("routes_community.py"),
+                  _GALLERY.with_name("routes_train.py"),
+                  _GALLERY.with_name("routes_ach.py"),
+                  _GALLERY.with_name("routes_mirror.py"),
+                  _GALLERY.with_name("routes_branding.py"),
+                  _GALLERY.with_name("routes_import.py"))
 _STATE_CHANGING = {"POST", "PUT", "PATCH", "DELETE"}
 _REFUSAL = "Your session expired. Reload the page and try again."
 
@@ -75,14 +89,15 @@ def _called_names(node):
 
 
 def _token_checkers():
-    """`_check_csrf` plus every function in moonglade_gallery.py that calls it, directly or
+    """`_check_csrf` plus every function in the route sources that calls it, directly or
     through another such function -- resolved to a fixed point, so a helper of a helper
     counts. A name defined more than once counts only when EVERY definition checks."""
-    tree = ast.parse(_GALLERY.read_text(encoding="utf-8"))
     defs = {}
-    for n in ast.walk(tree):
-        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            defs.setdefault(n.name, []).append(n)
+    for src_path in _ROUTE_SOURCES:
+        tree = ast.parse(src_path.read_text(encoding="utf-8"))
+        for n in ast.walk(tree):
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                defs.setdefault(n.name, []).append(n)
     checkers = {"_check_csrf"}
     grew = True
     while grew:
@@ -156,7 +171,7 @@ def test_the_front_door_covers_every_state_changing_route(app):
     token among them -- is refused for a page on another port of this PC, before its handler
     runs, with the plain sentence; and the same request from the app's own origin goes
     through to the handler (so the refusal is the origin, not something else)."""
-    from moonglade.gallery import CROSS_ORIGIN_REFUSED
+    from moonglade.web_policy import CROSS_ORIGIN_REFUSED
     cross = _sweep(app, _CROSS_PORT)
     assert len(cross) > 100, "the sweep found too few state-changing routes to mean anything"
     leaked = sorted(k for k, (status, ran, _body) in cross.items() if ran or status != 403)
@@ -193,7 +208,7 @@ def test_the_review_scenario_a_cross_port_page_cannot_import_or_stop(tmp_path, h
     sends a multipart POST to /api/import-local (LOCALHOST tier -- the browser IS on this PC)
     and a bare POST to /api/server/stop. Both are refused 403 and nothing happens."""
     import io
-    from moonglade.gallery import CROSS_ORIGIN_REFUSED
+    from moonglade.web_policy import CROSS_ORIGIN_REFUSED
     app = create_app(tmp_path)
     cli = login_test_client(app)
     r = cli.post("/api/import-local", base_url=_OWN, headers=headers,
@@ -218,7 +233,7 @@ def test_the_apps_own_page_passes(tmp_path, headers):
 
 
 def test_the_rule_itself():
-    from moonglade.gallery import same_origin_write as ok
+    from moonglade.web_policy import same_origin_write as ok
     assert ok("http://localhost:5057", None, None, "http", "localhost:5057")
     assert ok("http://LOCALHOST:5057", None, "same-origin", "http", "localhost:5057")
     assert ok("https://192.168.1.5:5057", None, None, "https", "192.168.1.5:5057")

@@ -2,7 +2,8 @@
 quarters (2026Q3), inclusive ranges (2026-08..2026-10, open ended too) and day compares."""
 import pytest
 
-from moonglade.gallery import CATALOG_FIELDS, save_catalog, query_catalog
+from moonglade.curation import query_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 
 def _row(**kw):

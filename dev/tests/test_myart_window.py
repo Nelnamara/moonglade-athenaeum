@@ -20,7 +20,9 @@ import datetime as dt
 import pytest
 
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
+from moonglade import catalog as catalog_mod
+from moonglade import catalog_verbs as catalog_verbs_mod
 
 T0 = dt.date(2026, 12, 20)
 
@@ -40,42 +42,42 @@ def db(tmp_path):
 
 
 def _set(db, aid, **cols):
-    with g.catalog(db) as con:
+    with catalog_mod.catalog(db) as con:
         for k, v in cols.items():
             con.execute("UPDATE catalog SET %s=? WHERE artwork_id=?" % k, (str(v), aid))
         con.commit()
 
 
 def _days(db):
-    with g.catalog(db) as con:
+    with catalog_mod.catalog(db) as con:
         return [tuple(r) for r in con.execute(
             "SELECT artwork_id, day, views, likes FROM artwork_snapshots ORDER BY artwork_id, day")]
 
 
 def test_a_snapshot_is_one_row_per_artwork_per_day_and_never_invents_views(db):
-    assert g.record_artwork_snapshots(db, today=T0) == 2
+    assert catalog_verbs_mod.record_artwork_snapshots(db, today=T0) == 2
     assert _days(db) == [("a1", "2026-12-20", 1000, 10), ("a2", "2026-12-20", None, 4)]
     _set(db, "a1", views=1100)
-    g.record_artwork_snapshots(db, today=T0)                      # same day: replaced
+    catalog_verbs_mod.record_artwork_snapshots(db, today=T0)                      # same day: replaced
     assert _days(db)[0] == ("a1", "2026-12-20", 1100, 10)
     assert len(_days(db)) == 2
 
 
 def test_with_no_history_there_is_no_window_yet(db):
-    win, w = g.myart_window(db, today=T0)
+    win, w = catalog_verbs_mod.myart_window(db, today=T0)
     assert w["seen"] is False and w["full"] is False and w["since"] == "2026-12-20"
     assert win["a1"] == {"views": 0, "likes": 0}
     assert win["a2"] == {"views": None, "likes": 0}
 
 
 def test_under_thirty_days_the_gain_is_since_the_oldest_reading_and_not_full(db):
-    g.record_artwork_snapshots(db, today=T0 - dt.timedelta(days=9))
+    catalog_verbs_mod.record_artwork_snapshots(db, today=T0 - dt.timedelta(days=9))
     _set(db, "a1", views=1250, liked_count=13)
     _set(db, "a2", views=40)                                       # first swept 3 days ago
-    g.record_artwork_snapshots(db, today=T0 - dt.timedelta(days=3))
+    catalog_verbs_mod.record_artwork_snapshots(db, today=T0 - dt.timedelta(days=3))
     _set(db, "a1", views=1400, liked_count=15)
     _set(db, "a2", views=90)
-    win, w = g.myart_window(db, today=T0)
+    win, w = catalog_verbs_mod.myart_window(db, today=T0)
     assert w == {"days": 30, "since": "2026-12-11", "full": False, "seen": True}
     assert win["a1"] == {"views": 400, "likes": 5}
     # a2's baseline reading had no views: the first swept reading (40) is its baseline
@@ -83,35 +85,35 @@ def test_under_thirty_days_the_gain_is_since_the_oldest_reading_and_not_full(db)
 
 
 def test_with_thirty_days_of_history_the_window_is_full_and_uses_the_edge_reading(db):
-    g.record_artwork_snapshots(db, today=T0 - dt.timedelta(days=45))     # views 1000
+    catalog_verbs_mod.record_artwork_snapshots(db, today=T0 - dt.timedelta(days=45))     # views 1000
     _set(db, "a1", views=1300, liked_count=12)
-    g.record_artwork_snapshots(db, today=T0 - dt.timedelta(days=31))     # the newest one on/before the edge
+    catalog_verbs_mod.record_artwork_snapshots(db, today=T0 - dt.timedelta(days=31))     # the newest one on/before the edge
     _set(db, "a1", views=1500, liked_count=20)
-    g.record_artwork_snapshots(db, today=T0 - dt.timedelta(days=10))
+    catalog_verbs_mod.record_artwork_snapshots(db, today=T0 - dt.timedelta(days=10))
     _set(db, "a1", views=1800, liked_count=25)
-    win, w = g.myart_window(db, today=T0)
+    win, w = catalog_verbs_mod.myart_window(db, today=T0)
     assert w["full"] is True and w["since"] == "2026-11-05"
     assert win["a1"] == {"views": 500, "likes": 13}                       # 1800-1300, 25-12
 
 
 def test_a_gain_never_goes_negative(db):
-    g.record_artwork_snapshots(db, today=T0 - dt.timedelta(days=5))
+    catalog_verbs_mod.record_artwork_snapshots(db, today=T0 - dt.timedelta(days=5))
     _set(db, "a1", views=900, liked_count=2)                              # PixAI took some away
-    win, _w = g.myart_window(db, today=T0)
+    win, _w = catalog_verbs_mod.myart_window(db, today=T0)
     assert win["a1"] == {"views": 0, "likes": 0}
 
 
 def test_old_readings_are_pruned(db):
-    g.record_artwork_snapshots(db, today=T0 - dt.timedelta(days=g.SNAPSHOT_KEEP_DAYS + 5))
-    g.record_artwork_snapshots(db, today=T0)
+    catalog_verbs_mod.record_artwork_snapshots(db, today=T0 - dt.timedelta(days=catalog_verbs_mod.SNAPSHOT_KEEP_DAYS + 5))
+    catalog_verbs_mod.record_artwork_snapshots(db, today=T0)
     assert {d for (_a, d, _v, _l) in _days(db)} == {"2026-12-20"}
 
 
 def test_a_sweep_records_the_reading(db):
-    g.apply_artwork_views(db, {"a1": 1234}, "2026-12-20T00:00:00Z")
+    catalog_verbs_mod.apply_artwork_views(db, {"a1": 1234}, "2026-12-20T00:00:00Z")
     assert any(r[0] == "a1" and r[2] == 1234 for r in _days(db))
     n = len(_days(db))
-    g.apply_artwork_meta(db, [{"media_id": "m1", "artwork_id": "a1", "title": "t", "liked_count": "11"}])
+    catalog_verbs_mod.apply_artwork_meta(db, [{"media_id": "m1", "artwork_id": "a1", "title": "t", "liked_count": "11"}])
     assert len(_days(db)) == n                                            # same day: a rewrite, not a row
     assert [r for r in _days(db) if r[0] == "a1"][0][3] == 11
 

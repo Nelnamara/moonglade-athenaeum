@@ -11,6 +11,10 @@ from moonglade import gen_road as gen_road_mod
 from moonglade import jobs as jobs_mod
 from moonglade import task_feed as task_feed_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import watch_plans as watch_plans_mod
+from moonglade import catalog as catalog_mod
+from moonglade import history as history_mod
+from moonglade import media_fetch as media_fetch_mod
 
 
 class _FakeWS:
@@ -302,7 +306,7 @@ def test_a_stale_reconnect_does_not_wait_out_the_long_backoff():
     (watch_reconnect_plan), so this pin moved from the stale branch's own `backoff = 5` to the
     rule: a connection that lived a stale window is a healthy one, and reconnects at once."""
     from moonglade import gallery as mg
-    assert mg.watch_reconnect_plan(60, task_feed_mod._WS_STALE_TIMEOUT) == (1, 5)
+    assert watch_plans_mod.watch_reconnect_plan(60, task_feed_mod._WS_STALE_TIMEOUT) == (1, 5)
 
 
 def test_mirror_and_reconcile_agree_on_what_done_means():
@@ -321,7 +325,8 @@ def test_mirror_and_reconcile_agree_on_what_done_means():
     ROW the frames produce, while this pins the one line that decides whether the FILE gets
     collected at all -- a branch whose failure mode is silence, not a wrong row."""
     import pathlib as _p
-    src = _p.Path(__file__).resolve().parents[2] / "moonglade" / "gallery.py"
+    # The watch left create_app for moonglade/web_threads.py (split phase 4).
+    src = _p.Path(__file__).resolve().parents[2] / "moonglade" / "web_threads.py"
     text = src.read_text(encoding="utf-8")
 
     i = text.index("def _watch_on_event(ev):")
@@ -353,7 +358,8 @@ def test_catchup_sweep_is_bounded_rate_limited_and_off_thread():
     actually run. _watch_catchup is invoked only from a background thread the suite never starts
     (MOONGLADE_DISABLE_WATCH), so both angles are worth keeping."""
     import pathlib as _p
-    src = _p.Path(__file__).resolve().parents[2] / "moonglade" / "gallery.py"
+    # The watch left create_app for moonglade/web_threads.py (split phase 4).
+    src = _p.Path(__file__).resolve().parents[2] / "moonglade" / "web_threads.py"
     text = src.read_text(encoding="utf-8")
 
     assert "def _watch_catchup(reason):" in text
@@ -365,7 +371,7 @@ def test_catchup_sweep_is_bounded_rate_limited_and_off_thread():
     # page_variables; the account id now rides the client (USER_ID retired from page_variables),
     # so the catchup threads it explicitly rather than leaning on a module global.
     assert "WATCH_CATCHUP_TASKS = 30" in text
-    assert "core.page_variables(" in body
+    assert "_media_fetch.page_variables(" in body
     assert "WATCH_CATCHUP_TASKS, _pixai_client._client_of(session).user_id" in body
 
     # Rate-limited: a reconnect storm must not become a request storm. Since #60 the decision
@@ -381,9 +387,9 @@ def test_catchup_sweep_is_bounded_rate_limited_and_off_thread():
     # task's composite grid and a video task's poster still -- ids no row ever holds, so the
     # test was false forever and every sweep relisted the same tasks). A video summary names
     # none of a video's cataloged ids at all, so that shape is asked by task id instead.
-    assert "core.cataloged_media_ids(node)" in body
-    assert "core.media_ids_for(" not in body
-    assert "core._is_video_task_node(node):" in body
+    assert "_history.cataloged_media_ids(node)" in body
+    assert "_history.media_ids_for(" not in body
+    assert "_history._is_video_task_node(node):" in body
     assert "get_row_by_task(db_path, tid)" in body
     assert "if all(get_row(db_path, m) for m in mids):" in body
 
@@ -447,19 +453,19 @@ def test_catchup_backfills_absent_media_skips_present_and_rate_limits(monkeypatc
     present = {"M_present"}                             # only this media is already catalogued
 
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
-    monkeypatch.setattr(core, "gql", lambda *a, **k: {})
-    monkeypatch.setattr(core, "page_variables", lambda *a, **k: {})
-    monkeypatch.setattr(core, "find_connection", lambda *a, **k: {"edges": edges})
-    monkeypatch.setattr(core, "cataloged_media_ids",
+    monkeypatch.setattr(history_mod, "gql", lambda *a, **k: {})
+    monkeypatch.setattr(media_fetch_mod, "page_variables", lambda *a, **k: {})
+    monkeypatch.setattr(history_mod, "find_connection", lambda *a, **k: {"edges": edges})
+    monkeypatch.setattr(history_mod, "cataloged_media_ids",
                         lambda node: media.get(str(node.get("id")), []))
-    monkeypatch.setattr(mg, "get_row", lambda db_path, m: (object() if m in present else None))
+    monkeypatch.setattr(catalog_mod, "get_row", lambda db_path, m: (object() if m in present else None))
     monkeypatch.setattr(time, "sleep", lambda *a, **k: None)   # keep the paced sweep fast
 
     collected = []
     monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: collected.append(str(tid)) or {"saved": 1})
     reads = []
-    monkeypatch.setattr(core, "find_connection",
+    monkeypatch.setattr(history_mod, "find_connection",
                         lambda *a, **k: reads.append(1) or {"edges": edges})
 
     catchup("startup")
@@ -497,7 +503,8 @@ def test_catchup_backfills_absent_media_skips_present_and_rate_limits(monkeypatc
 def _watch_app(tmp_path):
     """A create_app instance for the frame-handler seam. conftest's MOONGLADE_DISABLE_WATCH
     keeps the real watcher thread (and therefore the real socket) from ever starting."""
-    from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade.gallery import create_app
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     save_catalog(tmp_path / "catalog.db",
                  [{f: "" for f in CATALOG_FIELDS} | {
                      "media_id": "1", "filename": "a_1.png",
@@ -628,12 +635,12 @@ def test_the_catchup_writes_a_done_row_for_a_website_task_it_had_to_collect(tmp_
     # "already collected?" test resolves THOSE ids (cataloged_media_ids), so the fake node
     # carries one, and the by-task lookup a video would use answers nothing.
     edges = [{"node": {"id": "W5", "status": "completed", "mediaId": "M5", "batchMediaIds": None}}]
-    monkeypatch.setattr(mg, "get_row_by_task", lambda db_path, t: None)
+    monkeypatch.setattr(catalog_mod, "get_row_by_task", lambda db_path, t: None)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
-    monkeypatch.setattr(core, "gql", lambda *a, **k: {})
-    monkeypatch.setattr(core, "page_variables", lambda *a, **k: {})
-    monkeypatch.setattr(core, "find_connection", lambda *a, **k: {"edges": edges})
-    monkeypatch.setattr(mg, "get_row", lambda db_path, m: None)     # nothing catalogued yet
+    monkeypatch.setattr(history_mod, "gql", lambda *a, **k: {})
+    monkeypatch.setattr(media_fetch_mod, "page_variables", lambda *a, **k: {})
+    monkeypatch.setattr(history_mod, "find_connection", lambda *a, **k: {"edges": edges})
+    monkeypatch.setattr(catalog_mod, "get_row", lambda db_path, m: None)     # nothing catalogued yet
     monkeypatch.setattr(time, "sleep", lambda *a, **k: None)
     monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: {"media_ids": ["M5"], "saved": 1,
@@ -659,15 +666,15 @@ def test_the_event_path_and_the_catchup_converge_on_one_row(tmp_path, monkeypatc
     app = _watch_app(tmp_path)
     _sync_threads(monkeypatch)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
-    monkeypatch.setattr(core, "gql", lambda *a, **k: {})
-    monkeypatch.setattr(core, "page_variables", lambda *a, **k: {})
+    monkeypatch.setattr(history_mod, "gql", lambda *a, **k: {})
+    monkeypatch.setattr(media_fetch_mod, "page_variables", lambda *a, **k: {})
     # The node names its media, as a live TaskSummary does: the sweep asks
     # cataloged_media_ids(node), and a node naming none is skipped before it reaches the
     # second writer -- which would leave this test proving the frame path alone.
-    monkeypatch.setattr(core, "find_connection", lambda *a, **k:
+    monkeypatch.setattr(history_mod, "find_connection", lambda *a, **k:
                         {"edges": [{"node": {"id": "W6", "status": "completed",
                                              "mediaId": "M6", "batchMediaIds": None}}]})
-    monkeypatch.setattr(mg, "get_row", lambda db_path, m: None)
+    monkeypatch.setattr(catalog_mod, "get_row", lambda db_path, m: None)
     monkeypatch.setattr(time, "sleep", lambda *a, **k: None)
     collected = []
 
@@ -821,12 +828,12 @@ def test_catchup_tests_the_ids_the_catalog_actually_holds(monkeypatch, tmp_path,
                                 "is_video": "1"}}
 
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
-    monkeypatch.setattr(core, "gql", lambda *a, **k: {})
-    monkeypatch.setattr(core, "page_variables", lambda *a, **k: {})
-    monkeypatch.setattr(core, "find_connection", lambda *a, **k: {"edges": edges})
-    monkeypatch.setattr(mg, "get_row",
+    monkeypatch.setattr(history_mod, "gql", lambda *a, **k: {})
+    monkeypatch.setattr(media_fetch_mod, "page_variables", lambda *a, **k: {})
+    monkeypatch.setattr(history_mod, "find_connection", lambda *a, **k: {"edges": edges})
+    monkeypatch.setattr(catalog_mod, "get_row",
                         lambda db_path, m: ({"media_id": m} if m in present else None))
-    monkeypatch.setattr(mg, "get_row_by_task", lambda db_path, t: by_task.get(str(t)))
+    monkeypatch.setattr(catalog_mod, "get_row_by_task", lambda db_path, t: by_task.get(str(t)))
     monkeypatch.setattr(time, "sleep", lambda *a, **k: None)
 
     collected = []
@@ -863,7 +870,7 @@ def test_reconnect_plan_table():
     faster -- a refused handshake, a drop seconds after subscribing -- climbs 5/15/45/60, so a
     reconnect storm is bounded at about one connect a minute."""
     from moonglade import gallery as mg
-    plan = mg.watch_reconnect_plan
+    plan = watch_plans_mod.watch_reconnect_plan
     assert plan(5, 900) == (1, 5)            # healthy drop: at once
     assert plan(60, 900) == (1, 5)           # ...even after the ladder had climbed to 60
     assert plan(5, 60) == (1, 5)             # lived exactly one heartbeat
@@ -882,7 +889,7 @@ def test_catchup_plan_table():
     periodic backstop keeps its 300 s rule against the last SUCCESSFUL sweep, and never stacks
     on a fresh attempt."""
     from moonglade import gallery as mg
-    P = mg.catchup_plan
+    P = watch_plans_mod.catchup_plan
     # a reconnect waits out the settle delay after its subscribe...
     assert P("reconnect", 100.0, None, None, 102.0) == ("wait", 2.0)
     assert P("reconnect", 102.0, None, None, 102.0) == ("run", 0)
@@ -913,9 +920,9 @@ def _cycle_rig(app, monkeypatch, clock):
     env.update(clock=lambda: clock["t"], sleep=_sleep, spawn=lambda fn: fn())
     reads = []
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
-    monkeypatch.setattr(core, "gql", lambda *a, **k: {})
-    monkeypatch.setattr(core, "page_variables", lambda *a, **k: {})
-    monkeypatch.setattr(core, "find_connection",
+    monkeypatch.setattr(history_mod, "gql", lambda *a, **k: {})
+    monkeypatch.setattr(media_fetch_mod, "page_variables", lambda *a, **k: {})
+    monkeypatch.setattr(history_mod, "find_connection",
                         lambda *a, **k: reads.append(clock["t"]) or {"edges": []})
     monkeypatch.setattr(time, "sleep", lambda *a, **k: None)
     slept = []
@@ -1040,7 +1047,7 @@ def test_the_sweep_worker_coalesces_and_reruns(tmp_path, monkeypatch):
             ask("reconnect")                     # a drop + resubscribe while this sweep reads
         return {"edges": []}
 
-    monkeypatch.setattr(core, "find_connection", _read_with_a_subscribe_mid_sweep)
+    monkeypatch.setattr(history_mod, "find_connection", _read_with_a_subscribe_mid_sweep)
     spawned[0]()                                 # run the one worker
     assert len(reads) == 2 and len(spawned) == 1
     assert reads[1] - reads[0] >= 60             # the rerun respected the floor
@@ -1060,7 +1067,7 @@ def test_a_failed_read_is_not_coverage(tmp_path, monkeypatch):
         reads.append(clock["t"])
         raise ConnectionError("offline")
 
-    monkeypatch.setattr(core, "find_connection", _down)
+    monkeypatch.setattr(history_mod, "find_connection", _down)
     ask("reconnect")
     assert len(reads) == 1 and cs["ok"] is None
     clock["t"] += 120
@@ -1077,9 +1084,9 @@ def test_a_failed_collect_is_retried_after_300s_not_every_sweep(tmp_path, monkey
     _cycle_rig(app, monkeypatch, clock)
     edges = [{"node": {"id": "T_bad", "status": "completed", "mediaId": "M_bad",
                        "batchMediaIds": None}}]
-    monkeypatch.setattr(core, "find_connection", lambda *a, **k: {"edges": edges})
-    monkeypatch.setattr(mg, "get_row", lambda db_path, m: None)
-    monkeypatch.setattr(mg, "get_row_by_task", lambda db_path, t: None)
+    monkeypatch.setattr(history_mod, "find_connection", lambda *a, **k: {"edges": edges})
+    monkeypatch.setattr(catalog_mod, "get_row", lambda db_path, m: None)
+    monkeypatch.setattr(catalog_mod, "get_row_by_task", lambda db_path, t: None)
     tries = []
 
     def _boom(s, tid, out, **k):
@@ -1092,7 +1099,7 @@ def test_a_failed_collect_is_retried_after_300s_not_every_sweep(tmp_path, monkey
     sweep("reconnect")
     assert tries == ["T_bad"]                    # skipped inside 300 s
     assert "T_bad" not in app.extensions["mg_watch_backed"]
-    clock["t"] += mg.WATCH_COLLECT_RETRY_S
+    clock["t"] += watch_plans_mod.WATCH_COLLECT_RETRY_S
     sweep("reconnect")
     assert tries == ["T_bad", "T_bad"]           # and retried after
 
@@ -1110,9 +1117,9 @@ def test_a_task_the_sweep_collected_is_not_mirrored_again_by_a_late_frame(tmp_pa
     _cycle_rig(app, monkeypatch, clock)
     edges = [{"node": {"id": "T_late", "status": "completed", "mediaId": "M_late",
                        "batchMediaIds": None}}]
-    monkeypatch.setattr(core, "find_connection", lambda *a, **k: {"edges": edges})
-    monkeypatch.setattr(mg, "get_row", lambda db_path, m: None)
-    monkeypatch.setattr(mg, "get_row_by_task", lambda db_path, t: None)
+    monkeypatch.setattr(history_mod, "find_connection", lambda *a, **k: {"edges": edges})
+    monkeypatch.setattr(catalog_mod, "get_row", lambda db_path, m: None)
+    monkeypatch.setattr(catalog_mod, "get_row_by_task", lambda db_path, t: None)
     monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: {"media_ids": ["M_late"], "saved": 1,
                                                   "is_video": False})

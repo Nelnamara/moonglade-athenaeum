@@ -23,6 +23,7 @@ from moonglade.account_prefs import (ACCOUNT_LOCAL, ACCOUNT_PREF_VALUE_MAX, ACCO
                                      account_prefs_get, account_prefs_path, account_prefs_update)
 from tests.conftest import login_client, login_test_client
 from moonglade import telemetry as telemetry_mod
+from moonglade import web_accounts as web_accounts_mod
 
 URL = "/api/account/prefs"
 
@@ -153,7 +154,7 @@ def test_case_distinct_usernames_get_distinct_files(tmp_path):
 def test_no_accounts_install_refuses_both_methods_and_writes_nothing(tmp_path):
     """With no web accounts, nothing past /login is reachable -- from loopback too (there
     is no localhost bypass). So the route never runs without a real session["user"]."""
-    assert core.list_web_users() == []
+    assert web_accounts_mod.list_web_users() == []
     cli = create_app(tmp_path).test_client()
     r = cli.get(URL)
     assert r.status_code == 401 and r.get_json() == {"error": "authentication required"}

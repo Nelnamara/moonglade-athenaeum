@@ -17,6 +17,7 @@ from moonglade import branding as branding_mod
 from moonglade import gallery as g
 from moonglade.gallery import create_app
 from tests.conftest import login_test_client
+from moonglade import web_policy as web_policy_mod
 
 HOSTILE_SVG = (b'<svg xmlns="http://www.w3.org/2000/svg">'
                b'<script>fetch("/api/whoami")</script></svg>')
@@ -34,8 +35,8 @@ def _library(tmp_path):
 
 def _hardened(r, csp=None):
     assert r.headers.get("X-Content-Type-Options") == "nosniff"
-    assert r.headers.get("Content-Security-Policy") == (csp or g.FILE_RESPONSE_CSP)
-    assert "sandbox" in g.FILE_RESPONSE_CSP and "sandbox" in g.SVG_FILE_CSP
+    assert r.headers.get("Content-Security-Policy") == (csp or web_policy_mod.FILE_RESPONSE_CSP)
+    assert "sandbox" in web_policy_mod.FILE_RESPONSE_CSP and "sandbox" in web_policy_mod.SVG_FILE_CSP
 
 
 # ---- /full/: an SVG is a download, a PNG still shows ------------------------------------
@@ -48,7 +49,7 @@ def test_a_hostile_svg_via_full_is_an_attachment_with_nosniff_and_csp(tmp_path):
         assert r.headers["Content-Disposition"].startswith("attachment"), url
         assert "123456789.svg" in r.headers["Content-Disposition"], url
         assert r.mimetype == "image/svg+xml", url                 # 3.22 S5: <img> draws it
-        _hardened(r, g.SVG_FILE_CSP)
+        _hardened(r, web_policy_mod.SVG_FILE_CSP)
         r.close()
 
 
@@ -74,16 +75,16 @@ def test_harden_file_response_downloads_every_type_that_is_not_a_picture_video_o
                          ("image/svg+xml", False), ("text/html", False),
                          ("application/xhtml+xml", False), ("text/xml", False),
                          ("application/octet-stream", False), ("application/pdf", False)):
-        resp = g.harden_file_response(app.response_class(b"x", mimetype=mime), "f.bin")
+        resp = web_policy_mod.harden_file_response(app.response_class(b"x", mimetype=mime), "f.bin")
         cd = resp.headers.get("Content-Disposition") or ""
         assert cd.startswith("attachment") is (not inline), mime
         assert resp.headers["X-Content-Type-Options"] == "nosniff", mime
         assert resp.headers["Content-Security-Policy"] == (
-            g.SVG_FILE_CSP if mime == "image/svg+xml" else g.FILE_RESPONSE_CSP), mime
+            web_policy_mod.SVG_FILE_CSP if mime == "image/svg+xml" else web_policy_mod.FILE_RESPONSE_CSP), mime
 
 
 def test_the_attachment_name_is_safe_for_any_file_name():
-    cd = g._attachment_disposition('a"b\\c\r\nd é.svg')
+    cd = web_policy_mod._attachment_disposition('a"b\\c\r\nd é.svg')
     assert cd.startswith('attachment; filename="')
     assert "\r" not in cd and "\n" not in cd
     plain = cd.split('filename="', 1)[1].split('"', 1)[0]

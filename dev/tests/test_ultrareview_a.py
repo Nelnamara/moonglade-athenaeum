@@ -10,13 +10,16 @@ import time
 from moonglade import backup as core
 from moonglade import contests as contests_mod
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_test_client
 from moonglade import series as series_mod
 from moonglade import telemetry as telemetry_mod
 from moonglade import contest_sync as contest_sync_mod
 from moonglade import achievements as achievements_mod
+from moonglade import catalog as catalog_mod
+from moonglade import account_api as account_api_mod
 
 
 def _row(**kw):
@@ -220,9 +223,9 @@ def test_publish_and_enter_records_the_entry_itself(tmp_path, monkeypatch):
     """It answered entered:true and wrote nothing, leaning on a sweep that silently no-ops
     when the lock is held -- so the entry existed on PixAI and nowhere locally."""
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "resolve_tack_ids", lambda s, tags: ([], []))
-    monkeypatch.setattr(core, "task_media_index", lambda s, t, m: 0)
-    monkeypatch.setattr(core, "publish_artwork_from_task",
+    monkeypatch.setattr(account_api_mod, "resolve_tack_ids", lambda s, tags: ([], []))
+    monkeypatch.setattr(account_api_mod, "task_media_index", lambda s, t, m: 0)
+    monkeypatch.setattr(account_api_mod, "publish_artwork_from_task",
                         lambda s, t, **kw: {"id": "newart1"})
     monkeypatch.setattr(contests_mod, "list_contests", lambda s, **k: [
         {"id": "c7", "slug": "ice-pop", "title": "Ice", "type": "community",
@@ -323,6 +326,6 @@ def test_artwork_id_is_indexed(tmp_path):
     or three times per contest overlay open."""
     db = tmp_path / "catalog.db"
     save_catalog(db, [_row(media_id="m1", artwork_id="aw1", filename="a.png")])
-    with g.catalog(db) as con:
+    with catalog_mod.catalog(db) as con:
         names = {r[1] for r in con.execute("PRAGMA index_list(catalog)").fetchall()}
     assert "idx_artwork_id" in names

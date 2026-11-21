@@ -37,13 +37,28 @@ from moonglade import gen_road as gen_road_mod
 from moonglade import paths as _paths
 from moonglade import backup as core
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from moonglade.account_prefs import _account_key
 from tests.conftest import _TEST_USERNAME, login_test_client
 from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import loom_files as loom_files_mod
+from moonglade import thumbs as thumbs_mod
+from moonglade import account_api as account_api_mod
 
 REPO = Path(__file__).resolve().parents[2]
+# The Loom's code: what create_app still holds, and its store and routes, split out of it (split
+# phase 4), and the library's routes, which took _loom_complete_clip with them. The source walks
+# below read all four.
+_LOOM_SOURCES = (REPO / "moonglade" / "gallery.py", REPO / "moonglade" / "web_loom_store.py",
+                 REPO / "moonglade" / "routes_loom.py", REPO / "moonglade" / "routes_library.py")
+
+
+def _loom_trees():
+    return [ast.parse(path.read_text(encoding="utf-8")) for path in _LOOM_SOURCES]
+
+
 OTHER_USER, OTHER_PW = "someone-else", "another-real-password-2"
 
 
@@ -140,7 +155,7 @@ def test_the_bytes_decide_the_type_never_the_name(rig, data, ext):
 def test_a_real_wav_is_stored_content_addressed_in_the_callers_own_folder(rig):
     data = _wav()
     d = _upload(rig["cli"], data, filename="Elune theme.wav").get_json()
-    assert g.LOOM_BED_FILE_RE.match(d["file"]) and d["file"].endswith(".wav")
+    assert loom_files_mod.LOOM_BED_FILE_RE.match(d["file"]) and d["file"].endswith(".wav")
     p = _beds_dir(rig["tmp"]) / d["file"]
     assert p.read_bytes() == data
     assert d["dur"] is None or d["dur"] > 0, "ffprobe's length when it is installed, else null"
@@ -202,7 +217,7 @@ class _Untouchable(io.RawIOBase):
 
 def test_the_cap_is_enforced_before_the_body_is_read(rig):
     _Untouchable.reads = 0
-    r = rig["cli"].post("/api/loom/bed", input_stream=_Untouchable(g.LOOM_BED_MAX_BYTES + g.LOOM_BED_FORM_SLACK + 1),
+    r = rig["cli"].post("/api/loom/bed", input_stream=_Untouchable(loom_files_mod.LOOM_BED_MAX_BYTES + loom_files_mod.LOOM_BED_FORM_SLACK + 1),
                         content_type="multipart/form-data; boundary=zzz")
     assert r.status_code == 413
     assert _Untouchable.reads == 0
@@ -211,7 +226,7 @@ def test_the_cap_is_enforced_before_the_body_is_read(rig):
 
 def test_the_cap_also_holds_while_the_file_streams(rig, monkeypatch):
     """A body under the declared-length check whose file part is still over the cap."""
-    monkeypatch.setattr(g, "LOOM_BED_MAX_BYTES", 1000)
+    monkeypatch.setattr(loom_files_mod, "LOOM_BED_MAX_BYTES", 1000)
     r = _upload(rig["cli"], FLAC + b"\x00" * 2000)
     assert r.status_code == 413
     assert not [f for f in _beds_dir(rig["tmp"]).iterdir()], "nothing kept, not even a temp file"
@@ -336,9 +351,8 @@ _SPEND = {"submit", "submit_generation", "build_request", "gql_mutate", "gql_adh
 
 
 def test_no_new_route_function_names_a_render_or_pixai():
-    tree = ast.parse((REPO / "moonglade" / "gallery.py").read_text(encoding="utf-8"))
     found = {}
-    for node in ast.walk(tree):
+    for node in (n for tree in _loom_trees() for n in ast.walk(tree)):
         if isinstance(node, ast.FunctionDef) and node.name in _NEW_FUNCS:
             called = set()
             for sub in ast.walk(node):
@@ -457,16 +471,16 @@ def test_the_name_is_sanitised(clips, name, stem):
     cli = clips["cli"]
     r = cli.post("/api/loom/export-edl", json=_edl_body(cli, name=name))
     assert r.status_code == 200
-    assert g.loom_edl_zip_stem(name) == stem
+    assert loom_files_mod.loom_edl_zip_stem(name) == stem
     assert stem + ".edl" in zipfile.ZipFile(io.BytesIO(r.data)).namelist()
     assert "\n" not in r.headers["Content-Disposition"]
 
 
 def test_edl_and_csv_are_capped(clips, monkeypatch):
     cli = clips["cli"]
-    monkeypatch.setattr(g, "LOOM_EDL_MAX_EDL_CHARS", 10)
+    monkeypatch.setattr(loom_files_mod, "LOOM_EDL_MAX_EDL_CHARS", 10)
     assert cli.post("/api/loom/export-edl", json=_edl_body(cli, edl="x" * 11)).status_code == 413
-    monkeypatch.setattr(g, "LOOM_EDL_MAX_CSV_CHARS", 10)
+    monkeypatch.setattr(loom_files_mod, "LOOM_EDL_MAX_CSV_CHARS", 10)
     assert cli.post("/api/loom/export-edl", json=_edl_body(cli, edl="ok", csv="y" * 11)).status_code == 413
     assert cli.post("/api/loom/export-edl", json=_edl_body(cli, edl="")).status_code == 400
 
@@ -486,7 +500,7 @@ def test_a_stale_export_is_swept_at_start_and_a_fresh_one_kept(tmp_path):
     old, new = d / "old.zip", d / "new.zip"
     old.write_bytes(b"x")
     new.write_bytes(b"y")
-    _age(old, g.LOOM_EXPORT_SWEEP_AGE_S + 60)
+    _age(old, loom_files_mod.LOOM_EXPORT_SWEEP_AGE_S + 60)
     create_app(tmp_path)
     assert not old.exists() and new.exists()
 
@@ -495,11 +509,11 @@ def test_the_name_patterns_are_the_planners_own():
     js = (REPO / "loom" / "src" / "loom-edl-core.js").read_text(encoding="utf-8")
     clip = re.search(r"export const EDL_CLIP_FILE_RE = /(.+)/;", js).group(1)
     bed = re.search(r"export const EDL_BED_NAME_RE = /(.+)/;", js).group(1)
-    assert clip == g.LOOM_EDL_CLIP_RE.pattern
-    assert bed == g.LOOM_EDL_BED_NAME_RE.pattern
+    assert clip == loom_files_mod.LOOM_EDL_CLIP_RE.pattern
+    assert bed == loom_files_mod.LOOM_EDL_BED_NAME_RE.pattern
     bedjs = (REPO / "loom" / "src" / "loom-bed-core.js").read_text(encoding="utf-8")
-    assert re.search(r"export const BED_FILE_RE = /(.+)/;", bedjs).group(1) == g.LOOM_BED_FILE_RE.pattern
-    assert "export const BED_MAX_BYTES = 50 * 1024 * 1024;" in bedjs and g.LOOM_BED_MAX_BYTES == 50 * 1024 * 1024
+    assert re.search(r"export const BED_FILE_RE = /(.+)/;", bedjs).group(1) == loom_files_mod.LOOM_BED_FILE_RE.pattern
+    assert "export const BED_MAX_BYTES = 50 * 1024 * 1024;" in bedjs and loom_files_mod.LOOM_BED_MAX_BYTES == 50 * 1024 * 1024
 
 
 # ---- the full bundle carries the bed; an import re-hashes it (F19) -------------------------
@@ -560,7 +574,7 @@ def test_a_bundle_stores_only_the_bed_its_board_names(rig):
     assert d["project"]["bed"]["file"] == named
     stored = sorted(f.name for f in _beds_dir(rig["tmp"]).iterdir())
     assert stored == [named], "one bed, the one the board names; nothing else is written"
-    assert g.LOOM_BUNDLE_MAX_BEDS == 1
+    assert loom_files_mod.LOOM_BUNDLE_MAX_BEDS == 1
 
 
 def test_a_crash_left_bed_temp_file_is_swept_at_start_once_an_hour_old(tmp_path):
@@ -575,7 +589,7 @@ def test_a_crash_left_bed_temp_file_is_swept_at_start_once_an_hour_old(tmp_path)
     for n in names:
         (d / n).write_bytes(MP3_ID3)
         if n != ".upload-fresh.part":
-            _age(d / n, seconds=2 * g.LOOM_BED_TEMP_SWEEP_AGE_S)
+            _age(d / n, seconds=2 * loom_files_mod.LOOM_BED_TEMP_SWEEP_AGE_S)
     create_app(tmp_path)
     left = sorted(f.name for f in d.iterdir())
     assert left == sorted(n for n, swept in names.items() if not swept)
@@ -605,7 +619,7 @@ def test_an_imported_bed_naming_no_storable_file_is_dropped(rig):
 # ---- ⇧ Render mixes the bed (P3): the filter graph, pure; the command's shape -------------
 
 def test_the_bed_graph_follows_the_pages_rules():
-    fc = g.loom_bed_audio_graph(3, -8, 14.0, 102, [(5.0, 8.0)])
+    fc = loom_files_mod.loom_bed_audio_graph(3, -8, 14.0, 102, [(5.0, 8.0)])
     assert fc == ("[3:a]atrim=end=14.000,asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo,"
                   "volume=-8dB,volume=-12dB:enable='between(t,5.000,8.000)',afade=t=in:st=0:d=2.000,"
                   "afade=t=out:st=11.000:d=3.000[bed];"
@@ -614,7 +628,7 @@ def test_the_bed_graph_follows_the_pages_rules():
 
 
 def test_a_short_bed_ends_where_it_ends_and_never_loops():
-    fc = g.loom_bed_audio_graph(2, -3, 14.0, 10.0, [(8.0, 12.0)], cut_label=None)
+    fc = loom_files_mod.loom_bed_audio_graph(2, -3, 14.0, 10.0, [(8.0, 12.0)], cut_label=None)
     assert "atrim=end=10.000" in fc and "afade=t=out:st=7.000:d=3.000" in fc
     assert "between(t,8.000,10.000)" in fc, "the duck is clipped to the bed"
     assert "aloop" not in fc and "loop" not in fc
@@ -622,17 +636,17 @@ def test_a_short_bed_ends_where_it_ends_and_never_loops():
 
 
 def test_level_is_clamped_and_tiny_beds_do_not_overlap_their_fades():
-    assert "volume=-24dB" in g.loom_bed_audio_graph(1, -99, 10, None)
-    assert "volume=0dB" in g.loom_bed_audio_graph(1, 5, 10, None)
-    tiny = g.loom_bed_audio_graph(1, -8, 10, 2.0)
+    assert "volume=-24dB" in loom_files_mod.loom_bed_audio_graph(1, -99, 10, None)
+    assert "volume=0dB" in loom_files_mod.loom_bed_audio_graph(1, 5, 10, None)
+    tiny = loom_files_mod.loom_bed_audio_graph(1, -8, 10, 2.0)
     assert "afade=t=in:st=0:d=1.000" in tiny and "afade=t=out:st=1.000:d=1.000" in tiny
 
 
 def test_duck_windows_are_runs_of_own_audio_shots():
-    assert g.loom_bed_windows([5, 3, 6], [False, True, False]) == [(5.0, 8.0)]
-    assert g.loom_bed_windows([5, 3, 6], [True, True, False]) == [(0.0, 8.0)]
-    assert g.loom_bed_windows([5, 3, 6], [False, True, True], bed_len=10) == [(5.0, 10.0)]
-    assert g.loom_bed_windows([5, 3], [False, False]) == []
+    assert loom_files_mod.loom_bed_windows([5, 3, 6], [False, True, False]) == [(5.0, 8.0)]
+    assert loom_files_mod.loom_bed_windows([5, 3, 6], [True, True, False]) == [(0.0, 8.0)]
+    assert loom_files_mod.loom_bed_windows([5, 3, 6], [False, True, True], bed_len=10) == [(5.0, 10.0)]
+    assert loom_files_mod.loom_bed_windows([5, 3], [False, False]) == []
 
 
 def test_render_passes_the_bed_as_an_input_with_the_graph(rig, monkeypatch, clips):
@@ -640,8 +654,8 @@ def test_render_passes_the_bed_as_an_input_with_the_graph(rig, monkeypatch, clip
     bed = _upload(cli, FLAC).get_json()["file"]
     monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "ffmpeg-fake")
     monkeypatch.setattr(media_tools_mod, "ffprobe_path", lambda: "ffprobe-fake")
-    monkeypatch.setattr(g, "probe_has_audio", lambda p, timeout=None: p.endswith("7002.mp4"))
-    monkeypatch.setattr(g, "probe_duration", lambda p, timeout=None: 60.0 if p.endswith(".flac") else 5.0)
+    monkeypatch.setattr(thumbs_mod, "probe_has_audio", lambda p, timeout=None: p.endswith("7002.mp4"))
+    monkeypatch.setattr(thumbs_mod, "probe_duration", lambda p, timeout=None: 60.0 if p.endswith(".flac") else 5.0)
     started = []
 
     class _Thread:
@@ -672,8 +686,8 @@ def test_render_passes_the_bed_as_an_input_with_the_graph(rig, monkeypatch, clip
 def test_render_without_the_bed_file_says_so_and_renders_the_cut(rig, monkeypatch, clips):
     cli = rig["cli"]
     monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "ffmpeg-fake")
-    monkeypatch.setattr(g, "probe_has_audio", lambda p, timeout=None: True)
-    monkeypatch.setattr(g, "probe_duration", lambda p, timeout=None: 5.0)
+    monkeypatch.setattr(thumbs_mod, "probe_has_audio", lambda p, timeout=None: True)
+    monkeypatch.setattr(thumbs_mod, "probe_duration", lambda p, timeout=None: 5.0)
     started = []
 
     class _Thread:
@@ -711,15 +725,15 @@ def test_prompts_answers_in_order_and_leaves_unknown_ids_out(rig):
 # ---- the sniffer, directly -------------------------------------------------------------------------
 
 def test_sniff_audio_ext():
-    assert g.sniff_audio_ext(_wav()) == "wav"
-    assert g.sniff_audio_ext(MP3_ID3) == "mp3"
-    assert g.sniff_audio_ext(MP3_FRAME) == "mp3"
-    assert g.sniff_audio_ext(AAC_ADTS) == "aac"
-    assert g.sniff_audio_ext(FLAC) == "flac"
-    assert g.sniff_audio_ext(OGG) == "ogg"
-    assert g.sniff_audio_ext(M4A) == "m4a"
+    assert loom_files_mod.sniff_audio_ext(_wav()) == "wav"
+    assert loom_files_mod.sniff_audio_ext(MP3_ID3) == "mp3"
+    assert loom_files_mod.sniff_audio_ext(MP3_FRAME) == "mp3"
+    assert loom_files_mod.sniff_audio_ext(AAC_ADTS) == "aac"
+    assert loom_files_mod.sniff_audio_ext(FLAC) == "flac"
+    assert loom_files_mod.sniff_audio_ext(OGG) == "ogg"
+    assert loom_files_mod.sniff_audio_ext(M4A) == "m4a"
     for bad in (MP4_VIDEO, PNG, b"", b"RIFF\x00\x00\x00\x00AVI ", b"\xff\xd8\xff\xe0jpeg"):
-        assert g.sniff_audio_ext(bad) is None, bad[:12]
+        assert loom_files_mod.sniff_audio_ext(bad) is None, bad[:12]
 
 
 # ---- the continuity ribbon's frames (P9; review F18) ------------------------------------------------
@@ -788,7 +802,7 @@ def test_a_clip_not_on_this_machine_or_with_no_frame_is_a_404_and_leaves_nothing
 
 def test_the_cache_is_lru_capped_and_touches_nothing_else(frames, monkeypatch):
     cli, fdir = frames["cli"], frames["fdir"]
-    monkeypatch.setattr(g, "LOOM_FRAME_CACHE_MAX_FILES", 3)
+    monkeypatch.setattr(loom_files_mod, "LOOM_FRAME_CACHE_MAX_FILES", 3)
     fdir.mkdir(parents=True)
     (fdir / "7001_last.png").write_bytes(b"the splice's own frame")
     (fdir / "notes.txt").write_bytes(b"x")
@@ -800,9 +814,9 @@ def test_the_cache_is_lru_capped_and_touches_nothing_else(frames, monkeypatch):
     names = sorted(f.name for f in fdir.iterdir())
     assert names == ["7001_24.png", "7001_72.png", "7001_last.png", "7002_24.png", "notes.txt"], \
         "the least recently used frame (2 s) went; other files are never counted or touched"
-    monkeypatch.setattr(g, "LOOM_FRAME_CACHE_MAX_BYTES", 1)
+    monkeypatch.setattr(loom_files_mod, "LOOM_FRAME_CACHE_MAX_BYTES", 1)
     assert _frame(cli, "7002", "5").status_code in (200, 404)
-    assert sorted(f.name for f in fdir.iterdir() if g.LOOM_FRAME_FILE_RE.match(f.name)) in ([], ["7002_120.png"])
+    assert sorted(f.name for f in fdir.iterdir() if loom_files_mod.LOOM_FRAME_FILE_RE.match(f.name)) in ([], ["7002_120.png"])
     assert (fdir / "7001_last.png").read_bytes() == b"the splice's own frame"
     assert frames["traps"] == []
 
@@ -883,8 +897,8 @@ def test_the_refusal_names_every_board_that_will_not_read_and_where_its_file_is(
     ("\x00\x00\x00", ""),
 ])
 def test_the_board_name_is_salvaged_from_a_file_that_will_not_read(text, name):
-    assert g.loom_board_name_salvage(text) == name
-    assert len(g.loom_board_name_salvage('{"name": "' + "x" * 500 + '"}')) == 120
+    assert loom_files_mod.loom_board_name_salvage(text) == name
+    assert len(loom_files_mod.loom_board_name_salvage('{"name": "' + "x" * 500 + '"}')) == 120
 
 
 # ---- GitHub #63: the ribbon closes on the clip's REAL end -------------------------------------------
@@ -904,8 +918,8 @@ def test_end_1_is_the_clips_true_last_frame_cached_as_mid_end(frames):
     assert (frames["fdir"] / "7001_end.png").is_file()
     assert _frame_end(cli, "7001").status_code == 200
     assert len(frames["calls"]) == 1, "served from the cache"
-    assert g.LOOM_FRAME_FILE_RE.match("7001_end.png") and g.LOOM_FRAME_FILE_RE.match("local_0123456789ab_end.png")
-    assert not g.LOOM_FRAME_FILE_RE.match("7001_last.png"), "the splice's own frame is never swept"
+    assert loom_files_mod.LOOM_FRAME_FILE_RE.match("7001_end.png") and loom_files_mod.LOOM_FRAME_FILE_RE.match("local_0123456789ab_end.png")
+    assert not loom_files_mod.LOOM_FRAME_FILE_RE.match("7001_last.png"), "the splice's own frame is never swept"
     assert frames["traps"] == []
 
 
@@ -918,7 +932,7 @@ def test_end_with_a_time_or_anything_but_1_is_refused_before_anything_runs(frame
 
 def test_the_end_frame_is_in_the_lru_and_the_splice_frame_is_not(frames, monkeypatch):
     cli, fdir = frames["cli"], frames["fdir"]
-    monkeypatch.setattr(g, "LOOM_FRAME_CACHE_MAX_FILES", 2)
+    monkeypatch.setattr(loom_files_mod, "LOOM_FRAME_CACHE_MAX_FILES", 2)
     fdir.mkdir(parents=True)
     (fdir / "7001_last.png").write_bytes(b"the splice's own frame")
     assert _frame_end(cli, "7001").status_code == 200
@@ -1046,7 +1060,7 @@ def ft(tmp_path, monkeypatch):
         assert sess is session
         looked.append(mid)
         return urls.get(mid)
-    monkeypatch.setattr(core, "media_thumbnail_url", fake_url)
+    monkeypatch.setattr(account_api_mod, "media_thumbnail_url", fake_url)
     pic = _png_bytes()
 
     def fake_get(url, *a, **k):
@@ -1055,7 +1069,7 @@ def ft(tmp_path, monkeypatch):
     monkeypatch.setattr(requests, "get", fake_get)
     # Only the route's own pause is recorded (and skipped); every other sleep in the process is real.
     pause, real_sleep = 0.000123, time.sleep
-    monkeypatch.setattr(g, "LOOM_FRAME_THUMBS_PAUSE_S", pause)
+    monkeypatch.setattr(loom_files_mod, "LOOM_FRAME_THUMBS_PAUSE_S", pause)
     monkeypatch.setattr(time, "sleep", lambda s: slept.append(s) if s == pause else real_sleep(s))
     app = create_app(tmp_path)
     cli = login_test_client(app)
@@ -1102,7 +1116,7 @@ def test_no_pixai_session_is_not_a_verdict_on_the_frame(ft):
     ft["mp"].setattr(core, "_make_session", no_session)
     assert _thumbs_post(ft, ["222"]).get_json() == {"have": [], "fetched": [], "gone": ["222"]}
     ft["mp"].setattr(core, "_make_session", lambda *a, **k: object())
-    ft["mp"].setattr(core, "media_thumbnail_url", lambda s, mid: ft["urls"].get(mid))
+    ft["mp"].setattr(account_api_mod, "media_thumbnail_url", lambda s, mid: ft["urls"].get(mid))
     assert _thumbs_post(ft, ["222"]).get_json()["fetched"] == ["222"], "the next open asks again"
 
 
@@ -1129,9 +1143,8 @@ _READ_ONLY_FUNCS = ("loom_frame_thumbs", "_loom_fetch_frame_thumb")
 def test_the_frame_thumbs_route_names_nothing_that_spends_or_uploads():
     """It needs a PixAI session (the media read), so it is not in _NEW_FUNCS' no-session list;
     it must still name no submit, no gql and no upload."""
-    tree = ast.parse((REPO / "moonglade" / "gallery.py").read_text(encoding="utf-8"))
     found = {}
-    for node in ast.walk(tree):
+    for node in (n for tree in _loom_trees() for n in ast.walk(tree)):
         if isinstance(node, ast.FunctionDef) and node.name in _READ_ONLY_FUNCS:
             found[node.name] = {(s.func.attr if isinstance(s.func, ast.Attribute) else getattr(s.func, "id", ""))
                                 for s in ast.walk(node) if isinstance(s, ast.Call)}

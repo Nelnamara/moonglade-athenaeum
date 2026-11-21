@@ -14,7 +14,8 @@ from moonglade import gallery as g
 from moonglade import gen_params as gen_params_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import training as training_mod
-from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import STARFALL_EVENT, ach_event, ach_nonce, login_client, login_test_client, _SEALED_DONOR
 from moonglade import mirror as mirror_mod
@@ -22,6 +23,8 @@ from moonglade import telemetry as telemetry_mod
 from moonglade import achievements as achievements_mod
 from moonglade import branding as branding_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import ach_beacon as ach_beacon_mod
+from moonglade import sync as sync_mod
 
 # The roster is sealed in the container (built from the private donor), not in source.
 # Gate ONLY the tests that assert sealed roster/skin/criteria CONTENT -- NOT the whole
@@ -258,7 +261,7 @@ def test_api_ach_event_beacon(tmp_path, monkeypatch):
     """The two events still earn what they always earned, now each with a nonce. (Narrator
     pokes left this beacon for /api/narrator/poke, whose ladder keeps the count on the
     server per account -- dev/tests/test_narrator_route.py owns that.)"""
-    monkeypatch.setattr(g, "_ACH_DEBOUNCE_S", 0.0)
+    monkeypatch.setattr(ach_beacon_mod, "_ACH_DEBOUNCE_S", 0.0)
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
     r = ach_event(cli, STARFALL_EVENT)
@@ -317,8 +320,8 @@ def test_ach_nonce_expires(tmp_path):
     slept: the table is a plain module dict of nonce -> (issued_at, sid)."""
     cli = login_client(tmp_path)
     nonce = ach_nonce(cli)
-    issued, sid = g._ach_nonces[nonce]
-    g._ach_nonces[nonce] = (issued - (g._ACH_NONCE_TTL_S + 1), sid)
+    issued, sid = ach_beacon_mod._ach_nonces[nonce]
+    ach_beacon_mod._ach_nonces[nonce] = (issued - (ach_beacon_mod._ACH_NONCE_TTL_S + 1), sid)
     r = cli.post("/api/ach-event", json={"event": "docs", "nonce": nonce})
     assert r.status_code == 403 and r.get_json()["error"] == "stale page — reload"
     assert "docs_opened" not in telemetry_mod.telemetry_metrics(tmp_path)
@@ -376,8 +379,8 @@ def test_ach_debounce_window_is_narrower_than_a_hand(tmp_path, monkeypatch):
     pair of real taps was thrown away, while three separate comments said separate clicks
     were never touched. 150ms is over a double-fired DOM event and under a hand."""
     clock = {"t": time.time()}   # real epoch: the sweep prunes stamps by it
-    real = g._ach_debounced
-    monkeypatch.setattr(g, "_ach_debounced",
+    real = ach_beacon_mod._ach_debounced
+    monkeypatch.setattr(ach_beacon_mod, "_ach_debounced",
                         lambda sid, event, now=None: real(sid, event, now=clock["t"]))
     cli = login_client(tmp_path)
     n = ach_nonce(cli)
@@ -397,22 +400,22 @@ def test_ach_debounce_window_is_narrower_than_a_hand(tmp_path, monkeypatch):
     assert d["debounced"] is True
     assert telemetry_mod.telemetry_metrics(tmp_path)["docs_opened"] == 3
     # A hand cannot do this; that is the whole basis of the window.
-    assert g._ACH_DEBOUNCE_S <= 0.15
+    assert ach_beacon_mod._ACH_DEBOUNCE_S <= 0.15
 
 
 def test_ach_event_rate_limited_per_session(tmp_path, monkeypatch):
     """30 beacon calls a rolling minute, the mint included. Past that: 429 and nothing
     moves -- the replay loop the nonce alone would only slow down."""
-    monkeypatch.setattr(g, "_ACH_DEBOUNCE_S", 0.0)
+    monkeypatch.setattr(ach_beacon_mod, "_ACH_DEBOUNCE_S", 0.0)
     cli = login_client(tmp_path)
     nonce = ach_nonce(cli)                       # call 1 of 30
-    for i in range(2, g._ACH_RATE_MAX + 1):      # calls 2..30
+    for i in range(2, ach_beacon_mod._ACH_RATE_MAX + 1):      # calls 2..30
         d = cli.post("/api/ach-event", json={"event": "docs", "nonce": nonce}).get_json()
         assert d["ok"] is True, "call %d should still be accepted" % i
         nonce = d["next_nonce"]
     r = cli.post("/api/ach-event", json={"event": "docs", "nonce": nonce})
     assert r.status_code == 429 and r.get_json()["error"] == "slow down"
-    assert telemetry_mod.telemetry_metrics(tmp_path)["docs_opened"] == g._ACH_RATE_MAX - 1
+    assert telemetry_mod.telemetry_metrics(tmp_path)["docs_opened"] == ach_beacon_mod._ACH_RATE_MAX - 1
     assert cli.get("/api/ach-nonce").status_code == 429   # the top-up draws on the same budget
 
 
@@ -427,7 +430,7 @@ def test_ach_rate_limit_binds_across_a_replayed_cookie(tmp_path, monkeypatch):
     own docstring calls the stop for a scripted replay loop did not bind at all (probed
     2026-09-07: 60 rounds, 60 sids, no 429). Keyed on the login's own stable identity, the
     replays all draw on one budget."""
-    monkeypatch.setattr(g, "_ACH_DEBOUNCE_S", 0.0)
+    monkeypatch.setattr(ach_beacon_mod, "_ACH_DEBOUNCE_S", 0.0)
     app = g.create_app(tmp_path)
     cli = login_test_client(app)
     c0 = cli.get_cookie("session").value          # captured before any beacon call
@@ -439,7 +442,7 @@ def test_ach_rate_limit_binds_across_a_replayed_cookie(tmp_path, monkeypatch):
         c.set_cookie("session", c0)
         return c
 
-    rounds = g._ACH_RATE_MAX // 2                 # a top-up + an event is two calls
+    rounds = ach_beacon_mod._ACH_RATE_MAX // 2                 # a top-up + an event is two calls
     for i in range(rounds):
         c = replay()
         d = c.get("/api/ach-nonce").get_json()
@@ -484,11 +487,11 @@ def test_new_sql_metrics(tmp_path):
 
 def test_time_capsule_only_fires_on_old_insert(tmp_path):
     from moonglade import backup as core
-    core._check_time_capsule("2020-01-01T00:00:00", tmp_path)
+    sync_mod._check_time_capsule("2020-01-01T00:00:00", tmp_path)
     assert telemetry_mod.telemetry_metrics(tmp_path)["old_piece_backed_up"] == 1
     telemetry_mod._telemetry_path(tmp_path).unlink()
-    core._check_time_capsule("2099-01-01T00:00:00", tmp_path)   # young: no fire
-    core._check_time_capsule("", tmp_path)                       # blank: no crash
+    sync_mod._check_time_capsule("2099-01-01T00:00:00", tmp_path)   # young: no fire
+    sync_mod._check_time_capsule("", tmp_path)                       # blank: no crash
     assert telemetry_mod.telemetry_metrics(tmp_path).get("old_piece_backed_up", 0) == 0
 
 
@@ -800,11 +803,51 @@ def test_only_the_two_tool_terminals_write_the_bridge_set():
     bridge_gen_tasks are the enhance and scene terminals. Self-computing -- it counts the
     write sites in the source rather than restating where they are, so a third one added
     anywhere (the collect choke again, a new route) fails here on the day it lands. It reads
-    the gallery and the modules the 3.21.0 split moved gallery code into."""
+    the gallery and the modules the 3.21.0 split moved gallery code into (the create routes,
+    where both terminals live, since split phase 4)."""
     import inspect
     from moonglade import contest_sync as contest_sync_mod, living as living_mod
+    from moonglade import routes_generate as routes_generate_mod
+    from moonglade import routes_loom as routes_loom_mod, web_loom_store as web_loom_store_mod
+    from moonglade import routes_gate as routes_gate_mod
+    from moonglade import web_threads as web_threads_mod
+    from moonglade import routes_panel as routes_panel_mod
+    from moonglade import routes_delete as routes_delete_mod
+    from moonglade import routes_recipes as routes_recipes_mod
+    from moonglade import routes_library as routes_library_mod
+    from moonglade import routes_account as routes_account_mod
+    from moonglade import routes_community as routes_community_mod
+    from moonglade import routes_train as routes_train_mod
+    from moonglade import routes_ach as routes_ach_mod
+    from moonglade import routes_mirror as routes_mirror_mod
+    from moonglade import routes_branding as routes_branding_mod
+    from moonglade import routes_import as routes_import_mod
+    from moonglade import redact as redact_mod
+    from moonglade import web_tiers as web_tiers_mod
+    from moonglade import watch_plans as watch_plans_mod
+    from moonglade import name_hunt as name_hunt_mod
+    from moonglade import ach_beacon as ach_beacon_mod
+    from moonglade import scenes as scenes_mod
+    from moonglade import pages as pages_mod
+    from moonglade import web_policy as web_policy_mod
+    from moonglade import loom_files as loom_files_mod
+    from moonglade import catalog_search as catalog_search_mod
+    from moonglade import catalog as catalog_mod
+    from moonglade import curation as curation_mod
+    from moonglade import train_guard as train_guard_mod
+    from moonglade import catalog_verbs as catalog_verbs_mod
+    from moonglade import thumbs as thumbs_mod
+    from moonglade import trash as trash_mod
+    from moonglade import dupe_review as dupe_review_mod
     src = "\n".join(inspect.getsource(mod) for mod in (
-        g, telemetry_mod, achievements_mod, branding_mod, living_mod, contest_sync_mod))
+        g, telemetry_mod, achievements_mod, branding_mod, living_mod, contest_sync_mod,
+        routes_generate_mod, routes_loom_mod, web_loom_store_mod, routes_gate_mod, web_threads_mod,
+        routes_panel_mod, routes_delete_mod, routes_recipes_mod, routes_library_mod,
+        routes_account_mod, routes_community_mod, routes_train_mod, routes_ach_mod,
+        routes_mirror_mod, routes_branding_mod, routes_import_mod,
+        redact_mod, web_tiers_mod, watch_plans_mod, name_hunt_mod, ach_beacon_mod, scenes_mod,
+        pages_mod, web_policy_mod, loom_files_mod, catalog_search_mod, catalog_mod, curation_mod,
+        train_guard_mod, catalog_verbs_mod, thumbs_mod, trash_mod, dupe_review_mod))
     writes = [ln.strip() for ln in src.splitlines()
               if "telem_set_add(" in ln and "bridge_gen_tasks" in ln]
     assert len(writes) == 2, writes

@@ -5,10 +5,11 @@ redone without a whole --rebuild-thumbs pass (owner, 2026-08-22). Videos only.
 from pathlib import Path
 
 from moonglade import gallery as G
+from moonglade import thumbs as thumbs_mod
 
 
 def _seed(tmp_path, mid, is_video):
-    from moonglade.gallery import CATALOG_FIELDS, save_catalog
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     (tmp_path / "videos").mkdir(parents=True, exist_ok=True)
     name = ("videos/clip_%s.mp4" if is_video else "videos/pic_%s.png") % mid
     (tmp_path / name).write_bytes(b"\x00" * 64)
@@ -28,7 +29,7 @@ def test_rebuild_poster_regenerates_a_video_thumb(tmp_path, monkeypatch):
         Path(thumb_path).parent.mkdir(parents=True, exist_ok=True)
         Path(thumb_path).write_bytes(b"jpg")
         return True
-    monkeypatch.setattr(G, "make_video_thumbnail", fake_make)
+    monkeypatch.setattr(thumbs_mod, "make_video_thumbnail", fake_make)
 
     cli = login_test_client(create_app(tmp_path))
     r = cli.post("/api/rebuild-poster/555")
@@ -44,7 +45,7 @@ def test_rebuild_poster_refuses_an_image(tmp_path, monkeypatch):
     from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     _seed(tmp_path, "777", is_video=False)
-    monkeypatch.setattr(G, "make_video_thumbnail", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not run")))
+    monkeypatch.setattr(thumbs_mod, "make_video_thumbnail", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not run")))
     cli = login_test_client(create_app(tmp_path))
     r = cli.post("/api/rebuild-poster/777")
     assert r.status_code == 400
@@ -64,7 +65,7 @@ def test_rebuild_poster_reports_ffmpeg_failure_softly(tmp_path, monkeypatch):
     from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     _seed(tmp_path, "555", is_video=True)
-    monkeypatch.setattr(G, "make_video_thumbnail", lambda *a, **k: False)
+    monkeypatch.setattr(thumbs_mod, "make_video_thumbnail", lambda *a, **k: False)
     cli = login_test_client(create_app(tmp_path))
     r = cli.post("/api/rebuild-poster/555")
     assert r.status_code == 200
@@ -76,7 +77,8 @@ def test_rebuild_poster_finds_a_moved_video_via_the_matcher(tmp_path, monkeypatc
     """The catalog row's filename is stale (the clip was moved by --organize); the route must
     fall back to find_files_for_media_id told to look for VIDEO extensions. Pins the fallback
     branch -- a NameError hid there once because the happy path never reached it."""
-    from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade.gallery import create_app
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     from tests.conftest import login_test_client
     (tmp_path / "2026-08").mkdir(parents=True, exist_ok=True)
     # the real file sits where organize put it; the row still names the old path
@@ -87,7 +89,7 @@ def test_rebuild_poster_finds_a_moved_video_via_the_matcher(tmp_path, monkeypatc
     calls = []
     def fake_make(video_path, thumb_path):
         calls.append(Path(video_path).name); return True
-    monkeypatch.setattr(G, "make_video_thumbnail", fake_make)
+    monkeypatch.setattr(thumbs_mod, "make_video_thumbnail", fake_make)
     cli = login_test_client(create_app(tmp_path))
     r = cli.post("/api/rebuild-poster/555")
     assert r.status_code == 200, r.get_data(as_text=True)

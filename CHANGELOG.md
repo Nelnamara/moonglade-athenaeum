@@ -16,6 +16,9 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Changed
+- **The module split is finished.** Every route family is out of `create_app` into its own module, and `gallery.py` and `backup.py` hold only their cores, with each section that left them in a module of its own. Behaviour is unchanged. One visible effect: the server's own log lines in `moonglade.log` now carry the name `moonglade.gallery` (they said `__main__` before). (2026-11-21)
+
 ## [3.22.0] - 2026-11-20 — New Roads
 
 ### Added

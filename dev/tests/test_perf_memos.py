@@ -12,13 +12,15 @@ import time
 from moonglade import backup as core
 from moonglade import contests as contests_mod
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_test_client
 from moonglade import health as health_mod
 from moonglade import telemetry as telemetry_mod
 from moonglade import contest_sync as contest_sync_mod
 from moonglade import achievements as achievements_mod
+from moonglade import curation as curation_mod
 
 
 def _row(**kw):
@@ -49,12 +51,12 @@ def test_metrics_are_memoized_between_calls(tmp_path, monkeypatch):
                                created_at="2026-01-01T00:00:00")])
     first = achievements_mod.achievement_metrics(db)
     calls = {"n": 0}
-    real = g.catalog_counts
+    real = curation_mod.catalog_counts
 
     def _counted(p):
         calls["n"] += 1
         return real(p)
-    monkeypatch.setattr(g, "catalog_counts", _counted)
+    monkeypatch.setattr(curation_mod, "catalog_counts", _counted)
     again = achievements_mod.achievement_metrics(db)
     assert calls["n"] == 0, "a second call inside the window must not recompute"
     assert again == first

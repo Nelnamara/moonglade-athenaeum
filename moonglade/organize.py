@@ -94,7 +94,7 @@ def audit_collection(out_dir, content=True, progress=None):
     Class A = same media_id in >1 location (no hashing needed).
     Class B = byte-identical content under DIFFERENT media_ids (size-bucketed hash).
     """
-    from moonglade.backup import _file_sha
+    from moonglade.history import _file_sha
     by_mid = defaultdict(list)      # mid -> [(path, rel, bucket, size)]
     by_size = defaultdict(list)     # size -> [(path, rel, bucket, mid)]
     per_bucket = Counter()
@@ -279,7 +279,7 @@ def _delete_unsafe(loser, keeper, opens):
     copy beside a whole one), or when both open and show the same pixels. Anything else --
     a keeper that does not open, two different pictures under one id, no way to tell --
     keeps the file."""
-    from moonglade.backup import _same_bytes, _same_pixels
+    from moonglade.history import _same_bytes, _same_pixels
     if _same_bytes(loser, keeper):
         return ""
     k_ok, l_ok = opens.get(keeper), opens.get(loser)
@@ -448,7 +448,7 @@ def verify_quarantine(out_dir, restore_orphans=False, progress=None):
       * orphan  - no surviving keeper at all -> quarantining it lost the only copy
     Optionally restores orphans back to images/. Returns a result dict.
     """
-    from moonglade.backup import _same_bytes, _same_pixels
+    from moonglade.history import _same_bytes, _same_pixels
     quarantine_root = out_dir / "_duplicates"
     if not quarantine_root.exists():
         return {"safe": 0, "differs": [], "orphan": [], "total": 0}
@@ -766,7 +766,7 @@ def reconcile_catalog_with_disk(out_dir, db_path):
     """After files move/disappear, point each catalog row's filename+batch at the
     surviving on-disk file for that media_id. Rows whose file is gone keep their
     last-known filename but are left intact (the image may be re-downloadable)."""
-    from moonglade.backup import load_catalog, save_catalog
+    from moonglade.catalog import load_catalog, save_catalog
     rows = load_catalog(db_path)
     updated = 0
     for r in rows:
@@ -817,8 +817,10 @@ def cmd_organize(args, out, img_dir, db_path):
     sharing a media_id with the live catalogued copy collided with it in the move
     plan, either hard-deleting one outright as a spurious "redundant" duplicate or
     resurrecting the quarantined copy into the organized tree in its place)."""
-    from moonglade.backup import (build_stem_name, convert_image, embed_metadata, _ensure_db,
-                                  load_catalog, PixAIError, _same_bytes, save_catalog)
+    from moonglade.backup import _ensure_db, PixAIError
+    from moonglade.catalog import load_catalog, save_catalog
+    from moonglade.media_fetch import convert_image, embed_metadata
+    from moonglade.history import build_stem_name, _same_bytes
     db_path = _ensure_db(out)
     meta_by_mid = {}
     for row in load_catalog(db_path):

@@ -45,13 +45,20 @@ from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade import gen_cli as gen_cli_mod
 from moonglade import models as models_mod
-from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.fake_pixai import FakePixAI, UnregisteredOperation, operation_name
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import cloud_delete as cloud_delete_mod
+from moonglade import thumbs as thumbs_mod
+from moonglade import history as history_mod
+from moonglade import media_fetch as media_fetch_mod
+from moonglade import full_meta as full_meta_mod
+from moonglade import library_runs as library_runs_mod
+from moonglade import account_api as account_api_mod
+from moonglade import sync as sync_mod
 
 REPO = Path(__file__).resolve().parents[2]
 RECORDED = json.loads((Path(__file__).resolve().parent / "fixtures" /
@@ -156,7 +163,7 @@ def fresh_model_caches():
     """model_name_gql and _resolve_model_preset memoise into module-level default dicts, and
     other tests use the same public version ids: start these tests empty, put them back
     after."""
-    caches = [models_mod.model_name_gql.__defaults__[0], core._resolve_model_preset.__defaults__[0]]
+    caches = [models_mod.model_name_gql.__defaults__[0], full_meta_mod._resolve_model_preset.__defaults__[0]]
     kept = [dict(c) for c in caches]
     for c in caches:
         c.clear()
@@ -309,8 +316,8 @@ def test_extract_full_meta_reads_the_document_answer_as_it_read_the_saved_one(pi
     doc, saved = _document(kind), _saved(kind)
     pixai.on(TASK_DETAIL, {"task": doc})
     task = task_reads_mod.task_detail_gql(pixai, doc["id"])
-    assert core.extract_full_meta(task) == core.extract_full_meta(saved)
-    assert core.extract_full_meta(task)["paid_credit"] == str(saved["paidCredit"])
+    assert full_meta_mod.extract_full_meta(task) == full_meta_mod.extract_full_meta(saved)
+    assert full_meta_mod.extract_full_meta(task)["paid_credit"] == str(saved["paidCredit"])
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -318,25 +325,25 @@ def test_every_other_reader_of_a_task_reads_it_the_same(pixai, kind):
     doc, saved = _document(kind), _saved(kind)
     pixai.on(TASK_DETAIL, {"task": doc})
     task = task_reads_mod.task_detail_gql(pixai, doc["id"])
-    for reader in (core.video_outputs, core.source_media_of_task, core.fixer_block,
-                   cloud_delete_mod.task_artwork_ids, core._paid_credit_str):
+    for reader in (full_meta_mod.video_outputs, account_api_mod.source_media_of_task, history_mod.fixer_block,
+                   cloud_delete_mod.task_artwork_ids, full_meta_mod._paid_credit_str):
         assert reader(task) == reader(saved), reader.__name__
     assert gen_cli_mod._task_image_media(task["outputs"]) == gen_cli_mod._task_image_media(saved["outputs"])
-    assert core._prompt_helper_label(task["parameters"], task) == \
-        core._prompt_helper_label(saved["parameters"], saved)
+    assert full_meta_mod._prompt_helper_label(task["parameters"], task) == \
+        full_meta_mod._prompt_helper_label(saved["parameters"], saved)
     for mid in {doc["mediaId"], *(b["mediaId"] for b in doc["outputs"].get("batch") or [])}:
         assert cloud_delete_mod._image_delete_plan(task, mid) == cloud_delete_mod._image_delete_plan(saved, mid)
 
 
 def test_the_recorded_answers_exercise_what_the_readers_read():
     """So the equalities above are not equalities of empty values."""
-    fm = {k: core.extract_full_meta(_document(k)) for k in KINDS}
+    fm = {k: full_meta_mod.extract_full_meta(_document(k)) for k in KINDS}
     assert fm["batch"]["prompt_full"] and fm["batch"]["seed"]
     assert fm["lone"]["prompt_helper"] == "on (user-want-to-enable)"
     assert fm["lone"]["moderation"] == "PASS"
     assert (fm["i2v"]["derive_kind"], fm["i2v"]["video_model"]) == ("video", "v4.0.1")
     assert fm["edit"]["derive_kind"] == "edit" and fm["edit"]["model_name"] == "Edit Pro"
-    assert core.video_outputs(_document("video2"))[0][0]["poster_media_id"]
+    assert full_meta_mod.video_outputs(_document("video2"))[0][0]["poster_media_id"]
     assert cloud_delete_mod.task_artwork_ids(_document("published")) == tuple(
         _document("published")["artworkIds"]) != ()
     assert len(_document("batch")["outputs"]["batch"]) == 4
@@ -351,8 +358,8 @@ def test_a_fix_reads_the_same_through_the_document(pixai):
     saved["parameters"]["chat"]["fixer"] = copy.deepcopy(fixer)
     pixai.on(TASK_DETAIL, {"task": doc})
     task = task_reads_mod.task_detail_gql(pixai, doc["id"])
-    assert core.fixer_block(task) == fixer == core.fixer_block(saved)
-    assert core.extract_full_meta(task) == core.extract_full_meta(saved)
+    assert history_mod.fixer_block(task) == fixer == history_mod.fixer_block(saved)
+    assert full_meta_mod.extract_full_meta(task) == full_meta_mod.extract_full_meta(saved)
 
 
 def _batch_with_deleted(*positions):
@@ -404,11 +411,11 @@ def _feed(nodes):
 
 def test_the_video_sync_reads_its_task_through_the_document(pixai, tmp_path, monkeypatch):
     doc = _document("i2v")
-    [out], shared = core.video_outputs(doc)
+    [out], shared = full_meta_mod.video_outputs(doc)
     vmid = out["video_media_id"]
     save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "seed-row", "filename": "a.png"}])
-    pixai.on(operation_name(core._HISTORY_PAGE_DOC), _feed([{
+    pixai.on(operation_name(history_mod._HISTORY_PAGE_DOC), _feed([{
         "id": doc["id"], "status": "completed", "mediaId": doc["mediaId"],
         "batchMediaIds": [], "createdAt": doc["createdAt"], "promptsPreview": "p",
         "i2vProModel": "v4.0.1"}]))
@@ -421,20 +428,20 @@ def test_the_video_sync_reads_its_task_through_the_document(pixai, tmp_path, mon
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(b"mp4")
         return "ok", dest
-    monkeypatch.setattr(core, "download", fake_download)
-    monkeypatch.setattr(core, "resolve_media", lambda s, m: ("", {}))
+    monkeypatch.setattr(media_fetch_mod, "download", fake_download)
+    monkeypatch.setattr(media_fetch_mod, "resolve_media", lambda s, m: ("", {}))
     monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
     monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
-    monkeypatch.setattr(g, "make_thumbnail", lambda *a, **k: None)
+    monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
 
-    res = core.run_sync_videos(SimpleNamespace(out=str(tmp_path), token=None, page_size=250,
+    res = library_runs_mod.run_sync_videos(SimpleNamespace(out=str(tmp_path), token=None, page_size=250,
                                                workers=1, delay=0))
     assert res["i2v_tasks"] == 1
     assert [c.variables for c in pixai.calls_for(TASK_DETAIL)] == [{"id": doc["id"]}]
     row = {r["media_id"]: r for r in load_catalog(tmp_path / "catalog.db")}[vmid]
     assert row["paid_credit"] == str(doc["paidCredit"])
     assert row["video_model"] == "v4.0.1" and row["prompt_full"] == shared["prompt"]
-    assert row["source_media_id"] == core.source_media_of_task(doc)[0]
+    assert row["source_media_id"] == account_api_mod.source_media_of_task(doc)[0]
 
 
 def test_backfill_full_meta_reads_both_documents(pixai, tmp_path, fresh_model_caches):
@@ -450,7 +457,7 @@ def test_backfill_full_meta_reads_both_documents(pixai, tmp_path, fresh_model_ca
     pixai.on(TASK_DETAIL, {"task": doc})
     pixai.on(MODEL_VERSION, tsubaki["document"])
 
-    core.run_backfill_full_meta(SimpleNamespace(
+    sync_mod.run_backfill_full_meta(SimpleNamespace(
         out=str(tmp_path), token=None, workers=1, delay=0.0, progress=None,
         with_loras=False, with_credit=False, with_surface=False))
     row = load_catalog(db)[0]
@@ -507,7 +514,7 @@ def test_the_model_ids_are_the_probe_s():
 def test_the_preset_reads_the_recorded_extra(pixai, kind, preset, fresh_model_caches):
     m = MODELS[kind]
     pixai.on(MODEL_VERSION, m["document"])
-    assert core._resolve_model_preset(pixai, m["version_id"]) == preset
+    assert full_meta_mod._resolve_model_preset(pixai, m["version_id"]) == preset
     assert pixai.calls[0].retries == 0
 
 
@@ -578,7 +585,7 @@ def test_relabel_removed_acts_on_a_removed_model_and_not_on_a_failed_lookup(
             raise _refusal("Not authenticated", "UNAUTHENTICATED")
         return {"generationModelVersion": None}
     pixai.on(MODEL_VERSION, answer)
-    res = core.run_fix_models(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
+    res = library_runs_mod.run_fix_models(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
                                               relabel_removed=True))
     rows = {r["media_id"]: r for r in load_catalog(db)}
     assert rows["m1"]["model_name"] == "Unknown or removed model"
@@ -598,15 +605,15 @@ def test_the_reuse_reader_and_the_preset_fail_soft(pixai, answer, fresh_model_ca
     else:
         pixai.on(MODEL_VERSION, answer)
     assert models_mod.resolve_model_base_id(pixai, "918273645591000006") == ""
-    assert core._resolve_model_preset(pixai, "918273645591000007") in (
+    assert full_meta_mod._resolve_model_preset(pixai, "918273645591000007") in (
         {}, {"steps": "", "sampler": "", "cfg_scale": ""})
-    assert not core._resolve_model_preset(pixai, "918273645591000007").get("steps")
+    assert not full_meta_mod._resolve_model_preset(pixai, "918273645591000007").get("steps")
 
 
 @pytest.mark.parametrize("read", [
     lambda c: models_mod.model_name_gql(c, "918273645591000008"),
     lambda c: models_mod.resolve_model_base_id(c, "918273645591000009"),
-    lambda c: core._resolve_model_preset(c, "918273645591000010"),
+    lambda c: full_meta_mod._resolve_model_preset(c, "918273645591000010"),
 ], ids=["model_name_gql", "resolve_model_base_id", "_resolve_model_preset"])
 def test_each_model_reader_asks_once_on_a_5xx(read, fresh_model_caches, no_backoff):
     """retries=0 for all three, as on the saved road: a name lookup drives no backoff loop."""
@@ -632,6 +639,6 @@ def test_the_retired_saved_requests_leave_nothing_behind():
     example = (REPO / "config.example.json").read_text(encoding="utf-8")
     assert "TASK_DETAIL_HASH" not in example and "MODEL_DETAIL_HASH" not in example
     for reader in (task_reads_mod.task_detail_gql, models_mod._model_version_gql, models_mod.model_name_gql,
-                   models_mod.resolve_model_base_id, core._resolve_model_preset,
+                   models_mod.resolve_model_base_id, full_meta_mod._resolve_model_preset,
                    gen_cli_mod._task_detail_query):
         assert ".persisted(" not in inspect.getsource(reader), reader.__name__

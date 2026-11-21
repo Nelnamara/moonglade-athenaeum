@@ -22,6 +22,7 @@ from moonglade import paths
 from moonglade import settings as msettings
 from tests.conftest import first_party_sources, login_client
 from moonglade import mirror as mirror_mod
+from moonglade import account_api as account_api_mod
 
 _REPO = Path(__file__).resolve().parents[2]
 _REAL_CORE_CONFIG_PATH = core._config_path
@@ -50,7 +51,7 @@ def _decoy_untouched(cfg):
 
 
 def test_the_setup_wizard_key_save_writes_through_the_helper(routed, tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "account_info",
+    monkeypatch.setattr(account_api_mod, "account_info",
                         lambda session, raise_on_error=False: {"quotaAmount": 7})
     cli = login_client(tmp_path)
     r = cli.post("/api/setup/save-key", data=json.dumps({"api_key": "sk-routed"}),

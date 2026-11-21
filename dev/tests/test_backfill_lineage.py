@@ -12,10 +12,11 @@ import types
 
 import pytest
 
-from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, load_catalog, save_catalog
 
 from moonglade import backup as core
 from moonglade import task_reads as task_reads_mod
+from moonglade import sync as sync_mod
 
 
 def _args(tmp_path):
@@ -37,7 +38,7 @@ def _seed(tmp_path, task_ids):
 def _run(monkeypatch, tmp_path, detail_fn):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda session, tid: detail_fn(tid))
-    core.run_backfill_lineage(_args(tmp_path))
+    sync_mod.run_backfill_lineage(_args(tmp_path))
     return {r["task_id"]: r for r in load_catalog(tmp_path / "catalog.db")}
 
 
@@ -64,7 +65,7 @@ def test_errored_task_is_not_stamped_checked_and_retries_next_run(monkeypatch, t
                          "taskType": "edit"}}
 
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda session, tid: detail2(tid))
-    core.run_backfill_lineage(_args(tmp_path))
+    sync_mod.run_backfill_lineage(_args(tmp_path))
     assert fetched == ["t_boom"]                      # t_ok was NOT refetched
     by_task = {r["task_id"]: r for r in load_catalog(tmp_path / "catalog.db")}
     assert by_task["t_boom"]["lineage_checked"] == "1"
@@ -82,5 +83,5 @@ def test_confirmed_original_is_still_stamped_and_never_refetched(monkeypatch, tm
 
     by_task = _run(monkeypatch, tmp_path, detail)
     assert by_task["t_orig"]["lineage_checked"] == "1"
-    core.run_backfill_lineage(_args(tmp_path))        # second run
+    sync_mod.run_backfill_lineage(_args(tmp_path))        # second run
     assert calls == ["t_orig"]                        # fetched exactly once, ever

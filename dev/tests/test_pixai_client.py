@@ -31,6 +31,9 @@ from tests.fake_pixai import FakePixAI, UnregisteredOperation, operation_name
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import mirror as mirror_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import history as history_mod
+from moonglade import full_meta as full_meta_mod
+from moonglade import account_api as account_api_mod
 
 
 class FakeResponse:
@@ -162,7 +165,8 @@ class TestThePrimitivesAreThinDelegates:
     @pytest.mark.parametrize("name", ["gql", "gql_adhoc", "gql_mutate",
                                       "_rest_get", "_rest_post"])
     def test_it_routes_through_the_client(self, name, real_rest):
-        src = inspect.getsource(getattr(core, name))
+        home = next(m for m in (core, history_mod) if hasattr(m, name))
+        src = inspect.getsource(getattr(home, name))
         # gql reads the history feed's document through gql_adhoc, itself one of these five
         road = "gql_adhoc(" if name == "gql" else "_client_of("
         assert road in src, "{} no longer routes through the client".format(name)
@@ -172,10 +176,10 @@ class TestThePrimitivesAreThinDelegates:
     def test_gql_posts_the_history_document(self):
         page = {"user": {"taskSummaries": {"edges": [], "pageInfo": {}}}}  # a page, no edges
         s = RecordingSession(FakeResponse({"data": page}))
-        assert core.gql(s, {"last": 3}) == page
+        assert history_mod.gql(s, {"last": 3}) == page
         (verb, _url, kwargs), = s.calls
         assert verb == "POST"
-        assert kwargs["json"] == {"query": core._HISTORY_PAGE_DOC, "variables": {"last": 3}}
+        assert kwargs["json"] == {"query": history_mod._HISTORY_PAGE_DOC, "variables": {"last": 3}}
 
     def test_gql_adhoc_takes_a_raw_session(self):
         s = RecordingSession(FakeResponse({"data": {"me": {"id": "1"}}}))
@@ -205,7 +209,7 @@ class TestThePrimitivesAreThinDelegates:
                             lambda *a, **k: pytest.fail("wrapping resolved a user id"))
         s = RecordingSession(FakeResponse({"data": {"me": {"id": "1"}}}))
         assert pixai_client_mod._client_of(s).session is s
-        assert core.account_info(s) == {"id": "1"}
+        assert account_api_mod.account_info(s) == {"id": "1"}
 
     def test_make_session_hands_back_a_client(self, monkeypatch, tmp_path):
         """`_make_session` is the app's one entry to PixAI and now returns the seam
@@ -249,8 +253,10 @@ class TestTheDetailReadsRideTheClient:
 
     @pytest.mark.parametrize("name", DOCUMENT_READERS)
     def test_a_detail_read_rides_the_document_and_speaks_no_http_itself(self, name):
-        # task_reads_mod holds the task detail read, models_mod the model readers, since 3.22
-        home = next(m for m in (core, task_reads_mod, models_mod) if hasattr(m, name))
+        # task_reads_mod holds the task detail read, models_mod the model readers, since 3.22;
+        # full_meta_mod the preset read since 3.22 phase 4
+        home = next(m for m in (core, task_reads_mod, models_mod, full_meta_mod)
+                    if hasattr(m, name))
         src = inspect.getsource(getattr(home, name))
         assert "gql_adhoc(" in src or "_model_version_gql(" in src, \
             "{} no longer reads its document".format(name)
@@ -287,7 +293,7 @@ class TestTheDetailReadsRideTheClient:
 
     def test_resolve_model_preset_wire(self):
         kw = self._post(
-            lambda c: core._resolve_model_preset(c, "V-preset-wire-1"),
+            lambda c: full_meta_mod._resolve_model_preset(c, "V-preset-wire-1"),
             {"generationModelVersion": {"extra": {}}})
         assert kw["json"] == {"query": models_mod._MODEL_VERSION_DOC,
                               "variables": {"id": "V-preset-wire-1"}}
@@ -360,7 +366,7 @@ class TestRetryPolicy:
         times, as the saved-request GET was."""
         s = RecordingSession(requests.ConnectionError("connection dropped"))
         with pytest.raises(requests.RequestException):
-            core.gql(s, {"last": 1})
+            history_mod.gql(s, {"last": 1})
         assert len(s.calls) == 5 and all(v == "POST" for v, _u, _k in s.calls)
 
     def test_rest_post_makes_exactly_one_attempt(self):
@@ -573,11 +579,11 @@ class TestTheFixtureIsWhatTheAppIsHanded:
     def test_every_primitive_routes_to_the_fake(self, pixai):
         pixai.on("me", {"me": {"id": "9"}})
         page = {"edges": [], "pageInfo": {}}                    # the feed's answer: a page
-        pixai.on(operation_name(core._HISTORY_PAGE_DOC), page)   # the feed's document
+        pixai.on(operation_name(history_mod._HISTORY_PAGE_DOC), page)   # the feed's document
         pixai.on("/claim", {"claims": []})
         pixai.on("/claim/1", {"ok": True})
         assert core.gql_adhoc(pixai, "query me { id }") == {"me": {"id": "9"}}
-        assert core.gql(pixai, {"last": 1}) == page
+        assert history_mod.gql(pixai, {"last": 1}) == page
         assert core._rest_get(pixai, "/claim") == {"claims": []}
         assert core._rest_post(pixai, "/claim/1", {}) == {"ok": True}
         assert [c.verb for c in pixai.calls] == ["query", "query", "rest_get",
@@ -587,4 +593,4 @@ class TestTheFixtureIsWhatTheAppIsHanded:
         """The whole point: nothing registered, nothing answered, and the message names
         what to register."""
         with pytest.raises(UnregisteredOperation, match="me"):
-            core.account_info(pixai, raise_on_error=True)
+            account_api_mod.account_info(pixai, raise_on_error=True)

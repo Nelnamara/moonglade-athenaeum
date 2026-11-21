@@ -15,10 +15,14 @@ from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade import gen_cli as gen_cli_mod
 from moonglade import gen_road as gen_road_mod
-from moonglade.gallery import CATALOG_FIELDS, create_app, load_catalog, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.conftest import login_test_client
 from moonglade import task_reads as task_reads_mod
+from moonglade import thumbs as thumbs_mod
+from moonglade import media_fetch as media_fetch_mod
+from moonglade import full_meta as full_meta_mod
 
 
 def _row(**kw):
@@ -45,7 +49,7 @@ def _stub_download(monkeypatch, out, name="old.png", sub="images"):
     path = out / sub / name
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"not really an image")
-    monkeypatch.setattr(core, "download", lambda s, url, stem: ("skip", path))
+    monkeypatch.setattr(media_fetch_mod, "download", lambda s, url, stem: ("skip", path))
     return path
 
 
@@ -53,11 +57,11 @@ def test_the_very_first_collect_has_no_catalog_to_snapshot(tmp_path, monkeypatch
     """The snapshot reads the catalog BEFORE save_catalog creates it, so on a fresh output
     folder there is no table yet. Nothing local to carry is an empty map, not a crash."""
     _stub_download(monkeypatch, tmp_path, name="first.png")
-    monkeypatch.setattr(core, "resolve_media", lambda s, mid: ("https://x/i.png", {}))
+    monkeypatch.setattr(media_fetch_mod, "resolve_media", lambda s, mid: ("https://x/i.png", {}))
     monkeypatch.setattr(gen_cli_mod, "_task_image_media", lambda outputs: [("m0", "1")])
-    monkeypatch.setattr(core, "extract_full_meta", lambda r: {})
-    monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, r: None)
-    monkeypatch.setattr(g, "make_thumbnail", lambda *a, **k: None)
+    monkeypatch.setattr(full_meta_mod, "extract_full_meta", lambda r: {})
+    monkeypatch.setattr(full_meta_mod, "_fill_preset_defaults", lambda s, fm, r: None)
+    monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
     assert not (tmp_path / "catalog.db").exists()
 
     gen_cli_mod._download_image_task(object(), {"outputs": {"x": 1}}, "t0", tmp_path, _Args(),

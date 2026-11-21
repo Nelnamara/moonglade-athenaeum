@@ -27,14 +27,14 @@ from pathlib import Path
 import pytest
 
 from moonglade import gallery as g
-from moonglade.gallery import (CATALOG_FIELDS, catalog, migrate, save_catalog,
-                               init_db, task_media, task_media_count,
-                               delete_targets, delete_preview_rows, myart_items,
-                               artwork_row, publish_state, lineage, sibling_media,
-                               recent_train_task_page, history_page,
-                               history_created_ats)
+from moonglade.catalog_verbs import (task_media, task_media_count, delete_targets,
+                                     delete_preview_rows, myart_items, artwork_row, publish_state,
+                                     lineage, sibling_media, recent_train_task_page, history_page,
+                                     history_created_ats)
+from moonglade.catalog import CATALOG_FIELDS, catalog, migrate, save_catalog, init_db
 
 from tests.conftest import login_client
+from moonglade import catalog as catalog_mod
 
 
 def _row(**kw):
@@ -112,7 +112,7 @@ def test_catalog_runs_no_ddl_once_the_path_is_migrated(tmp_path, traced):
     with catalog(db) as con:
         con.execute("SELECT COUNT(*) FROM catalog").fetchone()
     first = _ddl(traced)
-    assert len(first) == len(g._MIGRATIONS), (
+    assert len(first) == len(catalog_mod._MIGRATIONS), (
         "the first open of a path must run the migrations lazily")
 
     del traced[:]
@@ -165,7 +165,7 @@ def test_migrate_runs_once_per_process_per_path(tmp_path, monkeypatch):
     rather than merely skipped."""
     db = tmp_path / "catalog.db"
     init_db(db)
-    monkeypatch.setattr(g, "_MIGRATIONS", list(g._MIGRATIONS) + [
+    monkeypatch.setattr(catalog_mod, "_MIGRATIONS", list(catalog_mod._MIGRATIONS) + [
         "CREATE TABLE IF NOT EXISTS migrate_probe (n TEXT)",
         "INSERT INTO migrate_probe (n) VALUES ('ran')"])
 
@@ -617,6 +617,21 @@ def _create_app_node():
                 if isinstance(n, ast.FunctionDef) and n.name == "create_app")
 
 
+def _route_function_nodes():
+    """create_app, and the register(app, ctx) of each route family split out of it (split
+    phase 4): the invariant covers the handlers wherever they now live."""
+    out = [("gallery.py", _create_app_node())]
+    for name in ("routes_generate.py", "web_loom_store.py", "routes_loom.py", "routes_gate.py",
+                 "web_threads.py", "routes_panel.py", "routes_delete.py", "routes_recipes.py",
+                 "routes_library.py", "routes_account.py", "routes_community.py",
+                 "routes_train.py", "routes_ach.py", "routes_mirror.py", "routes_branding.py",
+                 "routes_import.py"):
+        tree = ast.parse(Path(g.__file__).with_name(name).read_text(encoding="utf-8"))
+        out.append((name, next(n for n in tree.body
+                               if isinstance(n, ast.FunctionDef) and n.name == "register")))
+    return out
+
+
 def _docstring_nodes(root):
     """The Constant node of every docstring under `root`, so prose is not mistaken
     for code. Comments never reach the AST at all."""
@@ -639,17 +654,17 @@ def test_no_catalog_sql_lives_inside_create_app():
     through helpers in moonglade_gallery.py -- never raw SQL elsewhere" was a
     description of an intention rather than of the code. This test is what makes it
     a fact: a handler that grows its own SELECT fails the suite."""
-    ca = _create_app_node()
-    docs = _docstring_nodes(ca)
     offenders = []
-    for n in ast.walk(ca):
-        if isinstance(n, ast.Name) and n.id in _FORBIDDEN_NAMES:
-            offenders.append("line {}: names `{}`".format(n.lineno, n.id))
-        elif (isinstance(n, ast.Constant) and isinstance(n.value, str)
-                and id(n) not in docs and n.value not in _EXEMPT_STRINGS
-                and _SQL.search(n.value)):
-            offenders.append("line {}: SQL string {!r}".format(
-                n.lineno, n.value.replace("\n", " ")[:80]))
+    for where, ca in _route_function_nodes():
+        docs = _docstring_nodes(ca)
+        for n in ast.walk(ca):
+            if isinstance(n, ast.Name) and n.id in _FORBIDDEN_NAMES:
+                offenders.append("{} line {}: names `{}`".format(where, n.lineno, n.id))
+            elif (isinstance(n, ast.Constant) and isinstance(n.value, str)
+                    and id(n) not in docs and n.value not in _EXEMPT_STRINGS
+                    and _SQL.search(n.value)):
+                offenders.append("{} line {}: SQL string {!r}".format(
+                    where, n.lineno, n.value.replace("\n", " ")[:80]))
     assert not offenders, (
         "create_app holds catalog SQL again -- move it to a named verb beside the "
         "other catalog helpers:\n  " + "\n  ".join(sorted(set(offenders))))

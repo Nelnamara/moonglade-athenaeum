@@ -20,7 +20,7 @@ from moonglade import gen_params as gen_params_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import models as models_mod
 from moonglade import pricing as pricing_mod
-from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client
 

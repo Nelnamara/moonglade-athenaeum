@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from moonglade import backup as core
 from moonglade import cards as cards_mod
+from moonglade import account_api as account_api_mod
 
 
 # ---- list_extra_package_boosts: GET /v2/extra-package-boosts, soft-fail ----
@@ -83,7 +84,7 @@ def test_list_extra_package_boosts_fails_soft(monkeypatch):
 def test_run_coupons_empty(monkeypatch, capsys, pixai):
     monkeypatch.setattr(cards_mod, "list_extra_package_boosts", lambda s, **k: {
         "coupons": [], "has_next": False, "end_cursor": None})
-    assert core.run_coupons(SimpleNamespace(token=None, coupons_history=False)) == {
+    assert account_api_mod.run_coupons(SimpleNamespace(token=None, coupons_history=False)) == {
         "coupons": 0}
     assert "No currently-held coupons found" in capsys.readouterr().out
 
@@ -96,7 +97,7 @@ def test_run_coupons_history_flag_switches_statuses(monkeypatch, capsys, pixai):
         return {"coupons": [], "has_next": False, "end_cursor": None}
 
     monkeypatch.setattr(cards_mod, "list_extra_package_boosts", fake_list)
-    core.run_coupons(SimpleNamespace(token=None, coupons_history=True))
+    account_api_mod.run_coupons(SimpleNamespace(token=None, coupons_history=True))
     assert seen["statuses"] == cards_mod.COUPON_STATUSES_HISTORY
     assert "No past coupons found" in capsys.readouterr().out
 
@@ -113,7 +114,7 @@ def test_run_coupons_lists(monkeypatch, capsys, pixai):
              "available_since": "2026-07-30T00:00:00Z",
              "available_until": "2026-07-31T00:00:00Z", "created_at": "2026-07-30T00:00:00Z"},
         ], "has_next": False, "end_cursor": None})
-    res = core.run_coupons(SimpleNamespace(token=None))
+    res = account_api_mod.run_coupons(SimpleNamespace(token=None))
     out = capsys.readouterr().out
     assert res == {"coupons": 2}
     assert "+50%" in out and "redeemed" in out

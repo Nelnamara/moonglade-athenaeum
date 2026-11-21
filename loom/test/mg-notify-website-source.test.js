@@ -25,8 +25,15 @@ const row = readFileSync(
   path.join(__dirname, "../../gallery/src/notify/ActivityRow.jsx"), "utf8");
 const css = readFileSync(
   path.join(__dirname, "../../gallery/src/styles/notify.css"), "utf8");
+// The website-run job's source and status mapping live with the watch in web_threads.py since
+// split phase 4, and the Loom's shell in pages.py.
 const server = readFileSync(
-  path.join(__dirname, "../../moonglade/gallery.py"), "utf8");
+  path.join(__dirname, "../../moonglade/pages.py"), "utf8") + readFileSync(
+  path.join(__dirname, "../../moonglade/web_threads.py"), "utf8");
+// The job log's routes (/api/jobs and its register) live with the create routes since split
+// phase 4.
+const createRoutes = readFileSync(
+  path.join(__dirname, "../../moonglade/routes_generate.py"), "utf8");
 
 describe("a website run is marked as one, and marked nowhere else", () => {
   test("the row shows a 'website' mark when the job's source is pixai", () => {
@@ -44,7 +51,7 @@ describe("a website run is marked as one, and marked nowhere else", () => {
       "the server's website-run source value changed -- the row's `j.source === \"pixai\"` " +
       "gate now matches nothing, so the mark would never render again");
     // ...and the app's own rows keep the other value, or every dock run would wear the mark.
-    assert.match(server, /source=body\.get\("source"\) or "web"/,
+    assert.match(createRoutes, /source=body\.get\("source"\) or "web"/,
       "the app's own /api/jobs registrations no longer default to source 'web'");
   });
 

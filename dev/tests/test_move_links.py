@@ -24,6 +24,7 @@ import pytest
 from moonglade import migrate
 from moonglade import setup as msetup
 from tests.move_layouts import KEY_NEL, library_records, rig, start, write, write_config
+from moonglade import loom_files as loom_files_mod
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="a real Windows junction")
 
@@ -82,7 +83,7 @@ def test_a_junctioned_loom_moves_as_the_link_and_its_files_stay_where_they_are(r
     assert not [p for p in lib_files if p.name in ("cut.mp4", BOARD)], \
         "no copy of the link's files landed in the library"
     from moonglade import gallery as g
-    assert [p.name for p in g._loom_board_files(r.lib)] == [BOARD], "the Loom reads through it"
+    assert [p.name for p in loom_files_mod._loom_board_files(r.lib)] == [BOARD], "the Loom reads through it"
     assert any("Moved the link loom" in line for _lvl, line in done.report.items)
 
 

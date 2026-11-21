@@ -63,6 +63,12 @@ from pathlib import Path
 
 from moonglade import paths as _paths
 from moonglade import scan as _scan
+from moonglade import catalog as _catalog
+from moonglade import catalog_verbs as _catalog_verbs
+from moonglade import thumbs as _thumbs
+from moonglade import media_fetch as _media_fetch
+from moonglade import full_meta as _full_meta
+from moonglade import library_runs as _library_runs
 
 REPORT_CSV = "integrity_report.csv"
 REPORT_JSON = "integrity_report.json"
@@ -310,8 +316,7 @@ def _thumbless(path):
     """True for a picture the thumbnailer cannot draw (an SVG, or a type this Pillow does not
     open): it has no thumbnail by design, so none is checked for, reported or rebuilt (3.21.2,
     L3)."""
-    from moonglade import gallery as g                     # lazy: the thumbnailer's own rule
-    return not g.thumbnail_renders(path)
+    return not _thumbs.thumbnail_renders(path)
 
 
 def _row_check(r, index, deep, gallery_dirname):
@@ -356,7 +361,7 @@ def _line_for(r, check, g):
     problem, path, size, _best = check
     if not problem:
         return None
-    gone = problem in _FILE_PROBLEMS and g.is_archive_only(r)
+    gone = problem in _FILE_PROBLEMS and _catalog.is_archive_only(r)
     return (str(r.get("media_id") or ""), problem, path, size, "no" if gone else "yes")
 
 
@@ -365,7 +370,7 @@ def verify_library(out_dir, db_path, deep=False, progress=None):
     report lines under "lines" as (media_id, problem, path, size, recoverable) tuples."""
     from moonglade import gallery as g                     # lazy: the catalog verbs and the walk
     out = Path(out_dir)
-    rows = g.integrity_rows(db_path) if Path(db_path).exists() else []
+    rows = _catalog_verbs.integrity_rows(db_path) if Path(db_path).exists() else []
     index = _index(out, g)
     by_rel, by_mid, thumbs = index
 
@@ -595,9 +600,8 @@ def set_mark(out_dir, media_id, mark):
 def reconciled_at(out_dir):
     """When the last reconcile (moonglade.backup.run_reconcile_deleted) rewrote the
     archive-only flags, or None before the first stamped one."""
-    from moonglade import backup as core                  # lazy, like _write_atomic's
     try:
-        doc = json.loads(_paths.records_path(out_dir, core.RECONCILE_STAMP, make=False)
+        doc = json.loads(_paths.records_path(out_dir, _library_runs.RECONCILE_STAMP, make=False)
                          .read_text(encoding="utf-8"))
     except (OSError, ValueError, RecursionError):
         return None
@@ -649,12 +653,11 @@ def broken_list(out_dir, db_path, avg_bytes=None):
               redownload_bytes, an estimate (the cut-short file's own size or the library's
               average file size, `avg_bytes`, whichever is larger), None without an average.
     """
-    from moonglade import gallery as g                     # lazy: the catalog verbs
     out = Path(out_dir)
     summary = read_summary(out)
     lines = [ln for ln in read_lines(out) if ln[1] in LIST_KIND]
     ids = list(dict.fromkeys(ln[0] for ln in lines))
-    catalog = ({str(r["media_id"]): r for r in g.rows_for_media_ids(db_path, ids)}
+    catalog = ({str(r["media_id"]): r for r in _catalog_verbs.rows_for_media_ids(db_path, ids)}
                if ids and Path(db_path).exists() else {})
     marks = read_marks(out)
     rec_at = reconciled_at(out)
@@ -670,7 +673,7 @@ def broken_list(out_dir, db_path, avg_bytes=None):
             # A report written before 3.21.2 listed every SVG as "no thumbnail"; it has none
             # by design and is never offered a rebuild (L3).
             continue
-        archive = g.is_archive_only(r)
+        archive = _catalog.is_archive_only(r)
         mark = (marks.get(mid) or {}).get("mark", "")
         refetch = problem in REFETCH_PROBLEMS
         lost = (refetch and archive) or mark == "lost"
@@ -847,7 +850,6 @@ def missing_target(out_dir, row):
       5. a file name that carries this row's media id, so the file is found as this picture
          again and never lands under another picture's name.
     "occupied": something is already at that path. It is never overwritten."""
-    from moonglade import gallery as g
     mid = str(row.get("media_id") or "").strip()
     raw = str(row.get("filename") or "").strip().replace("\\", "/")
     if not mid or not raw or "\x00" in raw or ":" in raw or raw.startswith("/"):
@@ -891,9 +893,9 @@ def _full_size_url(core, session, row, mid):
     mp4 itself in `fileUrl` (moonglade.backup.media_file_gql). That file has no thumbnail
     variants -- it is the clip."""
     if str(row.get("is_video") or "") == "1":
-        url = (core.media_file_gql(session, mid) or {}).get("fileUrl")
+        url = (_full_meta.media_file_gql(session, mid) or {}).get("fileUrl")
         return (url, "") if url else (None, "no_file")
-    url, info = core.resolve_media(session, mid)
+    url, info = _media_fetch.resolve_media(session, mid)
     if not url:
         return None, "no_file"
     if (info or {}).get("variant") not in FULL_SIZE_VARIANTS:
@@ -974,11 +976,11 @@ def redownload_one(out_dir, db_path, media_id, session_factory=None, index=None,
     from moonglade import gallery as g
     out = Path(out_dir)
     mid = str(media_id or "").strip()
-    row = g.get_row(db_path, mid) if mid else None
+    row = _catalog.get_row(db_path, mid) if mid else None
     if not row:
         return _result(mid, "redownload", ok=False, refused="not_in_catalog")
     # THE RULE. Read from the catalog here, never from the caller.
-    if g.is_archive_only(row):
+    if _catalog.is_archive_only(row):
         return _result(mid, "redownload", ok=False, refused="archive_only")
     try:
         core._check_read_only("re-download a broken file")
@@ -1015,7 +1017,7 @@ def redownload_one(out_dir, db_path, media_id, session_factory=None, index=None,
         import uuid
         stem = stage / "{}-{}".format(mid if _safe_id(mid) else "media", uuid.uuid4().hex[:10])
         # (the finally below removes everything this stem left in the staging folder)
-        status, got = core.download(session, url, stem, retries=0, progress=on_bytes)
+        status, got = _media_fetch.download(session, url, stem, retries=0, progress=on_bytes)
         if status != "ok" or not got:
             return _result(mid, "redownload", ok=False, refused="no_file")
         if not verified_whole(got):
@@ -1060,9 +1062,9 @@ def redownload_one(out_dir, db_path, media_id, session_factory=None, index=None,
     if _safe_id(mid):
         if str(row.get("is_video") or "") == "1":
             if not thumb.exists() or thumb.stat().st_size == 0:
-                g.make_video_thumbnail(target, thumb)
+                _thumbs.make_video_thumbnail(target, thumb)
         elif not _thumbless(target):                   # an SVG has none to make (L3)
-            g.make_thumbnail(target, thumb)
+            _thumbs.make_thumbnail(target, thumb)
     return _result(mid, "redownload", nbytes=nbytes)
 
 
@@ -1072,7 +1074,7 @@ def rebuild_one(out_dir, db_path, media_id, index=None):
     from moonglade import gallery as g
     out = Path(out_dir)
     mid = str(media_id or "").strip()
-    row = g.get_row(db_path, mid) if mid else None
+    row = _catalog.get_row(db_path, mid) if mid else None
     if not row or not _safe_id(mid):
         return _result(mid, "rebuild", ok=False, refused="not_in_catalog")
     problem, _path, _size, best = _live_check(out, row, index, g)
@@ -1083,8 +1085,8 @@ def rebuild_one(out_dir, db_path, media_id, index=None):
     if _scan.media_id_of(best.path) != mid:                # this picture's thumbnail, from its own file
         return _result(mid, "rebuild", ok=False, refused="not_this_picture")
     thumb = out / _scan.GALLERY_DIRNAME / "thumbs" / (mid + ".jpg")
-    made = (g.make_video_thumbnail(best.path, thumb) if str(row.get("is_video") or "") == "1"
-            else g.make_thumbnail(best.path, thumb))
+    made = (_thumbs.make_video_thumbnail(best.path, thumb) if str(row.get("is_video") or "") == "1"
+            else _thumbs.make_thumbnail(best.path, thumb))
     if not made:
         return _result(mid, "rebuild", ok=False, refused="rebuild_failed")
     return _result(mid, "rebuild")
@@ -1105,7 +1107,7 @@ def fix_one(out_dir, db_path, media_id, session_factory=None, index=None, on_byt
     from moonglade import gallery as g
     mid = str(media_id or "").strip()
     marks = read_marks(out_dir) if marks is None else marks
-    row = g.get_row(db_path, mid) if mid else None
+    row = _catalog.get_row(db_path, mid) if mid else None
     if not row:
         return _result(mid, "", ok=False, refused="not_in_catalog")
     problem = _live_check(Path(out_dir), row, index, g)[0]
@@ -1143,7 +1145,7 @@ def _reverify_locked(out, db_path, ids, index, g):
     row_problems = set(_SEVERITY) - {P_UNCATALOGED, P_ORPHAN_THUMB}
     lines = [ln for ln in read_lines(out) if not (ln[0] in ids and ln[1] in row_problems)]
     deep = bool(summary.get("deep"))
-    for r in g.rows_for_media_ids(db_path, sorted(ids)):
+    for r in _catalog_verbs.rows_for_media_ids(db_path, sorted(ids)):
         if not str(r.get("filename") or "").strip():
             continue
         line = _line_for(r, _row_check(r, index, deep, _scan.GALLERY_DIRNAME), g)

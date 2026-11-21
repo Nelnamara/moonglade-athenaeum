@@ -16,9 +16,11 @@ import pytest
 
 from moonglade import gallery as g
 from moonglade import integrity as integ
-from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from tests.test_integrity import _png
 from tests.test_integrity_fix import FakeMediaSession
+from moonglade import catalog as catalog_mod
+from moonglade import thumbs as thumbs_mod
 
 SVG = (b'<?xml version="1.0" encoding="UTF-8"?>\n'
        b'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">'
@@ -61,10 +63,10 @@ def test_an_svg_is_never_reported_without_a_thumbnail(tmp_path, deep):
 
 
 def test_the_thumbnailer_rule():
-    assert g.thumbnail_renders("a_1.png") and g.thumbnail_renders("x/a_1.JPG")
-    assert not g.thumbnail_renders("logo_2.svg") and not g.thumbnail_renders("LOGO_2.SVG")
-    assert not g.thumbnail_renders("odd_3.notapicture")
-    assert g.thumbnail_renders("") and g.thumbnail_renders(None)          # today's default
+    assert thumbs_mod.thumbnail_renders("a_1.png") and thumbs_mod.thumbnail_renders("x/a_1.JPG")
+    assert not thumbs_mod.thumbnail_renders("logo_2.svg") and not thumbs_mod.thumbnail_renders("LOGO_2.SVG")
+    assert not thumbs_mod.thumbnail_renders("odd_3.notapicture")
+    assert thumbs_mod.thumbnail_renders("") and thumbs_mod.thumbnail_renders(None)          # today's default
 
 
 def test_the_broken_list_never_offers_an_svg_a_rebuild_even_from_an_old_report(tmp_path):
@@ -88,10 +90,10 @@ def test_a_rebuild_asked_for_an_svg_is_already_sound_not_a_failure(tmp_path):
 def test_build_thumbnails_skips_an_svg_without_counting_a_failure(tmp_path, monkeypatch):
     out = _lib(tmp_path)
     tried = []
-    real = g.make_thumbnail
-    monkeypatch.setattr(g, "make_thumbnail", lambda src, dst: tried.append(Path(src).name) or real(src, dst))
+    real = thumbs_mod.make_thumbnail
+    monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda src, dst: tried.append(Path(src).name) or real(src, dst))
     seen = []
-    g.build_thumbnails(g.load_catalog(out / "catalog.db"), out, out / "gallery" / "thumbs",
+    thumbs_mod.build_thumbnails(catalog_mod.load_catalog(out / "catalog.db"), out, out / "gallery" / "thumbs",
                        progress_cb=lambda d, t, p: seen.append((d, t)), workers=1)
     assert "logo_t2_202.svg" not in tried
     assert seen[-1][0] == seen[-1][1], "every row is accounted for: none counted as failed"

@@ -48,6 +48,7 @@ import pytest
 from moonglade import backup as core
 from moonglade.gallery import create_app
 from tests.conftest import _do_login, extract_login_csrf
+from moonglade import web_accounts as web_accounts_mod
 
 # The shipped password hashing, not the suite's cheap test cost (conftest).
 pytestmark = pytest.mark.usefixtures("real_password_hashing")
@@ -111,15 +112,15 @@ def _replay_logout(app, stolen, token, scope="everywhere"):
 
 def test_recreated_account_does_not_resurrect_an_old_cookie(tmp_path):
     """The headline defect, on the CLI / add_or_update_web_user path."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     app = _client(tmp_path)
     victim = _login(app)
     stolen = _steal(victim)
     assert _replay(app, stolen).status_code == 200          # live
     _logout(victim, scope="everywhere")
     assert _replay(app, stolen).status_code == 401          # revoked
-    core.remove_web_user("alice")                            # the exact owner
-    core.add_or_update_web_user("alice", "hunter2")          # recovery action
+    web_accounts_mod.remove_web_user("alice")                            # the exact owner
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")          # recovery action
     assert _replay(app, stolen).status_code == 401           # STAYS revoked
 
 
@@ -133,14 +134,14 @@ def test_recreated_account_via_panel_api_does_not_resurrect(tmp_path):
     # decorative: that writer mints a high ticket, so the stolen cookie carries a
     # large value, and the bug's hardcoded 0 cannot collide with it. Verified by
     # re-introducing the defect and watching this test pass anyway.
-    assert core.add_web_user_if_new("alice", "hunter2") is True
+    assert web_accounts_mod.add_web_user_if_new("alice", "hunter2") is True
     app = _client(tmp_path)
     victim = _login(app)
     stolen = _steal(victim)
     _logout(victim, scope="everywhere")
     assert _replay(app, stolen).status_code == 401
-    core.remove_web_user("alice")
-    assert core.add_web_user_if_new("alice", "hunter2") is True
+    web_accounts_mod.remove_web_user("alice")
+    assert web_accounts_mod.add_web_user_if_new("alice", "hunter2") is True
     assert _replay(app, stolen).status_code == 401
 
 
@@ -157,13 +158,13 @@ def test_legacy_config_remove_then_readd_under_new_code(tmp_path):
     which satisfies any 'greater than the old epoch' assertion and hides the
     ordering entirely. Verified by re-introducing the defect and watching the
     legacy-shaped version of this test pass anyway."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     cfg = core._load_config()
     cfg["AUTH_EPOCH_SEQ"] = 10                  # counter present -> no margin
     cfg["AUTH_USERS"][0]["sess_epoch"] = 500    # ... and alice sits well above it
     core._save_config(cfg)
 
-    core.remove_web_user("alice")
+    web_accounts_mod.remove_web_user("alice")
     seq = core._load_config().get("AUTH_EPOCH_SEQ")
     # Correct: the scan sees alice's 500 while she is still in the list -> 501.
     # Buggy:   the scan runs after the filter, sees nobody -> 11, and every
@@ -171,8 +172,8 @@ def test_legacy_config_remove_then_readd_under_new_code(tmp_path):
     assert seq is not None and seq > 500, \
         "removal must fold the departing epoch in BEFORE the record is dropped"
 
-    core.add_or_update_web_user("alice", "hunter2")
-    assert core.get_web_user_session_epoch("alice") > 500
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
+    assert web_accounts_mod.get_web_user_session_epoch("alice") > 500
 
 
 def test_first_ticket_clears_the_legacy_range(tmp_path):
@@ -189,17 +190,17 @@ def test_first_ticket_clears_the_legacy_range(tmp_path):
     cfg["AUTH_USERS"] = [{"username": "alice", "password_hash": "x", "sess_epoch": 7}]
     cfg.pop("AUTH_EPOCH_SEQ", None)
     core._save_config(cfg)
-    core.add_or_update_web_user("bob", "hunter2-pw")
-    assert core.get_web_user_session_epoch("bob") >= core._EPOCH_LEGACY_MARGIN
+    web_accounts_mod.add_or_update_web_user("bob", "hunter2-pw")
+    assert web_accounts_mod.get_web_user_session_epoch("bob") >= web_accounts_mod._EPOCH_LEGACY_MARGIN
 
 
 def test_epochs_are_unique_across_accounts(tmp_path):
     """Ticket semantics: epochs come from ONE install-wide counter, never a
     per-account one. Pins it so a future 'optimization' back to a record-local
     counter trips a test instead of silently reopening D1."""
-    core.add_or_update_web_user("alice", "hunter2-pw")
-    core.add_or_update_web_user("bob", "hunter2-pw")
-    assert core.get_web_user_session_epoch("alice") != core.get_web_user_session_epoch("bob")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2-pw")
+    web_accounts_mod.add_or_update_web_user("bob", "hunter2-pw")
+    assert web_accounts_mod.get_web_user_session_epoch("alice") != web_accounts_mod.get_web_user_session_epoch("bob")
 
 
 # --- D2: a revoked cookie must not retain the power to revoke ---------------
@@ -208,7 +209,7 @@ def test_dead_cookie_cannot_bump_epoch_via_logout(tmp_path):
     """Replaying a dead cookie at /api/logout must do nothing. The second half is
     the user-visible harm: without the fix the attacker kicks the victim off every
     time they sign back in, recoverable only by rotating AUTH_SECRET_KEY."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     app = _client(tmp_path)
     victim = _login(app)
     stolen = _steal(victim)
@@ -217,10 +218,10 @@ def test_dead_cookie_cannot_bump_epoch_via_logout(tmp_path):
     _logout(victim, scope="everywhere")
     assert _replay(app, stolen).status_code == 401
 
-    frozen = core.get_web_user_session_epoch("alice")
+    frozen = web_accounts_mod.get_web_user_session_epoch("alice")
     for _ in range(5):
         _replay_logout(app, stolen, token)
-    assert core.get_web_user_session_epoch("alice") == frozen, \
+    assert web_accounts_mod.get_web_user_session_epoch("alice") == frozen, \
         "a revoked cookie must not be able to revoke"
 
     victim2 = _login(app)
@@ -235,7 +236,7 @@ def test_signing_out_everywhere_still_revokes_every_outstanding_cookie(tmp_path)
     every outstanding cookie for that identity, not just the browser that clicked --
     e.g. one captured off plain-HTTP LAN traffic beforehand. This is the entire
     point of the mechanism, and it stays available as its own explicit request (#70)."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     app = _client(tmp_path)
     victim = _login(app)
     stolen = _steal(victim)
@@ -251,32 +252,32 @@ def test_log_out_signs_out_only_this_device(tmp_path):
     """#70: Log Out on device A signs out A and leaves device B signed in -- the
     plain POST every Log Out button sends (no scope field) no longer bumps the
     account's session epoch."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     app = _client(tmp_path)
     device_a = _login(app)
     device_b = _login(app)
-    before_epoch = core.get_web_user_session_epoch("alice")
+    before_epoch = web_accounts_mod.get_web_user_session_epoch("alice")
 
     r = _logout(device_a)
     assert r.status_code == 200 and r.get_json() == {"ok": True}
     assert device_a.get("/api/jobs").status_code == 401, "Log Out left device A signed in"
     assert device_b.get("/api/jobs").status_code == 200, (
         "Log Out on device A signed out device B too")
-    assert core.get_web_user_session_epoch("alice") == before_epoch
+    assert web_accounts_mod.get_web_user_session_epoch("alice") == before_epoch
 
 
 def test_an_unknown_scope_signs_out_only_this_device(tmp_path):
     """Only the exact word reaches every device: a misspelt or hand-built scope is an
     ordinary Log Out, never a revoke nobody asked for."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     app = _client(tmp_path)
     device_a = _login(app)
     device_b = _login(app)
-    before_epoch = core.get_web_user_session_epoch("alice")
+    before_epoch = web_accounts_mod.get_web_user_session_epoch("alice")
     _logout(device_a, scope="Everywhere ")
     assert device_a.get("/api/jobs").status_code == 401
     assert device_b.get("/api/jobs").status_code == 200
-    assert core.get_web_user_session_epoch("alice") == before_epoch
+    assert web_accounts_mod.get_web_user_session_epoch("alice") == before_epoch
 
 
 def test_anonymous_logout_is_still_a_noop(tmp_path):
@@ -288,14 +289,14 @@ def test_anonymous_logout_is_still_a_noop(tmp_path):
     /logout version of this test when that route died in the classic cut; the
     cache-purge-script assertions died with the classic page (React now purges
     Cache Storage itself in JS on a successful sign-out response)."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     app = _client(tmp_path)
-    before_epoch = core.get_web_user_session_epoch("alice")
+    before_epoch = web_accounts_mod.get_web_user_session_epoch("alice")
     before_bytes = core._config_path().read_bytes()
     r = app.test_client().post("/api/logout", json={})
     assert r.status_code == 200
     assert (r.get_json() or {}).get("ok") is True
-    assert core.get_web_user_session_epoch("alice") == before_epoch
+    assert web_accounts_mod.get_web_user_session_epoch("alice") == before_epoch
     assert core._config_path().read_bytes() == before_bytes
 
 
@@ -312,11 +313,11 @@ def test_get_logout_is_refused_and_writes_nothing(tmp_path):
 
     Bite: add methods=["GET", "POST"] back onto api_logout (the classic
     regression) and the refusal assertion fails immediately."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     app = _client(tmp_path)
     victim = _login(app)
     other = _login(app)                       # the owner's phone, still signed in
-    before_epoch = core.get_web_user_session_epoch("alice")
+    before_epoch = web_accounts_mod.get_web_user_session_epoch("alice")
 
     r = victim.get("/api/logout")
     assert r.status_code == 405
@@ -324,7 +325,7 @@ def test_get_logout_is_refused_and_writes_nothing(tmp_path):
         "a refused GET must not half-sign-out even the browser that sent it"
     assert other.get("/api/jobs").status_code == 200, \
         "a GET must not sign the user out on their other devices"
-    assert core.get_web_user_session_epoch("alice") == before_epoch
+    assert web_accounts_mod.get_web_user_session_epoch("alice") == before_epoch
 
 
 def test_refused_logout_does_not_signal_success(tmp_path):
@@ -336,7 +337,7 @@ def test_refused_logout_does_not_signal_success(tmp_path):
     who is, in fact, still signed in. (Ported from the classic-page version,
     which asserted the purge <script> was absent from the refusal's HTML --
     /api/logout has no HTML, so the JSON contract is the surviving surface.)"""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     app = _client(tmp_path)
     victim = _login(app)
     r = victim.post("/api/logout", json={"csrf": "forged-token-not-in-session"})
@@ -352,38 +353,38 @@ def test_post_logout_without_a_valid_csrf_token_revokes_nothing(tmp_path):
     INTACT -- not a quiet downgrade to a local sign-out, which is how a sign-out
     everywhere would silently become a local one if a caller ever stopped sending
     the field."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     app = _client(tmp_path)
     victim = _login(app)
     other = _login(app)
-    before_epoch = core.get_web_user_session_epoch("alice")
+    before_epoch = web_accounts_mod.get_web_user_session_epoch("alice")
 
     r = victim.post("/api/logout", json={"csrf": "forged-token-not-in-session",
                                          "scope": "everywhere"})
     assert r.status_code == 400
-    assert core.get_web_user_session_epoch("alice") == before_epoch
+    assert web_accounts_mod.get_web_user_session_epoch("alice") == before_epoch
     assert victim.get("/api/jobs").status_code == 200, \
         "a refused logout must leave the user signed in, not half-signed-out"
 
     # ... and the real, token-carrying POST still revokes everywhere when asked to.
     _logout(victim, scope="everywhere")
-    assert core.get_web_user_session_epoch("alice") != before_epoch
+    assert web_accounts_mod.get_web_user_session_epoch("alice") != before_epoch
     assert other.get("/api/jobs").status_code == 401
 
 
 def test_post_logout_scope_this_device_leaves_other_sessions_alone(tmp_path):
     """The older explicit opt-down, scope=this-device, is still accepted and still
     signs out here only -- the same as no scope at all since #70."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     app = _client(tmp_path)
     victim = _login(app)
     other = _login(app)
-    before_epoch = core.get_web_user_session_epoch("alice")
+    before_epoch = web_accounts_mod.get_web_user_session_epoch("alice")
 
     _logout(victim, scope="this-device")
     assert victim.get("/api/jobs").status_code == 401
     assert other.get("/api/jobs").status_code == 200
-    assert core.get_web_user_session_epoch("alice") == before_epoch
+    assert web_accounts_mod.get_web_user_session_epoch("alice") == before_epoch
 
 
 # --- D3: the bump must be lock-protected -----------------------------------
@@ -394,7 +395,7 @@ def test_concurrent_bump_and_add_do_not_lose_writes(tmp_path):
     account create that is a lost update in both directions: either the new
     account is erased from disk, or the epoch bump is lost -- and a lost bump
     means revocation silently no-ops and the stolen cookie stays live."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     n = 12
     start = threading.Barrier(n * 2)
     errors = []
@@ -402,14 +403,14 @@ def test_concurrent_bump_and_add_do_not_lose_writes(tmp_path):
     def bump():
         try:
             start.wait()
-            core.bump_web_user_session_epoch("alice")
+            web_accounts_mod.bump_web_user_session_epoch("alice")
         except Exception as e:                    # pragma: no cover - diagnostic
             errors.append(e)
 
     def add(i):
         try:
             start.wait()
-            core.add_web_user_if_new("user{}".format(i), "hunter2-pw")
+            web_accounts_mod.add_web_user_if_new("user{}".format(i), "hunter2-pw")
         except Exception as e:                    # pragma: no cover - diagnostic
             errors.append(e)
 
@@ -421,7 +422,7 @@ def test_concurrent_bump_and_add_do_not_lose_writes(tmp_path):
         t.join()
 
     assert not errors, errors
-    names = {u["username"] for u in core.list_web_users()}
+    names = {u["username"] for u in web_accounts_mod.list_web_users()}
     missing = {"user{}".format(i) for i in range(n)} - names
     assert not missing, \
         "concurrent adds erased by an unlocked bump: {}".format(sorted(missing))
@@ -433,7 +434,7 @@ def test_upgrade_from_legacy_config_does_not_log_anyone_out(tmp_path):
     """An owner pulling this update must not be logged out, and the READ path
     must not write. A legacy config carries a small int sess_epoch and no
     AUTH_EPOCH_SEQ; logging in and browsing has to just work."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     cfg = core._load_config()
     cfg["AUTH_USERS"][0]["sess_epoch"] = 3
     cfg.pop("AUTH_EPOCH_SEQ", None)
@@ -448,24 +449,24 @@ def test_malformed_epoch_values_do_not_crash(tmp_path):
     """Hand-edited garbage must degrade, never crash a login. A non-int
     sess_epoch is ignored by the scan; a non-int counter re-applies the margin
     rather than falling back to 1, which would land inside the legacy range."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     cfg = core._load_config()
     cfg["AUTH_USERS"][0]["sess_epoch"] = "banana"
     cfg["AUTH_EPOCH_SEQ"] = "banana"
     core._save_config(cfg)
-    core.add_or_update_web_user("bob", "hunter2-pw")
-    assert core.get_web_user_session_epoch("bob") >= core._EPOCH_LEGACY_MARGIN
+    web_accounts_mod.add_or_update_web_user("bob", "hunter2-pw")
+    assert web_accounts_mod.get_web_user_session_epoch("bob") >= web_accounts_mod._EPOCH_LEGACY_MARGIN
 
 
 def test_unrelated_config_keys_survive_a_mint(tmp_path):
     """A mint rewrites config.json, which also holds the owner's real API key and
     the session signing key. Neither may be disturbed."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     cfg = core._load_config()
     cfg["PIXAI_API_KEY"] = "sk-do-not-touch"
     core._save_config(cfg)
-    secret = core.get_or_create_secret_key()
-    core.bump_web_user_session_epoch("alice")
+    secret = web_accounts_mod.get_or_create_secret_key()
+    web_accounts_mod.bump_web_user_session_epoch("alice")
     after = core._load_config()
     assert after["PIXAI_API_KEY"] == "sk-do-not-touch"
     assert after["AUTH_SECRET_KEY"] == secret
@@ -474,8 +475,8 @@ def test_unrelated_config_keys_survive_a_mint(tmp_path):
 def test_save_config_leaves_no_temp_files(tmp_path):
     """_save_config is now an atomic tmp-write + os.replace. A successful write
     must leave no .tmp-* debris beside config.json."""
-    core.add_or_update_web_user("alice", "hunter2")
-    core.bump_web_user_session_epoch("alice")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.bump_web_user_session_epoch("alice")
     strays = list(core._config_path().parent.glob("config.json.tmp-*"))
     assert not strays, "atomic write left temp files behind: {}".format(strays)
 
@@ -495,7 +496,7 @@ def test_the_failure_that_locks_you_out_says_so(tmp_path):
     comes from GET /login's MG_BOOT blob, and each failed attempt's payload carries
     the ROTATED replacement token the SPA is expected to adopt -- reusing it here
     both drives the loop and exercises that rotation contract."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     app = _client(tmp_path)
     cli = app.test_client()
     csrf = extract_login_csrf(cli.get("/login").get_data(as_text=True))

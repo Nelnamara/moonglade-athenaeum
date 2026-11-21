@@ -7,6 +7,7 @@ from moonglade import backup as core
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import cloud_delete as cloud_delete_mod
+from moonglade import account_api as account_api_mod
 
 
 def _status_answers(monkeypatch, task):
@@ -194,7 +195,7 @@ def test_account_query_selects_no_bare_connection_field():
     a bare `roles` by name.
 
     Bite: re-add `roles` on its own line and this fails."""
-    q = core._ACCOUNT_QUERY
+    q = account_api_mod._ACCOUNT_QUERY
     for needed in ("quotaAmount", "membership", "privilege", "subscription"):
         assert needed in q, "account query no longer requests {!r}".format(needed)
     import re

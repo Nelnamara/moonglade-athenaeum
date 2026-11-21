@@ -348,7 +348,7 @@ def test_a_relative_library_serves_from_the_app_folder(tmp_path, monkeypatch):
     (`pixai_backup`) is relative, so a thumbnail and a video must come from APP_ROOT/<library>
     -- not from wherever moonglade_gallery.py sits, which stops being the app folder when
     the code moves. Here the app folder is a tmp one and the module is not in it."""
-    from moonglade.gallery import CATALOG_FIELDS, save_catalog
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     from tests.conftest import login_client
     app_root = tmp_path / "app"
     lib = app_root / "lib"

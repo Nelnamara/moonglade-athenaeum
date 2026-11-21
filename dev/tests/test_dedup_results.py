@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from moonglade.gallery import init_db
+from moonglade.catalog import init_db
 from moonglade import organize as organize_mod
 
 NODE = shutil.which("node")

@@ -16,6 +16,7 @@ import time
 from PIL import Image
 
 from moonglade import gallery as G
+from moonglade import catalog as catalog_mod
 
 
 def _seed(tmp_path, mids):
@@ -24,9 +25,9 @@ def _seed(tmp_path, mids):
     for mid in mids:
         name = "2026-08/pic_%s.png" % mid
         Image.new("RGB", (900, 600), (90, 60, 140)).save(tmp_path / name)
-        rows.append({f: "" for f in G.CATALOG_FIELDS} | {
+        rows.append({f: "" for f in catalog_mod.CATALOG_FIELDS} | {
             "media_id": mid, "filename": name, "created_at": "2026-08-22T01:02:03Z"})
-    G.save_catalog(tmp_path / "catalog.db", rows)
+    catalog_mod.save_catalog(tmp_path / "catalog.db", rows)
 
 
 def _seed_768(tmp_path, mid, color=(200, 30, 30), size=(768, 512)):

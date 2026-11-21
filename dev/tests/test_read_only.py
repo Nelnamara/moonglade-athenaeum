@@ -18,6 +18,7 @@ from moonglade import organize as organize_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import cloud_delete as cloud_delete_mod
 from moonglade import training as training_mod
+from moonglade import account_api as account_api_mod
 
 
 def test_read_only_defaults_to_false():
@@ -66,7 +67,7 @@ class TestDeleteTaskReadOnly:
         --delete-task is gone), so this is the end-to-end proof: the real route with the REAL
         delete_task behind it. READ_ONLY refuses up front, with one plain 403 and no job,
         and not one request reaches PixAI -- not the delete, not a read before it."""
-        from moonglade.gallery import CATALOG_FIELDS, save_catalog
+        from moonglade.catalog import CATALOG_FIELDS, save_catalog
         from tests.conftest import login_client
         row = {f: "" for f in CATALOG_FIELDS} | {
             "media_id": "m1", "task_id": "T1", "filename": "m1.png"}
@@ -132,14 +133,14 @@ class TestClaimReward:
     def test_blocked_when_read_only(self, mock_session, monkeypatch):
         monkeypatch.setattr(core, "READ_ONLY", True)
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.claim_reward(mock_session, "claim1")
+            account_api_mod.claim_reward(mock_session, "claim1")
         mock_session.post.assert_not_called()
 
     def test_allowed_when_not_read_only(self, mock_session, monkeypatch):
         monkeypatch.setattr(core, "READ_ONLY", False)
         calls = []
         monkeypatch.setattr(core, "_rest_post", lambda *a, **k: calls.append(a) or {"ok": True})
-        core.claim_reward(mock_session, "claim1")
+        account_api_mod.claim_reward(mock_session, "claim1")
         assert calls  # _rest_post genuinely fired
 
 
@@ -163,19 +164,19 @@ class TestTrainingAndArtworkMutationsReadOnly:
     def test_publish_artwork_blocked(self, mock_session, monkeypatch):
         monkeypatch.setattr(core, "READ_ONLY", True)
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.publish_artwork_from_task(mock_session, "task1")
+            account_api_mod.publish_artwork_from_task(mock_session, "task1")
         mock_session.post.assert_not_called()
 
     def test_update_artwork_blocked(self, mock_session, monkeypatch):
         monkeypatch.setattr(core, "READ_ONLY", True)
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.update_artwork(mock_session, "art1", title="new title")
+            account_api_mod.update_artwork(mock_session, "art1", title="new title")
         mock_session.post.assert_not_called()
 
     def test_delete_artwork_blocked(self, mock_session, monkeypatch):
         monkeypatch.setattr(core, "READ_ONLY", True)
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.delete_artwork(mock_session, "art1")
+            account_api_mod.delete_artwork(mock_session, "art1")
         mock_session.post.assert_not_called()
 
 

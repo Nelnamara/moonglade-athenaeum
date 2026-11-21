@@ -31,7 +31,8 @@ def collection_health(out_dir, db_path):
     Returns a dict consumed by the /health route. Cheap (no content hashing) so
     it's safe to render on every page load.
     """
-    from moonglade.gallery import catalog, loom_render_ids
+    from moonglade.catalog import catalog
+    from moonglade.loom_files import loom_render_ids
     from moonglade.achievements import _prompt_word_counter
     from collections import defaultdict, Counter
 
@@ -255,7 +256,7 @@ def storage_breakdown(rows, size_by_rel, loom_ids, size_by_mid=None):
     {relative path: bytes}, the Loom's render ids and the walk's {(kind, media_id): bytes}
     -> the payload's `storage` block. A row is measured by its relative path, else by its
     media id in its own kind (see the section comment: most rows hold a bare file name)."""
-    from moonglade.gallery import _split_collections
+    from moonglade.catalog import _split_collections
     size_by_mid = size_by_mid or {}
     by_type = {k: [0, 0] for k, _ in _STORAGE_TYPES}          # key -> [bytes, count]
     by_model, by_coll = {}, {}                                 # name -> [bytes, count]

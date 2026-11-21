@@ -16,10 +16,15 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import models as models_mod
-from moonglade.gallery import (CATALOG_FIELDS, catalog, delete_from_catalog, load_catalog,
+from moonglade.catalog import (CATALOG_FIELDS, catalog, delete_from_catalog, load_catalog,
                                merge_over_current, save_catalog, save_catalog_over_snapshot,
                                update_prompt_full, update_rating)
 from moonglade import task_reads as task_reads_mod
+from moonglade import history as history_mod
+from moonglade import media_fetch as media_fetch_mod
+from moonglade import full_meta as full_meta_mod
+from moonglade import library_runs as library_runs_mod
+from moonglade import sync as sync_mod
 
 
 def _row(**kw):
@@ -91,15 +96,15 @@ def test_a_page_save_keeps_edits_made_during_the_sync(tmp_path, monkeypatch, wor
 
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: SimpleNamespace())
     monkeypatch.setattr(core, "_quick_count", lambda *a, **k: 0)
-    monkeypatch.setattr(core, "page_variables", lambda *a, **k: {})
+    monkeypatch.setattr(media_fetch_mod, "page_variables", lambda *a, **k: {})
     monkeypatch.setattr(core._pixai_client, "_client_of",
                         lambda s: SimpleNamespace(user_id="u1"))
-    monkeypatch.setattr(core, "gql", fake_gql)
-    monkeypatch.setattr(core, "resolve_media",
+    monkeypatch.setattr(history_mod, "gql", fake_gql)
+    monkeypatch.setattr(media_fetch_mod, "resolve_media",
                         lambda s, mid: ("http://x/" + mid, {"width": "8", "height": "8"}))
-    monkeypatch.setattr(core, "download", fake_download)
+    monkeypatch.setattr(media_fetch_mod, "download", fake_download)
 
-    core.run_download(_dl_args(tmp_path, workers))
+    sync_mod.run_download(_dl_args(tmp_path, workers))
 
     assert edited, "the edit never ran -- this test would pass vacuously"
     rows = _by_id(db)
@@ -130,11 +135,11 @@ def test_the_backfill_step_keeps_edits_made_while_it_ran(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: SimpleNamespace())
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", detail)
     monkeypatch.setattr(models_mod, "model_name_gql", lambda *a, **k: "Model")
-    monkeypatch.setattr(core, "resolve_loras", lambda s, t: "")
-    monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, t: fm)
-    monkeypatch.setattr(core, "_BACKFILL_CHECKPOINT_TASKS", 1)
+    monkeypatch.setattr(full_meta_mod, "resolve_loras", lambda s, t: "")
+    monkeypatch.setattr(full_meta_mod, "_fill_preset_defaults", lambda s, fm, t: fm)
+    monkeypatch.setattr(sync_mod, "_BACKFILL_CHECKPOINT_TASKS", 1)
 
-    core.run_backfill_full_meta(SimpleNamespace(
+    sync_mod.run_backfill_full_meta(SimpleNamespace(
         out=str(tmp_path), token=None, workers=1, delay=0.0, progress=None,
         with_loras=False, with_credit=False, with_surface=False))
 
@@ -156,7 +161,7 @@ def test_the_fix_models_step_keeps_edits_made_while_it_ran(tmp_path, monkeypatch
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: SimpleNamespace())
     monkeypatch.setattr(models_mod, "model_name_gql", name_lookup)
 
-    core.run_fix_models(SimpleNamespace(out=str(tmp_path), token=None, workers=1, delay=0,
+    library_runs_mod.run_fix_models(SimpleNamespace(out=str(tmp_path), token=None, workers=1, delay=0,
                                         progress=None, relabel_removed=False))
 
     m1 = _by_id(db)["m1"]

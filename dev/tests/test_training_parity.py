@@ -23,7 +23,9 @@ import pytest
 from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import training as training_mod
-from moonglade.gallery import CATALOG_FIELDS, create_app, media_dims, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog_verbs import media_dims
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_test_client
 
 T3 = "2024383379556065549"          # Tsubaki.3, MMDIT26B_MODEL

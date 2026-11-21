@@ -23,14 +23,17 @@ import sqlite3
 import pytest
 
 from moonglade import backup as core
+from moonglade import history as history_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import gallery as g
-from moonglade.gallery import (
-    CATALOG_FIELDS, CurationError, add_to_collection, delete_collection, load_catalog,
-    merge_collections, ordered_members, query_catalog, remove_from_collection, rename_collection,
-    save_catalog, save_smart_collection, set_collection_order, list_media_ids,
-)
+from moonglade.catalog_verbs import list_media_ids
+from moonglade.curation import (CurationError, delete_collection, merge_collections,
+                                ordered_members, query_catalog, rename_collection,
+                                save_smart_collection, set_collection_order)
+from moonglade.catalog import (CATALOG_FIELDS, add_to_collection, load_catalog,
+                               remove_from_collection, save_catalog)
 from tests.conftest import login_client
+from moonglade import catalog as catalog_mod
 
 
 def _row(**kw):
@@ -43,8 +46,9 @@ def _no_network(monkeypatch):
         raise AssertionError("the manual order reached for the network")
     monkeypatch.setattr(socket.socket, "connect", _boom)
     for name in ("gql", "gql_adhoc", "gql_mutate", "_make_session"):
-        if hasattr(core, name):
-            monkeypatch.setattr(core, name, _boom)
+        home = next((m for m in (core, history_mod) if hasattr(m, name)), None)
+        if home is not None:
+            monkeypatch.setattr(home, name, _boom)
     for name in ("submit", "submit_generation"):  # in gen_road since 3.22
         if hasattr(gen_road_mod, name):
             monkeypatch.setattr(gen_road_mod, name, _boom)
@@ -106,7 +110,7 @@ def test_an_existing_library_gains_the_table_and_every_row_stays_byte_for_byte(t
         assert con.execute("SELECT COUNT(*) FROM collection_order").fetchone()[0] == 0, "an empty table, nothing seeded"
     finally:
         con.close()
-    g.migrate(p, force=True)
+    catalog_mod.migrate(p, force=True)
     assert _catalog_bytes(p) == before
 
 

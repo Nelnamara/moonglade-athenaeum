@@ -12,17 +12,21 @@ dev/tests/test_route_tiers.py; here only the contracts that go beyond a bare tie
 re-proven (READ_ONLY).
 """
 import time
+from pathlib import Path
 
 import pytest
 
 from moonglade import backup as core
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, save_catalog, load_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog, load_catalog
 
 from tests.conftest import login_client
 from moonglade import scan as scan_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import cloud_delete as cloud_delete_mod
+from moonglade import curation as curation_mod
+from moonglade import library_runs as library_runs_mod
+from moonglade import account_api as account_api_mod
 
 
 def _row(**kw):
@@ -105,14 +109,14 @@ def test_delete_local_reports_a_failed_move_without_stranding_the_rest(tmp_path,
         _row(media_id="good", filename="good.png"),
     ], {"bad.png": b"x", "good.png": b"y"})
 
-    real_replace = g.Path.replace
+    real_replace = Path.replace
 
     def _one_bad_file(self, target):
         if self.name == "bad.png":
             raise OSError(18, "Invalid cross-device link")
         return real_replace(self, target)
 
-    monkeypatch.setattr(g.Path, "replace", _one_bad_file)
+    monkeypatch.setattr(Path, "replace", _one_bad_file)
 
     cli = login_client(tmp_path)
     d = cli.post("/api/delete-local", json={"media_ids": ["bad", "good"]}).get_json()
@@ -149,7 +153,7 @@ def test_collection_add_then_remove_round_trips(tmp_path):
     assert d == {"ok": True, "count": 1}
     by_id = {r["media_id"]: r["collections"] for r in load_catalog(db)}
     assert by_id == {"1": "", "2": "Faves"}
-    assert g.query_catalog(db, collection="Faves")[1] == 1  # the collection filter agrees after a route remove
+    assert curation_mod.query_catalog(db, collection="Faves")[1] == 1  # the collection filter agrees after a route remove
 
 
 def test_collection_validates_its_inputs(tmp_path):
@@ -458,7 +462,7 @@ def test_stats_coverage_matches_the_account_badge_computation(tmp_path, monkeypa
     """Same formula the cover-badge gets from /api/account: distinct local tasks over
     the server's lifetime task count, one decimal, capped at 100."""
     _stats_catalog(tmp_path)
-    monkeypatch.setattr(core, "account_info",
+    monkeypatch.setattr(account_api_mod, "account_info",
                         lambda session: {"tasks": {"totalCount": 3}})
     cli = login_client(tmp_path)
     d = cli.get("/api/stats").get_json()
@@ -472,7 +476,7 @@ def test_stats_coverage_never_exceeds_100(tmp_path, monkeypatch, pixai):
     """A server count lagging behind local (sync raced a deletion) must clamp, not
     report 200% backed up -- same min() the account route applies."""
     _stats_catalog(tmp_path)
-    monkeypatch.setattr(core, "account_info",
+    monkeypatch.setattr(account_api_mod, "account_info",
                         lambda session: {"tasks": {"totalCount": 1}})
     cli = login_client(tmp_path)
     assert cli.get("/api/stats").get_json()["coverage_pct"] == 100.0
@@ -493,14 +497,14 @@ def _cov_catalog(tmp_path, rows):
 def _stamp(tmp_path, **counts):
     import json as _json
     from moonglade import paths as _p
-    dest = _p.records_path(tmp_path, core.RECONCILE_STAMP)
+    dest = _p.records_path(tmp_path, library_runs_mod.RECONCILE_STAMP)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(_json.dumps(dict({"reconciled_at": "2026-11-18T00:00:00Z", "flagged": 0,
                                       "cleared": 0}, **counts)), encoding="utf-8")
 
 
 def test_failed_and_deleted_tasks_no_longer_skew_the_pill(tmp_path):
-    from moonglade.gallery import backup_coverage
+    from moonglade.catalog_verbs import backup_coverage
     rows = [{"task_id": "T%d" % i, "media_id": "m%d" % i} for i in range(97)]
     rows += [{"task_id": "D%d" % i, "media_id": "d%d" % i, "deleted_remote": "1"} for i in range(2)]
     _cov_catalog(tmp_path, rows)
@@ -512,11 +516,11 @@ def test_failed_and_deleted_tasks_no_longer_skew_the_pill(tmp_path):
     assert "2 you deleted on PixAI are kept here and not counted." in cov["note"]
     assert "Sync now" not in cov["note"]
     # the old formula on the same library read 99/100 = 99.0%
-    assert core.feed_counts is not None
+    assert library_runs_mod.feed_counts is not None
 
 
 def test_a_real_gap_says_sync_fixes_it_and_never_rounds_up_to_100(tmp_path):
-    from moonglade.gallery import backup_coverage
+    from moonglade.catalog_verbs import backup_coverage
     _cov_catalog(tmp_path, [{"task_id": "T%d" % i, "media_id": "m%d" % i} for i in range(1999)])
     _stamp(tmp_path, live=2003, no_picture=3, in_progress=0, missing=1)
     cov = backup_coverage(tmp_path / "catalog.db", tmp_path, 2003)
@@ -525,7 +529,7 @@ def test_a_real_gap_says_sync_fixes_it_and_never_rounds_up_to_100(tmp_path):
 
 
 def test_before_any_full_walk_the_note_says_so(tmp_path):
-    from moonglade.gallery import backup_coverage
+    from moonglade.catalog_verbs import backup_coverage
     _cov_catalog(tmp_path, [{"task_id": "T1", "media_id": "m1"}])
     cov = backup_coverage(tmp_path / "catalog.db", tmp_path, 2)
     assert cov["pct"] == 50.0 and "until the next Sync" in cov["note"]
@@ -540,5 +544,5 @@ def test_feed_counts_sorts_the_feed():
              {"id": "e", "status": "running"},
              {"id": "f", "status": "completed", "batchMediaIds": []},
              {"id": ""}]
-    assert core.feed_counts(nodes, {"a"}) == {"live": 6, "no_picture": 3, "in_progress": 1,
+    assert library_runs_mod.feed_counts(nodes, {"a"}) == {"live": 6, "no_picture": 3, "in_progress": 1,
                                               "missing": 1}

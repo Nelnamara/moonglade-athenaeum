@@ -18,7 +18,7 @@ from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import pricing as pricing_mod
-from moonglade.gallery import save_catalog, CATALOG_FIELDS
+from moonglade.catalog import save_catalog, CATALOG_FIELDS
 from tests.conftest import _TEST_PASSWORD, _TEST_USERNAME, _do_login
 from tests.test_generate_runs import CARD as RUN_CARD
 from tests.test_generate_runs import cli, rig, run  # noqa: F401  (fixtures + helper)

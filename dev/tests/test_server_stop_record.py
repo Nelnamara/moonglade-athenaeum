@@ -18,7 +18,8 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_test_client
 from moonglade import updater as updater_mod
@@ -150,7 +151,8 @@ def test_a_refused_click_is_not_a_stop(tmp_path, monkeypatch, caplog, fresh_exit
 def test_the_update_restart_records_its_own_reason():
     """The updater's closure runs on a thread with no request: it names the update, after the
     one call test_updater.py pins to the front of that closure."""
-    src = inspect.getsource(g.create_app)
+    from moonglade import routes_panel as routes_panel_mod   # left create_app (split phase 4)
+    src = inspect.getsource(routes_panel_mod)
     body = src[src.index("def _restart():"):]
     assert body.index("_schedule_server_exit(42)") < body.index(
         '_note_server_exit("by the update just applied")') < 1200

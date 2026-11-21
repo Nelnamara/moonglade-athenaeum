@@ -14,8 +14,11 @@ import sqlite3
 import types
 
 from moonglade import backup as core
-from moonglade.gallery import CATALOG_FIELDS, load_catalog, migrate, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, load_catalog, migrate, save_catalog
 from moonglade import task_reads as task_reads_mod
+from moonglade import full_meta as full_meta_mod
+from moonglade import account_api as account_api_mod
+from moonglade import sync as sync_mod
 
 T3 = "2024383379556065549"          # Tsubaki.3
 FLASH = "2050048243034896798"       # Tsubaki.3 Flash
@@ -43,11 +46,11 @@ def _context_run(*context_ids, model=T3):
 
 
 def test_a_context_image_run_names_its_source():
-    assert core.source_media_of_task(_context_run(SRC_A)) == (SRC_A, "derived")
+    assert account_api_mod.source_media_of_task(_context_run(SRC_A)) == (SRC_A, "derived")
 
 
 def test_with_two_context_images_the_first_is_the_source():
-    assert core.source_media_of_task(_context_run(SRC_A, SRC_B)) == (SRC_A, "derived")
+    assert account_api_mod.source_media_of_task(_context_run(SRC_A, SRC_B)) == (SRC_A, "derived")
 
 
 def test_the_existing_shapes_still_win_over_context_images():
@@ -56,18 +59,18 @@ def test_the_existing_shapes_still_win_over_context_images():
     t = _context_run(SRC_A)
     t["parameters"]["mediaId"] = "999"
     t["parameters"]["upscale"] = 2
-    assert core.source_media_of_task(t) == ("999", "upscale")
+    assert account_api_mod.source_media_of_task(t) == ("999", "upscale")
 
 
 def test_empty_or_blank_context_images_are_still_an_original():
     for ctx in ([], [""], None):
         t = _context_run()
         t["parameters"]["contextImages"] = ctx
-        assert core.source_media_of_task(t) == (None, None)
+        assert account_api_mod.source_media_of_task(t) == (None, None)
 
 
 def test_create_time_collection_files_the_lineage():
-    fm = core.extract_full_meta(_context_run(SRC_B, SRC_A))
+    fm = full_meta_mod.extract_full_meta(_context_run(SRC_B, SRC_A))
     assert fm["source_media_id"] == SRC_B and fm["derive_kind"] == "derived"
 
 
@@ -150,7 +153,7 @@ def test_the_backfill_rereads_the_owners_runs_after_the_repair(monkeypatch, tmp_
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", detail)
     args = types.SimpleNamespace(out=str(tmp_path), token=None, workers=1, delay=0.0,
                                  progress=None)
-    core.run_backfill_lineage(args)
+    sync_mod.run_backfill_lineage(args)
     rows = _by_media(db)
     assert sorted(fetched) == ["t_ctx", "t_plain"]
     assert rows["m_ctx"]["source_media_id"] == SRC_A
@@ -161,7 +164,7 @@ def test_the_backfill_rereads_the_owners_runs_after_the_repair(monkeypatch, tmp_
     # The next process start and the next backfill fetch nothing again.
     migrate(db, force=True)
     del fetched[:]
-    core.run_backfill_lineage(args)
+    sync_mod.run_backfill_lineage(args)
     assert fetched == []
 
 

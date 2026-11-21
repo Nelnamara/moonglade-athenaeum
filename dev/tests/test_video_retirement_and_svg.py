@@ -13,6 +13,8 @@ from moonglade import gen_params as gen_params_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import integrity
 from moonglade import scan
+from moonglade import thumbs as thumbs_mod
+from moonglade import media_fetch as media_fetch_mod
 
 UTC = datetime.timezone.utc
 CUT = datetime.datetime(2026, 11, 23, 3, 0, 0, tzinfo=UTC)
@@ -106,10 +108,10 @@ def test_front_end_mirror_matches_server_table():
 # ---- SVG -------------------------------------------------------------------------------------
 
 def test_ext_from_ct_maps_svg():
-    assert core.ext_from_ct("image/svg+xml") == ".svg"
-    assert core.ext_from_ct("IMAGE/SVG+XML; charset=utf-8") == ".svg"
-    assert core.ext_from_ct("image/png") == ".png"        # the others are untouched
-    assert core.ext_from_ct("image/gif") == ".gif"
+    assert media_fetch_mod.ext_from_ct("image/svg+xml") == ".svg"
+    assert media_fetch_mod.ext_from_ct("IMAGE/SVG+XML; charset=utf-8") == ".svg"
+    assert media_fetch_mod.ext_from_ct("image/png") == ".png"        # the others are untouched
+    assert media_fetch_mod.ext_from_ct("image/gif") == ".gif"
 
 
 _SVG = b'<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></svg>'
@@ -126,9 +128,9 @@ def test_a_svg_in_the_library_is_catalogued_and_nothing_raises(tmp_path):
     assert scan.find_files_for_media_id(tmp_path, "123456789")
     # ... and every Pillow-backed walker answers "no" instead of raising
     thumb = tmp_path / "gallery" / "thumbs" / "123456789.jpg"
-    assert g.make_thumbnail(f, thumb) is False
+    assert thumbs_mod.make_thumbnail(f, thumb) is False
     assert not thumb.exists()
-    assert g.compute_dhash(f) is None
-    assert core.embed_metadata(f, {"prompt": "x"}) == "unsupported"
+    assert thumbs_mod.compute_dhash(f) is None
+    assert media_fetch_mod.embed_metadata(f, {"prompt": "x"}) == "unsupported"
     assert integrity.structural_problem(f) is None
     assert f.read_bytes() == _SVG                          # kept, untouched

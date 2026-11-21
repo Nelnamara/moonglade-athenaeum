@@ -22,7 +22,7 @@ _REAL_PATHS_CONFIG_PATH = moonglade_paths.config_path
 
 def test_already_downloaded_finds_flat(tmp_path):
     (tmp_path / "cool_prompt_task1_mid999.png").write_bytes(b"fakeimage")
-    result = core.already_downloaded(tmp_path, "mid999")
+    result = history_mod.already_downloaded(tmp_path, "mid999")
     assert result is not None
     assert result.name.endswith("mid999.png")
 
@@ -31,27 +31,27 @@ def test_already_downloaded_finds_in_subfolder(tmp_path):
     sub = tmp_path / "batches" / "my_batch"
     sub.mkdir(parents=True)
     (sub / "01_mid888.webp").write_bytes(b"fakeimage")
-    result = core.already_downloaded(tmp_path, "mid888")
+    result = history_mod.already_downloaded(tmp_path, "mid888")
     assert result is not None
 
 
 def test_already_downloaded_returns_none_when_missing(tmp_path):
-    assert core.already_downloaded(tmp_path, "nonexistent") is None
+    assert history_mod.already_downloaded(tmp_path, "nonexistent") is None
 
 
 def test_already_downloaded_ignores_part_files(tmp_path):
     (tmp_path / "task_mid777.png.part").write_bytes(b"partial")
-    assert core.already_downloaded(tmp_path, "mid777") is None
+    assert history_mod.already_downloaded(tmp_path, "mid777") is None
 
 
 def test_already_downloaded_ignores_zero_byte(tmp_path):
     (tmp_path / "task_mid666.png").write_bytes(b"")
-    assert core.already_downloaded(tmp_path, "mid666") is None
+    assert history_mod.already_downloaded(tmp_path, "mid666") is None
 
 
 def test_already_downloaded_multiple_exts_returns_first(tmp_path):
     (tmp_path / "task_mid555.jpg").write_bytes(b"img")
-    result = core.already_downloaded(tmp_path, "mid555")
+    result = history_mod.already_downloaded(tmp_path, "mid555")
     assert result is not None
 
 
@@ -131,7 +131,7 @@ def test_load_config_missing_returns_empty(real_config_rule):
 # ---------------------------------------------------------------------------
 
 from types import SimpleNamespace
-from moonglade.gallery import load_catalog as _load_cat
+from moonglade.catalog import load_catalog as _load_cat
 
 
 def test_import_local_scans_and_is_idempotent(tmp_path):
@@ -139,7 +139,7 @@ def test_import_local_scans_and_is_idempotent(tmp_path):
     (tmp_path / "videos" / "myclip.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
     (tmp_path / "images").mkdir()
     (tmp_path / "images" / "art.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
-    res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
+    res = library_runs_mod.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
     assert res["imported"] == 2 and res["skipped"] == 0
     assert len(res["media_ids"]) == 2                      # the web importer tags a collection off these
     rows = {r["filename"]: r for r in _load_cat(tmp_path / "catalog.db")}
@@ -148,20 +148,20 @@ def test_import_local_scans_and_is_idempotent(tmp_path):
     assert rows["images/art.png"]["source"] == "local"
     assert rows["images/art.png"]["is_video"] == ""
     # re-run imports nothing new
-    assert core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))["imported"] == 0
+    assert library_runs_mod.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))["imported"] == 0
 
 
 def test_import_local_skips_already_backed_up_pixai_files(tmp_path):
     """Regression: an organized PixAI file is named <mediaid>.ext and its catalog
     'filename' string may differ from the on-disk path, but media_id_of() matches
     the existing row -- so import must NOT re-catalog it as a duplicate 'local'."""
-    from moonglade.gallery import save_catalog, CATALOG_FIELDS
+    from moonglade.catalog import save_catalog, CATALOG_FIELDS
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} |
                       {"media_id": "375806477215601884", "filename": "images/old_name.png"}])
     (tmp_path / "2023-10").mkdir()
     (tmp_path / "2023-10" / "375806477215601884.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
-    res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
+    res = library_runs_mod.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
     assert res["imported"] == 0          # recognized as already backed up
     assert res["skipped"] == 1
     # catalog still has exactly one row, no 'local' duplicate
@@ -179,7 +179,7 @@ def test_import_local_skips_deleted_quarantine(tmp_path):
     qdir = tmp_path / DELETED_DIRNAME
     qdir.mkdir(parents=True)
     (qdir / "old_prompt_task1_999.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
-    res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
+    res = library_runs_mod.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
     assert res["imported"] == 0, "a file under _deleted/ was resurrected as a new local row"
     assert _load_cat(tmp_path / "catalog.db") == []
 
@@ -188,7 +188,7 @@ def test_import_local_external_copies_in(tmp_path):
     ext = tmp_path / "external"; ext.mkdir()
     (ext / "outside.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
     out = tmp_path / "backup"
-    res = core.run_import_local(SimpleNamespace(out=str(out), import_local=str(ext)))
+    res = library_runs_mod.run_import_local(SimpleNamespace(out=str(out), import_local=str(ext)))
     assert res["imported"] == 1
     # Stored under the content-addressed name, not the source basename: two different
     # files called outside.png out of two folders both have to survive the import.
@@ -200,7 +200,7 @@ def test_import_local_video_no_crash_without_ffmpeg(tmp_path, monkeypatch):
     monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "")
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "v.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
-    res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
+    res = library_runs_mod.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
     assert res["imported"] == 1   # cataloged fine; just no poster
 
 
@@ -312,7 +312,7 @@ def test_run_faststart_videos_no_ffmpeg(tmp_path, monkeypatch):
     monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "")
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "a.mp4").write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
-    res = core.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
+    res = library_runs_mod.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
     assert res["fixed"] == 0 and res["total"] == 1
 
 
@@ -327,14 +327,14 @@ def test_import_local_skips_branding_folder(tmp_path, monkeypatch):
     legacy installs); it covers the whole tree here because conftest's
     _isolated_branding redirects branding_root() to tmp_path/"branding"."""
     from moonglade import gallery as g
-    from moonglade.gallery import load_catalog
+    from moonglade.catalog import load_catalog
     monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "")
     branding_mod._role_dir("marks").mkdir(parents=True)
     (branding_mod.branding_root() / "banner.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
     (branding_mod._role_dir("marks") / "m1.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "v.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
-    res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
+    res = library_runs_mod.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
     assert res["imported"] == 1                       # only the video, not the 2 branding pngs
     files = [r.get("filename", "") for r in load_catalog(tmp_path / "catalog.db")]
     root_name = branding_mod.branding_root().name                 # derived, not retyped
@@ -343,7 +343,7 @@ def test_import_local_skips_branding_folder(tmp_path, monkeypatch):
 
 
 def test_organize_normalizes_to_month_descriptive_no_batches(tmp_path):
-    from moonglade.gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    from moonglade.catalog import save_catalog, CATALOG_FIELDS, load_catalog
     db = tmp_path / "catalog.db"
     save_catalog(db, [
         {f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "task_id": "T1",
@@ -397,7 +397,7 @@ def test_organize_never_touches_deleted_quarantine(tmp_path):
     replaces it into the organized tree in place of the live file. Either way the
     _deleted/ file must never be touched at all -- this asserts exactly that,
     regardless of which of the two on-disk copies the walk happens to visit first."""
-    from moonglade.gallery import save_catalog, CATALOG_FIELDS
+    from moonglade.catalog import save_catalog, CATALOG_FIELDS
     from moonglade.scan import DELETED_DIRNAME
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m9", "task_id": "T9",
@@ -420,7 +420,7 @@ def test_organize_never_touches_deleted_quarantine(tmp_path):
 
 
 def test_undo_organize_reverts_moves(tmp_path):
-    from moonglade.gallery import save_catalog, CATALOG_FIELDS
+    from moonglade.catalog import save_catalog, CATALOG_FIELDS
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "task_id": "T1",
         "prompt_preview": "alpha", "created_at": "2024-03-01T00:00:00", "filename": "alpha_T1_m1.png"}])
@@ -450,7 +450,7 @@ def test_organize_drops_byte_identical_duplicate(tmp_path):
     the redundant one and keep exactly one file -- this is the one line in the whole
     command that unlink()s a real file on a path that runs live by default (no
     --dry-run gate), so it must never fire on the wrong side of a comparison."""
-    from moonglade.gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    from moonglade.catalog import save_catalog, CATALOG_FIELDS, load_catalog
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "dup1", "task_id": "T9",
         "prompt_preview": "dup", "created_at": "2024-07-01T00:00:00"}])
@@ -474,7 +474,7 @@ def test_organize_keeps_differing_content_side_by_side(tmp_path):
     """INVARIANT 5's other half: two on-disk copies of the SAME media_id that are NOT
     byte-identical (a genuine conflict, not a redundant dupe) must both survive --
     cmd_organize must never silently pick one and discard the other's real content."""
-    from moonglade.gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    from moonglade.catalog import save_catalog, CATALOG_FIELDS, load_catalog
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "dup2", "task_id": "T8",
         "prompt_preview": "dup", "created_at": "2024-07-01T00:00:00"}])
@@ -495,7 +495,7 @@ def test_organize_keeps_differing_content_side_by_side(tmp_path):
 
 
 def test_reconcile_flags_deleted_server_side(tmp_path, monkeypatch, pixai):
-    from moonglade.gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    from moonglade.catalog import save_catalog, CATALOG_FIELDS, load_catalog
     db = tmp_path / "catalog.db"
     old = "2024-01-01T00:00:00"
     save_catalog(db, [
@@ -505,8 +505,8 @@ def test_reconcile_flags_deleted_server_side(tmp_path, monkeypatch, pixai):
         {f: "" for f in CATALOG_FIELDS} | {"media_id": "L", "task_id": "GONE2", "filename": "L.png", "source": "local", "created_at": old},
     ])
     conn = {"edges": [{"node": {"id": "LIVE1"}}], "pageInfo": {"hasPreviousPage": False}}
-    monkeypatch.setattr(core, "gql", lambda *a, **k: conn)
-    res = core.run_reconcile_deleted(SimpleNamespace(out=str(tmp_path), token=None, page_size=250))
+    monkeypatch.setattr(history_mod, "gql", lambda *a, **k: conn)
+    res = library_runs_mod.run_reconcile_deleted(SimpleNamespace(out=str(tmp_path), token=None, page_size=250))
     assert res["live"] == 1 and res["flagged"] == 1
     by = {r["media_id"]: r for r in load_catalog(db)}
     assert by["b"]["deleted_remote"] == "1"      # task gone from feed, old -> flagged
@@ -526,12 +526,14 @@ def test_generate_preview_spends_nothing(tmp_path):
 # SQLite catalog helpers
 # ---------------------------------------------------------------------------
 
-from moonglade.gallery import (CATALOG_FIELDS, init_db, save_catalog, load_catalog,
-                            update_rating, delete_from_catalog,
-                            update_prompt_full, bulk_replace_prompt, _db_is_empty)
+from moonglade.catalog import (CATALOG_FIELDS, init_db, save_catalog, load_catalog, update_rating,
+                               delete_from_catalog, update_prompt_full, bulk_replace_prompt,
+                               _db_is_empty)
 from moonglade import organize as organize_mod
 from moonglade import media_tools as media_tools_mod
 from moonglade import branding as branding_mod
+from moonglade import history as history_mod
+from moonglade import library_runs as library_runs_mod
 
 
 def _make_row(**kwargs):
@@ -590,7 +592,7 @@ def test_migrations_backfill_every_field_added_after_the_original_schema(tmp_pat
     was found. The test is not vacuous regardless -- see the report for the mutation
     check that proves it fails when a migration entry is missing.)"""
     import sqlite3
-    from moonglade.gallery import CATALOG_FIELDS, catalog
+    from moonglade.catalog import CATALOG_FIELDS, catalog
 
     original_fields = [   # cc2aeb1's _CREATE_TABLE, verbatim -- none of these have ever
         "task_id", "media_id", "filename", "url", "width", "height",   # needed a migration
@@ -625,7 +627,7 @@ def test_migration_adds_paid_credit_to_existing_db_without_data_loss(tmp_path):
     _MIGRATIONS on the first plain open of the catalog, with the existing row's data
     intact -- and the migrated db must round-trip a real credit value."""
     import sqlite3
-    from moonglade.gallery import migrate
+    from moonglade.catalog import migrate
 
     assert "paid_credit" in CATALOG_FIELDS   # the contract half: the field exists at all
     pre_fields = [f for f in CATALOG_FIELDS if f != "paid_credit"]
@@ -665,7 +667,7 @@ def test_catalog_stats_totals_paid_credit_once_per_task(tmp_path, capsys):
         _make_row(media_id="b1", task_id="t2", filename="b1.png", paid_credit="0"),
         _make_row(media_id="c1", task_id="t3", filename="c1.png"),   # untracked ('')
     ])
-    core.run_catalog_stats(SimpleNamespace(out=str(tmp_path), progress=None))
+    library_runs_mod.run_catalog_stats(SimpleNamespace(out=str(tmp_path), progress=None))
     out = capsys.readouterr().out
     assert "Credits tracked" in out
     assert "100 spent across 2 tasks (1 free)" in out
@@ -795,6 +797,6 @@ def test_count_backup_images_excludes_thumbnails(tmp_path):
     (tmp_path / "_duplicates" / "c_3.png").write_bytes(b"z")         # quarantined -> excluded
     (tmp_path / "_deleted" / "t_4.png").write_bytes(b"T" * 400)      # soft-deleted -> excluded
     (tmp_path / "images" / "half.part").write_bytes(b"nope")         # partial -> excluded
-    n, b, thumbs = core._count_backup_images(tmp_path)
+    n, b, thumbs = library_runs_mod._count_backup_images(tmp_path)
     assert n == 2 and b == 300          # two originals, their bytes; grid/thumbs/dupes/trash excluded
     assert thumbs == 2                  # thumbnails reported separately, not in the total

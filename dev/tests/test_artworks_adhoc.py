@@ -33,11 +33,13 @@ import requests
 
 from moonglade import backup as core
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.fake_pixai import FakePixAI
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import living as living_mod
+from moonglade import library_runs as library_runs_mod
+from moonglade import account_api as account_api_mod
 
 REPO = Path(__file__).resolve().parents[2]
 DAY = 86400.0
@@ -177,14 +179,14 @@ def test_the_document_pages_backward_from_the_newest_end():
     """`last` / `before` start at the NEWEST end and `hasPreviousPage` / `startCursor` lead
     to the older works (PROBE_2026-10-16); `first` / `after` start at the OLDEST end, which
     would hand the sweep's two-spent-pages stop the wrong end of the history."""
-    doc = " ".join(core._ARTWORK_LIST_DOC.split())
+    doc = " ".join(account_api_mod._ARTWORK_LIST_DOC.split())
     assert "artworks(authorId: $a, last: $n, before: $before)" in doc
     assert not re.search(r"\b(first|after)\b", doc)
 
 
 def test_the_document_never_selects_views():
-    assert not VIEWS.search(core._ARTWORK_LIST_DOC)
-    assert pixai_client_mod._is_mutation_document(core._ARTWORK_LIST_DOC) is False
+    assert not VIEWS.search(account_api_mod._ARTWORK_LIST_DOC)
+    assert pixai_client_mod._is_mutation_document(account_api_mod._ARTWORK_LIST_DOC) is False
 
 
 def test_the_document_asks_for_exactly_what_the_readers_consume():
@@ -193,15 +195,15 @@ def test_the_document_asks_for_exactly_what_the_readers_consume():
     the sync read) must be selected, and nothing else may be. A field the reader gains
     without the document selecting it would blank a column quietly; a field the document
     gains without a reader is, in the worst case, `views`."""
-    node = _selection(core._ARTWORK_LIST_DOC, "node {")
+    node = _selection(account_api_mod._ARTWORK_LIST_DOC, "node {")
     bare = re.sub(r"\([^)]*\)", "", node)                  # drop displayName(language: $lang)
     nested = {"codeName", "displayName"}                    # the inside of tacks { ... }
     selected = set(re.findall(r"[A-Za-z_]\w*", re.sub(r"\{[^}]*\}", "", bare)))
-    read = set(re.findall(r'node\.get\("(\w+)"\)', inspect.getsource(core.extract_artwork_meta)))
+    read = set(re.findall(r'node\.get\("(\w+)"\)', inspect.getsource(account_api_mod.extract_artwork_meta)))
     read.add("videoMediaId")
     assert selected == read, (selected - read, read - selected)
     assert set(re.findall(r"[A-Za-z_]\w*", _selection(bare, "tacks {"))) == nested
-    page_info = set(re.findall(r"[A-Za-z_]\w*", _selection(core._ARTWORK_LIST_DOC, "pageInfo {")))
+    page_info = set(re.findall(r"[A-Za-z_]\w*", _selection(account_api_mod._ARTWORK_LIST_DOC, "pageInfo {")))
     assert page_info == {"hasPreviousPage", "startCursor"}   # what the two walks read
 
 
@@ -212,11 +214,11 @@ def test_nothing_the_sweep_or_the_sync_sends_for_the_list_selects_views(pixai, t
     db = _catalog(tmp_path, ["m1", "m2", "m3"])
     lib = _library(pixai, [[_node("m1", "a1")], [_node("m2", "a2")], [_node("m3", "a3")]])
     _sweep(tmp_path, db)
-    core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
+    library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
                                            no_views=True))
     assert lib.documents and not any(VIEWS.search(d) for d in lib.documents)
     lib.documents.clear()
-    core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
     listing = [d for d in lib.documents if not VIEWS.search(d)]
     bulk = [d for d in lib.documents if VIEWS.search(d)]
     assert len(listing) == 3 and len(bulk) == 1
@@ -243,24 +245,24 @@ def test_a_page_is_one_post_of_the_full_document():
             raise AssertionError("the list is not a saved-request GET any more")
 
     s = Session()
-    conn = core.artwork_list_gql(pixai_client_mod.PixAIClient(s, user_id="u-wire"), before="c9", last=50)
+    conn = account_api_mod.artwork_list_gql(pixai_client_mod.PixAIClient(s, user_id="u-wire"), before="c9", last=50)
     assert conn["pageInfo"] == {"hasPreviousPage": False}
     [(verb, url, kw)] = s.calls
     assert (verb, url) == ("POST", core.API_URL)
-    assert kw["json"]["query"] == core._ARTWORK_LIST_DOC
+    assert kw["json"]["query"] == account_api_mod._ARTWORK_LIST_DOC
     assert kw["json"]["variables"] == {"a": "u-wire", "n": 50, "lang": "en", "before": "c9"}
 
 
 def test_the_first_page_sends_no_cursor_and_hands_back_the_connection(pixai):
     lib = _library(pixai, [[_node("m1", "a1")]])
-    conn = core.artwork_list_gql(pixai, last=25)
+    conn = account_api_mod.artwork_list_gql(pixai, last=25)
     assert [e["node"]["id"] for e in conn["edges"]] == ["a1"]
     assert conn["pageInfo"]["hasPreviousPage"] is False
     assert lib.variables == [{"a": "u-test", "n": 25, "lang": "en"}]      # no `before`
 
 
 def test_the_read_never_rides_the_saved_request_or_a_mutation():
-    src = inspect.getsource(core.artwork_list_gql)
+    src = inspect.getsource(account_api_mod.artwork_list_gql)
     assert "gql_adhoc(" in src
     assert ".persisted(" not in src and "gql_mutate" not in src and ".mutate(" not in src
 
@@ -268,7 +270,7 @@ def test_the_read_never_rides_the_saved_request_or_a_mutation():
 def test_a_graphql_refusal_names_pixais_code_and_message(pixai):
     pixai.fail("artworks", _refusal("PERSISTED_QUERY_NOT_FOUND", "no such saved request"))
     with pytest.raises(core.ArtworkListRefused) as ex:
-        core.artwork_list_gql(pixai)
+        account_api_mod.artwork_list_gql(pixai)
     text = str(ex.value)
     assert "PERSISTED_QUERY_NOT_FOUND" in text and "no such saved request" in text
     assert text.startswith("PixAI refused the request (") and "GraphQL error" not in text
@@ -277,20 +279,20 @@ def test_a_graphql_refusal_names_pixais_code_and_message(pixai):
 def test_a_network_failure_names_the_kind_of_failure(pixai):
     pixai.fail("artworks", requests.ConnectionError("connection reset by peer"))
     with pytest.raises(core.ArtworkListRefused) as ex:
-        core.artwork_list_gql(pixai)
+        account_api_mod.artwork_list_gql(pixai)
     assert "ConnectionError" in str(ex.value) and "connection reset" in str(ex.value)
 
 
 def test_an_answer_without_a_list_is_a_refusal_too(pixai):
     pixai.on("artworks", {"somethingElse": {"ok": True}})
     with pytest.raises(core.ArtworkListRefused, match="no list of artworks"):
-        core.artwork_list_gql(pixai)
+        account_api_mod.artwork_list_gql(pixai)
 
 
 def test_no_account_id_is_a_refusal_before_anything_is_sent():
     fake = FakePixAI(user_id="")
     with pytest.raises(core.ArtworkListRefused, match="account id"):
-        core.artwork_list_gql(fake)
+        account_api_mod.artwork_list_gql(fake)
     assert fake.calls == []
 
 
@@ -325,7 +327,7 @@ def test_the_sweep_stops_at_the_page_cap_and_calls_itself_incomplete(
 def test_the_full_sync_walks_every_page_too(pixai, tmp_path):
     db = _catalog(tmp_path, ["m1", "m2", "m3"])
     lib = _library(pixai, [[_node("m1", "a1")], [_node("m2", "a2")], [_node("m3", "a3")]])
-    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
+    res = library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
                                                  no_views=True))
     assert res["artworks"] == 3 and res["matched"] == 3 and res["fail"] == 0
     assert [v.get("before") for v in lib.variables] == [None, "1", "2"]
@@ -397,7 +399,7 @@ def test_a_failed_first_page_ends_the_sync_with_a_plain_error(pixai, tmp_path):
     db = _catalog(tmp_path, ["m1"])
     pixai.fail("artworks", _refusal("GRAPHQL_VALIDATION_FAILED", "PixAI would not take this"))
     with pytest.raises(core.PixAIError) as ex:
-        core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
+        library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
                                                no_views=True))
     text = str(ex.value)
     assert "published artworks" in text and "nothing was synced" in text
@@ -411,7 +413,7 @@ def test_a_failed_later_page_marks_the_sync_incomplete_and_says_why(pixai, tmp_p
     db = _catalog(tmp_path, ["m1", "m2"])
     lib = _library(pixai, [[_node("m1", "a1")], [_node("m2", "a2")]])
     lib.refuse_from, lib.refusal = 1, _refusal(message="page two was refused")
-    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
+    res = library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
                                                  no_views=True))
     out = capsys.readouterr().out
     assert res["fail"] == 1 and res["artworks"] == 1
@@ -432,7 +434,30 @@ def test_the_retired_saved_request_leaves_nothing_behind():
                  *sorted((REPO / "wiki").glob("*.md"))]
     for doc in live_docs:
         assert "ARTWORK_LIST_HASH" not in doc.read_text(encoding="utf-8"), doc.name
-    for module in (core, g, pixai_client_mod, living_mod):   # the transport, the sweep moved out
+    from moonglade import routes_generate as routes_generate_mod    # gallery's create routes
+    from moonglade import routes_loom as routes_loom_mod            # and the Loom's
+    from moonglade import web_loom_store as web_loom_store_mod
+    from moonglade import routes_gate as routes_gate_mod            # and the front door's
+    from moonglade import web_threads as web_threads_mod            # and the background jobs'
+    from moonglade import routes_panel as routes_panel_mod          # and the Control Panel's
+    from moonglade import routes_delete as routes_delete_mod        # and the delete routes'
+    from moonglade import routes_recipes as routes_recipes_mod      # and the recipe routes'
+    from moonglade import routes_library as routes_library_mod      # and the library routes'
+    from moonglade import routes_account as routes_account_mod      # and the account routes'
+    from moonglade import routes_community as routes_community_mod  # and the community routes'
+    from moonglade import routes_train as routes_train_mod          # and the training routes'
+    from moonglade import routes_ach as routes_ach_mod              # and the achievement routes'
+    from moonglade import routes_mirror as routes_mirror_mod        # and the Mirror's routes'
+    from moonglade import routes_branding as routes_branding_mod    # and the branding routes'
+    from moonglade import routes_import as routes_import_mod        # and the import routes'
+    for module in (core, g, pixai_client_mod, living_mod,   # the transport, the sweep moved out
+                   library_runs_mod,                        # and the --sync-artworks runner
+                   account_api_mod,                         # and the artwork list's reader
+                   routes_generate_mod, routes_loom_mod, web_loom_store_mod, routes_gate_mod,
+                   web_threads_mod, routes_panel_mod, routes_delete_mod, routes_recipes_mod,
+                   routes_library_mod, routes_account_mod, routes_community_mod,
+                   routes_train_mod, routes_ach_mod, routes_mirror_mod, routes_branding_mod,
+                   routes_import_mod):
         assert "ARTWORK_LIST_HASH" not in inspect.getsource(module)
 
 
@@ -449,7 +474,7 @@ def test_the_sweep_reads_each_page_once_and_the_command_keeps_the_retries(monkey
         return {"artworks": {"edges": [], "pageInfo": {"hasPreviousPage": False, "startCursor": None}}}
     monkeypatch.setattr(core, "gql_adhoc", fake_adhoc)
     monkeypatch.setattr(pixai_client_mod, "_client_of", lambda s: type("C", (), {"user_id": "1"})())
-    core.artwork_list_gql(object())
+    account_api_mod.artwork_list_gql(object())
     assert seen == [None]
     src = inspect.getsource(living_mod.artworks_sweep)
     assert "artwork_list_gql(session, before=before, last=ARTWORKS_PAGE, retries=0)" in src

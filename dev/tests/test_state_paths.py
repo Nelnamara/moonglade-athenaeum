@@ -29,6 +29,7 @@ from moonglade import account_prefs as account_prefs_mod
 from moonglade import jobs as jobs_mod
 from moonglade import telemetry as telemetry_mod
 from moonglade import achievements as achievements_mod
+from moonglade import library_runs as library_runs_mod
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -133,7 +134,7 @@ def test_the_curation_import_snapshot_is_a_decision(tmp_path, moved):
     that cannot be made again, like the organize undo list: it goes where decisions_path()
     says, beside nothing else."""
     from moonglade import curation_io as cio
-    from moonglade.gallery import CATALOG_FIELDS, save_catalog
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "m1", "filename": "a_m1.png", "created_at": "2025-01-01T00:00:00"}])
@@ -149,7 +150,7 @@ def test_the_curation_import_snapshot_is_a_decision(tmp_path, moved):
 
 def test_the_reconcile_stamp_follows_records_path(tmp_path, moved):
     (tmp_path / "_r").mkdir()
-    core._stamp_reconcile(tmp_path, 1, 0)
+    library_runs_mod._stamp_reconcile(tmp_path, 1, 0)
     assert (tmp_path / "_r" / "reconcile_stamp.json").is_file()
     assert not (tmp_path / "reconcile_stamp.json").exists()
     assert integrity.reconciled_at(tmp_path)          # and the reader finds it there

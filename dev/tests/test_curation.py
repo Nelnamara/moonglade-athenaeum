@@ -22,13 +22,17 @@ import sqlite3
 import pytest
 
 from moonglade import backup as core
+from moonglade import history as history_mod
 from moonglade import gallery as g
-from moonglade.gallery import (
-    CATALOG_FIELDS, CurationError, curate_apply, curate_restore, delete_collection,
-    list_media_ids, list_group_rows, load_catalog, merge_collections, normalize_tag,
-    personal_get, query_catalog, rename_collection, save_smart_collection, save_catalog,
-)
+from moonglade.catalog_verbs import list_media_ids, list_group_rows
+from moonglade.curation import (CurationError, curate_apply, curate_restore, delete_collection,
+                                merge_collections, normalize_tag, personal_get, query_catalog,
+                                rename_collection, save_smart_collection)
+from moonglade.catalog import CATALOG_FIELDS, load_catalog, save_catalog
 from tests.conftest import extract_login_csrf, login_client
+from moonglade import catalog_search as catalog_search_mod
+from moonglade import catalog as catalog_mod
+from moonglade import curation as curation_mod
 
 
 def _row(**kw):
@@ -64,8 +68,9 @@ def _no_network(monkeypatch):
         raise AssertionError("curation reached for the network")
     monkeypatch.setattr(socket.socket, "connect", _boom)
     for name in ("gql", "gql_adhoc", "gql_mutate", "_make_session"):
-        if hasattr(core, name):
-            monkeypatch.setattr(core, name, _boom)
+        home = next((m for m in (core, history_mod) if hasattr(m, name)), None)
+        if home is not None:
+            monkeypatch.setattr(home, name, _boom)
 
 
 def _tables(db):
@@ -108,7 +113,7 @@ def test_an_existing_library_gains_the_tables_and_loses_nothing(tmp_path):
     after = sqlite3.connect(str(p)).execute("SELECT * FROM catalog ORDER BY media_id").fetchall()
     assert after == before, "the migration touched an existing catalog row"
     assert len(rows) == 5
-    g.migrate(p, force=True)                    # re-running the DDL stays harmless
+    catalog_mod.migrate(p, force=True)                    # re-running the DDL stays harmless
     assert sqlite3.connect(str(p)).execute("SELECT * FROM catalog ORDER BY media_id").fetchall() == before
 
 
@@ -117,9 +122,9 @@ def test_opening_and_reading_writes_nothing(db):
     leave every table exactly as it was."""
     save_smart_collection(db, "keeper")
     before = _dump(db)
-    g.unique_collections(db)
-    g.list_smart_collections(db)
-    g.collection_summaries(db)
+    catalog_mod.unique_collections(db)
+    curation_mod.list_smart_collections(db)
+    curation_mod.collection_summaries(db)
     query_catalog(db, q="keeper -reject tag:x note:y")
     query_catalog(db, collection="keeper")
     personal_get(db, ["1", "2"])
@@ -219,7 +224,7 @@ def test_unknown_ids_are_skipped_not_created(db):
 
 def test_a_purge_leaves_the_personal_layer_waiting_for_a_restore(db):
     curate_apply(db, ["3"], {"mark": "keeper", "note": "hands"})
-    g.delete_from_catalog(db, "3")                        # what a trash purge does to the row
+    catalog_mod.delete_from_catalog(db, "3")                        # what a trash purge does to the row
     assert personal_get(db, ["3"])["3"]["note"] == "hands"
 
 
@@ -260,15 +265,15 @@ def test_negation_covers_free_text_and_operators_and_spares_bare_numbers(db):
     assert _ids(db, q='-"night elf"') == ["2", "3", "4"]
     assert _ids(db, q="-collection:Faves") == ["2", "4"]
     # a leading hyphen on a bare number is what it always was: literal text, not a negation
-    where, params = g._build_where("-5", "", "", "")
+    where, params = catalog_search_mod._build_where("-5", "", "", "")
     assert "NOT" not in where and params == ["%-5%", "%-5%"]
-    where, _ = g._build_where("-", "", "", "")
+    where, _ = catalog_search_mod._build_where("-", "", "", "")
     assert "NOT" not in where
 
 
 def test_a_quoted_keeper_is_a_phrase_not_the_operator(db):
     curate_apply(db, ["1"], {"mark": "keeper"})
-    where, params = g._build_where('"keeper"', "", "", "")
+    where, params = catalog_search_mod._build_where('"keeper"', "", "", "")
     assert "personal_meta" not in where and params == ["%keeper%", "%keeper%"]
 
 
@@ -321,7 +326,7 @@ def test_save_over_replaces_only_the_query(db):
     save_smart_collection(db, "keeper", name="Keepers")
     r = save_smart_collection(db, "reject", replace="Keepers")
     assert r["created"] is False and r["name"] == "Keepers"
-    assert [s["query"] for s in g.list_smart_collections(db)] == ["reject"]
+    assert [s["query"] for s in curation_mod.list_smart_collections(db)] == ["reject"]
     with pytest.raises(CurationError):
         save_smart_collection(db, "x", replace="No such")
 
@@ -329,17 +334,17 @@ def test_save_over_replaces_only_the_query(db):
 def test_pictures_cannot_be_added_to_a_smart_collection(db):
     save_smart_collection(db, "keeper", name="Keepers")
     with pytest.raises(CurationError):
-        g.add_to_collection(db, ["1"], "Keepers")
+        catalog_mod.add_to_collection(db, ["1"], "Keepers")
     with pytest.raises(CurationError):
-        g.add_to_collection(db, ["1"], "keepers")
-    assert g.unique_collections(db) == ["Druid", "Faves"]
+        catalog_mod.add_to_collection(db, ["1"], "keepers")
+    assert catalog_mod.unique_collections(db) == ["Druid", "Faves"]
 
 
 def test_the_summaries_list_both_kinds_with_counts_and_covers(db):
     curate_apply(db, ["3"], {"mark": "keeper"})
     save_smart_collection(db, "keeper", name="Keepers")
-    s = {c["name"]: c for c in g.collection_summaries(db)}
-    assert [c["name"] for c in g.collection_summaries(db)] == ["Druid", "Faves", "Keepers"]
+    s = {c["name"]: c for c in curation_mod.collection_summaries(db)}
+    assert [c["name"] for c in curation_mod.collection_summaries(db)] == ["Druid", "Faves", "Keepers"]
     assert (s["Druid"]["kind"], s["Druid"]["count"], s["Druid"]["cover"]) == ("hand", 2, "1")
     assert (s["Faves"]["count"], s["Faves"]["cover"]) == (2, "1")
     assert s["Keepers"] == {"name": "Keepers", "kind": "smart", "count": 1, "query": "keeper", "cover": "3"}
@@ -370,7 +375,7 @@ def test_rename_scrubs_commas_which_are_the_stores_separator(db):
 def test_rename_a_smart_collection(db):
     save_smart_collection(db, "keeper", name="Keepers")
     assert rename_collection(db, "Keepers", "Best")["kind"] == "smart"
-    assert [s["name"] for s in g.list_smart_collections(db)] == ["Best"]
+    assert [s["name"] for s in curation_mod.list_smart_collections(db)] == ["Best"]
     with pytest.raises(CurationError):
         rename_collection(db, "Best", "Druid")
 
@@ -380,7 +385,7 @@ def test_merge_dedupes_into_the_first_and_removes_the_others(db):
     r = merge_collections(db, ["Faves", "Druid"])
     assert r["target"] == "Faves" and r["merged"] == ["Druid"] and r["pictures"] == 3
     assert _ids(db, collection="Faves") == ["1", "2", "3"]
-    assert g.unique_collections(db) == ["Faves"], "the others are gone"
+    assert catalog_mod.unique_collections(db) == ["Faves"], "the others are gone"
     row1 = next(x for x in load_catalog(db) if x["media_id"] == "1")
     assert row1["collections"] == "Faves", "picture 1 was in both and holds the label once"
     assert len(load_catalog(db)) == before
@@ -397,7 +402,7 @@ def test_merge_needs_two_and_refuses_smart_and_unknown(db):
     assert "smart" in str(e.value)
     with pytest.raises(CurationError):
         merge_collections(db, ["Druid", "Nope"])
-    assert g.unique_collections(db) == ["Druid", "Faves"], "a refused merge changes nothing"
+    assert catalog_mod.unique_collections(db) == ["Druid", "Faves"], "a refused merge changes nothing"
 
 
 def test_delete_never_deletes_pictures(db):
@@ -407,7 +412,7 @@ def test_delete_never_deletes_pictures(db):
     after = load_catalog(db)
     assert len(after) == len(before)
     assert [x["media_id"] for x in after] == [x["media_id"] for x in before]
-    assert g.unique_collections(db) == ["Faves"]
+    assert catalog_mod.unique_collections(db) == ["Faves"]
     row1 = next(x for x in after if x["media_id"] == "1")
     assert row1["collections"] == "Faves"
 

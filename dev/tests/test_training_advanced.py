@@ -26,10 +26,13 @@ from moonglade import backup as core
 from moonglade import gen_road as gen_road_mod
 from moonglade import paths
 from moonglade import training as training_mod
-from moonglade.gallery import CATALOG_FIELDS, TrainGuard, create_app, save_catalog
+from moonglade.gallery import create_app
+from moonglade.train_guard import TrainGuard
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_test_client
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import telemetry as telemetry_mod
+from moonglade import account_api as account_api_mod
 
 T3 = "2024383379556065549"          # Tsubaki.3 (MMDIT26B), Recommended
 T2 = "1983308862240288769"          # Tsubaki.2 (MMDIT26A)
@@ -71,7 +74,7 @@ def _task(tid="700", status="captionReady", n=12, mode="advanced", progress=None
     lambda s: training_mod.retry_training(s, "7"),
     lambda s: training_mod.publish_training(s, "7", "private", "decline"),
     lambda s: core.make_model_public(s, "7"),
-    lambda s: core.join_lora_rebates(s, "7"),
+    lambda s: account_api_mod.join_lora_rebates(s, "7"),
 ])
 def test_every_training_writer_checks_read_only_before_the_network(call, pixai, monkeypatch):
     monkeypatch.setattr(core, "_check_read_only",

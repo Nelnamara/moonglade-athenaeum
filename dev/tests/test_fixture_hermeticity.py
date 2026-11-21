@@ -194,7 +194,7 @@ def _collect_at_three(root, monkeypatch):
     the hour-driven flag has had since 2026-10-02 (a page load no longer reads the hour)."""
     from moonglade import backup as core
     from moonglade import gallery as g
-    from moonglade.gallery import CATALOG_FIELDS, save_catalog
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
     from tests.conftest import login_client
 
@@ -246,7 +246,7 @@ def test_the_clock_pin_keeps_the_hour_out_of_an_installs_ledger(tmp_path, monkey
 
     page_only = tmp_path / "page-only"
     page_only.mkdir()
-    from moonglade.gallery import save_catalog
+    from moonglade.catalog import save_catalog
     from tests.conftest import login_client
     save_catalog(page_only / "catalog.db", [])
     with mock.patch("datetime.datetime", _ThreeAM):

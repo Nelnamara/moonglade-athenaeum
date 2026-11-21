@@ -335,6 +335,225 @@ SEAMS = {
         "_CONTEST_PAGE_SIZE", "_CONTEST_MAX_PAGES", "_CONTEST_PAGE_PAUSE", "_contest_title",
         "_contest_rule", "list_contests", "run_contests", "_contest_rows", "contest_my_entries",
         "contest_winners", "contest_artworks", "contest_enter"]},
+    # Split phase 4: the first route family. Its routes and helpers are closures inside
+    # register(app, ctx), not module attributes, so register is the one name it owns.
+    "moonglade.routes_generate": {"from": "moonglade.gallery", "names": ["register"]},
+    # Split phase 4: the Loom family, the same way: its store (the board files, the render
+    # journal, the sends ledger, the beds) and its routes, each a register(app, ctx). A name has
+    # one owner and routes_generate owns gallery's `register`, so these two list none: no
+    # gallery attribute moved, and every reader of gallery's text counts as touched.
+    "moonglade.web_loom_store": {"from": "moonglade.gallery", "names": []},
+    "moonglade.routes_loom": {"from": "moonglade.gallery", "names": []},
+    # Split phase 4: the front door and its security core (the sign-in routes, every request
+    # hook, the CSRF and session checks, the page shells), the same way: one register(app, ctx),
+    # and no gallery attribute moved.
+    "moonglade.routes_gate": {"from": "moonglade.gallery", "names": []},
+    # Split phase 4: the background block (the Control Panel's job runner, the job log, the
+    # schedule and its thread, the watch and its threads, the export job's state), the same
+    # way: one register(app, ctx), and no gallery attribute moved.
+    "moonglade.web_threads": {"from": "moonglade.gallery", "names": []},
+    # Split phase 4: the Control Panel's routes (health and integrity, users, the server's
+    # power and library folder, the updater, Bonjour, the exports, the job runner's routes),
+    # the same way: one register(app, ctx), and no gallery attribute moved.
+    "moonglade.routes_panel": {"from": "moonglade.gallery", "names": []},
+    # Split phase 4: the delete routes (the per-image cloud delete, the local delete, the bulk
+    # task delete and its preview, the Trash panel), the same way: one register(app, ctx), and
+    # no gallery attribute moved.
+    "moonglade.routes_delete": {"from": "moonglade.gallery", "names": []},
+    # Split phase 4: the recipe market and the model pickers' Saved tab, the same way: one
+    # register(app, ctx), and no gallery attribute moved.
+    "moonglade.routes_recipes": {"from": "moonglade.gallery", "names": []},
+    # Split phase 4: the library's routes (rating, collections, curation, thumbnails, the video
+    # file, the full image, the ZIP export, the model search, the duplicates, /api/library,
+    # /api/detail, /api/history) and the app-bound _find_local_video_file and
+    # _loom_complete_clip, the same way: one register(app, ctx), and no gallery attribute moved.
+    "moonglade.routes_library": {"from": "moonglade.gallery", "names": []},
+    # Split phase 4: the account's routes (the header chip and account detail, stats, the API-key
+    # save, the asset fetch, the claim, snippets, Toolbox presets, saved views, preferences and
+    # the in-app guide), the same way: one register(app, ctx), and no gallery attribute moved.
+    "moonglade.routes_account": {"from": "moonglade.gallery", "names": []},
+    # Split phase 4: the community routes (contests, My Art, lineage, siblings, series, a
+    # batch's detail, the inbox, comments and gifts), the same way: one register(app, ctx), and
+    # no gallery attribute moved.
+    "moonglade.routes_community": {"from": "moonglade.gallery", "names": []},
+    # Split phase 4: LoRA training's routes (the Basic submit, the advanced flow, runs, retry,
+    # publish, make public) with the start lock, the per-run locks and the train guard, the same
+    # way: one register(app, ctx), and no gallery attribute moved (TrainGuard stays in gallery).
+    "moonglade.routes_train": {"from": "moonglade.gallery", "names": []},
+    # Split phase 4: the achievement routes (the Folio's read, the skin switch, the beacon's nonce
+    # and event, the narrator's poke) with create_app's own _ach_lock, the same way: one
+    # register(app, ctx), and no gallery attribute moved (the nonce tables stay in gallery).
+    "moonglade.routes_ach": {"from": "moonglade.gallery", "names": []},
+    # Split phase 4: the Mirror's routes (status, the switch, Disconnect, Connect, the Connect
+    # from PixAI window and its token), the same way: one register(app, ctx), and no gallery
+    # attribute moved (the sign-in and its renewal stay in moonglade.mirror).
+    "moonglade.routes_mirror": {"from": "moonglade.gallery", "names": []},
+    # Split phase 4: the branding routes (the public branding art, badge thumbnails, feat masks
+    # and the branding panel's API), the same way: one register(app, ctx), and no gallery
+    # attribute moved.
+    "moonglade.routes_branding": {"from": "moonglade.gallery", "names": []},
+    # Split phase 4: the import and outside routes (Fix them, Suggest prompt, tag autocomplete,
+    # the upload and the local import with its zip extractor), the same way: one
+    # register(app, ctx), and no gallery attribute moved (the zip caps stay in gallery).
+    "moonglade.routes_import": {"from": "moonglade.gallery", "names": []},
+    # Split phase 4, the module-level sections: gallery's top level leaves section by section,
+    # the same way phase 3's did (moved names are reached through the new module, not gallery).
+    "moonglade.redact": {"from": "moonglade.gallery", "names": [
+        "_USER_HOME_RE", "_redact_host_paths_cli"]},
+    "moonglade.web_tiers": {"from": "moonglade.gallery", "names": [
+        "PUBLIC", "LOGIN", "LOCALHOST", "TIERS", "LOCALHOST_REFUSAL", "_TIER_ATTR", "tier",
+        "route_tier", "route_tier_message", "declare_endpoint_tier",
+        "assert_every_route_declares_a_tier"]},
+    "moonglade.watch_plans": {"from": "moonglade.gallery", "names": [
+        "WATCH_HEALTHY_S", "WATCH_RECONNECT_WAIT", "WATCH_BACKOFF_FIRST", "WATCH_BACKOFF_MAX",
+        "WATCH_CATCHUP_MIN_GAP", "WATCH_SWEEP_FLOOR", "WATCH_SUBSCRIBE_SETTLE",
+        "WATCH_COLLECT_RETRY_S", "watch_reconnect_plan", "catchup_plan", "watch_close_info"]},
+    "moonglade.name_hunt": {"from": "moonglade.gallery", "names": [
+        "_HUNT_MAX_PAGES", "_hunt_by_name"]},
+    "moonglade.ach_beacon": {"from": "moonglade.gallery", "names": [
+        "_ACH_NONCE_TTL_S", "_ACH_NONCE_MAX", "_ACH_DEBOUNCE_S", "_ACH_RATE_MAX",
+        "_ACH_RATE_WINDOW_S", "_ach_lock", "_ach_nonces", "_ach_last", "_ach_rate", "_ach_sweep",
+        "_ach_mint", "_ach_consume", "_ach_debounced", "_ach_rate_ok"]},
+    "moonglade.scenes": {"from": "moonglade.gallery", "names": [
+        "SCENES_TTL", "_scenes_cache", "_scenes_cache_lock", "_SCENE_LANG_KEYS", "_SCENE_CDN_HOST",
+        "pixai_cdn_url_ok", "scene_catalog", "_scene_label", "_scene_shape", "_scene_detail",
+        "scene_thumb_url", "scene_local_art", "scene_row"]},
+    "moonglade.pages": {"from": "moonglade.gallery", "names": [
+        "DESIGN_TOKENS_CSS", "_upscale_const_js", "_PREPAINT_BOOT_JS", "_AUTH_401_GUARD_JS",
+        "_LOOM_SHELL", "LOOM_PAGE_BUNDLE"]},
+    "moonglade.web_policy": {"from": "moonglade.gallery", "names": [
+        "_GB", "REQUEST_MAX_BYTES", "UPLOAD_MAX_BYTES", "IMPORT_REQUEST_MAX_BYTES",
+        "LOOM_BUNDLE_REQUEST_MAX_BYTES", "ZIP_MAX_MEMBERS", "ZIP_MAX_MEMBER_BYTES",
+        "ZIP_MAX_TOTAL_BYTES", "IMPORT_CLI_HINT", "ZIP_TOO_MANY_MEMBERS", "ZIP_MEMBER_TOO_BIG",
+        "ZIP_TOO_BIG", "ZipTooBig", "_too_large_sentence", "SESSION_ABSOLUTE_LIFETIME_S",
+        "SESSION_IDLE_LIFETIME_DAYS", "_INLINE_FILE_TYPES", "FILE_RESPONSE_CSP", "SVG_FILE_CSP",
+        "_MEDIA_TYPE_BY_EXT", "media_type_for", "_attachment_disposition", "harden_file_response",
+        "CSP_NONCE_MARK", "CSP_PAGE_POLICY", "page_csp", "CROSS_ORIGIN_REFUSED",
+        "PLAIN_HTTP_REFUSED", "CONNECT_TOKEN_NEEDS_HTTPS", "_origin_tuple", "same_origin_write"]},
+    "moonglade.loom_files": {"from": "moonglade.gallery", "names": [
+        "_LOOM_IDS_CACHE", "_loom_board_files", "loom_render_ids", "LOOM_BED_MAX_BYTES",
+        "LOOM_BED_FORM_SLACK", "LOOM_BED_FILE_RE", "LOOM_BUNDLE_MAX_BEDS", "LOOM_BED_MIMES",
+        "LOOM_BED_UNUSED_GRACE_S", "LOOM_BED_TEMP_SWEEP_AGE_S", "LOOM_EDL_CLIP_RE",
+        "LOOM_EDL_BED_NAME_RE", "LOOM_MEDIA_ID_RE", "LOOM_BUNDLE_MEDIA_RE",
+        "LOOM_BUNDLE_MEDIA_MAX_BYTES", "LOOM_EDL_MAX_EDL_CHARS", "LOOM_EDL_MAX_CSV_CHARS",
+        "LOOM_EDL_MAX_CLIPS", "LOOM_EXPORT_SWEEP_AGE_S", "LOOM_FRAME_FPS", "LOOM_FRAME_WIDTH",
+        "LOOM_FRAME_MAX_SECONDS", "LOOM_FRAME_CACHE_MAX_FILES", "LOOM_FRAME_CACHE_MAX_BYTES",
+        "LOOM_FRAME_THUMBS_MAX", "LOOM_FRAME_THUMBS_PAUSE_S", "LOOM_FRAME_THUMB_ID_RE",
+        "LOOM_FRAME_FILE_RE", "LOOM_BED_FADE_IN", "LOOM_BED_FADE_OUT", "LOOM_BED_DUCK_DB",
+        "sniff_audio_ext", "_unlink_quiet", "loom_edl_zip_stem", "_LOOM_BOARD_NAME_RE",
+        "_json_string_body", "loom_board_name_salvage", "loom_board_beds", "loom_bed_windows",
+        "loom_bed_audio_graph"]},
+    "moonglade.catalog_search": {"from": "moonglade.gallery", "names": [
+        "_SEARCH_OPS", "_SEARCH_TOKEN_RE", "_SEARCH_KEY_RE", "_SEARCH_NUM_RE", "_SEARCH_DATE_RE",
+        "_SEARCH_DATE_PART_RE", "_SEARCH_LORA_WEIGHT_RE", "_LORA_ENTRY_RE", "_SEARCH_TRUTHY",
+        "_SEARCH_FALSY", "_unquote", "_personal_tag_pattern", "_SEARCH_NEG_NUMBER_RE",
+        "_SEARCH_STAR_RE", "_personal_mark_clause", "_search_token_clause", "_AR_EXPR",
+        "AR_SQUARE", "AR_TALL_MAX", "AR_WIDE_MIN", "AR_TOLERANCE", "_AR_WH_RE", "_AR_CMP_RE",
+        "_aspect_clause", "_type_clause", "_date_part_bounds", "_date_clause", "_lora_name_regex",
+        "_lora_weight_match", "_lora_weight_clause", "_operator_clause", "_build_where"]},
+    "moonglade.catalog": {"from": "moonglade.gallery", "names": [
+        "CATALOG_FIELDS", "THUMB_SIZE", "THUMB_QUALITY", "_CREATE_TABLE", "_UPSERT", "init_db",
+        "_VIDEO_NAME_TO_ID", "_VIDEO_ROW_REPAIR_SQL", "_MIGRATIONS", "_MIGRATED", "_MIGRATE_LOCK",
+        "_MIGRATE_RETRY_AT", "MIGRATE_BUSY_BACKOFF_S", "MIGRATE_BUSY_TIMEOUT_S", "_catalog_key",
+        "migrate", "catalog", "catalog_csv_text", "load_catalog", "save_catalog",
+        "merge_over_current", "save_catalog_over_snapshot", "update_rating", "delete_from_catalog",
+        "update_prompt_full", "bulk_replace_prompt", "_db_is_empty", "_SORT_SQL",
+        "_DEFAULT_SORT_SQL", "_MANUAL_SORT_SQL", "_order_sql", "_like_pattern", "_like_escape",
+        "get_row", "get_row_by_task", "is_archive_only", "_split_collections",
+        "unique_collections", "_COLLECTIONS_LOCK", "add_to_collection", "remove_from_collection"]},
+    "moonglade.curation": {"from": "moonglade.gallery", "names": [
+        "CurationError", "PERSONAL_MARKS", "PERSONAL_TAG_MAX_LEN", "PERSONAL_TAGS_MAX",
+        "PERSONAL_NOTE_MAX", "CURATE_MAX_IDS", "_TAG_SPACE_RE", "_TAG_STRIP_RE", "_TAG_DASHES_RE",
+        "normalize_tag", "_split_tags", "_CURATION_LOCK", "_now_stamp", "_clean_collection_name",
+        "_all_collection_names", "_is_smart_name", "list_smart_collections",
+        "smart_collection_query", "_expand_smart", "_auto_smart_name", "save_smart_collection",
+        "_rows_with_label", "rename_collection", "merge_collections", "delete_collection",
+        "_collection_kind", "ordered_members", "set_collection_order", "collection_summaries",
+        "personal_get", "_curation_state", "_write_curation_state", "_clean_tag", "_clean_note",
+        "_clean_mark", "_clean_rating", "_clean_ids", "curate_apply", "curation_rows",
+        "curate_restore", "query_catalog", "_narrow_to_series", "_series_member_task_ids",
+        "batch_member_order", "_filters_from_args", "catalog_counts"]},
+    "moonglade.train_guard": {"from": "moonglade.gallery", "names": [
+        "TrainGuard"]},
+    "moonglade.catalog_verbs": {"from": "moonglade.gallery", "names": [
+        "task_media", "media_dims", "published_delete_note", "mark_cloud_deleted",
+        "task_media_count", "_TASK_CHUNK", "_delete_targets", "_members_of_tasks",
+        "delete_targets", "delete_preview_rows", "myart_items", "SNAPSHOT_KEEP_DAYS",
+        "MYART_WINDOW_DAYS", "_local_day", "record_artwork_snapshots", "myart_window",
+        "myart_coverage", "artwork_media_ids", "artwork_row", "publish_state",
+        "ARTWORK_META_FIELDS", "apply_artwork_meta", "apply_artwork_views", "lineage",
+        "sibling_media", "recent_train_task_page", "history_page", "history_created_ats",
+        "distinct_task_count", "backup_coverage", "rows_for_media_ids", "paid_credit_for_tasks",
+        "loom_cost", "loom_send_key", "loom_sends_fold", "loom_backfill_sends", "integrity_rows",
+        "list_media_ids", "list_group_rows", "unique_models", "backfill_batches", "catalog_years",
+        "find_image_file"]},
+    "moonglade.thumbs": {"from": "moonglade.gallery", "names": [
+        "compute_dhash", "_THUMBLESS_EXTS", "thumbnail_renders", "_PIL_EXTS", "CHECKER_A",
+        "CHECKER_B", "CHECKER_SQUARE", "CHECKER_MARKER", "_see_through_rgba", "_checkerboard",
+        "thumb_rgb", "_could_be_see_through", "source_is_see_through", "make_thumbnail",
+        "make_video_thumbnail", "probe_has_audio", "probe_duration", "build_thumbnails",
+        "_write_checker_marker", "recheck_see_through_thumbnails", "start_see_through_recheck"]},
+    "moonglade.trash": {"from": "moonglade.gallery", "names": [
+        "DELETE_PREVIEW_TASK_CAP", "DELETE_PREVIEW_LIVE_CAP", "DELETE_PREVIEW_LIVE_WORKERS",
+        "DELETE_PREVIEW_LIVE_BUDGET_S", "_trash_meta_path", "_read_trash_meta",
+        "_snapshot_before_purge", "purge_media_local", "_find_quarantined_file",
+        "list_quarantined", "_list_quarantined", "_ensure_trash_thumbs",
+        "restore_quarantined_media", "delete_quarantined_forever", "empty_trash"]},
+    "moonglade.dupe_review": {"from": "moonglade.gallery", "names": [
+        "_quarantine_meta_path", "_resolve_under", "_reconcile_one_row_after_move",
+        "quarantine_duplicate_file", "restore_quarantined_duplicate", "_validate_duplicate_pair"]},
+    "moonglade.web_accounts": {"from": "moonglade.backup", "names": [
+        "WEB_PASSWORD_HASH_METHOD", "get_or_create_secret_key", "_find_web_user",
+        "_EPOCH_SEQ_KEY", "_EPOCH_LEGACY_MARGIN", "_next_sess_epoch", "list_web_users",
+        "MIN_WEB_PASSWORD_LEN", "MAX_WEB_USERNAME_LEN", "_COMMON_PASSWORDS", "_is_single_run",
+        "password_problem", "username_problem", "add_or_update_web_user",
+        "set_web_user_password_guarded", "add_web_user_if_new", "remove_web_user",
+        "remove_web_user_guarded", "get_web_user_session_epoch", "bump_web_user_session_epoch",
+        "_dummy_hash_cache", "_dummy_password_hash", "verify_web_user", "run_add_web_user",
+        "run_remove_web_user", "remove_login_files", "run_list_web_users"]},
+    "moonglade.history": {"from": "moonglade.backup", "names": [
+        "_HISTORY_PAGE_DOC", "HISTORY_REFUSED", "HISTORY_RETRY_WAIT_S", "HISTORY_FALLBACK_LAST",
+        "COUNT_PAGE_SIZE", "_history_wait", "_feed_refusal", "gql", "_history_answer",
+        "find_connection", "slug_from_prompt", "build_stem_name", "_FIX_TAGS", "local_media_id",
+        "_LOCAL_SUFFIX_RE", "build_local_name", "migrate_local_filenames", "fixer_block",
+        "fix_marker", "build_fix_stem_name", "already_downloaded", "already_downloaded_video",
+        "_file_sha", "_same_bytes", "_same_pixels", "media_ids_for", "cataloged_media_ids",
+        "_is_video_task_node", "extract_meta"]},
+    "moonglade.media_fetch": {"from": "moonglade.backup", "names": [
+        "URL_VARIANT_PREFERENCE", "_MEDIA_TLS_LOCK", "_media_tls_warned", "_CONSOLE_LOCK",
+        "_console_block", "_warn_media_tls_once", "resolve_media", "ext_from_ct",
+        "embed_metadata", "convert_image", "download", "page_variables"]},
+    "moonglade.full_meta": {"from": "moonglade.backup", "names": [
+        "_FULL_META_FIELDS", "_paid_credit_str", "media_file_gql", "video_outputs",
+        "run_list_models", "_GEN_SURFACE_FIELDS", "_TASK_ROW_FIELDS", "_prompt_helper_label",
+        "_RECORDED_OUTPUT_FORMATS", "_output_format_of", "_mc_int_str", "_task_for_full_meta",
+        "extract_full_meta", "batch_position", "_with_batch_position", "_resolve_model_preset",
+        "_fill_preset_defaults", "resolve_loras", "_merge_full", "known_catalog_rows",
+        "carry_local_fields", "_created_at_utc", "build_catalog_row", "cmd_convert_existing"]},
+    "moonglade.library_runs": {"from": "moonglade.backup", "names": [
+        "run_sync_artworks", "run_sync_videos", "_under", "run_faststart_videos",
+        "run_import_local", "_resolved_loras", "_resolved_model_name", "_edit_model_label",
+        "_needs_model_fix", "run_fix_models", "RECONCILE_STAMP", "_NO_PICTURE_STATUSES",
+        "feed_counts", "read_reconcile_stamp", "_stamp_reconcile", "run_reconcile_deleted",
+        "DiskCounts", "_count_backup_images", "run_rebuild_similar", "run_sync_similar",
+        "_one_line", "run_search", "run_catalog_stats", "_META_COVERAGE",
+        "_print_meta_coverage"]},
+    "moonglade.account_api": {"from": "moonglade.backup", "names": [
+        "run_probe", "run_count", "_ARTWORK_LIST_DOC", "_artwork_list_reason", "artwork_list_gql",
+        "artwork_views_bulk", "extract_artwork_meta", "_ACCOUNT_QUERY", "artwork_views",
+        "_UPSERT_ARTWORK", "_PUBLISH_FROM_TASK", "_DELETE_ARTWORK", "_LIST_TACKS",
+        "resolve_tack_ids", "lora_rebate_eligibility", "_THUMB_VARIANTS", "media_thumbnail_url",
+        "join_lora_rebates", "source_media_of_task", "task_media_index",
+        "publish_artwork_from_task", "update_artwork", "delete_artwork", "account_info",
+        "account_is_member", "_CREDIT_BALANCE_QUERY", "credit_balance", "FREE_LORA_CAP",
+        "account_lora_cap", "run_account_info", "suggest_prompt", "tag_search_gql",
+        "run_suggest_prompt", "ClaimsResult", "list_claims", "claim_reward", "_fmt_epoch_ms",
+        "run_claims", "run_cards", "run_card_history", "run_coupons", "run_credit_log"]},
+    "moonglade.sync": {"from": "moonglade.backup", "names": [
+        "_DefaultDelay", "DEFAULT_DELAY", "_delay_was_chosen", "_pace_gate", "_parallel_map",
+        "run_backfill_meta", "_BACKFILL_CHECKPOINT_TASKS", "run_backfill_full_meta",
+        "run_backfill_lineage", "run_backfill_phash", "_check_time_capsule", "WALK_END_FLAG",
+        "walk_end_reached", "mark_walk_end_reached", "run_download", "run_rebuild_thumbs"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -350,61 +569,53 @@ SOURCE_READERS = {
     "tests/test_catalog_verbs.py": ("moonglade.gallery",),
     "tests/test_catchup_query.py": ("moonglade.gallery",),
     "tests/test_cli_doc_coverage.py": ("moonglade.backup",),
-    "tests/test_community_surface.py": ("moonglade.backup",),
     "tests/test_config_path_routing.py": ("moonglade.backup",),
-    "tests/test_contest_wins.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_create_door.py": ("moonglade.backup",),
     "tests/test_csrf_coverage.py": ("moonglade.backup", "moonglade.gallery"),
-    "tests/test_design_kit_sync.py": ("moonglade.gallery",),
-    "tests/test_doc_truth_residuals.py": ("moonglade.gallery",),
     "tests/test_edit_upload.py": ("moonglade.backup",),
     "tests/test_enhance.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_evidence_counters.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_first_party_sources.py": ("moonglade.gallery",),
     "tests/test_full_meta_rest_fallback.py": ("moonglade.backup",),
-    "tests/test_gen_surface.py": ("moonglade.backup", "moonglade.gallery"),
+    "tests/test_gen_surface.py": ("moonglade.backup",),   # its Loom read is routes_loom's now
     "tests/test_history_feed_document.py": ("moonglade.backup", "moonglade.gallery"),
-    "tests/test_jwt.py": ("moonglade.backup", "moonglade.gallery"),
-    "tests/test_library_dir.py": ("moonglade.gallery",),
+    "tests/test_jwt.py": ("moonglade.backup",),   # its scheduler read is web_threads' now
     "tests/test_living_library.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_logging.py": ("moonglade.gallery",),
-    "tests/test_loom_generate_guard.py": ("moonglade.gallery",),
-    "tests/test_loom_notify.py": ("moonglade.backup", "moonglade.gallery"),
+    "tests/test_loom_notify.py": ("moonglade.backup",),
     "tests/test_loom_p_routes.py": ("moonglade.gallery",),
     "tests/test_media_tools.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_move_edges.py": ("moonglade.gallery",),
-    "tests/test_network.py": ("moonglade.backup", "moonglade.gallery"),
+    "tests/test_network.py": ("moonglade.gallery",),   # its page_variables read: media_fetch
     "tests/test_outside_notice.py": ("moonglade.gallery",),
     "tests/test_pack_file_name.py": ("moonglade.gallery",),
     "tests/test_pack_file_type.py": ("moonglade.gallery",),
-    "tests/test_panel.py": ("moonglade.gallery",),
     "tests/test_pixai_client.py": ("moonglade.backup",),
     "tests/test_module_seams.py": ("moonglade.backup", "moonglade.gallery"),   # every module
     "tests/test_rest_delete_and_renewal.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_security_review_fixes.py": ("moonglade.gallery",),
+    "tests/test_server_one_module.py": ("moonglade.gallery",),
     "tests/test_server_stop_record.py": ("moonglade.gallery",),
     "tests/test_settings_store.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_setup_prepare.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_spend_no_retry.py": ("moonglade.backup",),
+    "tests/test_split_complete.py": ("moonglade.gallery",),   # C1-C3 read gallery.py; the rest is AST
     "tests/test_task_model_detail_document.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_telemetry.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_training_advanced.py": ("moonglade.backup",),
     "tests/test_training_parity.py": ("moonglade.backup",),
     "tests/test_tsubaki3_image_gate.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_unclear_single_sends.py": ("moonglade.backup",),
-    "tests/test_updater.py": ("moonglade.gallery",),
-    "tests/test_video_tsubaki.py": ("moonglade.backup",),
-    "tests/test_watch.py": ("moonglade.gallery",),
-    "tests/test_web_auth.py": ("moonglade.backup",),
-    "tools/export_design_kit.py": ("moonglade.gallery",),     # reads DESIGN_TOKENS_CSS by path
     "tools/split_names.py": ("moonglade.backup", "moonglade.gallery"),   # the move proof's sweep
     "loom/test/import-batches.test.js": ("moonglade.scan",),
     "loom/test/ledger-known-reasons.test.js": ("moonglade.cards",),
-    "loom/test/med-loom-bundle-missing-report.test.js": ("moonglade.gallery",),
-    "loom/test/mg-art-filters.test.js": ("moonglade.gallery",),
-    "loom/test/mg-notify-queue-phase.test.js": ("moonglade.gallery",),
-    "loom/test/mg-notify-website-source.test.js": ("moonglade.gallery",),
-    "loom/test/phone-back-layers.test.js": ("moonglade.gallery",),
+    "loom/test/med-loom-bundle-missing-report.test.js": ("moonglade.routes_loom",),
+    "loom/test/mg-art-filters.test.js": ("moonglade.pages",),
+    "loom/test/mg-notify-queue-phase.test.js": ("moonglade.pages",),
+    "loom/test/mg-notify-website-source.test.js": ("moonglade.pages",
+                                                   "moonglade.routes_generate",
+                                                   "moonglade.web_threads"),
+    "loom/test/phone-back-layers.test.js": ("moonglade.pages", "moonglade.routes_gate"),
     "loom/test/video-roster-parity.test.js": ("moonglade.gen_params",),
 }
 
@@ -1273,6 +1484,1040 @@ SOURCE_READERS_REVIEWED = {
         "cards", "cloud_delete", "contests", "gen_cli", "gen_params", "gen_road", "jobs",
         "media_tools", "mirror", "models", "organize", "pixai_client", "pricing", "task_feed",
         "task_reads", "training")),
+    # Split phase 4 step 0a: the one-server-module test reads only gallery.py's closing
+    # `if __name__ == "__main__":` block (its self-test swaps it for the old one); it was written
+    # after every move, and none of them touched that block.
+    *(("tests/test_server_one_module.py", "moonglade." + _m) for _m in (
+        "about", "account_prefs", "achievements", "branding", "contest_sync", "dupes", "health",
+        "living", "scan", "series", "telemetry", "updater")),
+    # Split phase 4: the create routes -> moonglade.routes_generate. Readers that read text which
+    # left gallery.py now read routes_generate too: test_csrf_coverage (the _check_csrf callers),
+    # test_catalog_verbs (the "no SQL in a handler" walk covers register), test_telemetry (the
+    # two bridge-set writers), test_evidence_counters, test_settings_store, test_catchup_query,
+    # test_artworks_adhoc and test_history_feed_document (their absence checks keep covering the
+    # moved code) and mg-notify-website-source.test.js (/api/jobs' "web" default). The rest read
+    # code that did not move (main, the Loom routes, the watch, the page shells, the palettes,
+    # create_app's setup and its other closures).
+    *((_r, "moonglade.routes_generate") for _r in (
+        "loom/test/med-loom-bundle-missing-report.test.js", "loom/test/mg-art-filters.test.js",
+        "loom/test/mg-notify-queue-phase.test.js", "loom/test/mg-notify-website-source.test.js",
+        "loom/test/phone-back-layers.test.js", "tests/test_app_paths.py",
+        "tests/test_artworks_adhoc.py", "tests/test_bonjour.py", "tests/test_branding.py",
+        "tests/test_branding_tree_rules.py", "tests/test_catalog_verbs.py",
+        "tests/test_catchup_query.py", "tests/test_csrf_coverage.py",
+        "tests/test_design_kit_sync.py", "tests/test_doc_truth_residuals.py",
+        "tests/test_evidence_counters.py", "tests/test_first_party_sources.py",
+        "tests/test_gen_surface.py", "tests/test_history_feed_document.py",
+        "tests/test_library_dir.py", "tests/test_living_library.py", "tests/test_logging.py",
+        "tests/test_loom_generate_guard.py", "tests/test_loom_notify.py",
+        "tests/test_loom_p_routes.py", "tests/test_network.py",
+        "tests/test_security_review_fixes.py", "tests/test_server_one_module.py",
+        "tests/test_settings_store.py", "tests/test_setup_prepare.py",
+        "tests/test_task_model_detail_document.py", "tests/test_telemetry.py", "tests/test_watch.py",
+        "tools/export_design_kit.py")),
+    # Split phase 4: the Loom -> moonglade.web_loom_store and moonglade.routes_loom. Readers of
+    # the moved text now read the Loom modules: test_loom_p_routes (its no-spend walks cover all
+    # three files), test_loom_generate_guard (the JSON-body and handoff source checks),
+    # test_security_review_fixes (the bundle import's named cap), test_gen_surface (the bundle
+    # import's catalog rows) and med-loom-bundle-missing-report.test.js (its label shapes); the
+    # absence and coverage readers routes_generate's move widened (test_csrf_coverage,
+    # test_catalog_verbs, test_telemetry, test_evidence_counters, test_settings_store,
+    # test_catchup_query, test_artworks_adhoc, test_history_feed_document) read both Loom
+    # modules too. The rest read code that did not move (main, the page shells and _LOOM_SHELL,
+    # the palettes, the scheduler and its ticks, create_app's setup and its other closures).
+    *((_r, "moonglade." + _m) for _m in ("web_loom_store", "routes_loom") for _r in (
+        "loom/test/med-loom-bundle-missing-report.test.js", "loom/test/mg-art-filters.test.js",
+        "loom/test/mg-notify-queue-phase.test.js", "loom/test/mg-notify-website-source.test.js",
+        "loom/test/phone-back-layers.test.js", "tests/test_app_paths.py",
+        "tests/test_artworks_adhoc.py", "tests/test_bonjour.py", "tests/test_branding.py",
+        "tests/test_branding_tree_rules.py", "tests/test_catalog_verbs.py",
+        "tests/test_catchup_query.py", "tests/test_contest_wins.py", "tests/test_csrf_coverage.py",
+        "tests/test_design_kit_sync.py", "tests/test_doc_truth_residuals.py",
+        "tests/test_evidence_counters.py", "tests/test_first_party_sources.py",
+        "tests/test_gen_surface.py", "tests/test_history_feed_document.py", "tests/test_jwt.py",
+        "tests/test_library_dir.py", "tests/test_living_library.py", "tests/test_logging.py",
+        "tests/test_loom_generate_guard.py", "tests/test_loom_notify.py",
+        "tests/test_loom_p_routes.py", "tests/test_move_edges.py", "tests/test_network.py",
+        "tests/test_outside_notice.py", "tests/test_pack_file_name.py",
+        "tests/test_pack_file_type.py", "tests/test_panel.py",
+        "tests/test_rest_delete_and_renewal.py", "tests/test_security_review_fixes.py",
+        "tests/test_server_one_module.py", "tests/test_server_stop_record.py",
+        "tests/test_settings_store.py", "tests/test_setup_prepare.py",
+        "tests/test_task_model_detail_document.py", "tests/test_telemetry.py",
+        "tests/test_updater.py", "tests/test_watch.py", "tools/export_design_kit.py")),
+    # Split phase 4: the front door -> moonglade.routes_gate. Readers of the moved text now read
+    # it there: phone-back-layers.test.js (three of the four served shells' viewport metas) and
+    # test_doc_truth_residuals (app_page()'s boot payload; /api/import-local's half stayed); the
+    # absence and coverage readers the earlier moves widened (test_csrf_coverage,
+    # test_catalog_verbs, test_telemetry, test_evidence_counters, test_settings_store,
+    # test_catchup_query, test_artworks_adhoc, test_history_feed_document, test_first_party_sources)
+    # read routes_gate too. The rest read code that did not move (main, _LOOM_SHELL, the palettes
+    # and DESIGN_TOKENS_CSS, the scheduler and the watch, create_app's setup and its other
+    # closures), or reach the moved code through a built app, not its text.
+    *((_r, "moonglade.routes_gate") for _r in (
+        "loom/test/mg-art-filters.test.js", "loom/test/mg-notify-queue-phase.test.js",
+        "loom/test/mg-notify-website-source.test.js", "loom/test/phone-back-layers.test.js",
+        "tests/test_app_paths.py", "tests/test_artworks_adhoc.py", "tests/test_bonjour.py",
+        "tests/test_branding.py", "tests/test_branding_tree_rules.py", "tests/test_catalog_verbs.py",
+        "tests/test_catchup_query.py", "tests/test_contest_wins.py", "tests/test_csrf_coverage.py",
+        "tests/test_design_kit_sync.py", "tests/test_doc_truth_residuals.py",
+        "tests/test_evidence_counters.py", "tests/test_first_party_sources.py",
+        "tests/test_history_feed_document.py", "tests/test_jwt.py", "tests/test_library_dir.py",
+        "tests/test_living_library.py", "tests/test_logging.py", "tests/test_loom_notify.py",
+        "tests/test_loom_p_routes.py", "tests/test_move_edges.py", "tests/test_network.py",
+        "tests/test_outside_notice.py", "tests/test_pack_file_name.py",
+        "tests/test_pack_file_type.py", "tests/test_panel.py",
+        "tests/test_rest_delete_and_renewal.py", "tests/test_security_review_fixes.py",
+        "tests/test_server_one_module.py", "tests/test_server_stop_record.py",
+        "tests/test_settings_store.py", "tests/test_setup_prepare.py",
+        "tests/test_task_model_detail_document.py", "tests/test_telemetry.py",
+        "tests/test_updater.py", "tests/test_watch.py", "tools/export_design_kit.py")),
+    # Split phase 4: the background block -> moonglade.web_threads. Readers of the moved text now
+    # read it there: test_watch (the mirror's collect branch, the catch-up), test_contest_wins,
+    # test_jwt, test_panel, test_rest_delete_and_renewal and test_updater (the scheduler loop and
+    # its ticks), mg-notify-website-source.test.js (the website-run labels; _LOOM_SHELL stayed),
+    # and test_living_library, whose pins read create_app and web_threads together;
+    # test_outside_notice's "create_app never starts it" covers the moved block too; the absence
+    # and coverage readers the earlier moves widened read web_threads too. The rest read code that
+    # did not move (main, _LOOM_SHELL, the palettes and DESIGN_TOKENS_CSS, the routes, create_app's
+    # setup), or reach the moved code through a built app, not its text.
+    *((_r, "moonglade.web_threads") for _r in (
+        "loom/test/mg-art-filters.test.js", "loom/test/mg-notify-queue-phase.test.js",
+        "loom/test/mg-notify-website-source.test.js", "loom/test/phone-back-layers.test.js",
+        "tests/test_app_paths.py", "tests/test_artworks_adhoc.py", "tests/test_bonjour.py",
+        "tests/test_branding.py", "tests/test_branding_tree_rules.py",
+        "tests/test_catalog_verbs.py", "tests/test_catchup_query.py", "tests/test_csrf_coverage.py",
+        "tests/test_design_kit_sync.py", "tests/test_doc_truth_residuals.py",
+        "tests/test_enhance.py", "tests/test_evidence_counters.py",
+        "tests/test_first_party_sources.py", "tests/test_history_feed_document.py",
+        "tests/test_library_dir.py", "tests/test_living_library.py", "tests/test_logging.py",
+        "tests/test_loom_notify.py", "tests/test_loom_p_routes.py", "tests/test_media_tools.py",
+        "tests/test_module_seams.py", "tests/test_move_edges.py", "tests/test_network.py",
+        "tests/test_outside_notice.py", "tests/test_pack_file_name.py",
+        "tests/test_pack_file_type.py", "tests/test_rest_delete_and_renewal.py",
+        "tests/test_security_review_fixes.py", "tests/test_server_one_module.py",
+        "tests/test_server_stop_record.py", "tests/test_settings_store.py",
+        "tests/test_setup_prepare.py", "tests/test_task_model_detail_document.py",
+        "tests/test_telemetry.py", "tests/test_tsubaki3_image_gate.py", "tests/test_updater.py",
+        "tools/export_design_kit.py", "tools/split_names.py")),
+    # Split phase 4: the Control Panel's routes -> moonglade.routes_panel. Readers of the moved text
+    # now read it there: test_library_dir (api_library_path), test_server_stop_record and
+    # test_updater (the update's own restart), and test_living_library, whose pins read create_app,
+    # web_threads and routes_panel together; the absence and coverage readers the earlier moves
+    # widened (test_csrf_coverage among them, for the panel's POST routes) read routes_panel too.
+    # The rest read code that did not move, name the panel's routes only as URLs they request, or
+    # reach the moved code through a built app, not its text.
+    *((_r, "moonglade.routes_panel") for _r in (
+        "loom/test/mg-art-filters.test.js", "loom/test/mg-notify-queue-phase.test.js",
+        "loom/test/mg-notify-website-source.test.js", "loom/test/phone-back-layers.test.js",
+        "tests/test_app_paths.py", "tests/test_artworks_adhoc.py", "tests/test_bonjour.py",
+        "tests/test_branding.py", "tests/test_branding_tree_rules.py",
+        "tests/test_catalog_verbs.py", "tests/test_catchup_query.py", "tests/test_csrf_coverage.py",
+        "tests/test_design_kit_sync.py", "tests/test_doc_truth_residuals.py",
+        "tests/test_enhance.py", "tests/test_evidence_counters.py",
+        "tests/test_first_party_sources.py", "tests/test_history_feed_document.py",
+        "tests/test_living_library.py", "tests/test_logging.py", "tests/test_loom_notify.py",
+        "tests/test_loom_p_routes.py", "tests/test_media_tools.py", "tests/test_module_seams.py",
+        "tests/test_move_edges.py", "tests/test_network.py", "tests/test_outside_notice.py",
+        "tests/test_pack_file_name.py", "tests/test_pack_file_type.py",
+        "tests/test_rest_delete_and_renewal.py", "tests/test_security_review_fixes.py",
+        "tests/test_server_one_module.py", "tests/test_server_stop_record.py",
+        "tests/test_settings_store.py", "tests/test_setup_prepare.py",
+        "tests/test_task_model_detail_document.py", "tests/test_telemetry.py",
+        "tests/test_tsubaki3_image_gate.py", "tools/export_design_kit.py", "tools/split_names.py")),
+    # Split phase 4: the delete routes -> moonglade.routes_delete. No reader slices the moved text
+    # out of gallery by name; the absence and coverage readers the earlier moves widened
+    # (test_csrf_coverage among them, for the delete routes' POSTs) read routes_delete too. The
+    # rest read code that did not move, name the delete routes only as URLs they request, or reach
+    # the moved code through a built app, not its text.
+    *((_r, "moonglade.routes_delete") for _r in (
+        "loom/test/mg-art-filters.test.js", "loom/test/mg-notify-queue-phase.test.js",
+        "loom/test/mg-notify-website-source.test.js", "loom/test/phone-back-layers.test.js",
+        "tests/test_app_paths.py", "tests/test_artworks_adhoc.py", "tests/test_bonjour.py",
+        "tests/test_branding.py", "tests/test_branding_tree_rules.py",
+        "tests/test_catalog_verbs.py", "tests/test_catchup_query.py", "tests/test_csrf_coverage.py",
+        "tests/test_design_kit_sync.py", "tests/test_doc_truth_residuals.py",
+        "tests/test_enhance.py", "tests/test_evidence_counters.py",
+        "tests/test_first_party_sources.py", "tests/test_history_feed_document.py",
+        "tests/test_living_library.py", "tests/test_logging.py", "tests/test_loom_notify.py",
+        "tests/test_loom_p_routes.py", "tests/test_media_tools.py", "tests/test_module_seams.py",
+        "tests/test_move_edges.py", "tests/test_network.py", "tests/test_outside_notice.py",
+        "tests/test_pack_file_name.py", "tests/test_pack_file_type.py",
+        "tests/test_rest_delete_and_renewal.py", "tests/test_security_review_fixes.py",
+        "tests/test_server_one_module.py", "tests/test_server_stop_record.py",
+        "tests/test_settings_store.py", "tests/test_setup_prepare.py",
+        "tests/test_task_model_detail_document.py", "tests/test_telemetry.py",
+        "tests/test_tsubaki3_image_gate.py", "tools/export_design_kit.py", "tools/split_names.py")),
+    # Split phase 4: the recipe market and the Saved tab -> moonglade.routes_recipes. No reader
+    # slices the moved text out of gallery by name; the absence and coverage readers the earlier
+    # moves widened (test_csrf_coverage among them, for the recipe and Saved writes) read
+    # routes_recipes too. The rest read code that did not move, name these routes only as URLs
+    # they request, or reach the moved code through a built app, not its text.
+    *((_r, "moonglade.routes_recipes") for _r in (
+        "loom/test/mg-art-filters.test.js", "loom/test/mg-notify-queue-phase.test.js",
+        "loom/test/mg-notify-website-source.test.js", "loom/test/phone-back-layers.test.js",
+        "tests/test_app_paths.py", "tests/test_artworks_adhoc.py", "tests/test_bonjour.py",
+        "tests/test_branding.py", "tests/test_branding_tree_rules.py",
+        "tests/test_catalog_verbs.py", "tests/test_catchup_query.py", "tests/test_csrf_coverage.py",
+        "tests/test_design_kit_sync.py", "tests/test_doc_truth_residuals.py",
+        "tests/test_enhance.py", "tests/test_evidence_counters.py",
+        "tests/test_first_party_sources.py", "tests/test_history_feed_document.py",
+        "tests/test_living_library.py", "tests/test_logging.py", "tests/test_loom_notify.py",
+        "tests/test_loom_p_routes.py", "tests/test_media_tools.py", "tests/test_module_seams.py",
+        "tests/test_move_edges.py", "tests/test_network.py", "tests/test_outside_notice.py",
+        "tests/test_pack_file_name.py", "tests/test_pack_file_type.py",
+        "tests/test_rest_delete_and_renewal.py", "tests/test_security_review_fixes.py",
+        "tests/test_server_one_module.py", "tests/test_server_stop_record.py",
+        "tests/test_settings_store.py", "tests/test_setup_prepare.py",
+        "tests/test_task_model_detail_document.py", "tests/test_telemetry.py",
+        "tests/test_tsubaki3_image_gate.py", "tools/export_design_kit.py", "tools/split_names.py")),
+    # Split phase 4: the library's routes -> moonglade.routes_library. test_loom_p_routes' walk
+    # of the Loom's helpers reads routes_library too, for _loom_complete_clip, which went with
+    # the library's routes; the absence and coverage readers the earlier moves widened
+    # (test_csrf_coverage among them, for the library's POSTs, and test_catalog_verbs' no-SQL
+    # guard) read routes_library too. The rest read code that did not move, name these routes
+    # only as URLs they request, or reach the moved code through a built app, not its text.
+    *((_r, "moonglade.routes_library") for _r in (
+        "loom/test/mg-art-filters.test.js", "loom/test/mg-notify-queue-phase.test.js",
+        "loom/test/mg-notify-website-source.test.js", "loom/test/phone-back-layers.test.js",
+        "tests/test_app_paths.py", "tests/test_artworks_adhoc.py", "tests/test_bonjour.py",
+        "tests/test_branding.py", "tests/test_branding_tree_rules.py",
+        "tests/test_catalog_verbs.py", "tests/test_catchup_query.py", "tests/test_csrf_coverage.py",
+        "tests/test_design_kit_sync.py", "tests/test_doc_truth_residuals.py",
+        "tests/test_enhance.py", "tests/test_evidence_counters.py",
+        "tests/test_first_party_sources.py", "tests/test_history_feed_document.py",
+        "tests/test_living_library.py", "tests/test_logging.py", "tests/test_loom_notify.py",
+        "tests/test_loom_p_routes.py", "tests/test_media_tools.py", "tests/test_module_seams.py",
+        "tests/test_move_edges.py", "tests/test_network.py", "tests/test_outside_notice.py",
+        "tests/test_pack_file_name.py", "tests/test_pack_file_type.py",
+        "tests/test_rest_delete_and_renewal.py", "tests/test_security_review_fixes.py",
+        "tests/test_server_one_module.py", "tests/test_server_stop_record.py",
+        "tests/test_settings_store.py", "tests/test_setup_prepare.py",
+        "tests/test_task_model_detail_document.py", "tests/test_telemetry.py",
+        "tests/test_tsubaki3_image_gate.py", "tools/export_design_kit.py", "tools/split_names.py")),
+    # Split phase 4: the account's routes -> moonglade.routes_account. No reader slices the moved
+    # text out of gallery by name; the absence and coverage readers the earlier moves widened
+    # (test_csrf_coverage among them, for the snippet, preset, saved-view and preference writes,
+    # and test_catalog_verbs' no-SQL guard) read routes_account too. The rest read code that did
+    # not move, name these routes only as URLs they request, or reach the moved code through a
+    # built app, not its text.
+    *((_r, "moonglade.routes_account") for _r in (
+        "loom/test/mg-art-filters.test.js", "loom/test/mg-notify-queue-phase.test.js",
+        "loom/test/mg-notify-website-source.test.js", "loom/test/phone-back-layers.test.js",
+        "tests/test_app_paths.py", "tests/test_artworks_adhoc.py", "tests/test_bonjour.py",
+        "tests/test_branding.py", "tests/test_branding_tree_rules.py",
+        "tests/test_catalog_verbs.py", "tests/test_catchup_query.py",
+        "tests/test_csrf_coverage.py", "tests/test_design_kit_sync.py",
+        "tests/test_doc_truth_residuals.py", "tests/test_evidence_counters.py",
+        "tests/test_first_party_sources.py", "tests/test_history_feed_document.py",
+        "tests/test_living_library.py", "tests/test_logging.py", "tests/test_loom_notify.py",
+        "tests/test_loom_p_routes.py", "tests/test_move_edges.py", "tests/test_network.py",
+        "tests/test_outside_notice.py", "tests/test_pack_file_name.py",
+        "tests/test_pack_file_type.py", "tests/test_security_review_fixes.py",
+        "tests/test_server_one_module.py", "tests/test_server_stop_record.py",
+        "tests/test_settings_store.py", "tests/test_setup_prepare.py",
+        "tests/test_task_model_detail_document.py", "tests/test_telemetry.py",
+        "tools/export_design_kit.py")),
+    # Split phase 4: the community routes -> moonglade.routes_community. test_living_library's
+    # _app_src reads routes_community too, for the pins that slice My Art's publish out by name
+    # (api_myart_publish up to _lineage_card, and the artworks kick inside it); the absence and
+    # coverage readers the earlier moves widened (test_csrf_coverage among them, for the contest,
+    # My Art, inbox, comment and gift writes, and test_catalog_verbs' no-SQL guard) read
+    # routes_community too. The rest read code that did not move, name these routes only as URLs
+    # they request, or reach the moved code through a built app, not its text.
+    *((_r, "moonglade.routes_community") for _r in (
+        "loom/test/mg-art-filters.test.js", "loom/test/mg-notify-queue-phase.test.js",
+        "loom/test/mg-notify-website-source.test.js", "loom/test/phone-back-layers.test.js",
+        "tests/test_app_paths.py", "tests/test_artworks_adhoc.py", "tests/test_bonjour.py",
+        "tests/test_branding.py", "tests/test_branding_tree_rules.py",
+        "tests/test_catalog_verbs.py", "tests/test_catchup_query.py",
+        "tests/test_csrf_coverage.py", "tests/test_design_kit_sync.py",
+        "tests/test_doc_truth_residuals.py", "tests/test_evidence_counters.py",
+        "tests/test_first_party_sources.py", "tests/test_history_feed_document.py",
+        "tests/test_living_library.py", "tests/test_logging.py", "tests/test_loom_notify.py",
+        "tests/test_loom_p_routes.py", "tests/test_move_edges.py", "tests/test_network.py",
+        "tests/test_outside_notice.py", "tests/test_pack_file_name.py",
+        "tests/test_pack_file_type.py", "tests/test_security_review_fixes.py",
+        "tests/test_server_one_module.py", "tests/test_server_stop_record.py",
+        "tests/test_settings_store.py", "tests/test_setup_prepare.py",
+        "tests/test_task_model_detail_document.py", "tests/test_telemetry.py",
+        "tools/export_design_kit.py")),
+    # Split phase 4: LoRA training's routes -> moonglade.routes_train. No reader slices the moved
+    # text out of gallery by name; the absence and coverage readers the earlier moves widened
+    # (test_csrf_coverage among them, whose walk follows /api/train/submit through
+    # _train_csrf_body, and test_catalog_verbs' no-SQL guard) read routes_train too. The rest read
+    # code that did not move, name these routes only as URLs they request, or reach the moved code
+    # through a built app, not its text; TrainGuard did not move.
+    *((_r, "moonglade.routes_train") for _r in (
+        "loom/test/mg-art-filters.test.js", "loom/test/mg-notify-queue-phase.test.js",
+        "loom/test/mg-notify-website-source.test.js", "loom/test/phone-back-layers.test.js",
+        "tests/test_app_paths.py", "tests/test_artworks_adhoc.py", "tests/test_bonjour.py",
+        "tests/test_branding.py", "tests/test_branding_tree_rules.py",
+        "tests/test_catalog_verbs.py", "tests/test_catchup_query.py",
+        "tests/test_csrf_coverage.py", "tests/test_design_kit_sync.py",
+        "tests/test_doc_truth_residuals.py", "tests/test_evidence_counters.py",
+        "tests/test_first_party_sources.py", "tests/test_history_feed_document.py",
+        "tests/test_living_library.py", "tests/test_logging.py", "tests/test_loom_notify.py",
+        "tests/test_loom_p_routes.py", "tests/test_move_edges.py", "tests/test_network.py",
+        "tests/test_outside_notice.py", "tests/test_pack_file_name.py",
+        "tests/test_pack_file_type.py", "tests/test_security_review_fixes.py",
+        "tests/test_server_one_module.py", "tests/test_server_stop_record.py",
+        "tests/test_settings_store.py", "tests/test_setup_prepare.py",
+        "tests/test_task_model_detail_document.py", "tests/test_telemetry.py",
+        "tools/export_design_kit.py")),
+    # Split phase 4: the achievement routes -> moonglade.routes_ach. test_evidence_counters'
+    # pin that slices api_achievements out by name reads routes_ach.register now; the absence
+    # and coverage readers the earlier moves widened (test_csrf_coverage among them, whose walk
+    # checks the narrator's poke, and test_catalog_verbs' no-SQL guard) read routes_ach too. The
+    # rest read code that did not move (the nonce tables and the skin palettes stay in gallery),
+    # name these routes only as URLs they request, or reach the moved code through a built app,
+    # not its text.
+    *((_r, "moonglade.routes_ach") for _r in (
+        "loom/test/mg-art-filters.test.js", "loom/test/mg-notify-queue-phase.test.js",
+        "loom/test/mg-notify-website-source.test.js", "loom/test/phone-back-layers.test.js",
+        "tests/test_app_paths.py", "tests/test_artworks_adhoc.py", "tests/test_bonjour.py",
+        "tests/test_branding.py", "tests/test_branding_tree_rules.py",
+        "tests/test_catalog_verbs.py", "tests/test_catchup_query.py",
+        "tests/test_csrf_coverage.py", "tests/test_design_kit_sync.py",
+        "tests/test_doc_truth_residuals.py", "tests/test_evidence_counters.py",
+        "tests/test_first_party_sources.py", "tests/test_history_feed_document.py",
+        "tests/test_living_library.py", "tests/test_logging.py", "tests/test_loom_notify.py",
+        "tests/test_loom_p_routes.py", "tests/test_move_edges.py", "tests/test_network.py",
+        "tests/test_outside_notice.py", "tests/test_pack_file_name.py",
+        "tests/test_pack_file_type.py", "tests/test_security_review_fixes.py",
+        "tests/test_server_one_module.py", "tests/test_server_stop_record.py",
+        "tests/test_settings_store.py", "tests/test_setup_prepare.py",
+        "tests/test_task_model_detail_document.py", "tests/test_telemetry.py",
+        "tools/export_design_kit.py")),
+    # Split phase 4: the Mirror's routes -> moonglade.routes_mirror. No reader slices the
+    # moved text out of gallery by name; the absence and coverage readers the earlier moves
+    # widened (test_csrf_coverage among them, whose walk follows Connect, Disconnect and the
+    # Connect from PixAI token, and test_settings_store's guard that no writer puts the switch
+    # back in config.json) read routes_mirror too. The rest read code that did not move (the
+    # sign-in and its renewal are moonglade.mirror's), name these routes only as URLs they
+    # request, or reach the moved code through a built app, not its text.
+    *((_r, "moonglade.routes_mirror") for _r in (
+        "loom/test/mg-art-filters.test.js", "loom/test/mg-notify-queue-phase.test.js",
+        "loom/test/mg-notify-website-source.test.js", "loom/test/phone-back-layers.test.js",
+        "tests/test_app_paths.py", "tests/test_artworks_adhoc.py", "tests/test_bonjour.py",
+        "tests/test_branding.py", "tests/test_branding_tree_rules.py",
+        "tests/test_catalog_verbs.py", "tests/test_catchup_query.py",
+        "tests/test_csrf_coverage.py", "tests/test_design_kit_sync.py",
+        "tests/test_doc_truth_residuals.py", "tests/test_evidence_counters.py",
+        "tests/test_first_party_sources.py", "tests/test_history_feed_document.py",
+        "tests/test_living_library.py", "tests/test_logging.py", "tests/test_loom_notify.py",
+        "tests/test_loom_p_routes.py", "tests/test_move_edges.py", "tests/test_network.py",
+        "tests/test_outside_notice.py", "tests/test_pack_file_name.py",
+        "tests/test_pack_file_type.py", "tests/test_security_review_fixes.py",
+        "tests/test_server_one_module.py", "tests/test_server_stop_record.py",
+        "tests/test_settings_store.py", "tests/test_setup_prepare.py",
+        "tests/test_task_model_detail_document.py", "tests/test_telemetry.py",
+        "tools/export_design_kit.py")),
+    # Split phase 4: the branding routes -> moonglade.routes_branding. No reader slices the
+    # moved text out of gallery by name; the absence and coverage readers the earlier moves
+    # widened (test_csrf_coverage among them, whose token walk reads every handler's syntax
+    # tree, and test_catalog_verbs' no-SQL guard) read routes_branding too. The rest read code
+    # that did not move (main(), the shortcut's icon bytes and the branding module itself), name
+    # these routes only as URLs they request, or reach the moved code through a built app, not
+    # its text.
+    *((_r, "moonglade.routes_branding") for _r in (
+        "loom/test/mg-art-filters.test.js", "loom/test/mg-notify-queue-phase.test.js",
+        "loom/test/mg-notify-website-source.test.js", "loom/test/phone-back-layers.test.js",
+        "tests/test_app_paths.py", "tests/test_artworks_adhoc.py", "tests/test_bonjour.py",
+        "tests/test_branding.py", "tests/test_branding_tree_rules.py",
+        "tests/test_catalog_verbs.py", "tests/test_catchup_query.py",
+        "tests/test_csrf_coverage.py", "tests/test_design_kit_sync.py",
+        "tests/test_doc_truth_residuals.py", "tests/test_evidence_counters.py",
+        "tests/test_first_party_sources.py", "tests/test_history_feed_document.py",
+        "tests/test_living_library.py", "tests/test_logging.py", "tests/test_loom_notify.py",
+        "tests/test_loom_p_routes.py", "tests/test_move_edges.py", "tests/test_network.py",
+        "tests/test_outside_notice.py", "tests/test_pack_file_name.py",
+        "tests/test_pack_file_type.py", "tests/test_security_review_fixes.py",
+        "tests/test_server_one_module.py", "tests/test_server_stop_record.py",
+        "tests/test_settings_store.py", "tests/test_setup_prepare.py",
+        "tests/test_task_model_detail_document.py", "tests/test_telemetry.py",
+        "tools/export_design_kit.py")),
+    # Split phase 4: the import routes -> moonglade.routes_import. Three readers slice the moved
+    # text and read routes_import now: test_doc_truth_residuals (the /api/import-local tier pin;
+    # it read gallery.py for nothing else, so it left SOURCE_READERS above and is not listed here),
+    # test_security_review_fixes (the upload and import request caps, sliced by def name) and
+    # test_outside_notice (create_app never primes the outside look; its Fix them route's module
+    # is read beside it). The absence and coverage readers the earlier moves widened
+    # (test_csrf_coverage and test_catalog_verbs' no-SQL guard among them) read routes_import too.
+    # The rest read code that did not move (main(), the zip caps, the outside scan), name these
+    # routes only as URLs they request, or reach the moved code through a built app, not its text
+    # (test_security_review_fixes' _safe_extract_zip closure lookup is one of those).
+    *((_r, "moonglade.routes_import") for _r in (
+        "loom/test/mg-art-filters.test.js", "loom/test/mg-notify-queue-phase.test.js",
+        "loom/test/mg-notify-website-source.test.js", "loom/test/phone-back-layers.test.js",
+        "tests/test_app_paths.py", "tests/test_artworks_adhoc.py", "tests/test_bonjour.py",
+        "tests/test_branding.py", "tests/test_branding_tree_rules.py",
+        "tests/test_catalog_verbs.py", "tests/test_catchup_query.py",
+        "tests/test_csrf_coverage.py", "tests/test_design_kit_sync.py",
+        "tests/test_evidence_counters.py",
+        "tests/test_first_party_sources.py", "tests/test_history_feed_document.py",
+        "tests/test_living_library.py", "tests/test_logging.py", "tests/test_loom_notify.py",
+        "tests/test_loom_p_routes.py", "tests/test_move_edges.py", "tests/test_network.py",
+        "tests/test_outside_notice.py", "tests/test_pack_file_name.py",
+        "tests/test_pack_file_type.py", "tests/test_security_review_fixes.py",
+        "tests/test_server_one_module.py", "tests/test_server_stop_record.py",
+        "tests/test_settings_store.py", "tests/test_setup_prepare.py",
+        "tests/test_task_model_detail_document.py", "tests/test_telemetry.py",
+        "tools/export_design_kit.py")),
+    # Split phase 4, redact: no reader reads text that left gallery.py (no reader names the
+    # redactor or its pattern; test_task_params reaches it through moonglade.redact).
+    ('loom/test/mg-art-filters.test.js', 'moonglade.redact'),
+    ('loom/test/mg-notify-queue-phase.test.js', 'moonglade.redact'),
+    ('loom/test/mg-notify-website-source.test.js', 'moonglade.redact'),
+    ('loom/test/phone-back-layers.test.js', 'moonglade.redact'),
+    ('tests/test_app_paths.py', 'moonglade.redact'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.redact'),
+    ('tests/test_bonjour.py', 'moonglade.redact'),
+    ('tests/test_branding.py', 'moonglade.redact'),
+    ('tests/test_catalog_verbs.py', 'moonglade.redact'),
+    ('tests/test_catchup_query.py', 'moonglade.redact'),
+    ('tests/test_csrf_coverage.py', 'moonglade.redact'),
+    ('tests/test_design_kit_sync.py', 'moonglade.redact'),
+    ('tests/test_evidence_counters.py', 'moonglade.redact'),
+    ('tests/test_first_party_sources.py', 'moonglade.redact'),
+    ('tests/test_history_feed_document.py', 'moonglade.redact'),
+    ('tests/test_living_library.py', 'moonglade.redact'),
+    ('tests/test_logging.py', 'moonglade.redact'),
+    ('tests/test_loom_notify.py', 'moonglade.redact'),
+    ('tests/test_loom_p_routes.py', 'moonglade.redact'),
+    ('tests/test_network.py', 'moonglade.redact'),
+    ('tests/test_security_review_fixes.py', 'moonglade.redact'),
+    ('tests/test_server_one_module.py', 'moonglade.redact'),
+    ('tests/test_settings_store.py', 'moonglade.redact'),
+    ('tests/test_setup_prepare.py', 'moonglade.redact'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.redact'),
+    ('tests/test_telemetry.py', 'moonglade.redact'),
+    ('tools/export_design_kit.py', 'moonglade.redact'),
+    # Split phase 4, web_tiers: no reader reads the tier definitions; the readers that name a tier
+    # name it in prose, a route's docstring or a payload, and test_route_tiers and
+    # test_outside_notice reach the tier helpers through moonglade.web_tiers.
+    ('loom/test/mg-art-filters.test.js', 'moonglade.web_tiers'),
+    ('loom/test/mg-notify-queue-phase.test.js', 'moonglade.web_tiers'),
+    ('loom/test/mg-notify-website-source.test.js', 'moonglade.web_tiers'),
+    ('loom/test/phone-back-layers.test.js', 'moonglade.web_tiers'),
+    ('tests/test_app_paths.py', 'moonglade.web_tiers'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.web_tiers'),
+    ('tests/test_bonjour.py', 'moonglade.web_tiers'),
+    ('tests/test_branding.py', 'moonglade.web_tiers'),
+    ('tests/test_branding_tree_rules.py', 'moonglade.web_tiers'),
+    ('tests/test_catalog_verbs.py', 'moonglade.web_tiers'),
+    ('tests/test_catchup_query.py', 'moonglade.web_tiers'),
+    ('tests/test_csrf_coverage.py', 'moonglade.web_tiers'),
+    ('tests/test_design_kit_sync.py', 'moonglade.web_tiers'),
+    ('tests/test_evidence_counters.py', 'moonglade.web_tiers'),
+    ('tests/test_first_party_sources.py', 'moonglade.web_tiers'),
+    ('tests/test_history_feed_document.py', 'moonglade.web_tiers'),
+    ('tests/test_living_library.py', 'moonglade.web_tiers'),
+    ('tests/test_logging.py', 'moonglade.web_tiers'),
+    ('tests/test_loom_notify.py', 'moonglade.web_tiers'),
+    ('tests/test_loom_p_routes.py', 'moonglade.web_tiers'),
+    ('tests/test_network.py', 'moonglade.web_tiers'),
+    ('tests/test_outside_notice.py', 'moonglade.web_tiers'),
+    ('tests/test_security_review_fixes.py', 'moonglade.web_tiers'),
+    ('tests/test_server_one_module.py', 'moonglade.web_tiers'),
+    ('tests/test_settings_store.py', 'moonglade.web_tiers'),
+    ('tests/test_setup_prepare.py', 'moonglade.web_tiers'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.web_tiers'),
+    ('tests/test_telemetry.py', 'moonglade.web_tiers'),
+    ('tools/export_design_kit.py', 'moonglade.web_tiers'),
+    # Split phase 4, watch_plans: no reader reads the timing plans' text; test_watch reaches them
+    # through moonglade.watch_plans, and web_threads imports them from there.
+    ('loom/test/mg-art-filters.test.js', 'moonglade.watch_plans'),
+    ('loom/test/mg-notify-queue-phase.test.js', 'moonglade.watch_plans'),
+    ('loom/test/mg-notify-website-source.test.js', 'moonglade.watch_plans'),
+    ('loom/test/phone-back-layers.test.js', 'moonglade.watch_plans'),
+    ('tests/test_app_paths.py', 'moonglade.watch_plans'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.watch_plans'),
+    ('tests/test_bonjour.py', 'moonglade.watch_plans'),
+    ('tests/test_branding.py', 'moonglade.watch_plans'),
+    ('tests/test_catalog_verbs.py', 'moonglade.watch_plans'),
+    ('tests/test_catchup_query.py', 'moonglade.watch_plans'),
+    ('tests/test_csrf_coverage.py', 'moonglade.watch_plans'),
+    ('tests/test_design_kit_sync.py', 'moonglade.watch_plans'),
+    ('tests/test_evidence_counters.py', 'moonglade.watch_plans'),
+    ('tests/test_first_party_sources.py', 'moonglade.watch_plans'),
+    ('tests/test_history_feed_document.py', 'moonglade.watch_plans'),
+    ('tests/test_living_library.py', 'moonglade.watch_plans'),
+    ('tests/test_logging.py', 'moonglade.watch_plans'),
+    ('tests/test_loom_notify.py', 'moonglade.watch_plans'),
+    ('tests/test_loom_p_routes.py', 'moonglade.watch_plans'),
+    ('tests/test_network.py', 'moonglade.watch_plans'),
+    ('tests/test_security_review_fixes.py', 'moonglade.watch_plans'),
+    ('tests/test_server_one_module.py', 'moonglade.watch_plans'),
+    ('tests/test_settings_store.py', 'moonglade.watch_plans'),
+    ('tests/test_setup_prepare.py', 'moonglade.watch_plans'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.watch_plans'),
+    ('tests/test_telemetry.py', 'moonglade.watch_plans'),
+    ('tools/export_design_kit.py', 'moonglade.watch_plans'),
+    # Split phase 4, name_hunt: no reader reads the hunt's text; routes_library imports it from
+    # moonglade.name_hunt at call time.
+    ('loom/test/mg-art-filters.test.js', 'moonglade.name_hunt'),
+    ('loom/test/mg-notify-queue-phase.test.js', 'moonglade.name_hunt'),
+    ('loom/test/mg-notify-website-source.test.js', 'moonglade.name_hunt'),
+    ('loom/test/phone-back-layers.test.js', 'moonglade.name_hunt'),
+    ('tests/test_app_paths.py', 'moonglade.name_hunt'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.name_hunt'),
+    ('tests/test_bonjour.py', 'moonglade.name_hunt'),
+    ('tests/test_branding.py', 'moonglade.name_hunt'),
+    ('tests/test_catalog_verbs.py', 'moonglade.name_hunt'),
+    ('tests/test_catchup_query.py', 'moonglade.name_hunt'),
+    ('tests/test_csrf_coverage.py', 'moonglade.name_hunt'),
+    ('tests/test_design_kit_sync.py', 'moonglade.name_hunt'),
+    ('tests/test_evidence_counters.py', 'moonglade.name_hunt'),
+    ('tests/test_first_party_sources.py', 'moonglade.name_hunt'),
+    ('tests/test_history_feed_document.py', 'moonglade.name_hunt'),
+    ('tests/test_living_library.py', 'moonglade.name_hunt'),
+    ('tests/test_logging.py', 'moonglade.name_hunt'),
+    ('tests/test_loom_notify.py', 'moonglade.name_hunt'),
+    ('tests/test_loom_p_routes.py', 'moonglade.name_hunt'),
+    ('tests/test_network.py', 'moonglade.name_hunt'),
+    ('tests/test_security_review_fixes.py', 'moonglade.name_hunt'),
+    ('tests/test_server_one_module.py', 'moonglade.name_hunt'),
+    ('tests/test_settings_store.py', 'moonglade.name_hunt'),
+    ('tests/test_setup_prepare.py', 'moonglade.name_hunt'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.name_hunt'),
+    ('tests/test_telemetry.py', 'moonglade.name_hunt'),
+    ('tools/export_design_kit.py', 'moonglade.name_hunt'),
+    # Split phase 4, ach_beacon: no reader reads the beacon's text; test_telemetry's whole-module
+    # read counts bridge_gen_tasks writers, which never sat in the beacon, and it reaches the
+    # tables through moonglade.ach_beacon.
+    ('loom/test/mg-art-filters.test.js', 'moonglade.ach_beacon'),
+    ('loom/test/mg-notify-queue-phase.test.js', 'moonglade.ach_beacon'),
+    ('loom/test/mg-notify-website-source.test.js', 'moonglade.ach_beacon'),
+    ('loom/test/phone-back-layers.test.js', 'moonglade.ach_beacon'),
+    ('tests/test_app_paths.py', 'moonglade.ach_beacon'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.ach_beacon'),
+    ('tests/test_bonjour.py', 'moonglade.ach_beacon'),
+    ('tests/test_branding.py', 'moonglade.ach_beacon'),
+    ('tests/test_catalog_verbs.py', 'moonglade.ach_beacon'),
+    ('tests/test_catchup_query.py', 'moonglade.ach_beacon'),
+    ('tests/test_csrf_coverage.py', 'moonglade.ach_beacon'),
+    ('tests/test_design_kit_sync.py', 'moonglade.ach_beacon'),
+    ('tests/test_evidence_counters.py', 'moonglade.ach_beacon'),
+    ('tests/test_first_party_sources.py', 'moonglade.ach_beacon'),
+    ('tests/test_history_feed_document.py', 'moonglade.ach_beacon'),
+    ('tests/test_living_library.py', 'moonglade.ach_beacon'),
+    ('tests/test_logging.py', 'moonglade.ach_beacon'),
+    ('tests/test_loom_notify.py', 'moonglade.ach_beacon'),
+    ('tests/test_loom_p_routes.py', 'moonglade.ach_beacon'),
+    ('tests/test_network.py', 'moonglade.ach_beacon'),
+    ('tests/test_security_review_fixes.py', 'moonglade.ach_beacon'),
+    ('tests/test_server_one_module.py', 'moonglade.ach_beacon'),
+    ('tests/test_settings_store.py', 'moonglade.ach_beacon'),
+    ('tests/test_setup_prepare.py', 'moonglade.ach_beacon'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.ach_beacon'),
+    ('tests/test_telemetry.py', 'moonglade.ach_beacon'),
+    ('tools/export_design_kit.py', 'moonglade.ach_beacon'),
+    # Split phase 4, scenes: no reader reads the scene catalog's text (test_app_paths and
+    # test_branding name branding_root only in patches); test_ai_tools_scenes reaches it through
+    # moonglade.scenes.
+    ('loom/test/mg-art-filters.test.js', 'moonglade.scenes'),
+    ('loom/test/mg-notify-queue-phase.test.js', 'moonglade.scenes'),
+    ('loom/test/mg-notify-website-source.test.js', 'moonglade.scenes'),
+    ('loom/test/phone-back-layers.test.js', 'moonglade.scenes'),
+    ('tests/test_app_paths.py', 'moonglade.scenes'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.scenes'),
+    ('tests/test_bonjour.py', 'moonglade.scenes'),
+    ('tests/test_branding.py', 'moonglade.scenes'),
+    ('tests/test_catalog_verbs.py', 'moonglade.scenes'),
+    ('tests/test_catchup_query.py', 'moonglade.scenes'),
+    ('tests/test_csrf_coverage.py', 'moonglade.scenes'),
+    ('tests/test_design_kit_sync.py', 'moonglade.scenes'),
+    ('tests/test_evidence_counters.py', 'moonglade.scenes'),
+    ('tests/test_first_party_sources.py', 'moonglade.scenes'),
+    ('tests/test_history_feed_document.py', 'moonglade.scenes'),
+    ('tests/test_living_library.py', 'moonglade.scenes'),
+    ('tests/test_logging.py', 'moonglade.scenes'),
+    ('tests/test_loom_notify.py', 'moonglade.scenes'),
+    ('tests/test_loom_p_routes.py', 'moonglade.scenes'),
+    ('tests/test_network.py', 'moonglade.scenes'),
+    ('tests/test_security_review_fixes.py', 'moonglade.scenes'),
+    ('tests/test_server_one_module.py', 'moonglade.scenes'),
+    ('tests/test_settings_store.py', 'moonglade.scenes'),
+    ('tests/test_setup_prepare.py', 'moonglade.scenes'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.scenes'),
+    ('tests/test_telemetry.py', 'moonglade.scenes'),
+    ('tools/export_design_kit.py', 'moonglade.scenes'),
+    # Split phase 4, pages: the readers that read the moved text now read moonglade/pages.py: the
+    # design kit's exporter and test_design_kit_sync (DESIGN_TOKENS_CSS by path; both leave
+    # SOURCE_READERS), test_loom_notify's shell font check, and the node tests mg-art-filters,
+    # mg-notify-queue-phase, mg-notify-website-source and phone-back-layers (each extracts the
+    # tokens or _LOOM_SHELL and fails when it finds none). No other reader reads the shells' text.
+    ('tests/test_app_paths.py', 'moonglade.pages'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.pages'),
+    ('tests/test_bonjour.py', 'moonglade.pages'),
+    ('tests/test_branding.py', 'moonglade.pages'),
+    ('tests/test_catalog_verbs.py', 'moonglade.pages'),
+    ('tests/test_catchup_query.py', 'moonglade.pages'),
+    ('tests/test_csrf_coverage.py', 'moonglade.pages'),
+    ('tests/test_evidence_counters.py', 'moonglade.pages'),
+    ('tests/test_first_party_sources.py', 'moonglade.pages'),
+    ('tests/test_history_feed_document.py', 'moonglade.pages'),
+    ('tests/test_living_library.py', 'moonglade.pages'),
+    ('tests/test_logging.py', 'moonglade.pages'),
+    ('tests/test_loom_p_routes.py', 'moonglade.pages'),
+    ('tests/test_network.py', 'moonglade.pages'),
+    ('tests/test_security_review_fixes.py', 'moonglade.pages'),
+    ('tests/test_server_one_module.py', 'moonglade.pages'),
+    ('tests/test_settings_store.py', 'moonglade.pages'),
+    ('tests/test_setup_prepare.py', 'moonglade.pages'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.pages'),
+    ('tests/test_telemetry.py', 'moonglade.pages'),
+    # Split phase 4, web_policy: no reader reads the moved text. test_security_review_fixes reads
+    # gallery's main() and the import and Loom route sources, test_csrf_coverage the functions
+    # that call _check_csrf; both reach the policy names through moonglade.web_policy.
+    ('tests/test_app_paths.py', 'moonglade.web_policy'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.web_policy'),
+    ('tests/test_bonjour.py', 'moonglade.web_policy'),
+    ('tests/test_branding.py', 'moonglade.web_policy'),
+    ('tests/test_catalog_verbs.py', 'moonglade.web_policy'),
+    ('tests/test_catchup_query.py', 'moonglade.web_policy'),
+    ('tests/test_csrf_coverage.py', 'moonglade.web_policy'),
+    ('tests/test_evidence_counters.py', 'moonglade.web_policy'),
+    ('tests/test_first_party_sources.py', 'moonglade.web_policy'),
+    ('tests/test_history_feed_document.py', 'moonglade.web_policy'),
+    ('tests/test_living_library.py', 'moonglade.web_policy'),
+    ('tests/test_logging.py', 'moonglade.web_policy'),
+    ('tests/test_loom_p_routes.py', 'moonglade.web_policy'),
+    ('tests/test_network.py', 'moonglade.web_policy'),
+    ('tests/test_security_review_fixes.py', 'moonglade.web_policy'),
+    ('tests/test_server_one_module.py', 'moonglade.web_policy'),
+    ('tests/test_settings_store.py', 'moonglade.web_policy'),
+    ('tests/test_setup_prepare.py', 'moonglade.web_policy'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.web_policy'),
+    ('tests/test_telemetry.py', 'moonglade.web_policy'),
+    # Split phase 4, loom_files: no reader reads the moved text. test_loom_p_routes' AST walks look
+    # for the Loom's route and store functions (none moved here) and its regex parity checks read
+    # the compiled patterns through moonglade.loom_files.
+    ('tests/test_app_paths.py', 'moonglade.loom_files'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.loom_files'),
+    ('tests/test_bonjour.py', 'moonglade.loom_files'),
+    ('tests/test_branding.py', 'moonglade.loom_files'),
+    ('tests/test_catalog_verbs.py', 'moonglade.loom_files'),
+    ('tests/test_catchup_query.py', 'moonglade.loom_files'),
+    ('tests/test_csrf_coverage.py', 'moonglade.loom_files'),
+    ('tests/test_evidence_counters.py', 'moonglade.loom_files'),
+    ('tests/test_first_party_sources.py', 'moonglade.loom_files'),
+    ('tests/test_history_feed_document.py', 'moonglade.loom_files'),
+    ('tests/test_living_library.py', 'moonglade.loom_files'),
+    ('tests/test_logging.py', 'moonglade.loom_files'),
+    ('tests/test_loom_p_routes.py', 'moonglade.loom_files'),
+    ('tests/test_network.py', 'moonglade.loom_files'),
+    ('tests/test_security_review_fixes.py', 'moonglade.loom_files'),
+    ('tests/test_server_one_module.py', 'moonglade.loom_files'),
+    ('tests/test_settings_store.py', 'moonglade.loom_files'),
+    ('tests/test_setup_prepare.py', 'moonglade.loom_files'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.loom_files'),
+    ('tests/test_telemetry.py', 'moonglade.loom_files'),
+    # Split phase 4, catalog_search: no reader reads the operators' text (the hits are catalog
+    # column names; test_catalog_verbs reads create_app and the registers only).
+    # test_search_operators reaches the grammar through moonglade.catalog_search.
+    ('tests/test_app_paths.py', 'moonglade.catalog_search'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.catalog_search'),
+    ('tests/test_bonjour.py', 'moonglade.catalog_search'),
+    ('tests/test_branding.py', 'moonglade.catalog_search'),
+    ('tests/test_catalog_verbs.py', 'moonglade.catalog_search'),
+    ('tests/test_catchup_query.py', 'moonglade.catalog_search'),
+    ('tests/test_csrf_coverage.py', 'moonglade.catalog_search'),
+    ('tests/test_evidence_counters.py', 'moonglade.catalog_search'),
+    ('tests/test_first_party_sources.py', 'moonglade.catalog_search'),
+    ('tests/test_history_feed_document.py', 'moonglade.catalog_search'),
+    ('tests/test_living_library.py', 'moonglade.catalog_search'),
+    ('tests/test_logging.py', 'moonglade.catalog_search'),
+    ('tests/test_loom_p_routes.py', 'moonglade.catalog_search'),
+    ('tests/test_network.py', 'moonglade.catalog_search'),
+    ('tests/test_security_review_fixes.py', 'moonglade.catalog_search'),
+    ('tests/test_server_one_module.py', 'moonglade.catalog_search'),
+    ('tests/test_settings_store.py', 'moonglade.catalog_search'),
+    ('tests/test_setup_prepare.py', 'moonglade.catalog_search'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.catalog_search'),
+    ('tests/test_telemetry.py', 'moonglade.catalog_search'),
+    # Split phase 4, catalog: no reader reads the catalog helpers' text; the hits are column names,
+    # the readers' own fixtures and main()/create_app reads. The whole-module absence guards
+    # (test_settings_store, test_catchup_query, test_evidence_counters; test_telemetry's writer
+    # count) now also read the modules split out of gallery's top level, this one included.
+    ('tests/test_app_paths.py', 'moonglade.catalog'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.catalog'),
+    ('tests/test_bonjour.py', 'moonglade.catalog'),
+    ('tests/test_branding.py', 'moonglade.catalog'),
+    ('tests/test_branding_tree_rules.py', 'moonglade.catalog'),
+    ('tests/test_catalog_verbs.py', 'moonglade.catalog'),
+    ('tests/test_catchup_query.py', 'moonglade.catalog'),
+    ('tests/test_csrf_coverage.py', 'moonglade.catalog'),
+    ('tests/test_evidence_counters.py', 'moonglade.catalog'),
+    ('tests/test_first_party_sources.py', 'moonglade.catalog'),
+    ('tests/test_history_feed_document.py', 'moonglade.catalog'),
+    ('tests/test_living_library.py', 'moonglade.catalog'),
+    ('tests/test_logging.py', 'moonglade.catalog'),
+    ('tests/test_loom_p_routes.py', 'moonglade.catalog'),
+    ('tests/test_move_edges.py', 'moonglade.catalog'),
+    ('tests/test_network.py', 'moonglade.catalog'),
+    ('tests/test_pack_file_name.py', 'moonglade.catalog'),
+    ('tests/test_security_review_fixes.py', 'moonglade.catalog'),
+    ('tests/test_server_one_module.py', 'moonglade.catalog'),
+    ('tests/test_server_stop_record.py', 'moonglade.catalog'),
+    ('tests/test_settings_store.py', 'moonglade.catalog'),
+    ('tests/test_setup_prepare.py', 'moonglade.catalog'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.catalog'),
+    ('tests/test_telemetry.py', 'moonglade.catalog'),
+    # Split phase 4, curation: no reader reads the curation text; test_living_library's banned-call
+    # guard reads living's functions and the scheduler blocks, not this section. The whole-module
+    # absence guards read moonglade.curation too.
+    ('tests/test_app_paths.py', 'moonglade.curation'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.curation'),
+    ('tests/test_bonjour.py', 'moonglade.curation'),
+    ('tests/test_branding.py', 'moonglade.curation'),
+    ('tests/test_catalog_verbs.py', 'moonglade.curation'),
+    ('tests/test_catchup_query.py', 'moonglade.curation'),
+    ('tests/test_csrf_coverage.py', 'moonglade.curation'),
+    ('tests/test_evidence_counters.py', 'moonglade.curation'),
+    ('tests/test_first_party_sources.py', 'moonglade.curation'),
+    ('tests/test_history_feed_document.py', 'moonglade.curation'),
+    ('tests/test_living_library.py', 'moonglade.curation'),
+    ('tests/test_logging.py', 'moonglade.curation'),
+    ('tests/test_loom_p_routes.py', 'moonglade.curation'),
+    ('tests/test_network.py', 'moonglade.curation'),
+    ('tests/test_security_review_fixes.py', 'moonglade.curation'),
+    ('tests/test_server_one_module.py', 'moonglade.curation'),
+    ('tests/test_settings_store.py', 'moonglade.curation'),
+    ('tests/test_setup_prepare.py', 'moonglade.curation'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.curation'),
+    ('tests/test_telemetry.py', 'moonglade.curation'),
+    # Split phase 4, train_guard: no reader reads TrainGuard's text (test_setup_prepare names
+    # train_guard.json as a records file); the whole-module absence guards read it too.
+    ('tests/test_app_paths.py', 'moonglade.train_guard'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.train_guard'),
+    ('tests/test_bonjour.py', 'moonglade.train_guard'),
+    ('tests/test_branding.py', 'moonglade.train_guard'),
+    ('tests/test_catalog_verbs.py', 'moonglade.train_guard'),
+    ('tests/test_catchup_query.py', 'moonglade.train_guard'),
+    ('tests/test_csrf_coverage.py', 'moonglade.train_guard'),
+    ('tests/test_evidence_counters.py', 'moonglade.train_guard'),
+    ('tests/test_first_party_sources.py', 'moonglade.train_guard'),
+    ('tests/test_history_feed_document.py', 'moonglade.train_guard'),
+    ('tests/test_living_library.py', 'moonglade.train_guard'),
+    ('tests/test_logging.py', 'moonglade.train_guard'),
+    ('tests/test_loom_p_routes.py', 'moonglade.train_guard'),
+    ('tests/test_network.py', 'moonglade.train_guard'),
+    ('tests/test_security_review_fixes.py', 'moonglade.train_guard'),
+    ('tests/test_server_one_module.py', 'moonglade.train_guard'),
+    ('tests/test_settings_store.py', 'moonglade.train_guard'),
+    ('tests/test_setup_prepare.py', 'moonglade.train_guard'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.train_guard'),
+    ('tests/test_telemetry.py', 'moonglade.train_guard'),
+    # Split phase 4, catalog_verbs: no reader reads the verbs' text. test_catalog_verbs names the
+    # verbs but reads create_app and the registers (its no-SQL guard); test_living_library's
+    # banned-call guard reads apply_artwork_meta through catalog_verbs_mod; the history_page hits
+    # are backup's retired feed. The whole-module absence guards read the module too.
+    ('tests/test_app_paths.py', 'moonglade.catalog_verbs'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.catalog_verbs'),
+    ('tests/test_bonjour.py', 'moonglade.catalog_verbs'),
+    ('tests/test_branding.py', 'moonglade.catalog_verbs'),
+    ('tests/test_catalog_verbs.py', 'moonglade.catalog_verbs'),
+    ('tests/test_catchup_query.py', 'moonglade.catalog_verbs'),
+    ('tests/test_csrf_coverage.py', 'moonglade.catalog_verbs'),
+    ('tests/test_evidence_counters.py', 'moonglade.catalog_verbs'),
+    ('tests/test_first_party_sources.py', 'moonglade.catalog_verbs'),
+    ('tests/test_history_feed_document.py', 'moonglade.catalog_verbs'),
+    ('tests/test_living_library.py', 'moonglade.catalog_verbs'),
+    ('tests/test_logging.py', 'moonglade.catalog_verbs'),
+    ('tests/test_loom_p_routes.py', 'moonglade.catalog_verbs'),
+    ('tests/test_network.py', 'moonglade.catalog_verbs'),
+    ('tests/test_security_review_fixes.py', 'moonglade.catalog_verbs'),
+    ('tests/test_server_one_module.py', 'moonglade.catalog_verbs'),
+    ('tests/test_settings_store.py', 'moonglade.catalog_verbs'),
+    ('tests/test_setup_prepare.py', 'moonglade.catalog_verbs'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.catalog_verbs'),
+    ('tests/test_telemetry.py', 'moonglade.catalog_verbs'),
+    # Split phase 4, thumbs: no reader reads the thumbnail section as text except
+    # test_living_library's _atomic_replace pin, which reads make_thumbnail through thumbs_mod; the
+    # other hits are patches of thumbs_mod. The whole-module absence guards read the module too.
+    ('tests/test_app_paths.py', 'moonglade.thumbs'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.thumbs'),
+    ('tests/test_bonjour.py', 'moonglade.thumbs'),
+    ('tests/test_branding.py', 'moonglade.thumbs'),
+    ('tests/test_catalog_verbs.py', 'moonglade.thumbs'),
+    ('tests/test_catchup_query.py', 'moonglade.thumbs'),
+    ('tests/test_csrf_coverage.py', 'moonglade.thumbs'),
+    ('tests/test_evidence_counters.py', 'moonglade.thumbs'),
+    ('tests/test_first_party_sources.py', 'moonglade.thumbs'),
+    ('tests/test_history_feed_document.py', 'moonglade.thumbs'),
+    ('tests/test_living_library.py', 'moonglade.thumbs'),
+    ('tests/test_logging.py', 'moonglade.thumbs'),
+    ('tests/test_loom_p_routes.py', 'moonglade.thumbs'),
+    ('tests/test_network.py', 'moonglade.thumbs'),
+    ('tests/test_security_review_fixes.py', 'moonglade.thumbs'),
+    ('tests/test_server_one_module.py', 'moonglade.thumbs'),
+    ('tests/test_settings_store.py', 'moonglade.thumbs'),
+    ('tests/test_setup_prepare.py', 'moonglade.thumbs'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.thumbs'),
+    ('tests/test_telemetry.py', 'moonglade.thumbs'),
+    # Split phase 4, trash: no reader reads the trash section's text (test_network names
+    # purge_media_local in prose); the whole-module absence guards read the module too.
+    ('tests/test_app_paths.py', 'moonglade.trash'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.trash'),
+    ('tests/test_bonjour.py', 'moonglade.trash'),
+    ('tests/test_branding.py', 'moonglade.trash'),
+    ('tests/test_catalog_verbs.py', 'moonglade.trash'),
+    ('tests/test_catchup_query.py', 'moonglade.trash'),
+    ('tests/test_csrf_coverage.py', 'moonglade.trash'),
+    ('tests/test_evidence_counters.py', 'moonglade.trash'),
+    ('tests/test_first_party_sources.py', 'moonglade.trash'),
+    ('tests/test_history_feed_document.py', 'moonglade.trash'),
+    ('tests/test_living_library.py', 'moonglade.trash'),
+    ('tests/test_logging.py', 'moonglade.trash'),
+    ('tests/test_loom_p_routes.py', 'moonglade.trash'),
+    ('tests/test_network.py', 'moonglade.trash'),
+    ('tests/test_security_review_fixes.py', 'moonglade.trash'),
+    ('tests/test_server_one_module.py', 'moonglade.trash'),
+    ('tests/test_settings_store.py', 'moonglade.trash'),
+    ('tests/test_setup_prepare.py', 'moonglade.trash'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.trash'),
+    ('tests/test_telemetry.py', 'moonglade.trash'),
+    # Split phase 4, dupe_review: no reader reads Duplicate Review's text; the whole-module absence
+    # guards read the module too.
+    ('tests/test_app_paths.py', 'moonglade.dupe_review'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.dupe_review'),
+    ('tests/test_bonjour.py', 'moonglade.dupe_review'),
+    ('tests/test_branding.py', 'moonglade.dupe_review'),
+    ('tests/test_catalog_verbs.py', 'moonglade.dupe_review'),
+    ('tests/test_catchup_query.py', 'moonglade.dupe_review'),
+    ('tests/test_csrf_coverage.py', 'moonglade.dupe_review'),
+    ('tests/test_evidence_counters.py', 'moonglade.dupe_review'),
+    ('tests/test_first_party_sources.py', 'moonglade.dupe_review'),
+    ('tests/test_history_feed_document.py', 'moonglade.dupe_review'),
+    ('tests/test_living_library.py', 'moonglade.dupe_review'),
+    ('tests/test_logging.py', 'moonglade.dupe_review'),
+    ('tests/test_loom_p_routes.py', 'moonglade.dupe_review'),
+    ('tests/test_network.py', 'moonglade.dupe_review'),
+    ('tests/test_security_review_fixes.py', 'moonglade.dupe_review'),
+    ('tests/test_server_one_module.py', 'moonglade.dupe_review'),
+    ('tests/test_settings_store.py', 'moonglade.dupe_review'),
+    ('tests/test_setup_prepare.py', 'moonglade.dupe_review'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.dupe_review'),
+    ('tests/test_telemetry.py', 'moonglade.dupe_review'),
+    # Split phase 4, web_accounts: no reader reads the login accounts' text; test_web_auth's
+    # shipped-hash read goes to moonglade/web_accounts.py, so it leaves SOURCE_READERS.
+    ('tests/test_artworks_adhoc.py', 'moonglade.web_accounts'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.web_accounts'),
+    ('tests/test_config_path_routing.py', 'moonglade.web_accounts'),
+    ('tests/test_create_door.py', 'moonglade.web_accounts'),
+    ('tests/test_csrf_coverage.py', 'moonglade.web_accounts'),
+    ('tests/test_enhance.py', 'moonglade.web_accounts'),
+    ('tests/test_evidence_counters.py', 'moonglade.web_accounts'),
+    ('tests/test_full_meta_rest_fallback.py', 'moonglade.web_accounts'),
+    ('tests/test_gen_surface.py', 'moonglade.web_accounts'),
+    ('tests/test_history_feed_document.py', 'moonglade.web_accounts'),
+    ('tests/test_jwt.py', 'moonglade.web_accounts'),
+    ('tests/test_living_library.py', 'moonglade.web_accounts'),
+    ('tests/test_loom_notify.py', 'moonglade.web_accounts'),
+    ('tests/test_pixai_client.py', 'moonglade.web_accounts'),
+    ('tests/test_settings_store.py', 'moonglade.web_accounts'),
+    ('tests/test_setup_prepare.py', 'moonglade.web_accounts'),
+    ('tests/test_spend_no_retry.py', 'moonglade.web_accounts'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.web_accounts'),
+    ('tests/test_telemetry.py', 'moonglade.web_accounts'),
+    ('tests/test_training_advanced.py', 'moonglade.web_accounts'),
+    ('tests/test_training_parity.py', 'moonglade.web_accounts'),
+    # Split phase 4, history: no reader reads the feed's or the extraction's text but through
+    # history_mod; test_history_feed_document's retired-hash guard reads history_mod too.
+    ('tests/test_artworks_adhoc.py', 'moonglade.history'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.history'),
+    ('tests/test_config_path_routing.py', 'moonglade.history'),
+    ('tests/test_create_door.py', 'moonglade.history'),
+    ('tests/test_csrf_coverage.py', 'moonglade.history'),
+    ('tests/test_enhance.py', 'moonglade.history'),
+    ('tests/test_evidence_counters.py', 'moonglade.history'),
+    ('tests/test_full_meta_rest_fallback.py', 'moonglade.history'),
+    ('tests/test_gen_surface.py', 'moonglade.history'),
+    ('tests/test_history_feed_document.py', 'moonglade.history'),
+    ('tests/test_jwt.py', 'moonglade.history'),
+    ('tests/test_living_library.py', 'moonglade.history'),
+    ('tests/test_loom_notify.py', 'moonglade.history'),
+    ('tests/test_network.py', 'moonglade.history'),
+    ('tests/test_pixai_client.py', 'moonglade.history'),
+    ('tests/test_settings_store.py', 'moonglade.history'),
+    ('tests/test_setup_prepare.py', 'moonglade.history'),
+    ('tests/test_spend_no_retry.py', 'moonglade.history'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.history'),
+    ('tests/test_telemetry.py', 'moonglade.history'),
+    ('tests/test_training_advanced.py', 'moonglade.history'),
+    ('tests/test_training_parity.py', 'moonglade.history'),
+    # Split phase 4, media_fetch: no reader reads the media fetch's text but through
+    # media_fetch_mod; test_network's page_variables read goes there, so it no longer reads backup.
+    ('tests/test_artworks_adhoc.py', 'moonglade.media_fetch'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.media_fetch'),
+    ('tests/test_config_path_routing.py', 'moonglade.media_fetch'),
+    ('tests/test_create_door.py', 'moonglade.media_fetch'),
+    ('tests/test_csrf_coverage.py', 'moonglade.media_fetch'),
+    ('tests/test_enhance.py', 'moonglade.media_fetch'),
+    ('tests/test_evidence_counters.py', 'moonglade.media_fetch'),
+    ('tests/test_full_meta_rest_fallback.py', 'moonglade.media_fetch'),
+    ('tests/test_gen_surface.py', 'moonglade.media_fetch'),
+    ('tests/test_history_feed_document.py', 'moonglade.media_fetch'),
+    ('tests/test_jwt.py', 'moonglade.media_fetch'),
+    ('tests/test_living_library.py', 'moonglade.media_fetch'),
+    ('tests/test_loom_notify.py', 'moonglade.media_fetch'),
+    ('tests/test_pixai_client.py', 'moonglade.media_fetch'),
+    ('tests/test_settings_store.py', 'moonglade.media_fetch'),
+    ('tests/test_setup_prepare.py', 'moonglade.media_fetch'),
+    ('tests/test_spend_no_retry.py', 'moonglade.media_fetch'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.media_fetch'),
+    ('tests/test_telemetry.py', 'moonglade.media_fetch'),
+    ('tests/test_training_advanced.py', 'moonglade.media_fetch'),
+    ('tests/test_training_parity.py', 'moonglade.media_fetch'),
+    ('tests/test_video_tsubaki.py', 'moonglade.media_fetch'),
+    # Split phase 4, full_meta: no reader reads the full-meta text but through full_meta_mod;
+    # test_gen_surface's row-builder read takes moonglade/full_meta.py beside backup and gen_cli.
+    ('tests/test_artworks_adhoc.py', 'moonglade.full_meta'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.full_meta'),
+    ('tests/test_config_path_routing.py', 'moonglade.full_meta'),
+    ('tests/test_create_door.py', 'moonglade.full_meta'),
+    ('tests/test_csrf_coverage.py', 'moonglade.full_meta'),
+    ('tests/test_edit_upload.py', 'moonglade.full_meta'),
+    ('tests/test_enhance.py', 'moonglade.full_meta'),
+    ('tests/test_evidence_counters.py', 'moonglade.full_meta'),
+    ('tests/test_full_meta_rest_fallback.py', 'moonglade.full_meta'),
+    ('tests/test_gen_surface.py', 'moonglade.full_meta'),
+    ('tests/test_history_feed_document.py', 'moonglade.full_meta'),
+    ('tests/test_jwt.py', 'moonglade.full_meta'),
+    ('tests/test_living_library.py', 'moonglade.full_meta'),
+    ('tests/test_loom_notify.py', 'moonglade.full_meta'),
+    ('tests/test_pixai_client.py', 'moonglade.full_meta'),
+    ('tests/test_settings_store.py', 'moonglade.full_meta'),
+    ('tests/test_setup_prepare.py', 'moonglade.full_meta'),
+    ('tests/test_spend_no_retry.py', 'moonglade.full_meta'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.full_meta'),
+    ('tests/test_telemetry.py', 'moonglade.full_meta'),
+    ('tests/test_training_advanced.py', 'moonglade.full_meta'),
+    ('tests/test_training_parity.py', 'moonglade.full_meta'),
+    ('tests/test_video_tsubaki.py', 'moonglade.full_meta'),
+    # Split phase 4, library_runs: no reader reads the library runs' text but through
+    # library_runs_mod; test_gen_surface's import-local read takes moonglade/library_runs.py too,
+    # test_artworks_adhoc's retired-hash guard reads library_runs_mod, and test_video_tsubaki's
+    # run_fix_models read goes there, so it leaves SOURCE_READERS.
+    ('tests/test_artworks_adhoc.py', 'moonglade.library_runs'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.library_runs'),
+    ('tests/test_community_surface.py', 'moonglade.library_runs'),
+    ('tests/test_config_path_routing.py', 'moonglade.library_runs'),
+    ('tests/test_create_door.py', 'moonglade.library_runs'),
+    ('tests/test_csrf_coverage.py', 'moonglade.library_runs'),
+    ('tests/test_enhance.py', 'moonglade.library_runs'),
+    ('tests/test_evidence_counters.py', 'moonglade.library_runs'),
+    ('tests/test_full_meta_rest_fallback.py', 'moonglade.library_runs'),
+    ('tests/test_gen_surface.py', 'moonglade.library_runs'),
+    ('tests/test_history_feed_document.py', 'moonglade.library_runs'),
+    ('tests/test_jwt.py', 'moonglade.library_runs'),
+    ('tests/test_living_library.py', 'moonglade.library_runs'),
+    ('tests/test_loom_notify.py', 'moonglade.library_runs'),
+    ('tests/test_pixai_client.py', 'moonglade.library_runs'),
+    ('tests/test_settings_store.py', 'moonglade.library_runs'),
+    ('tests/test_setup_prepare.py', 'moonglade.library_runs'),
+    ('tests/test_spend_no_retry.py', 'moonglade.library_runs'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.library_runs'),
+    ('tests/test_telemetry.py', 'moonglade.library_runs'),
+    ('tests/test_training_advanced.py', 'moonglade.library_runs'),
+    ('tests/test_training_parity.py', 'moonglade.library_runs'),
+    # Split phase 4, account_api: no reader reads the account code's text but through
+    # account_api_mod; test_spend_no_retry looks its spend paths up there too, and
+    # test_artworks_adhoc's retired-hash guard reads it. test_community_surface's and
+    # test_contest_wins' backup source reads go there, so they leave SOURCE_READERS.
+    ('tests/test_artworks_adhoc.py', 'moonglade.account_api'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.account_api'),
+    ('tests/test_config_path_routing.py', 'moonglade.account_api'),
+    ('tests/test_create_door.py', 'moonglade.account_api'),
+    ('tests/test_csrf_coverage.py', 'moonglade.account_api'),
+    ('tests/test_enhance.py', 'moonglade.account_api'),
+    ('tests/test_evidence_counters.py', 'moonglade.account_api'),
+    ('tests/test_full_meta_rest_fallback.py', 'moonglade.account_api'),
+    ('tests/test_gen_surface.py', 'moonglade.account_api'),
+    ('tests/test_history_feed_document.py', 'moonglade.account_api'),
+    ('tests/test_jwt.py', 'moonglade.account_api'),
+    ('tests/test_living_library.py', 'moonglade.account_api'),
+    ('tests/test_loom_notify.py', 'moonglade.account_api'),
+    ('tests/test_pixai_client.py', 'moonglade.account_api'),
+    ('tests/test_settings_store.py', 'moonglade.account_api'),
+    ('tests/test_setup_prepare.py', 'moonglade.account_api'),
+    ('tests/test_spend_no_retry.py', 'moonglade.account_api'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.account_api'),
+    ('tests/test_telemetry.py', 'moonglade.account_api'),
+    ('tests/test_training_advanced.py', 'moonglade.account_api'),
+    ('tests/test_training_parity.py', 'moonglade.account_api'),
+    # Split phase 4, sync: no reader reads the download's or the backfills' text but through
+    # sync_mod.
+    ('tests/test_artworks_adhoc.py', 'moonglade.sync'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.sync'),
+    ('tests/test_config_path_routing.py', 'moonglade.sync'),
+    ('tests/test_create_door.py', 'moonglade.sync'),
+    ('tests/test_csrf_coverage.py', 'moonglade.sync'),
+    ('tests/test_enhance.py', 'moonglade.sync'),
+    ('tests/test_evidence_counters.py', 'moonglade.sync'),
+    ('tests/test_full_meta_rest_fallback.py', 'moonglade.sync'),
+    ('tests/test_gen_surface.py', 'moonglade.sync'),
+    ('tests/test_history_feed_document.py', 'moonglade.sync'),
+    ('tests/test_jwt.py', 'moonglade.sync'),
+    ('tests/test_living_library.py', 'moonglade.sync'),
+    ('tests/test_loom_notify.py', 'moonglade.sync'),
+    ('tests/test_pixai_client.py', 'moonglade.sync'),
+    ('tests/test_settings_store.py', 'moonglade.sync'),
+    ('tests/test_setup_prepare.py', 'moonglade.sync'),
+    ('tests/test_spend_no_retry.py', 'moonglade.sync'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.sync'),
+    ('tests/test_telemetry.py', 'moonglade.sync'),
+    ('tests/test_training_advanced.py', 'moonglade.sync'),
+    ('tests/test_training_parity.py', 'moonglade.sync'),
+    # test_split_complete.py: reads gallery.py for its line count, create_app's AST and its route
+    # decorators; none of those regions is in a module a move touched.
+    ("tests/test_split_complete.py", "moonglade.scan"),
+    ("tests/test_split_complete.py", "moonglade.dupes"),
+    ("tests/test_split_complete.py", "moonglade.series"),
+    ("tests/test_split_complete.py", "moonglade.health"),
+    ("tests/test_split_complete.py", "moonglade.account_prefs"),
+    ("tests/test_split_complete.py", "moonglade.updater"),
+    ("tests/test_split_complete.py", "moonglade.about"),
+    ("tests/test_split_complete.py", "moonglade.living"),
+    ("tests/test_split_complete.py", "moonglade.telemetry"),
+    ("tests/test_split_complete.py", "moonglade.contest_sync"),
+    ("tests/test_split_complete.py", "moonglade.achievements"),
+    ("tests/test_split_complete.py", "moonglade.branding"),
+    ("tests/test_split_complete.py", "moonglade.routes_generate"),
+    ("tests/test_split_complete.py", "moonglade.web_loom_store"),
+    ("tests/test_split_complete.py", "moonglade.routes_loom"),
+    ("tests/test_split_complete.py", "moonglade.routes_gate"),
+    ("tests/test_split_complete.py", "moonglade.web_threads"),
+    ("tests/test_split_complete.py", "moonglade.routes_panel"),
+    ("tests/test_split_complete.py", "moonglade.routes_delete"),
+    ("tests/test_split_complete.py", "moonglade.routes_recipes"),
+    ("tests/test_split_complete.py", "moonglade.routes_library"),
+    ("tests/test_split_complete.py", "moonglade.routes_account"),
+    ("tests/test_split_complete.py", "moonglade.routes_community"),
+    ("tests/test_split_complete.py", "moonglade.routes_train"),
+    ("tests/test_split_complete.py", "moonglade.routes_ach"),
+    ("tests/test_split_complete.py", "moonglade.routes_mirror"),
+    ("tests/test_split_complete.py", "moonglade.routes_branding"),
+    ("tests/test_split_complete.py", "moonglade.routes_import"),
+    ("tests/test_split_complete.py", "moonglade.redact"),
+    ("tests/test_split_complete.py", "moonglade.web_tiers"),
+    ("tests/test_split_complete.py", "moonglade.watch_plans"),
+    ("tests/test_split_complete.py", "moonglade.name_hunt"),
+    ("tests/test_split_complete.py", "moonglade.ach_beacon"),
+    ("tests/test_split_complete.py", "moonglade.scenes"),
+    ("tests/test_split_complete.py", "moonglade.pages"),
+    ("tests/test_split_complete.py", "moonglade.web_policy"),
+    ("tests/test_split_complete.py", "moonglade.loom_files"),
+    ("tests/test_split_complete.py", "moonglade.catalog_search"),
+    ("tests/test_split_complete.py", "moonglade.catalog"),
+    ("tests/test_split_complete.py", "moonglade.curation"),
+    ("tests/test_split_complete.py", "moonglade.train_guard"),
+    ("tests/test_split_complete.py", "moonglade.catalog_verbs"),
+    ("tests/test_split_complete.py", "moonglade.thumbs"),
+    ("tests/test_split_complete.py", "moonglade.trash"),
+    ("tests/test_split_complete.py", "moonglade.dupe_review"),
 }
 
 
@@ -1548,7 +2793,12 @@ def test_the_js_reader_scan_sees_the_node_tests():
     readers = detect_source_readers(_reader_files())
     js = {p for p in readers if p.endswith(rp.JS_SUFFIXES)}
     assert "loom/test/import-batches.test.js" in js
-    assert any("moonglade.gallery" in readers[p] for p in js)
+    # Since 3.22 phase 4 the node tests that read the gallery's page shells read the module they
+    # moved to (pages), not gallery.py itself; import-batches (scan) does not count here.
+    from_gallery = {"moonglade.gallery"} | {m for m, e in SEAMS.items()
+                                            if e["from"] == "moonglade.gallery"}
+    assert any(set(readers[p]) & from_gallery for p in js
+               if p != "loom/test/import-batches.test.js")
     # Since 3.22 the node tests that read the engine read the modules split out of it
     # (cards, gen_params), not backup.py itself.
     from_backup = {"moonglade.backup"} | {m for m, e in SEAMS.items()

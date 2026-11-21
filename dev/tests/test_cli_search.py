@@ -8,7 +8,7 @@ import sys
 import pytest
 
 from moonglade import backup as core
-from moonglade.gallery import CATALOG_FIELDS, save_catalog, catalog_csv_text
+from moonglade.catalog import CATALOG_FIELDS, save_catalog, catalog_csv_text
 
 
 def _row(**kw):

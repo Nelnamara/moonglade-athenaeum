@@ -46,7 +46,7 @@ def same_seed_groups(db_path, limit=1000):
     most-duplicated first, capped at `limit` groups. `prompt_hash` is a short digest
     of the grouped prompt_full (NOT the seed's own identity) so callers get a stable,
     compact per-group key without echoing the full prompt text into an id string."""
-    from moonglade.gallery import catalog
+    from moonglade.catalog import catalog
     import hashlib
     with catalog(db_path) as con:
         rows = con.execute(
@@ -109,7 +109,7 @@ def near_duplicate_groups(db_path, threshold=NEAR_DUP_HAMMING_THRESHOLD, hash_si
     two least-alike members in this group still agree on at least this share of the
     hash" -- a conservative, real number derived from the actual bits, never a fabricated
     confidence score."""
-    from moonglade.gallery import catalog
+    from moonglade.catalog import catalog
     from collections import defaultdict
     with catalog(db_path) as con:
         rows = con.execute(

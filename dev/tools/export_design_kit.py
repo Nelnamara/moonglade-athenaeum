@@ -8,7 +8,7 @@ friendlyGenErr duplication), so the kit uses the same discipline as the drawer's
 upscale constants: the copy is GENERATED, documented as generated, and pinned by a test.
 
   * every inline copy sits between two exact marker comment lines;
-  * this script regenerates every marked block from moonglade_gallery.py's
+  * this script regenerates every marked block from moonglade/pages.py's
     DESIGN_TOKENS_CSS, plus static/design-tokens.css as a plain stylesheet
     (that one exists for build tooling -- e.g. the React pilot -- to import);
   * dev/tests/test_design_kit_sync.py fails the suite when any copy is stale.
@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-GALLERY_PY = REPO / "moonglade" / "gallery.py"
+PAGES_PY = REPO / "moonglade" / "pages.py"    # DESIGN_TOKENS_CSS (out of gallery.py, 3.22)
 STATIC = REPO / "static"
 TOKENS_CSS = STATIC / "design-tokens.css"
 
@@ -86,7 +86,7 @@ def css_file_text(tokens: str) -> str:
 
 
 def main() -> int:
-    tokens = extract_tokens(GALLERY_PY.read_text(encoding="utf-8"))
+    tokens = extract_tokens(PAGES_PY.read_text(encoding="utf-8"))
     stamp = tokens_stamp(tokens)
     touched = []
 

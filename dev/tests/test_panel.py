@@ -6,12 +6,17 @@ from moonglade import gallery as g
 from moonglade import backup as core
 from moonglade import paths
 from moonglade import training as training_mod
-from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_test_client, login_existing_client
 from moonglade import scan as scan_mod
 from moonglade import jobs as jobs_mod
 from moonglade import media_tools as media_tools_mod
+from moonglade import thumbs as thumbs_mod
+from moonglade import web_accounts as web_accounts_mod
+from moonglade import full_meta as full_meta_mod
+from moonglade import account_api as account_api_mod
 
 
 def _csrf(html):
@@ -159,7 +164,7 @@ def test_destructive_action_refuses_authenticated_lan_session(tmp_path, monkeypa
         return FakeProc()
 
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
     LAN = "203.0.113.5"
     html = cli.get("/login").get_data(as_text=True)
@@ -722,17 +727,17 @@ def test_probe_has_audio(monkeypatch):
             self.returncode = rc
             self.stderr = ""
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: R("0\n"))
-    assert g.probe_has_audio("clip.mp4") is True
+    assert thumbs_mod.probe_has_audio("clip.mp4") is True
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: R(""))
-    assert g.probe_has_audio("silent.mp4") is False          # no stream index -> no audio
+    assert thumbs_mod.probe_has_audio("silent.mp4") is False          # no stream index -> no audio
     monkeypatch.setattr(media_tools_mod, "ffprobe_path", lambda: "")
-    assert g.probe_has_audio("clip.mp4") is False            # ffprobe missing -> fail soft
+    assert thumbs_mod.probe_has_audio("clip.mp4") is False            # ffprobe missing -> fail soft
 
     def _boom(*a, **k):
         raise OSError("gone")
     monkeypatch.setattr(media_tools_mod, "ffprobe_path", lambda: "/bin/ffprobe")
     monkeypatch.setattr(subprocess, "run", _boom)
-    assert g.probe_has_audio("clip.mp4") is False             # never raises
+    assert thumbs_mod.probe_has_audio("clip.mp4") is False             # never raises
 
 
 def test_probe_duration(monkeypatch):
@@ -749,11 +754,11 @@ def test_probe_duration(monkeypatch):
             self.returncode = rc
             self.stderr = ""
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: R("5.234\n"))
-    assert g.probe_duration("clip.mp4") == 5.234
+    assert thumbs_mod.probe_duration("clip.mp4") == 5.234
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: R("not-a-number\n"))
-    assert g.probe_duration("clip.mp4") is None                # never raises on garbage
+    assert thumbs_mod.probe_duration("clip.mp4") is None                # never raises on garbage
     monkeypatch.setattr(media_tools_mod, "ffprobe_path", lambda: "")
-    assert g.probe_duration("clip.mp4") is None                # ffprobe missing -> None
+    assert thumbs_mod.probe_duration("clip.mp4") is None                # ffprobe missing -> None
 
 
 # --- /api/loom/export: real audio rides along, silence fills the gap -----------
@@ -810,7 +815,7 @@ def test_export_real_audio_maps_both_streams_no_a0(tmp_path, monkeypatch):
     """The original bug: audio was hard-dropped (concat=...a=0, no -c:a, no [aout] map)
     even when every clip has real audio. Two clips, both WITH audio."""
     captured = _mock_export_ffmpeg(monkeypatch)
-    monkeypatch.setattr(g, "probe_has_audio", lambda path: True)
+    monkeypatch.setattr(thumbs_mod, "probe_has_audio", lambda path: True)
     cli = _two_video_client(tmp_path)
     r = cli.post("/api/loom/export", json={"clips": [
         {"mid": "v1", "in": 0, "out": 2}, {"mid": "v2", "in": 0, "out": 3}],
@@ -834,7 +839,7 @@ def test_export_silent_clip_gets_matching_duration_silence(tmp_path, monkeypatch
     """One real-audio clip + one silent clip (e.g. rendered without 'Generate audio') --
     the silent one must get a synthetic track sized to its OWN trim span, not skipped."""
     captured = _mock_export_ffmpeg(monkeypatch)
-    monkeypatch.setattr(g, "probe_has_audio",
+    monkeypatch.setattr(thumbs_mod, "probe_has_audio",
                         lambda path: "v1" in str(path))   # v1 has audio, v2 doesn't
     cli = _two_video_client(tmp_path)
     r = cli.post("/api/loom/export", json={"clips": [
@@ -855,7 +860,7 @@ def test_export_all_silent_reuses_one_anullsrc_input(tmp_path, monkeypatch):
     """Neither clip has audio -- exactly ONE synthetic-silence input is added and referenced
     twice (not duplicated per segment); each segment still gets its own correctly-sized span."""
     captured = _mock_export_ffmpeg(monkeypatch)
-    monkeypatch.setattr(g, "probe_has_audio", lambda path: False)
+    monkeypatch.setattr(thumbs_mod, "probe_has_audio", lambda path: False)
     cli = _two_video_client(tmp_path)
     r = cli.post("/api/loom/export", json={"clips": [
         {"mid": "v1", "in": 0, "out": 2}, {"mid": "v2", "in": 0, "out": 3}],
@@ -871,8 +876,8 @@ def test_export_silent_clip_with_no_trim_out_probes_real_duration(tmp_path, monk
     """When 'out' isn't set (trim to the clip's real end) AND the clip has no audio, the
     synthetic silence can't infer a length from anullsrc -- probe_duration must be consulted."""
     captured = _mock_export_ffmpeg(monkeypatch)
-    monkeypatch.setattr(g, "probe_has_audio", lambda path: False)
-    monkeypatch.setattr(g, "probe_duration", lambda path: 6.0)
+    monkeypatch.setattr(thumbs_mod, "probe_has_audio", lambda path: False)
+    monkeypatch.setattr(thumbs_mod, "probe_duration", lambda path: 6.0)
     cli = _two_video_client(tmp_path)
     r = cli.post("/api/loom/export", json={"clips": [
         {"mid": "v1", "in": 1.0}], "total_seconds": 5})   # no 'out' -> co is None
@@ -1130,11 +1135,11 @@ def _publish_setup(tmp_path, monkeypatch):
         calls.append(("task_media_index", task_id, media_id))
         return None if media_id == "mNoIdx" else 1
 
-    monkeypatch.setattr(core, "task_media_index", _media_index)
-    monkeypatch.setattr(core, "resolve_tack_ids", _tacks)
-    monkeypatch.setattr(core, "publish_artwork_from_task", _publish)
-    monkeypatch.setattr(core, "update_artwork", _update)
-    monkeypatch.setattr(core, "delete_artwork", _delete)
+    monkeypatch.setattr(account_api_mod, "task_media_index", _media_index)
+    monkeypatch.setattr(account_api_mod, "resolve_tack_ids", _tacks)
+    monkeypatch.setattr(account_api_mod, "publish_artwork_from_task", _publish)
+    monkeypatch.setattr(account_api_mod, "update_artwork", _update)
+    monkeypatch.setattr(account_api_mod, "delete_artwork", _delete)
     return login_test_client(create_app(tmp_path)), calls
 
 
@@ -1362,18 +1367,18 @@ def test_list_trainable_base_models_is_the_curated_snapshot_grouped_by_arch():
 # --- Lineage (2026-08-06): batch siblings (task_id) + derivation chain (source_media_id).
 
 def test_source_media_of_task_reads_all_three_derive_shapes():
-    edit = core.source_media_of_task({"parameters": {"chat": {"mediaId": "111", "modelId": "x"}}})
+    edit = account_api_mod.source_media_of_task({"parameters": {"chat": {"mediaId": "111", "modelId": "x"}}})
     assert edit == ("111", "edit")
-    video = core.source_media_of_task({"parameters": {"i2v": {"mediaId": "222"}}})
+    video = account_api_mod.source_media_of_task({"parameters": {"i2v": {"mediaId": "222"}}})
     assert video == ("222", "video")
-    upscale = core.source_media_of_task({"parameters": {"mediaId": "333", "upscale": 2}})
+    upscale = account_api_mod.source_media_of_task({"parameters": {"mediaId": "333", "upscale": 2}})
     assert upscale == ("333", "upscale")
-    enlarge = core.source_media_of_task({"parameters": {"mediaId": "444", "enlarge": 2}})
+    enlarge = account_api_mod.source_media_of_task({"parameters": {"mediaId": "444", "enlarge": 2}})
     assert enlarge == ("444", "upscale")
-    original = core.source_media_of_task({"parameters": {"prompts": "a cat"}})
+    original = account_api_mod.source_media_of_task({"parameters": {"prompts": "a cat"}})
     assert original == (None, None)
-    assert core.source_media_of_task(None) == (None, None)
-    assert core.source_media_of_task({}) == (None, None)
+    assert account_api_mod.source_media_of_task(None) == (None, None)
+    assert account_api_mod.source_media_of_task({}) == (None, None)
 
 
 def test_api_lineage_returns_siblings_parent_and_children(tmp_path):
@@ -1411,10 +1416,10 @@ def test_api_lineage_returns_siblings_parent_and_children(tmp_path):
 
 
 def test_extract_full_meta_includes_lineage_fields():
-    fm = core.extract_full_meta({"parameters": {"chat": {"mediaId": "999", "modelId": "x"}},
+    fm = full_meta_mod.extract_full_meta({"parameters": {"chat": {"mediaId": "999", "modelId": "x"}},
                                  "outputs": {}})
     assert fm["source_media_id"] == "999" and fm["derive_kind"] == "edit"
-    fm2 = core.extract_full_meta({"parameters": {"prompts": "a cat"}, "outputs": {}})
+    fm2 = full_meta_mod.extract_full_meta({"parameters": {"prompts": "a cat"}, "outputs": {}})
     assert fm2["source_media_id"] == "" and fm2["derive_kind"] == ""
 
 def test_train_recent_tasks_groups_real_images_by_real_task_id(tmp_path):
@@ -1566,7 +1571,8 @@ def test_the_release_check_rides_the_schedulers_own_tick():
     chain does is `continue` when no automated task is enabled, which is the default on every
     install -- inside it, the release check would never run for almost anybody."""
     import inspect
-    src = inspect.getsource(g.create_app)
+    from moonglade import web_threads as web_threads_mod  # the scheduler left create_app (split phase 4)
+    src = inspect.getsource(web_threads_mod)
     loop = src[src.index("def _scheduler_loop():"):]
     loop = loop[:loop.index("def ", 40)]
     body = loop[:loop.index("threading.Thread(target=_scheduler_loop")]

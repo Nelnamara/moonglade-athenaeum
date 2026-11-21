@@ -118,7 +118,7 @@ def test_an_idle_older_install_still_holding_its_log_stops_every_bring_in(r):
     so "nothing more was written" alone never means it was closed: while it holds its old log
     open, every start stops, and its spend guard and runs.db stay where it reads them. Closed,
     the next start brings them in."""
-    from moonglade.gallery import TrainGuard
+    from moonglade.train_guard import TrainGuard
     _moved(r)
     log = r.lib / "logs" / "moonglade.log"
     holder = _hold_open(log)
@@ -218,7 +218,7 @@ def test_the_spend_guard_keeps_whichever_entry_blocks_longer(r):
     already retried, and its later, unclear attempt must never replace the new home's "done".
     The same for a Basic start: a later "started" (a minute) never replaces an "ambiguous"
     (15 minutes) still standing."""
-    from moonglade.gallery import TrainGuard
+    from moonglade.train_guard import TrainGuard
     _moved(r)
     now = time.time()
     rec = r.lib / "_moonglade" / "records" / "train_guard.json"

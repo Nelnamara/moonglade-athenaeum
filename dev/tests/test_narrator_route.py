@@ -17,7 +17,7 @@ import pytest
 
 from moonglade import gallery as g
 from moonglade import narrator as nar
-from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests import synthetic_feats as sf
 from tests.conftest import _SEALED_DONOR, login_client, login_test_client

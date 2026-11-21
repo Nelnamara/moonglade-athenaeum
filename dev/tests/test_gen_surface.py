@@ -8,8 +8,12 @@ import types
 from moonglade import backup as core
 from moonglade import gen_cli as gen_cli_mod
 from moonglade import models as models_mod
-from moonglade.gallery import CATALOG_FIELDS, save_catalog, load_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog, load_catalog
 from moonglade import task_reads as task_reads_mod
+from moonglade import full_meta as full_meta_mod
+from moonglade import library_runs as library_runs_mod
+from moonglade import sync as sync_mod
+from moonglade import catalog as catalog_mod
 
 
 _SURFACE = ["inference_profile", "quality_tag", "prompt_helper", "control_nets", "lora_parameters",
@@ -22,7 +26,7 @@ def test_every_surface_field_is_a_catalog_column():
         assert f in CATALOG_FIELDS, f + " missing from CATALOG_FIELDS"
     # and the backfill copy-list must carry them too, or --backfill-full-meta silently skips them
     for f in _SURFACE:
-        assert f in core._FULL_META_FIELDS, f + " missing from _FULL_META_FIELDS (backfill)"
+        assert f in full_meta_mod._FULL_META_FIELDS, f + " missing from _FULL_META_FIELDS (backfill)"
 
 
 def test_extract_full_meta_pulls_the_surface_fields():
@@ -37,7 +41,7 @@ def test_extract_full_meta_pulls_the_surface_fields():
         "moderationAction": {"promptsModerationAction": "PASS"},
         "detectPromptHelperResult": {"enableReasonCode": "user-want-to-enable"},
     }
-    fm = core.extract_full_meta(task)
+    fm = full_meta_mod.extract_full_meta(task)
     assert fm["inference_profile"] == "lite"
     assert fm["quality_tag"] == "Masterpiece"
     assert fm["prompt_helper"] == "off (user-want-to-enable)"
@@ -53,45 +57,45 @@ def test_extract_full_meta_pulls_the_surface_fields():
 
 
 def test_prompt_helper_label():
-    assert core._prompt_helper_label({"promptHelper": {"enable": True}}, {}) == "on"
-    assert core._prompt_helper_label({"promptHelper": {"enable": False}}, {}) == "off"
-    assert core._prompt_helper_label({}, {}) == ""                   # neither present -> ''
-    assert core._prompt_helper_label(
+    assert full_meta_mod._prompt_helper_label({"promptHelper": {"enable": True}}, {}) == "on"
+    assert full_meta_mod._prompt_helper_label({"promptHelper": {"enable": False}}, {}) == "off"
+    assert full_meta_mod._prompt_helper_label({}, {}) == ""                   # neither present -> ''
+    assert full_meta_mod._prompt_helper_label(
         {"promptHelper": {"enable": False}},
         {"detectPromptHelperResult": {"enableReasonCode": "x"}}) == "off (x)"
 
 
 def test_video_task_surface_fields():
     task = {"parameters": {"i2vPro": {"mode": "professional", "model": "v3.0.2", "duration": 10}}}
-    fm = core.extract_full_meta(task)
+    fm = full_meta_mod.extract_full_meta(task)
     assert fm["video_mode"] == "professional" and fm["video_model"] == "v3.0.2"
 
 
 def test_preset_fill_is_self_limiting(monkeypatch):
     """Tsubaki.2/AuraFlow: preset exposes samplingSteps only -> fill steps, leave sampler/cfg
     blank (that model genuinely has no sampler/cfg; an em-dash there is honest, not a hole)."""
-    monkeypatch.setattr(core, "_resolve_model_preset",
+    monkeypatch.setattr(full_meta_mod, "_resolve_model_preset",
                         lambda s, vid: {"steps": "16", "sampler": "", "cfg_scale": ""})
     fm = {"model_id": "V1", "steps": "", "sampler": "", "cfg_scale": ""}
-    core._fill_preset_defaults(object(), fm, {"parameters": {"modelId": "V1"}})
+    full_meta_mod._fill_preset_defaults(object(), fm, {"parameters": {"modelId": "V1"}})
     assert fm["steps"] == "16" and fm["sampler"] == "" and fm["cfg_scale"] == ""
 
 
 def test_preset_fill_never_overwrites_a_recorded_value(monkeypatch):
-    monkeypatch.setattr(core, "_resolve_model_preset",
+    monkeypatch.setattr(full_meta_mod, "_resolve_model_preset",
                         lambda s, vid: {"steps": "16", "sampler": "Euler a", "cfg_scale": "5"})
     fm = {"model_id": "V1", "steps": "30", "sampler": "", "cfg_scale": ""}   # steps already set
-    core._fill_preset_defaults(object(), fm, {"parameters": {"modelId": "V1"}})
+    full_meta_mod._fill_preset_defaults(object(), fm, {"parameters": {"modelId": "V1"}})
     assert fm["steps"] == "30"                                       # kept, not overwritten
     assert fm["sampler"] == "Euler a" and fm["cfg_scale"] == "5"     # blanks filled
 
 
 def test_preset_fill_skips_chat_and_video(monkeypatch):
-    monkeypatch.setattr(core, "_resolve_model_preset",
+    monkeypatch.setattr(full_meta_mod, "_resolve_model_preset",
                         lambda s, vid: {"steps": "16", "sampler": "x", "cfg_scale": "5"})
     for params in ({"chat": {"modelId": "V1"}}, {"i2vPro": {"mode": "pro"}}):
         fm = {"model_id": "V1", "steps": "", "sampler": "", "cfg_scale": ""}
-        core._fill_preset_defaults(object(), fm, {"parameters": params})
+        full_meta_mod._fill_preset_defaults(object(), fm, {"parameters": params})
         assert fm["steps"] == "" and fm["sampler"] == "" and fm["cfg_scale"] == ""
 
 
@@ -125,6 +129,10 @@ def test_every_capture_path_builds_its_row_through_the_shared_builder():
     src = pathlib.Path(core.__file__).read_text(encoding="utf-8")
     # the CLI runners and the task downloaders are in moonglade/gen_cli.py since 3.22
     src += "\n" + pathlib.Path(gen_cli_mod.__file__).read_text(encoding="utf-8")
+    # and the row builder is in moonglade/full_meta.py since 3.22 (split phase 4)
+    src += "\n" + pathlib.Path(full_meta_mod.__file__).read_text(encoding="utf-8")
+    # and run_sync_videos (with its _do_task) is in moonglade/library_runs.py
+    src += "\n" + pathlib.Path(library_runs_mod.__file__).read_text(encoding="utf-8")
 
     builder = _function_body(src, "def build_catalog_row")
     assert "for k in _TASK_ROW_FIELDS" in builder, \
@@ -152,11 +160,13 @@ def test_the_local_import_paths_also_use_the_shared_builder():
     the argument is actually there, not merely that the builder is called."""
     import pathlib
     src = pathlib.Path(core.__file__).read_text(encoding="utf-8")
+    # run_import_local is in moonglade/library_runs.py since 3.22 (split phase 4)
+    src += "\n" + pathlib.Path(library_runs_mod.__file__).read_text(encoding="utf-8")
     body = _function_body(src, "def run_import_local")
     assert "build_catalog_row(" in body and '{f: "" for f in CATALOG_FIELDS}' not in body
 
-    from moonglade import gallery as moonglade_gallery
-    gsrc = pathlib.Path(moonglade_gallery.__file__).read_text(encoding="utf-8")
+    from moonglade import routes_loom as routes_loom_mod    # the Loom routes (split phase 4)
+    gsrc = pathlib.Path(routes_loom_mod.__file__).read_text(encoding="utf-8")
     loom = gsrc[gsrc.index("def api_loom_import_bundle"):]
     loom = loom[:loom.index("media_added")]
     assert "build_catalog_row(" in loom and '{k: "" for k in CATALOG_FIELDS}' not in loom
@@ -170,9 +180,9 @@ def test_task_row_fields_carry_lineage():
     """Create-time row-builders spread _TASK_ROW_FIELDS, not the bare surface list, so a freshly
     captured derived image/video lands with source_media_id/derive_kind already filled (audit
     2026-08-15) instead of waiting on a separate --backfill-lineage pass."""
-    assert core._TASK_ROW_FIELDS[:len(core._GEN_SURFACE_FIELDS)] == core._GEN_SURFACE_FIELDS
+    assert full_meta_mod._TASK_ROW_FIELDS[:len(full_meta_mod._GEN_SURFACE_FIELDS)] == full_meta_mod._GEN_SURFACE_FIELDS
     for f in ("source_media_id", "derive_kind"):
-        assert f in core._TASK_ROW_FIELDS, f + " missing from _TASK_ROW_FIELDS"
+        assert f in full_meta_mod._TASK_ROW_FIELDS, f + " missing from _TASK_ROW_FIELDS"
         assert f in CATALOG_FIELDS, f + " missing from CATALOG_FIELDS"
 
 
@@ -198,21 +208,21 @@ def test_with_surface_gate_readmits_pre18_rows(monkeypatch, tmp_path, pixai):
 
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", detail)
     monkeypatch.setattr(models_mod, "model_name_gql", lambda s, mid: "My Model")
-    monkeypatch.setattr(core, "resolve_loras", lambda s, t: "")
-    monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, t: fm)
+    monkeypatch.setattr(full_meta_mod, "resolve_loras", lambda s, t: "")
+    monkeypatch.setattr(full_meta_mod, "_fill_preset_defaults", lambda s, fm, t: fm)
 
     args = types.SimpleNamespace(out=str(tmp_path), token=None, workers=1, delay=0.0,
                                  progress=None, with_loras=False, with_credit=False,
                                  with_surface=False)
 
     # 1) WITHOUT the flag: the row passes every core gate, so nothing is fetched or changed.
-    core.run_backfill_full_meta(args)
+    sync_mod.run_backfill_full_meta(args)
     assert fetched == []
     assert not {r["task_id"]: r for r in load_catalog(db)}["t0"].get("updated_at")
 
     # 2) WITH the flag: re-admitted, fetched once, and the surface columns land.
     args.with_surface = True
-    core.run_backfill_full_meta(args)
+    sync_mod.run_backfill_full_meta(args)
     assert fetched == ["t0"]
     got = {r["task_id"]: r for r in load_catalog(db)}["t0"]
     assert got["updated_at"] == "2026-08-01T00:00:00Z"
@@ -221,7 +231,7 @@ def test_with_surface_gate_readmits_pre18_rows(monkeypatch, tmp_path, pixai):
 
     # 3) Re-run WITH the flag: updated_at is now set, so the sentinel no longer matches -> skip.
     fetched.clear()
-    core.run_backfill_full_meta(args)
+    sync_mod.run_backfill_full_meta(args)
     assert fetched == []
 
 
@@ -245,9 +255,9 @@ def test_backfill_checkpoints_incrementally_not_only_at_the_end(monkeypatch, tmp
 
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", detail)
     monkeypatch.setattr(models_mod, "model_name_gql", lambda s, mid: "M")
-    monkeypatch.setattr(core, "resolve_loras", lambda s, t: "")
-    monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, t: fm)
-    monkeypatch.setattr(core, "_BACKFILL_CHECKPOINT_TASKS", 1)     # flush after every task
+    monkeypatch.setattr(full_meta_mod, "resolve_loras", lambda s, t: "")
+    monkeypatch.setattr(full_meta_mod, "_fill_preset_defaults", lambda s, fm, t: fm)
+    monkeypatch.setattr(sync_mod, "_BACKFILL_CHECKPOINT_TASKS", 1)     # flush after every task
 
     saves = {"n": 0}
     real_save = core.save_catalog_over_snapshot
@@ -256,12 +266,12 @@ def test_backfill_checkpoints_incrementally_not_only_at_the_end(monkeypatch, tmp
         saves["n"] += 1
         return real_save(dbp, rws, *a, **k)
 
-    monkeypatch.setattr(core, "save_catalog_over_snapshot", counting_save)
+    monkeypatch.setattr(catalog_mod, "save_catalog_over_snapshot", counting_save)
 
     args = types.SimpleNamespace(out=str(tmp_path), token=None, workers=1, delay=0.0,
                                  progress=None, with_loras=False, with_credit=False,
                                  with_surface=True)
-    core.run_backfill_full_meta(args)
+    sync_mod.run_backfill_full_meta(args)
 
     assert saves["n"] >= 3, "each task should checkpoint its own save, not batch to one end-save"
     got = {r["task_id"]: r for r in load_catalog(db)}

@@ -16,6 +16,7 @@ import time
 
 from moonglade import pixai_client as _pixai_client
 from moonglade import series as _series
+from moonglade import account_api as _account_api
 
 # ======================================================================================
 # THE LIVING LIBRARY (2026-09-06)
@@ -83,7 +84,7 @@ _artworks_refusal = {"reported": False}
 def _note_artworks_refusal(log, out_dir, page, err):
     """Say why the sweep could not read the published list: once, in plain words, with the
     reason PixAI or the network gave (folder paths hidden), then quietly while it lasts."""
-    from moonglade.gallery import _redact_host_paths_cli
+    from moonglade.redact import _redact_host_paths_cli
     reason = _redact_host_paths_cli(out_dir, str(err))[:300]
     if _artworks_refusal["reported"]:
         log.debug("artworks sweep: page %d still cannot be read: %s", page, reason)
@@ -99,7 +100,7 @@ def published_index(db_path):
     """media_id -> (artwork_id, created_epoch_or_None) for every catalog row that already
     claims an artwork. The sweep's whole idea of "do I already know this work, and is it
     young?" -- one indexed read, no network, ~36k rows of two small values."""
-    from moonglade.gallery import catalog
+    from moonglade.catalog import catalog
     idx = {}
     try:
         with catalog(db_path) as con:
@@ -124,7 +125,7 @@ def published_local_ids(db_path):
     that exist -- so treating it as "might be new" made it hold the walk open forever.
 
     One indexed column scan, no row bodies, the same shape published_index already is."""
-    from moonglade.gallery import catalog
+    from moonglade.catalog import catalog
     ids = set()
     try:
         with catalog(db_path) as con:
@@ -205,7 +206,8 @@ def artworks_sweep(out_dir, db_path, force=False, now=None, log_event=None):
     into the Activity ledger every time would bury the events that matter under its own
     noise. It is the ONLY thing this function tells the browser; there is no path from
     here to the gallery's loaders."""
-    from moonglade.gallery import apply_artwork_meta, _redact_host_paths_cli
+    from moonglade.catalog_verbs import apply_artwork_meta
+    from moonglade.redact import _redact_host_paths_cli
     import logging as _logging
     import uuid as _uuid
     from moonglade import backup as core
@@ -239,7 +241,7 @@ def artworks_sweep(out_dir, db_path, force=False, now=None, log_event=None):
             incomplete = True
             break
         try:
-            conn = core.artwork_list_gql(session, before=before, last=ARTWORKS_PAGE, retries=0)
+            conn = _account_api.artwork_list_gql(session, before=before, last=ARTWORKS_PAGE, retries=0)
         except core.ArtworkListRefused as e:
             # A page that cannot be read. Whatever was collected is real and is written
             # below; the run is simply incomplete, and an incomplete sweep must NOT buy
@@ -264,7 +266,7 @@ def artworks_sweep(out_dir, db_path, force=False, now=None, log_event=None):
                 # AND leaving the run unstamped. A skip costs one row until the next sweep;
                 # the alternative costs the entire pass, every fifteen minutes, forever.
                 try:
-                    meta = core.extract_artwork_meta(node)
+                    meta = _account_api.extract_artwork_meta(node)
                     if meta.get("media_id"):
                         metas.append(meta)
                         artworks += 1
@@ -385,7 +387,7 @@ def artworks_sweep_kick(out_dir, db_path, force=False, log_event=None, busy=None
     lock it is the same instant _panel_run's own probe finds this lock held, so whichever of
     the two arrives first, the other one stands down. Passed in rather than imported because
     the slot is a create_app closure and this function is module-level and testable."""
-    from moonglade.gallery import _redact_host_paths_cli
+    from moonglade.redact import _redact_host_paths_cli
     import logging as _logging
     if not _artworks_lock.acquire(False):
         return None
@@ -723,7 +725,7 @@ def top_published_rows(db_path, limit=12, order="likes"):
     column filled by --sync-artworks, not twelve live calls made while the panel opens;
     a library that has never been swept simply reads views=0 with views_at blank, which
     is what lets the panel say "not swept yet" instead of drawing a bar of zeroes."""
-    from moonglade.gallery import catalog
+    from moonglade.catalog import catalog
     col = "views" if order == "views" else "likes"
     with catalog(db_path) as con:
         try:
@@ -762,7 +764,7 @@ def published_totals(db_path):
     Which of an animation's two rows represents it does not matter here -- they carry the
     same PixAI-owned numbers by construction -- so the lowest rowid is representative
     enough. published_spikes, which shows a media_id to the owner, is fussier."""
-    from moonglade.gallery import catalog
+    from moonglade.catalog import catalog
     with catalog(db_path) as con:
         try:
             r = con.execute(
@@ -799,7 +801,7 @@ def published_spikes(db_path, limit=5):
     wins the slot over the mp4 -- the note names a picture, and the still is what the
     owner recognises. A row that has never been merged has no artwork_id and keys on its
     own media_id, so it is never folded in with any other."""
-    from moonglade.gallery import catalog
+    from moonglade.catalog import catalog
     with catalog(db_path) as con:
         try:
             rows = con.execute(

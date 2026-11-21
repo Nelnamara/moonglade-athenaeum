@@ -7,7 +7,8 @@ from unittest import mock
 import pytest
 
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client, _SEALED_DONOR
 from moonglade import telemetry as telemetry_mod

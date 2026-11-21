@@ -36,6 +36,11 @@ from moonglade import media_tools as media_tools_mod
 from moonglade import telemetry as telemetry_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import models as models_mod
+from moonglade import thumbs as thumbs_mod
+from moonglade import media_fetch as media_fetch_mod
+from moonglade import full_meta as full_meta_mod
+from moonglade import library_runs as library_runs_mod
+from moonglade import account_api as account_api_mod
 
 
 @pytest.fixture()
@@ -67,11 +72,11 @@ class TestM01ResolveMediaTls:
     def test_ssl_failure_prints_the_actionable_ssl_help(self, mock_session, monkeypatch, capsys):
         """gql()/download() answer an SSLError with _ssl_help(); resolve_media said nothing at
         all, so a fixable LOCAL trust problem read as 'PixAI does not have this image'."""
-        monkeypatch.setattr(core, "_media_tls_warned", False)
+        monkeypatch.setattr(media_fetch_mod, "_media_tls_warned", False)
         mock_session.get.side_effect = requests.exceptions.SSLError(
             "certificate verify failed: unable to get local issuer certificate")
 
-        url, info = core.resolve_media(mock_session, "mid-tls-1")
+        url, info = media_fetch_mod.resolve_media(mock_session, "mid-tls-1")
 
         assert (url, info) == (None, {})          # still fails SOFT -- callers depend on it
         out = capsys.readouterr().out
@@ -86,11 +91,11 @@ class TestM01ResolveMediaTls:
         The latch is per PROCESS, which is the same as per run for the CLI and deliberately
         is NOT inside the long-lived gallery server -- see _warn_media_tls_once, and do not
         "fix" the wording back to 'run'."""
-        monkeypatch.setattr(core, "_media_tls_warned", False)
+        monkeypatch.setattr(media_fetch_mod, "_media_tls_warned", False)
         mock_session.get.side_effect = requests.exceptions.SSLError("bad cert")
 
         for mid in ("a", "b", "c"):
-            assert core.resolve_media(mock_session, mid) == (None, {})
+            assert media_fetch_mod.resolve_media(mock_session, mid) == (None, {})
 
         out = capsys.readouterr().out
         assert out.count("pip install truststore") == 1
@@ -99,10 +104,10 @@ class TestM01ResolveMediaTls:
     def test_ordinary_network_failure_stays_quiet(self, mock_session, monkeypatch, capsys):
         """A timeout or a 404 is NOT a trust problem -- printing the TLS paragraph for one
         would be the same bug pointing the other way."""
-        monkeypatch.setattr(core, "_media_tls_warned", False)
+        monkeypatch.setattr(media_fetch_mod, "_media_tls_warned", False)
         mock_session.get.side_effect = requests.RequestException("read timeout")
 
-        assert core.resolve_media(mock_session, "mid-plain") == (None, {})
+        assert media_fetch_mod.resolve_media(mock_session, "mid-plain") == (None, {})
         assert "truststore" not in capsys.readouterr().out
 
     def test_the_paragraph_is_one_write_so_a_progress_frame_cannot_split_it(
@@ -124,11 +129,11 @@ class TestM01ResolveMediaTls:
                 pass
 
         rec = Recorder()
-        monkeypatch.setattr(core, "_media_tls_warned", False)
+        monkeypatch.setattr(media_fetch_mod, "_media_tls_warned", False)
         monkeypatch.setattr(sys, "stdout", rec)
         mock_session.get.side_effect = requests.exceptions.SSLError("bad cert")
 
-        core.resolve_media(mock_session, "mid-tls-atomic")
+        media_fetch_mod.resolve_media(mock_session, "mid-tls-atomic")
 
         assert len(rec.writes) == 1, (
             "the TLS paragraph went out in {} writes -- a progress frame can land between "
@@ -147,14 +152,14 @@ class TestM01ResolveMediaTls:
 
         cb = core._make_progress()
         wrote = threading.Event()
-        core._CONSOLE_LOCK.acquire()
+        media_fetch_mod._CONSOLE_LOCK.acquire()
         try:
             t = threading.Thread(target=lambda: (cb(1, 10), wrote.set()))
             t.start()
             assert not wrote.wait(0.25), (
                 "the progress bar was drawn while a console block held the lock")
         finally:
-            core._CONSOLE_LOCK.release()
+            media_fetch_mod._CONSOLE_LOCK.release()
         assert wrote.wait(2), "the progress bar never resumed after the lock was released"
         t.join()
 
@@ -237,7 +242,7 @@ class TestM04Faststart:
         monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "ffmpeg")
         _ffmpeg_refuses(monkeypatch)                                      # ffmpeg refuses it
 
-        res = core.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
+        res = library_runs_mod.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
 
         assert res["failed"] == 1
         assert res["fixed"] + res["skipped"] + res["failed"] == res["total"] == 2
@@ -269,7 +274,7 @@ class TestM04Faststart:
             return asked["n"] > 1          # the mirror won the race after the first check
         monkeypatch.setattr(media_tools_mod, "_mp4_is_faststart", racing)
 
-        res = core.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
+        res = library_runs_mod.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
 
         assert asked["n"] == 1, (
             "the sweep asked 'is it faststart?' {} times -- two askers can disagree, and the "
@@ -298,7 +303,7 @@ class TestM04Faststart:
             return False
         monkeypatch.setattr(media_tools_mod, "_mp4_is_faststart", purge_then_answer)
 
-        res = core.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
+        res = library_runs_mod.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
 
         assert res["failed"] == 0 and res["skipped"] == 1
         assert "still not iOS-playable" not in capsys.readouterr().out
@@ -312,7 +317,7 @@ class TestM05Claims:
     def test_list_claims_carries_the_failure_reason(self):
         """conftest blocks live /v2, so _rest_get raises here exactly as a 5xx would. The
         fail-soft contract (an empty list) is preserved for the gallery's callers."""
-        res = core.list_claims(object())
+        res = account_api_mod.list_claims(object())
 
         assert res == []                              # unchanged for every existing caller
         assert getattr(res, "error", "")              # ...but it now says why
@@ -322,7 +327,7 @@ class TestM05Claims:
         transient 5xx printed 'No claimable rewards found'."""
         monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
 
-        res = core.run_claims(SimpleNamespace(token=None, claims=True, claim="", confirm=False))
+        res = account_api_mod.run_claims(SimpleNamespace(token=None, claims=True, claim="", confirm=False))
 
         out = capsys.readouterr().out
         assert "No claimable rewards found" not in out
@@ -333,9 +338,9 @@ class TestM05Claims:
         """The other half of the distinction -- and proof a caller handing back a PLAIN list
         (no .error attribute) still works, which is how the existing tests stub this."""
         monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-        monkeypatch.setattr(core, "list_claims", lambda s: [])
+        monkeypatch.setattr(account_api_mod, "list_claims", lambda s: [])
 
-        res = core.run_claims(SimpleNamespace(token=None, claims=True, claim="", confirm=False))
+        res = account_api_mod.run_claims(SimpleNamespace(token=None, claims=True, claim="", confirm=False))
 
         assert res == {"rewards": 0}
         assert "No claimable rewards found" in capsys.readouterr().out
@@ -374,7 +379,7 @@ def _reply(mocker, payload, status=200, text=""):
 
 
 def _catalog_with_one_row(tmp_path, vid):
-    from moonglade.gallery import save_catalog, CATALOG_FIELDS
+    from moonglade.catalog import save_catalog, CATALOG_FIELDS
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "m1", "filename": "a.png", "model_id": vid, "model_name": vid}])
@@ -421,7 +426,7 @@ class TestM18ModelLookupFailure:
         """THE BUG. One timeout mid-run used to write 'Unknown or removed model' over every
         row of a still-valid model, and _needs_model_fix then read those rows as resolved --
         so re-running --fix-models never repaired it. Permanent, without editing the DB."""
-        from moonglade.gallery import save_catalog, load_catalog, CATALOG_FIELDS
+        from moonglade.catalog import save_catalog, load_catalog, CATALOG_FIELDS
         vid = "918273645500000001"
         db = tmp_path / "catalog.db"
         save_catalog(db, [
@@ -434,7 +439,7 @@ class TestM18ModelLookupFailure:
         session.post.side_effect = requests.RequestException("503 from the API")
         mocker.patch.object(core, "_make_session", return_value=session)
 
-        res = core.run_fix_models(SimpleNamespace(
+        res = library_runs_mod.run_fix_models(SimpleNamespace(
             out=str(tmp_path), token=None, delay=0, relabel_removed=True))
 
         rows = {r["media_id"]: r for r in load_catalog(db)}
@@ -443,7 +448,7 @@ class TestM18ModelLookupFailure:
         assert res["relabeled"] == 0
         assert res["lookup_failed"] == 1
         # and the rows are still queued for the next run, i.e. the damage is repairable
-        assert core._needs_model_fix(rows["m1"]) == vid
+        assert library_runs_mod._needs_model_fix(rows["m1"]) == vid
 
     @pytest.mark.parametrize("payload,status,what", [
         ({"errors": [{"message": "PersistedQueryNotFound"}]}, 200,
@@ -474,14 +479,14 @@ class TestM18ModelLookupFailure:
         session.post.return_value = _reply(mocker, payload, status)
         mocker.patch.object(core, "_make_session", return_value=session)
 
-        res = core.run_fix_models(SimpleNamespace(
+        res = library_runs_mod.run_fix_models(SimpleNamespace(
             out=str(tmp_path), token=None, delay=0, relabel_removed=True))
 
-        from moonglade.gallery import load_catalog
+        from moonglade.catalog import load_catalog
         row = load_catalog(db)[0]
         assert row["model_name"] == vid, what
         assert res["relabeled"] == 0 and res["lookup_failed"] == 1
-        assert core._needs_model_fix(row) == vid        # still repairable by a re-run
+        assert library_runs_mod._needs_model_fix(row) == vid        # still repairable by a re-run
         assert _model_cache().get(vid) is models_mod._MODEL_LOOKUP_FAILED
 
     def test_a_200_with_errors_is_not_laundered_through_the_cache_into_sync(
@@ -502,7 +507,7 @@ class TestM18ModelLookupFailure:
                                                                       mocker):
         """The conservative guard must not neuter the flag: PixAI ANSWERING with a null
         version really does mean the model is gone, and that still gets relabelled."""
-        from moonglade.gallery import save_catalog, load_catalog, CATALOG_FIELDS
+        from moonglade.catalog import save_catalog, load_catalog, CATALOG_FIELDS
         vid = "918273645500000002"
         db = tmp_path / "catalog.db"
         save_catalog(db, [
@@ -516,7 +521,7 @@ class TestM18ModelLookupFailure:
         session.post.return_value = _reply(mocker, {"data": {"generationModelVersion": None}})
         mocker.patch.object(core, "_make_session", return_value=session)
 
-        res = core.run_fix_models(SimpleNamespace(
+        res = library_runs_mod.run_fix_models(SimpleNamespace(
             out=str(tmp_path), token=None, delay=0, relabel_removed=True))
 
         rows = {r["media_id"]: r for r in load_catalog(db)}
@@ -559,14 +564,14 @@ def recovery_network(monkeypatch):
     def install(task, video_download="ok"):
         monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
         monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: task)
-        monkeypatch.setattr(core, "media_file_gql",
+        monkeypatch.setattr(full_meta_mod, "media_file_gql",
                             lambda s, mid: {"fileUrl": "https://cdn/{}.mp4".format(mid)})
-        monkeypatch.setattr(core, "resolve_media",
+        monkeypatch.setattr(media_fetch_mod, "resolve_media",
                             lambda s, mid: ("https://cdn/{}.png".format(mid),
                                             {"width": 8, "height": 8}))
         monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: True)
         monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
-        monkeypatch.setattr(gallery, "make_thumbnail", lambda *a, **k: None)
+        monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
         monkeypatch.setattr(telemetry_mod, "telem_bump",
                             lambda name, out_dir=None: bumps.append(name))
 
@@ -581,7 +586,7 @@ def recovery_network(monkeypatch):
             path.write_bytes(b"\x00binary")
             return "ok", path
 
-        monkeypatch.setattr(core, "download", fake_download)
+        monkeypatch.setattr(media_fetch_mod, "download", fake_download)
 
     return install, bumps
 
@@ -620,7 +625,7 @@ class TestM16VideoCollectionFailsSoft:
         """Not just the summary text -- the catalog itself. The images were saved before the
         video block ran, so an escape there loses the report, never the data; this pins that
         the soft-fail did not change what is on disk."""
-        from moonglade.gallery import load_catalog
+        from moonglade.catalog import load_catalog
         install, _bumps = recovery_network
         install(_MIXED_TASK, video_download="ssl-error")
 

@@ -28,13 +28,23 @@ import pytest
 
 from moonglade import gallery as g
 from moonglade import backup as core
-from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog, load_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, save_catalog, load_catalog
 
 from tests.conftest import login_test_client
 from tests.fake_pixai import FakePixAI
 from moonglade import jobs as jobs_mod
 from moonglade import updater as updater_mod
 from moonglade import living as living_mod
+from moonglade import web_threads as web_threads_mod
+from moonglade import routes_panel as routes_panel_mod
+from moonglade import routes_community as routes_community_mod
+from moonglade import catalog as catalog_mod
+from moonglade import catalog_verbs as catalog_verbs_mod
+from moonglade import thumbs as thumbs_mod
+from moonglade import library_runs as library_runs_mod
+from moonglade import account_api as account_api_mod
+from moonglade import sync as sync_mod
 
 SRC = Path(__file__).resolve().parents[2]
 DAY = 86400.0
@@ -42,6 +52,15 @@ DAY = 86400.0
 # 90-day tier is an age test, so a `now` in the past would make every row read as young and
 # a short-circuit test would pass for entirely the wrong reason.
 NOW = 1_800_000_000.0            # 2027-01-15
+
+
+def _app_src():
+    """create_app's text and the three blocks split out of it into moonglade/web_threads.py,
+    moonglade/routes_panel.py and moonglade/routes_community.py (split phase 4): the pins below
+    read the scheduler, the ticks and the routes (My Art's publish among them) together, as they
+    did when all of it was create_app."""
+    return (inspect.getsource(g.create_app) + inspect.getsource(web_threads_mod)
+            + inspect.getsource(routes_panel_mod) + inspect.getsource(routes_community_mod))
 
 
 def _iso(days_ago):
@@ -214,7 +233,7 @@ def _runnable(tmp_path):
     """The real _living_runnable closure out of a real create_app -- the one place the
     automation policy lives, reached the way the loop reaches it."""
     app = create_app(tmp_path)
-    src = inspect.getsource(g.create_app)
+    src = _app_src()
     assert "def _living_runnable(action):" in src
     return app
 
@@ -434,7 +453,7 @@ def test_the_very_first_sweep_walks_everything_and_then_goes_quiet(tmp_path, mon
     feed.fetched = 0
     second = living_mod.artworks_sweep(tmp_path, tmp_path / "catalog.db", force=True, now=now + 900)
     assert second["deep"] is False and feed.fetched == living_mod.ARTWORKS_GRACE
-    assert "artworks_deep_at" in inspect.getsource(g.create_app)
+    assert "artworks_deep_at" in _app_src()
 
 
 def test_the_forty_eight_hour_deep_pass_walks_the_whole_history(tmp_path, monkeypatch):
@@ -513,7 +532,7 @@ def test_a_failed_page_does_not_buy_the_sweep_fifteen_minutes_of_silence(tmp_pat
     when they had not."""
     def _refused(*_a, **_k):
         raise core.ArtworkListRefused("test refusal")
-    monkeypatch.setattr(core, "artwork_list_gql", _refused)
+    monkeypatch.setattr(account_api_mod, "artwork_list_gql", _refused)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: FakePixAI(user_id="u"))
     now = NOW
     res = living_mod.artworks_sweep(tmp_path, tmp_path / "catalog.db", force=True, now=now)
@@ -536,7 +555,7 @@ def test_apply_artwork_meta_writes_eleven_columns_and_touches_nothing_else(tmp_p
     save_catalog(db, [_row(media_id="m1", filename="keep.png", rating="5",
                            collections="Favourites", prompt_full="a wolf",
                            created_at="2026-01-01T00:00:00Z")])
-    changed = g.apply_artwork_meta(db, [{
+    changed = catalog_verbs_mod.apply_artwork_meta(db, [{
         "media_id": "m1", "artwork_id": "aX", "title": "Wolf", "is_published": "1",
         "is_nsfw": "0", "is_sensitive": "0", "liked_count": "12", "comment_count": "3",
         "aes_score": "6.1", "art_tags": "wolf, night", "blurhash": "L1", "nsfw_scores": "{}"}])
@@ -553,7 +572,7 @@ def test_apply_artwork_meta_never_invents_a_row(tmp_path):
     that created rows would fabricate library entries for images that are not on disk."""
     db = tmp_path / "catalog.db"
     save_catalog(db, [_row(media_id="m1", filename="a.png")])
-    assert g.apply_artwork_meta(db, [{"media_id": "ghost", "artwork_id": "a9"}]) == 0
+    assert catalog_verbs_mod.apply_artwork_meta(db, [{"media_id": "ghost", "artwork_id": "a9"}]) == 0
     assert len(load_catalog(db)) == 1
 
 
@@ -585,7 +604,7 @@ def test_the_sweep_has_all_four_triggers_wired(tmp_path):
     be driven -- it is a thread create_app starts only when the background gate is open,
     which is exactly what the suite closes so no test can reach PixAI -- so it stays a
     wiring assertion, deliberately and for a stated reason."""
-    src = inspect.getsource(g.create_app)
+    src = _app_src()
     assert "_artworks_sync_startup" in src and "ARTWORKS_STARTUP_DELAY" in src
     assert "threading.Thread(target=_artworks_sync_startup" in src
 
@@ -621,9 +640,9 @@ def test_the_publish_kick_fires_for_unpublish_and_retag_too(tmp_path, monkeypatc
     cli = _client(tmp_path, [_row(media_id="m1", filename="a_m1.png",
                                   artwork_id="aw1", is_published="1")])
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "resolve_tack_ids", lambda *a, **k: ([1], []))
-    monkeypatch.setattr(core, "update_artwork", lambda *a, **k: {"id": "aw1"})
-    monkeypatch.setattr(core, "delete_artwork", lambda *a, **k: None)
+    monkeypatch.setattr(account_api_mod, "resolve_tack_ids", lambda *a, **k: ([1], []))
+    monkeypatch.setattr(account_api_mod, "update_artwork", lambda *a, **k: {"id": "aw1"})
+    monkeypatch.setattr(account_api_mod, "delete_artwork", lambda *a, **k: None)
     csrf = cli.get("/api/panel/summary").get_json()["csrf"]
     # visibility = unpublish, tags = retag, delete = gone from the list entirely. Each
     # changes what listArtworks returns, so each is a reason to read it back.
@@ -637,7 +656,7 @@ def test_the_publish_kick_fires_for_unpublish_and_retag_too(tmp_path, monkeypatc
         assert living_mod._artworks_state["kicks"] == before + 1, \
             "%s must re-read PixAI's own list back" % body["action"]
     # the kick is the SHARED one, so it defers exactly as every other trigger does
-    src = inspect.getsource(g.create_app)
+    src = _app_src()
     publish = src[src.index("def api_myart_publish():"):]
     publish = publish[:publish.index("def _lineage_card(")]
     assert (publish.index("_artworks_kick(force=True, scheduled=True)")
@@ -778,7 +797,7 @@ def test_only_run_now_leaves_a_sweep_row_the_browser_will_toast(tmp_path, monkey
     # THE BOOT KICK and THE PUBLISH KICK -- read, narrowly, for the one argument that is
     # the whole point. Starting the app is not asking for a sweep, and neither is pressing
     # Publish: the owner has the publish's own answer in front of him already.
-    src = inspect.getsource(g.create_app)
+    src = _app_src()
     boot = src[src.index("def _artworks_sync_startup():"):]
     boot = boot[:boot.index("# MOONGLADE_DISABLE_WATCH=1 skips auto-start")]
     assert "_artworks_kick(force=False, scheduled=True)" in boot
@@ -793,7 +812,7 @@ def test_the_living_tick_rides_the_existing_sixty_second_loop_and_adds_no_thread
     exactly as the release check already does, and for the same reason it must sit OUTSIDE
     the schedule's own try/continue chain: that chain's first `continue` is "no standing
     order", which is the default on every install."""
-    src = inspect.getsource(g.create_app)
+    src = _app_src()
     loop = src[src.index("def _scheduler_loop():"):]
     loop = loop[:loop.index("def ", 40)]
     body = loop[:loop.index("threading.Thread(target=_scheduler_loop")]
@@ -860,7 +879,7 @@ def test_the_tick_starts_at_most_one_job_and_never_doubles_the_standing_order(tm
     assert started == [["--reconcile-deleted"]], \
         "the list must step over the action the standing order owns"
 
-    src = inspect.getsource(g.create_app)
+    src = _app_src()
     tick_src = src[src.index("def _living_tick():"):src.index("def _scheduler_loop():")]
     assert "if _update_busy():" in tick_src, "an update mid-flight must hold the list off"
 
@@ -909,7 +928,7 @@ def test_a_scheduled_metadata_refresh_does_not_read_view_counts(tmp_path):
     assert started == [["--sync-artworks"]], "a Run now click must still read views"
 
     # the scheduled paths: the same action, quietly
-    src = inspect.getsource(g.create_app)
+    src = _app_src()
     run = src[src.index("def _panel_run(action"):src.index("def _update_busy():")]
     assert 'action_args = action_args + list(spec.get("scheduled_args") or [])' in run
     assert '"scheduled_args": ["--no-views"]' in src, \
@@ -984,7 +1003,7 @@ def test_the_backfill_chain_is_a_property_of_the_action_not_of_who_started_it(tm
 
     All three trigger paths now look the follow-on up from the same table."""
     create_app(tmp_path)
-    src = inspect.getsource(g.create_app)
+    src = _app_src()
     lookup = 'then=_living.LIVING_BY_ACTION.get(action, {}).get("then")'
     run_route = src[src.index("def api_panel_run():"):]
     run_route = run_route[:run_route.index("def _close_orphan_if_resolved(")]
@@ -1034,7 +1053,7 @@ def test_the_manual_click_really_starts_the_follow_on_job(tmp_path):
 def test_the_backfill_chain_only_follows_a_sync_that_actually_succeeded():
     """"Backfill phash after each Sync". After -- and only after a clean finish: chaining
     onto a failed sync is just a second failure."""
-    src = inspect.getsource(g.create_app)
+    src = _app_src()
     reader = src[src.index("def _panel_reader(proc, then=None):"):]
     reader = reader[:reader.index("def _panel_run(")]
     assert 'if then and status == "done":' in reader
@@ -1102,13 +1121,13 @@ def test_no_living_job_path_can_reach_the_librarys_own_loaders():
     writes narrow UPDATEs, so there is no code path from a background job to the list the
     owner is looking at."""
     banned = ("query_catalog(", "load_catalog(", "save_catalog(", "catalog_counts(")
-    for fn in (living_mod.artworks_sweep, living_mod.artworks_sweep_kick, g.apply_artwork_meta,
+    for fn in (living_mod.artworks_sweep, living_mod.artworks_sweep_kick, catalog_verbs_mod.apply_artwork_meta,
                living_mod.published_index, living_mod.living_due, living_mod.living_merge,
                living_mod.artworks_page_needed):
         src = inspect.getsource(fn)
         for name in banned:
             assert name not in src, "%s reaches for %s" % (fn.__name__, name)
-    app_src = inspect.getsource(g.create_app)
+    app_src = _app_src()
     for start, end in (("def _living_tick():", "def _scheduler_loop():"),
                        ("def _artworks_kick(force=False, scheduled=False):", "def _living_run(action):"),
                        ("def _living_run(action):", "# Read ONCE, here")):
@@ -1185,7 +1204,7 @@ def test_the_full_sync_cannot_revert_a_write_that_lands_while_it_is_running(
         rather than one two identical writes would satisfy by accident."""
         writer["n"] += 1
         n = writer["n"]
-        with g.catalog(db) as con:
+        with catalog_mod.catalog(db) as con:
             con.execute("UPDATE catalog SET rating=? WHERE media_id='m1'", (str(n),))
             con.execute("UPDATE catalog SET liked_count=?, collections=?"
                         " WHERE media_id='untouched'", (str(90 + n), "Keepers%d" % n))
@@ -1198,7 +1217,7 @@ def test_the_full_sync_cannot_revert_a_write_that_lands_while_it_is_running(
         writer_a()                       # a writer landing DURING the walk
         return page
 
-    monkeypatch.setattr(core, "artwork_list_gql", _list)
+    monkeypatch.setattr(account_api_mod, "artwork_list_gql", _list)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _sync_fake())
     # The old shape's window was everything between its whole-table read and its
     # whole-table save, so put a writer there too. Wrapping the REAL load and the REAL
@@ -1216,10 +1235,10 @@ def test_the_full_sync_cannot_revert_a_write_that_lands_while_it_is_running(
         saved.append(len(rows))
         return real_save(path, rows, *a, **k)
 
-    monkeypatch.setattr(core, "load_catalog", _load_then_write)
-    monkeypatch.setattr(core, "save_catalog", _record_save)
+    monkeypatch.setattr(catalog_mod, "load_catalog", _load_then_write)
+    monkeypatch.setattr(catalog_mod, "save_catalog", _record_save)
 
-    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    res = library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
 
     last = writer["n"]
     assert last >= 1, "writer A never ran -- this test would pass vacuously"
@@ -1234,7 +1253,7 @@ def test_the_full_sync_cannot_revert_a_write_that_lands_while_it_is_running(
     assert rows["m1"]["artwork_id"] == "aw1" and rows["m1"]["liked_count"] == "3"
     # THE ROUND TRIP ITSELF IS GONE -- no whole-table read, no whole-table save
     assert saved == [], "run_sync_artworks still upserts the whole catalog"
-    src = inspect.getsource(core.run_sync_artworks)
+    src = inspect.getsource(library_runs_mod.run_sync_artworks)
     assert "save_catalog(" not in src and "load_catalog(" not in src
     assert "apply_artwork_meta(" in src
 
@@ -1249,10 +1268,10 @@ def test_the_full_sync_still_tags_an_animation_through_its_video_media_id(
     save_catalog(db, [_row(media_id="vid1", filename="v.mp4", is_video="1"),
                       _row(media_id="poster1", filename="p.png")])
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _sync_fake())
-    monkeypatch.setattr(core, "artwork_list_gql", lambda *a, **k: {
+    monkeypatch.setattr(account_api_mod, "artwork_list_gql", lambda *a, **k: {
         "edges": [{"node": _node("poster1", "aw9", video_mid="vid1")}],
         "pageInfo": {"hasPreviousPage": False}})
-    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    res = library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
     rows = {r["media_id"]: r for r in load_catalog(db)}
     assert res["matched"] == 2
     assert rows["vid1"]["artwork_id"] == "aw9" and rows["vid1"]["is_video"] == "1"
@@ -1338,7 +1357,7 @@ def test_the_scheduled_paths_defer_the_same_way_the_manual_click_does(tmp_path):
     False from _panel_run is already "the slot was taken, try again next tick" to both
     schedulers, so they retry rather than stamp last_run and go quiet."""
     create_app(tmp_path)
-    src = inspect.getsource(g.create_app)
+    src = _app_src()
     run = src[src.index("def _panel_run(action"):]
     run = run[:run.index("def _update_busy():")]
     assert ("if action in _living.ARTWORKS_TOUCHING_ACTIONS and _living.artworks_sweep_in_flight():\n"
@@ -1379,7 +1398,7 @@ def test_the_ticks_first_kick_does_not_repeat_the_boot_sweep():
     # only a CLEAN finish stamps `at`, so a run of failing sweeps can never read as fresh
     living_mod._artworks_state["at"] = 0.0
     assert living_mod.artworks_sweep_fresh(living_mod.ARTWORKS_SWEEP_S, now) is False
-    tick = inspect.getsource(g.create_app)
+    tick = _app_src()
     tick = tick[tick.index("def _living_tick():"):]
     tick = tick[:tick.index("def _scheduler_loop():")]
     # ...and it SKIPS rather than stamps: last_run must keep meaning "when this job last
@@ -1398,14 +1417,14 @@ def test_one_malformed_artwork_node_is_skipped_not_the_whole_sweep(tmp_path, mon
     db = tmp_path / "catalog.db"
     save_catalog(db, [_row(media_id="good1", filename="a.png", created_at=_iso(400)),
                       _row(media_id="good2", filename="b.png", created_at=_iso(400))])
-    real = core.extract_artwork_meta
+    real = account_api_mod.extract_artwork_meta
 
     def _extract(node):
         if node.get("mediaId") == "bad":
             raise TypeError("a shape this build has never seen")
         return real(node)
 
-    monkeypatch.setattr(core, "extract_artwork_meta", _extract)
+    monkeypatch.setattr(account_api_mod, "extract_artwork_meta", _extract)
     _sweep_env(monkeypatch, [[_node("good1", "aG1"), _node("bad", "aBad"),
                               _node("good2", "aG2")]])
     res = living_mod.artworks_sweep(tmp_path, db, force=True, now=NOW)
@@ -1426,7 +1445,7 @@ def test_an_interrupted_thumbnail_never_lands_on_the_real_name(tmp_path, monkeyp
     src = tmp_path / "src.png"
     PILImage.new("RGB", (40, 30), "red").save(src)
     thumb = tmp_path / "thumbs" / "m1.jpg"
-    assert g.make_thumbnail(src, thumb) is True
+    assert thumbs_mod.make_thumbnail(src, thumb) is True
     good = thumb.read_bytes()
 
     real_save = PILImage.Image.save
@@ -1439,14 +1458,14 @@ def test_an_interrupted_thumbnail_never_lands_on_the_real_name(tmp_path, monkeyp
         raise OSError("No space left on device")
 
     monkeypatch.setattr(PILImage.Image, "save", _torn_save)
-    assert g.make_thumbnail(src, thumb) is False
+    assert thumbs_mod.make_thumbnail(src, thumb) is False
     assert thumb.read_bytes() == good, \
         "an interrupted rebuild overwrote the live thumbnail with a torn file"
     # no debris, and nothing --rebuild-thumbs' orphan sweep (glob '*.jpg') could confuse
     assert [p.name for p in thumb.parent.iterdir()] == ["m1.jpg"]
-    assert "_atomic_replace" in inspect.getsource(g.make_thumbnail)
+    assert "_atomic_replace" in inspect.getsource(thumbs_mod.make_thumbnail)
     # ...and the docstring that promised "overwritten in place" is now true
-    assert "os.replace" in (inspect.getdoc(core.run_rebuild_thumbs) or "")
+    assert "os.replace" in (inspect.getdoc(sync_mod.run_rebuild_thumbs) or "")
 
 
 def test_the_sixty_day_floor_is_enforced_by_the_server_not_by_a_missing_selector(tmp_path):
@@ -1540,7 +1559,7 @@ def test_the_defer_check_confirms_the_standing_order_can_actually_run_the_job(tm
     cat = {c["action"]: c for c in cli.get("/api/panel/schedule").get_json()["catalog"]}
     assert cat["resync-full"]["deferred"] is False, \
         "a standing order that refuses the job must not be shown as running it"
-    src = inspect.getsource(g.create_app)
+    src = _app_src()
     tick = src[src.index("def _living_tick():"):src.index("def _scheduler_loop():")]
     assert "_standing_action(s)" in tick, \
         "the tick must ask whether the standing order can run the job, not only its name"
@@ -1564,7 +1583,7 @@ def test_a_row_the_standing_order_owns_says_so_instead_of_a_cadence_it_is_not_ru
     cli.post("/api/panel/schedule", json={"enabled": False})
     cat = {c["action"]: c for c in cli.get("/api/panel/schedule").get_json()["catalog"]}
     assert cat["sync"]["deferred"] is False
-    tick = inspect.getsource(g.create_app)
+    tick = _app_src()
     tick = tick[tick.index("def _living_tick():"):]
     tick = tick[:tick.index("def _scheduler_loop():")]
     assert "standing = _standing_action(s)" in tick

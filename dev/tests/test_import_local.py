@@ -8,7 +8,7 @@ import zipfile
 import pytest
 
 from moonglade import backup as core
-from moonglade.gallery import load_catalog
+from moonglade.catalog import load_catalog
 
 from tests.conftest import login_client
 from moonglade import scan as scan_mod

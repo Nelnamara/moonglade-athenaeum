@@ -10,12 +10,15 @@ import json
 import pytest
 
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_test_client
 from moonglade import backup as core
 from moonglade import jobs as jobs_mod
 from moonglade import updater as updater_mod
+from moonglade import web_threads as web_threads_mod
+from moonglade import routes_panel as routes_panel_mod
 
 
 def _row(**kw):
@@ -967,7 +970,7 @@ def test_the_scheduler_skips_a_tick_while_an_update_runs():
     """The one exclusion with no route to drive: a timer that fires mid-update would start
     a job against changing code with nobody watching."""
     import inspect
-    src = inspect.getsource(g.create_app)
+    src = inspect.getsource(web_threads_mod)  # the scheduler left create_app (split phase 4)
     loop = src[src.index("def _scheduler_loop():"):]
     loop = loop[:loop.index("def ", 40)]
     assert "_update_busy()" in loop, "the scheduler tick must skip while an update runs"
@@ -977,7 +980,7 @@ def test_the_updates_own_restart_is_not_blocked_by_its_own_phase():
     """The exemption that keeps the whole thing from deadlocking on itself: the updater
     calls the exit scheduler directly, never through the route it just locked out."""
     import inspect
-    src = inspect.getsource(g.create_app)
+    src = inspect.getsource(routes_panel_mod)   # the update route left create_app (split phase 4)
     body = src[src.index("def _restart():"):]
     assert "_schedule_server_exit(42)" in body[:900]
     assert "_update_busy" not in body[:900]
@@ -1266,7 +1269,7 @@ def test_the_scheduler_tick_only_announces():
     import ast
     import inspect
     import textwrap
-    src = inspect.getsource(g.create_app)
+    src = inspect.getsource(web_threads_mod)  # the scheduler left create_app (split phase 4)
     fn = src[src.index("def _update_check_tick():"):]
     fn = fn[:fn.index("def ", 40)]
     assert "run_update_tick" in fn, "the hourly check must actually be wired to the loop"

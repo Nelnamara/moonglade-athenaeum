@@ -225,7 +225,7 @@ def compute_series(db_path):
         deleted -- honest (they describe what exists), explicitly UNLIKE #33's
         batch index (PixAI's permanent fact, never renumbered).
     """
-    from moonglade.gallery import catalog
+    from moonglade.catalog import catalog
     with catalog(db_path) as con:
         rows = con.execute(
             "SELECT task_id, model_id, model_name, created_at, prompt_full,"
@@ -341,7 +341,7 @@ def series_index(db_path):
     check-and-compute so concurrent requests during a sync can't stampede into
     parallel recomputes. Fails soft to empty indexes (no cache write) on a
     missing/broken catalog, like catalog_counts does."""
-    from moonglade.gallery import catalog
+    from moonglade.catalog import catalog
     try:
         with catalog(db_path) as con:
             cheap = tuple(con.execute(

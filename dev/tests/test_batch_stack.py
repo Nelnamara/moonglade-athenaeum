@@ -18,9 +18,11 @@ batch answers as a series of ONE run. Pins:
     deleted-file row (the catalog's `filename != ''` survivor rule).
 """
 from moonglade import gallery as G
-from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_test_client
+from moonglade import curation as curation_mod
 
 
 def _seed(tmp_path, rows):
@@ -151,7 +153,7 @@ def test_batch_member_order_prefers_batch_index_when_every_row_has_one():
     rows = [{"media_id": "c", "batch_index": "1"},
             {"media_id": "a", "batch_index": "2"},
             {"media_id": "b", "batch_index": "0"}]
-    assert [r["media_id"] for r in G.batch_member_order(rows)] == ["b", "c", "a"]
+    assert [r["media_id"] for r in curation_mod.batch_member_order(rows)] == ["b", "c", "a"]
 
 
 def test_batch_member_order_falls_back_to_media_id_when_any_row_lacks_one():
@@ -160,5 +162,5 @@ def test_batch_member_order_falls_back_to_media_id_when_any_row_lacks_one():
     rows = [{"media_id": "c", "batch_index": "1"},
             {"media_id": "a", "batch_index": ""},
             {"media_id": "b", "batch_index": "0"}]
-    assert [r["media_id"] for r in G.batch_member_order(rows)] == ["a", "b", "c"]
-    assert G.batch_member_order([]) == []
+    assert [r["media_id"] for r in curation_mod.batch_member_order(rows)] == ["a", "b", "c"]
+    assert curation_mod.batch_member_order([]) == []

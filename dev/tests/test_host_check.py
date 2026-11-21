@@ -12,6 +12,7 @@ from moonglade import backup as core
 from moonglade import hostcheck as hc
 from moonglade import settings as _settings
 from moonglade.gallery import create_app
+from moonglade import web_accounts as web_accounts_mod
 
 
 def _get(cli, host, path="/login", **kw):
@@ -65,7 +66,7 @@ def test_extra_names_pass_only_when_listed():
 def test_rebinding_name_cannot_reach_first_account_form(tmp_path):
     """Fresh install, no accounts, a request from 127.0.0.1 (the owner's own browser) carrying a
     foreign Host: every road is refused before routing, and no account appears."""
-    assert core.list_web_users() == []
+    assert web_accounts_mod.list_web_users() == []
     cli = create_app(tmp_path).test_client()
     for path in ("/login", "/", "/branding/x.png", "/api/ping"):
         r = _get(cli, "evil.example:5000", path)
@@ -75,7 +76,7 @@ def test_rebinding_name_cannot_reach_first_account_form(tmp_path):
                        "confirm": "pw123456", "mode": "create"})
     assert r.status_code == 421
     assert "own names" in r.get_json()["error"]
-    assert core.list_web_users() == []
+    assert web_accounts_mod.list_web_users() == []
 
 
 @pytest.mark.parametrize("host", ["localhost:5000", "127.0.0.1:5000", "[::1]:5000",

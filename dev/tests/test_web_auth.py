@@ -28,6 +28,7 @@ import pytest
 from moonglade import backup as core
 from moonglade.gallery import create_app
 from tests.conftest import SHIPPED_PASSWORD_HASH_METHOD, login_existing_client
+from moonglade import web_accounts as web_accounts_mod
 
 # The suite hashes its throwaway accounts at a token cost (conftest's
 # _cheap_test_password_hashes); every test here runs with the shipped one.
@@ -39,28 +40,28 @@ def _client(tmp_path):
 
 
 def test_the_shipped_password_hash_is_full_strength_scrypt(tmp_path):
-    """The app's own hashing method, as moonglade/backup.py ships it, is scrypt at werkzeug's
+    """The app's own hashing method, as moonglade/web_accounts.py ships it, is scrypt at werkzeug's
     full cost (n=32768, r=8, p=1) or stronger -- the suite's cheap test-account cost must never
     be the shipped one. Read from the source rather than the live module attribute, which the
     suite swaps; then a real account is made with it, and the unknown-username dummy check
     pays the same cost, so response timing still cannot tell a missing account from a wrong
     password."""
-    src = open(core.__file__, encoding="utf-8").read()
+    src = open(web_accounts_mod.__file__, encoding="utf-8").read()
     shipped = [ast.literal_eval(node.value) for node in ast.parse(src).body
                if isinstance(node, ast.Assign)
                and any(getattr(t, "id", None) == "WEB_PASSWORD_HASH_METHOD" for t in node.targets)]
-    assert shipped == [SHIPPED_PASSWORD_HASH_METHOD] == [core.WEB_PASSWORD_HASH_METHOD], (
-        "moonglade/backup.py must assign WEB_PASSWORD_HASH_METHOD exactly once, and this "
+    assert shipped == [SHIPPED_PASSWORD_HASH_METHOD] == [web_accounts_mod.WEB_PASSWORD_HASH_METHOD], (
+        "moonglade/web_accounts.py must assign WEB_PASSWORD_HASH_METHOD exactly once, and this "
         "module must run with that value")
 
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     stored = core._load_config()["AUTH_USERS"][0]["password_hash"]
     m = re.match(r"^scrypt:(\d+):(\d+):(\d+)\$", stored)
     assert m, "a new account's hash is not werkzeug scrypt: {!r}".format(stored.split("$")[0])
     n, r, p = map(int, m.groups())
     assert n >= 2 ** 15 and r >= 8 and p >= 1, (
         "the shipped scrypt cost is below werkzeug's default: {}".format(stored.split("$")[0]))
-    assert core._dummy_password_hash().split("$")[0] == stored.split("$")[0], (
+    assert web_accounts_mod._dummy_password_hash().split("$")[0] == stored.split("$")[0], (
         "an unknown username's dummy check must cost what a real account's check costs")
 
 
@@ -145,17 +146,17 @@ def test_every_response_carries_the_server_marker(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_get_or_create_secret_key_persists_across_reload(tmp_path):
-    key1 = core.get_or_create_secret_key()
+    key1 = web_accounts_mod.get_or_create_secret_key()
     # A second, independent _load_config() call (not the cached one) must see the
     # SAME key -- this is what makes sessions survive a server restart.
     cfg = core._load_config()
     assert cfg["AUTH_SECRET_KEY"] == key1
-    key2 = core.get_or_create_secret_key()
+    key2 = web_accounts_mod.get_or_create_secret_key()
     assert key2 == key1
 
 
 def test_add_or_update_web_user_never_stores_plaintext(tmp_path):
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     cfg = core._load_config()
     users = cfg["AUTH_USERS"]
     assert len(users) == 1
@@ -169,8 +170,8 @@ def test_add_or_update_web_user_never_stores_plaintext(tmp_path):
 
 
 def test_add_or_update_web_user_reports_new_vs_replaced(tmp_path):
-    assert core.add_or_update_web_user("alice", "first-pw") is False    # new account
-    assert core.add_or_update_web_user("alice", "second-pw") is True    # replaced
+    assert web_accounts_mod.add_or_update_web_user("alice", "first-pw") is False    # new account
+    assert web_accounts_mod.add_or_update_web_user("alice", "second-pw") is True    # replaced
     from werkzeug.security import check_password_hash
     cfg = core._load_config()
     stored = cfg["AUTH_USERS"][0]["password_hash"]
@@ -179,26 +180,26 @@ def test_add_or_update_web_user_reports_new_vs_replaced(tmp_path):
 
 
 def test_remove_web_user_removes_only_named_user(tmp_path):
-    core.add_or_update_web_user("alice", "pw-a")
-    core.add_or_update_web_user("bob", "pw-b")
-    assert core.remove_web_user("alice") is True
-    assert core.remove_web_user("alice") is False   # already gone -- nothing to remove
-    remaining = {u["username"] for u in core.list_web_users()}
+    web_accounts_mod.add_or_update_web_user("alice", "pw-a")
+    web_accounts_mod.add_or_update_web_user("bob", "pw-b")
+    assert web_accounts_mod.remove_web_user("alice") is True
+    assert web_accounts_mod.remove_web_user("alice") is False   # already gone -- nothing to remove
+    remaining = {u["username"] for u in web_accounts_mod.list_web_users()}
     assert remaining == {"bob"}
 
 
 def test_list_web_users_never_exposes_hashes(tmp_path):
-    core.add_or_update_web_user("alice", "pw-a")
-    users = core.list_web_users()
+    web_accounts_mod.add_or_update_web_user("alice", "pw-a")
+    users = web_accounts_mod.list_web_users()
     assert users == [{"username": "alice"}]
     assert not any("hash" in k or "password" in k for u in users for k in u)
 
 
 def test_verify_web_user_checks_hash(tmp_path):
-    core.add_or_update_web_user("alice", "hunter2")
-    assert core.verify_web_user("alice", "hunter2") is True
-    assert core.verify_web_user("alice", "wrong") is False
-    assert core.verify_web_user("nobody", "hunter2") is False
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
+    assert web_accounts_mod.verify_web_user("alice", "hunter2") is True
+    assert web_accounts_mod.verify_web_user("alice", "wrong") is False
+    assert web_accounts_mod.verify_web_user("nobody", "hunter2") is False
 
 
 # ---------------------------------------------------------------------------
@@ -210,9 +211,9 @@ def test_cli_add_web_user_prompts_hashes_and_persists(tmp_path, monkeypatch):
     monkeypatch.setattr(core.getpass, "getpass", lambda prompt="": "hunter2-valid-pw")
     monkeypatch.setattr(sys, "argv", ["moonglade/backup.py", "--add-web-user"])
     core.main()
-    users = core.list_web_users()
+    users = web_accounts_mod.list_web_users()
     assert users == [{"username": "alice"}]
-    assert core.verify_web_user("alice", "hunter2-valid-pw") is True
+    assert web_accounts_mod.verify_web_user("alice", "hunter2-valid-pw") is True
 
 
 def test_cli_add_web_user_rejects_mismatched_confirmation(tmp_path, monkeypatch):
@@ -224,7 +225,7 @@ def test_cli_add_web_user_rejects_mismatched_confirmation(tmp_path, monkeypatch)
     monkeypatch.setattr(sys, "argv", ["moonglade/backup.py", "--add-web-user"])
     with pytest.raises(SystemExit):
         core.main()
-    assert core.list_web_users() == []
+    assert web_accounts_mod.list_web_users() == []
 
 
 def test_cli_add_web_user_enforces_the_same_password_policy(tmp_path, monkeypatch):
@@ -235,20 +236,20 @@ def test_cli_add_web_user_enforces_the_same_password_policy(tmp_path, monkeypatc
     monkeypatch.setattr(sys, "argv", ["moonglade/backup.py", "--add-web-user"])
     with pytest.raises(SystemExit):
         core.main()
-    assert core.list_web_users() == []
+    assert web_accounts_mod.list_web_users() == []
 
 
 def test_cli_remove_web_user_flag(tmp_path, monkeypatch):
-    core.add_or_update_web_user("alice", "pw-a")
-    core.add_or_update_web_user("bob", "pw-b")
+    web_accounts_mod.add_or_update_web_user("alice", "pw-a")
+    web_accounts_mod.add_or_update_web_user("bob", "pw-b")
     monkeypatch.setattr(sys, "argv",
                         ["moonglade/backup.py", "--remove-web-user", "alice"])
     core.main()
-    assert {u["username"] for u in core.list_web_users()} == {"bob"}
+    assert {u["username"] for u in web_accounts_mod.list_web_users()} == {"bob"}
 
 
 def test_cli_list_web_users_flag_runs_without_error(tmp_path, monkeypatch, capsys):
-    core.add_or_update_web_user("alice", "pw-a")
+    web_accounts_mod.add_or_update_web_user("alice", "pw-a")
     monkeypatch.setattr(sys, "argv", ["moonglade/backup.py", "--list-web-users"])
     core.main()
     out = capsys.readouterr().out
@@ -289,7 +290,7 @@ def test_login_page_no_accounts_flag_flips_once_a_real_account_exists(tmp_path):
     assert "--add-web-user" not in html
     assert _is_react_login_shell(html)
     assert _boot_field(html, "no_accounts") is True
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     html2 = cli.get("/login").get_data(as_text=True)
     assert "--add-web-user" not in html2
     assert _is_react_login_shell(html2)
@@ -310,7 +311,7 @@ def test_login_page_shows_safe_message_for_lan_request_when_no_accounts(tmp_path
     assert _boot_field(html, "no_accounts") is True
     assert _boot_field(html, "is_local") is False   # -> LoginPage shows the safe message
     # Once an account exists, a LAN request goes to the ordinary sign-in shell.
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     html2 = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
     assert _is_react_login_shell(html2)
     assert _boot_field(html2, "no_accounts") is False
@@ -335,7 +336,7 @@ def test_bootstrap_treats_empty_or_missing_remote_addr_as_not_local(tmp_path):
                                 "confirm": "pw123456", "mode": "create"},
                           remote_addr=blank)
         assert "No account has been set up yet" in body["error"]
-    assert core.list_web_users() == []
+    assert web_accounts_mod.list_web_users() == []
 
 
 # ---------------------------------------------------------------------------
@@ -358,7 +359,7 @@ def test_bootstrap_validates_username_and_password_rules(tmp_path):
     body = _api_login(cli, {"username": "alice", "password": "hunter22",
                             "confirm": "totally-different", "mode": "create"})
     assert body["error"] == "Passwords do not match."
-    assert core.list_web_users() == []
+    assert web_accounts_mod.list_web_users() == []
 
 
 @pytest.mark.parametrize("password, expected", [
@@ -380,7 +381,7 @@ def test_bootstrap_rejects_weak_passwords(tmp_path, password, expected):
     body = _api_login(cli, {"username": "alice", "password": password,
                             "confirm": password, "mode": "create"})
     assert expected in body["error"]
-    assert core.list_web_users() == []   # nothing was created
+    assert web_accounts_mod.list_web_users() == []   # nothing was created
 
 
 def test_bootstrap_missing_confirm_field_does_not_crash(tmp_path):
@@ -392,7 +393,7 @@ def test_bootstrap_missing_confirm_field_does_not_crash(tmp_path):
     body = _api_login(cli, {"username": "alice", "password": "hunter22",
                             "mode": "create"})
     assert body["error"] == "Passwords do not match."
-    assert core.list_web_users() == []
+    assert web_accounts_mod.list_web_users() == []
 
 
 def test_concurrent_add_or_update_web_user_does_not_lose_either_account(tmp_path, monkeypatch):
@@ -418,7 +419,7 @@ def test_concurrent_add_or_update_web_user_does_not_lose_either_account(tmp_path
     monkeypatch.setattr(core, "_save_config", slow_save)
 
     def create(name):
-        core.add_or_update_web_user(name, "hunter2222")
+        web_accounts_mod.add_or_update_web_user(name, "hunter2222")
 
     t1 = threading.Thread(target=create, args=("alice",))
     t2 = threading.Thread(target=create, args=("bob",))
@@ -426,7 +427,7 @@ def test_concurrent_add_or_update_web_user_does_not_lose_either_account(tmp_path
     t1.join(); t2.join()
 
     # Neither write was lost -- both accounts are actually on disk.
-    assert {u["username"] for u in core.list_web_users()} == {"alice", "bob"}
+    assert {u["username"] for u in web_accounts_mod.list_web_users()} == {"alice", "bob"}
 
 
 def test_incidental_get_does_not_invalidate_pending_csrf_token(tmp_path):
@@ -456,7 +457,7 @@ def test_incidental_get_does_not_invalidate_pending_csrf_token(tmp_path):
         "username": "nel", "password": "pw123456", "confirm": "pw123456",
         "mode": "create", "csrf": original_csrf})
     assert r.get_json() == {"ok": True, "next": "/"}   # not "Your session expired"
-    assert core.list_web_users() == [{"username": "nel"}]
+    assert web_accounts_mod.list_web_users() == [{"username": "nel"}]
 
 
 def test_csrf_applies_uniformly_to_mode_create_requests(tmp_path):
@@ -465,7 +466,7 @@ def test_csrf_applies_uniformly_to_mode_create_requests(tmp_path):
     same "session expired" message an ordinary login POST would, not skip
     straight to any create-specific text -- mode=create is not a lesser-checked
     request shape."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
     cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN})   # establishes a session/csrf we ignore
     r = cli.post("/api/login", environ_overrides={"REMOTE_ADDR": LAN},
@@ -473,11 +474,11 @@ def test_csrf_applies_uniformly_to_mode_create_requests(tmp_path):
                        "confirm": "pw123456", "mode": "create",
                        "csrf": "forged-token-not-in-session"})
     assert "expired" in r.get_json()["error"].lower()
-    assert core.list_web_users() == [{"username": "alice"}]
+    assert web_accounts_mod.list_web_users() == [{"username": "alice"}]
 
 
 def test_login_rate_limit_clears_on_success(tmp_path):
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
     # 4 failures -- under the 5-fail threshold, so not locked out yet.
     for _ in range(4):
@@ -515,7 +516,7 @@ def test_login_rate_limit_clears_on_success(tmp_path):
 # later. These assert _safe_next() still screens every shape.
 
 def test_login_next_tab_bypass_no_longer_open_redirects(tmp_path):
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
     body = _api_login(cli, {"username": "alice", "password": "hunter2",
                             "next": "/\t/evil.example.com"})
@@ -525,7 +526,7 @@ def test_login_next_tab_bypass_no_longer_open_redirects(tmp_path):
 
 
 def test_login_next_newline_bypass_no_longer_500s(tmp_path):
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     app = _client(tmp_path)
     for smuggled in ("/\n/evil.example.com", "/\r/evil.example.com"):
         cli = app.test_client()
@@ -541,7 +542,7 @@ def test_login_next_newline_bypass_no_longer_500s(tmp_path):
 def test_login_next_plain_scheme_relative_still_blocked(tmp_path):
     """Baseline the reviews confirmed already worked -- guard against a future
     regression on the case that was never broken."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
     body = _api_login(cli, {"username": "alice", "password": "hunter2",
                             "next": "//evil.example.com"})
@@ -553,7 +554,7 @@ def test_login_next_normal_path_still_honored(tmp_path):
     """The guard must not collateral-damage the one real shape every caller
     actually produces: the front door's redirect(url_for('login',
     next=request.path)), which LoginPage.jsx folds into the POST body."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
     body = _api_login(cli, {"username": "alice", "password": "hunter2",
                             "next": "/loom"})
@@ -611,7 +612,7 @@ def test_removed_user_loses_access_via_old_session(tmp_path):
     cli = _client(tmp_path).test_client()
     login_existing_client(cli, "mallory", "hunter2")
     assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
-    core.remove_web_user("mallory")
+    web_accounts_mod.remove_web_user("mallory")
     r = cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN})
     assert r.status_code == 401
 
@@ -622,7 +623,7 @@ def test_password_change_revokes_old_session(tmp_path):
     cli = _client(tmp_path).test_client()
     login_existing_client(cli, "alice", "old-pw")
     assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
-    core.add_or_update_web_user("alice", "new-pw")
+    web_accounts_mod.add_or_update_web_user("alice", "new-pw")
     r = cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN})
     assert r.status_code == 401
 
@@ -638,7 +639,7 @@ def test_login_rate_limit_race_does_not_grant_extra_guesses(tmp_path, monkeypatc
     import threading
     import time as _time
 
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     # Each thread gets its OWN client (own session/cookie jar) from the SAME app.
     # A single shared test client is NOT thread-safe: concurrent GET+POST pairs on
     # one session race on the CSRF cookie, so some POSTs land with a token a sibling
@@ -648,12 +649,12 @@ def test_login_rate_limit_race_does_not_grant_extra_guesses(tmp_path, monkeypatc
     # counter -- the concurrency race under test is intact; only the incidental
     # CSRF cross-talk is removed.
     app = _client(tmp_path)
-    real_verify = core.verify_web_user
+    real_verify = web_accounts_mod.verify_web_user
 
     def slow_verify(username, password):
         _time.sleep(0.15)
         return real_verify(username, password)
-    monkeypatch.setattr(core, "verify_web_user", slow_verify)
+    monkeypatch.setattr(web_accounts_mod, "verify_web_user", slow_verify)
 
     N = 10
     results = [None] * N

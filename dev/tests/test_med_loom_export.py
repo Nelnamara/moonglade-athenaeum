@@ -31,10 +31,12 @@ import zipfile
 from PIL import Image
 
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_test_client
 from moonglade import media_tools as media_tools_mod
+from moonglade import thumbs as thumbs_mod
 
 
 def _row(**kw):
@@ -117,8 +119,8 @@ def test_a_machine_with_ffmpeg_but_no_ffprobe_still_gets_a_cut(tmp_path, monkeyp
     invented. Nothing can drift, because there is nothing left to drift against.
     """
     captured = _mock_export_ffmpeg(monkeypatch)
-    monkeypatch.setattr(g, "probe_has_audio", lambda path: False)
-    monkeypatch.setattr(g, "probe_duration", lambda path: None)
+    monkeypatch.setattr(thumbs_mod, "probe_has_audio", lambda path: False)
+    monkeypatch.setattr(thumbs_mod, "probe_duration", lambda path: None)
     cli = _video_client(tmp_path)
     r = cli.post("/api/loom/export", json={"clips": [{"mid": "v1", "in": 0},
                                                      {"mid": "v2", "in": 0}],
@@ -146,8 +148,8 @@ def test_a_dropped_audio_track_is_reported_on_screen_not_only_in_the_log(tmp_pat
     and is fine apart from its audio.
     """
     _mock_export_ffmpeg(monkeypatch)
-    monkeypatch.setattr(g, "probe_has_audio", lambda path: False)
-    monkeypatch.setattr(g, "probe_duration", lambda path: None)
+    monkeypatch.setattr(thumbs_mod, "probe_has_audio", lambda path: False)
+    monkeypatch.setattr(thumbs_mod, "probe_duration", lambda path: None)
     cli = _video_client(tmp_path)
     r = cli.post("/api/loom/export", json={"clips": [{"mid": "v1", "in": 0},
                                                      {"mid": "v2", "in": 0}],
@@ -173,8 +175,8 @@ def test_the_export_refuses_only_when_real_audio_would_be_desynced(tmp_path, mon
     because setting its out point is the fix the owner can apply without installing anything.
     """
     captured = _mock_export_ffmpeg(monkeypatch)
-    monkeypatch.setattr(g, "probe_has_audio", lambda path: "v1" in str(path))
-    monkeypatch.setattr(g, "probe_duration", lambda path: None)
+    monkeypatch.setattr(thumbs_mod, "probe_has_audio", lambda path: "v1" in str(path))
+    monkeypatch.setattr(thumbs_mod, "probe_duration", lambda path: None)
     cli = _video_client(tmp_path)
     r = cli.post("/api/loom/export", json={"clips": [
         {"mid": "v1", "in": 0}, {"mid": "v2", "in": 0}], "total_seconds": 8})
@@ -198,8 +200,8 @@ def test_an_unreadable_file_among_silent_shots_degrades_instead_of_refusing(tmp_
     # re-pinned; ffmpeg_path stays "ffmpeg" from _mock_export_ffmpeg so the FakeProc
     # guard and _ffmpeg_call() still recognise the spawned command.
     monkeypatch.setattr(media_tools_mod, "ffprobe_path", lambda: "/usr/bin/ffprobe")
-    monkeypatch.setattr(g, "probe_has_audio", lambda path: False)
-    monkeypatch.setattr(g, "probe_duration",
+    monkeypatch.setattr(thumbs_mod, "probe_has_audio", lambda path: False)
+    monkeypatch.setattr(thumbs_mod, "probe_duration",
                         lambda path: 4.0 if "v1" in str(path) else None)
     cli = _video_client(tmp_path)
     r = cli.post("/api/loom/export", json={"clips": [
@@ -218,8 +220,8 @@ def test_real_audio_beside_a_measurable_silent_shot_is_not_refused(tmp_path, mon
     refuse. v1 has a real audio stream, v2 is silent and untrimmed but measurable: the
     export runs with both chains, exactly as it always did."""
     captured = _mock_export_ffmpeg(monkeypatch)
-    monkeypatch.setattr(g, "probe_has_audio", lambda path: "v1" in str(path))
-    monkeypatch.setattr(g, "probe_duration", lambda path: 6.0)
+    monkeypatch.setattr(thumbs_mod, "probe_has_audio", lambda path: "v1" in str(path))
+    monkeypatch.setattr(thumbs_mod, "probe_duration", lambda path: 6.0)
     cli = _video_client(tmp_path)
     r = cli.post("/api/loom/export", json={"clips": [
         {"mid": "v1", "in": 0}, {"mid": "v2", "in": 1}], "total_seconds": 11})
@@ -234,8 +236,8 @@ def test_export_still_runs_when_the_duration_is_readable(tmp_path, monkeypatch):
     """The guard must not fire on the healthy path: a measured duration still produces a
     span of dur - in, exactly as before."""
     captured = _mock_export_ffmpeg(monkeypatch)
-    monkeypatch.setattr(g, "probe_has_audio", lambda path: False)
-    monkeypatch.setattr(g, "probe_duration", lambda path: 7.5)
+    monkeypatch.setattr(thumbs_mod, "probe_has_audio", lambda path: False)
+    monkeypatch.setattr(thumbs_mod, "probe_duration", lambda path: 7.5)
     cli = _video_client(tmp_path)
     r = cli.post("/api/loom/export", json={"clips": [{"mid": "v1", "in": 1.5}],
                                            "total_seconds": 6})
@@ -251,12 +253,12 @@ def test_export_never_probes_when_every_silent_shot_carries_an_out_point(tmp_pat
     correct cut on a machine with no ffprobe. Refusing that up front would reject work
     that was going to succeed."""
     captured = _mock_export_ffmpeg(monkeypatch)
-    monkeypatch.setattr(g, "probe_has_audio", lambda path: False)
+    monkeypatch.setattr(thumbs_mod, "probe_has_audio", lambda path: False)
 
     def _never(path):
         raise AssertionError("probe_duration must not be called when 'out' is given")
 
-    monkeypatch.setattr(g, "probe_duration", _never)
+    monkeypatch.setattr(thumbs_mod, "probe_duration", _never)
     cli = _video_client(tmp_path)
     r = cli.post("/api/loom/export", json={"clips": [
         {"mid": "v1", "in": 0, "out": 2}, {"mid": "v2", "in": 1, "out": 4}],
@@ -426,8 +428,8 @@ def test_a_failed_export_says_what_ffmpeg_said_not_only_its_exit_code(tmp_path, 
     from moonglade import backup as core
     monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "ffmpeg")
     monkeypatch.setattr(media_tools_mod, "ffprobe_path", lambda: "")
-    monkeypatch.setattr(g, "probe_has_audio", lambda path: False)
-    monkeypatch.setattr(g, "probe_duration", lambda path: None)
+    monkeypatch.setattr(thumbs_mod, "probe_has_audio", lambda path: False)
+    monkeypatch.setattr(thumbs_mod, "probe_duration", lambda path: None)
     seen = {}
 
     class FailingProc:

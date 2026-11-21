@@ -198,7 +198,7 @@ def _contest_detection_sync(out_dir, force=False):
 
     Sealing: only counts ever leave the telemetry store, and nothing written to the store is
     ever logged -- the log lines carry an exception type and a redacted message, no keys."""
-    from moonglade.gallery import _redact_host_paths_cli
+    from moonglade.redact import _redact_host_paths_cli
     import logging as _logging
     log = _logging.getLogger(__name__)
     # RUN-RECENCY GUARD. A sweep that just ran has nothing new to learn: the board moves
@@ -392,7 +392,7 @@ def contest_win_pass(out_dir, now=None, pause=None):
     to learn each due contest's rewardStatus, and then each due contest's winners list is
     read ONCE, `_CW_PAUSE` apart. A failed read is logged, pushed an hour out and never
     retried in a loop; one bad contest does not stop the pass."""
-    from moonglade.gallery import _redact_host_paths_cli
+    from moonglade.redact import _redact_host_paths_cli
     import logging as _logging
     from moonglade import backup as core
     log = _logging.getLogger(__name__)
@@ -481,7 +481,7 @@ def contest_win_kick(out_dir, now=None):
     """Start one pass OFF-THREAD if anything is due, under a single-flight lock. The tick calls
     this every minute and it costs a local file read when there is nothing to do. Returns
     whether a pass was started."""
-    from moonglade.gallery import _redact_host_paths_cli
+    from moonglade.redact import _redact_host_paths_cli
     if not contest_win_due(out_dir, now):
         return False
     if not _cw_lock.acquire(False):
@@ -515,7 +515,7 @@ def contest_win_check(out_dir, body, now=None):
     the linked artwork in -- in that order (moonglade.contest_wins.plan_manual). Then ONE GET
     of that contest's winners. A miss says what did not match; nothing is recorded on a miss.
     """
-    from moonglade.gallery import _redact_host_paths_cli
+    from moonglade.redact import _redact_host_paths_cli
     from moonglade import backup as core
     cw = contest_wins
     now = time.time() if now is None else now

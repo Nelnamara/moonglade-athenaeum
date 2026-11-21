@@ -13,10 +13,12 @@ the <n> in the site's own from-PixAI-<taskId>-<n> download names). Pins:
 from moonglade import backup as core
 from moonglade import gen_cli as gen_cli_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import full_meta as full_meta_mod
+from moonglade import account_api as account_api_mod
 
 
 def _seed(tmp_path, rows):
-    from moonglade.gallery import CATALOG_FIELDS, save_catalog
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     (tmp_path / "2026-08").mkdir(parents=True, exist_ok=True)
     full = []
     for r in rows:
@@ -48,15 +50,15 @@ def _batch_task(mids):
 
 def test_extract_resolves_each_rows_own_index_and_size():
     mids = ["mA", "mB", "mC", "mD"]
-    fm = core.extract_full_meta(_batch_task(mids))
+    fm = full_meta_mod.extract_full_meta(_batch_task(mids))
     # task-level defaults stay blank: the index is a per-OUTPUT fact
     assert fm["batch_index"] == "" and fm["batch_size"] == ""
     for i, mid in enumerate(mids):
-        row = core._with_batch_position(fm, mid)
+        row = full_meta_mod._with_batch_position(fm, mid)
         assert row["batch_index"] == str(i), (mid, row["batch_index"])
         assert row["batch_size"] == "4"
     # and _merge_full carries both onto the row (they are _FULL_META_FIELDS members)
-    merged = core._merge_full(core._with_batch_position(fm, "mC"), {})
+    merged = full_meta_mod._merge_full(full_meta_mod._with_batch_position(fm, "mC"), {})
     assert merged["batch_index"] == "2" and merged["batch_size"] == "4"
     # the shared cached dict is never mutated by a row's resolution
     assert fm["batch_index"] == "" and fm["batch_size"] == ""
@@ -65,17 +67,17 @@ def test_extract_resolves_each_rows_own_index_and_size():
 def test_task_without_a_batch_array_stays_blank():
     """Edits, upscales, videos, imports: no outputs.batch -> both '' -- 'not a batch
     output', NEVER inferred from media_id order."""
-    fm = core.extract_full_meta({"parameters": {"prompts": "x"}, "outputs": {"seed": 2}})
+    fm = full_meta_mod.extract_full_meta({"parameters": {"prompts": "x"}, "outputs": {"seed": 2}})
     assert fm["_batch"] is None
-    row = core._with_batch_position(fm, "m0")
+    row = full_meta_mod._with_batch_position(fm, "m0")
     assert row["batch_index"] == "" and row["batch_size"] == ""
-    merged = core._merge_full(row, {})
+    merged = full_meta_mod._merge_full(row, {})
     assert merged["batch_index"] == "" and merged["batch_size"] == ""
 
 
 def test_media_id_not_in_the_batch_is_never_guessed():
-    fm = core.extract_full_meta(_batch_task(["mA", "mB"]))
-    row = core._with_batch_position(fm, "stranger")
+    fm = full_meta_mod.extract_full_meta(_batch_task(["mA", "mB"]))
+    row = full_meta_mod._with_batch_position(fm, "stranger")
     assert row["batch_index"] == "" and row["batch_size"] == ""
 
 
@@ -165,15 +167,15 @@ def test_survivors_keep_pixais_original_numbers_when_a_sibling_is_deleted():
     from-PixAI-<taskId>-<n> download names are the reason -- they never change either."""
     task = _batch_task_with_deletions(["mA", "mB", "mC", "mD"], deleted=("mB",))
     batch = task["outputs"]["batch"]
-    assert core.batch_position(batch, "mC") == ("2", "4"), "a survivor was renumbered"
-    assert core.batch_position(batch, "mD") == ("3", "4")
+    assert full_meta_mod.batch_position(batch, "mC") == ("2", "4"), "a survivor was renumbered"
+    assert full_meta_mod.batch_position(batch, "mD") == ("3", "4")
 
 
 def test_a_deleted_member_reports_no_position():
     """It is not one of the task's live outputs any more, so it has no live output number
     to report -- blank, the same answer as 'not a batch output'."""
     task = _batch_task_with_deletions(["mA", "mB"], deleted=("mB",))
-    assert core.batch_position(task["outputs"]["batch"], "mB") == ("", "")
+    assert full_meta_mod.batch_position(task["outputs"]["batch"], "mB") == ("", "")
 
 
 def _answers(monkeypatch, task):
@@ -193,9 +195,9 @@ def test_the_publish_index_is_pixais_raw_slot_not_a_count_of_survivors(monkeypat
     their public profile, silently. Not a recoverable mistake."""
     session = _answers(monkeypatch,
                        _batch_task_with_deletions(["mA", "mB", "mC"], deleted=("mA",)))
-    assert core.task_media_index(session, "T1", "mC") == 2, (
+    assert account_api_mod.task_media_index(session, "T1", "mC") == 2, (
         "the publish index was counted over the survivors, not PixAI's own slots")
-    assert core.task_media_index(session, "T1", "mB") == 1
+    assert account_api_mod.task_media_index(session, "T1", "mB") == 1
 
 
 def test_publishing_an_image_pixai_has_deleted_is_refused(monkeypatch):
@@ -204,29 +206,29 @@ def test_publishing_an_image_pixai_has_deleted_is_refused(monkeypatch):
     covers an id the batch does not list and the batch's own combined preview picture."""
     session = _answers(monkeypatch,
                        _batch_task_with_deletions(["mA", "mB", "mC"], deleted=("mA",)))
-    assert core.task_media_index(session, "T1", "mA") is None
-    assert core.task_media_index(session, "T1", "stranger") is None
-    assert core.task_media_index(session, "T1", "GRID-COMBINED") is None
+    assert account_api_mod.task_media_index(session, "T1", "mA") is None
+    assert account_api_mod.task_media_index(session, "T1", "stranger") is None
+    assert account_api_mod.task_media_index(session, "T1", "GRID-COMBINED") is None
 
 
 def test_a_task_with_no_batch_still_publishes_its_lone_image_at_zero(monkeypatch):
     """Single-image generations, edits and upscales have no batch array at all -- the image
     IS outputs.mediaId, and its index is 0, as it always was."""
     session = _answers(monkeypatch, {"outputs": {"mediaId": "solo", "seed": "1"}})
-    assert core.task_media_index(session, "T1", "solo") == 0
-    assert core.task_media_index(session, "T1", "other") is None
+    assert account_api_mod.task_media_index(session, "T1", "solo") == 0
+    assert account_api_mod.task_media_index(session, "T1", "other") is None
 
 
 def test_the_row_of_a_deleted_member_gets_the_deleted_stamp():
     """So a library that already holds the image says out loud that PixAI no longer does.
     --backfill-full-meta walks EXISTING catalog rows task by task, which is the pass that
     reaches a row whose image was deleted from PixAI's website."""
-    fm = core.extract_full_meta(
+    fm = full_meta_mod.extract_full_meta(
         _batch_task_with_deletions(["mA", "mB"], deleted=("mB",)))
-    assert core._with_batch_position(fm, "mB")["cloud_deleted_at"] == _GONE
-    assert core._with_batch_position(fm, "mA")["cloud_deleted_at"] == "", (
+    assert full_meta_mod._with_batch_position(fm, "mB")["cloud_deleted_at"] == _GONE
+    assert full_meta_mod._with_batch_position(fm, "mA")["cloud_deleted_at"] == "", (
         "a live sibling was marked as deleted on PixAI")
-    merged = core._merge_full(core._with_batch_position(fm, "mB"), {})
+    merged = full_meta_mod._merge_full(full_meta_mod._with_batch_position(fm, "mB"), {})
     assert merged["cloud_deleted_at"] == _GONE, (
         "the stamp never reaches the catalog row -- it is not carried by _merge_full")
     assert fm.get("cloud_deleted_at", "") == "", (

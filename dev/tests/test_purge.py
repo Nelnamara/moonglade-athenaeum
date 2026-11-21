@@ -5,18 +5,22 @@ effects + that the cloud call fires task-level). The classic /delete-tasks-bulk 
 route died in the 2026-08-08 classic cut; the JSON twin runs the same
 _start_bulk_delete engine, so the behavior pinned here is unchanged."""
 import contextlib
+from pathlib import Path
 
 import pytest
 
 from moonglade import backup as core
 from moonglade import gallery as g
-from moonglade.gallery import (CATALOG_FIELDS, save_catalog, load_catalog,
-                           purge_media_local)
+from moonglade.trash import purge_media_local
+from moonglade.catalog import CATALOG_FIELDS, save_catalog, load_catalog
 
 from tests.conftest import login_client
 from moonglade import scan as scan_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import cloud_delete as cloud_delete_mod
+from moonglade import catalog as catalog_mod
+from moonglade import catalog_verbs as catalog_verbs_mod
+from moonglade import trash as trash_mod
 
 
 def _row(**kw):
@@ -79,7 +83,7 @@ def test_purge_keeps_the_row_when_the_quarantine_move_fails(tmp_path, monkeypatc
     def _cross_device(self, target):
         raise OSError(18, "Invalid cross-device link")
 
-    monkeypatch.setattr(g.Path, "replace", _cross_device)
+    monkeypatch.setattr(Path, "replace", _cross_device)
 
     with pytest.raises(OSError):
         purge_media_local(tmp_path, thumb, db, "66", "66.png")
@@ -98,7 +102,7 @@ def test_purge_keeps_the_row_when_the_hard_delete_fails(tmp_path, monkeypatch):
     def _denied(self, **kw):
         raise OSError(13, "Permission denied")
 
-    monkeypatch.setattr(g.Path, "unlink", _denied)
+    monkeypatch.setattr(Path, "unlink", _denied)
 
     with pytest.raises(OSError):
         purge_media_local(tmp_path, tmp_path / "t", db, "67", "67.png", quarantine=False)
@@ -113,7 +117,7 @@ def test_quarantined_file_is_invisible_to_resolution(tmp_path):
     qdir = tmp_path / scan_mod.DELETED_DIRNAME
     qdir.mkdir()
     (qdir / "77.png").write_bytes(b"old")
-    assert g.find_image_file(tmp_path, "77", "77.png") is None
+    assert catalog_verbs_mod.find_image_file(tmp_path, "77", "77.png") is None
     assert scan_mod.find_files_for_media_id(tmp_path, "77") == []
 
 
@@ -133,14 +137,14 @@ def test_bulk_delete_keeps_going_when_one_local_purge_fails(tmp_path, monkeypatc
 
     monkeypatch.setattr(cloud_delete_mod, "delete_task", lambda sess, tid: None)
 
-    real_replace = g.Path.replace
+    real_replace = Path.replace
 
     def _one_bad_file(self, target):
         if self.name == "300.png":                 # TA is processed first (task ids sort)
             raise OSError(18, "Invalid cross-device link")
         return real_replace(self, target)
 
-    monkeypatch.setattr(g.Path, "replace", _one_bad_file)
+    monkeypatch.setattr(Path, "replace", _one_bad_file)
 
     client = login_client(tmp_path)
     client.post("/api/delete-tasks", json={"media_ids": ["300", "400"]})
@@ -227,7 +231,7 @@ def test_delete_preview_counts_stay_exact_when_the_strip_is_capped(tmp_path):
     truncated for DISPLAY only. The counts are what the user reads to decide, so they
     must describe the whole selection, not the visible slice -- a preview that
     undercounts an irreversible delete is worse than no preview at all."""
-    cap = g.DELETE_PREVIEW_TASK_CAP
+    cap = trash_mod.DELETE_PREVIEW_TASK_CAP
     rows = []
     for i in range(cap + 3):
         rows.append(_row(media_id="s{}".format(i), task_id="T{}".format(i),
@@ -265,7 +269,7 @@ def test_delete_preview_does_not_scan_the_catalog_once_per_selected_task(tmp_pat
     client = login_client(tmp_path)
 
     seen = []
-    real_catalog = g.catalog
+    real_catalog = catalog_mod.catalog
 
     class _Spy:
         def __init__(self, con):
@@ -288,7 +292,7 @@ def test_delete_preview_does_not_scan_the_catalog_once_per_selected_task(tmp_pat
         with real_catalog(*a, **k) as con:
             yield _Spy(con)
 
-    monkeypatch.setattr(g, "catalog", _spy_catalog)
+    monkeypatch.setattr(catalog_mod, "catalog", _spy_catalog)
     del seen[:]                              # ignore anything the login/render did
     body = client.post("/api/delete-preview", json={
         "media_ids": ["q{}".format(i) for i in range(30)]}).get_json()
@@ -401,7 +405,7 @@ def test_delete_preview_over_the_cap_reads_nothing_and_says_it_is_an_estimate(
     """Above DELETE_PREVIEW_LIVE_CAP the preview does not call PixAI at all. The counts
     are the library's, the response says so, and the delete still checks every task
     before it acts."""
-    n = g.DELETE_PREVIEW_LIVE_CAP + 1
+    n = trash_mod.DELETE_PREVIEW_LIVE_CAP + 1
     rows = [_row(media_id="e{}".format(i), task_id="E{}".format(i),
                  filename="e{}.png".format(i)) for i in range(n)]
     _seed(tmp_path, rows, {})
@@ -417,7 +421,7 @@ def test_delete_preview_over_the_cap_reads_nothing_and_says_it_is_an_estimate(
 
     assert reads == [], (
         "{} tasks is over the cap of {} -- the preview must not call PixAI at all, and "
-        "it made {} reads".format(n, g.DELETE_PREVIEW_LIVE_CAP, len(reads)))
+        "it made {} reads".format(n, trash_mod.DELETE_PREVIEW_LIVE_CAP, len(reads)))
     assert body["estimate"] is True
     assert body["live_checked"] == 0 and body["unverified"] == 0
     assert body["already_gone"] == 0
@@ -427,7 +431,7 @@ def test_delete_preview_over_the_cap_reads_nothing_and_says_it_is_an_estimate(
 def test_delete_preview_at_exactly_the_cap_still_reads(tmp_path, monkeypatch):
     """The cap is inclusive: 40 tasks is checked, 41 is an estimate. Pinned so the
     boundary cannot drift by one without somebody noticing."""
-    n = g.DELETE_PREVIEW_LIVE_CAP
+    n = trash_mod.DELETE_PREVIEW_LIVE_CAP
     rows = [_row(media_id="f{}".format(i), task_id="F{}".format(i),
                  filename="f{}.png".format(i)) for i in range(n)]
     _seed(tmp_path, rows, {})
@@ -587,7 +591,7 @@ def test_delete_preview_answers_inside_its_budget_when_a_read_hangs(tmp_path, mo
         _row(media_id="t2", task_id="S2", filename="t2.png"),
     ], {})
     _fake_session(monkeypatch)
-    monkeypatch.setattr(g, "DELETE_PREVIEW_LIVE_BUDGET_S", 0.3)
+    monkeypatch.setattr(trash_mod, "DELETE_PREVIEW_LIVE_BUDGET_S", 0.3)
 
     release = threading.Event()
     given = {}
@@ -675,7 +679,7 @@ def test_delete_preview_caps_a_tasks_artworks_at_its_files(tmp_path, monkeypatch
 def test_delete_preview_falls_back_to_the_catalog_over_the_live_cap(tmp_path, monkeypatch):
     """Over the cap nothing is read, so the count is the catalog's artwork_id rows -- over
     each task's whole membership, and a blank artwork_id never counts either way."""
-    n = g.DELETE_PREVIEW_LIVE_CAP + 1
+    n = trash_mod.DELETE_PREVIEW_LIVE_CAP + 1
     rows = [_row(media_id="e{}".format(i), task_id="E{}".format(i),
                  filename="e{}.png".format(i)) for i in range(n)]
     rows.append(_row(media_id="e0b", task_id="E0", filename="e0b.png", artwork_id="ART0"))
@@ -723,7 +727,7 @@ def test_a_read_without_artwork_ids_is_unknown_not_unpublished(tmp_path, monkeyp
 def test_published_delete_note_wording():
     """The per-image dialog's sentence (the bulk dialog words the same from these counts --
     loom/test/cloud-delete-dialog.test.js pins that side)."""
-    note = g.published_delete_note
+    note = catalog_verbs_mod.published_delete_note
     assert note(0) == ""
     assert note(1) == ("1 of these is published on PixAI. Deleting the task may remove the "
                        "published artwork too.")
@@ -767,7 +771,7 @@ def test_delete_preview_counts_the_tasks_it_could_not_check(tmp_path, monkeypatc
                                        json={"media_ids": ["l1", "n1"]}).get_json()
     assert body["published"] == 1
     assert body["published_unchecked"] is True and body["published_unchecked_tasks"] == 1
-    assert g.published_delete_note(body["published"], body["published_unchecked"],
+    assert catalog_verbs_mod.published_delete_note(body["published"], body["published_unchecked"],
                                    tasks=body["totals"]["tasks"],
                                    unchecked_tasks=body["published_unchecked_tasks"]) == (
         "1 of these is published on PixAI. Deleting the tasks may remove the published "
@@ -778,7 +782,7 @@ def test_published_delete_note_part_checked_wording():
     """Part-checked, the second sentence names how many tasks went unchecked instead of
     "whether any of these are published was not checked", which would contradict a count
     (loom/test/cloud-delete-dialog.test.js pins the bulk dialog's copy of these words)."""
-    note = g.published_delete_note
+    note = catalog_verbs_mod.published_delete_note
     assert note(0, unchecked=True, tasks=3, unchecked_tasks=2) == (
         "2 of the 3 tasks were not checked for published artwork — deleting a task may "
         "remove its published artwork too.")

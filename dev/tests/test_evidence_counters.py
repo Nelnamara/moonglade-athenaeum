@@ -28,7 +28,7 @@ import json
 from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade import gen_road as gen_road_mod
-from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_client
 from moonglade import organize as organize_mod
 from moonglade import telemetry as telemetry_mod
@@ -142,7 +142,8 @@ def test_a_flag_earned_before_stays_earned(tmp_path):
 
 
 def test_the_achievements_route_no_longer_reads_the_hour():
-    src = inspect.getsource(g.create_app)
+    from moonglade import routes_ach as routes_ach_mod   # it left create_app (split phase 4)
+    src = inspect.getsource(routes_ach_mod.register)
     i = src.index("def api_achievements(")
     body = src[i:src.index("@app.route", i)]
     assert 'telem_flag("session_hour"' not in body and "now().hour" not in body
@@ -210,11 +211,52 @@ def test_old_counters_in_telemetry_no_longer_shadow_the_catalog(tmp_path):
 
 
 def test_no_submit_path_bumps_a_retired_counter():
-    # The gallery and the modules the 3.21.0 split moved gallery code into.
+    # The gallery and the modules the 3.21.0 split moved gallery code into (the create routes,
+    # the submit paths themselves, since split phase 4).
     from moonglade import branding as branding_mod, contest_sync as contest_sync_mod
-    from moonglade import living as living_mod
+    from moonglade import living as living_mod, routes_generate as routes_generate_mod
+    from moonglade import routes_loom as routes_loom_mod, web_loom_store as web_loom_store_mod
+    from moonglade import routes_gate as routes_gate_mod
+    from moonglade import web_threads as web_threads_mod
+    from moonglade import routes_panel as routes_panel_mod
+    from moonglade import routes_delete as routes_delete_mod
+    from moonglade import routes_recipes as routes_recipes_mod
+    from moonglade import routes_library as routes_library_mod
+    from moonglade import routes_account as routes_account_mod
+    from moonglade import routes_community as routes_community_mod
+    from moonglade import routes_train as routes_train_mod
+    from moonglade import routes_ach as routes_ach_mod
+    from moonglade import routes_mirror as routes_mirror_mod
+    from moonglade import routes_branding as routes_branding_mod
+    from moonglade import routes_import as routes_import_mod
+    from moonglade import redact as redact_mod
+    from moonglade import web_tiers as web_tiers_mod
+    from moonglade import watch_plans as watch_plans_mod
+    from moonglade import name_hunt as name_hunt_mod
+    from moonglade import ach_beacon as ach_beacon_mod
+    from moonglade import scenes as scenes_mod
+    from moonglade import pages as pages_mod
+    from moonglade import web_policy as web_policy_mod
+    from moonglade import loom_files as loom_files_mod
+    from moonglade import catalog_search as catalog_search_mod
+    from moonglade import catalog as catalog_mod
+    from moonglade import curation as curation_mod
+    from moonglade import train_guard as train_guard_mod
+    from moonglade import catalog_verbs as catalog_verbs_mod
+    from moonglade import thumbs as thumbs_mod
+    from moonglade import trash as trash_mod
+    from moonglade import dupe_review as dupe_review_mod
     src = "\n".join(inspect.getsource(mod) for mod in (
-        g, telemetry_mod, achievements_mod, branding_mod, living_mod, contest_sync_mod))
+        g, telemetry_mod, achievements_mod, branding_mod, living_mod, contest_sync_mod,
+        routes_generate_mod, routes_loom_mod, web_loom_store_mod, routes_gate_mod, web_threads_mod,
+        routes_panel_mod, routes_delete_mod, routes_recipes_mod, routes_library_mod,
+        routes_account_mod, routes_community_mod, routes_train_mod, routes_ach_mod,
+        routes_mirror_mod, routes_branding_mod, routes_import_mod,
+        redact_mod, web_tiers_mod, watch_plans_mod, name_hunt_mod, ach_beacon_mod, scenes_mod,
+        pages_mod, web_policy_mod, loom_files_mod, catalog_search_mod, catalog_mod, curation_mod,
+        train_guard_mod, catalog_verbs_mod, thumbs_mod, trash_mod, dupe_review_mod))
+    # anchor: the moved submit paths really are in what this reads (their live counters)
+    assert 'telem_bump("enhances"' in inspect.getsource(routes_generate_mod)
     for needle in ('telem_bump("edits"', 'telem_bump("lora_used"', 'telem_max("lora_stacked"',
                    'telem_set_add("loras"', 'telem_bump("loras_trained"', 'telem_bump("culled"'):
         assert needle not in src, needle
@@ -247,7 +289,7 @@ def test_the_cli_dedup_counts_each_duplicated_picture_once(tmp_path):
     """--dedup --apply keys each swept copy by what it duplicated, so copying the same file
     back and sweeping it again is not a second piece."""
     import types
-    from moonglade.gallery import init_db
+    from moonglade.catalog import init_db
 
     def _dup_and_sweep():
         (tmp_path / "images").mkdir(exist_ok=True)

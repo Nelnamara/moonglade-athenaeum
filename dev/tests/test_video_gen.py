@@ -13,6 +13,9 @@ from moonglade import gen_params as gen_params_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import media_fetch as media_fetch_mod
+from moonglade import full_meta as full_meta_mod
+from moonglade import catalog as catalog_mod
 
 
 def test_build_video_parameters_matches_real_submit():
@@ -397,7 +400,7 @@ def test_build_shot_video_params_r2v_video_and_audio_ids_flow_through():
 
 def test_collect_generation_detects_video(monkeypatch, tmp_path):
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: {"outputs": {"videos": [{"mediaId": "V9"}]}})
-    monkeypatch.setattr(core, "video_outputs", lambda r: ([{"video_media_id": "V9"}], {"prompt": "p"}))
+    monkeypatch.setattr(full_meta_mod, "video_outputs", lambda r: ([{"video_media_id": "V9"}], {"prompt": "p"}))
     monkeypatch.setattr(gen_cli_mod, "_download_video_task", lambda *a, **k: ["/V9.mp4"])
     got = gen_road_mod.collect_generation(object(), "T", str(tmp_path))
     assert got["is_video"] is True and got["media_ids"] == ["V9"] and got["saved"] == 1
@@ -409,14 +412,14 @@ def test_download_video_task_posterless_makes_ffmpeg_thumb(monkeypatch, tmp_path
     later --sync-videos pass. This is the fix for the blank-video-tile bug."""
     from pathlib import Path
     # No poster on the output -> the ffmpeg fallback branch must fire.
-    monkeypatch.setattr(core, "video_outputs",
+    monkeypatch.setattr(full_meta_mod, "video_outputs",
                         lambda r: ([{"video_media_id": "V1", "poster_media_id": "", "seed": 1}],
                                    {"prompt": "p", "duration": 5}))
-    monkeypatch.setattr(core, "media_file_gql", lambda s, m: {"fileUrl": "http://x/v.mp4"})
+    monkeypatch.setattr(full_meta_mod, "media_file_gql", lambda s, m: {"fileUrl": "http://x/v.mp4"})
 
     def _fake_download(session, url, stem, **kw):
         p = Path(str(stem) + ".mp4"); p.write_bytes(b"\x00\x00\x00\x18ftypmp42"); return "ok", p
-    monkeypatch.setattr(core, "download", _fake_download)
+    monkeypatch.setattr(media_fetch_mod, "download", _fake_download)
 
     calls = []
     def _fake_vpt(video_path, thumb_path):
@@ -434,17 +437,17 @@ def test_download_video_task_with_poster_skips_ffmpeg(monkeypatch, tmp_path):
     """When PixAI DID return a still-frame poster, we thumbnail that -- ffmpeg fallback
     must NOT run (no redundant decode)."""
     from pathlib import Path
-    monkeypatch.setattr(core, "video_outputs",
+    monkeypatch.setattr(full_meta_mod, "video_outputs",
                         lambda r: ([{"video_media_id": "V2", "poster_media_id": "P2", "seed": 1}],
                                    {"prompt": "p", "duration": 5}))
-    monkeypatch.setattr(core, "media_file_gql", lambda s, m: {"fileUrl": "http://x/v.mp4"})
-    monkeypatch.setattr(core, "resolve_media", lambda s, m: ("http://x/p.png", {}))
+    monkeypatch.setattr(full_meta_mod, "media_file_gql", lambda s, m: {"fileUrl": "http://x/v.mp4"})
+    monkeypatch.setattr(media_fetch_mod, "resolve_media", lambda s, m: ("http://x/p.png", {}))
 
     def _fake_download(session, url, stem, **kw):
         p = Path(str(stem)); p.parent.mkdir(parents=True, exist_ok=True)
         p = p.with_suffix(p.suffix or ".bin"); p.write_bytes(b"data"); return "ok", p
-    monkeypatch.setattr(core, "download", _fake_download)
-    monkeypatch.setattr("moonglade.gallery.make_thumbnail",
+    monkeypatch.setattr(media_fetch_mod, "download", _fake_download)
+    monkeypatch.setattr("moonglade.thumbs.make_thumbnail",
                         lambda src, dst: (Path(dst).write_bytes(b"jpg"), True)[1])
 
     called = []
@@ -471,7 +474,8 @@ def test_gallery_catalog_ref_passes_through_then_uploads_on_invalid_media_id(tmp
 
     Pins the fix: a catalog id whose file we hold on disk must be uploaded, and the
     UPLOADED id is what reaches PixAI."""
-    from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade.gallery import create_app
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     from tests.conftest import login_test_client
 
     (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
@@ -521,7 +525,8 @@ def test_gallery_r2v_catalog_ids_pass_through_without_upload(tmp_path, monkeypat
     referenced twice. Was "upload once per media_id"; PROBED 2026-08-22 (10 of the owner's own
     completed R2V tasks): referenceImageMediaIds accepts in-library ids, so uploading only
     re-ran PixAI's content scan on art it already hosts (the 403 NSFW refusals)."""
-    from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade.gallery import create_app
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     from tests.conftest import login_test_client
 
     (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
@@ -546,7 +551,7 @@ def test_gallery_r2v_catalog_ids_pass_through_without_upload(tmp_path, monkeypat
 
 
 def _seed_one(tmp_path, mid="733917871331404290"):
-    from moonglade.gallery import CATALOG_FIELDS, save_catalog
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
     (tmp_path / "2025-01" / ("s_%s.png" % mid)).write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
     save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
@@ -646,22 +651,22 @@ def test_download_video_task_catalogs_video_even_if_poster_fails(monkeypatch, tm
     Bites: without the try/except around the poster block, _download_video_task raises here and
     save_catalog is never reached."""
     from pathlib import Path
-    monkeypatch.setattr(core, "video_outputs",
+    monkeypatch.setattr(full_meta_mod, "video_outputs",
                         lambda r: ([{"video_media_id": "V7", "poster_media_id": "P7", "seed": 1}],
                                    {"prompt": "p", "duration": 5}))
-    monkeypatch.setattr(core, "media_file_gql", lambda s, m: {"fileUrl": "http://x/v.mp4"})
-    monkeypatch.setattr(core, "resolve_media", lambda s, m: ("http://x/poster.png", {}))
+    monkeypatch.setattr(full_meta_mod, "media_file_gql", lambda s, m: {"fileUrl": "http://x/v.mp4"})
+    monkeypatch.setattr(media_fetch_mod, "resolve_media", lambda s, m: ("http://x/poster.png", {}))
 
     def _dl(session, url, stem, **kw):
         if "poster" in url:                          # the poster download hits the Windows lock
             raise PermissionError(32, "The process cannot access the file ... .jpg.part")
         p = Path(str(stem) + ".mp4"); p.write_bytes(b"\x00\x00\x00\x18ftypmp42"); return "ok", p
-    monkeypatch.setattr(core, "download", _dl)
+    monkeypatch.setattr(media_fetch_mod, "download", _dl)
     monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda v, t: False)
     monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
 
     saved = []
-    monkeypatch.setattr(core, "save_catalog_over_snapshot",
+    monkeypatch.setattr(catalog_mod, "save_catalog_over_snapshot",
                         lambda db, rows, snapshot: saved.extend(rows))
 
     gen_cli_mod._download_video_task(object(), {}, "T7", tmp_path, SimpleNamespace(name_length=60), {})
@@ -759,7 +764,8 @@ def test_a_failed_generation_is_logged_with_its_params(tmp_path, monkeypatch, ca
     Asserts the params are logged too, not just the message -- the shape (model, quality mode,
     duration) is the diagnosis for this class of failure."""
     import logging
-    from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade.gallery import create_app
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     from tests.conftest import login_test_client
 
     (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
@@ -795,7 +801,8 @@ def test_a_failed_generation_is_logged_with_its_params(tmp_path, monkeypatch, ca
 def test_the_failure_log_never_breaks_the_error_path(tmp_path, monkeypatch, pixai):
     """A diagnostic that can break the error path it reports on is worse than none. Params that
     refuse to serialise must not turn a clean error response into a 500."""
-    from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade.gallery import create_app
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     from tests.conftest import login_test_client
 
     (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
@@ -882,7 +889,7 @@ def test_video_outputs_reads_a_plain_i2v_not_just_reference_video():
                                   "negativePrompts": "blurry"}},
         "outputs": {"videos": [{"mediaId": "vid1", "thumbnailMediaId": "th1", "seed": "7"}]},
     }
-    outs, shared = core.video_outputs(i2v_task)
+    outs, shared = full_meta_mod.video_outputs(i2v_task)
     assert [o["video_media_id"] for o in outs] == ["vid1"]
     assert shared["prompt"] == "a cat on a wall", "an i2v prompt must not be dropped"
     assert shared["duration"] == "10"
@@ -897,13 +904,13 @@ def test_video_outputs_reads_a_plain_i2v_not_just_reference_video():
                                           "duration": "5"}},
         "outputs": {"videos": [{"mediaId": "vid2"}]},
     }
-    _outs2, shared2 = core.video_outputs(rv_task)
+    _outs2, shared2 = full_meta_mod.video_outputs(rv_task)
     assert shared2["prompt"] == "@image1 walks"
     assert shared2["duration"] == "5"
     assert shared2["negative_prompt"] == ""      # none in this block -> blank, not missing
 
     # A task with neither block still returns the empty shape rather than raising.
-    assert core.video_outputs({"parameters": {}, "outputs": {}}) == ([], {
+    assert full_meta_mod.video_outputs({"parameters": {}, "outputs": {}}) == ([], {
         "prompt": "", "duration": "", "i2v_model": "", "negative_prompt": ""})
 
 

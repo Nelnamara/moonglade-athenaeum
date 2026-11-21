@@ -24,6 +24,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade import media_tools as media_tools_mod
+from moonglade import thumbs as thumbs_mod
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +247,7 @@ def test_has_audio_without_ffprobe_is_none_not_false(no_tools, monkeypatch, verb
     coerces to False -- deliberately, in one place (see probe_has_audio)."""
     _Rec(monkeypatch)
     assert media_tools_mod.has_audio("clip.mp4") is None
-    assert g.probe_has_audio("clip.mp4") is False
+    assert thumbs_mod.probe_has_audio("clip.mp4") is False
     assert "ffprobe is not installed" in capsys.readouterr().out
 
 
@@ -367,7 +368,7 @@ def test_the_video_thumbnail_takes_its_binary_and_timeouts_from_the_seam(
         return SimpleNamespace(returncode=0, stdout="", stderr="")
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    assert g.make_video_thumbnail(tmp_path / "clip.mp4", tmp_path / "t.jpg") is True
+    assert thumbs_mod.make_video_thumbnail(tmp_path / "clip.mp4", tmp_path / "t.jpg") is True
     assert (tmp_path / "t.jpg").exists()
     assert [a[0][0] for a in calls] == ["/opt/bin/ffmpeg", "/opt/bin/ffmpeg"]
     assert "thumbnail=72" in calls[0][0] and "-vf" not in calls[1][0]
@@ -379,7 +380,7 @@ def test_the_video_thumbnail_takes_its_binary_and_timeouts_from_the_seam(
 def test_the_video_thumbnail_without_ffmpeg_is_false_and_spawns_nothing(
         no_tools, monkeypatch, tmp_path):
     rec = _Rec(monkeypatch)
-    assert g.make_video_thumbnail(tmp_path / "clip.mp4", tmp_path / "t.jpg") is False
+    assert thumbs_mod.make_video_thumbnail(tmp_path / "clip.mp4", tmp_path / "t.jpg") is False
     assert media_tools_mod.video_poster_thumb(tmp_path / "clip.mp4", tmp_path / "t.jpg") is False
     assert rec.calls == [] and not (tmp_path / "t.jpg").exists()
 
@@ -398,7 +399,7 @@ def test_the_two_old_duration_probes_agree_on_one_fixture(have_tools, monkeypatc
     """
     _Rec(monkeypatch, stdout="6.283185\n")
     ours = media_tools_mod.duration("clip.mp4")
-    theirs = g.probe_duration("clip.mp4")
+    theirs = thumbs_mod.probe_duration("clip.mp4")
     assert ours == theirs == 6.283185
     assert round(ours, 2) == 6.28, "a caller that wants 2dp still gets them, at its own site"
 

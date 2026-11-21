@@ -8,6 +8,8 @@ import pytest
 from moonglade import backup as core
 from moonglade import cloud_delete
 from moonglade import task_reads
+from moonglade import full_meta as full_meta_mod
+from moonglade import sync as sync_mod
 
 TASK = {"id": "2074596287000121003", "status": "completed", "startedAt": "t", "paidQuota": 3000,
         "outputs": {"mediaIds": ["m2", "m4"], "mediaUrls": ["u2", "u4"], "seed": "123"},
@@ -23,9 +25,9 @@ def refused_graphql(monkeypatch):
 
 
 def test_the_full_meta_read_takes_the_rest_record_when_graphql_is_refused(refused_graphql):
-    task = core._task_for_full_meta(object(), TASK["id"])
+    task = full_meta_mod._task_for_full_meta(object(), TASK["id"])
     assert task and task["_rest_fallback"] is True
-    fm = core.extract_full_meta(task)
+    fm = full_meta_mod.extract_full_meta(task)
     assert fm["prompt_full"] == "a cat" and fm["model_id"] == "1"
     assert fm["seed"] == ""                                 # per-image seeds stay unknown
 
@@ -33,16 +35,16 @@ def test_the_full_meta_read_takes_the_rest_record_when_graphql_is_refused(refuse
 def test_a_fallback_record_never_renumbers_the_survivors(refused_graphql):
     """The REST batch lists only the LIVE members, so m4 would read as index 1 of 2 though
     PixAI numbers it 3 of 4. A degraded record parks no batch, so no position is written."""
-    fm = core.extract_full_meta(core._task_for_full_meta(object(), TASK["id"]))
+    fm = full_meta_mod.extract_full_meta(full_meta_mod._task_for_full_meta(object(), TASK["id"]))
     assert fm["_batch"] is None
-    row = core._with_batch_position(fm, "m4")
+    row = full_meta_mod._with_batch_position(fm, "m4")
     assert not row.get("batch_index") and not row.get("batch_size")
 
 
 def test_the_three_full_meta_readers_use_the_fallback_read():
-    for fn in (core.run_backfill_full_meta, core.run_download):
+    for fn in (sync_mod.run_backfill_full_meta, sync_mod.run_download):
         assert "_task_for_full_meta(session, tid)" in inspect.getsource(fn), fn.__name__
-    assert inspect.getsource(core.run_download).count("_task_for_full_meta(session, tid)") == 2
+    assert inspect.getsource(sync_mod.run_download).count("_task_for_full_meta(session, tid)") == 2
 
 
 def test_deletes_and_the_plain_read_never_take_the_fallback(refused_graphql):
