@@ -43,6 +43,7 @@ _TODAY = (
     "moonglade/routes_community.py",
     "moonglade/routes_train.py",
     "moonglade/routes_ach.py",
+    "moonglade/routes_mirror.py",
     "moonglade/similar.py", "moonglade/task_reads.py", "moonglade/telemetry.py",
     "moonglade/updater.py",
 )
