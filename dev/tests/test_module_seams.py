@@ -408,6 +408,8 @@ SEAMS = {
         "WATCH_HEALTHY_S", "WATCH_RECONNECT_WAIT", "WATCH_BACKOFF_FIRST", "WATCH_BACKOFF_MAX",
         "WATCH_CATCHUP_MIN_GAP", "WATCH_SWEEP_FLOOR", "WATCH_SUBSCRIBE_SETTLE",
         "WATCH_COLLECT_RETRY_S", "watch_reconnect_plan", "catchup_plan", "watch_close_info"]},
+    "moonglade.name_hunt": {"from": "moonglade.gallery", "names": [
+        "_HUNT_MAX_PAGES", "_hunt_by_name"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -1813,6 +1815,35 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_task_model_detail_document.py', 'moonglade.watch_plans'),
     ('tests/test_telemetry.py', 'moonglade.watch_plans'),
     ('tools/export_design_kit.py', 'moonglade.watch_plans'),
+    # Split phase 4, name_hunt: no reader reads the hunt's text; routes_library imports it from
+    # moonglade.name_hunt at call time.
+    ('loom/test/mg-art-filters.test.js', 'moonglade.name_hunt'),
+    ('loom/test/mg-notify-queue-phase.test.js', 'moonglade.name_hunt'),
+    ('loom/test/mg-notify-website-source.test.js', 'moonglade.name_hunt'),
+    ('loom/test/phone-back-layers.test.js', 'moonglade.name_hunt'),
+    ('tests/test_app_paths.py', 'moonglade.name_hunt'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.name_hunt'),
+    ('tests/test_bonjour.py', 'moonglade.name_hunt'),
+    ('tests/test_branding.py', 'moonglade.name_hunt'),
+    ('tests/test_catalog_verbs.py', 'moonglade.name_hunt'),
+    ('tests/test_catchup_query.py', 'moonglade.name_hunt'),
+    ('tests/test_csrf_coverage.py', 'moonglade.name_hunt'),
+    ('tests/test_design_kit_sync.py', 'moonglade.name_hunt'),
+    ('tests/test_evidence_counters.py', 'moonglade.name_hunt'),
+    ('tests/test_first_party_sources.py', 'moonglade.name_hunt'),
+    ('tests/test_history_feed_document.py', 'moonglade.name_hunt'),
+    ('tests/test_living_library.py', 'moonglade.name_hunt'),
+    ('tests/test_logging.py', 'moonglade.name_hunt'),
+    ('tests/test_loom_notify.py', 'moonglade.name_hunt'),
+    ('tests/test_loom_p_routes.py', 'moonglade.name_hunt'),
+    ('tests/test_network.py', 'moonglade.name_hunt'),
+    ('tests/test_security_review_fixes.py', 'moonglade.name_hunt'),
+    ('tests/test_server_one_module.py', 'moonglade.name_hunt'),
+    ('tests/test_settings_store.py', 'moonglade.name_hunt'),
+    ('tests/test_setup_prepare.py', 'moonglade.name_hunt'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.name_hunt'),
+    ('tests/test_telemetry.py', 'moonglade.name_hunt'),
+    ('tools/export_design_kit.py', 'moonglade.name_hunt'),
 }
 
 

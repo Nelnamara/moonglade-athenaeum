@@ -589,7 +589,7 @@ def register(app, ctx):
              deliberately: layer 1 is a coarse browse hint, so only this one can be trusted
              to badge an individual row.
         Absent/kind=base -> results pass through unmodified, exactly as before."""
-        from moonglade.gallery import _hunt_by_name
+        from moonglade.name_hunt import _hunt_by_name
         q = (request.args.get("q") or "").strip()
         usage = "LORA" if (request.args.get("kind") or "base").lower() == "lora" else "MODEL"
         category = (request.args.get("category") or "").strip().lower()
