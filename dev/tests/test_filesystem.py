@@ -139,7 +139,7 @@ def test_import_local_scans_and_is_idempotent(tmp_path):
     (tmp_path / "videos" / "myclip.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
     (tmp_path / "images").mkdir()
     (tmp_path / "images" / "art.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
-    res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
+    res = library_runs_mod.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
     assert res["imported"] == 2 and res["skipped"] == 0
     assert len(res["media_ids"]) == 2                      # the web importer tags a collection off these
     rows = {r["filename"]: r for r in _load_cat(tmp_path / "catalog.db")}
@@ -148,7 +148,7 @@ def test_import_local_scans_and_is_idempotent(tmp_path):
     assert rows["images/art.png"]["source"] == "local"
     assert rows["images/art.png"]["is_video"] == ""
     # re-run imports nothing new
-    assert core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))["imported"] == 0
+    assert library_runs_mod.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))["imported"] == 0
 
 
 def test_import_local_skips_already_backed_up_pixai_files(tmp_path):
@@ -161,7 +161,7 @@ def test_import_local_skips_already_backed_up_pixai_files(tmp_path):
                       {"media_id": "375806477215601884", "filename": "images/old_name.png"}])
     (tmp_path / "2023-10").mkdir()
     (tmp_path / "2023-10" / "375806477215601884.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
-    res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
+    res = library_runs_mod.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
     assert res["imported"] == 0          # recognized as already backed up
     assert res["skipped"] == 1
     # catalog still has exactly one row, no 'local' duplicate
@@ -179,7 +179,7 @@ def test_import_local_skips_deleted_quarantine(tmp_path):
     qdir = tmp_path / DELETED_DIRNAME
     qdir.mkdir(parents=True)
     (qdir / "old_prompt_task1_999.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
-    res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
+    res = library_runs_mod.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
     assert res["imported"] == 0, "a file under _deleted/ was resurrected as a new local row"
     assert _load_cat(tmp_path / "catalog.db") == []
 
@@ -188,7 +188,7 @@ def test_import_local_external_copies_in(tmp_path):
     ext = tmp_path / "external"; ext.mkdir()
     (ext / "outside.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
     out = tmp_path / "backup"
-    res = core.run_import_local(SimpleNamespace(out=str(out), import_local=str(ext)))
+    res = library_runs_mod.run_import_local(SimpleNamespace(out=str(out), import_local=str(ext)))
     assert res["imported"] == 1
     # Stored under the content-addressed name, not the source basename: two different
     # files called outside.png out of two folders both have to survive the import.
@@ -200,7 +200,7 @@ def test_import_local_video_no_crash_without_ffmpeg(tmp_path, monkeypatch):
     monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "")
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "v.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
-    res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
+    res = library_runs_mod.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
     assert res["imported"] == 1   # cataloged fine; just no poster
 
 
@@ -312,7 +312,7 @@ def test_run_faststart_videos_no_ffmpeg(tmp_path, monkeypatch):
     monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "")
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "a.mp4").write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
-    res = core.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
+    res = library_runs_mod.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
     assert res["fixed"] == 0 and res["total"] == 1
 
 
@@ -334,7 +334,7 @@ def test_import_local_skips_branding_folder(tmp_path, monkeypatch):
     (branding_mod._role_dir("marks") / "m1.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "v.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
-    res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
+    res = library_runs_mod.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
     assert res["imported"] == 1                       # only the video, not the 2 branding pngs
     files = [r.get("filename", "") for r in load_catalog(tmp_path / "catalog.db")]
     root_name = branding_mod.branding_root().name                 # derived, not retyped
@@ -506,7 +506,7 @@ def test_reconcile_flags_deleted_server_side(tmp_path, monkeypatch, pixai):
     ])
     conn = {"edges": [{"node": {"id": "LIVE1"}}], "pageInfo": {"hasPreviousPage": False}}
     monkeypatch.setattr(history_mod, "gql", lambda *a, **k: conn)
-    res = core.run_reconcile_deleted(SimpleNamespace(out=str(tmp_path), token=None, page_size=250))
+    res = library_runs_mod.run_reconcile_deleted(SimpleNamespace(out=str(tmp_path), token=None, page_size=250))
     assert res["live"] == 1 and res["flagged"] == 1
     by = {r["media_id"]: r for r in load_catalog(db)}
     assert by["b"]["deleted_remote"] == "1"      # task gone from feed, old -> flagged
@@ -533,6 +533,7 @@ from moonglade import organize as organize_mod
 from moonglade import media_tools as media_tools_mod
 from moonglade import branding as branding_mod
 from moonglade import history as history_mod
+from moonglade import library_runs as library_runs_mod
 
 
 def _make_row(**kwargs):
@@ -666,7 +667,7 @@ def test_catalog_stats_totals_paid_credit_once_per_task(tmp_path, capsys):
         _make_row(media_id="b1", task_id="t2", filename="b1.png", paid_credit="0"),
         _make_row(media_id="c1", task_id="t3", filename="c1.png"),   # untracked ('')
     ])
-    core.run_catalog_stats(SimpleNamespace(out=str(tmp_path), progress=None))
+    library_runs_mod.run_catalog_stats(SimpleNamespace(out=str(tmp_path), progress=None))
     out = capsys.readouterr().out
     assert "Credits tracked" in out
     assert "100 spent across 2 tasks (1 free)" in out
@@ -796,6 +797,6 @@ def test_count_backup_images_excludes_thumbnails(tmp_path):
     (tmp_path / "_duplicates" / "c_3.png").write_bytes(b"z")         # quarantined -> excluded
     (tmp_path / "_deleted" / "t_4.png").write_bytes(b"T" * 400)      # soft-deleted -> excluded
     (tmp_path / "images" / "half.part").write_bytes(b"nope")         # partial -> excluded
-    n, b, thumbs = core._count_backup_images(tmp_path)
+    n, b, thumbs = library_runs_mod._count_backup_images(tmp_path)
     assert n == 2 and b == 300          # two originals, their bytes; grid/thumbs/dupes/trash excluded
     assert thumbs == 2                  # thumbnails reported separately, not in the total

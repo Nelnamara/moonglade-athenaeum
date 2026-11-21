@@ -38,6 +38,7 @@ from moonglade.catalog import CATALOG_FIELDS, load_catalog, save_catalog
 from tests.fake_pixai import FakePixAI
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import living as living_mod
+from moonglade import library_runs as library_runs_mod
 
 REPO = Path(__file__).resolve().parents[2]
 DAY = 86400.0
@@ -212,11 +213,11 @@ def test_nothing_the_sweep_or_the_sync_sends_for_the_list_selects_views(pixai, t
     db = _catalog(tmp_path, ["m1", "m2", "m3"])
     lib = _library(pixai, [[_node("m1", "a1")], [_node("m2", "a2")], [_node("m3", "a3")]])
     _sweep(tmp_path, db)
-    core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
+    library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
                                            no_views=True))
     assert lib.documents and not any(VIEWS.search(d) for d in lib.documents)
     lib.documents.clear()
-    core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
     listing = [d for d in lib.documents if not VIEWS.search(d)]
     bulk = [d for d in lib.documents if VIEWS.search(d)]
     assert len(listing) == 3 and len(bulk) == 1
@@ -325,7 +326,7 @@ def test_the_sweep_stops_at_the_page_cap_and_calls_itself_incomplete(
 def test_the_full_sync_walks_every_page_too(pixai, tmp_path):
     db = _catalog(tmp_path, ["m1", "m2", "m3"])
     lib = _library(pixai, [[_node("m1", "a1")], [_node("m2", "a2")], [_node("m3", "a3")]])
-    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
+    res = library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
                                                  no_views=True))
     assert res["artworks"] == 3 and res["matched"] == 3 and res["fail"] == 0
     assert [v.get("before") for v in lib.variables] == [None, "1", "2"]
@@ -397,7 +398,7 @@ def test_a_failed_first_page_ends_the_sync_with_a_plain_error(pixai, tmp_path):
     db = _catalog(tmp_path, ["m1"])
     pixai.fail("artworks", _refusal("GRAPHQL_VALIDATION_FAILED", "PixAI would not take this"))
     with pytest.raises(core.PixAIError) as ex:
-        core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
+        library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
                                                no_views=True))
     text = str(ex.value)
     assert "published artworks" in text and "nothing was synced" in text
@@ -411,7 +412,7 @@ def test_a_failed_later_page_marks_the_sync_incomplete_and_says_why(pixai, tmp_p
     db = _catalog(tmp_path, ["m1", "m2"])
     lib = _library(pixai, [[_node("m1", "a1")], [_node("m2", "a2")]])
     lib.refuse_from, lib.refusal = 1, _refusal(message="page two was refused")
-    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
+    res = library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
                                                  no_views=True))
     out = capsys.readouterr().out
     assert res["fail"] == 1 and res["artworks"] == 1
@@ -449,6 +450,7 @@ def test_the_retired_saved_request_leaves_nothing_behind():
     from moonglade import routes_branding as routes_branding_mod    # and the branding routes'
     from moonglade import routes_import as routes_import_mod        # and the import routes'
     for module in (core, g, pixai_client_mod, living_mod,   # the transport, the sweep moved out
+                   library_runs_mod,                        # and the --sync-artworks runner
                    routes_generate_mod, routes_loom_mod, web_loom_store_mod, routes_gate_mod,
                    web_threads_mod, routes_panel_mod, routes_delete_mod, routes_recipes_mod,
                    routes_library_mod, routes_account_mod, routes_community_mod,

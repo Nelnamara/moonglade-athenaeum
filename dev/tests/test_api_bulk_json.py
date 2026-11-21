@@ -25,6 +25,7 @@ from moonglade import scan as scan_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import cloud_delete as cloud_delete_mod
 from moonglade import curation as curation_mod
+from moonglade import library_runs as library_runs_mod
 
 
 def _row(**kw):
@@ -495,7 +496,7 @@ def _cov_catalog(tmp_path, rows):
 def _stamp(tmp_path, **counts):
     import json as _json
     from moonglade import paths as _p
-    dest = _p.records_path(tmp_path, core.RECONCILE_STAMP)
+    dest = _p.records_path(tmp_path, library_runs_mod.RECONCILE_STAMP)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(_json.dumps(dict({"reconciled_at": "2026-11-18T00:00:00Z", "flagged": 0,
                                       "cleared": 0}, **counts)), encoding="utf-8")
@@ -514,7 +515,7 @@ def test_failed_and_deleted_tasks_no_longer_skew_the_pill(tmp_path):
     assert "2 you deleted on PixAI are kept here and not counted." in cov["note"]
     assert "Sync now" not in cov["note"]
     # the old formula on the same library read 99/100 = 99.0%
-    assert core.feed_counts is not None
+    assert library_runs_mod.feed_counts is not None
 
 
 def test_a_real_gap_says_sync_fixes_it_and_never_rounds_up_to_100(tmp_path):
@@ -542,5 +543,5 @@ def test_feed_counts_sorts_the_feed():
              {"id": "e", "status": "running"},
              {"id": "f", "status": "completed", "batchMediaIds": []},
              {"id": ""}]
-    assert core.feed_counts(nodes, {"a"}) == {"live": 6, "no_picture": 3, "in_progress": 1,
+    assert library_runs_mod.feed_counts(nodes, {"a"}) == {"live": 6, "no_picture": 3, "in_progress": 1,
                                               "missing": 1}

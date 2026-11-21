@@ -24,6 +24,7 @@ from moonglade.catalog import save_catalog
 from tests.conftest import login_test_client, with_csrf
 from tests.test_integrity import _REPORTS_WRITTEN, _jpeg, _png, _row, _tree_hash
 from moonglade import history as history_mod
+from moonglade import library_runs as library_runs_mod
 
 # What a mark writes, besides the check's own reports: its file, beside them.
 _WRITTEN = _REPORTS_WRITTEN + ("_moonglade/decisions", "_moonglade/decisions/integrity_marks.json")
@@ -125,7 +126,7 @@ def test_recoverable_first_then_suspect_then_lost_then_newest(tmp_path):
 
 def test_lost_rows_say_as_of_when(tmp_path):
     out = _broken_library(tmp_path)
-    paths.records_path(out, core.RECONCILE_STAMP).write_text(
+    paths.records_path(out, library_runs_mod.RECONCILE_STAMP).write_text(
         json.dumps({"reconciled_at": "2026-10-02T08:00:00Z"}), encoding="utf-8")
     rows = _by_id(integ.broken_list(out, out / "catalog.db"))
     assert rows["109"]["gone_as_of"] == "2026-10-02"   # the last reconcile that flagged it
@@ -276,8 +277,8 @@ def test_a_reconcile_stamps_when_it_ran(tmp_path, monkeypatch, pixai):
         _row(media_id="a", task_id="GONE", filename="a.png", created_at="2024-01-01T00:00:00")])
     conn = {"edges": [{"node": {"id": "LIVE"}}], "pageInfo": {"hasPreviousPage": False}}
     monkeypatch.setattr(history_mod, "gql", lambda *a, **k: conn)
-    core.run_reconcile_deleted(SimpleNamespace(out=str(tmp_path), token=None, page_size=250))
-    doc = json.loads(paths.records_path(tmp_path, core.RECONCILE_STAMP).read_text(encoding="utf-8"))
+    library_runs_mod.run_reconcile_deleted(SimpleNamespace(out=str(tmp_path), token=None, page_size=250))
+    doc = json.loads(paths.records_path(tmp_path, library_runs_mod.RECONCILE_STAMP).read_text(encoding="utf-8"))
     assert doc["reconciled_at"].endswith("Z") and doc["flagged"] == 1
     assert integ.reconciled_at(tmp_path) == doc["reconciled_at"]
 

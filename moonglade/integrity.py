@@ -68,6 +68,7 @@ from moonglade import catalog_verbs as _catalog_verbs
 from moonglade import thumbs as _thumbs
 from moonglade import media_fetch as _media_fetch
 from moonglade import full_meta as _full_meta
+from moonglade import library_runs as _library_runs
 
 REPORT_CSV = "integrity_report.csv"
 REPORT_JSON = "integrity_report.json"
@@ -602,7 +603,7 @@ def reconciled_at(out_dir):
     archive-only flags, or None before the first stamped one."""
     from moonglade import backup as core                  # lazy, like _write_atomic's
     try:
-        doc = json.loads(_paths.records_path(out_dir, core.RECONCILE_STAMP, make=False)
+        doc = json.loads(_paths.records_path(out_dir, _library_runs.RECONCILE_STAMP, make=False)
                          .read_text(encoding="utf-8"))
     except (OSError, ValueError, RecursionError):
         return None

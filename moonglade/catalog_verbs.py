@@ -760,8 +760,8 @@ def backup_coverage(db_path, out_dir, server_tasks):
                 "AND COALESCE(deleted_remote,'') = '1'").fetchone()[0] or 0)
         except sqlite3.Error:
             local = deleted = 0
-    from moonglade import backup as _core_cov
-    stamp = _core_cov.read_reconcile_stamp(out_dir)
+    from moonglade import library_runs as _library_runs
+    stamp = _library_runs.read_reconcile_stamp(out_dir)
     walked = "no_picture" in stamp
     try:
         no_picture = max(0, int(stamp.get("no_picture") or 0))

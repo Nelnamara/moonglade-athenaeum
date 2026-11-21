@@ -11,6 +11,7 @@ from moonglade import models as models_mod
 from moonglade.catalog import CATALOG_FIELDS, save_catalog, load_catalog
 from moonglade import task_reads as task_reads_mod
 from moonglade import full_meta as full_meta_mod
+from moonglade import library_runs as library_runs_mod
 
 
 _SURFACE = ["inference_profile", "quality_tag", "prompt_helper", "control_nets", "lora_parameters",
@@ -128,6 +129,8 @@ def test_every_capture_path_builds_its_row_through_the_shared_builder():
     src += "\n" + pathlib.Path(gen_cli_mod.__file__).read_text(encoding="utf-8")
     # and the row builder is in moonglade/full_meta.py since 3.22 (split phase 4)
     src += "\n" + pathlib.Path(full_meta_mod.__file__).read_text(encoding="utf-8")
+    # and run_sync_videos (with its _do_task) is in moonglade/library_runs.py
+    src += "\n" + pathlib.Path(library_runs_mod.__file__).read_text(encoding="utf-8")
 
     builder = _function_body(src, "def build_catalog_row")
     assert "for k in _TASK_ROW_FIELDS" in builder, \
@@ -155,6 +158,8 @@ def test_the_local_import_paths_also_use_the_shared_builder():
     the argument is actually there, not merely that the builder is called."""
     import pathlib
     src = pathlib.Path(core.__file__).read_text(encoding="utf-8")
+    # run_import_local is in moonglade/library_runs.py since 3.22 (split phase 4)
+    src += "\n" + pathlib.Path(library_runs_mod.__file__).read_text(encoding="utf-8")
     body = _function_body(src, "def run_import_local")
     assert "build_catalog_row(" in body and '{f: "" for f in CATALOG_FIELDS}' not in body
 

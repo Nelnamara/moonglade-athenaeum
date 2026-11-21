@@ -304,6 +304,7 @@ from moonglade import pixai_client as pixai_client_mod
 from moonglade import history as history_mod
 from moonglade import media_fetch as media_fetch_mod
 from moonglade import full_meta as full_meta_mod
+from moonglade import library_runs as library_runs_mod
 
 
 def _dl_args(out, **kw):
@@ -811,7 +812,7 @@ def test_sync_artworks_merges_by_media_id(tmp_path, mocker, pixai):
     mocker.patch.object(core, "artwork_list_gql", return_value=conn)
     _views_sweep(pixai, {"aw1": 412})
 
-    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    res = library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
 
     assert res["artworks"] == 1 and res["matched"] == 1
     assert res["views"] == 1                       # the sweep landed on the matched row
@@ -839,7 +840,7 @@ def test_sync_artworks_tags_the_animation_video_row(tmp_path, mocker, pixai):
     mocker.patch.object(core, "artwork_list_gql", return_value=conn)
     _views_sweep(pixai, {"aw9": 77})
 
-    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    res = library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
 
     assert res["matched"] == 1                        # the video row matched via videoMediaId
     row = {r["media_id"]: r for r in load_catalog(db)}["vid1"]
@@ -862,7 +863,7 @@ def test_sync_artworks_resolves_userid_via_session(tmp_path, mocker):
     mocker.patch.object(core, "_make_session", side_effect=fake_session)
     mocker.patch.object(core, "artwork_list_gql",
                         return_value={"edges": [], "pageInfo": {"hasPreviousPage": False}})
-    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    res = library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
     assert res["artworks"] == 0 and core.USER_ID == "resolved-99"   # ran instead of raising
 
 
@@ -891,7 +892,7 @@ def test_sync_artworks_with_videos_skips_already_downloaded(tmp_path, mocker, pi
     mocker.patch.object(media_fetch_mod, "download",
                         return_value=("ok", tmp_path / "videos" / "clip_V1.mp4"))
 
-    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
+    res = library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
                                                  with_videos=True, workers=1))
 
     resolve.assert_not_called()
@@ -917,7 +918,7 @@ def test_sync_artworks_flags_incomplete_pagination_as_a_failure(tmp_path, mocker
                         side_effect=[page1, core.ArtworkListRefused("page 2 refused")])
     _views_sweep(pixai, {"aw1": 5})
 
-    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    res = library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
 
     assert res["artworks"] == 1                 # page 1's artwork still landed -- not discarded
     assert res["fail"] == 1                      # but the early stop is now visible, not silent
@@ -947,7 +948,7 @@ def test_sync_artworks_counts_failed_video_downloads_as_a_failure(tmp_path, mock
     mocker.patch.object(media_fetch_mod, "download", return_value=("fail", None))
     _views_sweep(pixai, {"aw1": 5})
 
-    res = core.run_sync_artworks(SimpleNamespace(
+    res = library_runs_mod.run_sync_artworks(SimpleNamespace(
         out=str(tmp_path), token=None, delay=0, with_videos=True, workers=1))
 
     assert res["videos"] == 0                    # the failed video was not counted as saved
@@ -966,15 +967,15 @@ def test_resolve_loras(mocker):
 
 def test_needs_model_fix():
     # numeric model_name with matching id -> needs fixing
-    assert core._needs_model_fix({"model_id": "123", "model_name": "123"}) == "123"
+    assert library_runs_mod._needs_model_fix({"model_id": "123", "model_name": "123"}) == "123"
     # blank name but has id -> needs fixing
-    assert core._needs_model_fix({"model_id": "456", "model_name": ""}) == "456"
+    assert library_runs_mod._needs_model_fix({"model_id": "456", "model_name": ""}) == "456"
     # model_name itself is the numeric id, no model_id column -> use it
-    assert core._needs_model_fix({"model_id": "", "model_name": "789"}) == "789"
+    assert library_runs_mod._needs_model_fix({"model_id": "", "model_name": "789"}) == "789"
     # already readable -> no fix
-    assert core._needs_model_fix({"model_id": "123", "model_name": "Tsubaki v1"}) == ""
+    assert library_runs_mod._needs_model_fix({"model_id": "123", "model_name": "Tsubaki v1"}) == ""
     # nothing to go on -> no fix
-    assert core._needs_model_fix({"model_id": "", "model_name": ""}) == ""
+    assert library_runs_mod._needs_model_fix({"model_id": "", "model_name": ""}) == ""
 
 
 def test_fix_models_resolves_numeric_names(tmp_path, mocker, pixai):
@@ -990,7 +991,7 @@ def test_fix_models_resolves_numeric_names(tmp_path, mocker, pixai):
     ])
     mocker.patch.object(models_mod, "model_name_gql", return_value="Tsubaki.2 v1")
 
-    res = core.run_fix_models(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    res = library_runs_mod.run_fix_models(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
 
     assert res["fixed"] == 2          # both m1/m2 (model 999) fixed
     rows = {r["media_id"]: r for r in load_catalog(db)}
@@ -1237,16 +1238,16 @@ def test_a_freshly_captured_generation_gets_its_model_NAME_not_just_its_id(monke
     it was generated showed a raw 19-digit model id on its detail page until a backfill
     happened past. Reported from the owner's own gallery: "Model 1983308862240288769".
     """
-    assert core._resolved_model_name(object(), {"model_name": "Reference Pro"}, "1") ==         "Reference Pro", "a chat task's locally-resolved label must win"
+    assert library_runs_mod._resolved_model_name(object(), {"model_name": "Reference Pro"}, "1") ==         "Reference Pro", "a chat task's locally-resolved label must win"
     monkeypatch.setattr(models_mod, "model_name_gql", lambda s, mid: "Tsubaki .2")
-    assert core._resolved_model_name(object(), {}, "1983308862240288769") == "Tsubaki .2"
-    assert core._resolved_model_name(object(), {}, "") == "", "no id, nothing to resolve"
+    assert library_runs_mod._resolved_model_name(object(), {}, "1983308862240288769") == "Tsubaki .2"
+    assert library_runs_mod._resolved_model_name(object(), {}, "") == "", "no id, nothing to resolve"
 
     def boom(s, mid):
         raise core.PixAIError("lookup down")
 
     monkeypatch.setattr(models_mod, "model_name_gql", boom)
-    assert core._resolved_model_name(object(), {}, "1") == "", (
+    assert library_runs_mod._resolved_model_name(object(), {}, "1") == "", (
         "a failed lookup must cost the label, never the row")
 
 
@@ -1367,7 +1368,7 @@ def test_full_metadata_is_the_default_on_a_pull(monkeypatch, tmp_path):
     flag) keep working unchanged.
     """
     seen = {}
-    monkeypatch.setattr(core, "run_catalog_stats", lambda a: seen.__setitem__("ns", a))
+    monkeypatch.setattr(library_runs_mod, "run_catalog_stats", lambda a: seen.__setitem__("ns", a))
 
     def parsed(argv):
         seen.clear()
@@ -1406,7 +1407,7 @@ def test_catalog_stats_reports_metadata_coverage(tmp_path, capsys):
         # imported locally: no PixAI task behind it, so it can never carry a model
         base | {"media_id": "m4", "filename": "d.png", "source": "local"},
     ])
-    core.run_catalog_stats(SimpleNamespace(out=str(tmp_path), progress=None))
+    library_runs_mod.run_catalog_stats(SimpleNamespace(out=str(tmp_path), progress=None))
     out = capsys.readouterr().out
     assert "Metadata coverage" in out
     assert "1 / 4" in out, "model coverage must be counted per row"

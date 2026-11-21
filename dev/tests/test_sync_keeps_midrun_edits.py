@@ -23,6 +23,7 @@ from moonglade import task_reads as task_reads_mod
 from moonglade import history as history_mod
 from moonglade import media_fetch as media_fetch_mod
 from moonglade import full_meta as full_meta_mod
+from moonglade import library_runs as library_runs_mod
 
 
 def _row(**kw):
@@ -159,7 +160,7 @@ def test_the_fix_models_step_keeps_edits_made_while_it_ran(tmp_path, monkeypatch
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: SimpleNamespace())
     monkeypatch.setattr(models_mod, "model_name_gql", name_lookup)
 
-    core.run_fix_models(SimpleNamespace(out=str(tmp_path), token=None, workers=1, delay=0,
+    library_runs_mod.run_fix_models(SimpleNamespace(out=str(tmp_path), token=None, workers=1, delay=0,
                                         progress=None, relabel_removed=False))
 
     m1 = _by_id(db)["m1"]

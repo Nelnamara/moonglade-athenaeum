@@ -35,6 +35,7 @@ from moonglade import catalog as catalog_mod
 from moonglade import thumbs as thumbs_mod
 from moonglade import media_fetch as media_fetch_mod
 from moonglade import full_meta as full_meta_mod
+from moonglade import library_runs as library_runs_mod
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +271,7 @@ class TestM06TrashedImagesAreNotTheLibrary:
         """Excluding it silently would just swap one wrong number for another: the totals
         would stop matching the folder with nothing on screen to explain the gap."""
         _seed_backup_tree(tmp_path)
-        counts = core._count_backup_images(tmp_path)
+        counts = library_runs_mod._count_backup_images(tmp_path)
         assert counts.trashed == 1 and counts.trashed_bytes == 400
 
     def test_catalog_stats_does_not_count_trash_as_library(self, tmp_path, capsys):
@@ -282,7 +283,7 @@ class TestM06TrashedImagesAreNotTheLibrary:
         row = {f: "" for f in catalog_mod.CATALOG_FIELDS}
         row.update({"media_id": "1", "filename": "images/live_1.png"})
         catalog_mod.save_catalog(db, [row])
-        core.run_catalog_stats(SimpleNamespace(out=str(tmp_path)))
+        library_runs_mod.run_catalog_stats(SimpleNamespace(out=str(tmp_path)))
         out = capsys.readouterr().out
         assert "Image files on disk : 1" in out
         assert "1 soft-deleted in {}/".format(DELETED_DIRNAME) in out
@@ -435,7 +436,7 @@ class TestM17UnknownEditModel:
         edit_task_network(_edit_task("3111000000000000002"), lambda mid: mid)
         row = _run_edit(tmp_path)
         assert row["model_name"] != "Edit"
-        assert core._needs_model_fix(row) == "3111000000000000002"
+        assert library_runs_mod._needs_model_fix(row) == "3111000000000000002"
 
     def test_a_known_edit_model_keeps_its_local_label_without_a_lookup(self, tmp_path,
                                                                       edit_task_network):
@@ -455,4 +456,4 @@ class TestM17UnknownEditModel:
         edit_task_network(_edit_task(None), "unused")
         row = _run_edit(tmp_path)
         assert row["model_name"] == "Edit"
-        assert core._needs_model_fix(row) == ""
+        assert library_runs_mod._needs_model_fix(row) == ""

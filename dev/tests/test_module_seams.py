@@ -530,6 +530,14 @@ SEAMS = {
         "extract_full_meta", "batch_position", "_with_batch_position", "_resolve_model_preset",
         "_fill_preset_defaults", "resolve_loras", "_merge_full", "known_catalog_rows",
         "carry_local_fields", "_created_at_utc", "build_catalog_row", "cmd_convert_existing"]},
+    "moonglade.library_runs": {"from": "moonglade.backup", "names": [
+        "run_sync_artworks", "run_sync_videos", "_under", "run_faststart_videos",
+        "run_import_local", "_resolved_loras", "_resolved_model_name", "_edit_model_label",
+        "_needs_model_fix", "run_fix_models", "RECONCILE_STAMP", "_NO_PICTURE_STATUSES",
+        "feed_counts", "read_reconcile_stamp", "_stamp_reconcile", "run_reconcile_deleted",
+        "DiskCounts", "_count_backup_images", "run_rebuild_similar", "run_sync_similar",
+        "_one_line", "run_search", "run_catalog_stats", "_META_COVERAGE",
+        "_print_meta_coverage"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -583,7 +591,6 @@ SOURCE_READERS = {
     "tests/test_training_parity.py": ("moonglade.backup",),
     "tests/test_tsubaki3_image_gate.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_unclear_single_sends.py": ("moonglade.backup",),
-    "tests/test_video_tsubaki.py": ("moonglade.backup",),
     "tools/split_names.py": ("moonglade.backup", "moonglade.gallery"),   # the move proof's sweep
     "loom/test/import-batches.test.js": ("moonglade.scan",),
     "loom/test/ledger-known-reasons.test.js": ("moonglade.cards",),
@@ -2375,6 +2382,32 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_training_advanced.py', 'moonglade.full_meta'),
     ('tests/test_training_parity.py', 'moonglade.full_meta'),
     ('tests/test_video_tsubaki.py', 'moonglade.full_meta'),
+    # Split phase 4, library_runs: no reader reads the library runs' text but through
+    # library_runs_mod; test_gen_surface's import-local read takes moonglade/library_runs.py too,
+    # test_artworks_adhoc's retired-hash guard reads library_runs_mod, and test_video_tsubaki's
+    # run_fix_models read goes there, so it leaves SOURCE_READERS.
+    ('tests/test_artworks_adhoc.py', 'moonglade.library_runs'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.library_runs'),
+    ('tests/test_community_surface.py', 'moonglade.library_runs'),
+    ('tests/test_config_path_routing.py', 'moonglade.library_runs'),
+    ('tests/test_create_door.py', 'moonglade.library_runs'),
+    ('tests/test_csrf_coverage.py', 'moonglade.library_runs'),
+    ('tests/test_enhance.py', 'moonglade.library_runs'),
+    ('tests/test_evidence_counters.py', 'moonglade.library_runs'),
+    ('tests/test_full_meta_rest_fallback.py', 'moonglade.library_runs'),
+    ('tests/test_gen_surface.py', 'moonglade.library_runs'),
+    ('tests/test_history_feed_document.py', 'moonglade.library_runs'),
+    ('tests/test_jwt.py', 'moonglade.library_runs'),
+    ('tests/test_living_library.py', 'moonglade.library_runs'),
+    ('tests/test_loom_notify.py', 'moonglade.library_runs'),
+    ('tests/test_pixai_client.py', 'moonglade.library_runs'),
+    ('tests/test_settings_store.py', 'moonglade.library_runs'),
+    ('tests/test_setup_prepare.py', 'moonglade.library_runs'),
+    ('tests/test_spend_no_retry.py', 'moonglade.library_runs'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.library_runs'),
+    ('tests/test_telemetry.py', 'moonglade.library_runs'),
+    ('tests/test_training_advanced.py', 'moonglade.library_runs'),
+    ('tests/test_training_parity.py', 'moonglade.library_runs'),
 }
 
 

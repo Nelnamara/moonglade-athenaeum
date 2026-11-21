@@ -10,6 +10,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import telemetry as telemetry_mod
+from moonglade import library_runs as library_runs_mod
 
 
 def _patch_chain(monkeypatch, calls, *, reconcile_exc=None):
@@ -17,7 +18,7 @@ def _patch_chain(monkeypatch, calls, *, reconcile_exc=None):
     the wiring/order, not the real download/network."""
     monkeypatch.setattr(core, "run_download",
                         lambda args, progress=None: calls.append("download"))
-    monkeypatch.setattr(core, "run_fix_models",
+    monkeypatch.setattr(library_runs_mod, "run_fix_models",
                         lambda args: calls.append("fix_models"))
     monkeypatch.setattr(core, "run_backfill_full_meta",
                         lambda args: calls.append("backfill"))
@@ -36,7 +37,7 @@ def _patch_chain(monkeypatch, calls, *, reconcile_exc=None):
         calls.append("reconcile")
         if reconcile_exc is not None:
             raise reconcile_exc
-    monkeypatch.setattr(core, "run_reconcile_deleted", _recon)
+    monkeypatch.setattr(library_runs_mod, "run_reconcile_deleted", _recon)
 
 
 def test_sync_runs_full_chain_in_order(monkeypatch, tmp_path):
@@ -62,11 +63,11 @@ def test_sync_sets_update_and_full_meta(monkeypatch, tmp_path):
     seen = {}
     monkeypatch.setattr(core, "run_download", lambda args, progress=None:
                         seen.update(update=args.update, full_meta=args.full_meta))
-    monkeypatch.setattr(core, "run_fix_models", lambda args: None)
+    monkeypatch.setattr(library_runs_mod, "run_fix_models", lambda args: None)
     monkeypatch.setattr(core, "run_backfill_full_meta", lambda args: None)
     monkeypatch.setattr(core, "load_catalog", lambda db: [])
     monkeypatch.setattr(core, "build_thumbnails", lambda *a, **k: None)
-    monkeypatch.setattr(core, "run_reconcile_deleted", lambda args: None)
+    monkeypatch.setattr(library_runs_mod, "run_reconcile_deleted", lambda args: None)
     monkeypatch.setattr(sys, "argv", ["prog", "--sync", "--out", str(tmp_path)])
     core.main()
     assert seen == {"update": True, "full_meta": True}

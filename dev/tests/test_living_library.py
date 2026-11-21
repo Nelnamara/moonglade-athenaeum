@@ -42,6 +42,7 @@ from moonglade import routes_community as routes_community_mod
 from moonglade import catalog as catalog_mod
 from moonglade import catalog_verbs as catalog_verbs_mod
 from moonglade import thumbs as thumbs_mod
+from moonglade import library_runs as library_runs_mod
 
 SRC = Path(__file__).resolve().parents[2]
 DAY = 86400.0
@@ -1235,7 +1236,7 @@ def test_the_full_sync_cannot_revert_a_write_that_lands_while_it_is_running(
     monkeypatch.setattr(core, "load_catalog", _load_then_write)
     monkeypatch.setattr(core, "save_catalog", _record_save)
 
-    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    res = library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
 
     last = writer["n"]
     assert last >= 1, "writer A never ran -- this test would pass vacuously"
@@ -1250,7 +1251,7 @@ def test_the_full_sync_cannot_revert_a_write_that_lands_while_it_is_running(
     assert rows["m1"]["artwork_id"] == "aw1" and rows["m1"]["liked_count"] == "3"
     # THE ROUND TRIP ITSELF IS GONE -- no whole-table read, no whole-table save
     assert saved == [], "run_sync_artworks still upserts the whole catalog"
-    src = inspect.getsource(core.run_sync_artworks)
+    src = inspect.getsource(library_runs_mod.run_sync_artworks)
     assert "save_catalog(" not in src and "load_catalog(" not in src
     assert "apply_artwork_meta(" in src
 
@@ -1268,7 +1269,7 @@ def test_the_full_sync_still_tags_an_animation_through_its_video_media_id(
     monkeypatch.setattr(core, "artwork_list_gql", lambda *a, **k: {
         "edges": [{"node": _node("poster1", "aw9", video_mid="vid1")}],
         "pageInfo": {"hasPreviousPage": False}})
-    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    res = library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
     rows = {r["media_id"]: r for r in load_catalog(db)}
     assert res["matched"] == 2
     assert rows["vid1"]["artwork_id"] == "aw9" and rows["vid1"]["is_video"] == "1"

@@ -33,6 +33,7 @@ from moonglade.catalog import CATALOG_FIELDS, load_catalog, save_catalog
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import living as living_mod
 from moonglade import catalog_verbs as catalog_verbs_mod
+from moonglade import library_runs as library_runs_mod
 
 
 def _row(**kw):
@@ -131,7 +132,7 @@ def test_sync_artworks_writes_views_and_keeps_the_previous_reading(tmp_path, moc
     mocker.patch.object(core, "artwork_views_bulk", return_value=({"aw1": 400}, True))
     args = SimpleNamespace(out=str(tmp_path), token=None, delay=0)
 
-    res = core.run_sync_artworks(args)
+    res = library_runs_mod.run_sync_artworks(args)
     assert res["views"] == 1 and res["views_complete"] is True
     row = {r["media_id"]: r for r in load_catalog(db)}["m1"]
     assert row["views"] == "400" and row["views_prev"] == ""       # nothing came before
@@ -139,7 +140,7 @@ def test_sync_artworks_writes_views_and_keeps_the_previous_reading(tmp_path, moc
     assert first_at                                                # stamped
 
     core.artwork_views_bulk.return_value = ({"aw1": 465}, True)
-    core.run_sync_artworks(args)
+    library_runs_mod.run_sync_artworks(args)
     row = {r["media_id"]: r for r in load_catalog(db)}["m1"]
     assert row["views"] == "465"
     assert row["views_prev"] == "400" and row["views_prev_at"] == first_at
@@ -158,7 +159,7 @@ def test_no_views_skips_the_sweep_entirely(tmp_path, mocker, pixai):
         "pageInfo": {"hasPreviousPage": False}})
     swept = mocker.patch.object(core, "artwork_views_bulk")
 
-    res = core.run_sync_artworks(SimpleNamespace(
+    res = library_runs_mod.run_sync_artworks(SimpleNamespace(
         out=str(tmp_path), token=None, delay=0, no_views=True))
 
     swept.assert_not_called()
@@ -179,7 +180,7 @@ def test_a_failed_sweep_does_not_fail_the_whole_sync(tmp_path, mocker, pixai):
         "pageInfo": {"hasPreviousPage": False}})
     mocker.patch.object(core, "artwork_views_bulk", return_value=({}, False))
 
-    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    res = library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
 
     assert res["matched"] == 1
     assert res["fail"] == 0                      # the sync itself succeeded
@@ -203,7 +204,7 @@ def test_views_only_reads_the_counts_without_re_walking_the_listing(tmp_path, mo
         side_effect=AssertionError("the listing must not be walked in views-only mode"))
     mocker.patch.object(core, "artwork_views_bulk", return_value=({"aw1": 400}, True))
 
-    res = core.run_sync_artworks(SimpleNamespace(
+    res = library_runs_mod.run_sync_artworks(SimpleNamespace(
         out=str(tmp_path), token=None, delay=0, views_only=True))
 
     listing.assert_not_called()
@@ -223,7 +224,7 @@ def test_views_only_beats_no_views_rather_than_doing_nothing(tmp_path, mocker, p
         side_effect=AssertionError("the listing must not be walked in views-only mode"))
     swept = mocker.patch.object(core, "artwork_views_bulk",
                                 return_value=({"aw1": 400}, True))
-    core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
+    library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
                                            views_only=True, no_views=True))
     swept.assert_called_once()
 
@@ -247,13 +248,13 @@ def test_read_only_refuses_the_view_read_and_says_so(tmp_path, mocker, pixai, ca
         "pageInfo": {"hasPreviousPage": False}})
     swept = mocker.patch.object(core, "artwork_views_bulk")
 
-    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    res = library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
 
     swept.assert_not_called()
     assert res["matched"] == 1 and res["views"] == 0
     assert "READ_ONLY" in capsys.readouterr().out
     # the narrow view-counts job is refused the same way, not quietly excused
-    core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
+    library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
                                            views_only=True))
     swept.assert_not_called()
 

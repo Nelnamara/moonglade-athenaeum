@@ -24,6 +24,7 @@ from moonglade import organize as organize_mod
 from moonglade import health as health_mod
 from moonglade import catalog as catalog_mod
 from moonglade import catalog_verbs as catalog_verbs_mod
+from moonglade import library_runs as library_runs_mod
 
 # moonglade.similar imports numpy and pixeltable at module level, and CI installs a curated list
 # without them (it ignores dev/tests/test_similar.py for the same reason), so only the test that
@@ -87,7 +88,7 @@ def test_the_audit_and_dedup_never_see_it(library):
 
 
 def test_the_disk_count_never_counts_it(library):
-    n, b, thumbs = core._count_backup_images(library)
+    n, b, thumbs = library_runs_mod._count_backup_images(library)
     assert (n, b, thumbs) == (1, len(b"PNG-REAL"), 0)
 
 

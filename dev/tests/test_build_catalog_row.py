@@ -41,6 +41,7 @@ from moonglade import thumbs as thumbs_mod
 from moonglade import history as history_mod
 from moonglade import media_fetch as media_fetch_mod
 from moonglade import full_meta as full_meta_mod
+from moonglade import library_runs as library_runs_mod
 
 
 # --------------------------------------------------------------------------------------
@@ -275,8 +276,8 @@ def _stub_image_task(monkeypatch, out, mid="m-golden", seed="424242"):
     monkeypatch.setattr(gen_cli_mod, "_task_image_media", lambda outputs: [(mid, seed)])
     monkeypatch.setattr(full_meta_mod, "extract_full_meta", lambda r: dict(FM))
     monkeypatch.setattr(full_meta_mod, "_fill_preset_defaults", lambda s, fm, r: None)
-    monkeypatch.setattr(core, "_resolved_model_name", lambda s, fm, m: MODEL_NAME)
-    monkeypatch.setattr(core, "_resolved_loras", lambda s, r: LORAS)
+    monkeypatch.setattr(library_runs_mod, "_resolved_model_name", lambda s, fm, m: MODEL_NAME)
+    monkeypatch.setattr(library_runs_mod, "_resolved_loras", lambda s, r: LORAS)
     monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
     return path
 
@@ -395,8 +396,8 @@ def _stub_generate(monkeypatch, out):
     monkeypatch.setattr(full_meta_mod, "video_outputs", lambda r: ([], {}))
     monkeypatch.setattr(full_meta_mod, "extract_full_meta", lambda r: dict(FM))
     monkeypatch.setattr(full_meta_mod, "_fill_preset_defaults", lambda s, fm, r: None)
-    monkeypatch.setattr(core, "_resolved_model_name", lambda s, fm, m: MODEL_NAME)
-    monkeypatch.setattr(core, "_resolved_loras", lambda s, r: LORAS)
+    monkeypatch.setattr(library_runs_mod, "_resolved_model_name", lambda s, fm, m: MODEL_NAME)
+    monkeypatch.setattr(library_runs_mod, "_resolved_loras", lambda s, r: LORAS)
     monkeypatch.setattr(media_fetch_mod, "resolve_media", lambda s, m: ("https://x/i.png", dict(INFO)))
     monkeypatch.setattr(media_fetch_mod, "download", lambda s, url, stem: ("skip", path))
     monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
@@ -453,7 +454,7 @@ def _stub_edit(monkeypatch, out):
     monkeypatch.setattr(gen_cli_mod, "_task_image_media", lambda outputs: [("m-golden", "424242")])
     monkeypatch.setattr(full_meta_mod, "extract_full_meta", lambda r: dict(FM))
     monkeypatch.setattr(full_meta_mod, "_fill_preset_defaults", lambda s, fm, r: None)
-    monkeypatch.setattr(core, "_edit_model_label", lambda s, fm, m: EDIT_MODEL_NAME)
+    monkeypatch.setattr(library_runs_mod, "_edit_model_label", lambda s, fm, m: EDIT_MODEL_NAME)
     monkeypatch.setattr(media_fetch_mod, "resolve_media", lambda s, m: ("https://x/i.png", dict(INFO)))
     monkeypatch.setattr(media_fetch_mod, "download", lambda s, url, stem: ("skip", path))
     monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
@@ -527,7 +528,7 @@ def test_sync_videos_row_is_identical_to_the_old_builder(tmp_path, monkeypatch):
                  [dict({f: "" for f in CATALOG_FIELDS}, media_id="seed-x")])
     args = _Args()
     args.out = str(tmp_path)
-    core.run_sync_videos(args)
+    library_runs_mod.run_sync_videos(args)
     _same(_row(tmp_path / "catalog.db", "v-golden"),
           _old_sync_videos(SV_NODE, VOUT, path, tmp_path, VSHARED, VDETAIL,
                            RESULT["parameters"], task, FM))
@@ -538,7 +539,7 @@ def test_sync_videos_carries_local_fields(tmp_path, monkeypatch):
     _stub_sync_videos(monkeypatch, tmp_path)
     args = _Args()
     args.out = str(tmp_path)
-    core.run_sync_videos(args)
+    library_runs_mod.run_sync_videos(args)
     row = _row(tmp_path / "catalog.db", "v-golden")
     assert {f: row[f] for f in LOCAL} == LOCAL
 
@@ -562,7 +563,7 @@ def test_import_local_row_is_identical_to_the_old_builder(tmp_path, monkeypatch)
     Image.new("RGB", (8, 8), (90, 70, 160)).save(src / "my_ref.png")
     monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
 
-    core.run_import_local(_import_args(tmp_path, src))
+    library_runs_mod.run_import_local(_import_args(tmp_path, src))
 
     rows = [r for r in load_catalog(tmp_path / "catalog.db") if r.get("source") == "local"]
     assert len(rows) == 1

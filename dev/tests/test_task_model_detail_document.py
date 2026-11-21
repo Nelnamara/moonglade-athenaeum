@@ -56,6 +56,7 @@ from moonglade import thumbs as thumbs_mod
 from moonglade import history as history_mod
 from moonglade import media_fetch as media_fetch_mod
 from moonglade import full_meta as full_meta_mod
+from moonglade import library_runs as library_runs_mod
 
 REPO = Path(__file__).resolve().parents[2]
 RECORDED = json.loads((Path(__file__).resolve().parent / "fixtures" /
@@ -431,7 +432,7 @@ def test_the_video_sync_reads_its_task_through_the_document(pixai, tmp_path, mon
     monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
     monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
 
-    res = core.run_sync_videos(SimpleNamespace(out=str(tmp_path), token=None, page_size=250,
+    res = library_runs_mod.run_sync_videos(SimpleNamespace(out=str(tmp_path), token=None, page_size=250,
                                                workers=1, delay=0))
     assert res["i2v_tasks"] == 1
     assert [c.variables for c in pixai.calls_for(TASK_DETAIL)] == [{"id": doc["id"]}]
@@ -582,7 +583,7 @@ def test_relabel_removed_acts_on_a_removed_model_and_not_on_a_failed_lookup(
             raise _refusal("Not authenticated", "UNAUTHENTICATED")
         return {"generationModelVersion": None}
     pixai.on(MODEL_VERSION, answer)
-    res = core.run_fix_models(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
+    res = library_runs_mod.run_fix_models(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
                                               relabel_removed=True))
     rows = {r["media_id"]: r for r in load_catalog(db)}
     assert rows["m1"]["model_name"] == "Unknown or removed model"

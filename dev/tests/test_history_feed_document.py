@@ -43,6 +43,7 @@ from tests.fake_pixai import operation_name
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import history as history_mod
 from moonglade import media_fetch as media_fetch_mod
+from moonglade import library_runs as library_runs_mod
 
 REPO = Path(__file__).resolve().parents[2]
 FEED = operation_name(history_mod._HISTORY_PAGE_DOC)       # what the fake keys the document by
@@ -359,7 +360,7 @@ def test_the_video_sync_reads_through_the_document(pixai, tmp_path, monkeypatch,
     h = _history(pixai, [[_node("T1"), _node("T2")],
                          [_node("V1", i2vProModel="v4.0.1")]])
     monkeypatch.setattr(core, "_parallel_map", lambda *a, **k: iter(()))   # no downloads
-    res = core.run_sync_videos(SimpleNamespace(out=str(tmp_path), token=None, page_size=250,
+    res = library_runs_mod.run_sync_videos(SimpleNamespace(out=str(tmp_path), token=None, page_size=250,
                                                workers=1, delay=0))
     assert res == {"i2v_tasks": 1, "videos": 0}
     assert "Found 1 image-to-video task(s) across 3 generations." in capsys.readouterr().out
@@ -374,13 +375,13 @@ def test_the_deleted_reconcile_reads_through_the_document(pixai, tmp_path):
         {"media_id": "c", "task_id": "LIVE2", "filename": "c.png", "created_at": old}])
     h = _history(pixai, [[_node("LIVE1"), _node("FAILED", status="failed", mediaId=None)],
                          [_node("LIVE2"), _node("NEW")]])
-    res = core.run_reconcile_deleted(SimpleNamespace(out=str(tmp_path), token=None,
+    res = library_runs_mod.run_reconcile_deleted(SimpleNamespace(out=str(tmp_path), token=None,
                                                      page_size=250))
     # the walk also counts what the Backed up pill needs (feed_counts): one failed task with no
     # picture, one finished task not here yet
     assert res == {"live": 4, "flagged": 1, "cleared": 0, "no_picture": 1, "in_progress": 0,
                    "missing": 1}
-    stamp = core.read_reconcile_stamp(tmp_path)
+    stamp = library_runs_mod.read_reconcile_stamp(tmp_path)
     assert (stamp["no_picture"], stamp["missing"], stamp["live"]) == (1, 1, 4)
     assert {r["media_id"]: r["deleted_remote"] for r in load_catalog(db)} == {
         "a": "", "b": "1", "c": ""}
@@ -402,7 +403,7 @@ def test_a_reconcile_walk_that_ends_early_flags_nothing(pixai, tmp_path, second)
         for m, t in (("a", "LIVE1"), ("b", "LIVE2"), ("c", "LIVE3"))])
     _history(pixai, [], script=[_answer([_node("LIVE1")], True, "c1"), second])
     with pytest.raises(core.PixAIError):
-        core.run_reconcile_deleted(SimpleNamespace(out=str(tmp_path), token=None,
+        library_runs_mod.run_reconcile_deleted(SimpleNamespace(out=str(tmp_path), token=None,
                                                    page_size=250))
     assert {r["media_id"]: r["deleted_remote"] for r in load_catalog(db)} == {
         "a": "", "b": "", "c": ""}
@@ -414,7 +415,7 @@ def test_an_empty_page_while_older_ones_exist_says_the_feed_ended_early(pixai, t
     _history(pixai, [], script=[_answer([_node("LIVE1")], True, "c1"),
                                 _answer([], has_prev=True, cursor="c2")])
     with pytest.raises(core.PixAIError, match="ended early -- nothing was flagged"):
-        core.run_reconcile_deleted(SimpleNamespace(out=str(tmp_path), token=None,
+        library_runs_mod.run_reconcile_deleted(SimpleNamespace(out=str(tmp_path), token=None,
                                                    page_size=250))
 
 

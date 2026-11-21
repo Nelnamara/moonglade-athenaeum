@@ -39,6 +39,7 @@ from moonglade import models as models_mod
 from moonglade import thumbs as thumbs_mod
 from moonglade import media_fetch as media_fetch_mod
 from moonglade import full_meta as full_meta_mod
+from moonglade import library_runs as library_runs_mod
 
 
 @pytest.fixture()
@@ -240,7 +241,7 @@ class TestM04Faststart:
         monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "ffmpeg")
         _ffmpeg_refuses(monkeypatch)                                      # ffmpeg refuses it
 
-        res = core.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
+        res = library_runs_mod.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
 
         assert res["failed"] == 1
         assert res["fixed"] + res["skipped"] + res["failed"] == res["total"] == 2
@@ -272,7 +273,7 @@ class TestM04Faststart:
             return asked["n"] > 1          # the mirror won the race after the first check
         monkeypatch.setattr(media_tools_mod, "_mp4_is_faststart", racing)
 
-        res = core.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
+        res = library_runs_mod.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
 
         assert asked["n"] == 1, (
             "the sweep asked 'is it faststart?' {} times -- two askers can disagree, and the "
@@ -301,7 +302,7 @@ class TestM04Faststart:
             return False
         monkeypatch.setattr(media_tools_mod, "_mp4_is_faststart", purge_then_answer)
 
-        res = core.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
+        res = library_runs_mod.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
 
         assert res["failed"] == 0 and res["skipped"] == 1
         assert "still not iOS-playable" not in capsys.readouterr().out
@@ -437,7 +438,7 @@ class TestM18ModelLookupFailure:
         session.post.side_effect = requests.RequestException("503 from the API")
         mocker.patch.object(core, "_make_session", return_value=session)
 
-        res = core.run_fix_models(SimpleNamespace(
+        res = library_runs_mod.run_fix_models(SimpleNamespace(
             out=str(tmp_path), token=None, delay=0, relabel_removed=True))
 
         rows = {r["media_id"]: r for r in load_catalog(db)}
@@ -446,7 +447,7 @@ class TestM18ModelLookupFailure:
         assert res["relabeled"] == 0
         assert res["lookup_failed"] == 1
         # and the rows are still queued for the next run, i.e. the damage is repairable
-        assert core._needs_model_fix(rows["m1"]) == vid
+        assert library_runs_mod._needs_model_fix(rows["m1"]) == vid
 
     @pytest.mark.parametrize("payload,status,what", [
         ({"errors": [{"message": "PersistedQueryNotFound"}]}, 200,
@@ -477,14 +478,14 @@ class TestM18ModelLookupFailure:
         session.post.return_value = _reply(mocker, payload, status)
         mocker.patch.object(core, "_make_session", return_value=session)
 
-        res = core.run_fix_models(SimpleNamespace(
+        res = library_runs_mod.run_fix_models(SimpleNamespace(
             out=str(tmp_path), token=None, delay=0, relabel_removed=True))
 
         from moonglade.catalog import load_catalog
         row = load_catalog(db)[0]
         assert row["model_name"] == vid, what
         assert res["relabeled"] == 0 and res["lookup_failed"] == 1
-        assert core._needs_model_fix(row) == vid        # still repairable by a re-run
+        assert library_runs_mod._needs_model_fix(row) == vid        # still repairable by a re-run
         assert _model_cache().get(vid) is models_mod._MODEL_LOOKUP_FAILED
 
     def test_a_200_with_errors_is_not_laundered_through_the_cache_into_sync(
@@ -519,7 +520,7 @@ class TestM18ModelLookupFailure:
         session.post.return_value = _reply(mocker, {"data": {"generationModelVersion": None}})
         mocker.patch.object(core, "_make_session", return_value=session)
 
-        res = core.run_fix_models(SimpleNamespace(
+        res = library_runs_mod.run_fix_models(SimpleNamespace(
             out=str(tmp_path), token=None, delay=0, relabel_removed=True))
 
         rows = {r["media_id"]: r for r in load_catalog(db)}

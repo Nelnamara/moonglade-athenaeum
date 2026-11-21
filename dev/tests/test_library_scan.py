@@ -27,6 +27,7 @@ from moonglade import scan as scan_mod
 from moonglade import organize as organize_mod
 from moonglade import catalog as catalog_mod
 from moonglade import catalog_verbs as catalog_verbs_mod
+from moonglade import library_runs as library_runs_mod
 
 
 # ---------------------------------------------------------------------------
@@ -381,9 +382,9 @@ def test_callers_ride_the_scan(library):
         _ALL_IMAGES - _QUARANTINED
 
     # the disk counter splits the quarantine trees out instead of dropping them
-    originals, _bytes, thumbs = core._count_backup_images(library)
+    originals, _bytes, thumbs = library_runs_mod._count_backup_images(library)
     assert thumbs == 1                                  # gallery/thumbs/100.jpg
-    assert core._count_backup_images(library).trashed == 1   # _deleted/purged_300.png
+    assert library_runs_mod._count_backup_images(library).trashed == 1   # _deleted/purged_300.png
     # originals = every image except the three quarantined ones
     assert originals == len(_ALL_IMAGES - _QUARANTINED)
 

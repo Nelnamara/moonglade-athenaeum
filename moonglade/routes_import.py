@@ -18,6 +18,7 @@ from flask import jsonify, request
 from moonglade import gen_params as _gen_params
 from moonglade import scan as _scan
 from moonglade import telemetry as _telemetry
+from moonglade import library_runs as _library_runs
 
 
 def register(app, ctx):
@@ -227,7 +228,7 @@ def register(app, ctx):
                 saved += 1
             if not saved:
                 return jsonify({"error": "no usable files"}), 400
-            res = core.run_import_local(SimpleNamespace(out=str(out_dir), import_local=tmp))
+            res = _library_runs.run_import_local(SimpleNamespace(out=str(out_dir), import_local=tmp))
             mids = res.get("media_ids") or []
             if collection and mids:
                 add_to_collection(db_path, mids, collection)
