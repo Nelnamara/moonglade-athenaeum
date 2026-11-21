@@ -36,6 +36,7 @@ from moonglade import task_reads as _task_reads
 from moonglade import telemetry as _telemetry
 from moonglade import updater as _updater
 from moonglade import history as _history
+from moonglade import media_fetch as _media_fetch
 
 
 def register(app, ctx):
@@ -1389,7 +1390,7 @@ def register(app, ctx):
         try:
             session = core._make_session(None)
             # The feed's one road (core.gql: the full document, #89), as every other reader.
-            data = _history.gql(session, core.page_variables(
+            data = _history.gql(session, _media_fetch.page_variables(
                 WATCH_CATCHUP_TASKS, _pixai_client._client_of(session).user_id))
             conn = _history.find_connection(data)
             edges = (conn or {}).get("edges") or []

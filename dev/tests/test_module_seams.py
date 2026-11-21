@@ -519,6 +519,10 @@ SEAMS = {
         "fix_marker", "build_fix_stem_name", "already_downloaded", "already_downloaded_video",
         "_file_sha", "_same_bytes", "_same_pixels", "media_ids_for", "cataloged_media_ids",
         "_is_video_task_node", "extract_meta"]},
+    "moonglade.media_fetch": {"from": "moonglade.backup", "names": [
+        "URL_VARIANT_PREFERENCE", "_MEDIA_TLS_LOCK", "_media_tls_warned", "_CONSOLE_LOCK",
+        "_console_block", "_warn_media_tls_once", "resolve_media", "ext_from_ct",
+        "embed_metadata", "convert_image", "download", "page_variables"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -553,7 +557,7 @@ SOURCE_READERS = {
     "tests/test_loom_p_routes.py": ("moonglade.gallery",),
     "tests/test_media_tools.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_move_edges.py": ("moonglade.gallery",),
-    "tests/test_network.py": ("moonglade.backup", "moonglade.gallery"),
+    "tests/test_network.py": ("moonglade.gallery",),   # its page_variables read: media_fetch
     "tests/test_outside_notice.py": ("moonglade.gallery",),
     "tests/test_pack_file_name.py": ("moonglade.gallery",),
     "tests/test_pack_file_type.py": ("moonglade.gallery",),
@@ -2315,6 +2319,30 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_telemetry.py', 'moonglade.history'),
     ('tests/test_training_advanced.py', 'moonglade.history'),
     ('tests/test_training_parity.py', 'moonglade.history'),
+    # Split phase 4, media_fetch: no reader reads the media fetch's text but through
+    # media_fetch_mod; test_network's page_variables read goes there, so it no longer reads backup.
+    ('tests/test_artworks_adhoc.py', 'moonglade.media_fetch'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.media_fetch'),
+    ('tests/test_config_path_routing.py', 'moonglade.media_fetch'),
+    ('tests/test_create_door.py', 'moonglade.media_fetch'),
+    ('tests/test_csrf_coverage.py', 'moonglade.media_fetch'),
+    ('tests/test_enhance.py', 'moonglade.media_fetch'),
+    ('tests/test_evidence_counters.py', 'moonglade.media_fetch'),
+    ('tests/test_full_meta_rest_fallback.py', 'moonglade.media_fetch'),
+    ('tests/test_gen_surface.py', 'moonglade.media_fetch'),
+    ('tests/test_history_feed_document.py', 'moonglade.media_fetch'),
+    ('tests/test_jwt.py', 'moonglade.media_fetch'),
+    ('tests/test_living_library.py', 'moonglade.media_fetch'),
+    ('tests/test_loom_notify.py', 'moonglade.media_fetch'),
+    ('tests/test_pixai_client.py', 'moonglade.media_fetch'),
+    ('tests/test_settings_store.py', 'moonglade.media_fetch'),
+    ('tests/test_setup_prepare.py', 'moonglade.media_fetch'),
+    ('tests/test_spend_no_retry.py', 'moonglade.media_fetch'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.media_fetch'),
+    ('tests/test_telemetry.py', 'moonglade.media_fetch'),
+    ('tests/test_training_advanced.py', 'moonglade.media_fetch'),
+    ('tests/test_training_parity.py', 'moonglade.media_fetch'),
+    ('tests/test_video_tsubaki.py', 'moonglade.media_fetch'),
 }
 
 

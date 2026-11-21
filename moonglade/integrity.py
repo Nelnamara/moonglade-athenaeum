@@ -66,6 +66,7 @@ from moonglade import scan as _scan
 from moonglade import catalog as _catalog
 from moonglade import catalog_verbs as _catalog_verbs
 from moonglade import thumbs as _thumbs
+from moonglade import media_fetch as _media_fetch
 
 REPORT_CSV = "integrity_report.csv"
 REPORT_JSON = "integrity_report.json"
@@ -896,7 +897,7 @@ def _full_size_url(core, session, row, mid):
     if str(row.get("is_video") or "") == "1":
         url = (core.media_file_gql(session, mid) or {}).get("fileUrl")
         return (url, "") if url else (None, "no_file")
-    url, info = core.resolve_media(session, mid)
+    url, info = _media_fetch.resolve_media(session, mid)
     if not url:
         return None, "no_file"
     if (info or {}).get("variant") not in FULL_SIZE_VARIANTS:
@@ -1018,7 +1019,7 @@ def redownload_one(out_dir, db_path, media_id, session_factory=None, index=None,
         import uuid
         stem = stage / "{}-{}".format(mid if _safe_id(mid) else "media", uuid.uuid4().hex[:10])
         # (the finally below removes everything this stem left in the staging folder)
-        status, got = core.download(session, url, stem, retries=0, progress=on_bytes)
+        status, got = _media_fetch.download(session, url, stem, retries=0, progress=on_bytes)
         if status != "ok" or not got:
             return _result(mid, "redownload", ok=False, refused="no_file")
         if not verified_whole(got):

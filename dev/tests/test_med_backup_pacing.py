@@ -34,6 +34,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import web_accounts as web_accounts_mod
 from moonglade import history as history_mod
+from moonglade import media_fetch as media_fetch_mod
 
 
 def _dl_args(out, **kw):
@@ -79,8 +80,8 @@ def _patch_download_layer(mocker, on_resolve=None, on_download=None):
         dest.write_bytes(b"img")
         return ("ok", dest)
 
-    mocker.patch.object(core, "resolve_media", side_effect=fake_resolve)
-    mocker.patch.object(core, "download", side_effect=fake_download)
+    mocker.patch.object(media_fetch_mod, "resolve_media", side_effect=fake_resolve)
+    mocker.patch.object(media_fetch_mod, "download", side_effect=fake_download)
 
 
 class TestM07ParallelDownloadHonoursDelay:

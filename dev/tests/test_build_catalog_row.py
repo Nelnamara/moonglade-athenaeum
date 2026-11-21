@@ -39,6 +39,7 @@ from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import thumbs as thumbs_mod
 from moonglade import history as history_mod
+from moonglade import media_fetch as media_fetch_mod
 
 
 # --------------------------------------------------------------------------------------
@@ -268,8 +269,8 @@ def _same(got, want):
 # --------------------------------------------------------------------------------------
 def _stub_image_task(monkeypatch, out, mid="m-golden", seed="424242"):
     path = _stub_file(out, "old.png", "images")
-    monkeypatch.setattr(core, "download", lambda s, url, stem: ("skip", path))
-    monkeypatch.setattr(core, "resolve_media", lambda s, m: ("https://x/i.png", dict(INFO)))
+    monkeypatch.setattr(media_fetch_mod, "download", lambda s, url, stem: ("skip", path))
+    monkeypatch.setattr(media_fetch_mod, "resolve_media", lambda s, m: ("https://x/i.png", dict(INFO)))
     monkeypatch.setattr(gen_cli_mod, "_task_image_media", lambda outputs: [(mid, seed)])
     monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(FM))
     monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, r: None)
@@ -314,11 +315,11 @@ def _stub_video_task(monkeypatch, out):
     path = _stub_file(out, "old.mp4", "videos")
     result = dict(RESULT)
     result["outputs"] = {"detailParameters": dict(VDETAIL)}
-    monkeypatch.setattr(core, "download", lambda s, url, stem: ("skip", path))
+    monkeypatch.setattr(media_fetch_mod, "download", lambda s, url, stem: ("skip", path))
     monkeypatch.setattr(core, "video_outputs", lambda r: ([dict(VOUT)], dict(VSHARED)))
     monkeypatch.setattr(core, "media_file_gql", lambda s, m: {"fileUrl": "https://x/v.mp4"})
     monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(FM))
-    monkeypatch.setattr(core, "resolve_media", lambda s, m: ("", {}))
+    monkeypatch.setattr(media_fetch_mod, "resolve_media", lambda s, m: ("", {}))
     monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
     monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
     monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
@@ -395,8 +396,8 @@ def _stub_generate(monkeypatch, out):
     monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, r: None)
     monkeypatch.setattr(core, "_resolved_model_name", lambda s, fm, m: MODEL_NAME)
     monkeypatch.setattr(core, "_resolved_loras", lambda s, r: LORAS)
-    monkeypatch.setattr(core, "resolve_media", lambda s, m: ("https://x/i.png", dict(INFO)))
-    monkeypatch.setattr(core, "download", lambda s, url, stem: ("skip", path))
+    monkeypatch.setattr(media_fetch_mod, "resolve_media", lambda s, m: ("https://x/i.png", dict(INFO)))
+    monkeypatch.setattr(media_fetch_mod, "download", lambda s, url, stem: ("skip", path))
     monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
     return path
 
@@ -452,8 +453,8 @@ def _stub_edit(monkeypatch, out):
     monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(FM))
     monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, r: None)
     monkeypatch.setattr(core, "_edit_model_label", lambda s, fm, m: EDIT_MODEL_NAME)
-    monkeypatch.setattr(core, "resolve_media", lambda s, m: ("https://x/i.png", dict(INFO)))
-    monkeypatch.setattr(core, "download", lambda s, url, stem: ("skip", path))
+    monkeypatch.setattr(media_fetch_mod, "resolve_media", lambda s, m: ("https://x/i.png", dict(INFO)))
+    monkeypatch.setattr(media_fetch_mod, "download", lambda s, url, stem: ("skip", path))
     monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
     return path
 
@@ -509,8 +510,8 @@ def _stub_sync_videos(monkeypatch, out):
     monkeypatch.setattr(core, "video_outputs", lambda r: ([dict(VOUT)], dict(VSHARED)))
     monkeypatch.setattr(core, "media_file_gql", lambda s, m: {"fileUrl": "https://x/v.mp4"})
     monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(FM))
-    monkeypatch.setattr(core, "download", lambda s, url, stem: ("ok", path))
-    monkeypatch.setattr(core, "resolve_media", lambda s, m: ("", {}))
+    monkeypatch.setattr(media_fetch_mod, "download", lambda s, url, stem: ("ok", path))
+    monkeypatch.setattr(media_fetch_mod, "resolve_media", lambda s, m: ("", {}))
     monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
     monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
     monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)

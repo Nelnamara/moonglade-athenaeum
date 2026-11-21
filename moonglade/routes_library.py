@@ -30,6 +30,7 @@ from moonglade import scan as _scan
 from moonglade import series as _series
 from moonglade import task_reads as _task_reads
 from moonglade import telemetry as _telemetry
+from moonglade import media_fetch as _media_fetch
 
 
 def register(app, ctx):
@@ -508,12 +509,12 @@ def register(app, ctx):
                         try:
                             shutil.copy2(p, work)
                             if fmt != "original":
-                                work, note = core.convert_image(work, fmt, keep_original=False)
+                                work, note = _media_fetch.convert_image(work, fmt, keep_original=False)
                                 if note not in ("ok", "already"):
                                     warnings.append("{}: convert to {} -> {} (shipped as-is)"
                                                      .format(p.name, fmt, note))
                             if embed:
-                                enote = core.embed_metadata(work, {
+                                enote = _media_fetch.embed_metadata(work, {
                                     "prompt": row.get("prompt_full") or row.get("prompt") or "",
                                     "media_id": mid, "task_id": row.get("task_id") or "",
                                     "model": row.get("model_name") or row.get("model_id") or "",

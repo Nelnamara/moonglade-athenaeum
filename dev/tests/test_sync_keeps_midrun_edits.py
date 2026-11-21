@@ -21,6 +21,7 @@ from moonglade.catalog import (CATALOG_FIELDS, catalog, delete_from_catalog, loa
                                update_prompt_full, update_rating)
 from moonglade import task_reads as task_reads_mod
 from moonglade import history as history_mod
+from moonglade import media_fetch as media_fetch_mod
 
 
 def _row(**kw):
@@ -92,13 +93,13 @@ def test_a_page_save_keeps_edits_made_during_the_sync(tmp_path, monkeypatch, wor
 
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: SimpleNamespace())
     monkeypatch.setattr(core, "_quick_count", lambda *a, **k: 0)
-    monkeypatch.setattr(core, "page_variables", lambda *a, **k: {})
+    monkeypatch.setattr(media_fetch_mod, "page_variables", lambda *a, **k: {})
     monkeypatch.setattr(core._pixai_client, "_client_of",
                         lambda s: SimpleNamespace(user_id="u1"))
     monkeypatch.setattr(history_mod, "gql", fake_gql)
-    monkeypatch.setattr(core, "resolve_media",
+    monkeypatch.setattr(media_fetch_mod, "resolve_media",
                         lambda s, mid: ("http://x/" + mid, {"width": "8", "height": "8"}))
-    monkeypatch.setattr(core, "download", fake_download)
+    monkeypatch.setattr(media_fetch_mod, "download", fake_download)
 
     core.run_download(_dl_args(tmp_path, workers))
 

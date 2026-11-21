@@ -37,6 +37,7 @@ from moonglade import telemetry as telemetry_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import models as models_mod
 from moonglade import thumbs as thumbs_mod
+from moonglade import media_fetch as media_fetch_mod
 
 
 @pytest.fixture()
@@ -68,11 +69,11 @@ class TestM01ResolveMediaTls:
     def test_ssl_failure_prints_the_actionable_ssl_help(self, mock_session, monkeypatch, capsys):
         """gql()/download() answer an SSLError with _ssl_help(); resolve_media said nothing at
         all, so a fixable LOCAL trust problem read as 'PixAI does not have this image'."""
-        monkeypatch.setattr(core, "_media_tls_warned", False)
+        monkeypatch.setattr(media_fetch_mod, "_media_tls_warned", False)
         mock_session.get.side_effect = requests.exceptions.SSLError(
             "certificate verify failed: unable to get local issuer certificate")
 
-        url, info = core.resolve_media(mock_session, "mid-tls-1")
+        url, info = media_fetch_mod.resolve_media(mock_session, "mid-tls-1")
 
         assert (url, info) == (None, {})          # still fails SOFT -- callers depend on it
         out = capsys.readouterr().out
@@ -87,11 +88,11 @@ class TestM01ResolveMediaTls:
         The latch is per PROCESS, which is the same as per run for the CLI and deliberately
         is NOT inside the long-lived gallery server -- see _warn_media_tls_once, and do not
         "fix" the wording back to 'run'."""
-        monkeypatch.setattr(core, "_media_tls_warned", False)
+        monkeypatch.setattr(media_fetch_mod, "_media_tls_warned", False)
         mock_session.get.side_effect = requests.exceptions.SSLError("bad cert")
 
         for mid in ("a", "b", "c"):
-            assert core.resolve_media(mock_session, mid) == (None, {})
+            assert media_fetch_mod.resolve_media(mock_session, mid) == (None, {})
 
         out = capsys.readouterr().out
         assert out.count("pip install truststore") == 1
@@ -100,10 +101,10 @@ class TestM01ResolveMediaTls:
     def test_ordinary_network_failure_stays_quiet(self, mock_session, monkeypatch, capsys):
         """A timeout or a 404 is NOT a trust problem -- printing the TLS paragraph for one
         would be the same bug pointing the other way."""
-        monkeypatch.setattr(core, "_media_tls_warned", False)
+        monkeypatch.setattr(media_fetch_mod, "_media_tls_warned", False)
         mock_session.get.side_effect = requests.RequestException("read timeout")
 
-        assert core.resolve_media(mock_session, "mid-plain") == (None, {})
+        assert media_fetch_mod.resolve_media(mock_session, "mid-plain") == (None, {})
         assert "truststore" not in capsys.readouterr().out
 
     def test_the_paragraph_is_one_write_so_a_progress_frame_cannot_split_it(
@@ -125,11 +126,11 @@ class TestM01ResolveMediaTls:
                 pass
 
         rec = Recorder()
-        monkeypatch.setattr(core, "_media_tls_warned", False)
+        monkeypatch.setattr(media_fetch_mod, "_media_tls_warned", False)
         monkeypatch.setattr(sys, "stdout", rec)
         mock_session.get.side_effect = requests.exceptions.SSLError("bad cert")
 
-        core.resolve_media(mock_session, "mid-tls-atomic")
+        media_fetch_mod.resolve_media(mock_session, "mid-tls-atomic")
 
         assert len(rec.writes) == 1, (
             "the TLS paragraph went out in {} writes -- a progress frame can land between "
@@ -148,14 +149,14 @@ class TestM01ResolveMediaTls:
 
         cb = core._make_progress()
         wrote = threading.Event()
-        core._CONSOLE_LOCK.acquire()
+        media_fetch_mod._CONSOLE_LOCK.acquire()
         try:
             t = threading.Thread(target=lambda: (cb(1, 10), wrote.set()))
             t.start()
             assert not wrote.wait(0.25), (
                 "the progress bar was drawn while a console block held the lock")
         finally:
-            core._CONSOLE_LOCK.release()
+            media_fetch_mod._CONSOLE_LOCK.release()
         assert wrote.wait(2), "the progress bar never resumed after the lock was released"
         t.join()
 
@@ -562,7 +563,7 @@ def recovery_network(monkeypatch):
         monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: task)
         monkeypatch.setattr(core, "media_file_gql",
                             lambda s, mid: {"fileUrl": "https://cdn/{}.mp4".format(mid)})
-        monkeypatch.setattr(core, "resolve_media",
+        monkeypatch.setattr(media_fetch_mod, "resolve_media",
                             lambda s, mid: ("https://cdn/{}.png".format(mid),
                                             {"width": 8, "height": 8}))
         monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: True)
@@ -582,7 +583,7 @@ def recovery_network(monkeypatch):
             path.write_bytes(b"\x00binary")
             return "ok", path
 
-        monkeypatch.setattr(core, "download", fake_download)
+        monkeypatch.setattr(media_fetch_mod, "download", fake_download)
 
     return install, bumps
 

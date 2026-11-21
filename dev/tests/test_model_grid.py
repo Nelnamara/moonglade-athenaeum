@@ -12,6 +12,7 @@ from moonglade import task_reads as task_reads_mod
 from moonglade import models as models_mod
 from moonglade import catalog as catalog_mod
 from moonglade import thumbs as thumbs_mod
+from moonglade import media_fetch as media_fetch_mod
 
 _SEARCH = {"data": [
     {"id": "1982880136609467518", "title": "Tsubaki.2", "type": "MMDIT26A_MODEL",
@@ -901,8 +902,8 @@ def _stub_generate_network(monkeypatch, outputs):
     def fake_resolve(s, mid):
         seen_mids.append(mid)
         return "https://cdn/" + mid, {"width": 512, "height": 512}
-    monkeypatch.setattr(core, "resolve_media", fake_resolve)
-    monkeypatch.setattr(core, "download", lambda s, url, stem, **k: ("ok", stem.with_suffix(".png")))
+    monkeypatch.setattr(media_fetch_mod, "resolve_media", fake_resolve)
+    monkeypatch.setattr(media_fetch_mod, "download", lambda s, url, stem, **k: ("ok", stem.with_suffix(".png")))
     monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
     return seen_mids
 
@@ -1133,9 +1134,9 @@ def test_collect_generation_persists_paid_credit_zero_not_blank(monkeypatch, tmp
                         lambda s, t: {"createdAt": "2026-07-23T00:00:00Z",
                                       "outputs": {"mediaId": "M1", "seed": "9"},
                                       "paidCredit": 0})
-    monkeypatch.setattr(core, "resolve_media",
+    monkeypatch.setattr(media_fetch_mod, "resolve_media",
                         lambda s, m: ("https://cdn/" + m, {"width": 8, "height": 8}))
-    monkeypatch.setattr(core, "download",
+    monkeypatch.setattr(media_fetch_mod, "download",
                         lambda s, url, stem, **k: ("ok", stem.with_suffix(".png")))
     monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
     got = gen_road_mod.collect_generation(object(), "T1", str(tmp_path))

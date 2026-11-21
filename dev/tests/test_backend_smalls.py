@@ -23,6 +23,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade.catalog import CATALOG_FIELDS, save_catalog
+from moonglade import media_fetch as media_fetch_mod
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -107,7 +108,7 @@ def _export_one(tmp_path, monkeypatch, **row_kw):
         handed.append(dict(fields))
         return "ok"
 
-    monkeypatch.setattr(core, "embed_metadata", fake_embed)
+    monkeypatch.setattr(media_fetch_mod, "embed_metadata", fake_embed)
     client = login_client(tmp_path)
     z = client.post("/export-zip", data={"media_ids": "333", "embed": "1"})
     assert z.status_code == 200

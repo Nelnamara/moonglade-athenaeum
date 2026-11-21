@@ -14,6 +14,7 @@ from moonglade import task_reads as task_reads_mod
 from moonglade import watch_plans as watch_plans_mod
 from moonglade import catalog as catalog_mod
 from moonglade import history as history_mod
+from moonglade import media_fetch as media_fetch_mod
 
 
 class _FakeWS:
@@ -370,7 +371,7 @@ def test_catchup_sweep_is_bounded_rate_limited_and_off_thread():
     # page_variables; the account id now rides the client (USER_ID retired from page_variables),
     # so the catchup threads it explicitly rather than leaning on a module global.
     assert "WATCH_CATCHUP_TASKS = 30" in text
-    assert "core.page_variables(" in body
+    assert "_media_fetch.page_variables(" in body
     assert "WATCH_CATCHUP_TASKS, _pixai_client._client_of(session).user_id" in body
 
     # Rate-limited: a reconnect storm must not become a request storm. Since #60 the decision
@@ -453,7 +454,7 @@ def test_catchup_backfills_absent_media_skips_present_and_rate_limits(monkeypatc
 
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
     monkeypatch.setattr(history_mod, "gql", lambda *a, **k: {})
-    monkeypatch.setattr(core, "page_variables", lambda *a, **k: {})
+    monkeypatch.setattr(media_fetch_mod, "page_variables", lambda *a, **k: {})
     monkeypatch.setattr(history_mod, "find_connection", lambda *a, **k: {"edges": edges})
     monkeypatch.setattr(history_mod, "cataloged_media_ids",
                         lambda node: media.get(str(node.get("id")), []))
@@ -637,7 +638,7 @@ def test_the_catchup_writes_a_done_row_for_a_website_task_it_had_to_collect(tmp_
     monkeypatch.setattr(catalog_mod, "get_row_by_task", lambda db_path, t: None)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
     monkeypatch.setattr(history_mod, "gql", lambda *a, **k: {})
-    monkeypatch.setattr(core, "page_variables", lambda *a, **k: {})
+    monkeypatch.setattr(media_fetch_mod, "page_variables", lambda *a, **k: {})
     monkeypatch.setattr(history_mod, "find_connection", lambda *a, **k: {"edges": edges})
     monkeypatch.setattr(catalog_mod, "get_row", lambda db_path, m: None)     # nothing catalogued yet
     monkeypatch.setattr(time, "sleep", lambda *a, **k: None)
@@ -666,7 +667,7 @@ def test_the_event_path_and_the_catchup_converge_on_one_row(tmp_path, monkeypatc
     _sync_threads(monkeypatch)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
     monkeypatch.setattr(history_mod, "gql", lambda *a, **k: {})
-    monkeypatch.setattr(core, "page_variables", lambda *a, **k: {})
+    monkeypatch.setattr(media_fetch_mod, "page_variables", lambda *a, **k: {})
     # The node names its media, as a live TaskSummary does: the sweep asks
     # cataloged_media_ids(node), and a node naming none is skipped before it reaches the
     # second writer -- which would leave this test proving the frame path alone.
@@ -828,7 +829,7 @@ def test_catchup_tests_the_ids_the_catalog_actually_holds(monkeypatch, tmp_path,
 
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
     monkeypatch.setattr(history_mod, "gql", lambda *a, **k: {})
-    monkeypatch.setattr(core, "page_variables", lambda *a, **k: {})
+    monkeypatch.setattr(media_fetch_mod, "page_variables", lambda *a, **k: {})
     monkeypatch.setattr(history_mod, "find_connection", lambda *a, **k: {"edges": edges})
     monkeypatch.setattr(catalog_mod, "get_row",
                         lambda db_path, m: ({"media_id": m} if m in present else None))
@@ -920,7 +921,7 @@ def _cycle_rig(app, monkeypatch, clock):
     reads = []
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
     monkeypatch.setattr(history_mod, "gql", lambda *a, **k: {})
-    monkeypatch.setattr(core, "page_variables", lambda *a, **k: {})
+    monkeypatch.setattr(media_fetch_mod, "page_variables", lambda *a, **k: {})
     monkeypatch.setattr(history_mod, "find_connection",
                         lambda *a, **k: reads.append(clock["t"]) or {"edges": []})
     monkeypatch.setattr(time, "sleep", lambda *a, **k: None)

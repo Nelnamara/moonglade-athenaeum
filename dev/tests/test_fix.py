@@ -26,6 +26,7 @@ from moonglade import mirror as mirror_mod
 from moonglade import catalog as catalog_mod
 from moonglade import thumbs as thumbs_mod
 from moonglade import history as history_mod
+from moonglade import media_fetch as media_fetch_mod
 
 
 REFERENCE_PRO = gen_params_mod.EDIT_MODELS["reference-pro"]["model_id"]
@@ -105,9 +106,9 @@ def test_build_fix_stem_name_without_a_source_label():
 
 
 def _stub_collect(monkeypatch, tmp_path):
-    monkeypatch.setattr(core, "resolve_media",
+    monkeypatch.setattr(media_fetch_mod, "resolve_media",
                         lambda s, m: ("https://cdn/" + m, {"width": 1024, "height": 1536}))
-    monkeypatch.setattr(core, "download",
+    monkeypatch.setattr(media_fetch_mod, "download",
                         lambda s, url, stem, **k: ("ok", stem.with_suffix(".jpg")))
     monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
 

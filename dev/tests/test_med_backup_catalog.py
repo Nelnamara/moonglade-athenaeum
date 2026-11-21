@@ -33,6 +33,7 @@ from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import catalog as catalog_mod
 from moonglade import thumbs as thumbs_mod
+from moonglade import media_fetch as media_fetch_mod
 
 
 # ---------------------------------------------------------------------------
@@ -307,7 +308,7 @@ def video_task_network(monkeypatch):
                         lambda s, mid: {"fileUrl": "https://cdn/{}.mp4".format(mid)})
     # A video's media object resolves to a perfectly good URL -- which is exactly why the old
     # path could download the mp4 through the IMAGE loop and never notice.
-    monkeypatch.setattr(core, "resolve_media",
+    monkeypatch.setattr(media_fetch_mod, "resolve_media",
                         lambda s, mid: ("https://cdn/{}.png".format(mid), {"width": 8, "height": 8}))
 
     def fake_download(session, url, stem, **kw):
@@ -316,7 +317,7 @@ def video_task_network(monkeypatch):
         path.write_bytes(b"\x00binary")
         return "ok", path
 
-    monkeypatch.setattr(core, "download", fake_download)
+    monkeypatch.setattr(media_fetch_mod, "download", fake_download)
     monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: True)
     monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
     monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
@@ -384,7 +385,7 @@ def edit_task_network(monkeypatch):
     def _install(task, resolved_name):
         monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
         monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: task)
-        monkeypatch.setattr(core, "resolve_media",
+        monkeypatch.setattr(media_fetch_mod, "resolve_media",
                             lambda s, mid: ("https://cdn/{}.png".format(mid),
                                             {"width": 8, "height": 8}))
 
@@ -394,7 +395,7 @@ def edit_task_network(monkeypatch):
             path.write_bytes(b"\x00png")
             return "ok", path
 
-        monkeypatch.setattr(core, "download", fake_download)
+        monkeypatch.setattr(media_fetch_mod, "download", fake_download)
         monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
 
         def fake_name(session, mid, **kw):

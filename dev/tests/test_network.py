@@ -103,19 +103,19 @@ class TestPageVariablesTakesTheIdFromTheClient:
     def test_uses_the_passed_id_not_the_module_global(self, monkeypatch):
         # Whatever the module global happens to be, the PASSED id is what lands on the wire.
         monkeypatch.setattr(core, "USER_ID", "GLOBAL-MUST-NOT-APPEAR")
-        assert core.page_variables(30, "AAA") == {"last": 30, "userId": "AAA"}
-        assert core.page_variables(30, "BBB") == {"last": 30, "userId": "BBB"}
+        assert media_fetch_mod.page_variables(30, "AAA") == {"last": 30, "userId": "AAA"}
+        assert media_fetch_mod.page_variables(30, "BBB") == {"last": 30, "userId": "BBB"}
 
     def test_two_clients_thread_their_own_ids(self):
         # The call-site idiom is page_variables(size, _client_of(session).user_id, ...):
         # build two clients with different ids and confirm each threads its own.
         a = pixai_client_mod.PixAIClient(object(), user_id="acct-A")
         b = pixai_client_mod.PixAIClient(object(), user_id="acct-B")
-        assert core.page_variables(30, pixai_client_mod._client_of(a).user_id)["userId"] == "acct-A"
-        assert core.page_variables(30, pixai_client_mod._client_of(b).user_id)["userId"] == "acct-B"
+        assert media_fetch_mod.page_variables(30, pixai_client_mod._client_of(a).user_id)["userId"] == "acct-A"
+        assert media_fetch_mod.page_variables(30, pixai_client_mod._client_of(b).user_id)["userId"] == "acct-B"
 
     def test_before_cursor_still_threads(self):
-        assert core.page_variables(50, "acct-A", before="cur-1") == {
+        assert media_fetch_mod.page_variables(50, "acct-A", before="cur-1") == {
             "last": 50, "userId": "acct-A", "before": "cur-1"}
 
     def test_source_no_longer_reads_the_module_global(self):
@@ -124,7 +124,7 @@ class TestPageVariablesTakesTheIdFromTheClient:
         import ast
         import inspect
         import textwrap
-        fn = ast.parse(textwrap.dedent(inspect.getsource(core.page_variables))).body[0]
+        fn = ast.parse(textwrap.dedent(inspect.getsource(media_fetch_mod.page_variables))).body[0]
         body = fn.body[1:] if ast.get_docstring(fn) is not None else fn.body
         names = {n.id for stmt in body for n in ast.walk(stmt) if isinstance(n, ast.Name)}
         assert "USER_ID" not in names, (
@@ -153,7 +153,7 @@ class TestResolveMedia:
         resp.raise_for_status.return_value = None
         mock_session.get.return_value = resp
 
-        url, info = core.resolve_media(mock_session, "mid123")
+        url, info = media_fetch_mod.resolve_media(mock_session, "mid123")
         assert url == "https://cdn.example.com/full"
         assert info["width"] == 512
 
@@ -169,7 +169,7 @@ class TestResolveMedia:
         resp.json.return_value = obj
         resp.raise_for_status.return_value = None
         mock_session.get.return_value = resp
-        url, info = core.resolve_media(mock_session, "mid456")
+        url, info = media_fetch_mod.resolve_media(mock_session, "mid456")
         assert url is not None
 
     def test_returns_none_on_empty_urls(self, mock_session, mocker):
@@ -179,7 +179,7 @@ class TestResolveMedia:
         resp.json.return_value = obj
         resp.raise_for_status.return_value = None
         mock_session.get.return_value = resp
-        url, info = core.resolve_media(mock_session, "mid789")
+        url, info = media_fetch_mod.resolve_media(mock_session, "mid789")
         assert url is None
 
 
@@ -302,6 +302,7 @@ class TestQuickCount:
 from types import SimpleNamespace
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import history as history_mod
+from moonglade import media_fetch as media_fetch_mod
 
 
 def _dl_args(out, **kw):
@@ -326,7 +327,7 @@ def _page(mid, has_prev, cursor=""):
 def _patch_download_layer(mocker):
     mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
     mocker.patch.object(core, "_quick_count", return_value=3)
-    mocker.patch.object(core, "resolve_media",
+    mocker.patch.object(media_fetch_mod, "resolve_media",
                         return_value=("http://x/img", {"width": "1", "height": "1"}))
 
     def fake_download(session, url, stem, **kw):
@@ -334,7 +335,7 @@ def _patch_download_layer(mocker):
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(b"img")
         return ("ok", dest)
-    return mocker.patch.object(core, "download", side_effect=fake_download)
+    return mocker.patch.object(media_fetch_mod, "download", side_effect=fake_download)
 
 
 def test_resume_skips_on_disk_without_redownload(tmp_path, mocker):
@@ -399,7 +400,7 @@ def test_run_download_returns_its_fail_count(tmp_path, mocker, capsys, pixai):
     to everything downstream (the CLI job log, the Panel). Also locks in the louder
     console notice that replaces the old easy-to-miss one-liner."""
     mocker.patch.object(core, "_quick_count", return_value=2)
-    mocker.patch.object(core, "resolve_media",
+    mocker.patch.object(media_fetch_mod, "resolve_media",
                         return_value=("http://x/img", {"width": "1", "height": "1"}))
 
     def fake_download(session, url, stem, **kw):
@@ -409,7 +410,7 @@ def test_run_download_returns_its_fail_count(tmp_path, mocker, capsys, pixai):
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(b"img")
         return ("ok", dest)
-    mocker.patch.object(core, "download", side_effect=fake_download)
+    mocker.patch.object(media_fetch_mod, "download", side_effect=fake_download)
     mocker.patch.object(history_mod, "gql", side_effect=[_page("bad", True, "c1"), _page("good", False)])
 
     result = core.run_download(_dl_args(tmp_path))
@@ -443,7 +444,7 @@ class TestDownloadNeverWritesAZeroByteFile:
         resp.__exit__ = mocker.Mock(return_value=False)
         mock_session.get.return_value = resp
 
-        status, path = core.download(mock_session, "http://x/img", tmp_path / "stem",
+        status, path = media_fetch_mod.download(mock_session, "http://x/img", tmp_path / "stem",
                                      retries=0)
 
         assert status == "fail"
@@ -481,7 +482,7 @@ class TestDownloadVerifiesContentLength:
         good = self._resp(mocker, vid, [b"y" * 1000])
         mock_session.get.side_effect = [short, good]
 
-        status, path = core.download(mock_session, "http://x/vid", tmp_path / "stem",
+        status, path = media_fetch_mod.download(mock_session, "http://x/vid", tmp_path / "stem",
                                      retries=1)
 
         assert status == "ok"
@@ -496,7 +497,7 @@ class TestDownloadVerifiesContentLength:
                            [b"x" * 400])
         mock_session.get.return_value = short
 
-        status, path = core.download(mock_session, "http://x/vid", tmp_path / "stem",
+        status, path = media_fetch_mod.download(mock_session, "http://x/vid", tmp_path / "stem",
                                      retries=0)
 
         assert status == "fail" and path is None
@@ -511,7 +512,7 @@ class TestDownloadVerifiesContentLength:
                                    "Content-Encoding": "gzip"}, [b"z" * 400])
         mock_session.get.return_value = resp
 
-        status, path = core.download(mock_session, "http://x/img", tmp_path / "stem",
+        status, path = media_fetch_mod.download(mock_session, "http://x/img", tmp_path / "stem",
                                      retries=0)
 
         assert status == "ok" and path is not None and path.stat().st_size == 400
@@ -884,9 +885,9 @@ def test_sync_artworks_with_videos_skips_already_downloaded(tmp_path, mocker, pi
     # Mocked with a well-formed return (not a bare MagicMock): if the bug fires and
     # this DOES get called, _fetch_video must still complete cleanly so the failure
     # shows up as the assertion below, not an incidental unpack/network crash.
-    resolve = mocker.patch.object(core, "resolve_media",
+    resolve = mocker.patch.object(media_fetch_mod, "resolve_media",
                                   return_value=("http://example.com/v.mp4", {"width": "1"}))
-    mocker.patch.object(core, "download",
+    mocker.patch.object(media_fetch_mod, "download",
                         return_value=("ok", tmp_path / "videos" / "clip_V1.mp4"))
 
     res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
@@ -941,8 +942,8 @@ def test_sync_artworks_counts_failed_video_downloads_as_a_failure(tmp_path, mock
     # already_downloaded_video, not already_downloaded -- B16 (merged separately, same
     # sweep) redirected this call site to the video-aware matcher.
     mocker.patch.object(history_mod, "already_downloaded_video", return_value=None)
-    mocker.patch.object(core, "resolve_media", return_value=("https://x/vid1.mp4", {}))
-    mocker.patch.object(core, "download", return_value=("fail", None))
+    mocker.patch.object(media_fetch_mod, "resolve_media", return_value=("https://x/vid1.mp4", {}))
+    mocker.patch.object(media_fetch_mod, "download", return_value=("fail", None))
     _views_sweep(pixai, {"aw1": 5})
 
     res = core.run_sync_artworks(SimpleNamespace(
@@ -1624,7 +1625,7 @@ class TestDownloadTempNameIsUniquePerProcessAndThread:
         resp.__exit__ = mocker.Mock(return_value=False)
         mock_session.get.return_value = resp
 
-        status, path = core.download(mock_session, "http://x/img", tmp_path / "stem", retries=0)
+        status, path = media_fetch_mod.download(mock_session, "http://x/img", tmp_path / "stem", retries=0)
 
         assert status == "ok" and path.read_bytes() == b"abc"
         assert len(seen) == 1 and seen[0].endswith(".part")

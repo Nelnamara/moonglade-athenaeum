@@ -817,8 +817,8 @@ def cmd_organize(args, out, img_dir, db_path):
     sharing a media_id with the live catalogued copy collided with it in the move
     plan, either hard-deleting one outright as a spurious "redundant" duplicate or
     resurrecting the quarantined copy into the organized tree in its place)."""
-    from moonglade.backup import (convert_image, embed_metadata, _ensure_db, load_catalog,
-                                  PixAIError, save_catalog)
+    from moonglade.backup import _ensure_db, load_catalog, PixAIError, save_catalog
+    from moonglade.media_fetch import convert_image, embed_metadata
     from moonglade.history import build_stem_name, _same_bytes
     db_path = _ensure_db(out)
     meta_by_mid = {}

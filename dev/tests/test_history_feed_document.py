@@ -42,6 +42,7 @@ from moonglade.catalog import CATALOG_FIELDS, load_catalog, save_catalog
 from tests.fake_pixai import operation_name
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import history as history_mod
+from moonglade import media_fetch as media_fetch_mod
 
 REPO = Path(__file__).resolve().parents[2]
 FEED = operation_name(history_mod._HISTORY_PAGE_DOC)       # what the fake keys the document by
@@ -149,7 +150,7 @@ def test_a_page_is_one_post_of_the_full_document():
             raise AssertionError("the history feed is not a saved-request GET any more")
 
     s = Session()
-    variables = core.page_variables(250, "u-wire", before="c9")
+    variables = media_fetch_mod.page_variables(250, "u-wire", before="c9")
     data = history_mod.gql(pixai_client_mod.PixAIClient(s), variables)
     [(verb, url, kw)] = s.calls
     assert (verb, url) == ("POST", core.API_URL)
@@ -161,7 +162,7 @@ def test_a_page_is_one_post_of_the_full_document():
 
 def test_through_the_fake_it_is_a_query_and_never_a_saved_request(pixai):
     h = _history(pixai, [[_node("T1")]])
-    data = history_mod.gql(pixai, core.page_variables(30, "u-test"))
+    data = history_mod.gql(pixai, media_fetch_mod.page_variables(30, "u-test"))
     assert history_mod.find_connection(data)["pageInfo"]["hasPreviousPage"] is False
     assert [c.verb for c in pixai.calls] == ["query"]
     assert h.variables == [{"last": 30, "userId": "u-test"}]
@@ -295,7 +296,7 @@ def test_an_answer_that_is_not_graphql_is_a_refusal_not_an_empty_history(status,
 def test_a_user_with_no_generations_is_not_refused(pixai):
     """The empty history is still a page: a connection with no edges."""
     _history(pixai, [])
-    data = history_mod.gql(pixai, core.page_variables(250, "u-test"))
+    data = history_mod.gql(pixai, media_fetch_mod.page_variables(250, "u-test"))
     assert history_mod.find_connection(data)["edges"] == []
     assert history_mod.find_connection(data)["pageInfo"]["hasPreviousPage"] is False
 
@@ -319,7 +320,7 @@ def test_the_quick_count_reads_through_the_document(pixai):
 
 def test_the_probe_reads_through_the_document(pixai, monkeypatch, capsys):
     _history(pixai, [[_node("T1", mid="M1"), _node("T2")]])
-    monkeypatch.setattr(core, "resolve_media",
+    monkeypatch.setattr(media_fetch_mod, "resolve_media",
                         lambda s, mid: ("https://cdn/" + mid, {"width": 2, "height": 3}))
     core.run_probe(SimpleNamespace(token=None, page_size=250))
     out = capsys.readouterr().out
@@ -428,7 +429,7 @@ def _pull_args(out, **kw):
 
 def _no_downloads(monkeypatch):
     monkeypatch.setattr(core, "_quick_count", lambda *a, **k: 3)
-    monkeypatch.setattr(core, "resolve_media",
+    monkeypatch.setattr(media_fetch_mod, "resolve_media",
                         lambda s, mid: ("http://x/" + mid, {"width": "1", "height": "1"}))
 
     def fake_download(session, url, stem, **kw):
@@ -436,7 +437,7 @@ def _no_downloads(monkeypatch):
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(b"img")
         return ("ok", dest)
-    monkeypatch.setattr(core, "download", fake_download)
+    monkeypatch.setattr(media_fetch_mod, "download", fake_download)
 
 
 @pytest.mark.parametrize("workers", [1, 4], ids=["serial", "parallel"])

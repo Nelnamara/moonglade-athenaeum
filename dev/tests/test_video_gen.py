@@ -13,6 +13,7 @@ from moonglade import gen_params as gen_params_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import media_fetch as media_fetch_mod
 
 
 def test_build_video_parameters_matches_real_submit():
@@ -416,7 +417,7 @@ def test_download_video_task_posterless_makes_ffmpeg_thumb(monkeypatch, tmp_path
 
     def _fake_download(session, url, stem, **kw):
         p = Path(str(stem) + ".mp4"); p.write_bytes(b"\x00\x00\x00\x18ftypmp42"); return "ok", p
-    monkeypatch.setattr(core, "download", _fake_download)
+    monkeypatch.setattr(media_fetch_mod, "download", _fake_download)
 
     calls = []
     def _fake_vpt(video_path, thumb_path):
@@ -438,12 +439,12 @@ def test_download_video_task_with_poster_skips_ffmpeg(monkeypatch, tmp_path):
                         lambda r: ([{"video_media_id": "V2", "poster_media_id": "P2", "seed": 1}],
                                    {"prompt": "p", "duration": 5}))
     monkeypatch.setattr(core, "media_file_gql", lambda s, m: {"fileUrl": "http://x/v.mp4"})
-    monkeypatch.setattr(core, "resolve_media", lambda s, m: ("http://x/p.png", {}))
+    monkeypatch.setattr(media_fetch_mod, "resolve_media", lambda s, m: ("http://x/p.png", {}))
 
     def _fake_download(session, url, stem, **kw):
         p = Path(str(stem)); p.parent.mkdir(parents=True, exist_ok=True)
         p = p.with_suffix(p.suffix or ".bin"); p.write_bytes(b"data"); return "ok", p
-    monkeypatch.setattr(core, "download", _fake_download)
+    monkeypatch.setattr(media_fetch_mod, "download", _fake_download)
     monkeypatch.setattr("moonglade.thumbs.make_thumbnail",
                         lambda src, dst: (Path(dst).write_bytes(b"jpg"), True)[1])
 
@@ -652,13 +653,13 @@ def test_download_video_task_catalogs_video_even_if_poster_fails(monkeypatch, tm
                         lambda r: ([{"video_media_id": "V7", "poster_media_id": "P7", "seed": 1}],
                                    {"prompt": "p", "duration": 5}))
     monkeypatch.setattr(core, "media_file_gql", lambda s, m: {"fileUrl": "http://x/v.mp4"})
-    monkeypatch.setattr(core, "resolve_media", lambda s, m: ("http://x/poster.png", {}))
+    monkeypatch.setattr(media_fetch_mod, "resolve_media", lambda s, m: ("http://x/poster.png", {}))
 
     def _dl(session, url, stem, **kw):
         if "poster" in url:                          # the poster download hits the Windows lock
             raise PermissionError(32, "The process cannot access the file ... .jpg.part")
         p = Path(str(stem) + ".mp4"); p.write_bytes(b"\x00\x00\x00\x18ftypmp42"); return "ok", p
-    monkeypatch.setattr(core, "download", _dl)
+    monkeypatch.setattr(media_fetch_mod, "download", _dl)
     monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda v, t: False)
     monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
 

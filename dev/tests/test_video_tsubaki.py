@@ -23,6 +23,7 @@ from moonglade.catalog import CATALOG_FIELDS, save_catalog, load_catalog
 from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import catalog as catalog_mod
+from moonglade import media_fetch as media_fetch_mod
 
 TBKV = ("tbkv1.0", "tbkv1.0.1")
 TBKV_IDS = {"tbkv1.0": "2042030623542642408", "tbkv1.0.1": "2054378086834851904"}
@@ -544,7 +545,7 @@ def _collect(tmp_path, monkeypatch, task, names=None):
         p = Path(str(stem) + ".mp4")
         p.write_bytes(b"\x00\x00\x00\x18ftypmp42")
         return "ok", p
-    monkeypatch.setattr(core, "download", _dl)
+    monkeypatch.setattr(media_fetch_mod, "download", _dl)
     monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
     monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
     looked = []
@@ -652,7 +653,7 @@ def _recover_i2v(tmp_path, monkeypatch, task, lookup=None):
         p = Path(str(stem) + ".mp4")
         p.write_bytes(b"\x00\x00\x00\x18ftypmp42")
         return "ok", p
-    monkeypatch.setattr(core, "download", _dl)
+    monkeypatch.setattr(media_fetch_mod, "download", _dl)
     monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
     monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
 
