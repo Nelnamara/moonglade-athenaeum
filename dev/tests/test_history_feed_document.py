@@ -45,6 +45,7 @@ from moonglade import history as history_mod
 from moonglade import media_fetch as media_fetch_mod
 from moonglade import library_runs as library_runs_mod
 from moonglade import account_api as account_api_mod
+from moonglade import sync as sync_mod
 
 REPO = Path(__file__).resolve().parents[2]
 FEED = operation_name(history_mod._HISTORY_PAGE_DOC)       # what the fake keys the document by
@@ -360,7 +361,7 @@ def test_the_video_sync_reads_through_the_document(pixai, tmp_path, monkeypatch,
     _catalog(tmp_path, [{"media_id": "m0", "filename": "a.png"}])
     h = _history(pixai, [[_node("T1"), _node("T2")],
                          [_node("V1", i2vProModel="v4.0.1")]])
-    monkeypatch.setattr(core, "_parallel_map", lambda *a, **k: iter(()))   # no downloads
+    monkeypatch.setattr(sync_mod, "_parallel_map", lambda *a, **k: iter(()))   # no downloads
     res = library_runs_mod.run_sync_videos(SimpleNamespace(out=str(tmp_path), token=None, page_size=250,
                                                workers=1, delay=0))
     assert res == {"i2v_tasks": 1, "videos": 0}
@@ -447,11 +448,11 @@ def test_the_pull_walks_back_with_before_and_ends_where_it_ended_before(
         pixai, tmp_path, monkeypatch, workers):
     _no_downloads(monkeypatch)
     h = _history(pixai, [[_node("T1")], [_node("T2")], [_node("T3")]])
-    res = core.run_download(_pull_args(tmp_path, workers=workers))
+    res = sync_mod.run_download(_pull_args(tmp_path, workers=workers))
     assert [v.get("before") for v in h.variables] == [None, "c1", "c2"]
     assert all(v["last"] == 20 and v["userId"] == "u-test" for v in h.variables)
     assert res["pages"] == 3 and res["reached_end"] is True and res["ok"] == 3
-    assert core.walk_end_reached(tmp_path) is True               # the end was seen
+    assert sync_mod.walk_end_reached(tmp_path) is True               # the end was seen
     assert {r["media_id"] for r in load_catalog(tmp_path / "catalog.db")} == {
         "m_T1", "m_T2", "m_T3"}
 
@@ -461,8 +462,8 @@ def test_a_refused_page_ends_the_pull_without_claiming_the_end(pixai, tmp_path, 
     _history(pixai, [[_node("T1")], [_node("T2")]],
              script=[_answer([_node("T1")], True, "c1"), _refusal("Cannot query field \"x\".")])
     with pytest.raises(core.HistoryPageRefused):
-        core.run_download(_pull_args(tmp_path))
-    assert core.walk_end_reached(tmp_path) is False
+        sync_mod.run_download(_pull_args(tmp_path))
+    assert sync_mod.walk_end_reached(tmp_path) is False
     assert {r["media_id"] for r in load_catalog(tmp_path / "catalog.db")} == {"m_T1"}
 
 

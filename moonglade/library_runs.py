@@ -55,7 +55,8 @@ def run_sync_artworks(args):
     thread it into _cli_job_finish(warn=...) the same way run_download's own callers
     thread dl['fail']."""
     from moonglade.backup import (ArtworkListRefused, _ensure_db, _make_session, PANEL_WARN_PREFIX,
-                                  _parallel_map, PixAIError, READ_ONLY, _read_only_now)
+                                  PixAIError, READ_ONLY, _read_only_now)
+    from moonglade.sync import _parallel_map
     from moonglade.account_api import artwork_list_gql, artwork_views_bulk, extract_artwork_meta
     out = Path(args.out)
     db_path = _ensure_db(out)
@@ -286,8 +287,9 @@ def run_sync_videos(args):
     fileUrl. So: find i2v tasks (i2vProModel set in the summary), fetch each task,
     resolve + download the mp4 into videos/, and catalog it as a video row
     (is_video=1) with the still frame as its poster."""
-    from moonglade.backup import (_ensure_db, load_catalog, _make_session, _parallel_map,
+    from moonglade.backup import (_ensure_db, load_catalog, _make_session,
                                   save_catalog_over_snapshot)
+    from moonglade.sync import _parallel_map
     out = Path(args.out)
     db_path = _ensure_db(out)
     # Pre-pass snapshot of the existing rows, keyed by media_id: the rows built
@@ -747,8 +749,9 @@ def run_fix_models(args):
     """Re-resolve human-readable model names for catalog rows whose model_name is
     blank or still a numeric version-id (e.g. saved while the model lookup was failing).
     One API call per distinct model id (cached)."""
-    from moonglade.backup import (_ensure_db, load_catalog, _make_session, _parallel_map,
+    from moonglade.backup import (_ensure_db, load_catalog, _make_session,
                                   save_catalog_over_snapshot)
+    from moonglade.sync import _parallel_map
     out = Path(args.out)
     db_path = _ensure_db(out)
     session = _make_session(getattr(args, "token", None))

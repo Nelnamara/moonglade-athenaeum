@@ -9,6 +9,7 @@ from moonglade import backup as core
 from moonglade import cloud_delete
 from moonglade import task_reads
 from moonglade import full_meta as full_meta_mod
+from moonglade import sync as sync_mod
 
 TASK = {"id": "2074596287000121003", "status": "completed", "startedAt": "t", "paidQuota": 3000,
         "outputs": {"mediaIds": ["m2", "m4"], "mediaUrls": ["u2", "u4"], "seed": "123"},
@@ -41,9 +42,9 @@ def test_a_fallback_record_never_renumbers_the_survivors(refused_graphql):
 
 
 def test_the_three_full_meta_readers_use_the_fallback_read():
-    for fn in (core.run_backfill_full_meta, core.run_download):
+    for fn in (sync_mod.run_backfill_full_meta, sync_mod.run_download):
         assert "_task_for_full_meta(session, tid)" in inspect.getsource(fn), fn.__name__
-    assert inspect.getsource(core.run_download).count("_task_for_full_meta(session, tid)") == 2
+    assert inspect.getsource(sync_mod.run_download).count("_task_for_full_meta(session, tid)") == 2
 
 
 def test_deletes_and_the_plain_read_never_take_the_fallback(refused_graphql):

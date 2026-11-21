@@ -44,6 +44,7 @@ from moonglade import catalog_verbs as catalog_verbs_mod
 from moonglade import thumbs as thumbs_mod
 from moonglade import library_runs as library_runs_mod
 from moonglade import account_api as account_api_mod
+from moonglade import sync as sync_mod
 
 SRC = Path(__file__).resolve().parents[2]
 DAY = 86400.0
@@ -1464,7 +1465,7 @@ def test_an_interrupted_thumbnail_never_lands_on_the_real_name(tmp_path, monkeyp
     assert [p.name for p in thumb.parent.iterdir()] == ["m1.jpg"]
     assert "_atomic_replace" in inspect.getsource(thumbs_mod.make_thumbnail)
     # ...and the docstring that promised "overwritten in place" is now true
-    assert "os.replace" in (inspect.getdoc(core.run_rebuild_thumbs) or "")
+    assert "os.replace" in (inspect.getdoc(sync_mod.run_rebuild_thumbs) or "")
 
 
 def test_the_sixty_day_floor_is_enforced_by_the_server_not_by_a_missing_selector(tmp_path):

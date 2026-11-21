@@ -18,6 +18,7 @@ from moonglade.catalog import CATALOG_FIELDS, load_catalog, migrate, save_catalo
 from moonglade import task_reads as task_reads_mod
 from moonglade import full_meta as full_meta_mod
 from moonglade import account_api as account_api_mod
+from moonglade import sync as sync_mod
 
 T3 = "2024383379556065549"          # Tsubaki.3
 FLASH = "2050048243034896798"       # Tsubaki.3 Flash
@@ -152,7 +153,7 @@ def test_the_backfill_rereads_the_owners_runs_after_the_repair(monkeypatch, tmp_
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", detail)
     args = types.SimpleNamespace(out=str(tmp_path), token=None, workers=1, delay=0.0,
                                  progress=None)
-    core.run_backfill_lineage(args)
+    sync_mod.run_backfill_lineage(args)
     rows = _by_media(db)
     assert sorted(fetched) == ["t_ctx", "t_plain"]
     assert rows["m_ctx"]["source_media_id"] == SRC_A
@@ -163,7 +164,7 @@ def test_the_backfill_rereads_the_owners_runs_after_the_repair(monkeypatch, tmp_
     # The next process start and the next backfill fetch nothing again.
     migrate(db, force=True)
     del fetched[:]
-    core.run_backfill_lineage(args)
+    sync_mod.run_backfill_lineage(args)
     assert fetched == []
 
 

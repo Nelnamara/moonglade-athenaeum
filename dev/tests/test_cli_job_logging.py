@@ -17,6 +17,7 @@ from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import jobs as jobs_mod
 from moonglade import library_runs as library_runs_mod
+from moonglade import sync as sync_mod
 
 
 def _patch_sync_chain(monkeypatch, calls, *, download_exc=None):
@@ -27,9 +28,9 @@ def _patch_sync_chain(monkeypatch, calls, *, download_exc=None):
         calls.append("download")
         if download_exc is not None:
             raise download_exc
-    monkeypatch.setattr(core, "run_download", _dl)
+    monkeypatch.setattr(sync_mod, "run_download", _dl)
     monkeypatch.setattr(library_runs_mod, "run_fix_models", lambda args: calls.append("fix_models"))
-    monkeypatch.setattr(core, "run_backfill_full_meta", lambda args: calls.append("backfill"))
+    monkeypatch.setattr(sync_mod, "run_backfill_full_meta", lambda args: calls.append("backfill"))
     monkeypatch.setattr(core, "load_catalog", lambda db: [])
     monkeypatch.setattr(core, "build_thumbnails",
                         lambda *a, **k: calls.append("thumbnails"))
@@ -85,9 +86,9 @@ def test_sync_progress_ticks_feed_the_same_job(monkeypatch, tmp_path):
         assert callable(progress)
         progress(1, 2, 0)          # 50%
         progress(2, 2, 0)          # 100%
-    monkeypatch.setattr(core, "run_download", _dl)
+    monkeypatch.setattr(sync_mod, "run_download", _dl)
     monkeypatch.setattr(library_runs_mod, "run_fix_models", lambda args: None)
-    monkeypatch.setattr(core, "run_backfill_full_meta", lambda args: None)
+    monkeypatch.setattr(sync_mod, "run_backfill_full_meta", lambda args: None)
     monkeypatch.setattr(core, "load_catalog", lambda db: [])
     monkeypatch.setattr(core, "build_thumbnails", lambda *a, **k: None)
     monkeypatch.setattr(library_runs_mod, "run_reconcile_deleted", lambda args: None)
@@ -104,7 +105,7 @@ def test_sync_progress_ticks_feed_the_same_job(monkeypatch, tmp_path):
 
 def test_update_logs_a_cli_job_labeled_update(monkeypatch, tmp_path):
     seen = {}
-    monkeypatch.setattr(core, "run_download",
+    monkeypatch.setattr(sync_mod, "run_download",
                         lambda args: seen.update(update=args.update))
     monkeypatch.setattr(sys, "argv", ["prog", "--update", "--out", str(tmp_path)])
 
@@ -118,7 +119,7 @@ def test_update_logs_a_cli_job_labeled_update(monkeypatch, tmp_path):
 
 def test_plain_download_logs_a_cli_job_labeled_download(monkeypatch, tmp_path):
     """No flags at all -> the same fallback branch as --update, labeled 'Full backup'."""
-    monkeypatch.setattr(core, "run_download", lambda args: None)
+    monkeypatch.setattr(sync_mod, "run_download", lambda args: None)
     monkeypatch.setattr(sys, "argv", ["prog", "--out", str(tmp_path)])
 
     core.main()
@@ -132,7 +133,7 @@ def test_plain_download_with_failures_logs_done_with_errors(monkeypatch, tmp_pat
     be its own distinguishable terminal status -- not silently folded into "done" the
     way a clean run is. FAILS before the fix: run_download's return value never reached
     _cli_job_finish, so this always logged plain "done" regardless of dl['fail']."""
-    monkeypatch.setattr(core, "run_download",
+    monkeypatch.setattr(sync_mod, "run_download",
                         lambda args: {"ok": 197, "skip": 0, "missing": 0, "fail": 3})
     monkeypatch.setattr(sys, "argv", ["prog", "--out", str(tmp_path)])
 
@@ -149,9 +150,9 @@ def test_sync_with_failures_logs_done_with_errors(monkeypatch, tmp_path):
     plain/--update branch -- both needed the fix)."""
     def _dl(args, progress=None):
         return {"ok": 10, "skip": 0, "missing": 0, "fail": 2}
-    monkeypatch.setattr(core, "run_download", _dl)
+    monkeypatch.setattr(sync_mod, "run_download", _dl)
     monkeypatch.setattr(library_runs_mod, "run_fix_models", lambda args: None)
-    monkeypatch.setattr(core, "run_backfill_full_meta", lambda args: None)
+    monkeypatch.setattr(sync_mod, "run_backfill_full_meta", lambda args: None)
     monkeypatch.setattr(core, "load_catalog", lambda db: [])
     monkeypatch.setattr(core, "build_thumbnails", lambda *a, **k: None)
     monkeypatch.setattr(library_runs_mod, "run_reconcile_deleted", lambda args: None)

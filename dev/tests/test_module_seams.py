@@ -549,6 +549,11 @@ SEAMS = {
         "account_lora_cap", "run_account_info", "suggest_prompt", "tag_search_gql",
         "run_suggest_prompt", "ClaimsResult", "list_claims", "claim_reward", "_fmt_epoch_ms",
         "run_claims", "run_cards", "run_card_history", "run_coupons", "run_credit_log"]},
+    "moonglade.sync": {"from": "moonglade.backup", "names": [
+        "_DefaultDelay", "DEFAULT_DELAY", "_delay_was_chosen", "_pace_gate", "_parallel_map",
+        "run_backfill_meta", "_BACKFILL_CHECKPOINT_TASKS", "run_backfill_full_meta",
+        "run_backfill_lineage", "run_backfill_phash", "_check_time_capsule", "WALK_END_FLAG",
+        "walk_end_reached", "mark_walk_end_reached", "run_download", "run_rebuild_thumbs"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -2442,6 +2447,29 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_telemetry.py', 'moonglade.account_api'),
     ('tests/test_training_advanced.py', 'moonglade.account_api'),
     ('tests/test_training_parity.py', 'moonglade.account_api'),
+    # Split phase 4, sync: no reader reads the download's or the backfills' text but through
+    # sync_mod.
+    ('tests/test_artworks_adhoc.py', 'moonglade.sync'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.sync'),
+    ('tests/test_config_path_routing.py', 'moonglade.sync'),
+    ('tests/test_create_door.py', 'moonglade.sync'),
+    ('tests/test_csrf_coverage.py', 'moonglade.sync'),
+    ('tests/test_enhance.py', 'moonglade.sync'),
+    ('tests/test_evidence_counters.py', 'moonglade.sync'),
+    ('tests/test_full_meta_rest_fallback.py', 'moonglade.sync'),
+    ('tests/test_gen_surface.py', 'moonglade.sync'),
+    ('tests/test_history_feed_document.py', 'moonglade.sync'),
+    ('tests/test_jwt.py', 'moonglade.sync'),
+    ('tests/test_living_library.py', 'moonglade.sync'),
+    ('tests/test_loom_notify.py', 'moonglade.sync'),
+    ('tests/test_pixai_client.py', 'moonglade.sync'),
+    ('tests/test_settings_store.py', 'moonglade.sync'),
+    ('tests/test_setup_prepare.py', 'moonglade.sync'),
+    ('tests/test_spend_no_retry.py', 'moonglade.sync'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.sync'),
+    ('tests/test_telemetry.py', 'moonglade.sync'),
+    ('tests/test_training_advanced.py', 'moonglade.sync'),
+    ('tests/test_training_parity.py', 'moonglade.sync'),
 }
 
 

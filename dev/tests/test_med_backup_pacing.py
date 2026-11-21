@@ -35,6 +35,7 @@ from moonglade import backup as core
 from moonglade import web_accounts as web_accounts_mod
 from moonglade import history as history_mod
 from moonglade import media_fetch as media_fetch_mod
+from moonglade import sync as sync_mod
 
 
 def _dl_args(out, **kw):
@@ -103,7 +104,7 @@ class TestM07ParallelDownloadHonoursDelay:
         mids = ["m%d" % i for i in range(6)]
         mocker.patch.object(history_mod, "gql", side_effect=[_one_page(mids)])
 
-        core.run_download(_dl_args(tmp_path, delay=0.05, workers=4))
+        sync_mod.run_download(_dl_args(tmp_path, delay=0.05, workers=4))
 
         assert len(starts) == len(mids), "every image must still be fetched exactly once"
         starts.sort()
@@ -148,7 +149,7 @@ class TestM07ParallelDownloadHonoursDelay:
         mids = ["m%d" % i for i in range(8)]
         mocker.patch.object(history_mod, "gql", side_effect=[_one_page(mids)])
 
-        core.run_download(_dl_args(tmp_path, delay=0.02, workers=4))
+        sync_mod.run_download(_dl_args(tmp_path, delay=0.02, workers=4))
 
         assert live["peak"] >= 2, (
             "no two downloads ever overlapped -- the pace gate serialised the pool")
@@ -174,7 +175,7 @@ class TestM07ParallelDownloadHonoursDelay:
         mids = ["m%d" % i for i in range(6)]
         mocker.patch.object(history_mod, "gql", side_effect=[_one_page(mids)])
 
-        core.run_download(_dl_args(tmp_path, delay=core.DEFAULT_DELAY, workers=4))
+        sync_mod.run_download(_dl_args(tmp_path, delay=sync_mod.DEFAULT_DELAY, workers=4))
 
         assert len(starts) == len(mids), "every image must still be fetched exactly once"
         span = max(starts) - min(starts)
@@ -189,7 +190,7 @@ class TestM07ParallelDownloadHonoursDelay:
         is not there."""
         _patch_download_layer(mocker)
         mocker.patch.object(history_mod, "gql", side_effect=[_one_page(["m1"])])
-        core.run_download(_dl_args(tmp_path, delay=core.DEFAULT_DELAY, workers=4))
+        sync_mod.run_download(_dl_args(tmp_path, delay=sync_mod.DEFAULT_DELAY, workers=4))
         out = capsys.readouterr().out
         assert "Parallel downloads: 4 workers." in out
         assert "paced" not in out
@@ -199,7 +200,7 @@ class TestM07ParallelDownloadHonoursDelay:
         # A second library, already there as the command line always leaves it before a
         # download (main() makes the folder and opens its records first).
         (tmp_path / "b").mkdir()
-        core.run_download(_dl_args(tmp_path / "b", delay=0.01, workers=4))
+        sync_mod.run_download(_dl_args(tmp_path / "b", delay=0.01, workers=4))
         assert "paced to one image per 0.01s across the pool" in capsys.readouterr().out
 
 
@@ -228,20 +229,20 @@ class TestM07DelayWasChosen:
     def test_an_untouched_flag_reads_as_not_chosen(self, tmp_path, mocker):
         args = self._parse(tmp_path, mocker)
         assert args.delay == 0.4                      # the documented default still applies
-        assert core._delay_was_chosen(args) is False
+        assert sync_mod._delay_was_chosen(args) is False
 
     def test_typing_the_default_value_still_counts_as_choosing_it(self, tmp_path, mocker):
         """The case a number comparison cannot see. A user who reads the help, decides 0.4 is
         the pace they want, and types it must get pacing -- not be told they meant nothing."""
         args = self._parse(tmp_path, mocker, "--delay", "0.4")
         assert args.delay == 0.4
-        assert core._delay_was_chosen(args) is True
+        assert sync_mod._delay_was_chosen(args) is True
 
     def test_any_other_typed_value_counts_too(self, tmp_path, mocker):
         for typed, expected in (("1.5", 1.5), ("0", 0.0)):
             args = self._parse(tmp_path, mocker, "--delay", typed)
             assert args.delay == expected
-            assert core._delay_was_chosen(args) is True
+            assert sync_mod._delay_was_chosen(args) is True
 
 
 class TestPaceGate:
@@ -265,7 +266,7 @@ class TestPaceGate:
         (sleep `delay` in every worker) would record five identical `delay`s instead."""
         waits = []
         guard = threading.Lock()
-        pace = core._pace_gate(
+        pace = sync_mod._pace_gate(
             0.05,
             clock=lambda: 0.0,                        # frozen: no real time eats a wait
             sleep=lambda w: (guard.acquire(), waits.append(w), guard.release()))
@@ -286,7 +287,7 @@ class TestPaceGate:
         rather than by racing 1000 iterations against a wall-clock bound a loaded machine
         could blow."""
         touched = []
-        pace = core._pace_gate(
+        pace = sync_mod._pace_gate(
             0, clock=lambda: touched.append("clock"),
             sleep=lambda w: touched.append("sleep"))
         for _ in range(1000):

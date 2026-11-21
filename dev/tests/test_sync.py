@@ -11,16 +11,17 @@ import pytest
 from moonglade import backup as core
 from moonglade import telemetry as telemetry_mod
 from moonglade import library_runs as library_runs_mod
+from moonglade import sync as sync_mod
 
 
 def _patch_chain(monkeypatch, calls, *, reconcile_exc=None):
     """Replace every stage of the sync chain with a recorder so main() exercises only
     the wiring/order, not the real download/network."""
-    monkeypatch.setattr(core, "run_download",
+    monkeypatch.setattr(sync_mod, "run_download",
                         lambda args, progress=None: calls.append("download"))
     monkeypatch.setattr(library_runs_mod, "run_fix_models",
                         lambda args: calls.append("fix_models"))
-    monkeypatch.setattr(core, "run_backfill_full_meta",
+    monkeypatch.setattr(sync_mod, "run_backfill_full_meta",
                         lambda args: calls.append("backfill"))
     # build_thumbnails is fed straight from the catalog; stub load_catalog so it has rows.
     monkeypatch.setattr(core, "load_catalog",
@@ -50,7 +51,7 @@ def test_sync_runs_full_chain_in_order(monkeypatch, tmp_path):
     def _download(args, progress=None):
         calls.append("download")
         seen["progress"] = progress
-    monkeypatch.setattr(core, "run_download", _download)
+    monkeypatch.setattr(sync_mod, "run_download", _download)
     monkeypatch.setattr(sys, "argv", ["prog", "--sync", "--out", str(tmp_path)])
     core.main()
     assert calls == ["download", "backfill", "fix_models", "thumbnails", "reconcile"]
@@ -61,10 +62,10 @@ def test_sync_runs_full_chain_in_order(monkeypatch, tmp_path):
 
 def test_sync_sets_update_and_full_meta(monkeypatch, tmp_path):
     seen = {}
-    monkeypatch.setattr(core, "run_download", lambda args, progress=None:
+    monkeypatch.setattr(sync_mod, "run_download", lambda args, progress=None:
                         seen.update(update=args.update, full_meta=args.full_meta))
     monkeypatch.setattr(library_runs_mod, "run_fix_models", lambda args: None)
-    monkeypatch.setattr(core, "run_backfill_full_meta", lambda args: None)
+    monkeypatch.setattr(sync_mod, "run_backfill_full_meta", lambda args: None)
     monkeypatch.setattr(core, "load_catalog", lambda db: [])
     monkeypatch.setattr(core, "build_thumbnails", lambda *a, **k: None)
     monkeypatch.setattr(library_runs_mod, "run_reconcile_deleted", lambda args: None)
@@ -116,9 +117,9 @@ def test_sync_that_reached_the_end_says_so_and_marks_the_first_sync(
 
     def _dl(args, progress=None):
         calls.append("download")
-        core.mark_walk_end_reached(tmp_path)      # what the real walk does at the tail
+        sync_mod.mark_walk_end_reached(tmp_path)      # what the real walk does at the tail
         return _dl_result(pages=5, reached_end=True, end_known=True)
-    monkeypatch.setattr(core, "run_download", _dl)
+    monkeypatch.setattr(sync_mod, "run_download", _dl)
     monkeypatch.setattr(sys, "argv", ["prog", "--sync", "--out", str(tmp_path)])
 
     core.main()

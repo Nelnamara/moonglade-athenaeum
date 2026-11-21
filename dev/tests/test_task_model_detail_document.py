@@ -58,6 +58,7 @@ from moonglade import media_fetch as media_fetch_mod
 from moonglade import full_meta as full_meta_mod
 from moonglade import library_runs as library_runs_mod
 from moonglade import account_api as account_api_mod
+from moonglade import sync as sync_mod
 
 REPO = Path(__file__).resolve().parents[2]
 RECORDED = json.loads((Path(__file__).resolve().parent / "fixtures" /
@@ -456,7 +457,7 @@ def test_backfill_full_meta_reads_both_documents(pixai, tmp_path, fresh_model_ca
     pixai.on(TASK_DETAIL, {"task": doc})
     pixai.on(MODEL_VERSION, tsubaki["document"])
 
-    core.run_backfill_full_meta(SimpleNamespace(
+    sync_mod.run_backfill_full_meta(SimpleNamespace(
         out=str(tmp_path), token=None, workers=1, delay=0.0, progress=None,
         with_loras=False, with_credit=False, with_surface=False))
     row = load_catalog(db)[0]

@@ -634,7 +634,8 @@ def build_catalog_row(media_id, *, fm=None, known=None,
 
 def cmd_convert_existing(args, out):
     """Convert all .webp files in the backup tree to the target format in-place."""
-    from moonglade.backup import _parallel_map, PixAIError
+    from moonglade.backup import PixAIError
+    from moonglade.sync import _parallel_map
     target = (args.convert or "png").lower()
     out_ext = ".jpg" if target in ("jpg", "jpeg") else ".png"
 

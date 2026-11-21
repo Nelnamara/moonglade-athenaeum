@@ -12,6 +12,7 @@ from moonglade.catalog import CATALOG_FIELDS, save_catalog, load_catalog
 from moonglade import task_reads as task_reads_mod
 from moonglade import full_meta as full_meta_mod
 from moonglade import library_runs as library_runs_mod
+from moonglade import sync as sync_mod
 
 
 _SURFACE = ["inference_profile", "quality_tag", "prompt_helper", "control_nets", "lora_parameters",
@@ -214,13 +215,13 @@ def test_with_surface_gate_readmits_pre18_rows(monkeypatch, tmp_path, pixai):
                                  with_surface=False)
 
     # 1) WITHOUT the flag: the row passes every core gate, so nothing is fetched or changed.
-    core.run_backfill_full_meta(args)
+    sync_mod.run_backfill_full_meta(args)
     assert fetched == []
     assert not {r["task_id"]: r for r in load_catalog(db)}["t0"].get("updated_at")
 
     # 2) WITH the flag: re-admitted, fetched once, and the surface columns land.
     args.with_surface = True
-    core.run_backfill_full_meta(args)
+    sync_mod.run_backfill_full_meta(args)
     assert fetched == ["t0"]
     got = {r["task_id"]: r for r in load_catalog(db)}["t0"]
     assert got["updated_at"] == "2026-08-01T00:00:00Z"
@@ -229,7 +230,7 @@ def test_with_surface_gate_readmits_pre18_rows(monkeypatch, tmp_path, pixai):
 
     # 3) Re-run WITH the flag: updated_at is now set, so the sentinel no longer matches -> skip.
     fetched.clear()
-    core.run_backfill_full_meta(args)
+    sync_mod.run_backfill_full_meta(args)
     assert fetched == []
 
 
@@ -255,7 +256,7 @@ def test_backfill_checkpoints_incrementally_not_only_at_the_end(monkeypatch, tmp
     monkeypatch.setattr(models_mod, "model_name_gql", lambda s, mid: "M")
     monkeypatch.setattr(full_meta_mod, "resolve_loras", lambda s, t: "")
     monkeypatch.setattr(full_meta_mod, "_fill_preset_defaults", lambda s, fm, t: fm)
-    monkeypatch.setattr(core, "_BACKFILL_CHECKPOINT_TASKS", 1)     # flush after every task
+    monkeypatch.setattr(sync_mod, "_BACKFILL_CHECKPOINT_TASKS", 1)     # flush after every task
 
     saves = {"n": 0}
     real_save = core.save_catalog_over_snapshot
@@ -269,7 +270,7 @@ def test_backfill_checkpoints_incrementally_not_only_at_the_end(monkeypatch, tmp
     args = types.SimpleNamespace(out=str(tmp_path), token=None, workers=1, delay=0.0,
                                  progress=None, with_loras=False, with_credit=False,
                                  with_surface=True)
-    core.run_backfill_full_meta(args)
+    sync_mod.run_backfill_full_meta(args)
 
     assert saves["n"] >= 3, "each task should checkpoint its own save, not batch to one end-save"
     got = {r["task_id"]: r for r in load_catalog(db)}

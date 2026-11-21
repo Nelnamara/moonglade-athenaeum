@@ -24,6 +24,7 @@ from moonglade import achievements as achievements_mod
 from moonglade import branding as branding_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import ach_beacon as ach_beacon_mod
+from moonglade import sync as sync_mod
 
 # The roster is sealed in the container (built from the private donor), not in source.
 # Gate ONLY the tests that assert sealed roster/skin/criteria CONTENT -- NOT the whole
@@ -486,11 +487,11 @@ def test_new_sql_metrics(tmp_path):
 
 def test_time_capsule_only_fires_on_old_insert(tmp_path):
     from moonglade import backup as core
-    core._check_time_capsule("2020-01-01T00:00:00", tmp_path)
+    sync_mod._check_time_capsule("2020-01-01T00:00:00", tmp_path)
     assert telemetry_mod.telemetry_metrics(tmp_path)["old_piece_backed_up"] == 1
     telemetry_mod._telemetry_path(tmp_path).unlink()
-    core._check_time_capsule("2099-01-01T00:00:00", tmp_path)   # young: no fire
-    core._check_time_capsule("", tmp_path)                       # blank: no crash
+    sync_mod._check_time_capsule("2099-01-01T00:00:00", tmp_path)   # young: no fire
+    sync_mod._check_time_capsule("", tmp_path)                       # blank: no crash
     assert telemetry_mod.telemetry_metrics(tmp_path).get("old_piece_backed_up", 0) == 0
 
 

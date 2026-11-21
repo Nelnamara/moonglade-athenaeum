@@ -6,6 +6,7 @@ from moonglade import gen_params as gen_params_mod
 from moonglade import models as models_mod
 from moonglade import history as history_mod
 from moonglade import full_meta as full_meta_mod
+from moonglade import sync as sync_mod
 
 
 # ---------------------------------------------------------------------------
@@ -472,24 +473,24 @@ def test_merge_full_empty_both():
 # ---------------------------------------------------------------------------
 
 def test_parallel_map_serial_preserves_order():
-    assert list(core._parallel_map([1, 2, 3], lambda x: x * 10, workers=1)) == \
+    assert list(sync_mod._parallel_map([1, 2, 3], lambda x: x * 10, workers=1)) == \
         [(1, 10), (2, 20), (3, 30)]
 
 
 def test_parallel_map_parallel_covers_all_items():
-    got = sorted(core._parallel_map([1, 2, 3, 4, 5], lambda x: x * 10, workers=4))
+    got = sorted(sync_mod._parallel_map([1, 2, 3, 4, 5], lambda x: x * 10, workers=4))
     assert got == [(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]
 
 
 def test_parallel_map_worker_exception_yields_none():
     def boom(x):
         raise ValueError("nope")
-    assert list(core._parallel_map([1, 2], boom, workers=3)) == [(1, None), (2, None)]
+    assert list(sync_mod._parallel_map([1, 2], boom, workers=3)) == [(1, None), (2, None)]
 
 
 def test_parallel_map_progress_called_per_item():
     seen = []
-    list(core._parallel_map([1, 2, 3], lambda x: x, workers=2,
+    list(sync_mod._parallel_map([1, 2, 3], lambda x: x, workers=2,
                             progress=lambda d, t, n: seen.append((d, t))))
     assert len(seen) == 3 and seen[-1][1] == 3 and {d for d, t in seen} == {1, 2, 3}
 

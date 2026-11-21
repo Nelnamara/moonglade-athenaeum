@@ -306,6 +306,7 @@ from moonglade import media_fetch as media_fetch_mod
 from moonglade import full_meta as full_meta_mod
 from moonglade import library_runs as library_runs_mod
 from moonglade import account_api as account_api_mod
+from moonglade import sync as sync_mod
 
 
 def _dl_args(out, **kw):
@@ -348,7 +349,7 @@ def test_resume_skips_on_disk_without_redownload(tmp_path, mocker):
     mocker.patch.object(history_mod, "gql", side_effect=[_page("new1", True, "c1"),
                                                   _page("known", False)])
 
-    core.run_download(_dl_args(tmp_path))
+    sync_mod.run_download(_dl_args(tmp_path))
 
     names = [str(c.args[2]) for c in dl.call_args_list]  # stem is 3rd positional
     assert any("new1" in n for n in names)
@@ -367,7 +368,7 @@ def test_resume_ignores_quarantined_deleted_file(tmp_path, mocker):
     dl = _patch_download_layer(mocker)
     mocker.patch.object(history_mod, "gql", side_effect=[_page("known", False)])
 
-    core.run_download(_dl_args(tmp_path))
+    sync_mod.run_download(_dl_args(tmp_path))
 
     names = [str(c.args[2]) for c in dl.call_args_list]
     assert any("known" in n for n in names), (
@@ -389,7 +390,7 @@ def test_resume_does_not_skip_a_zero_byte_file(tmp_path, mocker):
     mocker.patch.object(history_mod, "gql", side_effect=[_page("new1", True, "c1"),
                                                   _page("known", False)])
 
-    core.run_download(_dl_args(tmp_path))
+    sync_mod.run_download(_dl_args(tmp_path))
 
     names = [str(c.args[2]) for c in dl.call_args_list]
     assert any("new1" in n for n in names)
@@ -416,7 +417,7 @@ def test_run_download_returns_its_fail_count(tmp_path, mocker, capsys, pixai):
     mocker.patch.object(media_fetch_mod, "download", side_effect=fake_download)
     mocker.patch.object(history_mod, "gql", side_effect=[_page("bad", True, "c1"), _page("good", False)])
 
-    result = core.run_download(_dl_args(tmp_path))
+    result = sync_mod.run_download(_dl_args(tmp_path))
 
     assert result is not None, "run_download must return its counts, not None"
     assert result["fail"] == 1
@@ -525,7 +526,7 @@ def test_update_mode_stops_early(tmp_path, mocker):
     # The early stop is armed by the walk-end marker (2026-09-07): "already on disk" only
     # means "already downloaded" for a library some pass has walked to the end of. A
     # settled library has that marker; an interrupted first backup does not.
-    core.mark_walk_end_reached(tmp_path)
+    sync_mod.mark_walk_end_reached(tmp_path)
     (tmp_path / "images").mkdir(parents=True)
     (tmp_path / "images" / "x_old.webp").write_bytes(b"img")
     _patch_download_layer(mocker)
@@ -533,7 +534,7 @@ def test_update_mode_stops_early(tmp_path, mocker):
         _page("fresh", True, "c1"), _page("old", True, "c2"),
         _page("should_not_fetch", False)])
 
-    core.run_download(_dl_args(tmp_path, update=True, update_grace=1))
+    sync_mod.run_download(_dl_args(tmp_path, update=True, update_grace=1))
 
     assert gql.call_count == 2  # page3 never requested
 
@@ -558,9 +559,9 @@ def test_update_walks_to_the_end_while_the_marker_is_absent(tmp_path, mocker):
         _page("p1", True, "c1"), _page("p2", True, "c2"), _page("p3", True, "c3"),
         _page("p4", True, "c4"), _page("p5", False)])
 
-    assert core.walk_end_reached(tmp_path) is False        # fresh: nothing has proven the end
+    assert sync_mod.walk_end_reached(tmp_path) is False        # fresh: nothing has proven the end
 
-    result = core.run_download(_dl_args(tmp_path, update=True, update_grace=2))
+    result = sync_mod.run_download(_dl_args(tmp_path, update=True, update_grace=2))
 
     assert gql.call_count == 5                             # all five pages requested
     names = [str(c.args[2]) for c in dl.call_args_list]
@@ -569,7 +570,7 @@ def test_update_walks_to_the_end_while_the_marker_is_absent(tmp_path, mocker):
         assert any(mid in n for n in names), "{} was never downloaded".format(mid)
     mids = {r["media_id"] for r in load_catalog(tmp_path / "catalog.db")}
     assert {"p1", "p2", "p3", "p4", "p5"} <= mids          # rows written for the tail
-    assert core.walk_end_reached(tmp_path) is True         # the end was seen -> marker set
+    assert sync_mod.walk_end_reached(tmp_path) is True         # the end was seen -> marker set
     assert result["reached_end"] is True
     assert result["stopped_early"] is False
     assert result["pages"] == 5
@@ -585,17 +586,17 @@ def test_update_walks_to_the_end_while_the_marker_is_absent_parallel(tmp_path, m
     gql = mocker.patch.object(history_mod, "gql", side_effect=[
         _page("p1", True, "c1"), _page("p2", True, "c2"), _page("p3", False)])
 
-    core.run_download(_dl_args(tmp_path, update=True, update_grace=2, workers=4))
+    sync_mod.run_download(_dl_args(tmp_path, update=True, update_grace=2, workers=4))
 
     assert gql.call_count == 3
     assert any("p3" in str(c.args[2]) for c in dl.call_args_list)
-    assert core.walk_end_reached(tmp_path) is True
+    assert sync_mod.walk_end_reached(tmp_path) is True
 
 
 def test_update_stops_early_once_the_marker_is_set(tmp_path, mocker):
     """The other side of the gate: a library whose walk HAS reached the end keeps the cheap
     incremental stop -- two known pages and the Sync is over, exactly as before."""
-    core.mark_walk_end_reached(tmp_path)
+    sync_mod.mark_walk_end_reached(tmp_path)
     (tmp_path / "images").mkdir(parents=True)
     (tmp_path / "images" / "x_p1.webp").write_bytes(b"img")
     (tmp_path / "images" / "x_p2.webp").write_bytes(b"img")
@@ -604,11 +605,11 @@ def test_update_stops_early_once_the_marker_is_set(tmp_path, mocker):
         _page("p1", True, "c1"), _page("p2", True, "c2"), _page("p3", True, "c3"),
         _page("p4", True, "c4"), _page("p5", False)])
 
-    result = core.run_download(_dl_args(tmp_path, update=True, update_grace=2))
+    result = sync_mod.run_download(_dl_args(tmp_path, update=True, update_grace=2))
 
     assert gql.call_count == 2                             # stopped after the two known pages
     assert not any("p3" in str(c.args[2]) for c in dl.call_args_list)
-    assert core.walk_end_reached(tmp_path) is True         # marker unchanged
+    assert sync_mod.walk_end_reached(tmp_path) is True         # marker unchanged
     assert result["stopped_early"] is True
     assert result["reached_end"] is False
 
@@ -621,10 +622,10 @@ def test_the_walk_end_marker_is_per_library(tmp_path, mocker):
     b.mkdir()
     _patch_download_layer(mocker)
     mocker.patch.object(history_mod, "gql", side_effect=[_page("only", False)])
-    core.run_download(_dl_args(a))
+    sync_mod.run_download(_dl_args(a))
 
-    assert core.walk_end_reached(a) is True
-    assert core.walk_end_reached(b) is False
+    assert sync_mod.walk_end_reached(a) is True
+    assert sync_mod.walk_end_reached(b) is False
     assert paths.records_path(a, "telemetry.json").exists()
     assert not paths.records_path(b, "telemetry.json").exists()
 
@@ -635,7 +636,7 @@ def test_the_walk_end_marker_is_per_library(tmp_path, mocker):
     gql_b = mocker.patch.object(history_mod, "gql", side_effect=[
         _page("q1", True, "c1"), _page("q2", True, "c2"), _page("q3", False)])
 
-    core.run_download(_dl_args(b, update=True, update_grace=2))
+    sync_mod.run_download(_dl_args(b, update=True, update_grace=2))
 
     assert gql_b.call_count == 3, "library A's finished walk armed library B's early stop"
 
@@ -647,9 +648,9 @@ def test_a_max_capped_run_does_not_claim_the_end_of_history(tmp_path, mocker):
     _patch_download_layer(mocker)
     mocker.patch.object(history_mod, "gql", side_effect=[_page("p1", True, "c1")])
 
-    result = core.run_download(_dl_args(tmp_path, max=1))
+    result = sync_mod.run_download(_dl_args(tmp_path, max=1))
 
-    assert core.walk_end_reached(tmp_path) is False
+    assert sync_mod.walk_end_reached(tmp_path) is False
     assert result["reached_end"] is False
 
 
@@ -676,7 +677,7 @@ def test_download_skips_video_task_posters(tmp_path, mocker):
         "pageInfo": {"hasPreviousPage": False, "startCursor": ""}}}}
     mocker.patch.object(history_mod, "gql", side_effect=[page])
 
-    core.run_download(_dl_args(tmp_path))
+    sync_mod.run_download(_dl_args(tmp_path))
 
     stems = [str(c.args[2]) for c in dl.call_args_list]        # stem is the 3rd positional
     assert any("IMG1" in s for s in stems)                     # the image WAS fetched
@@ -698,7 +699,7 @@ def test_populated_catalog_skips_network_count(tmp_path, mocker):
     qc = mocker.patch.object(core, "_quick_count", return_value=999)
     mocker.patch.object(history_mod, "gql", side_effect=[_page("old", False)])
 
-    core.run_download(_dl_args(tmp_path, update=True, update_grace=1))
+    sync_mod.run_download(_dl_args(tmp_path, update=True, update_grace=1))
 
     assert qc.call_count == 0  # catalog estimate used, no network pre-count
 
@@ -717,7 +718,7 @@ def test_parallel_workers_download_new_skip_known(tmp_path, mocker):
             "edges": edges, "pageInfo": {"hasPreviousPage": has_prev, "startCursor": cursor}}}}
 
     mocker.patch.object(history_mod, "gql", side_effect=[_multi_page(["a", "b", "known"], False)])
-    core.run_download(_dl_args(tmp_path, workers=4))
+    sync_mod.run_download(_dl_args(tmp_path, workers=4))
 
     names = [str(c.args[2]) for c in dl.call_args_list]
     assert sum("known" in n for n in names) == 0          # on-disk skipped
@@ -731,7 +732,7 @@ def test_update_and_workers_compose(tmp_path_factory, mocker):
     tmp_path.mkdir()
     # --update (early-stop) + --workers (parallel) together: new items fetched
     # concurrently at the top, then stop once a page is fully on disk.
-    core.mark_walk_end_reached(tmp_path)   # a settled library: the stop is armed
+    sync_mod.mark_walk_end_reached(tmp_path)   # a settled library: the stop is armed
     (tmp_path / "images").mkdir(parents=True)
     (tmp_path / "images" / "x_old.webp").write_bytes(b"img")
     dl = _patch_download_layer(mocker)
@@ -747,7 +748,7 @@ def test_update_and_workers_compose(tmp_path_factory, mocker):
         _mp(["new1", "new2"], True, "c1"), _mp(["old"], True, "c2"),
         _mp(["should_not_fetch"], False)])
 
-    core.run_download(_dl_args(tmp_path, update=True, update_grace=1, workers=4))
+    sync_mod.run_download(_dl_args(tmp_path, update=True, update_grace=1, workers=4))
 
     names = [str(c.args[2]) for c in dl.call_args_list]
     assert gql.call_count == 2                                   # stopped before page 3
@@ -1019,7 +1020,7 @@ def test_progress_counter_does_not_double_count(tmp_path, mocker):
                                     "pageInfo": {"hasPreviousPage": False}}}}])
 
     seen = []
-    core.run_download(_dl_args(tmp_path), progress=lambda d, t, n: seen.append((d, t)))
+    sync_mod.run_download(_dl_args(tmp_path), progress=lambda d, t, n: seen.append((d, t)))
 
     max_done = max(d for d, t in seen)
     total = seen[-1][1]
@@ -1170,7 +1171,7 @@ def test_backfill_full_meta_recovers_historical_paid_credit(tmp_path, mocker, pi
     mocker.patch.object(task_reads_mod, "task_detail_gql", side_effect=lambda s, tid, **kw: tasks[str(tid)])
 
     # Pass 1: plain backfill -> t1 fetched (missing meta) and gains cost; t2 untouched.
-    core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    sync_mod.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
     rows = {r["media_id"]: r for r in load_catalog(db)}
     assert rows["m1"]["prompt_full"] == "night elf druid"
     assert rows["m1"]["paid_credit"] == "300"        # historical cost recovered
@@ -1178,7 +1179,7 @@ def test_backfill_full_meta_recovers_historical_paid_credit(tmp_path, mocker, pi
 
     # Pass 2: --with-credit -> t2 re-fetched for its blank cost; existing meta kept;
     # its genuinely-free cost stored as '0', never '' .
-    core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
+    sync_mod.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
                                                 with_credit=True))
     rows = {r["media_id"]: r for r in load_catalog(db)}
     assert rows["m2"]["paid_credit"] == "0"
@@ -1274,7 +1275,7 @@ def test_the_backfill_separates_errors_from_tasks_that_carried_no_prompt(tmp_pat
         return {"parameters": {}, "outputs": {}}          # fetched fine, no prompt
 
     mocker.patch.object(task_reads_mod, "task_detail_gql", side_effect=detail)
-    core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    sync_mod.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
     out = capsys.readouterr().out
     assert "Why they failed:" in out and "429" in out, "the real error must be named"
     assert "carried no prompt" in out, (
@@ -1297,7 +1298,7 @@ def test_parallel_map_reports_failures_instead_of_swallowing_them():
             raise RuntimeError("rate limited (429)")
         return i
 
-    out = list(core._parallel_map(range(6), boom, workers=4,
+    out = list(sync_mod._parallel_map(range(6), boom, workers=4,
                                   on_error=lambda it, e: seen.append((it, str(e)))))
     assert len(out) == 6, "a failing worker must not drop its item from the stream"
     assert [r for _, r in out].count(None) == 3, "failures still yield None, as before"
@@ -1323,7 +1324,7 @@ def test_parallel_map_paces_the_whole_pool_not_each_thread():
         return i
 
     t0 = time.monotonic()
-    list(core._parallel_map(range(8), stamp, workers=8, delay=0.05))
+    list(sync_mod._parallel_map(range(8), stamp, workers=8, delay=0.05))
     span = time.monotonic() - t0
     # 8 starts one slot apart is 7 gaps of real time.sleep -- a FLOOR, so load can only push
     # this span higher, never below the bound. A pool that ignored the pace finishes in ~0s
@@ -1347,7 +1348,7 @@ def test_backfill_names_why_tasks_failed(tmp_path, mocker, capsys, pixai):
                           "filename": "%d.png" % i} for i in range(40)])
     mocker.patch.object(task_reads_mod, "task_detail_gql",
                         side_effect=core.PixAIError("HTTP 429 rate limited"))
-    core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
+    sync_mod.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
                                                 workers=4))
     out = capsys.readouterr().out
     assert "Why they failed:" in out
@@ -1444,7 +1445,7 @@ def test_backfill_full_meta_refetches_rows_that_have_only_a_prompt(tmp_path, moc
     mocker.patch.object(models_mod, "model_name_gql", side_effect=lambda s, mid: "WAI v17")
     mocker.patch.object(full_meta_mod, "resolve_loras", side_effect=lambda s, t: "")
 
-    core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    sync_mod.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
     row = {r["media_id"]: r for r in load_catalog(db)}["m1"]
     assert row["model_id"] == "4242", "the prompt-only row was skipped again"
     assert row["model_name"] == "WAI v17"
@@ -1454,7 +1455,7 @@ def test_backfill_full_meta_refetches_rows_that_have_only_a_prompt(tmp_path, moc
     calls = []
     mocker.patch.object(task_reads_mod, "task_detail_gql",
                         side_effect=lambda s, tid, **kw: calls.append(tid) or task)
-    core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    sync_mod.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
     assert calls == [], "the filled row is being re-fetched on every run"
 
 

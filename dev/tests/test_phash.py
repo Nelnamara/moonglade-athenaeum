@@ -10,6 +10,7 @@ from moonglade import backup as core
 from moonglade.thumbs import compute_dhash
 from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from moonglade.dupes import near_duplicate_groups
+from moonglade import sync as sync_mod
 
 
 def _row(**kw):
@@ -156,7 +157,7 @@ def test_backfill_phash_fills_missing_rows_image_only(tmp_path):
         _row(media_id="2", filename="b_2.png", phash="deadbeefdeadbeef"),  # already filled
         _row(media_id="3", filename="videos/v_3.mp4", is_video="1"),       # video: skipped
     ])
-    out = core.run_backfill_phash(SimpleNamespace(out=str(tmp_path), workers=1, max=0,
+    out = sync_mod.run_backfill_phash(SimpleNamespace(out=str(tmp_path), workers=1, max=0,
                                                   progress=None))
     assert out["filled"] == 1                  # only row "1" needed filling
     assert out["unresolved"] == 0 and out["unreadable"] == 0
@@ -174,7 +175,7 @@ def test_backfill_phash_respects_max_cap(tmp_path):
     save_catalog(tmp_path / "catalog.db", [
         _row(media_id=str(i), filename="img_{}.png".format(i)) for i in range(1, 4)
     ])
-    out = core.run_backfill_phash(SimpleNamespace(out=str(tmp_path), workers=1, max=1,
+    out = sync_mod.run_backfill_phash(SimpleNamespace(out=str(tmp_path), workers=1, max=1,
                                                   progress=None))
     assert out["filled"] == 1                  # capped to 1 of the 3 rows needing it
 
@@ -190,7 +191,7 @@ def test_backfill_phash_counts_unresolved_file_separately(tmp_path):
     save_catalog(tmp_path / "catalog.db", [
         _row(media_id="1", filename="missing.png"),
     ])
-    out = core.run_backfill_phash(SimpleNamespace(out=str(tmp_path), workers=1, max=0,
+    out = sync_mod.run_backfill_phash(SimpleNamespace(out=str(tmp_path), workers=1, max=0,
                                                   progress=None))
     assert out["filled"] == 0
     assert out["unresolved"] == 1
@@ -200,6 +201,6 @@ def test_backfill_phash_nothing_to_do_is_safe(tmp_path):
     save_catalog(tmp_path / "catalog.db", [
         _row(media_id="1", filename="a.png", phash="0000000000000000"),
     ])
-    out = core.run_backfill_phash(SimpleNamespace(out=str(tmp_path), workers=1, max=0,
+    out = sync_mod.run_backfill_phash(SimpleNamespace(out=str(tmp_path), workers=1, max=0,
                                                   progress=None))
     assert out == {"filled": 0, "unresolved": 0, "unreadable": 0, "total": 1}
