@@ -41,6 +41,8 @@ from tests.conftest import login_test_client, session_csrf, with_csrf
 from moonglade import task_reads as task_reads_mod
 
 _GALLERY = Path(__file__).resolve().parents[2] / "moonglade" / "gallery.py"
+# Where routes are defined: gallery.create_app, and the families split out of it (phase 4).
+_ROUTE_SOURCES = (_GALLERY, _GALLERY.with_name("routes_generate.py"))
 _STATE_CHANGING = {"POST", "PUT", "PATCH", "DELETE"}
 _REFUSAL = "Your session expired. Reload the page and try again."
 
@@ -75,14 +77,15 @@ def _called_names(node):
 
 
 def _token_checkers():
-    """`_check_csrf` plus every function in moonglade_gallery.py that calls it, directly or
+    """`_check_csrf` plus every function in the route sources that calls it, directly or
     through another such function -- resolved to a fixed point, so a helper of a helper
     counts. A name defined more than once counts only when EVERY definition checks."""
-    tree = ast.parse(_GALLERY.read_text(encoding="utf-8"))
     defs = {}
-    for n in ast.walk(tree):
-        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            defs.setdefault(n.name, []).append(n)
+    for src_path in _ROUTE_SOURCES:
+        tree = ast.parse(src_path.read_text(encoding="utf-8"))
+        for n in ast.walk(tree):
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                defs.setdefault(n.name, []).append(n)
     checkers = {"_check_csrf"}
     grew = True
     while grew:

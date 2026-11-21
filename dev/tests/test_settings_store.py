@@ -228,7 +228,8 @@ def test_the_branding_picks_write_settings_and_leave_each_other_alone(tmp_path):
 def test_config_json_keeps_only_hand_edited_values():
     """The keys the app used to write into config.json are gone from every writer."""
     import inspect
+    from moonglade import routes_generate as routes_generate_mod    # gallery's create routes
     src = (inspect.getsource(g) + inspect.getsource(core) + inspect.getsource(mirror_mod)
-           + inspect.getsource(branding_mod))
+           + inspect.getsource(branding_mod) + inspect.getsource(routes_generate_mod))
     for key in ('"LIBRARY_DIR"', '"BONJOUR_ENABLED"', '"BONJOUR_NAME"', '"MIRROR_TO_PIXAI"'):
         assert key not in src, key

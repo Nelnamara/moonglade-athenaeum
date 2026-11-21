@@ -800,11 +800,14 @@ def test_only_the_two_tool_terminals_write_the_bridge_set():
     bridge_gen_tasks are the enhance and scene terminals. Self-computing -- it counts the
     write sites in the source rather than restating where they are, so a third one added
     anywhere (the collect choke again, a new route) fails here on the day it lands. It reads
-    the gallery and the modules the 3.21.0 split moved gallery code into."""
+    the gallery and the modules the 3.21.0 split moved gallery code into (the create routes,
+    where both terminals live, since split phase 4)."""
     import inspect
     from moonglade import contest_sync as contest_sync_mod, living as living_mod
+    from moonglade import routes_generate as routes_generate_mod
     src = "\n".join(inspect.getsource(mod) for mod in (
-        g, telemetry_mod, achievements_mod, branding_mod, living_mod, contest_sync_mod))
+        g, telemetry_mod, achievements_mod, branding_mod, living_mod, contest_sync_mod,
+        routes_generate_mod))
     writes = [ln.strip() for ln in src.splitlines()
               if "telem_set_add(" in ln and "bridge_gen_tasks" in ln]
     assert len(writes) == 2, writes

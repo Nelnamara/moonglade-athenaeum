@@ -617,6 +617,17 @@ def _create_app_node():
                 if isinstance(n, ast.FunctionDef) and n.name == "create_app")
 
 
+def _route_function_nodes():
+    """create_app, and the register(app, ctx) of each route family split out of it (split
+    phase 4): the invariant covers the handlers wherever they now live."""
+    out = [("gallery.py", _create_app_node())]
+    for name in ("routes_generate.py",):
+        tree = ast.parse(Path(g.__file__).with_name(name).read_text(encoding="utf-8"))
+        out.append((name, next(n for n in tree.body
+                               if isinstance(n, ast.FunctionDef) and n.name == "register")))
+    return out
+
+
 def _docstring_nodes(root):
     """The Constant node of every docstring under `root`, so prose is not mistaken
     for code. Comments never reach the AST at all."""
@@ -639,17 +650,17 @@ def test_no_catalog_sql_lives_inside_create_app():
     through helpers in moonglade_gallery.py -- never raw SQL elsewhere" was a
     description of an intention rather than of the code. This test is what makes it
     a fact: a handler that grows its own SELECT fails the suite."""
-    ca = _create_app_node()
-    docs = _docstring_nodes(ca)
     offenders = []
-    for n in ast.walk(ca):
-        if isinstance(n, ast.Name) and n.id in _FORBIDDEN_NAMES:
-            offenders.append("line {}: names `{}`".format(n.lineno, n.id))
-        elif (isinstance(n, ast.Constant) and isinstance(n.value, str)
-                and id(n) not in docs and n.value not in _EXEMPT_STRINGS
-                and _SQL.search(n.value)):
-            offenders.append("line {}: SQL string {!r}".format(
-                n.lineno, n.value.replace("\n", " ")[:80]))
+    for where, ca in _route_function_nodes():
+        docs = _docstring_nodes(ca)
+        for n in ast.walk(ca):
+            if isinstance(n, ast.Name) and n.id in _FORBIDDEN_NAMES:
+                offenders.append("{} line {}: names `{}`".format(where, n.lineno, n.id))
+            elif (isinstance(n, ast.Constant) and isinstance(n.value, str)
+                    and id(n) not in docs and n.value not in _EXEMPT_STRINGS
+                    and _SQL.search(n.value)):
+                offenders.append("{} line {}: SQL string {!r}".format(
+                    where, n.lineno, n.value.replace("\n", " ")[:80]))
     assert not offenders, (
         "create_app holds catalog SQL again -- move it to a named verb beside the "
         "other catalog helpers:\n  " + "\n  ".join(sorted(set(offenders))))

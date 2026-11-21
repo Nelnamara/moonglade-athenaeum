@@ -432,7 +432,9 @@ def test_the_retired_saved_request_leaves_nothing_behind():
                  *sorted((REPO / "wiki").glob("*.md"))]
     for doc in live_docs:
         assert "ARTWORK_LIST_HASH" not in doc.read_text(encoding="utf-8"), doc.name
-    for module in (core, g, pixai_client_mod, living_mod):   # the transport, the sweep moved out
+    from moonglade import routes_generate as routes_generate_mod    # gallery's create routes
+    for module in (core, g, pixai_client_mod, living_mod,   # the transport, the sweep moved out
+                   routes_generate_mod):
         assert "ARTWORK_LIST_HASH" not in inspect.getsource(module)
 
 

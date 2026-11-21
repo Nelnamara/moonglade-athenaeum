@@ -529,5 +529,7 @@ def test_the_retired_saved_request_leaves_nothing_behind():
                  *sorted((REPO / "wiki").glob("*.md"))]
     for doc in live_docs:
         assert "PERSISTED_QUERY_HASH" not in doc.read_text(encoding="utf-8"), doc.name
-    for module in (core, g, pixai_client_mod):     # the transport moved out of core
+    from moonglade import routes_generate as routes_generate_mod    # gallery's create routes
+    for module in (core, g, pixai_client_mod,      # the transport moved out of core
+                   routes_generate_mod):
         assert "PERSISTED_QUERY_HASH" not in inspect.getsource(module)

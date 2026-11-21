@@ -335,6 +335,9 @@ SEAMS = {
         "_CONTEST_PAGE_SIZE", "_CONTEST_MAX_PAGES", "_CONTEST_PAGE_PAUSE", "_contest_title",
         "_contest_rule", "list_contests", "run_contests", "_contest_rows", "contest_my_entries",
         "contest_winners", "contest_artworks", "contest_enter"]},
+    # Split phase 4: the first route family. Its routes and helpers are closures inside
+    # register(app, ctx), not module attributes, so register is the one name it owns.
+    "moonglade.routes_generate": {"from": "moonglade.gallery", "names": ["register"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -404,7 +407,8 @@ SOURCE_READERS = {
     "loom/test/med-loom-bundle-missing-report.test.js": ("moonglade.gallery",),
     "loom/test/mg-art-filters.test.js": ("moonglade.gallery",),
     "loom/test/mg-notify-queue-phase.test.js": ("moonglade.gallery",),
-    "loom/test/mg-notify-website-source.test.js": ("moonglade.gallery",),
+    "loom/test/mg-notify-website-source.test.js": ("moonglade.gallery",
+                                                   "moonglade.routes_generate"),
     "loom/test/phone-back-layers.test.js": ("moonglade.gallery",),
     "loom/test/video-roster-parity.test.js": ("moonglade.gen_params",),
 }
@@ -1280,6 +1284,31 @@ SOURCE_READERS_REVIEWED = {
     *(("tests/test_server_one_module.py", "moonglade." + _m) for _m in (
         "about", "account_prefs", "achievements", "branding", "contest_sync", "dupes", "health",
         "living", "scan", "series", "telemetry", "updater")),
+    # Split phase 4: the create routes -> moonglade.routes_generate. Readers that read text which
+    # left gallery.py now read routes_generate too: test_csrf_coverage (the _check_csrf callers),
+    # test_catalog_verbs (the "no SQL in a handler" walk covers register), test_telemetry (the
+    # two bridge-set writers), test_evidence_counters, test_settings_store, test_catchup_query,
+    # test_artworks_adhoc and test_history_feed_document (their absence checks keep covering the
+    # moved code) and mg-notify-website-source.test.js (/api/jobs' "web" default). The rest read
+    # code that did not move (main, the Loom routes, the watch, the page shells, the palettes,
+    # create_app's setup and its other closures).
+    *((_r, "moonglade.routes_generate") for _r in (
+        "loom/test/med-loom-bundle-missing-report.test.js", "loom/test/mg-art-filters.test.js",
+        "loom/test/mg-notify-queue-phase.test.js", "loom/test/mg-notify-website-source.test.js",
+        "loom/test/phone-back-layers.test.js", "tests/test_app_paths.py",
+        "tests/test_artworks_adhoc.py", "tests/test_bonjour.py", "tests/test_branding.py",
+        "tests/test_branding_tree_rules.py", "tests/test_catalog_verbs.py",
+        "tests/test_catchup_query.py", "tests/test_csrf_coverage.py",
+        "tests/test_design_kit_sync.py", "tests/test_doc_truth_residuals.py",
+        "tests/test_evidence_counters.py", "tests/test_first_party_sources.py",
+        "tests/test_gen_surface.py", "tests/test_history_feed_document.py",
+        "tests/test_library_dir.py", "tests/test_living_library.py", "tests/test_logging.py",
+        "tests/test_loom_generate_guard.py", "tests/test_loom_notify.py",
+        "tests/test_loom_p_routes.py", "tests/test_network.py",
+        "tests/test_security_review_fixes.py", "tests/test_server_one_module.py",
+        "tests/test_settings_store.py", "tests/test_setup_prepare.py",
+        "tests/test_task_model_detail_document.py", "tests/test_telemetry.py", "tests/test_watch.py",
+        "tools/export_design_kit.py")),
 }
 
 
