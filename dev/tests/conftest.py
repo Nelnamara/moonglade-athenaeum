@@ -246,6 +246,51 @@ def first_party_sources(root=None, suffixes=(".py", ".pyw")):
     return found
 
 
+def _server_seams():
+    """The SEAMS map (new module -> {"from", "names"}) read as a literal, so conftest never
+    imports a test module."""
+    import ast
+    path = DEV_DIR / "tests" / "test_module_seams.py"
+    for node in ast.parse(path.read_text(encoding="utf-8")).body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "SEAMS"
+                                                for t in node.targets):
+            return ast.literal_eval(node.value)
+    raise AssertionError("test_module_seams.py has no SEAMS literal")
+
+
+def server_source_modules():
+    """The modules that make up the server's and the engine's source: the two old modules and
+    every module that received code from them (the targets of SEAMS, the route and web modules
+    included though they own no view or hook of their own)."""
+    return sorted({"moonglade.gallery", "moonglade.backup"} | set(_server_seams()))
+
+
+def server_sources(function=None, parts=False):
+    """THE collector for a test that reads the gallery's or the engine's source text.
+
+    No argument: the text of every module in server_source_modules(). `function="create_app"`:
+    create_app plus every module's `register`. Any other `function`: that top-level function or
+    class, found wherever SEAMS says it went (AssertionError if no collected module has it).
+    Returns one string, or `{module: text}` with `parts=True`. A reader that wants the code it
+    names, not the file it once lived in, reads it here, so a move never leaves it reading less."""
+    import ast
+    out = {}
+    for mod in server_source_modules():
+        path = REPO_ROOT / Path(*mod.split(".")).with_suffix(".py")
+        text = path.read_text(encoding="utf-8")
+        if function is None:
+            out[mod] = text
+            continue
+        wanted = {"create_app", "register"} if function == "create_app" else {function}
+        segs = [ast.get_source_segment(text, n) for n in ast.parse(text).body
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                and n.name in wanted]
+        if segs:
+            out[mod] = "\n\n".join(segs)
+    if function is not None and not out:
+        raise AssertionError("no collected module defines %s" % function)
+    return out if parts else "\n\n".join(out[m] for m in sorted(out))
+
 def stub_code_module(monkeypatch, name, module):
     """Stand `module` in for `moonglade.<name>` for one test. The app imports its own modules
     as `from moonglade import <name>`, which reads the PACKAGE's attribute first and falls
