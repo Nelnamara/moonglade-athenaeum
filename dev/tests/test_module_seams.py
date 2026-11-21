@@ -360,6 +360,9 @@ SEAMS = {
     # task delete and its preview, the Trash panel), the same way: one register(app, ctx), and
     # no gallery attribute moved.
     "moonglade.routes_delete": {"from": "moonglade.gallery", "names": []},
+    # Split phase 4: the recipe market and the model pickers' Saved tab, the same way: one
+    # register(app, ctx), and no gallery attribute moved.
+    "moonglade.routes_recipes": {"from": "moonglade.gallery", "names": []},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -1443,6 +1446,29 @@ SOURCE_READERS_REVIEWED = {
     # rest read code that did not move, name the delete routes only as URLs they request, or reach
     # the moved code through a built app, not its text.
     *((_r, "moonglade.routes_delete") for _r in (
+        "loom/test/mg-art-filters.test.js", "loom/test/mg-notify-queue-phase.test.js",
+        "loom/test/mg-notify-website-source.test.js", "loom/test/phone-back-layers.test.js",
+        "tests/test_app_paths.py", "tests/test_artworks_adhoc.py", "tests/test_bonjour.py",
+        "tests/test_branding.py", "tests/test_branding_tree_rules.py",
+        "tests/test_catalog_verbs.py", "tests/test_catchup_query.py", "tests/test_csrf_coverage.py",
+        "tests/test_design_kit_sync.py", "tests/test_doc_truth_residuals.py",
+        "tests/test_enhance.py", "tests/test_evidence_counters.py",
+        "tests/test_first_party_sources.py", "tests/test_history_feed_document.py",
+        "tests/test_living_library.py", "tests/test_logging.py", "tests/test_loom_notify.py",
+        "tests/test_loom_p_routes.py", "tests/test_media_tools.py", "tests/test_module_seams.py",
+        "tests/test_move_edges.py", "tests/test_network.py", "tests/test_outside_notice.py",
+        "tests/test_pack_file_name.py", "tests/test_pack_file_type.py",
+        "tests/test_rest_delete_and_renewal.py", "tests/test_security_review_fixes.py",
+        "tests/test_server_one_module.py", "tests/test_server_stop_record.py",
+        "tests/test_settings_store.py", "tests/test_setup_prepare.py",
+        "tests/test_task_model_detail_document.py", "tests/test_telemetry.py",
+        "tests/test_tsubaki3_image_gate.py", "tools/export_design_kit.py", "tools/split_names.py")),
+    # Split phase 4: the recipe market and the Saved tab -> moonglade.routes_recipes. No reader
+    # slices the moved text out of gallery by name; the absence and coverage readers the earlier
+    # moves widened (test_csrf_coverage among them, for the recipe and Saved writes) read
+    # routes_recipes too. The rest read code that did not move, name these routes only as URLs
+    # they request, or reach the moved code through a built app, not its text.
+    *((_r, "moonglade.routes_recipes") for _r in (
         "loom/test/mg-art-filters.test.js", "loom/test/mg-notify-queue-phase.test.js",
         "loom/test/mg-notify-website-source.test.js", "loom/test/phone-back-layers.test.js",
         "tests/test_app_paths.py", "tests/test_artworks_adhoc.py", "tests/test_bonjour.py",

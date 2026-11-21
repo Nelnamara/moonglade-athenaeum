@@ -235,11 +235,13 @@ def test_config_json_keeps_only_hand_edited_values():
     from moonglade import web_threads as web_threads_mod            # and the background jobs'
     from moonglade import routes_panel as routes_panel_mod          # and the Control Panel's
     from moonglade import routes_delete as routes_delete_mod        # and the delete routes'
+    from moonglade import routes_recipes as routes_recipes_mod      # and the recipe routes'
     src = (inspect.getsource(g) + inspect.getsource(core) + inspect.getsource(mirror_mod)
            + inspect.getsource(branding_mod) + inspect.getsource(routes_generate_mod)
            + inspect.getsource(routes_loom_mod) + inspect.getsource(web_loom_store_mod)
            + inspect.getsource(routes_gate_mod) + inspect.getsource(web_threads_mod)
            + inspect.getsource(routes_panel_mod)
-           + inspect.getsource(routes_delete_mod))
+           + inspect.getsource(routes_delete_mod)
+           + inspect.getsource(routes_recipes_mod))
     for key in ('"LIBRARY_DIR"', '"BONJOUR_ENABLED"', '"BONJOUR_NAME"', '"MIRROR_TO_PIXAI"'):
         assert key not in src, key
