@@ -166,6 +166,7 @@ def test_the_miss_account_is_gone():
     from moonglade import routes_account as routes_account_mod      # and the account routes'
     from moonglade import routes_community as routes_community_mod  # and the community routes'
     from moonglade import routes_train as routes_train_mod          # and the training routes'
+    from moonglade import routes_ach as routes_ach_mod              # and the achievement routes'
     src = (inspect.getsource(mg) + inspect.getsource(routes_generate_mod)
            + inspect.getsource(routes_loom_mod) + inspect.getsource(web_loom_store_mod)
            + inspect.getsource(routes_gate_mod) + inspect.getsource(web_threads_mod)
@@ -175,7 +176,8 @@ def test_the_miss_account_is_gone():
            + inspect.getsource(routes_library_mod)
            + inspect.getsource(routes_account_mod)
            + inspect.getsource(routes_community_mod)
-           + inspect.getsource(routes_train_mod))
+           + inspect.getsource(routes_train_mod)
+           + inspect.getsource(routes_ach_mod))
     for retired in ("_note_catchup_query", "_catchup_query", "WATCH_CATCHUP_QUERY_MISSES",
                     "via_document", "saved history request", "core.history_page"):
         assert retired not in src, retired
