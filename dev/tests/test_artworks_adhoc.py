@@ -438,9 +438,10 @@ def test_the_retired_saved_request_leaves_nothing_behind():
     from moonglade import routes_gate as routes_gate_mod            # and the front door's
     from moonglade import web_threads as web_threads_mod            # and the background jobs'
     from moonglade import routes_panel as routes_panel_mod          # and the Control Panel's
+    from moonglade import routes_delete as routes_delete_mod        # and the delete routes'
     for module in (core, g, pixai_client_mod, living_mod,   # the transport, the sweep moved out
                    routes_generate_mod, routes_loom_mod, web_loom_store_mod, routes_gate_mod,
-                   web_threads_mod, routes_panel_mod):
+                   web_threads_mod, routes_panel_mod, routes_delete_mod):
         assert "ARTWORK_LIST_HASH" not in inspect.getsource(module)
 
 
