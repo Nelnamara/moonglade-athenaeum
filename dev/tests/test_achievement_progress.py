@@ -17,13 +17,14 @@ import pytest
 
 from moonglade import container as _mc
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests import synthetic_feats as sf
 from tests.conftest import clear_sealed_caches, login_client
 from moonglade import telemetry as telemetry_mod
 from moonglade import achievements as achievements_mod
 from moonglade import branding as branding_mod
+from moonglade import catalog as catalog_mod
 
 HIDDEN_ID = "synth-hidden-feat"
 HIDDEN_NAME = "Synthetic Hidden Feat"
@@ -263,7 +264,7 @@ def test_every_non_feat_metric_in_the_sealed_roster_is_measured(tmp_path, sealed
     assertion is on metric NAMES of non-feat honors; it never prints a feat."""
     # The real recipe on an empty library: the catalog's metrics, then telemetry's -- the
     # merge every gate uses -- rather than a hand list that drifts when a metric moves.
-    g.save_catalog(tmp_path / "catalog.db", [])
+    catalog_mod.save_catalog(tmp_path / "catalog.db", [])
     fresh = achievements_mod.achievement_metrics(tmp_path / "catalog.db", use_cache=False)
     fresh.update(telemetry_mod.telemetry_metrics(tmp_path))
     unmeasured = sorted({

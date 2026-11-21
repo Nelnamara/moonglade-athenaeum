@@ -12,10 +12,11 @@ pytest.importorskip("fastmcp")   # CI installs no fastmcp -> skip, never fail
 
 from moonglade import gallery as g
 from moonglade import mcp_server as m
+from moonglade import catalog as catalog_mod
 
 
 def _row(**kw):
-    return {f: "" for f in g.CATALOG_FIELDS} | kw
+    return {f: "" for f in catalog_mod.CATALOG_FIELDS} | kw
 
 
 @pytest.fixture
@@ -33,7 +34,7 @@ def catalog(tmp_path, monkeypatch):
              created_at="2026-04-01", prompt_full="a short clip", model_name="Wan"),
     ]
     db = tmp_path / "catalog.db"
-    g.save_catalog(db, rows)
+    catalog_mod.save_catalog(db, rows)
     monkeypatch.setattr(m, "DB", str(db))
     monkeypatch.setattr(m, "OUT", tmp_path)
     return db
@@ -125,7 +126,7 @@ def test_tag_suggest_reports_error_not_raises(monkeypatch):
 def test_get_image_never_opens_an_svg(catalog, monkeypatch):
     """3.22 S5 (DESIGN_3.22 5.4): the MCP server's image read skips an SVG -- a document, never
     opened or drawn here -- and still answers its metadata."""
-    g.save_catalog(catalog, [_row(media_id="m9", filename="m9.svg", created_at="2026-05-01",
+    catalog_mod.save_catalog(catalog, [_row(media_id="m9", filename="m9.svg", created_at="2026-05-01",
                                   output_format="svg")])
     (catalog.parent / "m9.svg").write_text("<svg xmlns='http://www.w3.org/2000/svg'/>",
                                            encoding="utf-8")

@@ -23,13 +23,14 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gallery as g
-from moonglade.gallery import (
-    CATALOG_FIELDS, CurationError, curate_apply, curate_restore, delete_collection,
-    list_media_ids, list_group_rows, load_catalog, merge_collections, normalize_tag,
-    personal_get, query_catalog, rename_collection, save_smart_collection, save_catalog,
-)
+from moonglade.gallery import (CurationError, curate_apply, curate_restore, delete_collection,
+                               list_media_ids, list_group_rows, merge_collections, normalize_tag,
+                               personal_get, query_catalog, rename_collection,
+                               save_smart_collection)
+from moonglade.catalog import CATALOG_FIELDS, load_catalog, save_catalog
 from tests.conftest import extract_login_csrf, login_client
 from moonglade import catalog_search as catalog_search_mod
+from moonglade import catalog as catalog_mod
 
 
 def _row(**kw):
@@ -109,7 +110,7 @@ def test_an_existing_library_gains_the_tables_and_loses_nothing(tmp_path):
     after = sqlite3.connect(str(p)).execute("SELECT * FROM catalog ORDER BY media_id").fetchall()
     assert after == before, "the migration touched an existing catalog row"
     assert len(rows) == 5
-    g.migrate(p, force=True)                    # re-running the DDL stays harmless
+    catalog_mod.migrate(p, force=True)                    # re-running the DDL stays harmless
     assert sqlite3.connect(str(p)).execute("SELECT * FROM catalog ORDER BY media_id").fetchall() == before
 
 
@@ -118,7 +119,7 @@ def test_opening_and_reading_writes_nothing(db):
     leave every table exactly as it was."""
     save_smart_collection(db, "keeper")
     before = _dump(db)
-    g.unique_collections(db)
+    catalog_mod.unique_collections(db)
     g.list_smart_collections(db)
     g.collection_summaries(db)
     query_catalog(db, q="keeper -reject tag:x note:y")
@@ -220,7 +221,7 @@ def test_unknown_ids_are_skipped_not_created(db):
 
 def test_a_purge_leaves_the_personal_layer_waiting_for_a_restore(db):
     curate_apply(db, ["3"], {"mark": "keeper", "note": "hands"})
-    g.delete_from_catalog(db, "3")                        # what a trash purge does to the row
+    catalog_mod.delete_from_catalog(db, "3")                        # what a trash purge does to the row
     assert personal_get(db, ["3"])["3"]["note"] == "hands"
 
 
@@ -330,10 +331,10 @@ def test_save_over_replaces_only_the_query(db):
 def test_pictures_cannot_be_added_to_a_smart_collection(db):
     save_smart_collection(db, "keeper", name="Keepers")
     with pytest.raises(CurationError):
-        g.add_to_collection(db, ["1"], "Keepers")
+        catalog_mod.add_to_collection(db, ["1"], "Keepers")
     with pytest.raises(CurationError):
-        g.add_to_collection(db, ["1"], "keepers")
-    assert g.unique_collections(db) == ["Druid", "Faves"]
+        catalog_mod.add_to_collection(db, ["1"], "keepers")
+    assert catalog_mod.unique_collections(db) == ["Druid", "Faves"]
 
 
 def test_the_summaries_list_both_kinds_with_counts_and_covers(db):
@@ -381,7 +382,7 @@ def test_merge_dedupes_into_the_first_and_removes_the_others(db):
     r = merge_collections(db, ["Faves", "Druid"])
     assert r["target"] == "Faves" and r["merged"] == ["Druid"] and r["pictures"] == 3
     assert _ids(db, collection="Faves") == ["1", "2", "3"]
-    assert g.unique_collections(db) == ["Faves"], "the others are gone"
+    assert catalog_mod.unique_collections(db) == ["Faves"], "the others are gone"
     row1 = next(x for x in load_catalog(db) if x["media_id"] == "1")
     assert row1["collections"] == "Faves", "picture 1 was in both and holds the label once"
     assert len(load_catalog(db)) == before
@@ -398,7 +399,7 @@ def test_merge_needs_two_and_refuses_smart_and_unknown(db):
     assert "smart" in str(e.value)
     with pytest.raises(CurationError):
         merge_collections(db, ["Druid", "Nope"])
-    assert g.unique_collections(db) == ["Druid", "Faves"], "a refused merge changes nothing"
+    assert catalog_mod.unique_collections(db) == ["Druid", "Faves"], "a refused merge changes nothing"
 
 
 def test_delete_never_deletes_pictures(db):
@@ -408,7 +409,7 @@ def test_delete_never_deletes_pictures(db):
     after = load_catalog(db)
     assert len(after) == len(before)
     assert [x["media_id"] for x in after] == [x["media_id"] for x in before]
-    assert g.unique_collections(db) == ["Faves"]
+    assert catalog_mod.unique_collections(db) == ["Faves"]
     row1 = next(x for x in after if x["media_id"] == "1")
     assert row1["collections"] == "Faves"
 

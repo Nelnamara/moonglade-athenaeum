@@ -16,7 +16,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import models as models_mod
-from moonglade.gallery import (CATALOG_FIELDS, catalog, delete_from_catalog, load_catalog,
+from moonglade.catalog import (CATALOG_FIELDS, catalog, delete_from_catalog, load_catalog,
                                merge_over_current, save_catalog, save_catalog_over_snapshot,
                                update_prompt_full, update_rating)
 from moonglade import task_reads as task_reads_mod

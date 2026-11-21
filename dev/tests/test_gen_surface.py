@@ -8,7 +8,7 @@ import types
 from moonglade import backup as core
 from moonglade import gen_cli as gen_cli_mod
 from moonglade import models as models_mod
-from moonglade.gallery import CATALOG_FIELDS, save_catalog, load_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog, load_catalog
 from moonglade import task_reads as task_reads_mod
 
 

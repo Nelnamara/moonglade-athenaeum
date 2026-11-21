@@ -6,7 +6,8 @@ from moonglade import gallery as g
 from moonglade import backup as core
 from moonglade import paths
 from moonglade import training as training_mod
-from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_test_client, login_existing_client
 from moonglade import scan as scan_mod

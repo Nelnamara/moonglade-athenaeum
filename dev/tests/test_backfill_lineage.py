@@ -12,7 +12,7 @@ import types
 
 import pytest
 
-from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, load_catalog, save_catalog
 
 from moonglade import backup as core
 from moonglade import task_reads as task_reads_mod

@@ -919,7 +919,7 @@ def make_video_duration_lookup(out_dir, db_path=None):
     The answer is cached per media id for the life of the returned callable (one per gallery
     app, one per CLI run), so a quote and the spend that follows it read the same number even
     if a file lands in between, and a miss does not re-walk the library per keystroke."""
-    from moonglade.gallery import get_row
+    from moonglade.catalog import get_row
     from moonglade.scan import find_local_video_file
     out = Path(out_dir)
     dbp = Path(db_path) if db_path else out / "catalog.db"

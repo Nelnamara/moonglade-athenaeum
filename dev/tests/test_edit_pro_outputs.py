@@ -212,7 +212,8 @@ def test_the_gallery_quote_and_spend_carry_the_same_capability_read(monkeypatch,
     """/api/price and /api/edit both read the model's live lists, and both refuse what they
     say no to: the badge never quotes an output the send would refuse."""
     from moonglade import cards as cards_mod
-    from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade.gallery import create_app
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     from tests.conftest import login_test_client
     save_catalog(tmp_path / "catalog.db", [dict({f: "" for f in CATALOG_FIELDS},
                                                 media_id="55", filename="a_55.png")])

@@ -1477,7 +1477,8 @@ def register(app, ctx):
         it either drops the audio track entirely (when there was no real audio anywhere, so
         nothing is lost) or refuses and names the shot (when real audio would be thrown out
         of sync by it). See the span pre-pass below. body: {clips:[{mid,in,out}], total_seconds}"""
-        from moonglade.gallery import get_row, probe_duration, probe_has_audio
+        from moonglade.gallery import probe_duration, probe_has_audio
+        from moonglade.catalog import get_row
         from moonglade.loom_files import loom_bed_audio_graph, loom_bed_windows
         from moonglade import backup as core
         if not _media_tools.ffmpeg_path():
@@ -1849,7 +1850,7 @@ def register(app, ctx):
         images by design. Same fallback /api/loom/export already uses for exactly this
         reason: catalog row -> is_video + filename -> out_dir/filename. Returns a Path
         or None."""
-        from moonglade.gallery import get_row
+        from moonglade.catalog import get_row
         paths = _scan.find_files_for_media_id(out_dir, mid)
         if paths:
             return paths[0]
@@ -1964,8 +1965,8 @@ def register(app, ctx):
         bundle instead of --update), and returns {project, thumbs} in the exact shape
         importJSON already expects, so both tiers share one client-side create-project path.
         Login required (any session, local or LAN)."""
-        from moonglade.gallery import (make_thumbnail, make_video_thumbnail,
-                                       save_catalog_over_snapshot)
+        from moonglade.gallery import make_thumbnail, make_video_thumbnail
+        from moonglade.catalog import save_catalog_over_snapshot
         from moonglade.loom_files import (LOOM_BED_FILE_RE, LOOM_BED_MAX_BYTES,
                                           LOOM_BUNDLE_MAX_BEDS, LOOM_BUNDLE_MEDIA_MAX_BYTES,
                                           LOOM_BUNDLE_MEDIA_RE, _unlink_quiet, sniff_audio_ext)

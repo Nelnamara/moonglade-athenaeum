@@ -133,7 +133,7 @@ def test_the_curation_import_snapshot_is_a_decision(tmp_path, moved):
     that cannot be made again, like the organize undo list: it goes where decisions_path()
     says, beside nothing else."""
     from moonglade import curation_io as cio
-    from moonglade.gallery import CATALOG_FIELDS, save_catalog
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "m1", "filename": "a_m1.png", "created_at": "2025-01-01T00:00:00"}])

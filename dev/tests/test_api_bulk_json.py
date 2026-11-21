@@ -18,7 +18,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, save_catalog, load_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog, load_catalog
 
 from tests.conftest import login_client
 from moonglade import scan as scan_mod

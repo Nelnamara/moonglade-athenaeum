@@ -52,7 +52,8 @@ def register(app, ctx):
         whose image PixAI had already deleted -- their local copy is the only copy left
         anywhere, and removing the generation record on PixAI does not change that. The
         branch comes off the plan the delete itself reported, never off a local count."""
-        from moonglade.gallery import get_row, task_media
+        from moonglade.gallery import task_media
+        from moonglade.catalog import get_row
         if plan.plan == "per-image":
             row = get_row(db_path, media_id) or {}
             return [{"media_id": media_id, "filename": row.get("filename") or ""}]
@@ -144,7 +145,8 @@ def register(app, ctx):
         library's whole record of what left it stops depending on which button was used. The
         PREVIEW writes nothing: nothing happened, and a row per dialog-open is noise.
         """
-        from moonglade.gallery import get_row, mark_cloud_deleted, purge_media_local
+        from moonglade.gallery import mark_cloud_deleted, purge_media_local
+        from moonglade.catalog import get_row
         from moonglade import backup as core          # lazy: avoid import cycle
         import uuid
         body = request.get_json(silent=True) or {}
@@ -286,7 +288,8 @@ def register(app, ctx):
         purge_media_local writes first). What the bulk confirm needs is the count BEFORE it
         asks, so `preview: true` answers {"preview": true, "count", "archive_only"} -- the rows
         the delete would take and how many of them are the only copy -- and touches nothing."""
-        from moonglade.gallery import get_row, is_archive_only, purge_media_local
+        from moonglade.gallery import purge_media_local
+        from moonglade.catalog import get_row, is_archive_only
         body = request.get_json(silent=True) or {}
         media_ids = list(dict.fromkeys(
             str(m) for m in (body.get("media_ids") or []) if str(m).strip()))

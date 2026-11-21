@@ -14,7 +14,7 @@ import sqlite3
 import types
 
 from moonglade import backup as core
-from moonglade.gallery import CATALOG_FIELDS, load_catalog, migrate, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, load_catalog, migrate, save_catalog
 from moonglade import task_reads as task_reads_mod
 
 T3 = "2024383379556065549"          # Tsubaki.3

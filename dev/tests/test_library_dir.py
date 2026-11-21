@@ -23,8 +23,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from moonglade import paths  # noqa: E402
 from moonglade import settings  # noqa: E402
-from moonglade.gallery import (CATALOG_FIELDS, DEFAULT_LIBRARY_DIR,  # noqa: E402
-                               resolve_library_dir, save_catalog)
+from moonglade.gallery import DEFAULT_LIBRARY_DIR, resolve_library_dir
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client  # noqa: E402
 

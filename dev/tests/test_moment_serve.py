@@ -17,7 +17,7 @@ import pytest
 
 from moonglade import container as mc
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import (STARFALL_EVENT, _SEALED_DONOR, MOMENT_FIXTURE_CLIP, ach_event, clear_sealed_caches,
                             first_party_sources, login_client, moment_clip_keys)

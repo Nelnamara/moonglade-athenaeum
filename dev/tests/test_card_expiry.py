@@ -7,7 +7,8 @@ peach underline and its tooltip lines (and the phone's Gift box row) are drawn f
 is read: the summary is the same call the chip already makes. No network: the `pixai` fixture."""
 from moonglade import backup as core
 from moonglade import cards as cards_mod
-from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_test_client
 
 

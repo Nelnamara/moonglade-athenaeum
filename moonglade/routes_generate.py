@@ -142,7 +142,7 @@ def register(app, ctx):
         """A create source's format, "svg" / "gif" / "" (RequestResolver.source_format, 3.22
         S5): a catalog id by its row's recorded output_format, then its file's extension;
         anything else (a data: picture, a name) by its own text. Local, no network."""
-        from moonglade.gallery import get_row
+        from moonglade.catalog import get_row
         s = str(value or "").strip()
         row = None
         if s.isdigit():
@@ -1107,7 +1107,7 @@ def register(app, ctx):
         caller's own account made it; for a task this library holds with no record anywhere,
         PixAI's stored task (source "pixai"). Another account's record is never served, and
         never falls back to PixAI either (review F9). Writes nothing."""
-        from moonglade.gallery import get_row_by_task
+        from moonglade.catalog import get_row_by_task
         from moonglade import runs
         user = str(session.get("user") or "")
         tid = str(task_id or "").strip()

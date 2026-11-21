@@ -374,7 +374,7 @@ def _reply(mocker, payload, status=200, text=""):
 
 
 def _catalog_with_one_row(tmp_path, vid):
-    from moonglade.gallery import save_catalog, CATALOG_FIELDS
+    from moonglade.catalog import save_catalog, CATALOG_FIELDS
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "m1", "filename": "a.png", "model_id": vid, "model_name": vid}])
@@ -421,7 +421,7 @@ class TestM18ModelLookupFailure:
         """THE BUG. One timeout mid-run used to write 'Unknown or removed model' over every
         row of a still-valid model, and _needs_model_fix then read those rows as resolved --
         so re-running --fix-models never repaired it. Permanent, without editing the DB."""
-        from moonglade.gallery import save_catalog, load_catalog, CATALOG_FIELDS
+        from moonglade.catalog import save_catalog, load_catalog, CATALOG_FIELDS
         vid = "918273645500000001"
         db = tmp_path / "catalog.db"
         save_catalog(db, [
@@ -477,7 +477,7 @@ class TestM18ModelLookupFailure:
         res = core.run_fix_models(SimpleNamespace(
             out=str(tmp_path), token=None, delay=0, relabel_removed=True))
 
-        from moonglade.gallery import load_catalog
+        from moonglade.catalog import load_catalog
         row = load_catalog(db)[0]
         assert row["model_name"] == vid, what
         assert res["relabeled"] == 0 and res["lookup_failed"] == 1
@@ -502,7 +502,7 @@ class TestM18ModelLookupFailure:
                                                                       mocker):
         """The conservative guard must not neuter the flag: PixAI ANSWERING with a null
         version really does mean the model is gone, and that still gets relabelled."""
-        from moonglade.gallery import save_catalog, load_catalog, CATALOG_FIELDS
+        from moonglade.catalog import save_catalog, load_catalog, CATALOG_FIELDS
         vid = "918273645500000002"
         db = tmp_path / "catalog.db"
         save_catalog(db, [
@@ -620,7 +620,7 @@ class TestM16VideoCollectionFailsSoft:
         """Not just the summary text -- the catalog itself. The images were saved before the
         video block ran, so an escape there loses the report, never the data; this pins that
         the soft-fail did not change what is on disk."""
-        from moonglade.gallery import load_catalog
+        from moonglade.catalog import load_catalog
         install, _bumps = recovery_network
         install(_MIXED_TASK, video_download="ssl-error")
 

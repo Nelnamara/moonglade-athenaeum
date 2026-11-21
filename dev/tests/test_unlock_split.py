@@ -18,7 +18,7 @@ import json
 import pytest
 
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import STARFALL_EVENT, ach_event, login_client
 from moonglade import telemetry as telemetry_mod

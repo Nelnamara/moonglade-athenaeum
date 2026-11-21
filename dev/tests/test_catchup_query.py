@@ -19,6 +19,7 @@ from moonglade import gallery as mg
 from moonglade import gen_road as gen_road_mod
 
 from tests.fake_pixai import FakePixAI, operation_name
+from moonglade import catalog as catalog_mod
 
 FEED = operation_name(core._HISTORY_PAGE_DOC)
 REFUSED_DOC = "Cannot query field taskSummaries on type User"
@@ -69,7 +70,7 @@ def _sweep_app(monkeypatch, tmp_path, fake):
     present = set()
     collected = []
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: fake)
-    monkeypatch.setattr(mg, "get_row",
+    monkeypatch.setattr(catalog_mod, "get_row",
                         lambda db_path, m: ({"media_id": m} if m in present else None))
     monkeypatch.setattr(time, "sleep", lambda *a, **k: None)
 
@@ -170,6 +171,17 @@ def test_the_miss_account_is_gone():
     from moonglade import routes_mirror as routes_mirror_mod        # and the Mirror's routes'
     from moonglade import routes_branding as routes_branding_mod    # and the branding routes'
     from moonglade import routes_import as routes_import_mod        # and the import routes'
+    from moonglade import redact as redact_mod
+    from moonglade import web_tiers as web_tiers_mod
+    from moonglade import watch_plans as watch_plans_mod
+    from moonglade import name_hunt as name_hunt_mod
+    from moonglade import ach_beacon as ach_beacon_mod
+    from moonglade import scenes as scenes_mod
+    from moonglade import pages as pages_mod
+    from moonglade import web_policy as web_policy_mod
+    from moonglade import loom_files as loom_files_mod
+    from moonglade import catalog_search as catalog_search_mod
+    from moonglade import catalog as catalog_mod
     src = (inspect.getsource(mg) + inspect.getsource(routes_generate_mod)
            + inspect.getsource(routes_loom_mod) + inspect.getsource(web_loom_store_mod)
            + inspect.getsource(routes_gate_mod) + inspect.getsource(web_threads_mod)
@@ -183,7 +195,18 @@ def test_the_miss_account_is_gone():
            + inspect.getsource(routes_ach_mod)
            + inspect.getsource(routes_mirror_mod)
            + inspect.getsource(routes_branding_mod)
-           + inspect.getsource(routes_import_mod))
+           + inspect.getsource(routes_import_mod)
+           + inspect.getsource(redact_mod)
+           + inspect.getsource(web_tiers_mod)
+           + inspect.getsource(watch_plans_mod)
+           + inspect.getsource(name_hunt_mod)
+           + inspect.getsource(ach_beacon_mod)
+           + inspect.getsource(scenes_mod)
+           + inspect.getsource(pages_mod)
+           + inspect.getsource(web_policy_mod)
+           + inspect.getsource(loom_files_mod)
+           + inspect.getsource(catalog_search_mod)
+           + inspect.getsource(catalog_mod))
     for retired in ("_note_catchup_query", "_catchup_query", "WATCH_CATCHUP_QUERY_MISSES",
                     "via_document", "saved history request", "core.history_page"):
         assert retired not in src, retired

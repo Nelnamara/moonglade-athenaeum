@@ -16,7 +16,7 @@ closure handing back the moonglade_backup module itself, so the functions are
 patched on `core`, with _make_session stubbed."""
 from moonglade import backup as core
 from moonglade import models as models_mod
-from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_client
 from moonglade import task_reads as task_reads_mod
 

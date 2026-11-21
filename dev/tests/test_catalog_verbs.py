@@ -27,14 +27,13 @@ from pathlib import Path
 import pytest
 
 from moonglade import gallery as g
-from moonglade.gallery import (CATALOG_FIELDS, catalog, migrate, save_catalog,
-                               init_db, task_media, task_media_count,
-                               delete_targets, delete_preview_rows, myart_items,
-                               artwork_row, publish_state, lineage, sibling_media,
-                               recent_train_task_page, history_page,
-                               history_created_ats)
+from moonglade.gallery import (task_media, task_media_count, delete_targets, delete_preview_rows,
+                               myart_items, artwork_row, publish_state, lineage, sibling_media,
+                               recent_train_task_page, history_page, history_created_ats)
+from moonglade.catalog import CATALOG_FIELDS, catalog, migrate, save_catalog, init_db
 
 from tests.conftest import login_client
+from moonglade import catalog as catalog_mod
 
 
 def _row(**kw):
@@ -112,7 +111,7 @@ def test_catalog_runs_no_ddl_once_the_path_is_migrated(tmp_path, traced):
     with catalog(db) as con:
         con.execute("SELECT COUNT(*) FROM catalog").fetchone()
     first = _ddl(traced)
-    assert len(first) == len(g._MIGRATIONS), (
+    assert len(first) == len(catalog_mod._MIGRATIONS), (
         "the first open of a path must run the migrations lazily")
 
     del traced[:]
@@ -165,7 +164,7 @@ def test_migrate_runs_once_per_process_per_path(tmp_path, monkeypatch):
     rather than merely skipped."""
     db = tmp_path / "catalog.db"
     init_db(db)
-    monkeypatch.setattr(g, "_MIGRATIONS", list(g._MIGRATIONS) + [
+    monkeypatch.setattr(catalog_mod, "_MIGRATIONS", list(catalog_mod._MIGRATIONS) + [
         "CREATE TABLE IF NOT EXISTS migrate_probe (n TEXT)",
         "INSERT INTO migrate_probe (n) VALUES ('ran')"])
 

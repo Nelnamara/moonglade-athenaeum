@@ -167,7 +167,7 @@ def register(app, ctx):
         trigger words), the prompt, and the picture itself. The category is never guessed.
         A picture this library has no row for is refused (the route runs on the owner's
         credentials; the /api/task-params rule)."""
-        from moonglade.gallery import get_row
+        from moonglade.catalog import get_row
         mid = str(request.args.get("media_id") or "").strip()
         row = get_row(db_path, mid) if mid else None
         if not row:

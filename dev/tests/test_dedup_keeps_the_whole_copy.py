@@ -14,7 +14,7 @@ PIL = pytest.importorskip("PIL")
 from PIL import Image, PngImagePlugin  # noqa: E402
 
 from moonglade import organize as organize_mod  # noqa: E402
-from moonglade.gallery import init_db  # noqa: E402
+from moonglade.catalog import init_db
 
 
 def _png(color, text=None):

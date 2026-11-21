@@ -20,7 +20,8 @@ import datetime as dt
 import pytest
 
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
+from moonglade import catalog as catalog_mod
 
 T0 = dt.date(2026, 12, 20)
 
@@ -40,14 +41,14 @@ def db(tmp_path):
 
 
 def _set(db, aid, **cols):
-    with g.catalog(db) as con:
+    with catalog_mod.catalog(db) as con:
         for k, v in cols.items():
             con.execute("UPDATE catalog SET %s=? WHERE artwork_id=?" % k, (str(v), aid))
         con.commit()
 
 
 def _days(db):
-    with g.catalog(db) as con:
+    with catalog_mod.catalog(db) as con:
         return [tuple(r) for r in con.execute(
             "SELECT artwork_id, day, views, likes FROM artwork_snapshots ORDER BY artwork_id, day")]
 

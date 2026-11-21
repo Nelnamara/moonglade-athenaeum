@@ -471,7 +471,8 @@ def test_gallery_catalog_ref_passes_through_then_uploads_on_invalid_media_id(tmp
 
     Pins the fix: a catalog id whose file we hold on disk must be uploaded, and the
     UPLOADED id is what reaches PixAI."""
-    from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade.gallery import create_app
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     from tests.conftest import login_test_client
 
     (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
@@ -521,7 +522,8 @@ def test_gallery_r2v_catalog_ids_pass_through_without_upload(tmp_path, monkeypat
     referenced twice. Was "upload once per media_id"; PROBED 2026-08-22 (10 of the owner's own
     completed R2V tasks): referenceImageMediaIds accepts in-library ids, so uploading only
     re-ran PixAI's content scan on art it already hosts (the 403 NSFW refusals)."""
-    from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade.gallery import create_app
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     from tests.conftest import login_test_client
 
     (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
@@ -546,7 +548,7 @@ def test_gallery_r2v_catalog_ids_pass_through_without_upload(tmp_path, monkeypat
 
 
 def _seed_one(tmp_path, mid="733917871331404290"):
-    from moonglade.gallery import CATALOG_FIELDS, save_catalog
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
     (tmp_path / "2025-01" / ("s_%s.png" % mid)).write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
     save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
@@ -759,7 +761,8 @@ def test_a_failed_generation_is_logged_with_its_params(tmp_path, monkeypatch, ca
     Asserts the params are logged too, not just the message -- the shape (model, quality mode,
     duration) is the diagnosis for this class of failure."""
     import logging
-    from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade.gallery import create_app
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     from tests.conftest import login_test_client
 
     (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
@@ -795,7 +798,8 @@ def test_a_failed_generation_is_logged_with_its_params(tmp_path, monkeypatch, ca
 def test_the_failure_log_never_breaks_the_error_path(tmp_path, monkeypatch, pixai):
     """A diagnostic that can break the error path it reports on is worse than none. Params that
     refuse to serialise must not turn a clean error response into a 500."""
-    from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade.gallery import create_app
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     from tests.conftest import login_test_client
 
     (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)

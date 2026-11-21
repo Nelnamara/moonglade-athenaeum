@@ -105,7 +105,8 @@ from moonglade import models as models_mod
 from moonglade import paths as moonglade_paths
 from moonglade import training as training_mod
 from moonglade import updater as updater_mod
-from moonglade.gallery import CATALOG_FIELDS, create_app, load_catalog, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, load_catalog, save_catalog
 from moonglade.achievements import achievement_metrics, compute_achievements, save_ach_state
 from moonglade.telemetry import telem_flag, telemetry_metrics, load_telemetry
 

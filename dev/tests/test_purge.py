@@ -11,13 +11,14 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gallery as g
-from moonglade.gallery import (CATALOG_FIELDS, save_catalog, load_catalog,
-                           purge_media_local)
+from moonglade.gallery import purge_media_local
+from moonglade.catalog import CATALOG_FIELDS, save_catalog, load_catalog
 
 from tests.conftest import login_client
 from moonglade import scan as scan_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import cloud_delete as cloud_delete_mod
+from moonglade import catalog as catalog_mod
 
 
 def _row(**kw):
@@ -266,7 +267,7 @@ def test_delete_preview_does_not_scan_the_catalog_once_per_selected_task(tmp_pat
     client = login_client(tmp_path)
 
     seen = []
-    real_catalog = g.catalog
+    real_catalog = catalog_mod.catalog
 
     class _Spy:
         def __init__(self, con):
@@ -289,7 +290,7 @@ def test_delete_preview_does_not_scan_the_catalog_once_per_selected_task(tmp_pat
         with real_catalog(*a, **k) as con:
             yield _Spy(con)
 
-    monkeypatch.setattr(g, "catalog", _spy_catalog)
+    monkeypatch.setattr(catalog_mod, "catalog", _spy_catalog)
     del seen[:]                              # ignore anything the login/render did
     body = client.post("/api/delete-preview", json={
         "media_ids": ["q{}".format(i) for i in range(30)]}).get_json()

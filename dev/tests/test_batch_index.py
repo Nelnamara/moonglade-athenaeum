@@ -16,7 +16,7 @@ from moonglade import task_reads as task_reads_mod
 
 
 def _seed(tmp_path, rows):
-    from moonglade.gallery import CATALOG_FIELDS, save_catalog
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     (tmp_path / "2026-08").mkdir(parents=True, exist_ok=True)
     full = []
     for r in rows:

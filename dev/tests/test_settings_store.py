@@ -181,7 +181,7 @@ def test_launch_args_hold_only_lasting_switches(tmp_path):
 
 @pytest.fixture
 def cli(tmp_path):
-    from moonglade.gallery import CATALOG_FIELDS, save_catalog
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "1", "filename": "a.png", "created_at": "2025-01-01T00:00:00"}])
     c = login_client(tmp_path)
@@ -244,6 +244,17 @@ def test_config_json_keeps_only_hand_edited_values():
     from moonglade import routes_mirror as routes_mirror_mod        # and the Mirror's routes'
     from moonglade import routes_branding as routes_branding_mod    # and the branding routes'
     from moonglade import routes_import as routes_import_mod        # and the import routes'
+    from moonglade import redact as redact_mod
+    from moonglade import web_tiers as web_tiers_mod
+    from moonglade import watch_plans as watch_plans_mod
+    from moonglade import name_hunt as name_hunt_mod
+    from moonglade import ach_beacon as ach_beacon_mod
+    from moonglade import scenes as scenes_mod
+    from moonglade import pages as pages_mod
+    from moonglade import web_policy as web_policy_mod
+    from moonglade import loom_files as loom_files_mod
+    from moonglade import catalog_search as catalog_search_mod
+    from moonglade import catalog as catalog_mod
     src = (inspect.getsource(g) + inspect.getsource(core) + inspect.getsource(mirror_mod)
            + inspect.getsource(branding_mod) + inspect.getsource(routes_generate_mod)
            + inspect.getsource(routes_loom_mod) + inspect.getsource(web_loom_store_mod)
@@ -258,6 +269,17 @@ def test_config_json_keeps_only_hand_edited_values():
            + inspect.getsource(routes_ach_mod)
            + inspect.getsource(routes_mirror_mod)
            + inspect.getsource(routes_branding_mod)
-           + inspect.getsource(routes_import_mod))
+           + inspect.getsource(routes_import_mod)
+           + inspect.getsource(redact_mod)
+           + inspect.getsource(web_tiers_mod)
+           + inspect.getsource(watch_plans_mod)
+           + inspect.getsource(name_hunt_mod)
+           + inspect.getsource(ach_beacon_mod)
+           + inspect.getsource(scenes_mod)
+           + inspect.getsource(pages_mod)
+           + inspect.getsource(web_policy_mod)
+           + inspect.getsource(loom_files_mod)
+           + inspect.getsource(catalog_search_mod)
+           + inspect.getsource(catalog_mod))
     for key in ('"LIBRARY_DIR"', '"BONJOUR_ENABLED"', '"BONJOUR_NAME"', '"MIRROR_TO_PIXAI"'):
         assert key not in src, key

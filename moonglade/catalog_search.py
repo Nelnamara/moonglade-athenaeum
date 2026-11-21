@@ -146,7 +146,7 @@ def _personal_mark_clause(mark):
 def _search_token_clause(tok):
     """One whitespace-delimited search token -> (sql, params). The token is already stripped
     of any leading `-` negation by the caller."""
-    from moonglade.gallery import _like_pattern
+    from moonglade.catalog import _like_pattern
     # the bare marks are operators on their own (an UNQUOTED word: "reject" in quotes is a
     # phrase and stays a prompt search)
     if tok.lower() in ("keeper", "reject"):
@@ -346,7 +346,7 @@ def _operator_clause(key, value):
     the token isn't a valid operator and should be searched as plain prompt text
     instead (unknown key, empty value, malformed number/date, unrecognized bool)
     -- the way search engines degrade, so a stray colon never errors or surprises."""
-    from moonglade.gallery import _like_escape, _like_pattern
+    from moonglade.catalog import _like_escape, _like_pattern
     spec = _SEARCH_OPS.get(key.lower())
     if not spec or value == "":
         return None
@@ -434,7 +434,7 @@ def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
     out (by the recorded output format, then the file's extension): the picture list the
     create pickers and the Apple TV client read, since tvOS cannot draw one and no create
     road takes one as a source (3.22 S5)."""
-    from moonglade.gallery import _like_escape
+    from moonglade.catalog import _like_escape
     clauses = ["filename != ''"]
     params  = []
     if collection:

@@ -27,10 +27,11 @@ from moonglade import gallery
 from moonglade import gen_cli as gen_cli_mod
 from moonglade import gen_params as gen_params_mod
 from moonglade import models as models_mod
-from moonglade.gallery import load_catalog
+from moonglade.catalog import load_catalog
 from moonglade.scan import DELETED_DIRNAME
 from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import catalog as catalog_mod
 
 
 # ---------------------------------------------------------------------------
@@ -274,10 +275,10 @@ class TestM06TrashedImagesAreNotTheLibrary:
         what to clean up, and it reported the trashed image as part of the collection."""
         _seed_backup_tree(tmp_path)
         db = tmp_path / "catalog.db"
-        gallery.init_db(db)
-        row = {f: "" for f in gallery.CATALOG_FIELDS}
+        catalog_mod.init_db(db)
+        row = {f: "" for f in catalog_mod.CATALOG_FIELDS}
         row.update({"media_id": "1", "filename": "images/live_1.png"})
-        gallery.save_catalog(db, [row])
+        catalog_mod.save_catalog(db, [row])
         core.run_catalog_stats(SimpleNamespace(out=str(tmp_path)))
         out = capsys.readouterr().out
         assert "Image files on disk : 1" in out

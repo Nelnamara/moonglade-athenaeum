@@ -451,6 +451,16 @@ SEAMS = {
         "AR_SQUARE", "AR_TALL_MAX", "AR_WIDE_MIN", "AR_TOLERANCE", "_AR_WH_RE", "_AR_CMP_RE",
         "_aspect_clause", "_type_clause", "_date_part_bounds", "_date_clause", "_lora_name_regex",
         "_lora_weight_match", "_lora_weight_clause", "_operator_clause", "_build_where"]},
+    "moonglade.catalog": {"from": "moonglade.gallery", "names": [
+        "CATALOG_FIELDS", "THUMB_SIZE", "THUMB_QUALITY", "_CREATE_TABLE", "_UPSERT", "init_db",
+        "_VIDEO_NAME_TO_ID", "_VIDEO_ROW_REPAIR_SQL", "_MIGRATIONS", "_MIGRATED", "_MIGRATE_LOCK",
+        "_MIGRATE_RETRY_AT", "MIGRATE_BUSY_BACKOFF_S", "MIGRATE_BUSY_TIMEOUT_S", "_catalog_key",
+        "migrate", "catalog", "catalog_csv_text", "load_catalog", "save_catalog",
+        "merge_over_current", "save_catalog_over_snapshot", "update_rating", "delete_from_catalog",
+        "update_prompt_full", "bulk_replace_prompt", "_db_is_empty", "_SORT_SQL",
+        "_DEFAULT_SORT_SQL", "_MANUAL_SORT_SQL", "_order_sql", "_like_pattern", "_like_escape",
+        "get_row", "get_row_by_task", "is_archive_only", "_split_collections",
+        "unique_collections", "_COLLECTIONS_LOCK", "add_to_collection", "remove_from_collection"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -2037,6 +2047,34 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_setup_prepare.py', 'moonglade.catalog_search'),
     ('tests/test_task_model_detail_document.py', 'moonglade.catalog_search'),
     ('tests/test_telemetry.py', 'moonglade.catalog_search'),
+    # Split phase 4, catalog: no reader reads the catalog helpers' text; the hits are column names,
+    # the readers' own fixtures and main()/create_app reads. The whole-module absence guards
+    # (test_settings_store, test_catchup_query, test_evidence_counters; test_telemetry's writer
+    # count) now also read the modules split out of gallery's top level, this one included.
+    ('tests/test_app_paths.py', 'moonglade.catalog'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.catalog'),
+    ('tests/test_bonjour.py', 'moonglade.catalog'),
+    ('tests/test_branding.py', 'moonglade.catalog'),
+    ('tests/test_branding_tree_rules.py', 'moonglade.catalog'),
+    ('tests/test_catalog_verbs.py', 'moonglade.catalog'),
+    ('tests/test_catchup_query.py', 'moonglade.catalog'),
+    ('tests/test_csrf_coverage.py', 'moonglade.catalog'),
+    ('tests/test_evidence_counters.py', 'moonglade.catalog'),
+    ('tests/test_first_party_sources.py', 'moonglade.catalog'),
+    ('tests/test_history_feed_document.py', 'moonglade.catalog'),
+    ('tests/test_living_library.py', 'moonglade.catalog'),
+    ('tests/test_logging.py', 'moonglade.catalog'),
+    ('tests/test_loom_p_routes.py', 'moonglade.catalog'),
+    ('tests/test_move_edges.py', 'moonglade.catalog'),
+    ('tests/test_network.py', 'moonglade.catalog'),
+    ('tests/test_pack_file_name.py', 'moonglade.catalog'),
+    ('tests/test_security_review_fixes.py', 'moonglade.catalog'),
+    ('tests/test_server_one_module.py', 'moonglade.catalog'),
+    ('tests/test_server_stop_record.py', 'moonglade.catalog'),
+    ('tests/test_settings_store.py', 'moonglade.catalog'),
+    ('tests/test_setup_prepare.py', 'moonglade.catalog'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.catalog'),
+    ('tests/test_telemetry.py', 'moonglade.catalog'),
 }
 
 

@@ -866,8 +866,8 @@ def register(app, ctx):
         than the whole library. With no filter args it stays the full dump it has always
         been -- load_catalog, not query_catalog, because the latter's `filename != ''`
         would quietly drop rows whose file isn't on disk yet."""
-        from moonglade.gallery import (_filters_from_args, catalog_csv_text, load_catalog,
-                                       query_catalog)
+        from moonglade.gallery import _filters_from_args, query_catalog
+        from moonglade.catalog import catalog_csv_text, load_catalog
         import io
         import datetime
         filters = _filters_from_args(request.args)

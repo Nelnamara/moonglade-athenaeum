@@ -19,9 +19,10 @@ from moonglade import gen_params as gen_params_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import models as models_mod
 from moonglade import pricing as pricing_mod
-from moonglade.gallery import CATALOG_FIELDS, save_catalog, load_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog, load_catalog
 from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import catalog as catalog_mod
 
 TBKV = ("tbkv1.0", "tbkv1.0.1")
 TBKV_IDS = {"tbkv1.0": "2042030623542642408", "tbkv1.0.1": "2054378086834851904"}
@@ -46,7 +47,7 @@ def test_gallery_repair_table_matches_the_roster():
     """The catalog repair keeps its own name->id copy (the gallery cannot import the backup
     module at load time). It must be exactly VIDEO_MODELS' engines that publish an id."""
     want = {n: m["model_id"] for n, m in gen_params_mod.VIDEO_MODELS.items() if m["model_id"]}
-    assert g._VIDEO_NAME_TO_ID == want
+    assert catalog_mod._VIDEO_NAME_TO_ID == want
 
 
 # =============================================================================
@@ -685,7 +686,7 @@ def test_recovering_a_task_with_no_numeric_id_keeps_its_engine_name(tmp_path, mo
 
 def _seed_raw(db, rows):
     save_catalog(db, rows)
-    g._MIGRATED.discard(g._catalog_key(db))
+    catalog_mod._MIGRATED.discard(catalog_mod._catalog_key(db))
 
 
 def test_the_video_row_repair_migration_is_idempotent(tmp_path):
@@ -705,9 +706,9 @@ def test_the_video_row_repair_migration_is_idempotent(tmp_path):
         _row(media_id="h", is_video="1", model_id="v4.0", model_name="v4.0"),
         _row(media_id="i", is_video="1", model_id="v3.2", model_name="V3.2 by hand"),
     ])
-    g.migrate(db, force=True)
+    catalog_mod.migrate(db, force=True)
     first = {r["media_id"]: r for r in load_catalog(db)}
-    g.migrate(db, force=True)
+    catalog_mod.migrate(db, force=True)
     second = {r["media_id"]: r for r in load_catalog(db)}
     assert first == second, "a second run changes nothing"
     assert (first["a"]["model_id"], first["a"]["video_model"]) == (TBKV_IDS["tbkv1.0.1"],
@@ -732,7 +733,7 @@ def test_the_video_row_repair_migration_is_idempotent(tmp_path):
 
 def test_the_repair_clears_exactly_the_label_fix_models_stamps():
     import inspect
-    assert "'Unknown or removed model'" in g._VIDEO_ROW_REPAIR_SQL
+    assert "'Unknown or removed model'" in catalog_mod._VIDEO_ROW_REPAIR_SQL
     assert '"Unknown or removed model"' in inspect.getsource(core.run_fix_models)
 
 

@@ -14,7 +14,8 @@ from moonglade import gallery as g
 from moonglade import gen_params as gen_params_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import training as training_mod
-from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import STARFALL_EVENT, ach_event, ach_nonce, login_client, login_test_client, _SEALED_DONOR
 from moonglade import mirror as mirror_mod
@@ -820,12 +821,25 @@ def test_only_the_two_tool_terminals_write_the_bridge_set():
     from moonglade import routes_mirror as routes_mirror_mod
     from moonglade import routes_branding as routes_branding_mod
     from moonglade import routes_import as routes_import_mod
+    from moonglade import redact as redact_mod
+    from moonglade import web_tiers as web_tiers_mod
+    from moonglade import watch_plans as watch_plans_mod
+    from moonglade import name_hunt as name_hunt_mod
+    from moonglade import ach_beacon as ach_beacon_mod
+    from moonglade import scenes as scenes_mod
+    from moonglade import pages as pages_mod
+    from moonglade import web_policy as web_policy_mod
+    from moonglade import loom_files as loom_files_mod
+    from moonglade import catalog_search as catalog_search_mod
+    from moonglade import catalog as catalog_mod
     src = "\n".join(inspect.getsource(mod) for mod in (
         g, telemetry_mod, achievements_mod, branding_mod, living_mod, contest_sync_mod,
         routes_generate_mod, routes_loom_mod, web_loom_store_mod, routes_gate_mod, web_threads_mod,
         routes_panel_mod, routes_delete_mod, routes_recipes_mod, routes_library_mod,
         routes_account_mod, routes_community_mod, routes_train_mod, routes_ach_mod,
-        routes_mirror_mod, routes_branding_mod, routes_import_mod))
+        routes_mirror_mod, routes_branding_mod, routes_import_mod,
+        redact_mod, web_tiers_mod, watch_plans_mod, name_hunt_mod, ach_beacon_mod, scenes_mod,
+        pages_mod, web_policy_mod, loom_files_mod, catalog_search_mod, catalog_mod))
     writes = [ln.strip() for ln in src.splitlines()
               if "telem_set_add(" in ln and "bridge_gen_tasks" in ln]
     assert len(writes) == 2, writes

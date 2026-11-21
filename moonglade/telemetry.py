@@ -483,7 +483,7 @@ def stamp_session_hour(db_path, media_ids, out_dir, now=None):
     """Set the `session_hour` flag when any of `media_ids` -- just collected -- is an in-app
     row (source api/local) session_hour_generation() accepts. True when it stamped. Reads the
     catalog only; fail-soft."""
-    from moonglade.gallery import catalog
+    from moonglade.catalog import catalog
     ids = [str(x) for x in (media_ids or []) if str(x).strip()]
     if not ids:
         return False

@@ -15,7 +15,7 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from moonglade import backup as core  # noqa: E402
-from moonglade.gallery import CATALOG_FIELDS, save_catalog  # noqa: E402
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client  # noqa: E402
 from moonglade import jobs as jobs_mod

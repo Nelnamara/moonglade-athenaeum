@@ -22,7 +22,8 @@ from moonglade import cards as cards_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import paths as _paths
 from moonglade.account_prefs import _account_key
-from moonglade.gallery import CATALOG_FIELDS, create_app, loom_backfill_sends, save_catalog
+from moonglade.gallery import create_app, loom_backfill_sends
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_test_client
 
 MID = "733917871331404290"

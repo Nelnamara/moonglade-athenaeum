@@ -16,6 +16,7 @@ from tests.conftest import login_client
 from moonglade import mirror as mirror_mod
 from moonglade import telemetry as telemetry_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import catalog as catalog_mod
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -23,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def _enhance_client(tmp_path):
     """A logged-in client over an empty catalog -- the Bridge routes never read the catalog on
     the paths these tests exercise (source is a non-catalog id, collect is mocked)."""
-    moonglade_gallery.save_catalog(tmp_path / "catalog.db", [])
+    catalog_mod.save_catalog(tmp_path / "catalog.db", [])
     return login_client(tmp_path)
 
 

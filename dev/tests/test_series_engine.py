@@ -20,7 +20,7 @@ from moonglade import series as series_mod
 
 
 def _seed(tmp_path, rows):
-    from moonglade.gallery import CATALOG_FIELDS, save_catalog
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     (tmp_path / "2026-08").mkdir(parents=True, exist_ok=True)
     full = []
     for r in rows:

@@ -1379,7 +1379,7 @@ def register(app, ctx):
         mg_watch_catchup seam drives.
 
         Never raises -- a failed catch-up must not kill the thread that called it."""
-        from moonglade.gallery import get_row, get_row_by_task
+        from moonglade.catalog import get_row, get_row_by_task
         from moonglade.watch_plans import WATCH_COLLECT_RETRY_S
         import logging as _logging
         import time as _time

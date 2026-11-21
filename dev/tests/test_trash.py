@@ -13,8 +13,8 @@ import os
 import time
 
 from moonglade import gallery as g
-from moonglade.gallery import (CATALOG_FIELDS, load_catalog, save_catalog,
-                           purge_media_local)
+from moonglade.gallery import purge_media_local
+from moonglade.catalog import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.conftest import login_client
 from moonglade import scan as scan_mod

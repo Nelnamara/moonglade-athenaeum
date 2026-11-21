@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from moonglade import gallery as g
 from moonglade import backup as core
-from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from moonglade import media_tools as media_tools_mod
 
 

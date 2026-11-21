@@ -63,6 +63,7 @@ from pathlib import Path
 
 from moonglade import paths as _paths
 from moonglade import scan as _scan
+from moonglade import catalog as _catalog
 
 REPORT_CSV = "integrity_report.csv"
 REPORT_JSON = "integrity_report.json"
@@ -356,7 +357,7 @@ def _line_for(r, check, g):
     problem, path, size, _best = check
     if not problem:
         return None
-    gone = problem in _FILE_PROBLEMS and g.is_archive_only(r)
+    gone = problem in _FILE_PROBLEMS and _catalog.is_archive_only(r)
     return (str(r.get("media_id") or ""), problem, path, size, "no" if gone else "yes")
 
 
@@ -670,7 +671,7 @@ def broken_list(out_dir, db_path, avg_bytes=None):
             # A report written before 3.21.2 listed every SVG as "no thumbnail"; it has none
             # by design and is never offered a rebuild (L3).
             continue
-        archive = g.is_archive_only(r)
+        archive = _catalog.is_archive_only(r)
         mark = (marks.get(mid) or {}).get("mark", "")
         refetch = problem in REFETCH_PROBLEMS
         lost = (refetch and archive) or mark == "lost"
@@ -974,11 +975,11 @@ def redownload_one(out_dir, db_path, media_id, session_factory=None, index=None,
     from moonglade import gallery as g
     out = Path(out_dir)
     mid = str(media_id or "").strip()
-    row = g.get_row(db_path, mid) if mid else None
+    row = _catalog.get_row(db_path, mid) if mid else None
     if not row:
         return _result(mid, "redownload", ok=False, refused="not_in_catalog")
     # THE RULE. Read from the catalog here, never from the caller.
-    if g.is_archive_only(row):
+    if _catalog.is_archive_only(row):
         return _result(mid, "redownload", ok=False, refused="archive_only")
     try:
         core._check_read_only("re-download a broken file")
@@ -1072,7 +1073,7 @@ def rebuild_one(out_dir, db_path, media_id, index=None):
     from moonglade import gallery as g
     out = Path(out_dir)
     mid = str(media_id or "").strip()
-    row = g.get_row(db_path, mid) if mid else None
+    row = _catalog.get_row(db_path, mid) if mid else None
     if not row or not _safe_id(mid):
         return _result(mid, "rebuild", ok=False, refused="not_in_catalog")
     problem, _path, _size, best = _live_check(out, row, index, g)
@@ -1105,7 +1106,7 @@ def fix_one(out_dir, db_path, media_id, session_factory=None, index=None, on_byt
     from moonglade import gallery as g
     mid = str(media_id or "").strip()
     marks = read_marks(out_dir) if marks is None else marks
-    row = g.get_row(db_path, mid) if mid else None
+    row = _catalog.get_row(db_path, mid) if mid else None
     if not row:
         return _result(mid, "", ok=False, refused="not_in_catalog")
     problem = _live_check(Path(out_dir), row, index, g)[0]

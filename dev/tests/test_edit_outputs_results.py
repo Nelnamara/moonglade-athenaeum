@@ -10,6 +10,7 @@ from moonglade import gallery as g
 
 pytest.importorskip("PIL")
 from PIL import Image                                         # noqa: E402
+from moonglade import catalog as catalog_mod
 
 
 def _task(outputs=None, model_config=None):
@@ -44,16 +45,16 @@ def test_an_ordinary_picture_records_nothing():
 
 def test_the_new_columns_are_catalog_columns_and_surface_fields():
     for f in ("output_format", "frame_count", "frame_duration_ms"):
-        assert f in g.CATALOG_FIELDS
+        assert f in catalog_mod.CATALOG_FIELDS
         assert f in core._GEN_SURFACE_FIELDS and f in core._FULL_META_FIELDS
 
 
 def test_a_row_saved_with_the_format_reads_back(tmp_path):
     db = tmp_path / "catalog.db"
-    row = dict({f: "" for f in g.CATALOG_FIELDS}, media_id="5", filename="images/a_5.gif",
+    row = dict({f: "" for f in catalog_mod.CATALOG_FIELDS}, media_id="5", filename="images/a_5.gif",
                output_format="gif", frame_count="9", frame_duration_ms="200")
-    g.save_catalog(db, [row])
-    back = g.get_row(db, "5")
+    catalog_mod.save_catalog(db, [row])
+    back = catalog_mod.get_row(db, "5")
     assert (back["output_format"], back["frame_count"], back["frame_duration_ms"]) == (
         "gif", "9", "200")
 
@@ -105,7 +106,7 @@ def test_an_svg_row_is_skipped_by_the_thumbnailer_and_never_counted_failed(tmp_p
 
 def test_the_picture_list_leaves_svg_rows_out(tmp_path):
     from tests.conftest import login_test_client
-    blank = {f: "" for f in g.CATALOG_FIELDS}
+    blank = {f: "" for f in catalog_mod.CATALOG_FIELDS}
     rows = [dict(blank, media_id="1", filename="images/a_1.png", created_at="2026-11-01"),
             dict(blank, media_id="2", filename="images/logo_2.svg", created_at="2026-11-02"),
             dict(blank, media_id="3", filename="images/odd_3.png", output_format="svg",
@@ -113,7 +114,7 @@ def test_the_picture_list_leaves_svg_rows_out(tmp_path):
             dict(blank, media_id="4", filename="images/anim_4.gif", output_format="gif",
                  created_at="2026-11-04"),
             dict(blank, media_id="5", filename="images/LOGO_5.SVG", created_at="2026-11-05")]
-    g.save_catalog(tmp_path / "catalog.db", rows)
+    catalog_mod.save_catalog(tmp_path / "catalog.db", rows)
     cli = login_test_client(g.create_app(tmp_path))
     got = cli.get("/api/gallery-images?type=all&limit=100").get_json()
     assert sorted(i["media_id"] for i in got["images"]) == ["1", "4"]

@@ -13,19 +13,20 @@ import threading
 import time
 
 from moonglade import gallery as g
+from moonglade import catalog as catalog_mod
 
 
 def _fresh_unmigrated(tmp_path):
     """A catalog missing one migrated table, and not memoized as migrated."""
     db = tmp_path / "catalog.db"
-    g.save_catalog(db, [])
-    key = g._catalog_key(db)
+    catalog_mod.save_catalog(db, [])
+    key = catalog_mod._catalog_key(db)
     con = sqlite3.connect(str(db))
     con.execute("DROP TABLE IF EXISTS smart_collections")
     con.commit()
     con.close()
-    g._MIGRATED.discard(key)
-    g._MIGRATE_RETRY_AT.pop(key, None)
+    catalog_mod._MIGRATED.discard(key)
+    catalog_mod._MIGRATE_RETRY_AT.pop(key, None)
     return db, key
 
 
@@ -63,66 +64,66 @@ def _count_connects(monkeypatch, db):
 
 
 def test_a_locked_catalog_is_migrated_on_a_later_access_not_never(tmp_path, monkeypatch):
-    monkeypatch.setattr(g, "MIGRATE_BUSY_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(catalog_mod, "MIGRATE_BUSY_TIMEOUT_S", 0.2)
     db, key = _fresh_unmigrated(tmp_path)
     holder = _Holder(db)
     try:
-        g.migrate(db)
-        assert key not in g._MIGRATED, "a locked run was memoized as done"
-        assert key in g._MIGRATE_RETRY_AT, "a locked run started no back-off"
+        catalog_mod.migrate(db)
+        assert key not in catalog_mod._MIGRATED, "a locked run was memoized as done"
+        assert key in catalog_mod._MIGRATE_RETRY_AT, "a locked run started no back-off"
     finally:
         holder.release()
 
-    g._MIGRATE_RETRY_AT[key] = 0.0          # the back-off has run out
-    g.migrate(db)
-    assert key in g._MIGRATED
+    catalog_mod._MIGRATE_RETRY_AT[key] = 0.0          # the back-off has run out
+    catalog_mod.migrate(db)
+    assert key in catalog_mod._MIGRATED
     assert "smart_collections" in _tables(db)
 
 
 def test_inside_the_back_off_a_second_access_opens_no_connection(tmp_path, monkeypatch):
-    monkeypatch.setattr(g, "MIGRATE_BUSY_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(catalog_mod, "MIGRATE_BUSY_TIMEOUT_S", 0.2)
     db, key = _fresh_unmigrated(tmp_path)
     holder = _Holder(db)
     try:
-        g.migrate(db)
+        catalog_mod.migrate(db)
         seen = _count_connects(monkeypatch, db)
-        g.migrate(db)
-        g.migrate(db)
+        catalog_mod.migrate(db)
+        catalog_mod.migrate(db)
         assert seen == [], "an access inside the back-off retried the migration"
-        assert key not in g._MIGRATED
+        assert key not in catalog_mod._MIGRATED
     finally:
         holder.release()
 
 
 def test_after_the_back_off_it_retries_completes_and_forgets_the_window(tmp_path, monkeypatch):
-    monkeypatch.setattr(g, "MIGRATE_BUSY_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(catalog_mod, "MIGRATE_BUSY_TIMEOUT_S", 0.2)
     db, key = _fresh_unmigrated(tmp_path)
     holder = _Holder(db)
     try:
-        g.migrate(db)
+        catalog_mod.migrate(db)
     finally:
         holder.release()
-    g._MIGRATE_RETRY_AT[key] = 0.0
+    catalog_mod._MIGRATE_RETRY_AT[key] = 0.0
     seen = _count_connects(monkeypatch, db)
-    g.migrate(db)
+    catalog_mod.migrate(db)
     assert len(seen) == 1
-    assert key in g._MIGRATED
-    assert key not in g._MIGRATE_RETRY_AT
+    assert key in catalog_mod._MIGRATED
+    assert key not in catalog_mod._MIGRATE_RETRY_AT
     assert "smart_collections" in _tables(db)
 
 
 def test_force_ignores_the_back_off(tmp_path, monkeypatch):
-    monkeypatch.setattr(g, "MIGRATE_BUSY_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(catalog_mod, "MIGRATE_BUSY_TIMEOUT_S", 0.2)
     db, key = _fresh_unmigrated(tmp_path)
     holder = _Holder(db)
     try:
-        g.migrate(db)
+        catalog_mod.migrate(db)
     finally:
         holder.release()
-    assert key in g._MIGRATE_RETRY_AT          # still inside the window...
-    g.migrate(db, force=True)                  # ...and force runs it anyway
-    assert key in g._MIGRATED
-    assert key not in g._MIGRATE_RETRY_AT
+    assert key in catalog_mod._MIGRATE_RETRY_AT          # still inside the window...
+    catalog_mod.migrate(db, force=True)                  # ...and force runs it anyway
+    assert key in catalog_mod._MIGRATED
+    assert key not in catalog_mod._MIGRATE_RETRY_AT
     assert "smart_collections" in _tables(db)
 
 
@@ -137,14 +138,14 @@ def test_threads_queued_behind_a_locked_attempt_do_not_each_wait_a_timeout(tmp_p
     least one MIGRATE_BUSY_TIMEOUT_S after the one before it. The single connection is the
     structural half of the same proof."""
     timeout_s = 0.3
-    monkeypatch.setattr(g, "MIGRATE_BUSY_TIMEOUT_S", timeout_s)
+    monkeypatch.setattr(catalog_mod, "MIGRATE_BUSY_TIMEOUT_S", timeout_s)
     db, key = _fresh_unmigrated(tmp_path)
     holder = _Holder(db)
     seen = _count_connects(monkeypatch, db)
     finished = []
 
     def run():
-        g.migrate(db)
+        catalog_mod.migrate(db)
         finished.append(time.monotonic())
 
     try:
@@ -161,11 +162,11 @@ def test_threads_queued_behind_a_locked_attempt_do_not_each_wait_a_timeout(tmp_p
     assert spread < timeout_s, (
         f"the four threads finished {spread:.2f}s apart; a queued thread that waited its own "
         f"{timeout_s}s timeout would be at least that far behind the one before it")
-    assert key not in g._MIGRATED
+    assert key not in catalog_mod._MIGRATED
 
 
 def test_a_clean_migration_leaves_no_back_off_entry(tmp_path):
     db, key = _fresh_unmigrated(tmp_path)
-    g.migrate(db)
-    assert key in g._MIGRATED
-    assert key not in g._MIGRATE_RETRY_AT
+    catalog_mod.migrate(db)
+    assert key in catalog_mod._MIGRATED
+    assert key not in catalog_mod._MIGRATE_RETRY_AT

@@ -16,6 +16,7 @@ from moonglade import backup as core
 from moonglade import gen_cli
 from moonglade import gen_params
 from moonglade import gen_road
+from moonglade import catalog as catalog_mod
 
 
 @pytest.fixture(autouse=True)
@@ -111,8 +112,8 @@ def test_a_plain_source_still_builds():
 def app(tmp_path, monkeypatch):
     from moonglade import gallery as g
     from tests.conftest import login_test_client
-    blank = {f: "" for f in g.CATALOG_FIELDS}
-    g.save_catalog(tmp_path / "catalog.db", [
+    blank = {f: "" for f in catalog_mod.CATALOG_FIELDS}
+    catalog_mod.save_catalog(tmp_path / "catalog.db", [
         dict(blank, media_id="71", filename="images/logo_71.svg"),
         dict(blank, media_id="72", filename="images/anim_72.png", output_format="gif"),
         dict(blank, media_id="73", filename="images/plain_73.png")])
@@ -170,8 +171,8 @@ def test_the_scene_route_refuses_before_any_upload(app, monkeypatch):
 @pytest.fixture
 def library(tmp_path, monkeypatch):
     from moonglade import gallery as g
-    blank = {f: "" for f in g.CATALOG_FIELDS}
-    g.save_catalog(tmp_path / "catalog.db", [
+    blank = {f: "" for f in catalog_mod.CATALOG_FIELDS}
+    catalog_mod.save_catalog(tmp_path / "catalog.db", [
         dict(blank, media_id="81", filename="images/a_81.svg"),
         dict(blank, media_id="82", filename="images/a_82.png", output_format="gif")])
     (tmp_path / "logo.svg").write_text("<svg/>", encoding="utf-8")

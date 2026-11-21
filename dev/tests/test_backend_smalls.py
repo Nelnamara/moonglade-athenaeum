@@ -22,7 +22,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import cards as cards_mod
-from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 ROOT = Path(__file__).resolve().parents[2]
 

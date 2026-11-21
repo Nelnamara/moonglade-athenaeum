@@ -12,6 +12,7 @@ from moonglade import jobs as jobs_mod
 from moonglade import task_feed as task_feed_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import watch_plans as watch_plans_mod
+from moonglade import catalog as catalog_mod
 
 
 class _FakeWS:
@@ -455,7 +456,7 @@ def test_catchup_backfills_absent_media_skips_present_and_rate_limits(monkeypatc
     monkeypatch.setattr(core, "find_connection", lambda *a, **k: {"edges": edges})
     monkeypatch.setattr(core, "cataloged_media_ids",
                         lambda node: media.get(str(node.get("id")), []))
-    monkeypatch.setattr(mg, "get_row", lambda db_path, m: (object() if m in present else None))
+    monkeypatch.setattr(catalog_mod, "get_row", lambda db_path, m: (object() if m in present else None))
     monkeypatch.setattr(time, "sleep", lambda *a, **k: None)   # keep the paced sweep fast
 
     collected = []
@@ -500,7 +501,8 @@ def test_catchup_backfills_absent_media_skips_present_and_rate_limits(monkeypatc
 def _watch_app(tmp_path):
     """A create_app instance for the frame-handler seam. conftest's MOONGLADE_DISABLE_WATCH
     keeps the real watcher thread (and therefore the real socket) from ever starting."""
-    from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade.gallery import create_app
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     save_catalog(tmp_path / "catalog.db",
                  [{f: "" for f in CATALOG_FIELDS} | {
                      "media_id": "1", "filename": "a_1.png",
@@ -631,12 +633,12 @@ def test_the_catchup_writes_a_done_row_for_a_website_task_it_had_to_collect(tmp_
     # "already collected?" test resolves THOSE ids (cataloged_media_ids), so the fake node
     # carries one, and the by-task lookup a video would use answers nothing.
     edges = [{"node": {"id": "W5", "status": "completed", "mediaId": "M5", "batchMediaIds": None}}]
-    monkeypatch.setattr(mg, "get_row_by_task", lambda db_path, t: None)
+    monkeypatch.setattr(catalog_mod, "get_row_by_task", lambda db_path, t: None)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
     monkeypatch.setattr(core, "gql", lambda *a, **k: {})
     monkeypatch.setattr(core, "page_variables", lambda *a, **k: {})
     monkeypatch.setattr(core, "find_connection", lambda *a, **k: {"edges": edges})
-    monkeypatch.setattr(mg, "get_row", lambda db_path, m: None)     # nothing catalogued yet
+    monkeypatch.setattr(catalog_mod, "get_row", lambda db_path, m: None)     # nothing catalogued yet
     monkeypatch.setattr(time, "sleep", lambda *a, **k: None)
     monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: {"media_ids": ["M5"], "saved": 1,
@@ -670,7 +672,7 @@ def test_the_event_path_and_the_catchup_converge_on_one_row(tmp_path, monkeypatc
     monkeypatch.setattr(core, "find_connection", lambda *a, **k:
                         {"edges": [{"node": {"id": "W6", "status": "completed",
                                              "mediaId": "M6", "batchMediaIds": None}}]})
-    monkeypatch.setattr(mg, "get_row", lambda db_path, m: None)
+    monkeypatch.setattr(catalog_mod, "get_row", lambda db_path, m: None)
     monkeypatch.setattr(time, "sleep", lambda *a, **k: None)
     collected = []
 
@@ -827,9 +829,9 @@ def test_catchup_tests_the_ids_the_catalog_actually_holds(monkeypatch, tmp_path,
     monkeypatch.setattr(core, "gql", lambda *a, **k: {})
     monkeypatch.setattr(core, "page_variables", lambda *a, **k: {})
     monkeypatch.setattr(core, "find_connection", lambda *a, **k: {"edges": edges})
-    monkeypatch.setattr(mg, "get_row",
+    monkeypatch.setattr(catalog_mod, "get_row",
                         lambda db_path, m: ({"media_id": m} if m in present else None))
-    monkeypatch.setattr(mg, "get_row_by_task", lambda db_path, t: by_task.get(str(t)))
+    monkeypatch.setattr(catalog_mod, "get_row_by_task", lambda db_path, t: by_task.get(str(t)))
     monkeypatch.setattr(time, "sleep", lambda *a, **k: None)
 
     collected = []
@@ -1081,8 +1083,8 @@ def test_a_failed_collect_is_retried_after_300s_not_every_sweep(tmp_path, monkey
     edges = [{"node": {"id": "T_bad", "status": "completed", "mediaId": "M_bad",
                        "batchMediaIds": None}}]
     monkeypatch.setattr(core, "find_connection", lambda *a, **k: {"edges": edges})
-    monkeypatch.setattr(mg, "get_row", lambda db_path, m: None)
-    monkeypatch.setattr(mg, "get_row_by_task", lambda db_path, t: None)
+    monkeypatch.setattr(catalog_mod, "get_row", lambda db_path, m: None)
+    monkeypatch.setattr(catalog_mod, "get_row_by_task", lambda db_path, t: None)
     tries = []
 
     def _boom(s, tid, out, **k):
@@ -1114,8 +1116,8 @@ def test_a_task_the_sweep_collected_is_not_mirrored_again_by_a_late_frame(tmp_pa
     edges = [{"node": {"id": "T_late", "status": "completed", "mediaId": "M_late",
                        "batchMediaIds": None}}]
     monkeypatch.setattr(core, "find_connection", lambda *a, **k: {"edges": edges})
-    monkeypatch.setattr(mg, "get_row", lambda db_path, m: None)
-    monkeypatch.setattr(mg, "get_row_by_task", lambda db_path, t: None)
+    monkeypatch.setattr(catalog_mod, "get_row", lambda db_path, m: None)
+    monkeypatch.setattr(catalog_mod, "get_row_by_task", lambda db_path, t: None)
     monkeypatch.setattr(gen_road_mod, "collect_generation",
                         lambda s, tid, out, **k: {"media_ids": ["M_late"], "saved": 1,
                                                   "is_video": False})

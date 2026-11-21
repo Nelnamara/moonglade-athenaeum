@@ -52,7 +52,7 @@ def register(app, ctx):
     @app.route("/api/rate/<media_id>", methods=["POST"])
     @tier(LOGIN)
     def rate(media_id):
-        from moonglade.gallery import update_rating
+        from moonglade.catalog import update_rating
         data = request.get_json(silent=True) or {}
         try:
             value = max(0, min(5, int(data.get("rating", 0))))
@@ -77,7 +77,8 @@ def register(app, ctx):
         /api/rate: it only rewrites a regenerable local cache file, touches nothing on
         PixAI and no config. Videos only; an image's thumb is a straight resize and
         never wrong in this way."""
-        from moonglade.gallery import Path, get_row, make_video_thumbnail
+        from moonglade.gallery import Path, make_video_thumbnail
+        from moonglade.catalog import get_row
         if not media_id or "/" in media_id or "\\" in media_id or ".." in media_id:
             return json.dumps({"ok": False, "error": "bad id"}), 400, {"Content-Type": "application/json"}
         row = get_row(db_path, media_id)
@@ -104,7 +105,7 @@ def register(app, ctx):
     @app.route("/api/edit-prompt/<media_id>", methods=["POST"])
     @tier(LOGIN)
     def edit_prompt(media_id):
-        from moonglade.gallery import update_prompt_full
+        from moonglade.catalog import update_prompt_full
         data = request.get_json(silent=True) or {}
         update_prompt_full(db_path, media_id, data.get("prompt", ""))
         return json.dumps({"ok": True}), 200, {"Content-Type": "application/json"}
@@ -119,8 +120,8 @@ def register(app, ctx):
         redirect banner. LOGIN tier, exactly like both page routes it mirrors.
         `count` is rows actually CHANGED, the page banner's own number -- adding to
         a collection an image is already in counts zero, not one."""
-        from moonglade.gallery import (CurationError, _is_smart_name, add_to_collection,
-                                       remove_from_collection)
+        from moonglade.gallery import CurationError, _is_smart_name
+        from moonglade.catalog import add_to_collection, remove_from_collection
         body = request.get_json(silent=True) or {}
         action = str(body.get("action") or "").strip()
         if action not in ("add", "remove"):
@@ -266,7 +267,7 @@ def register(app, ctx):
         changed), no redirect banner. LOGIN tier, like the page route it mirrors.
         An empty `find` is a 400 here rather than the helper's silent 0: the page
         form can't submit one, so a JSON caller sending one is a bug worth naming."""
-        from moonglade.gallery import bulk_replace_prompt
+        from moonglade.catalog import bulk_replace_prompt
         body = request.get_json(silent=True) or {}
         find = str(body.get("find") or "")
         if not find:
@@ -357,7 +358,8 @@ def register(app, ctx):
     @tier(LOGIN)
     def thumb(media_id):
         # ?s= is an allowlist (_THUMB_TIERS: 32 and 256); anything else is the 768 thumb.
-        from moonglade.gallery import Path, find_image_file, get_row
+        from moonglade.gallery import Path, find_image_file
+        from moonglade.catalog import get_row
         from moonglade.web_policy import harden_file_response
         size_key = request.args.get("s") or ""
         if size_key in _THUMB_TIERS and "/" not in media_id \
@@ -386,7 +388,7 @@ def register(app, ctx):
     @app.route("/video-file/<media_id>")
     @tier(LOGIN)
     def video_file(media_id):
-        from moonglade.gallery import get_row
+        from moonglade.catalog import get_row
         from moonglade.web_policy import harden_file_response, media_type_for
         row = get_row(db_path, media_id)
         if not row or row.get("is_video") != "1":
@@ -422,7 +424,8 @@ def register(app, ctx):
     def full_image(media_id):
         # Resolve a media_id to its full-res file on the fly (used by the
         # lightbox so the index page doesn't precompute 250 image paths).
-        from moonglade.gallery import find_image_file, get_row
+        from moonglade.gallery import find_image_file
+        from moonglade.catalog import get_row
         from moonglade.web_policy import harden_file_response, media_type_for
         row = get_row(db_path, media_id)
         p = find_image_file(out_dir, media_id, row.get("filename") if row else "")
@@ -449,7 +452,8 @@ def register(app, ctx):
         # originals on disk are NEVER touched, and a converted file never re-enters the
         # catalog as a new row (the decided shape; the archive stays exactly as PixAI
         # delivered it). Videos are always passed through as-is (Pillow can't transform mp4).
-        from moonglade.gallery import Path, find_image_file, get_row, query_catalog
+        from moonglade.gallery import Path, find_image_file, query_catalog
+        from moonglade.catalog import get_row
         import io
         import zipfile
         import shutil
@@ -786,7 +790,7 @@ def register(app, ctx):
           `unresolved` -- never a silent plausible default (finding 1.5); a
           failed compatibility-meta lookup ships the row flagged `degraded`
           so the client can disclose it (finding 1.4)."""
-        from moonglade.gallery import get_row_by_task
+        from moonglade.catalog import get_row_by_task
         tid = (task_id or "").strip()
         if not tid:
             return jsonify({"error": "task id required"}), 400
@@ -862,7 +866,7 @@ def register(app, ctx):
         belongs to /api/task-params) and a CHAT task -- both `not a video task`,
         400. task_detail_gql returning None (its NETWORK-failure value, not a raise)
         answers {"error": ...}, never a success-shaped empty recipe."""
-        from moonglade.gallery import get_row_by_task
+        from moonglade.catalog import get_row_by_task
         tid = (task_id or "").strip()
         if not tid:
             return jsonify({"error": "task id required"}), 400
@@ -883,7 +887,7 @@ def register(app, ctx):
                 return jsonify({"error": "not a video task"}), 400
 
             def _mref(mid):
-                from moonglade.gallery import get_row
+                from moonglade.catalog import get_row
                 mid = str(mid or "")
                 if not mid:
                     return None
@@ -974,7 +978,7 @@ def register(app, ctx):
         Spending stays gated on /api/generate, which is where the upscale is actually
         submitted.
         """
-        from moonglade.gallery import get_row
+        from moonglade.catalog import get_row
         row = get_row(db_path, media_id)
         if not row:
             return jsonify({"error": "no such image"}), 404
@@ -1063,7 +1067,8 @@ def register(app, ctx):
         moonglade.similar CLIP sidecar index. Mirrors /api/gallery-images's shape so the client
         reuses the same .card rendering. Read-only; fails soft to an empty list if the sidecar
         index or its ML stack isn't available/built yet, so it never 500s the gallery."""
-        from moonglade.gallery import find_image_file, get_row
+        from moonglade.gallery import find_image_file
+        from moonglade.catalog import get_row
         try:
             k = max(1, min(int(request.args.get("k") or 24), 60))
         except ValueError:
@@ -1120,7 +1125,7 @@ def register(app, ctx):
     @tier(LOGIN)
     def api_collections():
         """Collection names for the picker/filter dropdowns. Read-only, local catalog."""
-        from moonglade.gallery import unique_collections
+        from moonglade.catalog import unique_collections
         return jsonify({"collections": unique_collections(db_path)})
 
     @app.route("/contact-sheet")
@@ -1343,7 +1348,7 @@ def register(app, ctx):
         from moonglade import backup as core
 
         def _member(mid, row, path, bucket, size, is_keeper):
-            from moonglade.gallery import is_archive_only
+            from moonglade.catalog import is_archive_only
             row = row or {}
             isv = str(row.get("is_video") or "") == "1"
             return {
@@ -1700,7 +1705,7 @@ def register(app, ctx):
             plain row listing and a grouped unit's cover build, so a series cover is
             byte-identical to that same media as an ordinary card (only the extra
             `series` key ever differs)."""
-            from moonglade.gallery import is_archive_only
+            from moonglade.catalog import is_archive_only
             mid = r.get("media_id")
             pl = _pers.get(str(mid)) or {}
             return {
@@ -1805,7 +1810,8 @@ def register(app, ctx):
         broken-image icon with no explanation. The client already gets that signal for
         free (an <img>/<video> onError), so there is nothing here worth a filesystem
         stat the caller didn't ask for."""
-        from moonglade.gallery import get_row, is_archive_only, list_media_ids, personal_get
+        from moonglade.gallery import list_media_ids, personal_get
+        from moonglade.catalog import get_row, is_archive_only
         row = get_row(db_path, media_id)
         if not row:
             return jsonify({"error": "not found"}), 404
@@ -2114,7 +2120,7 @@ def register(app, ctx):
         this doesn't repeat a primary-key SELECT they already paid for. It is a cache, not
         an override: pass a DIFFERENT row and you get a different file, which is why only
         the two callers holding this exact mid's row use it."""
-        from moonglade.gallery import get_row
+        from moonglade.catalog import get_row
         return _scan.find_local_video_file(out_dir, mid,
                                      row if row is not None else get_row(db_path, mid))
 

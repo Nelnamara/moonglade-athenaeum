@@ -26,7 +26,7 @@ import pytest
 from PIL import Image, ImageSequence
 
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import STARFALL_EVENT, ach_event, login_client
 from moonglade import achievements as achievements_mod

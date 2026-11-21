@@ -7,7 +7,8 @@ rows, is_keeper/reclaimable_bytes) is covered in dev/tests/test_duplicates_api.p
 from types import SimpleNamespace
 
 from moonglade import backup as core
-from moonglade.gallery import CATALOG_FIELDS, compute_dhash, save_catalog
+from moonglade.gallery import compute_dhash
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from moonglade.dupes import near_duplicate_groups
 
 
@@ -160,7 +161,7 @@ def test_backfill_phash_fills_missing_rows_image_only(tmp_path):
     assert out["filled"] == 1                  # only row "1" needed filling
     assert out["unresolved"] == 0 and out["unreadable"] == 0
 
-    from moonglade.gallery import load_catalog
+    from moonglade.catalog import load_catalog
     rows = {r["media_id"]: r for r in load_catalog(tmp_path / "catalog.db")}
     assert rows["1"]["phash"] and len(rows["1"]["phash"]) == 16
     assert rows["2"]["phash"] == "deadbeefdeadbeef"     # untouched, already had one
@@ -177,7 +178,7 @@ def test_backfill_phash_respects_max_cap(tmp_path):
                                                   progress=None))
     assert out["filled"] == 1                  # capped to 1 of the 3 rows needing it
 
-    from moonglade.gallery import load_catalog
+    from moonglade.catalog import load_catalog
     rows = load_catalog(tmp_path / "catalog.db")
     filled = [r for r in rows if r["phash"]]
     assert len(filled) == 1

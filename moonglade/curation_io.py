@@ -56,6 +56,7 @@ import time
 from pathlib import Path
 
 from moonglade import paths as _paths
+from moonglade import catalog as _catalog
 
 FORMAT = "moonglade-curation"
 VERSION = 1
@@ -93,7 +94,7 @@ def export_curation(db_path, now=None):
         mid = str(r["media_id"])
         rs = str(r["rating"] or "")
         rating = min(5, int(rs)) if rs.isdigit() else 0
-        cols = sorted(set(g._split_collections(r["collections"])), key=_fold)
+        cols = sorted(set(_catalog._split_collections(r["collections"])), key=_fold)
         if rating or cols:
             it = item(mid)
             it["rating"] = rating
@@ -284,14 +285,14 @@ def import_curation(db_path, doc, apply=False, overwrite=False):
         states[mid] = new
 
     # --- collections: unioned; under overwrite, the document's list exactly ----------
-    hand_now = set(g.unique_collections(db_path))
+    hand_now = set(_catalog.unique_collections(db_path))
     smart_now = {s["name"].casefold(): s for s in g.list_smart_collections(db_path)}
     labels, unlabels, label_skipped = {}, {}, []
     for it in items:
         mid = it["media_id"]
         if mid not in known:
             continue
-        have = g._split_collections(known[mid].get("collections"))
+        have = _catalog._split_collections(known[mid].get("collections"))
         want = []
         for c in it["collections"]:
             if c.casefold() in smart_now:
@@ -375,10 +376,10 @@ def import_curation(db_path, doc, apply=False, overwrite=False):
         g.curate_restore(db_path, dict(chunk))
     for name, mids in labels.items():
         for chunk in _chunks(mids, g.CURATE_MAX_IDS):
-            g.add_to_collection(db_path, chunk, name)
+            _catalog.add_to_collection(db_path, chunk, name)
     for name, mids in unlabels.items():
         for chunk in _chunks(mids, g.CURATE_MAX_IDS):
-            g.remove_from_collection(db_path, chunk, name)
+            _catalog.remove_from_collection(db_path, chunk, name)
     for s in smart:
         if s["name"] in smart_created:
             try:
@@ -388,7 +389,7 @@ def import_curation(db_path, doc, apply=False, overwrite=False):
                 smart_skipped.append(s["name"])
     for name, oids in plan_orders.items():
         members = {str(r["media_id"]) for r in g.rows_for_media_ids(db_path, oids)
-                   if name in g._split_collections(r.get("collections"))}
+                   if name in _catalog._split_collections(r.get("collections"))}
         try:
             g.set_collection_order(db_path, name, [m for m in oids if m in members])
         except g.CurationError:

@@ -40,7 +40,8 @@ import pytest
 from moonglade import settings as _settings
 from moonglade import container as mc
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client
 from moonglade import telemetry as telemetry_mod

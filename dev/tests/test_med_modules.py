@@ -66,6 +66,7 @@ except ImportError:
     _install_fastmcp_stub()
 
 from moonglade import mcp_server as M   # noqa: E402  (must follow the stub install)
+from moonglade import catalog as catalog_mod
 
 
 def _fn(tool):
@@ -80,12 +81,12 @@ def _seed(tmp_path, media_ids):
     db = tmp_path / "catalog.db"
     rows = []
     for mid in media_ids:
-        row = {f: "" for f in g.CATALOG_FIELDS}
+        row = {f: "" for f in catalog_mod.CATALOG_FIELDS}
         row.update(media_id=mid, filename="{}.png".format(mid),
                    created_at="2025-01-01T00:00:00")
         rows.append(row)
         (tmp_path / "{}.png".format(mid)).write_bytes(b"not-really-a-png")
-    g.save_catalog(db, rows)
+    catalog_mod.save_catalog(db, rows)
     return db
 
 
@@ -261,7 +262,7 @@ def test_set_rating_reports_failure_for_an_unknown_media_id(mcp_out):
     assert res["ok"] is False
     assert res["error"] == "no such media_id"
     assert res["media_id"] == "typo-not-in-catalog"
-    assert g.get_row(str(db), "real1")["rating"] in ("", None)   # nothing else touched
+    assert catalog_mod.get_row(str(db), "real1")["rating"] in ("", None)   # nothing else touched
 
 
 def test_set_rating_still_writes_for_a_real_media_id(mcp_out):
@@ -270,7 +271,7 @@ def test_set_rating_still_writes_for_a_real_media_id(mcp_out):
     res = _fn(M.set_rating)("real1", 4)
 
     assert res == {"ok": True, "media_id": "real1", "rating": 4}
-    assert g.get_row(str(db), "real1")["rating"] == "4"
+    assert catalog_mod.get_row(str(db), "real1")["rating"] == "4"
 
 
 def test_set_rating_clamps_and_still_persists(mcp_out):
@@ -279,4 +280,4 @@ def test_set_rating_clamps_and_still_persists(mcp_out):
     db = mcp_out(["real1"])
 
     assert _fn(M.set_rating)("real1", 99)["rating"] == 5
-    assert g.get_row(str(db), "real1")["rating"] == "5"
+    assert catalog_mod.get_row(str(db), "real1")["rating"] == "5"

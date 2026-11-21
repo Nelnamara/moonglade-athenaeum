@@ -16,9 +16,10 @@ import pytest
 
 from moonglade import gallery as g
 from moonglade import integrity as integ
-from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from tests.test_integrity import _png
 from tests.test_integrity_fix import FakeMediaSession
+from moonglade import catalog as catalog_mod
 
 SVG = (b'<?xml version="1.0" encoding="UTF-8"?>\n'
        b'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">'
@@ -91,7 +92,7 @@ def test_build_thumbnails_skips_an_svg_without_counting_a_failure(tmp_path, monk
     real = g.make_thumbnail
     monkeypatch.setattr(g, "make_thumbnail", lambda src, dst: tried.append(Path(src).name) or real(src, dst))
     seen = []
-    g.build_thumbnails(g.load_catalog(out / "catalog.db"), out, out / "gallery" / "thumbs",
+    g.build_thumbnails(catalog_mod.load_catalog(out / "catalog.db"), out, out / "gallery" / "thumbs",
                        progress_cb=lambda d, t, p: seen.append((d, t)), workers=1)
     assert "logo_t2_202.svg" not in tried
     assert seen[-1][0] == seen[-1][1], "every row is accounted for: none counted as failed"

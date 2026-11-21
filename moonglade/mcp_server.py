@@ -38,6 +38,7 @@ from fastmcp.utilities.types import Image
 from moonglade import gallery as g   # catalog helpers -- the single source of truth for SQL
 from moonglade.backup import __version__   # gallery already imports backup: no new cost
 from moonglade import dupes as _dupes
+from moonglade import catalog as _catalog
 
 # The library the tools read: bound by main() once the move has run and the library is
 # resolved (bind_library). Importing this module reads nothing.
@@ -120,7 +121,7 @@ def search_catalog(query: str = "", model: str = "", collection: str = "",
 def get_image(media_id: str, include_image: bool = True):
     """Full metadata for ONE image and, by default, a downscaled view so you can
     actually see it. Returns metadata; when include_image, also an image block."""
-    row = g.get_row(DB, media_id)
+    row = _catalog.get_row(DB, media_id)
     if not row:
         return {"error": "no such media_id", "media_id": media_id}
     meta = _slim(row)
@@ -149,7 +150,7 @@ def similar(media_id: str, limit: int = 24) -> dict:
     `stale_index_entries` counts neighbours the index still holds but the catalog no
     longer does -- when it is non-zero, `count` is short of `requested` for that
     reason and not because the library ran out of similar images."""
-    row = g.get_row(DB, media_id)
+    row = _catalog.get_row(DB, media_id)
     if not row:
         return {"error": "no such media_id", "neighbors": []}
     path = g.find_image_file(OUT, media_id, row.get("filename") or "")
@@ -164,7 +165,7 @@ def similar(media_id: str, limit: int = 24) -> dict:
     neighbors = []
     stale = []
     for mid, score in hits:
-        r = g.get_row(DB, mid)
+        r = _catalog.get_row(DB, mid)
         if r:
             neighbors.append({**_slim(r), "score": round(float(score), 4)})
         else:
@@ -203,9 +204,9 @@ def set_rating(media_id: str, rating: int) -> dict:
     # through a review queue marks the image done, and it stays unrated forever. The check
     # lives here rather than in update_rating because the gallery helper has other callers
     # whose contract (silent no-op on a missing row) this tool has no business changing.
-    if not g.get_row(DB, media_id):
+    if not _catalog.get_row(DB, media_id):
         return {"ok": False, "error": "no such media_id", "media_id": media_id}
-    g.update_rating(DB, media_id, value)
+    _catalog.update_rating(DB, media_id, value)
     return {"ok": True, "media_id": media_id, "rating": value}
 
 
@@ -217,7 +218,7 @@ def add_to_collection(media_ids: list[str], collection: str) -> dict:
     if not name:
         return {"ok": False, "error": "collection name required"}
     try:
-        n = g.add_to_collection(DB, [str(m) for m in media_ids], name)
+        n = _catalog.add_to_collection(DB, [str(m) for m in media_ids], name)
     except g.CurationError as e:      # a smart collection is a saved search, not a list
         return {"ok": False, "error": str(e)}
     return {"ok": True, "collection": name, "added": n}
@@ -249,7 +250,7 @@ def list_collections() -> dict:
     add_to_collection / remove_from_collection are blind to on their own. Returns
     {count, collections:[{name, count}]}."""
     out = []
-    for name in g.unique_collections(DB):
+    for name in _catalog.unique_collections(DB):
         _, total = g.query_catalog(DB, collection=name, page=1, page_size=1)
         out.append({"name": name, "count": total})
     return {"count": len(out), "collections": out}
@@ -262,7 +263,7 @@ def remove_from_collection(media_ids: list[str], collection: str) -> dict:
     name = (collection or "").strip()
     if not name:
         return {"ok": False, "error": "collection name required"}
-    n = g.remove_from_collection(DB, [str(m) for m in media_ids], name)
+    n = _catalog.remove_from_collection(DB, [str(m) for m in media_ids], name)
     return {"ok": True, "collection": name, "removed": n}
 
 
@@ -274,7 +275,7 @@ def get_images(media_ids: list[str]) -> dict:
     come back under `missing`."""
     rows, missing = [], []
     for mid in [str(m) for m in media_ids][:100]:
-        row = g.get_row(DB, mid)
+        row = _catalog.get_row(DB, mid)
         if row:
             rows.append(_slim(row))
         else:
@@ -309,7 +310,7 @@ def catalog_stats() -> dict:
         "by_source": {src: total(source=src) for src in ("api", "local")},
         "by_rating": by_rating,
         "collections": [{"name": n, "count": total(collection=n)}
-                        for n in g.unique_collections(DB)],
+                        for n in _catalog.unique_collections(DB)],
         "newest": (newest[0].get("created_at") if newest else None),
         "oldest": (oldest[0].get("created_at") if oldest else None),
     }

@@ -99,7 +99,7 @@ def published_index(db_path):
     """media_id -> (artwork_id, created_epoch_or_None) for every catalog row that already
     claims an artwork. The sweep's whole idea of "do I already know this work, and is it
     young?" -- one indexed read, no network, ~36k rows of two small values."""
-    from moonglade.gallery import catalog
+    from moonglade.catalog import catalog
     idx = {}
     try:
         with catalog(db_path) as con:
@@ -124,7 +124,7 @@ def published_local_ids(db_path):
     that exist -- so treating it as "might be new" made it hold the walk open forever.
 
     One indexed column scan, no row bodies, the same shape published_index already is."""
-    from moonglade.gallery import catalog
+    from moonglade.catalog import catalog
     ids = set()
     try:
         with catalog(db_path) as con:
@@ -724,7 +724,7 @@ def top_published_rows(db_path, limit=12, order="likes"):
     column filled by --sync-artworks, not twelve live calls made while the panel opens;
     a library that has never been swept simply reads views=0 with views_at blank, which
     is what lets the panel say "not swept yet" instead of drawing a bar of zeroes."""
-    from moonglade.gallery import catalog
+    from moonglade.catalog import catalog
     col = "views" if order == "views" else "likes"
     with catalog(db_path) as con:
         try:
@@ -763,7 +763,7 @@ def published_totals(db_path):
     Which of an animation's two rows represents it does not matter here -- they carry the
     same PixAI-owned numbers by construction -- so the lowest rowid is representative
     enough. published_spikes, which shows a media_id to the owner, is fussier."""
-    from moonglade.gallery import catalog
+    from moonglade.catalog import catalog
     with catalog(db_path) as con:
         try:
             r = con.execute(
@@ -800,7 +800,7 @@ def published_spikes(db_path, limit=5):
     wins the slot over the mp4 -- the note names a picture, and the still is what the
     owner recognises. A row that has never been merged has no artwork_id and keys on its
     own media_id, so it is never folded in with any other."""
-    from moonglade.gallery import catalog
+    from moonglade.catalog import catalog
     with catalog(db_path) as con:
         try:
             rows = con.execute(

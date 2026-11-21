@@ -10,13 +10,15 @@ import time
 from moonglade import backup as core
 from moonglade import contests as contests_mod
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_test_client
 from moonglade import series as series_mod
 from moonglade import telemetry as telemetry_mod
 from moonglade import contest_sync as contest_sync_mod
 from moonglade import achievements as achievements_mod
+from moonglade import catalog as catalog_mod
 
 
 def _row(**kw):
@@ -323,6 +325,6 @@ def test_artwork_id_is_indexed(tmp_path):
     or three times per contest overlay open."""
     db = tmp_path / "catalog.db"
     save_catalog(db, [_row(media_id="m1", artwork_id="aw1", filename="a.png")])
-    with g.catalog(db) as con:
+    with catalog_mod.catalog(db) as con:
         names = {r[1] for r in con.execute("PRAGMA index_list(catalog)").fetchall()}
     assert "idx_artwork_id" in names

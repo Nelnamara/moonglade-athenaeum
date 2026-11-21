@@ -37,7 +37,7 @@ import requests
 
 from moonglade import backup as core
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.fake_pixai import operation_name
 from moonglade import pixai_client as pixai_client_mod

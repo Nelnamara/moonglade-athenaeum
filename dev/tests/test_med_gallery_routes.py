@@ -24,7 +24,8 @@ from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gallery as moonglade_gallery
 from moonglade import gen_road as gen_road_mod
-from moonglade.gallery import CATALOG_FIELDS, create_app, query_catalog, save_catalog
+from moonglade.gallery import create_app, query_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client, login_test_client
 

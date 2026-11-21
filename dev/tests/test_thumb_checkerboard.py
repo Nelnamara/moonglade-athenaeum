@@ -3,7 +3,8 @@ old thumbnails of see-through sources rebuild themselves exactly once."""
 import io
 
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS
+from moonglade.catalog import CATALOG_FIELDS
+from moonglade import catalog as catalog_mod
 
 
 def _row(**kw):
@@ -46,9 +47,9 @@ def test_opaque_thumbnail_is_unchanged(tmp_path):
     assert g.make_thumbnail(src, dst) is True
     with Image.open(src) as im:                      # the old path, spelled out
         im = im.convert("RGB")
-        im.thumbnail(g.THUMB_SIZE, Image.LANCZOS)
+        im.thumbnail(catalog_mod.THUMB_SIZE, Image.LANCZOS)
         buf = io.BytesIO()
-        im.save(buf, "JPEG", quality=g.THUMB_QUALITY)
+        im.save(buf, "JPEG", quality=catalog_mod.THUMB_QUALITY)
     assert dst.read_bytes() == buf.getvalue()
     # an RGBA picture with no see-through pixel takes the same path
     src2 = tmp_path / "o2.png"

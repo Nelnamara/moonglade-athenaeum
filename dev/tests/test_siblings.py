@@ -10,7 +10,7 @@ from moonglade import gallery as G
 
 
 def _seed(tmp_path, rows):
-    from moonglade.gallery import CATALOG_FIELDS, save_catalog
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     (tmp_path / "2026-08").mkdir(parents=True, exist_ok=True)
     full = []
     for r in rows:
@@ -253,7 +253,7 @@ def test_task_id_is_indexed(tmp_path):
     """task_id is the sibling key; /api/siblings and the View Batch filter query it.
     It had no index (full table scan). Pin the migration."""
     import sqlite3
-    from moonglade.gallery import CATALOG_FIELDS, save_catalog
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "1", "filename": "a_1.png", "task_id": "T1",
         "created_at": "2026-08-22T00:00:00Z"}])

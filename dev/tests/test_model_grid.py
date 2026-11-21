@@ -10,6 +10,7 @@ from moonglade import gen_road as gen_road_mod
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import models as models_mod
+from moonglade import catalog as catalog_mod
 
 _SEARCH = {"data": [
     {"id": "1982880136609467518", "title": "Tsubaki.2", "type": "MMDIT26A_MODEL",
@@ -1119,7 +1120,7 @@ def test_run_generate_persists_paid_credit(monkeypatch, tmp_path):
     args = SimpleNamespace(out=str(tmp_path), params_json='{"prompts": "x", "modelId": "v"}',
                            confirm=True, task_id="", token=None)
     gen_cli_mod.run_generate(args)
-    rows = moonglade_gallery.load_catalog(tmp_path / "catalog.db")
+    rows = catalog_mod.load_catalog(tmp_path / "catalog.db")
     assert {r["media_id"]: r.get("paid_credit") for r in rows} == {"A": "2750", "B": "2750"}
 
 
@@ -1138,5 +1139,5 @@ def test_collect_generation_persists_paid_credit_zero_not_blank(monkeypatch, tmp
     monkeypatch.setattr(moonglade_gallery, "make_thumbnail", lambda *a, **k: None)
     got = gen_road_mod.collect_generation(object(), "T1", str(tmp_path))
     assert got["media_ids"] == ["M1"]
-    rows = moonglade_gallery.load_catalog(tmp_path / "catalog.db")
+    rows = catalog_mod.load_catalog(tmp_path / "catalog.db")
     assert rows[0].get("paid_credit") == "0"

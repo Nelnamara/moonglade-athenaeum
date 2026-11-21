@@ -128,7 +128,7 @@ def test_a_pack_copy_under_rewards_is_served_and_its_absence_is_a_plain_404(tmp_
     does not the answer is a 404, which sends the button on to the module's copy. Pack v7 only
     has to carry the file, at the rewards role's coded folder."""
     from moonglade import gallery as g
-    from moonglade.gallery import CATALOG_FIELDS, save_catalog
+    from moonglade.catalog import CATALOG_FIELDS, save_catalog
     from tests.conftest import login_client
     save_catalog(tmp_path / "catalog.db", [
         {f: "" for f in CATALOG_FIELDS} | {"media_id": "1", "filename": "a.png",

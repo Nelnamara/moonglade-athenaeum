@@ -75,13 +75,7 @@ from moonglade import task_feed as _task_feed
 from moonglade import task_reads as _task_reads
 from moonglade import telemetry as _telemetry
 from moonglade import training as _training
-from moonglade.gallery import (CATALOG_FIELDS, init_db, migrate, load_catalog,
-                            query_catalog, catalog_csv_text,
-                            save_catalog, _db_is_empty, rows_for_media_ids,
-                            # A save of rows built from an earlier read: re-reads the
-                            # current rows in the write transaction so an edit made
-                            # meanwhile is never undone (2026-11-19).
-                            save_catalog_over_snapshot,
+from moonglade.gallery import (query_catalog, rows_for_media_ids,
                             # The row-level artwork write (see run_sync_artworks): one
                             # narrow UPDATE of the eleven PixAI-owned columns, keyed by
                             # media_id -- imported the same way its whole-table siblings
@@ -93,6 +87,12 @@ from moonglade.gallery import (CATALOG_FIELDS, init_db, migrate, load_catalog,
                             apply_artwork_views,
                             build_thumbnails,
                             _NO_WINDOW)
+from moonglade.catalog import (CATALOG_FIELDS, init_db, migrate, load_catalog,
+                               catalog_csv_text, save_catalog, _db_is_empty,
+                               # A save of rows built from an earlier read: re-reads the
+                               # current rows in the write transaction so an edit made
+                               # meanwhile is never undone (2026-11-19).
+                               save_catalog_over_snapshot)
 from moonglade.redact import _redact_host_paths_cli
 # The one library scan (moonglade/scan.py, out of the gallery since 3.21.0).
 from moonglade.scan import (_IMAGE_EXTS, media_id_of, find_files_for_media_id, DELETED_DIRNAME,
@@ -1339,7 +1339,7 @@ def migrate_local_filenames(out, db_path, thumb_dir):
     Deliberately never deletes: a destination that already exists holds the same
     content (the name contains the content hash), so the row is left exactly as it
     is for a human to look at rather than resolved by removing one of them."""
-    from moonglade.gallery import delete_from_catalog
+    from moonglade.catalog import delete_from_catalog
     out = Path(out)
     thumb_dir = Path(thumb_dir)
     renamed = skipped = 0
@@ -5723,7 +5723,8 @@ def run_backfill_phash(args):
     run_backfill_full_meta's docstring already explains."""
     out = Path(args.out)
     db_path = _ensure_db(out)
-    from moonglade.gallery import load_catalog, save_catalog, compute_dhash, find_image_file
+    from moonglade.gallery import compute_dhash, find_image_file
+    from moonglade.catalog import load_catalog, save_catalog
 
     rows = load_catalog(db_path)
     videos = [r for r in rows if str(r.get("is_video") or "") == "1"]
@@ -6336,7 +6337,8 @@ def run_rebuild_thumbs(args):
     and thumbs whose media left the catalog are swept."""
     out = Path(args.out)
     db_path = _ensure_db(out)
-    from moonglade.gallery import build_thumbnails, load_catalog
+    from moonglade.gallery import build_thumbnails
+    from moonglade.catalog import load_catalog
     thumb_dir = out / "gallery" / "thumbs"
     thumb_dir.mkdir(parents=True, exist_ok=True)
     rows = load_catalog(db_path)

@@ -25,6 +25,7 @@ from moonglade.scan import (scan_library, files_for, media_id_of, bucket_of,
                             QUARANTINE_EXCLUDE_ANYWHERE, IMPORT_EXCLUDE, BRANDING_DIRNAME)
 from moonglade import scan as scan_mod
 from moonglade import organize as organize_mod
+from moonglade import catalog as catalog_mod
 
 
 # ---------------------------------------------------------------------------
@@ -387,11 +388,11 @@ def test_callers_ride_the_scan(library):
 
     # backfill drops the loose file that has no batch directory
     (library / "catalog.db").unlink(missing_ok=True)
-    g.init_db(library / "catalog.db")
-    g.save_catalog(library / "catalog.db",
-                   [{f: "" for f in g.CATALOG_FIELDS} | {"media_id": "108"},
-                    {f: "" for f in g.CATALOG_FIELDS} | {"media_id": "109"}])
+    catalog_mod.init_db(library / "catalog.db")
+    catalog_mod.save_catalog(library / "catalog.db",
+                   [{f: "" for f in catalog_mod.CATALOG_FIELDS} | {"media_id": "108"},
+                    {f: "" for f in catalog_mod.CATALOG_FIELDS} | {"media_id": "109"}])
     assert g.backfill_batches(library, library / "catalog.db") == 1
-    rows = {r["media_id"]: r["batch"] for r in g.load_catalog(library / "catalog.db")}
+    rows = {r["media_id"]: r["batch"] for r in catalog_mod.load_catalog(library / "catalog.db")}
     assert rows["108"] == "batch_a"
     assert rows["109"] == ""            # loose in batches/: no batch name to take

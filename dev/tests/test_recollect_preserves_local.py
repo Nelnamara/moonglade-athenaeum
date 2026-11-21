@@ -15,7 +15,8 @@ from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade import gen_cli as gen_cli_mod
 from moonglade import gen_road as gen_road_mod
-from moonglade.gallery import CATALOG_FIELDS, create_app, load_catalog, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.conftest import login_test_client
 from moonglade import task_reads as task_reads_mod

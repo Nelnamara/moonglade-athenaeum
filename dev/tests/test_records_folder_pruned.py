@@ -22,6 +22,7 @@ from moonglade import scan as scan_mod
 from moonglade import dupes as dupes_mod
 from moonglade import organize as organize_mod
 from moonglade import health as health_mod
+from moonglade import catalog as catalog_mod
 
 # moonglade.similar imports numpy and pixeltable at module level, and CI installs a curated list
 # without them (it ignores dev/tests/test_similar.py for the same reason), so only the test that
@@ -45,8 +46,8 @@ def library(tmp_path):
     (rec / "a_999.png").write_bytes(b"PNG-IN-RECORDS")          # named like a picture
     (rec / "logs" / "deep_998.png").write_bytes(b"PNG-DEEPER")
     (rec / "runs.db").write_bytes(b"SQLite format 3\x00")
-    row = {f: "" for f in g.CATALOG_FIELDS}
-    g.save_catalog(lib / "catalog.db", [
+    row = {f: "" for f in catalog_mod.CATALOG_FIELDS}
+    catalog_mod.save_catalog(lib / "catalog.db", [
         row | {"media_id": "100", "filename": "images/real_100.png",
                "created_at": "2025-01-01T00:00:00", "prompt_preview": "real"},
         row | {"media_id": "999", "filename": "a_999.png",

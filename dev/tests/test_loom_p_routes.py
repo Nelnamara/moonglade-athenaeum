@@ -37,7 +37,8 @@ from moonglade import gen_road as gen_road_mod
 from moonglade import paths as _paths
 from moonglade import backup as core
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from moonglade.account_prefs import _account_key
 from tests.conftest import _TEST_USERNAME, login_test_client
 from moonglade import media_tools as media_tools_mod

@@ -31,7 +31,7 @@ from moonglade import gallery as g
 from moonglade import gen_cli as gen_cli_mod
 from moonglade import gen_params as gen_params_mod
 from moonglade import models as models_mod
-from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.conftest import login_test_client
 from moonglade import pixai_client as pixai_client_mod

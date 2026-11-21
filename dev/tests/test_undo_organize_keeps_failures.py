@@ -13,7 +13,7 @@ import pytest
 
 from moonglade import organize as organize_mod
 from moonglade import paths
-from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 
 def _seed(tmp_path, names):

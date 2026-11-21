@@ -24,7 +24,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import contests as contests_mod
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client, record_own_sleeps
 from moonglade import telemetry as telemetry_mod

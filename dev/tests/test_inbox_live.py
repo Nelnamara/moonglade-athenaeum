@@ -13,7 +13,8 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import inbox
-from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_test_client
 from moonglade import jobs as jobs_mod
 

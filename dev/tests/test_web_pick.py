@@ -15,7 +15,8 @@ from moonglade import gen_road as gen_road_mod
 from moonglade import models as models_mod
 from moonglade import paths
 from moonglade import pricing as pricing_mod
-from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from moonglade.account_prefs import _account_key
 
 from tests.conftest import login_client, login_existing_client, with_csrf
@@ -26,6 +27,7 @@ from moonglade import pixai_client as pixai_client_mod
 from moonglade import media_tools as media_tools_mod
 from moonglade import living as living_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import catalog as catalog_mod
 
 
 def _row(**kw):
@@ -759,7 +761,7 @@ def test_rows_for_media_ids_preserves_order_drops_missing():
             return False
 
     import unittest.mock as mock
-    with mock.patch.object(g, "catalog", return_value=FakeCon()):
+    with mock.patch.object(catalog_mod, "catalog", return_value=FakeCon()):
         rows = g.rows_for_media_ids("db", ["3", "1", "99", "2"])
     assert [r["media_id"] for r in rows] == ["3", "1", "2"]   # order kept, 99 dropped
 
@@ -1298,7 +1300,7 @@ def test_redaction_still_does_not_eat_ordinary_messages(tmp_path, monkeypatch, p
 
 def test_catalog_counts(tmp_path):
     from moonglade import gallery as g
-    g.save_catalog(tmp_path / "catalog.db", [
+    catalog_mod.save_catalog(tmp_path / "catalog.db", [
         _row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00",
              collections="faves,wips"),
         _row(media_id="2", filename="b_2.png", created_at="2025-01-02T00:00:00",
@@ -1311,7 +1313,7 @@ def test_catalog_counts(tmp_path):
 
 def test_distinct_task_count(tmp_path):
     from moonglade import gallery as g
-    g.save_catalog(tmp_path / "catalog.db", [
+    catalog_mod.save_catalog(tmp_path / "catalog.db", [
         _row(media_id="1", task_id="tA", filename="a_1.png", created_at="2025-01-01T00:00:00"),
         _row(media_id="2", task_id="tA", filename="b_2.png", created_at="2025-01-02T00:00:00"),  # same task (batch)
         _row(media_id="3", task_id="tB", filename="c_3.png", created_at="2025-01-03T00:00:00"),

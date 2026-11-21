@@ -158,7 +158,7 @@ def test_similar_excludes_self_and_limits_k(monkeypatch):
 def test_api_similar_route(tmp_path, monkeypatch):
     """Hydrates neighbours like /api/gallery-images, drops ids no longer in the catalog,
     and soft-404s an unknown media_id — the sidecar itself is mocked."""
-    from moonglade.gallery import save_catalog, CATALOG_FIELDS
+    from moonglade.catalog import save_catalog, CATALOG_FIELDS
     from tests.conftest import login_client
 
     def row(**kw):

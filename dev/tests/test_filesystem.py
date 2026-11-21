@@ -131,7 +131,7 @@ def test_load_config_missing_returns_empty(real_config_rule):
 # ---------------------------------------------------------------------------
 
 from types import SimpleNamespace
-from moonglade.gallery import load_catalog as _load_cat
+from moonglade.catalog import load_catalog as _load_cat
 
 
 def test_import_local_scans_and_is_idempotent(tmp_path):
@@ -155,7 +155,7 @@ def test_import_local_skips_already_backed_up_pixai_files(tmp_path):
     """Regression: an organized PixAI file is named <mediaid>.ext and its catalog
     'filename' string may differ from the on-disk path, but media_id_of() matches
     the existing row -- so import must NOT re-catalog it as a duplicate 'local'."""
-    from moonglade.gallery import save_catalog, CATALOG_FIELDS
+    from moonglade.catalog import save_catalog, CATALOG_FIELDS
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} |
                       {"media_id": "375806477215601884", "filename": "images/old_name.png"}])
@@ -327,7 +327,7 @@ def test_import_local_skips_branding_folder(tmp_path, monkeypatch):
     legacy installs); it covers the whole tree here because conftest's
     _isolated_branding redirects branding_root() to tmp_path/"branding"."""
     from moonglade import gallery as g
-    from moonglade.gallery import load_catalog
+    from moonglade.catalog import load_catalog
     monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "")
     branding_mod._role_dir("marks").mkdir(parents=True)
     (branding_mod.branding_root() / "banner.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
@@ -343,7 +343,7 @@ def test_import_local_skips_branding_folder(tmp_path, monkeypatch):
 
 
 def test_organize_normalizes_to_month_descriptive_no_batches(tmp_path):
-    from moonglade.gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    from moonglade.catalog import save_catalog, CATALOG_FIELDS, load_catalog
     db = tmp_path / "catalog.db"
     save_catalog(db, [
         {f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "task_id": "T1",
@@ -397,7 +397,7 @@ def test_organize_never_touches_deleted_quarantine(tmp_path):
     replaces it into the organized tree in place of the live file. Either way the
     _deleted/ file must never be touched at all -- this asserts exactly that,
     regardless of which of the two on-disk copies the walk happens to visit first."""
-    from moonglade.gallery import save_catalog, CATALOG_FIELDS
+    from moonglade.catalog import save_catalog, CATALOG_FIELDS
     from moonglade.scan import DELETED_DIRNAME
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m9", "task_id": "T9",
@@ -420,7 +420,7 @@ def test_organize_never_touches_deleted_quarantine(tmp_path):
 
 
 def test_undo_organize_reverts_moves(tmp_path):
-    from moonglade.gallery import save_catalog, CATALOG_FIELDS
+    from moonglade.catalog import save_catalog, CATALOG_FIELDS
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "task_id": "T1",
         "prompt_preview": "alpha", "created_at": "2024-03-01T00:00:00", "filename": "alpha_T1_m1.png"}])
@@ -450,7 +450,7 @@ def test_organize_drops_byte_identical_duplicate(tmp_path):
     the redundant one and keep exactly one file -- this is the one line in the whole
     command that unlink()s a real file on a path that runs live by default (no
     --dry-run gate), so it must never fire on the wrong side of a comparison."""
-    from moonglade.gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    from moonglade.catalog import save_catalog, CATALOG_FIELDS, load_catalog
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "dup1", "task_id": "T9",
         "prompt_preview": "dup", "created_at": "2024-07-01T00:00:00"}])
@@ -474,7 +474,7 @@ def test_organize_keeps_differing_content_side_by_side(tmp_path):
     """INVARIANT 5's other half: two on-disk copies of the SAME media_id that are NOT
     byte-identical (a genuine conflict, not a redundant dupe) must both survive --
     cmd_organize must never silently pick one and discard the other's real content."""
-    from moonglade.gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    from moonglade.catalog import save_catalog, CATALOG_FIELDS, load_catalog
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "dup2", "task_id": "T8",
         "prompt_preview": "dup", "created_at": "2024-07-01T00:00:00"}])
@@ -495,7 +495,7 @@ def test_organize_keeps_differing_content_side_by_side(tmp_path):
 
 
 def test_reconcile_flags_deleted_server_side(tmp_path, monkeypatch, pixai):
-    from moonglade.gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    from moonglade.catalog import save_catalog, CATALOG_FIELDS, load_catalog
     db = tmp_path / "catalog.db"
     old = "2024-01-01T00:00:00"
     save_catalog(db, [
@@ -526,9 +526,9 @@ def test_generate_preview_spends_nothing(tmp_path):
 # SQLite catalog helpers
 # ---------------------------------------------------------------------------
 
-from moonglade.gallery import (CATALOG_FIELDS, init_db, save_catalog, load_catalog,
-                            update_rating, delete_from_catalog,
-                            update_prompt_full, bulk_replace_prompt, _db_is_empty)
+from moonglade.catalog import (CATALOG_FIELDS, init_db, save_catalog, load_catalog, update_rating,
+                               delete_from_catalog, update_prompt_full, bulk_replace_prompt,
+                               _db_is_empty)
 from moonglade import organize as organize_mod
 from moonglade import media_tools as media_tools_mod
 from moonglade import branding as branding_mod
@@ -590,7 +590,7 @@ def test_migrations_backfill_every_field_added_after_the_original_schema(tmp_pat
     was found. The test is not vacuous regardless -- see the report for the mutation
     check that proves it fails when a migration entry is missing.)"""
     import sqlite3
-    from moonglade.gallery import CATALOG_FIELDS, catalog
+    from moonglade.catalog import CATALOG_FIELDS, catalog
 
     original_fields = [   # cc2aeb1's _CREATE_TABLE, verbatim -- none of these have ever
         "task_id", "media_id", "filename", "url", "width", "height",   # needed a migration
@@ -625,7 +625,7 @@ def test_migration_adds_paid_credit_to_existing_db_without_data_loss(tmp_path):
     _MIGRATIONS on the first plain open of the catalog, with the existing row's data
     intact -- and the migrated db must round-trip a real credit value."""
     import sqlite3
-    from moonglade.gallery import migrate
+    from moonglade.catalog import migrate
 
     assert "paid_credit" in CATALOG_FIELDS   # the contract half: the field exists at all
     pre_fields = [f for f in CATALOG_FIELDS if f != "paid_credit"]

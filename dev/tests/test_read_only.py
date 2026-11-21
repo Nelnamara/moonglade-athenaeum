@@ -66,7 +66,7 @@ class TestDeleteTaskReadOnly:
         --delete-task is gone), so this is the end-to-end proof: the real route with the REAL
         delete_task behind it. READ_ONLY refuses up front, with one plain 403 and no job,
         and not one request reaches PixAI -- not the delete, not a read before it."""
-        from moonglade.gallery import CATALOG_FIELDS, save_catalog
+        from moonglade.catalog import CATALOG_FIELDS, save_catalog
         from tests.conftest import login_client
         row = {f: "" for f in CATALOG_FIELDS} | {
             "media_id": "m1", "task_id": "T1", "filename": "m1.png"}

@@ -27,7 +27,7 @@ from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade import integrity as integ
 from moonglade import paths
-from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from moonglade import health as health_mod
 from moonglade import jobs as jobs_mod
 

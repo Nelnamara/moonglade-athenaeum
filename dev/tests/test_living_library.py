@@ -28,7 +28,8 @@ import pytest
 
 from moonglade import gallery as g
 from moonglade import backup as core
-from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog, load_catalog
+from moonglade.gallery import create_app
+from moonglade.catalog import CATALOG_FIELDS, save_catalog, load_catalog
 
 from tests.conftest import login_test_client
 from tests.fake_pixai import FakePixAI
@@ -38,6 +39,7 @@ from moonglade import living as living_mod
 from moonglade import web_threads as web_threads_mod
 from moonglade import routes_panel as routes_panel_mod
 from moonglade import routes_community as routes_community_mod
+from moonglade import catalog as catalog_mod
 
 SRC = Path(__file__).resolve().parents[2]
 DAY = 86400.0
@@ -1197,7 +1199,7 @@ def test_the_full_sync_cannot_revert_a_write_that_lands_while_it_is_running(
         rather than one two identical writes would satisfy by accident."""
         writer["n"] += 1
         n = writer["n"]
-        with g.catalog(db) as con:
+        with catalog_mod.catalog(db) as con:
             con.execute("UPDATE catalog SET rating=? WHERE media_id='m1'", (str(n),))
             con.execute("UPDATE catalog SET liked_count=?, collections=?"
                         " WHERE media_id='untouched'", (str(90 + n), "Keepers%d" % n))

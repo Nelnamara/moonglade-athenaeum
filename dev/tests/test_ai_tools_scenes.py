@@ -15,7 +15,7 @@ import pytest
 
 from moonglade import gallery as g
 from moonglade import gen_road as gen_road_mod
-from moonglade.gallery import save_catalog
+from moonglade.catalog import save_catalog
 
 from tests.conftest import login_client
 from moonglade import mirror as mirror_mod

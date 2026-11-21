@@ -20,7 +20,7 @@ import pytest
 
 from moonglade import container as mc
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, save_catalog
+from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client, login_test_client
 from moonglade import achievements as achievements_mod
