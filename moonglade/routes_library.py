@@ -1536,8 +1536,8 @@ def register(app, ctx):
         group_id, a file already gone) does not block the rest, same "one file
         the OS won't release must not strand the rest" shape as
         /api/delete-local."""
-        from moonglade.gallery import (_resolve_under, _validate_duplicate_pair,
-                                       quarantine_duplicate_file)
+        from moonglade.dupe_review import (_resolve_under, _validate_duplicate_pair,
+                                           quarantine_duplicate_file)
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
@@ -1635,7 +1635,7 @@ def register(app, ctx):
         silent no-op or a write to some OTHER location -- when the undo record
         is missing/stale or the original location is now occupied by something
         else."""
-        from moonglade.gallery import restore_quarantined_duplicate
+        from moonglade.dupe_review import restore_quarantined_duplicate
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400

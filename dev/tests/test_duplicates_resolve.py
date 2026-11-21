@@ -16,8 +16,8 @@ import re
 from pathlib import Path
 
 from moonglade import backup as core
-from moonglade.gallery import (quarantine_duplicate_file, restore_quarantined_duplicate,
-                               _validate_duplicate_pair)
+from moonglade.dupe_review import (quarantine_duplicate_file, restore_quarantined_duplicate,
+                                   _validate_duplicate_pair)
 from moonglade.catalog import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.conftest import login_client

@@ -499,6 +499,9 @@ SEAMS = {
         "_snapshot_before_purge", "purge_media_local", "_find_quarantined_file",
         "list_quarantined", "_list_quarantined", "_ensure_trash_thumbs",
         "restore_quarantined_media", "delete_quarantined_forever", "empty_trash"]},
+    "moonglade.dupe_review": {"from": "moonglade.gallery", "names": [
+        "_quarantine_meta_path", "_resolve_under", "_reconcile_one_row_after_move",
+        "quarantine_duplicate_file", "restore_quarantined_duplicate", "_validate_duplicate_pair"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -2227,6 +2230,28 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_setup_prepare.py', 'moonglade.trash'),
     ('tests/test_task_model_detail_document.py', 'moonglade.trash'),
     ('tests/test_telemetry.py', 'moonglade.trash'),
+    # Split phase 4, dupe_review: no reader reads Duplicate Review's text; the whole-module absence
+    # guards read the module too.
+    ('tests/test_app_paths.py', 'moonglade.dupe_review'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.dupe_review'),
+    ('tests/test_bonjour.py', 'moonglade.dupe_review'),
+    ('tests/test_branding.py', 'moonglade.dupe_review'),
+    ('tests/test_catalog_verbs.py', 'moonglade.dupe_review'),
+    ('tests/test_catchup_query.py', 'moonglade.dupe_review'),
+    ('tests/test_csrf_coverage.py', 'moonglade.dupe_review'),
+    ('tests/test_evidence_counters.py', 'moonglade.dupe_review'),
+    ('tests/test_first_party_sources.py', 'moonglade.dupe_review'),
+    ('tests/test_history_feed_document.py', 'moonglade.dupe_review'),
+    ('tests/test_living_library.py', 'moonglade.dupe_review'),
+    ('tests/test_logging.py', 'moonglade.dupe_review'),
+    ('tests/test_loom_p_routes.py', 'moonglade.dupe_review'),
+    ('tests/test_network.py', 'moonglade.dupe_review'),
+    ('tests/test_security_review_fixes.py', 'moonglade.dupe_review'),
+    ('tests/test_server_one_module.py', 'moonglade.dupe_review'),
+    ('tests/test_settings_store.py', 'moonglade.dupe_review'),
+    ('tests/test_setup_prepare.py', 'moonglade.dupe_review'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.dupe_review'),
+    ('tests/test_telemetry.py', 'moonglade.dupe_review'),
 }
 
 
