@@ -131,7 +131,7 @@ def register(app, ctx):
         second proxy. SSRF-guarded: the URL host MUST be exactly the PixAI image CDN --
         nothing else is fetchable through here. Read-only, cached a day (these thumbnails
         are immutable)."""
-        from moonglade.gallery import harden_file_response
+        from moonglade.web_policy import harden_file_response
         from moonglade.scenes import pixai_cdn_url_ok
         import urllib.parse as _up
         raw = request.args.get("u") or ""

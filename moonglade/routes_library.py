@@ -357,7 +357,8 @@ def register(app, ctx):
     @tier(LOGIN)
     def thumb(media_id):
         # ?s= is an allowlist (_THUMB_TIERS: 32 and 256); anything else is the 768 thumb.
-        from moonglade.gallery import Path, find_image_file, get_row, harden_file_response
+        from moonglade.gallery import Path, find_image_file, get_row
+        from moonglade.web_policy import harden_file_response
         size_key = request.args.get("s") or ""
         if size_key in _THUMB_TIERS and "/" not in media_id \
                 and "\\" not in media_id and ".." not in media_id:
@@ -385,7 +386,8 @@ def register(app, ctx):
     @app.route("/video-file/<media_id>")
     @tier(LOGIN)
     def video_file(media_id):
-        from moonglade.gallery import get_row, harden_file_response, media_type_for
+        from moonglade.gallery import get_row
+        from moonglade.web_policy import harden_file_response, media_type_for
         row = get_row(db_path, media_id)
         if not row or row.get("is_video") != "1":
             return "Video not found.", 404
@@ -420,7 +422,8 @@ def register(app, ctx):
     def full_image(media_id):
         # Resolve a media_id to its full-res file on the fly (used by the
         # lightbox so the index page doesn't precompute 250 image paths).
-        from moonglade.gallery import find_image_file, get_row, harden_file_response, media_type_for
+        from moonglade.gallery import find_image_file, get_row
+        from moonglade.web_policy import harden_file_response, media_type_for
         row = get_row(db_path, media_id)
         p = find_image_file(out_dir, media_id, row.get("filename") if row else "")
         if not p or not p.exists():

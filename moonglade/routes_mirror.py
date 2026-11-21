@@ -190,7 +190,7 @@ def register(app, ctx):
         # Home network only (2026-11-18): never accept a sign-in from outside a home network.
         # Same client address the localhost-only checks read (request.remote_addr, the real
         # TCP peer; no forwarded header is trusted anywhere in this app).
-        from moonglade.gallery import CONNECT_TOKEN_NEEDS_HTTPS
+        from moonglade.web_policy import CONNECT_TOKEN_NEEDS_HTTPS
         if not _mirror.home_network_address(request.remote_addr):
             return jsonify({"ok": False, "error": _mirror.SITE_TOKEN_NOT_HOME}), 403
         # And from another device, only over HTTPS (app security review 2026-11-19, finding

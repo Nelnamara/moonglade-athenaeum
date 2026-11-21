@@ -29,6 +29,7 @@ from moonglade import secure_files
 from moonglade import web_sessions
 from moonglade.gallery import create_app
 from tests.conftest import _do_login, login_client, login_test_client, with_csrf
+from moonglade import web_policy as web_policy_mod
 
 LAN = "192.168.1.20"
 
@@ -58,7 +59,7 @@ def test_every_page_carries_the_policy_its_inline_scripts_were_written_for(tmp_p
     for part in ("object-src 'none'", "base-uri 'none'", "frame-ancestors 'self'"):
         assert part in csp
     html = r.get_data(as_text=True)
-    assert g.CSP_NONCE_MARK not in html, "a page went out with its nonce mark unfilled"
+    assert web_policy_mod.CSP_NONCE_MARK not in html, "a page went out with its nonce mark unfilled"
     tags = _script_tags(html)
     assert tags, path
     for tag in tags:
@@ -82,10 +83,10 @@ def test_a_value_from_the_request_can_never_carry_the_nonce(tmp_path):
     """The nonce is filled into the TEMPLATE before Jinja renders anything a request supplied:
     a `next` that spells the mark comes back as the mark, not as the nonce."""
     cli = login_client(tmp_path)
-    r = cli.get("/login?next=/" + g.CSP_NONCE_MARK)
+    r = cli.get("/login?next=/" + web_policy_mod.CSP_NONCE_MARK)
     nonce = re.search(r"'nonce-([^']+)'", r.headers["Content-Security-Policy"]).group(1)
     body = r.get_data(as_text=True)
-    assert g.CSP_NONCE_MARK in body
+    assert web_policy_mod.CSP_NONCE_MARK in body
     assert body.count(nonce) == len([t for t in _script_tags(body) if "src=" not in t])
 
 
@@ -101,7 +102,7 @@ def test_json_and_redirects_carry_the_two_headers_too_and_files_keep_their_sandb
     # a served branding file keeps harden_file_response's sandbox, not the page policy
     r = cli.get("/branding/logo.png")
     if r.status_code == 200:
-        assert r.headers["Content-Security-Policy"] == g.FILE_RESPONSE_CSP
+        assert r.headers["Content-Security-Policy"] == web_policy_mod.FILE_RESPONSE_CSP
 
 
 # ---------------------------------------------------------------------------
@@ -637,9 +638,9 @@ def test_a_session_ends_at_its_absolute_lifetime_however_often_it_is_used(tmp_pa
     cli = _do_login(app.test_client(), "alice", "a-real-test-password-1")
     assert cli.get("/api/jobs").status_code == 200
     real = time.time
-    monkeypatch.setattr(g.time, "time", lambda: real() + g.SESSION_ABSOLUTE_LIFETIME_S - 60)
+    monkeypatch.setattr(g.time, "time", lambda: real() + web_policy_mod.SESSION_ABSOLUTE_LIFETIME_S - 60)
     assert cli.get("/api/jobs").status_code == 200
-    monkeypatch.setattr(g.time, "time", lambda: real() + g.SESSION_ABSOLUTE_LIFETIME_S + 60)
+    monkeypatch.setattr(g.time, "time", lambda: real() + web_policy_mod.SESSION_ABSOLUTE_LIFETIME_S + 60)
     assert cli.get("/api/jobs").status_code == 401
 
 
@@ -738,7 +739,7 @@ def test_the_tile_offers_disconnect_on_the_home_network():
 
 def test_a_body_over_the_app_wide_cap_is_refused_in_words(tmp_path, monkeypatch):
     app = create_app(tmp_path)
-    assert app.config["MAX_CONTENT_LENGTH"] == g.REQUEST_MAX_BYTES
+    assert app.config["MAX_CONTENT_LENGTH"] == web_policy_mod.REQUEST_MAX_BYTES
     app.config["MAX_CONTENT_LENGTH"] = 1024
     cli = login_test_client(app)
     r = cli.post("/api/view-presets", json=with_csrf(cli, {"name": "x" * 4096}))
@@ -761,7 +762,7 @@ def _import(cli, blob, name="pack.zip"):
 
 def test_a_zip_with_too_many_files_is_refused_before_anything_is_written(tmp_path,
                                                                         monkeypatch):
-    monkeypatch.setattr(g, "ZIP_MAX_MEMBERS", 3)
+    monkeypatch.setattr(web_policy_mod, "ZIP_MAX_MEMBERS", 3)
     cli = login_client(tmp_path)
     r = _import(cli, _zip_bytes([("a%d.png" % i, b"x") for i in range(5)]))
     assert r.status_code == 413 and "more than" in r.get_json()["error"]
@@ -771,7 +772,7 @@ def test_a_zip_with_too_many_files_is_refused_before_anything_is_written(tmp_pat
 def test_a_zip_bomb_stops_at_the_byte_budget(tmp_path, monkeypatch):
     """The bytes are counted as they are written: a member that LIES small in its header is
     still stopped. Here the budget is shrunk; the zip unpacks far past it."""
-    monkeypatch.setattr(g, "ZIP_MAX_TOTAL_BYTES", 64 * 1024)
+    monkeypatch.setattr(web_policy_mod, "ZIP_MAX_TOTAL_BYTES", 64 * 1024)
     cli = login_client(tmp_path)
     r = _import(cli, _zip_bytes([("big.png", b"\0" * (4 * 1024 * 1024))]))
     assert r.status_code == 413 and "unpacks to more than" in r.get_json()["error"]
@@ -779,7 +780,7 @@ def test_a_zip_bomb_stops_at_the_byte_budget(tmp_path, monkeypatch):
 
 
 def test_one_huge_file_in_a_zip_stops_at_the_per_file_cap(tmp_path, monkeypatch):
-    monkeypatch.setattr(g, "ZIP_MAX_MEMBER_BYTES", 32 * 1024)
+    monkeypatch.setattr(web_policy_mod, "ZIP_MAX_MEMBER_BYTES", 32 * 1024)
     cli = login_client(tmp_path)
     r = _import(cli, _zip_bytes([("small.png", b"x" * 1024), ("big.mp4", b"\0" * 200_000)]))
     assert r.status_code == 413
@@ -792,11 +793,11 @@ def test_the_limits_fit_a_whole_library_and_name_the_command_line_import():
     """Review: a 5 GB library zip, one video over 2 GB and a zip unpacking past 8 GB were all
     refused. The limits now fit a library; every refusal names the CLI import."""
     gb = 1024 ** 3
-    assert g.IMPORT_REQUEST_MAX_BYTES >= 50 * gb and g.ZIP_MAX_TOTAL_BYTES >= 50 * gb
-    assert g.ZIP_MAX_MEMBER_BYTES >= 8 * gb and g.UPLOAD_MAX_BYTES >= 8 * gb
-    assert g.LOOM_BUNDLE_REQUEST_MAX_BYTES >= 50 * gb and g.ZIP_MAX_MEMBERS >= 100000
-    for msg in (g.ZIP_TOO_BIG, g.ZIP_TOO_MANY_MEMBERS, g.ZIP_MEMBER_TOO_BIG,
-                g._too_large_sentence(g.IMPORT_REQUEST_MAX_BYTES)):
+    assert web_policy_mod.IMPORT_REQUEST_MAX_BYTES >= 50 * gb and web_policy_mod.ZIP_MAX_TOTAL_BYTES >= 50 * gb
+    assert web_policy_mod.ZIP_MAX_MEMBER_BYTES >= 8 * gb and web_policy_mod.UPLOAD_MAX_BYTES >= 8 * gb
+    assert web_policy_mod.LOOM_BUNDLE_REQUEST_MAX_BYTES >= 50 * gb and web_policy_mod.ZIP_MAX_MEMBERS >= 100000
+    for msg in (web_policy_mod.ZIP_TOO_BIG, web_policy_mod.ZIP_TOO_MANY_MEMBERS, web_policy_mod.ZIP_MEMBER_TOO_BIG,
+                web_policy_mod._too_large_sentence(web_policy_mod.IMPORT_REQUEST_MAX_BYTES)):
         assert "python -m moonglade --import-local" in msg, msg
 
 
@@ -812,13 +813,13 @@ def test_the_extractor_counts_what_it_writes_not_what_the_zip_claims(tmp_path):
         if getattr(cell.cell_contents, "__name__", "") == "_safe_extract_zip":
             extract = cell.cell_contents
     assert extract is not None
-    with pytest.raises(g.ZipTooBig):
+    with pytest.raises(web_policy_mod.ZipTooBig):
         extract(str(src), str(out), max_total=400_000)
     assert extract(str(src), str(out)) == 600_000
 
 
 def test_a_loom_bundle_with_too_many_entries_is_refused(tmp_path, monkeypatch):
-    monkeypatch.setattr(g, "ZIP_MAX_MEMBERS", 2)
+    monkeypatch.setattr(web_policy_mod, "ZIP_MAX_MEMBERS", 2)
     cli = login_client(tmp_path)
     blob = _zip_bytes([("project.json", json.dumps({"project": {"n": 1}}))] +
                       [("media/%d.png" % i, b"x") for i in range(4)])

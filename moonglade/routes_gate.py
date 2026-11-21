@@ -304,7 +304,7 @@ def register(app, ctx):
         caller (React) does that purge itself in JS on a successful response,
         then navigates to /login. See LoginPage.jsx / App.jsx's logout
         handler."""
-        from moonglade.gallery import SESSION_ABSOLUTE_LIFETIME_S
+        from moonglade.web_policy import SESSION_ABSOLUTE_LIFETIME_S
         from moonglade import backup as core
         body = request.get_json(silent=True) or {}
         user = session.get("user")
@@ -462,7 +462,7 @@ def register(app, ctx):
         own loopback keeps plain HTTP in the default mode (TLS_LAN); --https (TLS_ALL) sends
         every plain visit over. Runs FIRST, ahead of the front door, so a visitor's very first
         hop is already to https."""
-        from moonglade.gallery import PLAIN_HTTP_REFUSED
+        from moonglade.web_policy import PLAIN_HTTP_REFUSED
         mode = app.config.get("MG_TLS_MODE") or "off"
         if mode not in ("lan", "all") or request.is_secure:
             return None
@@ -494,7 +494,7 @@ def register(app, ctx):
         A request carrying none of those three headers is not from a browser (a browser
         sends Origin on every POST and Sec-Fetch-Site on every request), so there is no
         ambient cookie to abuse and it passes to the route's own checks."""
-        from moonglade.gallery import CROSS_ORIGIN_REFUSED, same_origin_write
+        from moonglade.web_policy import CROSS_ORIGIN_REFUSED, same_origin_write
         if request.method in ("GET", "HEAD", "OPTIONS"):
             return None
         h = request.headers
@@ -516,7 +516,7 @@ def register(app, ctx):
         """A page TEMPLATE with its __CSP_NONCE__ marks filled in. Applied to the template's
         own source, before Jinja or any request value touches it, so nothing a request
         supplies can ever carry the nonce."""
-        from moonglade.gallery import CSP_NONCE_MARK
+        from moonglade.web_policy import CSP_NONCE_MARK
         return page_source.replace(CSP_NONCE_MARK, _csp_nonce())
 
     @app.after_request
@@ -526,7 +526,7 @@ def register(app, ctx):
         scripts were written for (CSP_PAGE_POLICY, with this request's nonce). A response
         that set its own policy keeps it (served files carry `sandbox`, harden_file_response),
         and so does one that set its own Referrer-Policy (the connect page's no-referrer)."""
-        from moonglade.gallery import page_csp
+        from moonglade.web_policy import page_csp
         h = resp.headers
         h.setdefault("X-Content-Type-Options", "nosniff")
         h.setdefault("X-Frame-Options", "SAMEORIGIN")
@@ -539,7 +539,7 @@ def register(app, ctx):
     def _too_large(_e):
         """Finding 9's refusal: the body was over the route's cap (REQUEST_MAX_BYTES unless the
         route raised it). A plain sentence, JSON for the API."""
-        from moonglade.gallery import REQUEST_MAX_BYTES, _too_large_sentence
+        from moonglade.web_policy import REQUEST_MAX_BYTES, _too_large_sentence
         try:
             limit = request.max_content_length
         except Exception:                                  # noqa: BLE001
@@ -668,7 +668,7 @@ def register(app, ctx):
         younger than SESSION_ABSOLUTE_LIFETIME_S (finding 6). A cookie from before sessions
         carried an id and a birth time has neither and is refused: one sign-in per device
         after this update, so that every live session can be ended on its own."""
-        from moonglade.gallery import SESSION_ABSOLUTE_LIFETIME_S
+        from moonglade.web_policy import SESSION_ABSOLUTE_LIFETIME_S
         sid = session.get("sid")
         born = session.get("born")
         if not sid or not isinstance(born, (int, float)) or isinstance(born, bool):

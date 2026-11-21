@@ -421,6 +421,15 @@ SEAMS = {
     "moonglade.pages": {"from": "moonglade.gallery", "names": [
         "DESIGN_TOKENS_CSS", "_upscale_const_js", "_PREPAINT_BOOT_JS", "_AUTH_401_GUARD_JS",
         "_LOOM_SHELL", "LOOM_PAGE_BUNDLE"]},
+    "moonglade.web_policy": {"from": "moonglade.gallery", "names": [
+        "_GB", "REQUEST_MAX_BYTES", "UPLOAD_MAX_BYTES", "IMPORT_REQUEST_MAX_BYTES",
+        "LOOM_BUNDLE_REQUEST_MAX_BYTES", "ZIP_MAX_MEMBERS", "ZIP_MAX_MEMBER_BYTES",
+        "ZIP_MAX_TOTAL_BYTES", "IMPORT_CLI_HINT", "ZIP_TOO_MANY_MEMBERS", "ZIP_MEMBER_TOO_BIG",
+        "ZIP_TOO_BIG", "ZipTooBig", "_too_large_sentence", "SESSION_ABSOLUTE_LIFETIME_S",
+        "SESSION_IDLE_LIFETIME_DAYS", "_INLINE_FILE_TYPES", "FILE_RESPONSE_CSP", "SVG_FILE_CSP",
+        "_MEDIA_TYPE_BY_EXT", "media_type_for", "_attachment_disposition", "harden_file_response",
+        "CSP_NONCE_MARK", "CSP_PAGE_POLICY", "page_csp", "CROSS_ORIGIN_REFUSED",
+        "PLAIN_HTTP_REFUSED", "CONNECT_TOKEN_NEEDS_HTTPS", "_origin_tuple", "same_origin_write"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -1938,6 +1947,29 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_setup_prepare.py', 'moonglade.pages'),
     ('tests/test_task_model_detail_document.py', 'moonglade.pages'),
     ('tests/test_telemetry.py', 'moonglade.pages'),
+    # Split phase 4, web_policy: no reader reads the moved text. test_security_review_fixes reads
+    # gallery's main() and the import and Loom route sources, test_csrf_coverage the functions
+    # that call _check_csrf; both reach the policy names through moonglade.web_policy.
+    ('tests/test_app_paths.py', 'moonglade.web_policy'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.web_policy'),
+    ('tests/test_bonjour.py', 'moonglade.web_policy'),
+    ('tests/test_branding.py', 'moonglade.web_policy'),
+    ('tests/test_catalog_verbs.py', 'moonglade.web_policy'),
+    ('tests/test_catchup_query.py', 'moonglade.web_policy'),
+    ('tests/test_csrf_coverage.py', 'moonglade.web_policy'),
+    ('tests/test_evidence_counters.py', 'moonglade.web_policy'),
+    ('tests/test_first_party_sources.py', 'moonglade.web_policy'),
+    ('tests/test_history_feed_document.py', 'moonglade.web_policy'),
+    ('tests/test_living_library.py', 'moonglade.web_policy'),
+    ('tests/test_logging.py', 'moonglade.web_policy'),
+    ('tests/test_loom_p_routes.py', 'moonglade.web_policy'),
+    ('tests/test_network.py', 'moonglade.web_policy'),
+    ('tests/test_security_review_fixes.py', 'moonglade.web_policy'),
+    ('tests/test_server_one_module.py', 'moonglade.web_policy'),
+    ('tests/test_settings_store.py', 'moonglade.web_policy'),
+    ('tests/test_setup_prepare.py', 'moonglade.web_policy'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.web_policy'),
+    ('tests/test_telemetry.py', 'moonglade.web_policy'),
 }
 
 

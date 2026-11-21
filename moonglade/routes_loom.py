@@ -467,7 +467,8 @@ def register(app, ctx):
         could be produced (no ffmpeg here, a broken file) -- the ribbon then shows its
         placeholder tint. Login required; local only."""
         from moonglade.gallery import (Image, LOOM_FRAME_FPS, LOOM_FRAME_MAX_SECONDS,
-                                       LOOM_FRAME_WIDTH, LOOM_MEDIA_ID_RE, harden_file_response)
+                                       LOOM_FRAME_WIDTH, LOOM_MEDIA_ID_RE)
+        from moonglade.web_policy import harden_file_response
         user = str(session.get("user") or "")
         if not user:
             return jsonify({"error": "not logged in"}), 401
@@ -1268,7 +1269,8 @@ def register(app, ctx):
     def api_loom_bed_get():
         """?file=<sha1>.<ext> -> the caller's own bed, streamed (HTTP Range for seeking).
         The name must match the pattern AND resolve inside the caller's own bed folder."""
-        from moonglade.gallery import LOOM_BED_MIMES, harden_file_response
+        from moonglade.gallery import LOOM_BED_MIMES
+        from moonglade.web_policy import harden_file_response
         user = str(session.get("user") or "")
         if not user:
             return jsonify({"error": "not logged in"}), 401
@@ -1731,7 +1733,7 @@ def register(app, ctx):
     @app.route("/api/loom/export-file")
     @tier(LOGIN)
     def api_loom_export_file():
-        from moonglade.gallery import harden_file_response
+        from moonglade.web_policy import harden_file_response
         name = _export_job.get("out") or "loom_cut.mp4"
         if not (_export_dir / name).exists():
             return "No export available.", 404
@@ -1961,10 +1963,11 @@ def register(app, ctx):
         Login required (any session, local or LAN)."""
         from moonglade.gallery import (LOOM_BED_FILE_RE, LOOM_BED_MAX_BYTES, LOOM_BUNDLE_MAX_BEDS,
                                        LOOM_BUNDLE_MEDIA_MAX_BYTES, LOOM_BUNDLE_MEDIA_RE,
-                                       LOOM_BUNDLE_REQUEST_MAX_BYTES, REQUEST_MAX_BYTES,
-                                       ZIP_MAX_MEMBERS, ZIP_MAX_TOTAL_BYTES, ZIP_TOO_MANY_MEMBERS,
                                        _unlink_quiet, make_thumbnail, make_video_thumbnail,
                                        save_catalog_over_snapshot, sniff_audio_ext)
+        from moonglade.web_policy import (LOOM_BUNDLE_REQUEST_MAX_BYTES, REQUEST_MAX_BYTES,
+                                          ZIP_MAX_MEMBERS, ZIP_MAX_TOTAL_BYTES,
+                                          ZIP_TOO_MANY_MEMBERS)
         import io
         import time
         import zipfile

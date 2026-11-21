@@ -60,7 +60,7 @@ def register(app, ctx):
         the cache. Keeping a render current is create_app's startup ensure pass
         (_ensure_banner_renders) plus the explicit user actions that change a
         pick; see _ensure_banner_flat."""
-        from moonglade.gallery import harden_file_response
+        from moonglade.web_policy import harden_file_response
         from flask import send_from_directory, abort
         import mimetypes
         bdir = _branding.branding_root().resolve()

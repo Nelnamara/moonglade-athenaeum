@@ -171,7 +171,7 @@ def test_the_front_door_covers_every_state_changing_route(app):
     token among them -- is refused for a page on another port of this PC, before its handler
     runs, with the plain sentence; and the same request from the app's own origin goes
     through to the handler (so the refusal is the origin, not something else)."""
-    from moonglade.gallery import CROSS_ORIGIN_REFUSED
+    from moonglade.web_policy import CROSS_ORIGIN_REFUSED
     cross = _sweep(app, _CROSS_PORT)
     assert len(cross) > 100, "the sweep found too few state-changing routes to mean anything"
     leaked = sorted(k for k, (status, ran, _body) in cross.items() if ran or status != 403)
@@ -208,7 +208,7 @@ def test_the_review_scenario_a_cross_port_page_cannot_import_or_stop(tmp_path, h
     sends a multipart POST to /api/import-local (LOCALHOST tier -- the browser IS on this PC)
     and a bare POST to /api/server/stop. Both are refused 403 and nothing happens."""
     import io
-    from moonglade.gallery import CROSS_ORIGIN_REFUSED
+    from moonglade.web_policy import CROSS_ORIGIN_REFUSED
     app = create_app(tmp_path)
     cli = login_test_client(app)
     r = cli.post("/api/import-local", base_url=_OWN, headers=headers,
@@ -233,7 +233,7 @@ def test_the_apps_own_page_passes(tmp_path, headers):
 
 
 def test_the_rule_itself():
-    from moonglade.gallery import same_origin_write as ok
+    from moonglade.web_policy import same_origin_write as ok
     assert ok("http://localhost:5057", None, None, "http", "localhost:5057")
     assert ok("http://LOCALHOST:5057", None, "same-origin", "http", "localhost:5057")
     assert ok("https://192.168.1.5:5057", None, None, "https", "192.168.1.5:5057")

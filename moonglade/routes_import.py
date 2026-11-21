@@ -97,7 +97,7 @@ def register(app, ctx):
         """Upload a local file from the picker -> PixAI media_id (the same free
         3-step S3 handshake as the CLI's --upload). Login required,
         spends nothing. At most UPLOAD_MAX_BYTES (a 413 with a plain sentence past it)."""
-        from moonglade.gallery import UPLOAD_MAX_BYTES
+        from moonglade.web_policy import UPLOAD_MAX_BYTES
         request.max_content_length = UPLOAD_MAX_BYTES
         f = request.files.get("file")
         if f is None or not f.filename:
@@ -131,9 +131,9 @@ def register(app, ctx):
         the moment the bytes WRITTEN pass ZIP_MAX_TOTAL_BYTES -- counted as they are written,
         never taken from the zip's own size fields, which a zip bomb lies in. Either raises
         ZipTooBig with its plain sentence; the caller's temp dir is then thrown away."""
-        from moonglade.gallery import (ZIP_MAX_MEMBERS, ZIP_MAX_MEMBER_BYTES, ZIP_MAX_TOTAL_BYTES,
-                                       ZIP_MEMBER_TOO_BIG, ZIP_TOO_BIG, ZIP_TOO_MANY_MEMBERS,
-                                       ZipTooBig)
+        from moonglade.web_policy import (ZIP_MAX_MEMBERS, ZIP_MAX_MEMBER_BYTES,
+                                          ZIP_MAX_TOTAL_BYTES, ZIP_MEMBER_TOO_BIG, ZIP_TOO_BIG,
+                                          ZIP_TOO_MANY_MEMBERS, ZipTooBig)
         import os as _os
         import zipfile as _zip
         max_members = ZIP_MAX_MEMBERS if max_members is None else max_members
@@ -176,8 +176,8 @@ def register(app, ctx):
         Saves the uploads to a temp dir (expanding any zip), then reuses
         core.run_import_local (copy -> imported/ + catalog source='local' + thumbnail, path
         dedup), tags an optional collection, and returns counts. Synchronous for now."""
-        from moonglade.gallery import (IMPORT_REQUEST_MAX_BYTES, ZIP_MAX_TOTAL_BYTES, ZipTooBig,
-                                       _is_smart_name, add_to_collection)
+        from moonglade.gallery import _is_smart_name, add_to_collection
+        from moonglade.web_policy import IMPORT_REQUEST_MAX_BYTES, ZIP_MAX_TOTAL_BYTES, ZipTooBig
         import os as _os
         import tempfile
         import shutil
