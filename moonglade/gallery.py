@@ -23532,7 +23532,13 @@ def main():
 
 
 if __name__ == "__main__":
-    # sys.exit(main()) rather than a bare main(): the port pre-flight signals refusal
-    # with `return 2`, and a bare call would discard it and exit 0 -- so a wrapper
-    # script would read "server started fine" from a server that refused to start.
-    sys.exit(main())
+    # ONE SERVER (split phase 4). `python -m moonglade.gallery` runs this file as __main__, an
+    # unregistered module. Code that moved out of create_app reaches gallery with a call-time
+    # `from moonglade.gallery import ...`, which would load a SECOND copy whose _SERVER_CONTROL,
+    # _OUTSIDE and exit record main() never set. So main() runs in the registered module, the one
+    # every importer (and the test suite) gets; this copy only defined names and is not used again.
+    # The engine's version of the same fix is moonglade/__main__.py (dev/tests/test_cli_one_engine.py).
+    # sys.exit(...) rather than a bare call: main()'s return code (0 stop, 42 restart, 2 and 3
+    # refusals) is the launcher's contract.
+    import moonglade.gallery as _server
+    sys.exit(_server.main())

@@ -107,10 +107,13 @@ def test_werkzeug_request_lines_reach_the_file_regardless_of_root_ceiling(tmp_pa
 def test_the_web_servers_own_module_logger_reaches_the_file(tmp_path):
     """FAILS before 2026-09-07: the live mirror's whole life -- "connected and subscribed",
     "task N reported completed -- mirroring", "disconnected cleanly; reconnecting" -- is
-    logged from inside the web server's module through logging.getLogger(__name__), which is
-    "__main__" when the server runs as the main module (how it always runs: "Moonglade Launcher.pyw"
-    launches `python -m moonglade.gallery`) and its module name when it is imported (since
-    3.20 "moonglade.gallery"; the flat "moonglade_gallery" before). Neither name was
+    logged from inside the web server's module through logging.getLogger(__name__), which was
+    "__main__" when the server ran as the main module (how production ran it before split
+    phase 4: "Moonglade Launcher.pyw" launches `python -m moonglade.gallery`) and is its module
+    name when it is imported (since 3.20 "moonglade.gallery"; the flat "moonglade_gallery"
+    before). Since split phase 4 the launched server runs main() in the imported module too
+    (dev/tests/test_server_one_module.py), so production logs as "moonglade.gallery"; "__main__"
+    stays levelled for a server still running an older file. Neither name was
     LOGGER_NAME's then, so both inherited root's WARNING ceiling and every one of
     those INFO lines was absent from moonglade.log -- the one record that could answer "was
     the socket up when that generation finished?" after the fact.
@@ -137,9 +140,11 @@ def test_the_web_servers_own_module_logger_reaches_the_file(tmp_path):
 
 
 def test_flasks_own_app_logger_is_levelled_under_every_name_it_takes(tmp_path, monkeypatch):
-    """Flask names app.logger after the app. Run as the main module (production) that is the
-    main FILE's stem: "moonglade_gallery" before 3.20, "gallery" since (moonglade/gallery.py).
-    Imported it is the module name, "moonglade.gallery". Each must be levelled like the
+    """Flask names app.logger after the app. Run as the main module (production before split
+    phase 4) that is the main FILE's stem: "moonglade_gallery" before 3.20, "gallery" since
+    (moonglade/gallery.py). Imported it is the module name, "moonglade.gallery", which is also
+    production's since split phase 4 (main() runs in the imported module;
+    dev/tests/test_server_one_module.py). Each must be levelled like the
     server's own module logger, or the app logger's INFO lines fall under root's WARNING
     ceiling and never reach moonglade.log -- the move would have dropped them silently."""
     import sys

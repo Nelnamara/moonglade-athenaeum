@@ -382,6 +382,7 @@ SOURCE_READERS = {
     "tests/test_module_seams.py": ("moonglade.backup", "moonglade.gallery"),   # every module
     "tests/test_rest_delete_and_renewal.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_security_review_fixes.py": ("moonglade.gallery",),
+    "tests/test_server_one_module.py": ("moonglade.gallery",),
     "tests/test_server_stop_record.py": ("moonglade.gallery",),
     "tests/test_settings_store.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_setup_prepare.py": ("moonglade.backup", "moonglade.gallery"),
@@ -1273,6 +1274,12 @@ SOURCE_READERS_REVIEWED = {
         "cards", "cloud_delete", "contests", "gen_cli", "gen_params", "gen_road", "jobs",
         "media_tools", "mirror", "models", "organize", "pixai_client", "pricing", "task_feed",
         "task_reads", "training")),
+    # Split phase 4 step 0a: the one-server-module test reads only gallery.py's closing
+    # `if __name__ == "__main__":` block (its self-test swaps it for the old one); it was written
+    # after every move, and none of them touched that block.
+    *(("tests/test_server_one_module.py", "moonglade." + _m) for _m in (
+        "about", "account_prefs", "achievements", "branding", "contest_sync", "dupes", "health",
+        "living", "scan", "series", "telemetry", "updater")),
 }
 
 
