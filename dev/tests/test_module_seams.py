@@ -414,6 +414,10 @@ SEAMS = {
         "_ACH_NONCE_TTL_S", "_ACH_NONCE_MAX", "_ACH_DEBOUNCE_S", "_ACH_RATE_MAX",
         "_ACH_RATE_WINDOW_S", "_ach_lock", "_ach_nonces", "_ach_last", "_ach_rate", "_ach_sweep",
         "_ach_mint", "_ach_consume", "_ach_debounced", "_ach_rate_ok"]},
+    "moonglade.scenes": {"from": "moonglade.gallery", "names": [
+        "SCENES_TTL", "_scenes_cache", "_scenes_cache_lock", "_SCENE_LANG_KEYS", "_SCENE_CDN_HOST",
+        "pixai_cdn_url_ok", "scene_catalog", "_scene_label", "_scene_shape", "_scene_detail",
+        "scene_thumb_url", "scene_local_art", "scene_row"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -1878,6 +1882,36 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_task_model_detail_document.py', 'moonglade.ach_beacon'),
     ('tests/test_telemetry.py', 'moonglade.ach_beacon'),
     ('tools/export_design_kit.py', 'moonglade.ach_beacon'),
+    # Split phase 4, scenes: no reader reads the scene catalog's text (test_app_paths and
+    # test_branding name branding_root only in patches); test_ai_tools_scenes reaches it through
+    # moonglade.scenes.
+    ('loom/test/mg-art-filters.test.js', 'moonglade.scenes'),
+    ('loom/test/mg-notify-queue-phase.test.js', 'moonglade.scenes'),
+    ('loom/test/mg-notify-website-source.test.js', 'moonglade.scenes'),
+    ('loom/test/phone-back-layers.test.js', 'moonglade.scenes'),
+    ('tests/test_app_paths.py', 'moonglade.scenes'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.scenes'),
+    ('tests/test_bonjour.py', 'moonglade.scenes'),
+    ('tests/test_branding.py', 'moonglade.scenes'),
+    ('tests/test_catalog_verbs.py', 'moonglade.scenes'),
+    ('tests/test_catchup_query.py', 'moonglade.scenes'),
+    ('tests/test_csrf_coverage.py', 'moonglade.scenes'),
+    ('tests/test_design_kit_sync.py', 'moonglade.scenes'),
+    ('tests/test_evidence_counters.py', 'moonglade.scenes'),
+    ('tests/test_first_party_sources.py', 'moonglade.scenes'),
+    ('tests/test_history_feed_document.py', 'moonglade.scenes'),
+    ('tests/test_living_library.py', 'moonglade.scenes'),
+    ('tests/test_logging.py', 'moonglade.scenes'),
+    ('tests/test_loom_notify.py', 'moonglade.scenes'),
+    ('tests/test_loom_p_routes.py', 'moonglade.scenes'),
+    ('tests/test_network.py', 'moonglade.scenes'),
+    ('tests/test_security_review_fixes.py', 'moonglade.scenes'),
+    ('tests/test_server_one_module.py', 'moonglade.scenes'),
+    ('tests/test_settings_store.py', 'moonglade.scenes'),
+    ('tests/test_setup_prepare.py', 'moonglade.scenes'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.scenes'),
+    ('tests/test_telemetry.py', 'moonglade.scenes'),
+    ('tools/export_design_kit.py', 'moonglade.scenes'),
 }
 
 

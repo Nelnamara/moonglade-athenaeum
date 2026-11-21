@@ -1486,7 +1486,7 @@ def register(app, ctx):
         28 and could not see daily-fortune, daily-setlog or mini-mart-ad at all (issue #36).
         Mirror-gated exactly like /api/enhance -- the AI-Tools tier only exists when the
         Bridge is armed. LOGIN tier; read-only, spends nothing."""
-        from moonglade.gallery import scene_catalog, scene_local_art, scene_row
+        from moonglade.scenes import scene_catalog, scene_local_art, scene_row
         from moonglade import backup as core
         if not _mirror.mirror_enabled() or _mirror.make_mirror_session() is None:
             return jsonify({"error": "Mirror to PixAI must be armed to browse AI Tools"}), 409

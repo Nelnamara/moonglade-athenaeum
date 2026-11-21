@@ -19,6 +19,7 @@ from moonglade.gallery import save_catalog
 
 from tests.conftest import login_client
 from moonglade import mirror as mirror_mod
+from moonglade import scenes as scenes_mod
 
 _CDN = "https://images-ng.pixai.art/images/thumb/"
 
@@ -60,9 +61,9 @@ CATALOG = [
 def _clear_scene_memo():
     """The catalog memo is module-level (shared by every consumer, contest_board pattern), so
     a test that fills it must not decide the next one's answer."""
-    g._scenes_cache.clear()
+    scenes_mod._scenes_cache.clear()
     yield
-    g._scenes_cache.clear()
+    scenes_mod._scenes_cache.clear()
 
 
 class _Upstream:
@@ -92,7 +93,7 @@ def _core(monkeypatch):
 # --- normalization -------------------------------------------------------------------
 
 def test_scene_row_derives_the_tile_fields_the_modal_draws():
-    r = g.scene_row(_sc("daily-fortune",
+    r = scenes_mod.scene_row(_sc("daily-fortune",
                         presets=("english", "japanese", "korean", "traditional-chinese"),
                         tier=1, demo=[_CDN + "ccc"]))
     assert r["sceneId"] == "daily-fortune"
@@ -107,7 +108,7 @@ def test_scene_row_derives_the_tile_fields_the_modal_draws():
 def test_scene_row_keeps_the_control_schema_the_gen_drawer_reads():
     """The tile fields are ADDITIVE -- SceneTab still finds its scene by sceneId and renders
     presets/selectors/custom/refMin from the same row."""
-    r = g.scene_row(CATALOG[5])   # dual-character-generator
+    r = scenes_mod.scene_row(CATALOG[5])   # dual-character-generator
     assert [p["key"] for p in r["presets"]] == ["facing-hug", "back-hug"]
     assert r["presets"][0]["label"] == "Facing Hug"
     assert r["selectors"][0]["id"] == "aspect-ratio"
@@ -131,11 +132,11 @@ def test_shape_is_derived_from_the_live_schema(scene_id, expected):
     """Derivation, not a table: it reproduced all 28 shipped tile shapes against the live
     catalog on 2026-09-04, which is what lets a scene PixAI adds classify itself."""
     row = next(s for s in CATALOG if s.get("sceneId") == scene_id)
-    assert g.scene_row(row)["shape"] == expected
+    assert scenes_mod.scene_row(row)["shape"] == expected
 
 
 def test_refless_scene_defaults_to_one_source():
-    assert g.scene_row(_sc("plushie"))["refMin"] == 1
+    assert scenes_mod.scene_row(_sc("plushie"))["refMin"] == 1
 
 
 @pytest.mark.parametrize("images,expected", [
@@ -150,14 +151,14 @@ def test_refless_scene_defaults_to_one_source():
 def test_catalog_thumbnail_goes_through_the_cdn_proxy_only_for_the_cdn_host(images, expected):
     """The proxy's SSRF guard accepts exactly images-ng.pixai.art, so pointing anything else
     at it would 403. Off-host urls pass through untouched instead."""
-    assert g.scene_thumb_url(images) == expected
+    assert scenes_mod.scene_thumb_url(images) == expected
 
 
 def test_the_catalog_carries_no_price_so_no_row_pretends_to():
     """PixAI exposes no scene task-price op and no price/credit/cost field anywhere in the
     catalog (checked over all 31 live scenes). SceneTab's confirm names the spend instead;
     a row must not grow a fake one."""
-    r = g.scene_row(CATALOG[0])
+    r = scenes_mod.scene_row(CATALOG[0])
     assert not {k for k in r if k.lower() in ("price", "cost", "credit", "credits")}
 
 
@@ -178,25 +179,25 @@ def test_the_scene_confirm_says_it_could_not_verify_the_cost():
 def test_catalog_is_memoized_so_both_scene_surfaces_share_one_upstream_read(_core):
     up = _Upstream()
     core = _core(up)
-    assert g.scene_catalog(core, object()) == CATALOG
-    assert g.scene_catalog(core, object()) == CATALOG
+    assert scenes_mod.scene_catalog(core, object()) == CATALOG
+    assert scenes_mod.scene_catalog(core, object()) == CATALOG
     assert up.calls == 1
 
 
 def test_memo_expires_after_the_ttl(_core):
     up = _Upstream()
     core = _core(up)
-    g.scene_catalog(core, object())
-    g._scenes_cache["catalog"]["at"] = time.time() - g.SCENES_TTL - 1
-    g.scene_catalog(core, object())
+    scenes_mod.scene_catalog(core, object())
+    scenes_mod._scenes_cache["catalog"]["at"] = time.time() - scenes_mod.SCENES_TTL - 1
+    scenes_mod.scene_catalog(core, object())
     assert up.calls == 2
 
 
 def test_force_drops_the_memo(_core):
     up = _Upstream()
     core = _core(up)
-    g.scene_catalog(core, object())
-    g.scene_catalog(core, object(), force=True)
+    scenes_mod.scene_catalog(core, object())
+    scenes_mod.scene_catalog(core, object(), force=True)
     assert up.calls == 2
 
 
@@ -205,19 +206,19 @@ def test_a_failure_is_not_cached(_core):
     PixAI instead of being served a remembered outage for an hour."""
     bad = _Upstream(raises=RuntimeError("upstream down"))
     with pytest.raises(RuntimeError):
-        g.scene_catalog(_core(bad), object())
-    assert "catalog" not in g._scenes_cache
+        scenes_mod.scene_catalog(_core(bad), object())
+    assert "catalog" not in scenes_mod._scenes_cache
     good = _Upstream()
-    assert g.scene_catalog(_core(good), object()) == CATALOG
+    assert scenes_mod.scene_catalog(_core(good), object()) == CATALOG
     assert good.calls == 1
 
 
 def test_an_empty_answer_is_not_cached(_core):
     """An account that briefly answers [] must not blank the modal for the whole TTL."""
     empty = _Upstream(rows=[])
-    assert g.scene_catalog(_core(empty), object()) == []
-    assert "catalog" not in g._scenes_cache
-    assert g.scene_catalog(_core(empty), object()) == []
+    assert scenes_mod.scene_catalog(_core(empty), object()) == []
+    assert "catalog" not in scenes_mod._scenes_cache
+    assert scenes_mod.scene_catalog(_core(empty), object()) == []
     assert empty.calls == 2
 
 
@@ -288,4 +289,4 @@ def test_api_scenes_says_which_scenes_have_curated_local_art(tmp_path, monkeypat
     by_id = {s["sceneId"]: s for s in d["scenes"]}
     assert by_id["daily-fortune"]["local_art"] is True
     assert by_id["daily-setlog"]["local_art"] is False
-    assert g.scene_local_art("../x") is False
+    assert scenes_mod.scene_local_art("../x") is False

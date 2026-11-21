@@ -549,7 +549,8 @@ def register(app, ctx):
 
     def _loom_fetch_frame_thumb(core, sess, mid):
         """Fill thumbs/<mid>.jpg from PixAI. True when it is there afterwards."""
-        from moonglade.gallery import make_thumbnail, pixai_cdn_url_ok
+        from moonglade.gallery import make_thumbnail
+        from moonglade.scenes import pixai_cdn_url_ok
         import requests as _req
         url = core.media_thumbnail_url(sess, mid)
         if not url or not pixai_cdn_url_ok(url):
