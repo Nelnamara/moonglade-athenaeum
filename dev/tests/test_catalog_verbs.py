@@ -624,7 +624,8 @@ def _route_function_nodes():
     for name in ("routes_generate.py", "web_loom_store.py", "routes_loom.py", "routes_gate.py",
                  "web_threads.py", "routes_panel.py", "routes_delete.py", "routes_recipes.py",
                  "routes_library.py", "routes_account.py", "routes_community.py",
-                 "routes_train.py", "routes_ach.py", "routes_mirror.py", "routes_branding.py"):
+                 "routes_train.py", "routes_ach.py", "routes_mirror.py", "routes_branding.py",
+                 "routes_import.py"):
         tree = ast.parse(Path(g.__file__).with_name(name).read_text(encoding="utf-8"))
         out.append((name, next(n for n in tree.body
                                if isinstance(n, ast.FunctionDef) and n.name == "register")))

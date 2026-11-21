@@ -828,7 +828,9 @@ def test_a_loom_bundle_with_too_many_entries_is_refused(tmp_path, monkeypatch):
 
 
 def test_the_upload_routes_raise_their_own_caps_in_named_constants():
-    src = open(g.__file__, encoding="utf-8").read()
+    # the upload and the local import left create_app for routes_import.py (split phase 4)
+    src = open(os.path.join(os.path.dirname(g.__file__), "routes_import.py"),
+               encoding="utf-8").read()
     # the Loom's routes left create_app for their own module (split phase 4)
     loom_src = open(os.path.join(os.path.dirname(g.__file__), "routes_loom.py"),
                     encoding="utf-8").read()

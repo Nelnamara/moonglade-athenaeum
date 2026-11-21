@@ -74,7 +74,8 @@ def test_is_local_hardcode_ships_with_the_real_check_and_the_route_backs_the_doc
     as `message=`) -- so what this pins is the DECLARATION, not the old
     statement. dev/tests/test_route_tiers.py proves the enforcement itself against a
     live authenticated LAN request."""
-    src = _read("moonglade/gallery.py")
+    # /api/import-local left create_app for routes_import.py (split phase 4)
+    src = _read("moonglade/routes_import.py")
     # app_page() and its boot payload left create_app for routes_gate.py (split phase 4)
     gate = _read("moonglade/routes_gate.py")
     start = gate.index('"is_local": True')

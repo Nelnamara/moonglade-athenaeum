@@ -142,7 +142,7 @@ def test_a_flag_earned_before_stays_earned(tmp_path):
 
 
 def test_the_achievements_route_no_longer_reads_the_hour():
-    from moonglade import routes_ach as routes_ach_mod   # the route left create_app (split phase 4)
+    from moonglade import routes_ach as routes_ach_mod   # it left create_app (split phase 4)
     src = inspect.getsource(routes_ach_mod.register)
     i = src.index("def api_achievements(")
     body = src[i:src.index("@app.route", i)]
@@ -228,12 +228,13 @@ def test_no_submit_path_bumps_a_retired_counter():
     from moonglade import routes_ach as routes_ach_mod
     from moonglade import routes_mirror as routes_mirror_mod
     from moonglade import routes_branding as routes_branding_mod
+    from moonglade import routes_import as routes_import_mod
     src = "\n".join(inspect.getsource(mod) for mod in (
         g, telemetry_mod, achievements_mod, branding_mod, living_mod, contest_sync_mod,
         routes_generate_mod, routes_loom_mod, web_loom_store_mod, routes_gate_mod, web_threads_mod,
         routes_panel_mod, routes_delete_mod, routes_recipes_mod, routes_library_mod,
         routes_account_mod, routes_community_mod, routes_train_mod, routes_ach_mod,
-        routes_mirror_mod, routes_branding_mod))
+        routes_mirror_mod, routes_branding_mod, routes_import_mod))
     # anchor: the moved submit paths really are in what this reads (their live counters)
     assert 'telem_bump("enhances"' in inspect.getsource(routes_generate_mod)
     for needle in ('telem_bump("edits"', 'telem_bump("lora_used"', 'telem_max("lora_stacked"',

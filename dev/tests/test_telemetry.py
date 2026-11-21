@@ -818,12 +818,13 @@ def test_only_the_two_tool_terminals_write_the_bridge_set():
     from moonglade import routes_ach as routes_ach_mod
     from moonglade import routes_mirror as routes_mirror_mod
     from moonglade import routes_branding as routes_branding_mod
+    from moonglade import routes_import as routes_import_mod
     src = "\n".join(inspect.getsource(mod) for mod in (
         g, telemetry_mod, achievements_mod, branding_mod, living_mod, contest_sync_mod,
         routes_generate_mod, routes_loom_mod, web_loom_store_mod, routes_gate_mod, web_threads_mod,
         routes_panel_mod, routes_delete_mod, routes_recipes_mod, routes_library_mod,
         routes_account_mod, routes_community_mod, routes_train_mod, routes_ach_mod,
-        routes_mirror_mod, routes_branding_mod))
+        routes_mirror_mod, routes_branding_mod, routes_import_mod))
     writes = [ln.strip() for ln in src.splitlines()
               if "telem_set_add(" in ln and "bridge_gen_tasks" in ln]
     assert len(writes) == 2, writes

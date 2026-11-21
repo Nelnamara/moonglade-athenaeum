@@ -170,6 +170,8 @@ def test_the_look_is_a_real_starts_and_off_the_request_path():
     assert "_outside_prime" not in inspect.getsource(g.create_app)
     from moonglade import web_threads as web_threads_mod     # create_app's background block
     assert "_outside_prime" not in inspect.getsource(web_threads_mod)
+    from moonglade import routes_import as routes_import_mod   # and its Fix them route
+    assert "_outside_prime" not in inspect.getsource(routes_import_mod)
     started = []
 
     class T:
