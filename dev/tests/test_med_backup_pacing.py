@@ -32,6 +32,7 @@ from types import SimpleNamespace
 import pytest
 
 from moonglade import backup as core
+from moonglade import web_accounts as web_accounts_mod
 
 
 def _dl_args(out, **kw):
@@ -212,7 +213,7 @@ class TestM07DelayWasChosen:
 
     def _parse(self, tmp_path, mocker, *argv):
         seen = {}
-        mocker.patch.object(core, "run_list_web_users", side_effect=lambda a: seen.update(a=a))
+        mocker.patch.object(web_accounts_mod, "run_list_web_users", side_effect=lambda a: seen.update(a=a))
         mocker.patch.object(sys, "argv", ["moonglade/backup.py", "--out", str(tmp_path),
                                           "--list-web-users"] + list(argv))
         from moonglade import logs as moonglade_logging

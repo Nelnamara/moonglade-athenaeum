@@ -28,6 +28,7 @@ from moonglade import hostcheck as _hostcheck
 from moonglade import paths as _paths
 from moonglade import settings as _settings
 from moonglade import web_sessions as _web_sessions
+from moonglade import web_accounts as _web_accounts
 
 
 def register(app, ctx):
@@ -114,7 +115,7 @@ def register(app, ctx):
         from moonglade import backup as core
         session.clear()
         session["user"] = username
-        session["sess_epoch"] = core.get_web_user_session_epoch(username)
+        session["sess_epoch"] = _web_accounts.get_web_user_session_epoch(username)
         session["csrf"] = secrets.token_hex(16)
         # This session's own id, and when it was made (finding 6): Log Out ends exactly this
         # id (moonglade.web_sessions), and the gate refuses it SESSION_ABSOLUTE_LIFETIME_S
@@ -139,7 +140,7 @@ def register(app, ctx):
         from moonglade.pages import DESIGN_TOKENS_CSS
         next_url = _safe_next(request.values.get("next", "")) or ""
         from moonglade import backup as core
-        no_accounts = not core.list_web_users()
+        no_accounts = not _web_accounts.list_web_users()
         is_local = _is_local_request()
         # setdefault, NEVER a fresh mint on GET: the front door redirects every
         # unauthenticated request here including the browser's own incidental asset
@@ -208,7 +209,7 @@ def register(app, ctx):
             return jsonify({"error": error, "csrf": session["csrf"]})
 
         next_url = _safe_next(str(body.get("next") or "")) or ""
-        no_accounts = not core.list_web_users()
+        no_accounts = not _web_accounts.list_web_users()
         bootstrap_mode = no_accounts and _is_local_request()
         wants_create = body.get("mode") == "create"
         ip = _client_ip()
@@ -240,21 +241,21 @@ def register(app, ctx):
             username = str(body.get("username") or "").strip()
             password = str(body.get("password") or "")
             confirm = str(body.get("confirm") or "")
-            un_problem = core.username_problem(username)
-            pw_problem = core.password_problem(password)
+            un_problem = _web_accounts.username_problem(username)
+            pw_problem = _web_accounts.password_problem(password)
             if un_problem:
                 return _fail(un_problem)
             if pw_problem:
                 return _fail(pw_problem)
             if password != confirm:
                 return _fail("Passwords do not match.")
-            core.add_or_update_web_user(username, password)
+            _web_accounts.add_or_update_web_user(username, password)
             _login_clear(ip)
             _establish_session(username)
             return jsonify({"ok": True, "next": next_url or "/"})
         username = str(body.get("username") or "").strip()
         password = str(body.get("password") or "")
-        if username and core.verify_web_user(username, password):
+        if username and _web_accounts.verify_web_user(username, password):
             _login_clear(ip)
             _establish_session(username)
             return jsonify({"ok": True, "next": next_url or "/"})
@@ -315,7 +316,7 @@ def register(app, ctx):
             if not _check_csrf(body):
                 return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
             if body.get("scope") == "everywhere":
-                core.bump_web_user_session_epoch(user)
+                _web_accounts.bump_web_user_session_epoch(user)
             # Server-side, this session only (finding 6): its id is recorded as signed out,
             # so a copy of this cookie taken before the Log Out stops working too. A dead
             # cookie never gets here (`authorized`), so it can record nothing.
@@ -654,7 +655,7 @@ def register(app, ctx):
         if user is None:
             return False
         from moonglade import backup as core
-        current_epoch = core.get_web_user_session_epoch(user)
+        current_epoch = _web_accounts.get_web_user_session_epoch(user)
         if current_epoch is None or current_epoch != session.get("sess_epoch"):
             session.clear()   # stale/revoked -- drop it so later requests short-circuit above
             return False

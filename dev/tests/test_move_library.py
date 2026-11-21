@@ -43,6 +43,7 @@ from moonglade import jobs as jobs_mod
 from moonglade import telemetry as telemetry_mod
 from moonglade import achievements as achievements_mod
 from moonglade import branding as branding_mod
+from moonglade import web_accounts as web_accounts_mod
 
 
 @pytest.fixture
@@ -347,9 +348,9 @@ def test_removing_a_login_removes_its_folder(r):
     write_config(r)
     folder = paths.account_dir(r.lib, "Nel")
     write(folder / "prefs.json", {"x": 1})
-    assert core.remove_login_files(r.lib, "Nel") is True
+    assert web_accounts_mod.remove_login_files(r.lib, "Nel") is True
     assert not folder.exists()
-    assert core.remove_login_files(r.lib, "Nel") is False
+    assert web_accounts_mod.remove_login_files(r.lib, "Nel") is False
 
 
 def test_c_s_copy_first_library(r):

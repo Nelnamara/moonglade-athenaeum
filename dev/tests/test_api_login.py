@@ -12,6 +12,7 @@ the wording pins and the counter's session-independence coverage were ported
 to stand alone here.)"""
 from moonglade import backup as core
 from moonglade.gallery import create_app
+from moonglade import web_accounts as web_accounts_mod
 
 
 def _client(tmp_path):
@@ -52,7 +53,7 @@ def test_api_login_success_sets_session_and_returns_ok_next(tmp_path):
     CLIENT-SIDE navigate off `next`, so both keys are load-bearing. And the
     session must really be established, not just claimed: a follow-up LAN
     request (which the front door refuses for anyone anonymous) now passes."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
     body = _api_login(cli, {"username": "alice", "password": "hunter2"})
     assert body == {"ok": True, "next": "/"}
@@ -62,7 +63,7 @@ def test_api_login_success_sets_session_and_returns_ok_next(tmp_path):
 def test_api_login_wrong_password_generic_error_and_no_session(tmp_path):
     """A bad password gets the one generic string -- never which field was wrong --
     and leaves the caller exactly as anonymous as before."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
     body = _api_login(cli, {"username": "alice", "password": "wrong-pw"})
     assert body["error"] == "Invalid username or password."
@@ -75,7 +76,7 @@ def test_api_login_unknown_user_same_error_as_wrong_password(tmp_path):
     Asserts actual equality of the two error strings (not just that each looks
     generic) so a future edit that reworks one message without the other fails
     loudly, plus the same leaky-phrase screen test_web_auth.py runs on the form."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
     wrong_pw = _api_login(cli, {"username": "alice", "password": "wrong-pw"})
     unknown_user = _api_login(cli, {"username": "nobody-at-all", "password": "hunter2"})
@@ -91,7 +92,7 @@ def test_api_login_forged_csrf_rejected(tmp_path):
     """The JSON endpoint enforces the same session-bound CSRF token the classic
     form does (shared _check_csrf) -- a forged token gets the same 'expired'
     message and no session, so /api/login is not a lesser-checked side door."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
     cli.get("/login")   # establishes a session + a real token we deliberately ignore
     r = cli.post("/api/login", json={"username": "alice", "password": "hunter2",
@@ -110,7 +111,7 @@ def test_api_login_rate_limit_locks_out_after_five_failures(tmp_path):
     the lock -- must SAY so (the classic route grew that report after users got
     locked without being told; api_login carries the same just-locked re-check),
     and a 6th attempt with the CORRECT password is still refused."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
     for attempt in range(1, 6):
         body = _api_login(cli, {"username": "alice", "password": "wrong"},
@@ -134,7 +135,7 @@ def test_api_login_lockout_is_ip_keyed_not_session_keyed(tmp_path):
     locked out from a brand-new session (fresh cookie jar, fresh csrf) too --
     if the counter ever moved into the session, an attacker could reset the
     guess budget just by discarding cookies."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     app = _client(tmp_path)
     cli = app.test_client()
     for _ in range(5):
@@ -150,7 +151,7 @@ def test_api_login_lockout_applies_uniformly_to_mode_create_requests(tmp_path):
     test_web_auth.py's twin): a mode=create POST from a locked-out address must
     get the lockout message, never sail through to the create-specific branch.
     api_login checks lockout FIRST, before the bootstrap gate -- keep it so."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
     for _ in range(5):
         _api_login(cli, {"username": "alice", "password": "wrong"}, remote_addr=LAN)
@@ -158,7 +159,7 @@ def test_api_login_lockout_applies_uniformly_to_mode_create_requests(tmp_path):
                             "confirm": "pw123456", "mode": "create"},
                       remote_addr=LAN)
     assert "too many failed attempts" in body["error"].lower()
-    assert core.list_web_users() == [{"username": "alice"}]   # nothing created
+    assert web_accounts_mod.list_web_users() == [{"username": "alice"}]   # nothing created
 
 
 # ---------------------------------------------------------------------------
@@ -171,11 +172,11 @@ def test_api_login_bootstrap_creates_account_and_signs_in(tmp_path):
     same POST both creates it AND establishes the session -- one step, exactly
     like classic bootstrap (_establish_session is shared, so no second login)."""
     cli = _client(tmp_path).test_client()
-    assert core.list_web_users() == []
+    assert web_accounts_mod.list_web_users() == []
     body = _api_login(cli, {"username": "alice", "password": "hunter22",
                             "confirm": "hunter22", "mode": "create"})
     assert body == {"ok": True, "next": "/"}
-    assert core.verify_web_user("alice", "hunter22")
+    assert web_accounts_mod.verify_web_user("alice", "hunter22")
     assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
 
 
@@ -184,13 +185,13 @@ def test_api_login_bootstrap_refused_once_an_account_exists(tmp_path):
     POST after that point (even a local one carrying a valid csrf) must be
     treated as an ordinary failed login, with the generic error, never as
     account creation."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
     body = _api_login(cli, {"username": "mallory", "password": "pw123456",
                             "confirm": "pw123456", "mode": "create"})
     assert body["error"] == "Invalid username or password."
     assert body.get("csrf"), "failed POST must return the rotated csrf token"
-    assert {u["username"] for u in core.list_web_users()} == {"alice"}
+    assert {u["username"] for u in web_accounts_mod.list_web_users()} == {"alice"}
 
 
 def test_api_login_bootstrap_refused_from_lan_address(tmp_path):
@@ -205,7 +206,7 @@ def test_api_login_bootstrap_refused_from_lan_address(tmp_path):
                             "confirm": "pw123456", "mode": "create"},
                       remote_addr=LAN)
     assert "No account has been set up yet" in body["error"]
-    assert core.list_web_users() == []
+    assert web_accounts_mod.list_web_users() == []
     assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 401
 
 
@@ -222,7 +223,7 @@ def test_api_login_bootstrap_enforces_password_policy_server_side(tmp_path):
                             "confirm": "totally-different", "mode": "create"})
     assert body["error"] == "Passwords do not match."
     assert body.get("csrf"), "failed POST must return the rotated csrf token"
-    assert core.list_web_users() == []
+    assert web_accounts_mod.list_web_users() == []
 
 
 # ---------------------------------------------------------------------------
@@ -237,7 +238,7 @@ def test_api_login_lockout_error_text_pinned_verbatim(tmp_path):
     figure a fresh 15-minute lockout reports. The other lockout tests match a
     lowercase substring; this is the one place the user-facing text itself is
     load-bearing, so a rewording can't slip through unnoticed."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
     for _ in range(5):
         _api_login(cli, {"username": "alice", "password": "wrong"}, remote_addr=LAN)
@@ -255,7 +256,7 @@ def test_api_failed_post_rotates_csrf_and_returned_token_works(tmp_path):
     SPA -- which can't re-render a hidden field -- stays retryable; LoginPage.jsx
     and useLogin.js adopt d.csrf). Gap found by the 2026-08-07 test port;
     rotation added same day."""
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
     cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN})
     old = _session_csrf(cli)

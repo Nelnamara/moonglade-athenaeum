@@ -85,6 +85,7 @@ from moonglade import watch_plans as _watch_plans
 from moonglade import web_policy as _web_policy
 from moonglade import web_sessions as _web_sessions
 from moonglade import web_tiers as _web_tiers
+from moonglade import web_accounts as _web_accounts
 
 try:
     from flask import (Flask, g as _flask_g, jsonify, redirect, render_template_string, request,
@@ -414,7 +415,7 @@ def create_app(out_dir: Path):
     # _is_authorized_request() below for the gate this session backs, and
     # /login /logout for the routes that populate it.
     from moonglade import backup as _core_auth
-    app.secret_key = _core_auth.get_or_create_secret_key()
+    app.secret_key = _web_accounts.get_or_create_secret_key()
     app.config["SESSION_COOKIE_HTTPONLY"] = True   # JS can never read the session cookie
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"   # blocks cross-site POST/nav CSRF vectors
     # Secure PER REQUEST (2026-11-19): the cookie is marked Secure whenever the request that

@@ -36,6 +36,7 @@ from tests.move_layouts import read_config, rig, write, write_config
 from moonglade import health as health_mod
 from moonglade import branding as branding_mod
 from moonglade import thumbs as thumbs_mod
+from moonglade import web_accounts as web_accounts_mod
 
 
 @pytest.fixture
@@ -248,7 +249,7 @@ def test_the_command_line_prepares_first_and_opens_the_settings_library(r, monke
     write_config(r, LIBRARY_DIR=str(r.lib))
     write(r.app / "serve.txt", "--port 5300\n")
     seen = {}
-    monkeypatch.setattr(core, "run_list_web_users", lambda args: seen.update(out=args.out))
+    monkeypatch.setattr(web_accounts_mod, "run_list_web_users", lambda args: seen.update(out=args.out))
     monkeypatch.setattr(sys, "argv", ["moonglade", "--list-web-users"])
     core.main()
     assert seen["out"] == str(r.lib)
@@ -274,7 +275,7 @@ def test_the_command_line_s_out_wins(r, monkeypatch):
     other = r.lib.parent / "elsewhere"
     other.mkdir()
     seen = {}
-    monkeypatch.setattr(core, "run_list_web_users", lambda args: seen.update(out=args.out))
+    monkeypatch.setattr(web_accounts_mod, "run_list_web_users", lambda args: seen.update(out=args.out))
     monkeypatch.setattr(sys, "argv", ["moonglade", "--out", str(other), "--list-web-users"])
     core.main()
     assert seen["out"] == str(other)

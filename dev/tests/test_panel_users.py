@@ -17,6 +17,7 @@ import pytest
 from moonglade import backup as core
 
 from tests.conftest import login_client
+from moonglade import web_accounts as web_accounts_mod
 
 # The shipped password hashing, not the suite's cheap test cost (conftest): this file asserts
 # the stored hash's format.
@@ -43,7 +44,7 @@ def test_summary_lists_existing_accounts_without_hashes(tmp_path):
     original's real invariant -- usernames only, never a password hash leaking
     into what the browser receives -- holds for the JSON payload the same way it
     had to hold for the rendered HTML."""
-    core.add_or_update_web_user("archivist", "pw-a")
+    web_accounts_mod.add_or_update_web_user("archivist", "pw-a")
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
     r = cli.get("/api/panel/summary")
     assert r.status_code == 200
@@ -66,7 +67,7 @@ def test_add_user_end_to_end_real_post_real_hash(tmp_path):
         "csrf": csrf})
     assert r.status_code == 200
     assert r.get_json()["ok"] is True
-    assert core.verify_web_user("newperson", "hunter2222")
+    assert web_accounts_mod.verify_web_user("newperson", "hunter2222")
     # Never plaintext anywhere in config.json.
     cfg = core._load_config()
     raw = str(cfg)
@@ -84,7 +85,7 @@ def test_add_user_rejects_duplicate_username(tmp_path):
     assert r.status_code == 400
     assert "already exists" in r.get_json()["error"]
     # The original account's password must be untouched.
-    assert core.verify_web_user("tester", "a-real-test-password-1")
+    assert web_accounts_mod.verify_web_user("tester", "a-real-test-password-1")
 
 
 def test_add_user_validates_password_length_and_confirm(tmp_path):
@@ -99,20 +100,20 @@ def test_add_user_validates_password_length_and_confirm(tmp_path):
         "username": "mismatch", "password": "a-valid-password", "confirm": "different",
         "csrf": csrf})
     assert "do not match" in r.get_json()["error"]
-    assert core.list_web_users() == [{"username": "tester"}]
+    assert web_accounts_mod.list_web_users() == [{"username": "tester"}]
 
 
 def test_username_problem_policy():
     """The one policy every entry point shares. Empty / over-length / control chars are
     rejected with a rendered-verbatim reason; an ordinary name passes."""
-    cap = core.MAX_WEB_USERNAME_LEN
-    assert core.username_problem("") == "Username is required."
-    assert core.username_problem("   ") == "Username is required."      # strips first
-    assert "at most" in core.username_problem("x" * (cap + 1))
-    assert core.username_problem("x" * cap) is None                      # exactly at the cap is fine
-    assert "control characters" in core.username_problem("bad\x00name")
-    assert "control characters" in core.username_problem("tab\tname")
-    assert core.username_problem("Nel'namara 42") is None                # spaces/punctuation/unicode ok
+    cap = web_accounts_mod.MAX_WEB_USERNAME_LEN
+    assert web_accounts_mod.username_problem("") == "Username is required."
+    assert web_accounts_mod.username_problem("   ") == "Username is required."      # strips first
+    assert "at most" in web_accounts_mod.username_problem("x" * (cap + 1))
+    assert web_accounts_mod.username_problem("x" * cap) is None                      # exactly at the cap is fine
+    assert "control characters" in web_accounts_mod.username_problem("bad\x00name")
+    assert "control characters" in web_accounts_mod.username_problem("tab\tname")
+    assert web_accounts_mod.username_problem("Nel'namara 42") is None                # spaces/punctuation/unicode ok
 
 
 def test_add_user_rejects_overlong_username(tmp_path):
@@ -120,13 +121,13 @@ def test_add_user_rejects_overlong_username(tmp_path):
     message, and nothing is written."""
     cli = login_client(tmp_path)
     csrf = _session_csrf(cli)
-    long_name = "z" * (core.MAX_WEB_USERNAME_LEN + 50)
+    long_name = "z" * (web_accounts_mod.MAX_WEB_USERNAME_LEN + 50)
     r = cli.post("/api/users/add", json={
         "username": long_name, "password": "a-valid-password", "confirm": "a-valid-password",
         "csrf": csrf})
     assert r.status_code == 400
     assert "at most" in r.get_json()["error"]
-    assert core.list_web_users() == [{"username": "tester"}]             # not written
+    assert web_accounts_mod.list_web_users() == [{"username": "tester"}]             # not written
 
 
 def test_writers_reject_overlong_username_as_a_backstop(tmp_path):
@@ -134,13 +135,13 @@ def test_writers_reject_overlong_username_as_a_backstop(tmp_path):
     --add-web-user CLI path (which never calls username_problem) can't persist an
     over-long name."""
     import pytest
-    over = "q" * (core.MAX_WEB_USERNAME_LEN + 1)
+    over = "q" * (web_accounts_mod.MAX_WEB_USERNAME_LEN + 1)
     with pytest.raises(ValueError):
-        core.add_or_update_web_user(over, "a-valid-password")
+        web_accounts_mod.add_or_update_web_user(over, "a-valid-password")
     with pytest.raises(ValueError):
-        core.add_web_user_if_new(over, "a-valid-password")
+        web_accounts_mod.add_web_user_if_new(over, "a-valid-password")
     # a name exactly at the cap writes fine
-    assert core.add_web_user_if_new("y" * core.MAX_WEB_USERNAME_LEN, "a-valid-password") is True
+    assert web_accounts_mod.add_web_user_if_new("y" * web_accounts_mod.MAX_WEB_USERNAME_LEN, "a-valid-password") is True
 
 
 def test_username_inputs_carry_a_maxlength():
@@ -177,7 +178,7 @@ def test_add_user_requires_valid_csrf(tmp_path):
         "csrf": "forged-token-not-in-session"})
     assert r.status_code == 400
     assert "expired" in r.get_json()["error"].lower()
-    assert core.list_web_users() == [{"username": "tester"}]
+    assert web_accounts_mod.list_web_users() == [{"username": "tester"}]
 
 
 def test_add_user_refuses_a_lan_session(tmp_path):
@@ -193,27 +194,27 @@ def test_add_user_refuses_a_lan_session(tmp_path):
         "csrf": csrf})
     assert r.status_code == 403
     assert "localhost-only" in r.get_json()["error"]
-    assert core.list_web_users() == [{"username": "tester"}]   # nothing was created
+    assert web_accounts_mod.list_web_users() == [{"username": "tester"}]   # nothing was created
 
 
 def test_remove_user_end_to_end(tmp_path):
-    core.add_or_update_web_user("doomed", "pw-doomed")
+    web_accounts_mod.add_or_update_web_user("doomed", "pw-doomed")
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
     csrf = _session_csrf(cli)
     r = cli.post("/api/users/remove", json={"username": "doomed", "csrf": csrf})
     assert r.status_code == 200
     assert r.get_json()["ok"] is True
-    assert {u["username"] for u in core.list_web_users()} == {"tester"}
+    assert {u["username"] for u in web_accounts_mod.list_web_users()} == {"tester"}
 
 
 def test_remove_user_requires_valid_csrf(tmp_path):
-    core.add_or_update_web_user("doomed", "pw-doomed")
+    web_accounts_mod.add_or_update_web_user("doomed", "pw-doomed")
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
     r = cli.post("/api/users/remove", json={"username": "doomed", "csrf": "bogus"})
     assert r.status_code == 400
     assert "expired" in r.get_json()["error"].lower()
     # Nothing removed -- both accounts still present.
-    assert {u["username"] for u in core.list_web_users()} == {"tester", "doomed"}
+    assert {u["username"] for u in web_accounts_mod.list_web_users()} == {"tester", "doomed"}
 
 
 def test_remove_last_account_is_refused(tmp_path):
@@ -222,35 +223,35 @@ def test_remove_last_account_is_refused(tmp_path):
     r = cli.post("/api/users/remove", json={"username": "onlyone", "csrf": csrf})
     assert r.status_code == 400
     assert "last remaining account" in r.get_json()["error"]
-    assert core.list_web_users() == [{"username": "onlyone"}]
+    assert web_accounts_mod.list_web_users() == [{"username": "onlyone"}]
 
 
 def test_remove_user_refuses_a_lan_session_removing_someone_else(tmp_path):
     """The other half of the same fix: a LAN session can no longer remove ANY
     other account by name -- previously the only guard was "not the last account
     left," which let a borrowed-tablet guest evict the owner specifically."""
-    core.add_or_update_web_user("victim", "pw-victim-account")
+    web_accounts_mod.add_or_update_web_user("victim", "pw-victim-account")
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
     csrf = _session_csrf(cli)
     r = cli.post("/api/users/remove", environ_overrides={"REMOTE_ADDR": LAN},
                  json={"username": "victim", "csrf": csrf})
     assert r.status_code == 403
     assert "localhost-only" in r.get_json()["error"]
-    assert {u["username"] for u in core.list_web_users()} == {"tester", "victim"}
+    assert {u["username"] for u in web_accounts_mod.list_web_users()} == {"tester", "victim"}
 
 
 def test_remove_user_allows_a_lan_session_removing_itself(tmp_path):
     """Self-removal is the deliberate carve-out: it can only harm the caller, so
     it stays reachable from a LAN session even though removing anyone else does
     not -- a deliberate scoping choice for this fix."""
-    core.add_or_update_web_user("other", "pw-other-account")
+    web_accounts_mod.add_or_update_web_user("other", "pw-other-account")
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
     csrf = _session_csrf(cli)
     r = cli.post("/api/users/remove", environ_overrides={"REMOTE_ADDR": LAN},
                  json={"username": "tester", "csrf": csrf})
     assert r.status_code == 200
     assert r.get_json()["ok"] is True
-    assert {u["username"] for u in core.list_web_users()} == {"other"}
+    assert {u["username"] for u in web_accounts_mod.list_web_users()} == {"other"}
 
 
 def test_lan_self_removal_kills_the_callers_own_session_immediately(tmp_path):
@@ -258,7 +259,7 @@ def test_lan_self_removal_kills_the_callers_own_session_immediately(tmp_path):
     request -- get_web_user_session_epoch() returns None once the account is
     gone, and _is_authorized_request() re-checks that on every call. Confirms
     the caller can't keep acting as a user that no longer exists."""
-    core.add_or_update_web_user("other", "pw-other-account")
+    web_accounts_mod.add_or_update_web_user("other", "pw-other-account")
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
     csrf = _session_csrf(cli)
     r = cli.post("/api/users/remove", environ_overrides={"REMOTE_ADDR": LAN},
@@ -282,7 +283,7 @@ def test_remove_last_account_is_refused_even_as_lan_self_removal(tmp_path):
                  json={"username": "onlyone", "csrf": csrf})
     assert r.status_code == 400
     assert "last remaining account" in r.get_json()["error"]
-    assert core.list_web_users() == [{"username": "onlyone"}]
+    assert web_accounts_mod.list_web_users() == [{"username": "onlyone"}]
 
 
 def test_remove_nonexistent_user_404s(tmp_path):
@@ -307,9 +308,9 @@ def test_concurrent_remove_of_two_different_accounts_cannot_empty_the_list(tmp_p
     import threading
     import time as _time
 
-    core.add_or_update_web_user("bob", "pw-bob-account")
+    web_accounts_mod.add_or_update_web_user("bob", "pw-bob-account")
     cli = login_client(tmp_path, username="alice", password="a-real-test-password-1")
-    assert {u["username"] for u in core.list_web_users()} == {"alice", "bob"}
+    assert {u["username"] for u in web_accounts_mod.list_web_users()} == {"alice", "bob"}
     csrf = _session_csrf(cli)
 
     real_save = core._save_config
@@ -330,7 +331,7 @@ def test_concurrent_remove_of_two_different_accounts_cannot_empty_the_list(tmp_p
     t1.start(); t2.start()
     t1.join(); t2.join()
 
-    remaining = {u["username"] for u in core.list_web_users()}
+    remaining = {u["username"] for u in web_accounts_mod.list_web_users()}
     assert len(remaining) == 1                     # never emptied, never both survived
     refused = [v for v in results.values() if "error" in v]
     assert len(refused) == 1                       # exactly one of the two was turned away
@@ -373,8 +374,8 @@ def test_lan_session_changes_its_own_password_with_the_current_one(tmp_path):
                  json={"current_password": "a-real-test-password-1",
                        "new_password": "a-brand-new-password-2", "csrf": csrf})
     assert r.status_code == 200, r.get_json()
-    assert core.verify_web_user("tester", "a-brand-new-password-2")
-    assert not core.verify_web_user("tester", "a-real-test-password-1")
+    assert web_accounts_mod.verify_web_user("tester", "a-brand-new-password-2")
+    assert not web_accounts_mod.verify_web_user("tester", "a-real-test-password-1")
 
 
 def test_lan_session_cannot_change_its_own_password_without_the_current_one(tmp_path):
@@ -391,14 +392,14 @@ def test_lan_session_cannot_change_its_own_password_without_the_current_one(tmp_
                         "new_password": "attacker-chosen-pw-9", "csrf": csrf})
     assert r2.status_code == 403
     # The original password still works, both times.
-    assert core.verify_web_user("tester", "a-real-test-password-1")
-    assert not core.verify_web_user("tester", "attacker-chosen-pw-9")
+    assert web_accounts_mod.verify_web_user("tester", "a-real-test-password-1")
+    assert not web_accounts_mod.verify_web_user("tester", "attacker-chosen-pw-9")
 
 
 def test_lan_session_cannot_change_anyone_elses_password(tmp_path):
     """Even knowing the victim's current password. The username check refuses first,
     exactly as api_users_remove does, so a LAN caller can never aim this at the owner."""
-    core.add_or_update_web_user("victim", "pw-victim-account")
+    web_accounts_mod.add_or_update_web_user("victim", "pw-victim-account")
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
     csrf = _session_csrf(cli)
     r = cli.post("/api/users/password", environ_overrides={"REMOTE_ADDR": LAN},
@@ -406,20 +407,20 @@ def test_lan_session_cannot_change_anyone_elses_password(tmp_path):
                        "new_password": "stolen-account-pw-3", "csrf": csrf})
     assert r.status_code == 403
     assert "localhost-only" in r.get_json()["error"]
-    assert core.verify_web_user("victim", "pw-victim-account")   # untouched
+    assert web_accounts_mod.verify_web_user("victim", "pw-victim-account")   # untouched
 
 
 def test_local_session_resets_another_account_without_its_password(tmp_path):
     """THE recovery path, and the whole point of the item: at the machine, the owner
     can reset a forgotten password without knowing the old one."""
-    core.add_or_update_web_user("forgetful", "the-password-nobody-recalls")
+    web_accounts_mod.add_or_update_web_user("forgetful", "the-password-nobody-recalls")
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
     csrf = _session_csrf(cli)
     r = cli.post("/api/users/password",
                  json={"username": "forgetful", "new_password": "a-fresh-start-pw-4",
                        "csrf": csrf})
     assert r.status_code == 200, r.get_json()
-    assert core.verify_web_user("forgetful", "a-fresh-start-pw-4")
+    assert web_accounts_mod.verify_web_user("forgetful", "a-fresh-start-pw-4")
 
 
 def test_local_session_resets_its_own_password_without_the_current_one(tmp_path):
@@ -431,7 +432,7 @@ def test_local_session_resets_its_own_password_without_the_current_one(tmp_path)
     r = cli.post("/api/users/password",
                  json={"new_password": "recovered-locally-pw-5", "csrf": csrf})
     assert r.status_code == 200, r.get_json()
-    assert core.verify_web_user("tester", "recovered-locally-pw-5")
+    assert web_accounts_mod.verify_web_user("tester", "recovered-locally-pw-5")
 
 
 def test_changing_your_own_password_keeps_you_signed_in_here(tmp_path):
@@ -459,7 +460,7 @@ def test_password_reset_refuses_an_unknown_account(tmp_path):
                  json={"username": "ghost", "new_password": "should-not-exist-7",
                        "csrf": csrf})
     assert r.status_code == 404
-    assert {u["username"] for u in core.list_web_users()} == {"tester"}
+    assert {u["username"] for u in web_accounts_mod.list_web_users()} == {"tester"}
 
 
 def test_password_reset_reuses_the_add_user_password_policy(tmp_path):
@@ -470,7 +471,7 @@ def test_password_reset_reuses_the_add_user_password_policy(tmp_path):
     r = cli.post("/api/users/password",
                  json={"new_password": "x", "csrf": csrf})
     assert r.status_code == 400
-    assert core.verify_web_user("tester", "a-real-test-password-1")   # unchanged
+    assert web_accounts_mod.verify_web_user("tester", "a-real-test-password-1")   # unchanged
 
 
 def test_password_change_requires_csrf(tmp_path):
@@ -479,4 +480,4 @@ def test_password_change_requires_csrf(tmp_path):
     r = cli.post("/api/users/password",
                  json={"new_password": "no-token-supplied-8"})
     assert r.status_code == 400
-    assert core.verify_web_user("tester", "a-real-test-password-1")
+    assert web_accounts_mod.verify_web_user("tester", "a-real-test-password-1")

@@ -30,6 +30,7 @@ from moonglade import web_sessions
 from moonglade.gallery import create_app
 from tests.conftest import _do_login, login_client, login_test_client, with_csrf
 from moonglade import web_policy as web_policy_mod
+from moonglade import web_accounts as web_accounts_mod
 
 LAN = "192.168.1.20"
 
@@ -145,7 +146,7 @@ def test_all_mode_sends_this_pc_too_and_off_mode_sends_nobody(tmp_path):
 
 
 def test_the_session_cookie_is_secure_over_https_only(tmp_path):
-    core.add_or_update_web_user("alice", "a-real-test-password-1")
+    web_accounts_mod.add_or_update_web_user("alice", "a-real-test-password-1")
     app = create_app(tmp_path)
     for base, secure in (("https://localhost", True), ("http://localhost", False)):
         cli = app.test_client()
@@ -440,7 +441,7 @@ def test_a_secret_file_is_private_before_a_byte_is_written(tmp_path, monkeypatch
         seen.append((os.path.basename(str(p)), os.path.getsize(p) if os.path.exists(p) else -1))
         return real(p)
     monkeypatch.setattr(secure_files, "restrict_to_owner", _spy)
-    core.add_or_update_web_user("alice", "a-real-test-password-1")          # config.json
+    web_accounts_mod.add_or_update_web_user("alice", "a-real-test-password-1")          # config.json
     mirror_mod.save_mirror_state({"jwt": "a.b.c"})                           # the Mirror
     temps = [(n, size) for n, size in seen if ".tmp-" in n]
     assert any(n.startswith("config.json.tmp-") for n, _ in temps), seen
@@ -583,7 +584,7 @@ def test_every_secret_write_restricts_the_file(tmp_path, monkeypatch):
     seen = []
     monkeypatch.setattr(secure_files, "restrict_to_owner",
                         lambda p: seen.append(os.path.basename(str(p))) or True)
-    core.add_or_update_web_user("alice", "a-real-test-password-1")     # config.json
+    web_accounts_mod.add_or_update_web_user("alice", "a-real-test-password-1")     # config.json
     assert "config.json" in seen
     mirror_mod.save_mirror_state({"jwt": "a.b.c"})                      # the Mirror's sign-in
     assert moonglade_paths.MIRROR_SESSION_NAME in seen
@@ -618,7 +619,7 @@ def _logout(cli, **extra):
 
 
 def test_log_out_ends_a_copied_cookie_too(tmp_path):
-    core.add_or_update_web_user("alice", "a-real-test-password-1")
+    web_accounts_mod.add_or_update_web_user("alice", "a-real-test-password-1")
     app = create_app(tmp_path)
     device = _do_login(app.test_client(), "alice", "a-real-test-password-1")
     other = _do_login(app.test_client(), "alice", "a-real-test-password-1")
@@ -633,7 +634,7 @@ def test_log_out_ends_a_copied_cookie_too(tmp_path):
 
 def test_a_session_ends_at_its_absolute_lifetime_however_often_it_is_used(tmp_path,
                                                                          monkeypatch):
-    core.add_or_update_web_user("alice", "a-real-test-password-1")
+    web_accounts_mod.add_or_update_web_user("alice", "a-real-test-password-1")
     app = create_app(tmp_path)
     cli = _do_login(app.test_client(), "alice", "a-real-test-password-1")
     assert cli.get("/api/jobs").status_code == 200
@@ -645,7 +646,7 @@ def test_a_session_ends_at_its_absolute_lifetime_however_often_it_is_used(tmp_pa
 
 
 def test_a_cookie_from_before_sessions_had_an_id_is_refused(tmp_path):
-    core.add_or_update_web_user("alice", "a-real-test-password-1")
+    web_accounts_mod.add_or_update_web_user("alice", "a-real-test-password-1")
     app = create_app(tmp_path)
     cli = _do_login(app.test_client(), "alice", "a-real-test-password-1")
     with cli.session_transaction() as s:

@@ -14,6 +14,7 @@ from moonglade import scan as scan_mod
 from moonglade import jobs as jobs_mod
 from moonglade import media_tools as media_tools_mod
 from moonglade import thumbs as thumbs_mod
+from moonglade import web_accounts as web_accounts_mod
 
 
 def _csrf(html):
@@ -161,7 +162,7 @@ def test_destructive_action_refuses_authenticated_lan_session(tmp_path, monkeypa
         return FakeProc()
 
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
-    core.add_or_update_web_user("alice", "hunter2")
+    web_accounts_mod.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
     LAN = "203.0.113.5"
     html = cli.get("/login").get_data(as_text=True)

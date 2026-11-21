@@ -502,6 +502,15 @@ SEAMS = {
     "moonglade.dupe_review": {"from": "moonglade.gallery", "names": [
         "_quarantine_meta_path", "_resolve_under", "_reconcile_one_row_after_move",
         "quarantine_duplicate_file", "restore_quarantined_duplicate", "_validate_duplicate_pair"]},
+    "moonglade.web_accounts": {"from": "moonglade.backup", "names": [
+        "WEB_PASSWORD_HASH_METHOD", "get_or_create_secret_key", "_find_web_user",
+        "_EPOCH_SEQ_KEY", "_EPOCH_LEGACY_MARGIN", "_next_sess_epoch", "list_web_users",
+        "MIN_WEB_PASSWORD_LEN", "MAX_WEB_USERNAME_LEN", "_COMMON_PASSWORDS", "_is_single_run",
+        "password_problem", "username_problem", "add_or_update_web_user",
+        "set_web_user_password_guarded", "add_web_user_if_new", "remove_web_user",
+        "remove_web_user_guarded", "get_web_user_session_epoch", "bump_web_user_session_epoch",
+        "_dummy_hash_cache", "_dummy_password_hash", "verify_web_user", "run_add_web_user",
+        "run_remove_web_user", "remove_login_files", "run_list_web_users"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -556,7 +565,6 @@ SOURCE_READERS = {
     "tests/test_tsubaki3_image_gate.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_unclear_single_sends.py": ("moonglade.backup",),
     "tests/test_video_tsubaki.py": ("moonglade.backup",),
-    "tests/test_web_auth.py": ("moonglade.backup",),
     "tools/split_names.py": ("moonglade.backup", "moonglade.gallery"),   # the move proof's sweep
     "loom/test/import-batches.test.js": ("moonglade.scan",),
     "loom/test/ledger-known-reasons.test.js": ("moonglade.cards",),
@@ -2252,6 +2260,29 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_setup_prepare.py', 'moonglade.dupe_review'),
     ('tests/test_task_model_detail_document.py', 'moonglade.dupe_review'),
     ('tests/test_telemetry.py', 'moonglade.dupe_review'),
+    # Split phase 4, web_accounts: no reader reads the login accounts' text; test_web_auth's
+    # shipped-hash read goes to moonglade/web_accounts.py, so it leaves SOURCE_READERS.
+    ('tests/test_artworks_adhoc.py', 'moonglade.web_accounts'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.web_accounts'),
+    ('tests/test_config_path_routing.py', 'moonglade.web_accounts'),
+    ('tests/test_create_door.py', 'moonglade.web_accounts'),
+    ('tests/test_csrf_coverage.py', 'moonglade.web_accounts'),
+    ('tests/test_enhance.py', 'moonglade.web_accounts'),
+    ('tests/test_evidence_counters.py', 'moonglade.web_accounts'),
+    ('tests/test_full_meta_rest_fallback.py', 'moonglade.web_accounts'),
+    ('tests/test_gen_surface.py', 'moonglade.web_accounts'),
+    ('tests/test_history_feed_document.py', 'moonglade.web_accounts'),
+    ('tests/test_jwt.py', 'moonglade.web_accounts'),
+    ('tests/test_living_library.py', 'moonglade.web_accounts'),
+    ('tests/test_loom_notify.py', 'moonglade.web_accounts'),
+    ('tests/test_pixai_client.py', 'moonglade.web_accounts'),
+    ('tests/test_settings_store.py', 'moonglade.web_accounts'),
+    ('tests/test_setup_prepare.py', 'moonglade.web_accounts'),
+    ('tests/test_spend_no_retry.py', 'moonglade.web_accounts'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.web_accounts'),
+    ('tests/test_telemetry.py', 'moonglade.web_accounts'),
+    ('tests/test_training_advanced.py', 'moonglade.web_accounts'),
+    ('tests/test_training_parity.py', 'moonglade.web_accounts'),
 }
 
 

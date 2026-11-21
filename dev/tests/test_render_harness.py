@@ -331,7 +331,7 @@ def render_server(tmp_path_factory):
     # the image's intrinsic aspect, which a 1x1 placeholder would not have.
     from PIL import Image
     Image.new("RGB", (900, 600), (120, 90, 180)).save(root / "harness_0.png")
-    core.add_or_update_web_user(_USERNAME, _PASSWORD)
+    web_accounts_mod.add_or_update_web_user(_USERNAME, _PASSWORD)
     # This module's tests assume an already-onboarded install (the real gallery, not the
     # first-run Setup Wizard) -- app_page()'s boot payload now computes needs_key from
     # a fresh config.json read, and this fixture's config would otherwise have none.
@@ -439,7 +439,7 @@ def logged_in_page(render_server, render_browser, monkeypatch, request):
         page = ctx.new_page()
         if fresh_account:
             username = "render-fresh-%d" % next(_FRESH_ACCOUNTS)
-            core.add_or_update_web_user(username, _PASSWORD)
+            web_accounts_mod.add_or_update_web_user(username, _PASSWORD)
             _login(page, username)
         else:
             _login(page)
@@ -1837,7 +1837,7 @@ def fresh_install_server(tmp_path_factory, monkeypatch):
     # Wave 4 every config.json reader and writer goes through core._config_path() (pinned
     # above), and dev/tests/test_config_path_routing.py holds that with a decoy.
     save_catalog(root / "catalog.db", [])          # genuinely empty -- no rows at all
-    core.add_or_update_web_user(_USERNAME, _PASSWORD)
+    web_accounts_mod.add_or_update_web_user(_USERNAME, _PASSWORD)
 
     server = make_server("127.0.0.1", 0, create_app(root), threaded=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True,
@@ -3294,7 +3294,7 @@ def paged_library_server(tmp_path_factory, monkeypatch):
     # answering half of that route, not its refusal.
     from PIL import Image
     Image.new("RGB", (900, 600), (120, 90, 180)).save(root / "paged_119.png")
-    core.add_or_update_web_user(_USERNAME, _PASSWORD)
+    web_accounts_mod.add_or_update_web_user(_USERNAME, _PASSWORD)
     # Already onboarded, exactly as render_server is: a key, so app_page() serves the real
     # gallery instead of the Setup Wizard...
     cfg = json.loads(config_path.read_text()) if config_path.exists() else {}
@@ -4860,6 +4860,7 @@ def test_each_tab_keeps_its_own_scroll(
 from tests.conftest import donor_feat as _donor_feat
 from moonglade import telemetry as telemetry_mod
 from moonglade import branding as branding_mod
+from moonglade import web_accounts as web_accounts_mod
 _UNDER_THE_HOOD = _donor_feat(unlocks="branding_tab")
 _DROP_RGB = (200, 40, 90)              # a colour nothing else in this harness paints, so a
 #                                        served pixel PROVES it came from this exact drop
@@ -7611,7 +7612,7 @@ def phone_q_server(tmp_path_factory, monkeypatch):
             "seed": str(1000 + i), "steps": "28", "cfg_scale": "6",
             "created_at": (base - _dt.timedelta(minutes=37 * i)).strftime("%Y-%m-%dT%H:%M:%S.000Z")})
     save_catalog(root / "catalog.db", rows)
-    core.add_or_update_web_user(_USERNAME, _PASSWORD)
+    web_accounts_mod.add_or_update_web_user(_USERNAME, _PASSWORD)
     cfg = json.loads(config_path.read_text()) if config_path.exists() else {}
     cfg["PIXAI_API_KEY"] = "sk-render-harness-fake"
     config_path.write_text(json.dumps(cfg))
@@ -9150,7 +9151,7 @@ def phone_u_server(tmp_path_factory, monkeypatch):
         th = Image.new("RGB", (w // 16, h // 16), (40 + (i * 7) % 90, 44 + (i * 3) % 70, 90 + (i * 5) % 80))
         th.save(root / "gallery" / "thumbs" / ("%d.jpg" % (_U_BASE_MID + i)), "JPEG")
     save_catalog(root / "catalog.db", rows)
-    core.add_or_update_web_user(_USERNAME, _PASSWORD)
+    web_accounts_mod.add_or_update_web_user(_USERNAME, _PASSWORD)
     cfg = json.loads(config_path.read_text()) if config_path.exists() else {}
     cfg["PIXAI_API_KEY"] = "sk-render-harness-fake"
     config_path.write_text(json.dumps(cfg))

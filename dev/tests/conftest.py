@@ -1104,6 +1104,7 @@ def _no_live_config(monkeypatch):
 
 
 from moonglade import bonjour as _bonjour_mod   # noqa: E402 -- beside the fixture that stubs it
+from moonglade import web_accounts as web_accounts_mod
 
 # Captured at import, before `_no_lan_probe` swaps it, for the one test that is about it.
 REAL_LAN_IP = _bonjour_mod.lan_ip
@@ -1178,7 +1179,7 @@ def mock_session(mocker):
 # Password hashing for the suite's own accounts
 # ---------------------------------------------------------------------------
 # What moonglade.backup ships, read at import -- before the session fixture below swaps it.
-SHIPPED_PASSWORD_HASH_METHOD = core.WEB_PASSWORD_HASH_METHOD
+SHIPPED_PASSWORD_HASH_METHOD = web_accounts_mod.WEB_PASSWORD_HASH_METHOD
 # scrypt at a token cost: the same "scrypt:" hash format and the same code path, in a fraction
 # of a millisecond. (werkzeug sizes scrypt's memory limit from n, so n much below this fails.)
 TEST_PASSWORD_HASH_METHOD = "scrypt:256:1:1"
@@ -1199,7 +1200,7 @@ def _cheap_test_password_hashes():
     the stored format) take `real_password_hashing` and run with the shipped cost, and
     test_web_auth holds that shipped cost to full strength."""
     mp = pytest.MonkeyPatch()
-    mp.setattr(core, "WEB_PASSWORD_HASH_METHOD", TEST_PASSWORD_HASH_METHOD)
+    mp.setattr(web_accounts_mod, "WEB_PASSWORD_HASH_METHOD", TEST_PASSWORD_HASH_METHOD)
     try:
         yield
     finally:
@@ -1209,7 +1210,7 @@ def _cheap_test_password_hashes():
 @pytest.fixture()
 def real_password_hashing(monkeypatch):
     """The shipped password hashing for one test, instead of the suite's cheap one."""
-    monkeypatch.setattr(core, "WEB_PASSWORD_HASH_METHOD", SHIPPED_PASSWORD_HASH_METHOD)
+    monkeypatch.setattr(web_accounts_mod, "WEB_PASSWORD_HASH_METHOD", SHIPPED_PASSWORD_HASH_METHOD)
 
 
 # ---------------------------------------------------------------------------
@@ -1262,7 +1263,7 @@ def login_existing_client(cli, username=_TEST_USERNAME, password=_TEST_PASSWORD)
     to make some calls anonymously first (e.g. to prove an unauthenticated/LAN request
     is refused) and then continue as a logged-in session against the very same client/
     app instance."""
-    core.add_or_update_web_user(username, password)
+    web_accounts_mod.add_or_update_web_user(username, password)
     return _do_login(cli, username, password)
 
 
@@ -1270,7 +1271,7 @@ def login_test_client(app, username=_TEST_USERNAME, password=_TEST_PASSWORD):
     """Given an already-built create_app(tmp_path) app (e.g. one a test file's own
     helper seeded with a catalog), create a real account and return a FRESH,
     now-authenticated test_client() for it."""
-    core.add_or_update_web_user(username, password)
+    web_accounts_mod.add_or_update_web_user(username, password)
     return _do_login(app.test_client(), username, password)
 
 

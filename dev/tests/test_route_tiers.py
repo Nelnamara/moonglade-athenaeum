@@ -79,6 +79,7 @@ from moonglade.gallery import create_app
 from moonglade.web_tiers import (LOCALHOST, LOGIN, PUBLIC, route_tier,
                                  assert_every_route_declares_a_tier)
 from moonglade import web_tiers as web_tiers_mod
+from moonglade import web_accounts as web_accounts_mod
 
 
 LAN = "203.0.113.5"      # TEST-NET-3 -- the "some other device on the LAN" stand-in
@@ -567,7 +568,7 @@ def armed(monkeypatch):
 def _login(app, username="tier-probe", password="a-real-test-password-1"):
     """A real, fully-authenticated client -- used ONLY to prove that being logged
     in is still not enough for a LOCALHOST route."""
-    core.add_or_update_web_user(username, password)
+    web_accounts_mod.add_or_update_web_user(username, password)
     cli = app.test_client()
     html = cli.get("/login").get_data(as_text=True)
     # The React shell's window.MG_BOOT JSON blob (the ONLY login page since the

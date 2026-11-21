@@ -25,6 +25,7 @@ from moonglade import mirror as _mirror
 from moonglade import paths as _paths
 from moonglade import settings as _settings
 from moonglade import updater as _updater
+from moonglade import web_accounts as _web_accounts
 
 
 def register(app, ctx):
@@ -214,7 +215,7 @@ def register(app, ctx):
             "home_network": bool(_mirror.home_network_address(request.remote_addr)),
             "actions": actions, "all_actions": all_actions,
             "out_dir": str(out_dir) if panel_is_local else "",
-            "web_users": core.list_web_users(),
+            "web_users": _web_accounts.list_web_users(),
             "current_username": session.get("user"),
             "csrf": session["csrf"],
             "branding": dict(_branding._branding_tuning(branding),
@@ -273,15 +274,15 @@ def register(app, ctx):
         # Same core.username_problem()/password_problem() the /login bootstrap form
         # and the --add-web-user CLI call use -- one policy, three entry points, no
         # drift. username_problem covers empty, over-length, and control chars.
-        un_problem = core.username_problem(username)
+        un_problem = _web_accounts.username_problem(username)
         if un_problem:
             return jsonify({"error": un_problem}), 400
-        pw_problem = core.password_problem(password)
+        pw_problem = _web_accounts.password_problem(password)
         if pw_problem:
             return jsonify({"error": pw_problem}), 400
         if password != confirm:
             return jsonify({"error": "Passwords do not match."}), 400
-        if not core.add_web_user_if_new(username, password):
+        if not _web_accounts.add_web_user_if_new(username, password):
             return jsonify({"error": "That username already exists."}), 400
         return jsonify({"ok": True, "username": username})
 
@@ -325,7 +326,7 @@ def register(app, ctx):
         if username != session.get("user") and not _is_local_request():
             return jsonify({"error": "localhost-only to remove another account"}), 403
         from moonglade import backup as core
-        result = core.remove_web_user_guarded(username)
+        result = _web_accounts.remove_web_user_guarded(username)
         if result == "not_found":
             return jsonify({"error": "No such account."}), 404
         if result == "last_account":
@@ -334,7 +335,7 @@ def register(app, ctx):
                                      "someone signs in locally to bootstrap a new one."}), 400
         # S10: a removed login's per-login folder (prefs, state, snippets, presets, saved
         # views) goes with it.
-        core.remove_login_files(out_dir, username)
+        _web_accounts.remove_login_files(out_dir, username)
         return jsonify({"ok": True, "username": username})
 
     @app.route("/api/users/password", methods=["POST"])
@@ -385,7 +386,7 @@ def register(app, ctx):
             return jsonify({"error": "localhost-only to change another account's password"}), 403
         # Same policy the Users tab already enforces when ADDING an account -- one rule, one
         # place, so a password that could not be registered cannot be set here either.
-        problem = core.password_problem(new_pw)
+        problem = _web_accounts.password_problem(new_pw)
         if problem:
             return jsonify({"error": problem}), 400
 
@@ -394,7 +395,7 @@ def register(app, ctx):
         if current is not None and not current:
             return jsonify({"error": "Enter your current password."}), 400
 
-        result = core.set_web_user_password_guarded(target, new_pw, current_password=current)
+        result = _web_accounts.set_web_user_password_guarded(target, new_pw, current_password=current)
         if result == "not_found":
             return jsonify({"error": "No such account."}), 404
         if result == "bad_current":
@@ -404,7 +405,7 @@ def register(app, ctx):
             return jsonify({"error": "That current password isn't right."}), 403
 
         if target == me:
-            session["sess_epoch"] = core.get_web_user_session_epoch(me)
+            session["sess_epoch"] = _web_accounts.get_web_user_session_epoch(me)
         return jsonify({"ok": True, "username": target,
                         "signed_out_elsewhere": True,
                         "still_signed_in_here": target == me})

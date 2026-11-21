@@ -21,6 +21,7 @@ from moonglade.gallery import create_app
 from moonglade.account_prefs import _account_key
 from tests.conftest import _TEST_PASSWORD, _TEST_USERNAME, _do_login, login_test_client
 from moonglade import task_reads as task_reads_mod
+from moonglade import web_accounts as web_accounts_mod
 
 MID = "733917871331404290"
 
@@ -527,7 +528,7 @@ def test_the_session_cookie_is_samesite_lax(tmp_path):
     from tests.conftest import extract_login_csrf
     app = create_app(tmp_path)
     assert app.config["SESSION_COOKIE_SAMESITE"] == "Lax"
-    core.add_or_update_web_user(_TEST_USERNAME, _TEST_PASSWORD)
+    web_accounts_mod.add_or_update_web_user(_TEST_USERNAME, _TEST_PASSWORD)
     cli = app.test_client()
     csrf = extract_login_csrf(cli.get("/login").get_data(as_text=True))
     r = cli.post("/api/login", json={"username": _TEST_USERNAME, "password": _TEST_PASSWORD, "csrf": csrf})
