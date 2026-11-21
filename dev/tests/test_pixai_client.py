@@ -32,6 +32,7 @@ from moonglade import pixai_client as pixai_client_mod
 from moonglade import mirror as mirror_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import history as history_mod
+from moonglade import full_meta as full_meta_mod
 
 
 class FakeResponse:
@@ -251,8 +252,10 @@ class TestTheDetailReadsRideTheClient:
 
     @pytest.mark.parametrize("name", DOCUMENT_READERS)
     def test_a_detail_read_rides_the_document_and_speaks_no_http_itself(self, name):
-        # task_reads_mod holds the task detail read, models_mod the model readers, since 3.22
-        home = next(m for m in (core, task_reads_mod, models_mod) if hasattr(m, name))
+        # task_reads_mod holds the task detail read, models_mod the model readers, since 3.22;
+        # full_meta_mod the preset read since 3.22 phase 4
+        home = next(m for m in (core, task_reads_mod, models_mod, full_meta_mod)
+                    if hasattr(m, name))
         src = inspect.getsource(getattr(home, name))
         assert "gql_adhoc(" in src or "_model_version_gql(" in src, \
             "{} no longer reads its document".format(name)
@@ -289,7 +292,7 @@ class TestTheDetailReadsRideTheClient:
 
     def test_resolve_model_preset_wire(self):
         kw = self._post(
-            lambda c: core._resolve_model_preset(c, "V-preset-wire-1"),
+            lambda c: full_meta_mod._resolve_model_preset(c, "V-preset-wire-1"),
             {"generationModelVersion": {"extra": {}}})
         assert kw["json"] == {"query": models_mod._MODEL_VERSION_DOC,
                               "variables": {"id": "V-preset-wire-1"}}

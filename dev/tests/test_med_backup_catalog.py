@@ -34,6 +34,7 @@ from moonglade import task_reads as task_reads_mod
 from moonglade import catalog as catalog_mod
 from moonglade import thumbs as thumbs_mod
 from moonglade import media_fetch as media_fetch_mod
+from moonglade import full_meta as full_meta_mod
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +305,7 @@ def video_task_network(monkeypatch):
     """Stub every network touch of a --task-id recovery whose task turns out to be a video."""
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: _VIDEO_TASK)
-    monkeypatch.setattr(core, "media_file_gql",
+    monkeypatch.setattr(full_meta_mod, "media_file_gql",
                         lambda s, mid: {"fileUrl": "https://cdn/{}.mp4".format(mid)})
     # A video's media object resolves to a perfectly good URL -- which is exactly why the old
     # path could download the mp4 through the IMAGE loop and never notice.

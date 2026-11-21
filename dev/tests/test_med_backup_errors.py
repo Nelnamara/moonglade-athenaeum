@@ -38,6 +38,7 @@ from moonglade import task_reads as task_reads_mod
 from moonglade import models as models_mod
 from moonglade import thumbs as thumbs_mod
 from moonglade import media_fetch as media_fetch_mod
+from moonglade import full_meta as full_meta_mod
 
 
 @pytest.fixture()
@@ -561,7 +562,7 @@ def recovery_network(monkeypatch):
     def install(task, video_download="ok"):
         monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
         monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: task)
-        monkeypatch.setattr(core, "media_file_gql",
+        monkeypatch.setattr(full_meta_mod, "media_file_gql",
                             lambda s, mid: {"fileUrl": "https://cdn/{}.mp4".format(mid)})
         monkeypatch.setattr(media_fetch_mod, "resolve_media",
                             lambda s, mid: ("https://cdn/{}.png".format(mid),

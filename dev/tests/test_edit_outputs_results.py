@@ -13,6 +13,7 @@ from PIL import Image                                         # noqa: E402
 from moonglade import catalog as catalog_mod
 from moonglade import curation as curation_mod
 from moonglade import thumbs as thumbs_mod
+from moonglade import full_meta as full_meta_mod
 
 
 def _task(outputs=None, model_config=None):
@@ -35,12 +36,12 @@ def _task(outputs=None, model_config=None):
     ({}, {"outputFormat": "gif", "frameCount": True}, ("gif", "", "")),
 ])
 def test_the_format_and_frames_are_recorded_from_the_task(outputs, mc, want):
-    fm = core.extract_full_meta(_task(outputs, mc))
+    fm = full_meta_mod.extract_full_meta(_task(outputs, mc))
     assert (fm["output_format"], fm["frame_count"], fm["frame_duration_ms"]) == want
 
 
 def test_an_ordinary_picture_records_nothing():
-    fm = core.extract_full_meta({"id": "T1", "parameters": {"prompts": "x", "modelId": "1"},
+    fm = full_meta_mod.extract_full_meta({"id": "T1", "parameters": {"prompts": "x", "modelId": "1"},
                                  "outputs": {"mediaId": "9"}})
     assert (fm["output_format"], fm["frame_count"], fm["frame_duration_ms"]) == ("", "", "")
 
@@ -48,7 +49,7 @@ def test_an_ordinary_picture_records_nothing():
 def test_the_new_columns_are_catalog_columns_and_surface_fields():
     for f in ("output_format", "frame_count", "frame_duration_ms"):
         assert f in catalog_mod.CATALOG_FIELDS
-        assert f in core._GEN_SURFACE_FIELDS and f in core._FULL_META_FIELDS
+        assert f in full_meta_mod._GEN_SURFACE_FIELDS and f in full_meta_mod._FULL_META_FIELDS
 
 
 def test_a_row_saved_with_the_format_reads_back(tmp_path):

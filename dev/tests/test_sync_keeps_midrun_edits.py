@@ -22,6 +22,7 @@ from moonglade.catalog import (CATALOG_FIELDS, catalog, delete_from_catalog, loa
 from moonglade import task_reads as task_reads_mod
 from moonglade import history as history_mod
 from moonglade import media_fetch as media_fetch_mod
+from moonglade import full_meta as full_meta_mod
 
 
 def _row(**kw):
@@ -132,8 +133,8 @@ def test_the_backfill_step_keeps_edits_made_while_it_ran(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: SimpleNamespace())
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", detail)
     monkeypatch.setattr(models_mod, "model_name_gql", lambda *a, **k: "Model")
-    monkeypatch.setattr(core, "resolve_loras", lambda s, t: "")
-    monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, t: fm)
+    monkeypatch.setattr(full_meta_mod, "resolve_loras", lambda s, t: "")
+    monkeypatch.setattr(full_meta_mod, "_fill_preset_defaults", lambda s, fm, t: fm)
     monkeypatch.setattr(core, "_BACKFILL_CHECKPOINT_TASKS", 1)
 
     core.run_backfill_full_meta(SimpleNamespace(

@@ -27,6 +27,7 @@ from moonglade import catalog as catalog_mod
 from moonglade import thumbs as thumbs_mod
 from moonglade import history as history_mod
 from moonglade import media_fetch as media_fetch_mod
+from moonglade import full_meta as full_meta_mod
 
 
 REFERENCE_PRO = gen_params_mod.EDIT_MODELS["reference-pro"]["model_id"]
@@ -159,7 +160,7 @@ def test_collect_still_names_an_ordinary_generation_from_its_prompt(monkeypatch,
 # ---------------------------------------------------------------------------
 
 def test_extract_full_meta_reads_a_fixer_tasks_model():
-    fm = core.extract_full_meta(_fixer_task())
+    fm = full_meta_mod.extract_full_meta(_fixer_task())
     assert fm["model_id"] == REFERENCE_PRO
     assert fm["model_name"] == "Reference Pro"
 
@@ -167,14 +168,14 @@ def test_extract_full_meta_reads_a_fixer_tasks_model():
 def test_extract_full_meta_falls_back_to_the_chat_blocks_model_id():
     """build_chat_edit_parameters sets modelId INSIDE the chat block and nowhere else, so a
     chat task built by this app has no top-level modelId at all."""
-    fm = core.extract_full_meta(_fixer_task(top_model=False))
+    fm = full_meta_mod.extract_full_meta(_fixer_task(top_model=False))
     assert fm["model_id"] == REFERENCE_PRO
 
 
 def test_extract_full_meta_invents_no_seed_sampler_steps_or_cfg_for_a_fix():
     """A fixer task has no outputs.detailParameters and no seed. Those fields stay empty --
     the detail page's em-dash is the honest answer; a borrowed number would be a lie."""
-    fm = core.extract_full_meta(_fixer_task())
+    fm = full_meta_mod.extract_full_meta(_fixer_task())
     assert fm["seed"] == "" and fm["steps"] == ""
     assert fm["sampler"] == "" and fm["cfg_scale"] == ""
 

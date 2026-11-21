@@ -22,6 +22,7 @@ from tests.conftest import login_test_client
 from moonglade import task_reads as task_reads_mod
 from moonglade import thumbs as thumbs_mod
 from moonglade import media_fetch as media_fetch_mod
+from moonglade import full_meta as full_meta_mod
 
 
 def _row(**kw):
@@ -58,8 +59,8 @@ def test_the_very_first_collect_has_no_catalog_to_snapshot(tmp_path, monkeypatch
     _stub_download(monkeypatch, tmp_path, name="first.png")
     monkeypatch.setattr(media_fetch_mod, "resolve_media", lambda s, mid: ("https://x/i.png", {}))
     monkeypatch.setattr(gen_cli_mod, "_task_image_media", lambda outputs: [("m0", "1")])
-    monkeypatch.setattr(core, "extract_full_meta", lambda r: {})
-    monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, r: None)
+    monkeypatch.setattr(full_meta_mod, "extract_full_meta", lambda r: {})
+    monkeypatch.setattr(full_meta_mod, "_fill_preset_defaults", lambda s, fm, r: None)
     monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
     assert not (tmp_path / "catalog.db").exists()
 

@@ -40,6 +40,7 @@ from moonglade import task_reads as task_reads_mod
 from moonglade import thumbs as thumbs_mod
 from moonglade import history as history_mod
 from moonglade import media_fetch as media_fetch_mod
+from moonglade import full_meta as full_meta_mod
 
 
 # --------------------------------------------------------------------------------------
@@ -63,10 +64,10 @@ def _old_sync_videos(node, o, path, out, shared, detail, params, task, full_meta
         "status": "completed",
         "is_video": "1",
         "poster_media_id": o.get("poster_media_id", ""),
-        "paid_credit": core._paid_credit_str(task),
+        "paid_credit": full_meta_mod._paid_credit_str(task),
         "video_duration": str(shared.get("duration") or ""),
     })
-    full.update({k: full_meta.get(k, "") for k in core._TASK_ROW_FIELDS})
+    full.update({k: full_meta.get(k, "") for k in full_meta_mod._TASK_ROW_FIELDS})
     return full
 
 
@@ -101,11 +102,11 @@ def _old_generate(task_id, mid, path, out, url, result, prompt, seeds, fm, param
         "natural_prompt": fm.get("natural_prompt", ""),
         "clip_skip": fm.get("clip_skip", ""),
         "loras": loras,
-        "paid_credit": core._paid_credit_str(result),
+        "paid_credit": full_meta_mod._paid_credit_str(result),
         "width": str((info or {}).get("width") or params.get("width") or ""),
         "height": str((info or {}).get("height") or params.get("height") or ""),
     })
-    full.update({k: fm.get(k, "") for k in core._TASK_ROW_FIELDS})
+    full.update({k: fm.get(k, "") for k in full_meta_mod._TASK_ROW_FIELDS})
     return full
 
 
@@ -121,13 +122,13 @@ def _old_download_video_task(task_id, o, path, out, url, result, prompt, sent, s
         "negative_prompt": sent.get("negativePrompts", ""),
         "seed": str(o.get("seed") or ""),
         "poster_media_id": o.get("poster_media_id", ""),
-        "paid_credit": core._paid_credit_str(result),
+        "paid_credit": full_meta_mod._paid_credit_str(result),
         "video_duration": str(shared.get("duration") or sent.get("duration") or ""),
         "model_id": str(sent.get("model") or ""),
         "width": str(detail.get("width") or ""),
         "height": str(detail.get("height") or ""),
     })
-    full.update({k: fm.get(k, "") for k in core._TASK_ROW_FIELDS})
+    full.update({k: fm.get(k, "") for k in full_meta_mod._TASK_ROW_FIELDS})
     return full
 
 
@@ -149,11 +150,11 @@ def _old_download_image_task(task_id, mid, seed, path, out, url, result, prompt,
         "natural_prompt": fm.get("natural_prompt", ""),
         "clip_skip": fm.get("clip_skip", ""),
         "loras": loras,
-        "paid_credit": core._paid_credit_str(result),
+        "paid_credit": full_meta_mod._paid_credit_str(result),
         "width": str((info or {}).get("width") or ""),
         "height": str((info or {}).get("height") or ""),
     })
-    full.update({k: fm.get(k, "") for k in core._TASK_ROW_FIELDS})
+    full.update({k: fm.get(k, "") for k in full_meta_mod._TASK_ROW_FIELDS})
     return full
 
 
@@ -168,11 +169,11 @@ def _old_edit_image(task_id, mid, path, out, url, result, prompt_used, seeds, fm
         "prompt_full": prompt_used, "prompt_preview": (prompt_used or "")[:100],
         "model_id": model_id_used,
         "model_name": model_name,
-        "paid_credit": core._paid_credit_str(result),
+        "paid_credit": full_meta_mod._paid_credit_str(result),
         "width": str((info or {}).get("width") or ""),
         "height": str((info or {}).get("height") or ""),
     })
-    full.update({k: fm.get(k, "") for k in core._TASK_ROW_FIELDS})
+    full.update({k: fm.get(k, "") for k in full_meta_mod._TASK_ROW_FIELDS})
     return full
 
 
@@ -272,8 +273,8 @@ def _stub_image_task(monkeypatch, out, mid="m-golden", seed="424242"):
     monkeypatch.setattr(media_fetch_mod, "download", lambda s, url, stem: ("skip", path))
     monkeypatch.setattr(media_fetch_mod, "resolve_media", lambda s, m: ("https://x/i.png", dict(INFO)))
     monkeypatch.setattr(gen_cli_mod, "_task_image_media", lambda outputs: [(mid, seed)])
-    monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(FM))
-    monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, r: None)
+    monkeypatch.setattr(full_meta_mod, "extract_full_meta", lambda r: dict(FM))
+    monkeypatch.setattr(full_meta_mod, "_fill_preset_defaults", lambda s, fm, r: None)
     monkeypatch.setattr(core, "_resolved_model_name", lambda s, fm, m: MODEL_NAME)
     monkeypatch.setattr(core, "_resolved_loras", lambda s, r: LORAS)
     monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
@@ -316,9 +317,9 @@ def _stub_video_task(monkeypatch, out):
     result = dict(RESULT)
     result["outputs"] = {"detailParameters": dict(VDETAIL)}
     monkeypatch.setattr(media_fetch_mod, "download", lambda s, url, stem: ("skip", path))
-    monkeypatch.setattr(core, "video_outputs", lambda r: ([dict(VOUT)], dict(VSHARED)))
-    monkeypatch.setattr(core, "media_file_gql", lambda s, m: {"fileUrl": "https://x/v.mp4"})
-    monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(FM))
+    monkeypatch.setattr(full_meta_mod, "video_outputs", lambda r: ([dict(VOUT)], dict(VSHARED)))
+    monkeypatch.setattr(full_meta_mod, "media_file_gql", lambda s, m: {"fileUrl": "https://x/v.mp4"})
+    monkeypatch.setattr(full_meta_mod, "extract_full_meta", lambda r: dict(FM))
     monkeypatch.setattr(media_fetch_mod, "resolve_media", lambda s, m: ("", {}))
     monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
     monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
@@ -354,7 +355,7 @@ def test_video_task_row_with_a_numeric_task_modelid_files_the_id_and_its_title(t
     path, result = _stub_video_task(monkeypatch, tmp_path)
     own = gen_params_mod.video_model_id(FM["video_model"])
     fm = dict(FM, model_id=own)
-    monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(fm))
+    monkeypatch.setattr(full_meta_mod, "extract_full_meta", lambda r: dict(fm))
     monkeypatch.setattr(models_mod, "model_name_gql",
                         lambda s, mid, **k: {own: "V3.0 Lite v3.0.2"}.get(mid, mid))
     sent = {"model": "i2v-pro", "negativePrompts": "blurry", "duration": 9}
@@ -391,9 +392,9 @@ def _stub_generate(monkeypatch, out):
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: dict(RESULT))
     monkeypatch.setattr(gen_cli_mod, "_maybe_dump_params", lambda a, r: None)
     monkeypatch.setattr(gen_cli_mod, "_task_image_media", lambda outputs: [("m-golden", "424242")])
-    monkeypatch.setattr(core, "video_outputs", lambda r: ([], {}))
-    monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(FM))
-    monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, r: None)
+    monkeypatch.setattr(full_meta_mod, "video_outputs", lambda r: ([], {}))
+    monkeypatch.setattr(full_meta_mod, "extract_full_meta", lambda r: dict(FM))
+    monkeypatch.setattr(full_meta_mod, "_fill_preset_defaults", lambda s, fm, r: None)
     monkeypatch.setattr(core, "_resolved_model_name", lambda s, fm, m: MODEL_NAME)
     monkeypatch.setattr(core, "_resolved_loras", lambda s, r: LORAS)
     monkeypatch.setattr(media_fetch_mod, "resolve_media", lambda s, m: ("https://x/i.png", dict(INFO)))
@@ -450,8 +451,8 @@ def _stub_edit(monkeypatch, out):
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: dict(RESULT))
     monkeypatch.setattr(gen_cli_mod, "_maybe_dump_params", lambda a, r: None)
     monkeypatch.setattr(gen_cli_mod, "_task_image_media", lambda outputs: [("m-golden", "424242")])
-    monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(FM))
-    monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, r: None)
+    monkeypatch.setattr(full_meta_mod, "extract_full_meta", lambda r: dict(FM))
+    monkeypatch.setattr(full_meta_mod, "_fill_preset_defaults", lambda s, fm, r: None)
     monkeypatch.setattr(core, "_edit_model_label", lambda s, fm, m: EDIT_MODEL_NAME)
     monkeypatch.setattr(media_fetch_mod, "resolve_media", lambda s, m: ("https://x/i.png", dict(INFO)))
     monkeypatch.setattr(media_fetch_mod, "download", lambda s, url, stem: ("skip", path))
@@ -507,9 +508,9 @@ def _stub_sync_videos(monkeypatch, out):
     monkeypatch.setattr(history_mod, "gql", lambda s, v: {})
     monkeypatch.setattr(history_mod, "find_connection", _find_connection)
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: task)
-    monkeypatch.setattr(core, "video_outputs", lambda r: ([dict(VOUT)], dict(VSHARED)))
-    monkeypatch.setattr(core, "media_file_gql", lambda s, m: {"fileUrl": "https://x/v.mp4"})
-    monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(FM))
+    monkeypatch.setattr(full_meta_mod, "video_outputs", lambda r: ([dict(VOUT)], dict(VSHARED)))
+    monkeypatch.setattr(full_meta_mod, "media_file_gql", lambda s, m: {"fileUrl": "https://x/v.mp4"})
+    monkeypatch.setattr(full_meta_mod, "extract_full_meta", lambda r: dict(FM))
     monkeypatch.setattr(media_fetch_mod, "download", lambda s, url, stem: ("ok", path))
     monkeypatch.setattr(media_fetch_mod, "resolve_media", lambda s, m: ("", {}))
     monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
@@ -578,7 +579,7 @@ def test_import_local_carries_local_fields(tmp_path, monkeypatch):
     `known` map that holds the seeded curation."""
     known = {"m-imp": {f: "" for f in CATALOG_FIELDS}}
     known["m-imp"].update({"media_id": "m-imp"}, **LOCAL)
-    row = core.build_catalog_row("m-imp", known=known, filename="imported/x.png",
+    row = full_meta_mod.build_catalog_row("m-imp", known=known, filename="imported/x.png",
                                  source="local", status="imported",
                                  created_at="2026-08-01T00:00:00Z",
                                  prompt_preview="x", is_video="")
@@ -647,7 +648,7 @@ def test_loom_bundle_carries_local_fields(tmp_path, monkeypatch):
 # The helper's own contract
 # --------------------------------------------------------------------------------------
 def test_every_row_starts_from_the_full_blank_template():
-    row = core.build_catalog_row("m1")
+    row = full_meta_mod.build_catalog_row("m1")
     assert sorted(row) == sorted(CATALOG_FIELDS)
     assert all(row[f] == "" for f in CATALOG_FIELDS if f != "media_id")
 
@@ -655,28 +656,28 @@ def test_every_row_starts_from_the_full_blank_template():
 def test_task_row_fields_are_spread_for_every_caller():
     """issue #18 + lineage, applied in ONE place instead of six -- including for a caller
     that passes no other task field at all."""
-    row = core.build_catalog_row("m1", fm=dict(FM))
-    for f in core._TASK_ROW_FIELDS:
+    row = full_meta_mod.build_catalog_row("m1", fm=dict(FM))
+    for f in full_meta_mod._TASK_ROW_FIELDS:
         assert row[f] == FM[f], f + " was not spread from fm"
 
 
 def test_prompt_preview_defaults_to_the_prompt_but_can_be_overridden():
     long_prompt = "x" * 200
-    assert core.build_catalog_row("m1", prompt_full=long_prompt)["prompt_preview"] == "x" * 100
-    assert core.build_catalog_row("m1", prompt_full=long_prompt,
+    assert full_meta_mod.build_catalog_row("m1", prompt_full=long_prompt)["prompt_preview"] == "x" * 100
+    assert full_meta_mod.build_catalog_row("m1", prompt_full=long_prompt,
                                  prompt_preview="own")["prompt_preview"] == "own"
 
 
 def test_created_at_utc_falls_back_to_a_z_stamp():
-    assert core._created_at_utc("2026-01-01T00:00:00Z") == "2026-01-01T00:00:00Z"
-    assert core._created_at_utc("").endswith("Z")
-    assert core._created_at_utc(None).endswith("Z")
+    assert full_meta_mod._created_at_utc("2026-01-01T00:00:00Z") == "2026-01-01T00:00:00Z"
+    assert full_meta_mod._created_at_utc("").endswith("Z")
+    assert full_meta_mod._created_at_utc(None).endswith("Z")
 
 
 def test_a_fresh_media_id_is_not_turned_into_a_no_op():
     """The carry must never make a first capture vanish: an id absent from `known` passes
     through with only what the capture wrote."""
-    row = core.build_catalog_row("m-new", known={"other": dict(LOCAL)},
+    row = full_meta_mod.build_catalog_row("m-new", known={"other": dict(LOCAL)},
                                  task_id="t1", source="api")
     assert row["task_id"] == "t1" and row["source"] == "api"
     assert all(row[f] == "" for f in LOCAL)

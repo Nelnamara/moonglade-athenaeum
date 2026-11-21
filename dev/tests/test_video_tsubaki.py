@@ -24,6 +24,7 @@ from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import catalog as catalog_mod
 from moonglade import media_fetch as media_fetch_mod
+from moonglade import full_meta as full_meta_mod
 
 TBKV = ("tbkv1.0", "tbkv1.0.1")
 TBKV_IDS = {"tbkv1.0": "2042030623542642408", "tbkv1.0.1": "2054378086834851904"}
@@ -532,14 +533,14 @@ _RV_TBKV = {"referenceVideo": {"mode": "professional", "model": "tbkv1.0", "rati
 
 
 def test_extract_full_meta_reads_the_reference_video_block():
-    fm = core.extract_full_meta(_vtask(_RV_TBKV, TBKV_IDS["tbkv1.0"]))
+    fm = full_meta_mod.extract_full_meta(_vtask(_RV_TBKV, TBKV_IDS["tbkv1.0"]))
     assert fm["video_model"] == "tbkv1.0" and fm["video_mode"] == "professional"
     assert fm["model_id"] == TBKV_IDS["tbkv1.0"]
 
 
 def _collect(tmp_path, monkeypatch, task, names=None):
     from pathlib import Path
-    monkeypatch.setattr(core, "media_file_gql", lambda s, m: {"fileUrl": "https://x/v.mp4"})
+    monkeypatch.setattr(full_meta_mod, "media_file_gql", lambda s, m: {"fileUrl": "https://x/v.mp4"})
 
     def _dl(session, url, stem, **kw):
         p = Path(str(stem) + ".mp4")
@@ -647,7 +648,7 @@ def _recover_i2v(tmp_path, monkeypatch, task, lookup=None):
     from pathlib import Path
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t, **k: task)
-    monkeypatch.setattr(core, "media_file_gql", lambda s, m: {"fileUrl": "https://x/v.mp4"})
+    monkeypatch.setattr(full_meta_mod, "media_file_gql", lambda s, m: {"fileUrl": "https://x/v.mp4"})
 
     def _dl(session, url, stem, **kw):
         p = Path(str(stem) + ".mp4")

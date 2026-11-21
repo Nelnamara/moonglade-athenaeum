@@ -15,6 +15,7 @@ from moonglade import jobs as jobs_mod
 from moonglade import media_tools as media_tools_mod
 from moonglade import thumbs as thumbs_mod
 from moonglade import web_accounts as web_accounts_mod
+from moonglade import full_meta as full_meta_mod
 
 
 def _csrf(html):
@@ -1414,10 +1415,10 @@ def test_api_lineage_returns_siblings_parent_and_children(tmp_path):
 
 
 def test_extract_full_meta_includes_lineage_fields():
-    fm = core.extract_full_meta({"parameters": {"chat": {"mediaId": "999", "modelId": "x"}},
+    fm = full_meta_mod.extract_full_meta({"parameters": {"chat": {"mediaId": "999", "modelId": "x"}},
                                  "outputs": {}})
     assert fm["source_media_id"] == "999" and fm["derive_kind"] == "edit"
-    fm2 = core.extract_full_meta({"parameters": {"prompts": "a cat"}, "outputs": {}})
+    fm2 = full_meta_mod.extract_full_meta({"parameters": {"prompts": "a cat"}, "outputs": {}})
     assert fm2["source_media_id"] == "" and fm2["derive_kind"] == ""
 
 def test_train_recent_tasks_groups_real_images_by_real_task_id(tmp_path):

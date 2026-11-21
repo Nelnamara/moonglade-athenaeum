@@ -1645,7 +1645,7 @@ def catalog_source_format(out_dir):
         s = str(value or "").strip()
         if not s.isdigit() or _is_local_source(s):
             return source_format(s)
-        from moonglade.backup import known_catalog_rows
+        from moonglade.full_meta import known_catalog_rows
         try:
             row = known_catalog_rows(db, [s]).get(s) if db.is_file() else None
         except Exception:                                    # noqa: BLE001 -- no row

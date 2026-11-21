@@ -1972,7 +1972,8 @@ def collect_generation(session, task_id, out_dir, *, name_length=60, name_sep="_
     """Download + catalog a COMPLETED task's output(s) into out_dir -> {media_ids, saved,
     is_video}. Auto-detects video (outputs.videos) vs image and uses the matching shared
     downloader. Call only once status is 'done'."""
-    from moonglade.backup import extract_full_meta, _fill_preset_defaults, init_db, video_outputs
+    from moonglade.backup import init_db
+    from moonglade.full_meta import extract_full_meta, _fill_preset_defaults, video_outputs
     from moonglade.gen_cli import (_download_image_task, _download_video_task, _task_detail_query,
                                    _task_image_media)
     from types import SimpleNamespace

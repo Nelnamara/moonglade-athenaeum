@@ -13,6 +13,7 @@ from moonglade import models as models_mod
 from moonglade import catalog as catalog_mod
 from moonglade import thumbs as thumbs_mod
 from moonglade import media_fetch as media_fetch_mod
+from moonglade import full_meta as full_meta_mod
 
 _SEARCH = {"data": [
     {"id": "1982880136609467518", "title": "Tsubaki.2", "type": "MMDIT26A_MODEL",
@@ -1081,7 +1082,7 @@ def test_generation_status_phases(monkeypatch):
 
 def test_collect_generation(monkeypatch, tmp_path):
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: {"outputs": {"mediaId": "M1"}})
-    monkeypatch.setattr(core, "extract_full_meta", lambda r: {"prompt_full": "p"})
+    monkeypatch.setattr(full_meta_mod, "extract_full_meta", lambda r: {"prompt_full": "p"})
     monkeypatch.setattr(gen_cli_mod, "_download_image_task", lambda *a, **k: ["/M1.webp"])
     got = gen_road_mod.collect_generation(object(), "T", str(tmp_path))
     assert got["media_ids"] == ["M1"] and got["saved"] == 1

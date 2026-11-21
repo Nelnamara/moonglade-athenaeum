@@ -303,6 +303,7 @@ from types import SimpleNamespace
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import history as history_mod
 from moonglade import media_fetch as media_fetch_mod
+from moonglade import full_meta as full_meta_mod
 
 
 def _dl_args(out, **kw):
@@ -957,10 +958,10 @@ def test_resolve_loras(mocker):
     mocker.patch.object(models_mod, "model_name_gql",
                         side_effect=lambda s, vid: {"111": "DetailLora", "222": "222"}.get(str(vid), str(vid)))
     task = {"parameters": {"lora": {"111": 0.7, "222": 0.5}}}
-    out = core.resolve_loras(mocker.MagicMock(), task)
+    out = full_meta_mod.resolve_loras(mocker.MagicMock(), task)
     assert "DetailLora:0.7" in out
     assert "lora 222:0.5" in out          # unresolved id gets a "lora <id>" label
-    assert core.resolve_loras(mocker.MagicMock(), {"parameters": {}}) == ""
+    assert full_meta_mod.resolve_loras(mocker.MagicMock(), {"parameters": {}}) == ""
 
 
 def test_needs_model_fix():
@@ -1206,7 +1207,7 @@ def test_live_capture_writes_every_field_the_backfill_would(monkeypatch, tmp_pat
                     "detailParameters": {"steps": 25, "sampler": "Euler a",
                                          "cfg_scale": 7, "clipSkip": 2}},
     }
-    fm = core.extract_full_meta(task)
+    fm = full_meta_mod.extract_full_meta(task)
     # Every field extract_full_meta resolves for an ordinary generation must reach the row.
     expected = {k for k, v in fm.items()
                 if k in CATALOG_FIELDS and str(v or "").strip()}
@@ -1220,7 +1221,7 @@ def test_live_capture_writes_every_field_the_backfill_would(monkeypatch, tmp_pat
     # the _TASK_ROW_FIELDS the builder spreads for it.
     body = src[src.index("def _download_image_task("):]
     body = body[:body.index(chr(10) + "        rows.append(full)")]
-    spread = set(core._TASK_ROW_FIELDS) if "fm=fm" in body else set()
+    spread = set(full_meta_mod._TASK_ROW_FIELDS) if "fm=fm" in body else set()
     missing = sorted(f for f in expected
                      if f not in spread
                      and '"{}"'.format(f) not in body and "{}=".format(f) not in body)
@@ -1261,7 +1262,7 @@ def test_the_backfill_separates_errors_from_tasks_that_carried_no_prompt(tmp_pat
                  [base | {"media_id": "m%d" % i, "task_id": "t%d" % i,
                           "filename": "%d.png" % i} for i in range(4)])
     mocker.patch.object(models_mod, "model_name_gql", side_effect=lambda s, m: "M")
-    mocker.patch.object(core, "resolve_loras", side_effect=lambda s, t: "")
+    mocker.patch.object(full_meta_mod, "resolve_loras", side_effect=lambda s, t: "")
 
     def detail(_s, tid, **kw):
         if tid == "t0":
@@ -1439,7 +1440,7 @@ def test_backfill_full_meta_refetches_rows_that_have_only_a_prompt(tmp_path, moc
                                                         "samplingMethod": "Euler a"}}}
     mocker.patch.object(task_reads_mod, "task_detail_gql", side_effect=lambda s, tid, **kw: task)
     mocker.patch.object(models_mod, "model_name_gql", side_effect=lambda s, mid: "WAI v17")
-    mocker.patch.object(core, "resolve_loras", side_effect=lambda s, t: "")
+    mocker.patch.object(full_meta_mod, "resolve_loras", side_effect=lambda s, t: "")
 
     core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
     row = {r["media_id"]: r for r in load_catalog(db)}["m1"]

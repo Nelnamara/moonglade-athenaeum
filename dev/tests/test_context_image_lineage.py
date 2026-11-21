@@ -16,6 +16,7 @@ import types
 from moonglade import backup as core
 from moonglade.catalog import CATALOG_FIELDS, load_catalog, migrate, save_catalog
 from moonglade import task_reads as task_reads_mod
+from moonglade import full_meta as full_meta_mod
 
 T3 = "2024383379556065549"          # Tsubaki.3
 FLASH = "2050048243034896798"       # Tsubaki.3 Flash
@@ -67,7 +68,7 @@ def test_empty_or_blank_context_images_are_still_an_original():
 
 
 def test_create_time_collection_files_the_lineage():
-    fm = core.extract_full_meta(_context_run(SRC_B, SRC_A))
+    fm = full_meta_mod.extract_full_meta(_context_run(SRC_B, SRC_A))
     assert fm["source_media_id"] == SRC_B and fm["derive_kind"] == "derived"
 
 

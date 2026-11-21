@@ -523,6 +523,13 @@ SEAMS = {
         "URL_VARIANT_PREFERENCE", "_MEDIA_TLS_LOCK", "_media_tls_warned", "_CONSOLE_LOCK",
         "_console_block", "_warn_media_tls_once", "resolve_media", "ext_from_ct",
         "embed_metadata", "convert_image", "download", "page_variables"]},
+    "moonglade.full_meta": {"from": "moonglade.backup", "names": [
+        "_FULL_META_FIELDS", "_paid_credit_str", "media_file_gql", "video_outputs",
+        "run_list_models", "_GEN_SURFACE_FIELDS", "_TASK_ROW_FIELDS", "_prompt_helper_label",
+        "_RECORDED_OUTPUT_FORMATS", "_output_format_of", "_mc_int_str", "_task_for_full_meta",
+        "extract_full_meta", "batch_position", "_with_batch_position", "_resolve_model_preset",
+        "_fill_preset_defaults", "resolve_loras", "_merge_full", "known_catalog_rows",
+        "carry_local_fields", "_created_at_utc", "build_catalog_row", "cmd_convert_existing"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -2343,6 +2350,31 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_training_advanced.py', 'moonglade.media_fetch'),
     ('tests/test_training_parity.py', 'moonglade.media_fetch'),
     ('tests/test_video_tsubaki.py', 'moonglade.media_fetch'),
+    # Split phase 4, full_meta: no reader reads the full-meta text but through full_meta_mod;
+    # test_gen_surface's row-builder read takes moonglade/full_meta.py beside backup and gen_cli.
+    ('tests/test_artworks_adhoc.py', 'moonglade.full_meta'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.full_meta'),
+    ('tests/test_config_path_routing.py', 'moonglade.full_meta'),
+    ('tests/test_create_door.py', 'moonglade.full_meta'),
+    ('tests/test_csrf_coverage.py', 'moonglade.full_meta'),
+    ('tests/test_edit_upload.py', 'moonglade.full_meta'),
+    ('tests/test_enhance.py', 'moonglade.full_meta'),
+    ('tests/test_evidence_counters.py', 'moonglade.full_meta'),
+    ('tests/test_full_meta_rest_fallback.py', 'moonglade.full_meta'),
+    ('tests/test_gen_surface.py', 'moonglade.full_meta'),
+    ('tests/test_history_feed_document.py', 'moonglade.full_meta'),
+    ('tests/test_jwt.py', 'moonglade.full_meta'),
+    ('tests/test_living_library.py', 'moonglade.full_meta'),
+    ('tests/test_loom_notify.py', 'moonglade.full_meta'),
+    ('tests/test_pixai_client.py', 'moonglade.full_meta'),
+    ('tests/test_settings_store.py', 'moonglade.full_meta'),
+    ('tests/test_setup_prepare.py', 'moonglade.full_meta'),
+    ('tests/test_spend_no_retry.py', 'moonglade.full_meta'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.full_meta'),
+    ('tests/test_telemetry.py', 'moonglade.full_meta'),
+    ('tests/test_training_advanced.py', 'moonglade.full_meta'),
+    ('tests/test_training_parity.py', 'moonglade.full_meta'),
+    ('tests/test_video_tsubaki.py', 'moonglade.full_meta'),
 }
 
 

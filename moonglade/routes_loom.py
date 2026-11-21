@@ -29,6 +29,7 @@ from moonglade import media_tools as _media_tools
 from moonglade import paths as _paths
 from moonglade import scan as _scan
 from moonglade import telemetry as _telemetry
+from moonglade import full_meta as _full_meta
 
 
 def register(app, ctx):
@@ -2018,7 +2019,7 @@ def register(app, ctx):
         # data loss. The file is still written (the bytes really are missing here); the row
         # keeps what the user owns.
         media_entries = [m for m in (LOOM_BUNDLE_MEDIA_RE.match(n) for n in z.namelist()) if m]
-        known = core.known_catalog_rows(db_path, [m.group(1) for m in media_entries])
+        known = _full_meta.known_catalog_rows(db_path, [m.group(1) for m in media_entries])
         rows = []
         # Session P (P3, review F19): a bundle's music bed is RE-HASHED on arrival and stored
         # under the name its own bytes give it, in the caller's bed folder -- never under the
@@ -2112,7 +2113,7 @@ def register(app, ctx):
             # mean a missing row). created_at stays this route's own naive local stamp,
             # NOT _created_at_utc's UTC+Z -- see that helper for why the two sort
             # differently.
-            rows.append(core.build_catalog_row(
+            rows.append(_full_meta.build_catalog_row(
                 mid, known=known,
                 filename=str(dest.relative_to(out_dir)).replace("\\", "/"),
                 source="api", status="imported",

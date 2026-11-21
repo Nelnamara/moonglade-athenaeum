@@ -12,6 +12,7 @@ from moonglade import gen_params as gen_params_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import pricing as pricing_mod
+from moonglade import full_meta as full_meta_mod
 
 
 # ---- build_chat_edit_parameters (pinned to the captured Edit-Pro submit) ----
@@ -384,7 +385,7 @@ def test_edit_v4_is_labelled_as_pixai_labels_it():
     PixAI's general Edit model -- not Edit Pro, not Tsubaki.3 -- and it reads exactly that on the
     card and on the picture it makes."""
     assert gen_params_mod.EDIT_MODELS["edit-v4"]["label"] == "PixAI Edit (v4.0)"
-    meta = core.extract_full_meta({"parameters": {"chat": {
+    meta = full_meta_mod.extract_full_meta({"parameters": {"chat": {
         "prompts": "x", "mediaId": "1", "mediaIds": ["1"], "modelId": EDIT_V4,
         "modelConfig": {"resolution": "1K"}}}, "outputs": {}})
     assert meta["model_id"] == EDIT_V4 and meta["model_name"] == "PixAI Edit (v4.0)"
@@ -495,7 +496,7 @@ def test_edit_pro_v2_payload_sends_its_model_and_up_to_ten_refs():
 
 
 def test_an_edit_pro_v2_edit_is_catalogued_under_its_own_label():
-    meta = core.extract_full_meta({"parameters": {"chat": {
+    meta = full_meta_mod.extract_full_meta({"parameters": {"chat": {
         "prompts": "x", "mediaId": "1", "mediaIds": ["1"], "modelId": EDIT_PRO_V2,
         "modelConfig": {"resolution": "1K"}}}, "outputs": {}})
     assert meta["model_id"] == EDIT_PRO_V2 and meta["model_name"] == "Edit Pro (v2.0)"

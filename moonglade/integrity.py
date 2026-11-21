@@ -67,6 +67,7 @@ from moonglade import catalog as _catalog
 from moonglade import catalog_verbs as _catalog_verbs
 from moonglade import thumbs as _thumbs
 from moonglade import media_fetch as _media_fetch
+from moonglade import full_meta as _full_meta
 
 REPORT_CSV = "integrity_report.csv"
 REPORT_JSON = "integrity_report.json"
@@ -895,7 +896,7 @@ def _full_size_url(core, session, row, mid):
     mp4 itself in `fileUrl` (moonglade.backup.media_file_gql). That file has no thumbnail
     variants -- it is the clip."""
     if str(row.get("is_video") or "") == "1":
-        url = (core.media_file_gql(session, mid) or {}).get("fileUrl")
+        url = (_full_meta.media_file_gql(session, mid) or {}).get("fileUrl")
         return (url, "") if url else (None, "no_file")
     url, info = _media_fetch.resolve_media(session, mid)
     if not url:

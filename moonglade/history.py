@@ -452,7 +452,7 @@ def cataloged_media_ids(node):
     means "this node cannot tell you", not "there is nothing to collect", and a caller that
     must decide about a video task from a summary has to ask by task id instead:
     `_watch_catchup` checks `_is_video_task_node` first and uses `get_row_by_task`."""
-    from moonglade.backup import video_outputs
+    from moonglade.full_meta import video_outputs
     node = node or {}
     outputs = node.get("outputs")
     if outputs is not None:                          # full task detail

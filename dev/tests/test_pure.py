@@ -5,6 +5,7 @@ from moonglade import backup as core
 from moonglade import gen_params as gen_params_mod
 from moonglade import models as models_mod
 from moonglade import history as history_mod
+from moonglade import full_meta as full_meta_mod
 
 
 # ---------------------------------------------------------------------------
@@ -285,7 +286,7 @@ _SAMPLE_TASK = {
 
 
 def test_extract_full_meta_all_fields():
-    m = core.extract_full_meta(_SAMPLE_TASK)
+    m = full_meta_mod.extract_full_meta(_SAMPLE_TASK)
     assert m["prompt_full"] == "A night elf druid with lavender skin"
     assert m["natural_prompt"] == "night elf female druid lavender skin"
     assert m["seed"] == "2973364003509396"
@@ -296,7 +297,7 @@ def test_extract_full_meta_all_fields():
 
 
 def test_extract_full_meta_none_returns_empty():
-    assert core.extract_full_meta(None) == {}
+    assert full_meta_mod.extract_full_meta(None) == {}
 
 
 def test_extract_full_meta_negative_and_clip_skip():
@@ -304,14 +305,14 @@ def test_extract_full_meta_negative_and_clip_skip():
         "parameters": {"prompts": "cat", "negativePrompts": "bad hands", "modelId": "m"},
         "outputs": {"detailParameters": {"steps": 30, "clipSkip": 2}},
     }
-    m = core.extract_full_meta(task)
+    m = full_meta_mod.extract_full_meta(task)
     assert m["negative_prompt"] == "bad hands"
     assert m["clip_skip"] == "2"
 
 
 def test_extract_full_meta_no_negative_is_blank():
     # newer "structured prompt" tasks have no separate negative
-    m = core.extract_full_meta({"parameters": {"prompts": "cat"}, "outputs": {}})
+    m = full_meta_mod.extract_full_meta({"parameters": {"prompts": "cat"}, "outputs": {}})
     assert m["negative_prompt"] == ""
     assert m["clip_skip"] == ""
 
@@ -328,15 +329,15 @@ def test_video_outputs_extracts_video_and_poster():
         "outputs": {"mediaId": "THUMB", "detailParameters": {"width": 1248, "height": 716},
                     "videos": [{"seed": 42, "mediaId": "VID1", "thumbnailMediaId": "THUMB"}]},
     }
-    outs, shared = core.video_outputs(task)
+    outs, shared = full_meta_mod.video_outputs(task)
     assert outs == [{"video_media_id": "VID1", "poster_media_id": "THUMB", "seed": "42"}]
     assert shared["prompt"] == "night elf dance"
     assert shared["duration"] == 10
 
 
 def test_video_outputs_none_and_empty():
-    assert core.video_outputs(None) == ([], {})
-    assert core.video_outputs({"outputs": {}, "parameters": {}}) == (
+    assert full_meta_mod.video_outputs(None) == ([], {})
+    assert full_meta_mod.video_outputs({"outputs": {}, "parameters": {}}) == (
         [], {"prompt": "", "duration": "", "i2v_model": "", "negative_prompt": ""})
 
 
@@ -430,7 +431,7 @@ def test_gen_parameters_omits_optionals_and_honors_json():
 
 def test_extract_full_meta_partial():
     task = {"parameters": {"prompts": "cat"}, "outputs": {}}
-    m = core.extract_full_meta(task)
+    m = full_meta_mod.extract_full_meta(task)
     assert m["prompt_full"] == "cat"
     assert m["seed"] == ""
     assert m["steps"] == ""
@@ -445,7 +446,7 @@ def test_merge_full_prefers_fm():
           "steps": "4", "sampler": "Euler a", "cfg_scale": "7",
           "model_id": "m1", "model_name": "Tsubaki.2 v1"}
     kr = {"prompt_full": "old", "seed": "999", "model_name": "OldModel v0"}
-    result = core._merge_full(fm, kr)
+    result = full_meta_mod._merge_full(fm, kr)
     assert result["prompt_full"] == "new"
     assert result["seed"] == "123"
     assert result["model_name"] == "Tsubaki.2 v1"
@@ -455,14 +456,14 @@ def test_merge_full_falls_back_to_known():
     fm = {}
     kr = {"prompt_full": "stored prompt", "seed": "777", "model_name": "OldModel",
           "natural_prompt": "", "steps": "", "sampler": "", "cfg_scale": "", "model_id": ""}
-    result = core._merge_full(fm, kr)
+    result = full_meta_mod._merge_full(fm, kr)
     assert result["prompt_full"] == "stored prompt"
     assert result["seed"] == "777"
 
 
 def test_merge_full_empty_both():
-    result = core._merge_full({}, {})
-    for f in core._FULL_META_FIELDS:
+    result = full_meta_mod._merge_full({}, {})
+    for f in full_meta_mod._FULL_META_FIELDS:
         assert result[f] == ""
 
 
