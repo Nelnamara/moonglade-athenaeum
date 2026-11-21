@@ -2,7 +2,7 @@
 year dropdowns, and per-page (via query_catalog)."""
 import pytest
 
-from moonglade.gallery import catalog_years
+from moonglade.catalog_verbs import catalog_years
 from moonglade.curation import query_catalog
 from moonglade.catalog import CATALOG_FIELDS, init_db, save_catalog, _like_pattern
 from moonglade.branding import _role_dir

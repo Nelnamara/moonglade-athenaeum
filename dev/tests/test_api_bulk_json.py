@@ -502,7 +502,7 @@ def _stamp(tmp_path, **counts):
 
 
 def test_failed_and_deleted_tasks_no_longer_skew_the_pill(tmp_path):
-    from moonglade.gallery import backup_coverage
+    from moonglade.catalog_verbs import backup_coverage
     rows = [{"task_id": "T%d" % i, "media_id": "m%d" % i} for i in range(97)]
     rows += [{"task_id": "D%d" % i, "media_id": "d%d" % i, "deleted_remote": "1"} for i in range(2)]
     _cov_catalog(tmp_path, rows)
@@ -518,7 +518,7 @@ def test_failed_and_deleted_tasks_no_longer_skew_the_pill(tmp_path):
 
 
 def test_a_real_gap_says_sync_fixes_it_and_never_rounds_up_to_100(tmp_path):
-    from moonglade.gallery import backup_coverage
+    from moonglade.catalog_verbs import backup_coverage
     _cov_catalog(tmp_path, [{"task_id": "T%d" % i, "media_id": "m%d" % i} for i in range(1999)])
     _stamp(tmp_path, live=2003, no_picture=3, in_progress=0, missing=1)
     cov = backup_coverage(tmp_path / "catalog.db", tmp_path, 2003)
@@ -527,7 +527,7 @@ def test_a_real_gap_says_sync_fixes_it_and_never_rounds_up_to_100(tmp_path):
 
 
 def test_before_any_full_walk_the_note_says_so(tmp_path):
-    from moonglade.gallery import backup_coverage
+    from moonglade.catalog_verbs import backup_coverage
     _cov_catalog(tmp_path, [{"task_id": "T1", "media_id": "m1"}])
     cov = backup_coverage(tmp_path / "catalog.db", tmp_path, 2)
     assert cov["pct"] == 50.0 and "until the next Sync" in cov["note"]

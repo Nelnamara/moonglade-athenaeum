@@ -29,6 +29,7 @@ from moonglade import living as living_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import catalog as catalog_mod
 from moonglade import curation as curation_mod
+from moonglade import catalog_verbs as catalog_verbs_mod
 
 
 def _row(**kw):
@@ -763,7 +764,7 @@ def test_rows_for_media_ids_preserves_order_drops_missing():
 
     import unittest.mock as mock
     with mock.patch.object(catalog_mod, "catalog", return_value=FakeCon()):
-        rows = g.rows_for_media_ids("db", ["3", "1", "99", "2"])
+        rows = catalog_verbs_mod.rows_for_media_ids("db", ["3", "1", "99", "2"])
     assert [r["media_id"] for r in rows] == ["3", "1", "2"]   # order kept, 99 dropped
 
 
@@ -1321,7 +1322,7 @@ def test_distinct_task_count(tmp_path):
         _row(media_id="4", task_id="",   filename="d_4.png", created_at="2025-01-04T00:00:00"),  # no task id
     ])
     # 2 distinct tasks (tA, tB); the batch-sibling and the empty task_id don't inflate it
-    assert g.distinct_task_count(tmp_path / "catalog.db") == 2
+    assert catalog_verbs_mod.distinct_task_count(tmp_path / "catalog.db") == 2
 
 
 # A brief longer than the 600 chars the normalizer used to slice it to, so the

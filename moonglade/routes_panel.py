@@ -1005,7 +1005,7 @@ def register(app, ctx):
         The real tier is pinned by dev/tests/test_route_tiers.py.
 
         Logs to the Activity card. Returns {saved, media_ids, is_video} or {error}."""
-        from moonglade.gallery import task_media
+        from moonglade.catalog_verbs import task_media
         tid = str((request.get_json(silent=True) or {}).get("task_id") or "").strip()
         if not tid.isdigit():
             return jsonify({"error": "enter a numeric task id"}), 200

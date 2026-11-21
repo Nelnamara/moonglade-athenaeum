@@ -832,7 +832,7 @@ def register(app, ctx):
         Falls back to the value unchanged on ANY failure (no local copy, upload error)
         so PixAI's own error surfaces rather than a mystery 'no reference'.
         """
-        from moonglade.gallery import find_image_file
+        from moonglade.catalog_verbs import find_image_file
         from moonglade.catalog import get_row
         s = str(val or "").strip()
         if not s or not s.isdigit():
@@ -1088,7 +1088,7 @@ __DESIGN_TOKENS__
     @app.route("/")
     @tier(LOGIN)
     def app_page():
-        from moonglade.gallery import catalog_years, unique_models
+        from moonglade.catalog_verbs import catalog_years, unique_models
         from moonglade.curation import catalog_counts, list_smart_collections
         from moonglade.catalog import unique_collections
         from moonglade.pages import DESIGN_TOKENS_CSS, _upscale_const_js

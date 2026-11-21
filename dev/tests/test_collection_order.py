@@ -25,7 +25,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import gen_road as gen_road_mod
 from moonglade import gallery as g
-from moonglade.gallery import list_media_ids
+from moonglade.catalog_verbs import list_media_ids
 from moonglade.curation import (CurationError, delete_collection, merge_collections,
                                 ordered_members, query_catalog, rename_collection,
                                 save_smart_collection, set_collection_order)

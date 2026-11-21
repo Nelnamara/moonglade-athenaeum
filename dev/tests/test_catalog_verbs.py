@@ -27,9 +27,10 @@ from pathlib import Path
 import pytest
 
 from moonglade import gallery as g
-from moonglade.gallery import (task_media, task_media_count, delete_targets, delete_preview_rows,
-                               myart_items, artwork_row, publish_state, lineage, sibling_media,
-                               recent_train_task_page, history_page, history_created_ats)
+from moonglade.catalog_verbs import (task_media, task_media_count, delete_targets,
+                                     delete_preview_rows, myart_items, artwork_row, publish_state,
+                                     lineage, sibling_media, recent_train_task_page, history_page,
+                                     history_created_ats)
 from moonglade.catalog import CATALOG_FIELDS, catalog, migrate, save_catalog, init_db
 
 from tests.conftest import login_client

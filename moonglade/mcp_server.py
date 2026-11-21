@@ -40,6 +40,7 @@ from moonglade.backup import __version__   # gallery already imports backup: no 
 from moonglade import dupes as _dupes
 from moonglade import catalog as _catalog
 from moonglade import curation as _curation
+from moonglade import catalog_verbs as _catalog_verbs
 
 # The library the tools read: bound by main() once the move has run and the library is
 # resolved (bind_library). Importing this module reads nothing.
@@ -128,7 +129,7 @@ def get_image(media_id: str, include_image: bool = True):
     meta = _slim(row)
     if not include_image:
         return meta
-    path = g.find_image_file(OUT, media_id, row.get("filename") or "")
+    path = _catalog_verbs.find_image_file(OUT, media_id, row.get("filename") or "")
     if not path:
         return {**meta, "note": "image file not found on disk"}
     if str(path).lower().endswith(".svg") or str(row.get("output_format") or "") == "svg":
@@ -154,7 +155,7 @@ def similar(media_id: str, limit: int = 24) -> dict:
     row = _catalog.get_row(DB, media_id)
     if not row:
         return {"error": "no such media_id", "neighbors": []}
-    path = g.find_image_file(OUT, media_id, row.get("filename") or "")
+    path = _catalog_verbs.find_image_file(OUT, media_id, row.get("filename") or "")
     if not path:
         return {"error": "image file not on disk", "neighbors": []}
     k = max(1, min(limit, 96))

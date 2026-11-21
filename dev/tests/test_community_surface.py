@@ -32,6 +32,7 @@ from moonglade import gallery as g
 from moonglade.catalog import CATALOG_FIELDS, load_catalog, save_catalog
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import living as living_mod
+from moonglade import catalog_verbs as catalog_verbs_mod
 
 
 def _row(**kw):
@@ -330,7 +331,7 @@ def test_the_views_merge_leaves_a_row_alone_when_the_sweep_missed_it(tmp_path):
         _row(media_id="missed", artwork_id="aw2", **before),
         _row(media_id="blank", artwork_id="aw3", **before),
     ])
-    changed = g.apply_artwork_views(db, {"aw1": 500, "aw3": None},
+    changed = catalog_verbs_mod.apply_artwork_views(db, {"aw1": 500, "aw3": None},
                                     "2026-09-06T00:00:00Z")
     rows = {r["media_id"]: r for r in load_catalog(db)}
     assert changed == 1

@@ -19,6 +19,7 @@ from moonglade import scan as scan_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import cloud_delete as cloud_delete_mod
 from moonglade import catalog as catalog_mod
+from moonglade import catalog_verbs as catalog_verbs_mod
 
 
 def _row(**kw):
@@ -115,7 +116,7 @@ def test_quarantined_file_is_invisible_to_resolution(tmp_path):
     qdir = tmp_path / scan_mod.DELETED_DIRNAME
     qdir.mkdir()
     (qdir / "77.png").write_bytes(b"old")
-    assert g.find_image_file(tmp_path, "77", "77.png") is None
+    assert catalog_verbs_mod.find_image_file(tmp_path, "77", "77.png") is None
     assert scan_mod.find_files_for_media_id(tmp_path, "77") == []
 
 
@@ -725,7 +726,7 @@ def test_a_read_without_artwork_ids_is_unknown_not_unpublished(tmp_path, monkeyp
 def test_published_delete_note_wording():
     """The per-image dialog's sentence (the bulk dialog words the same from these counts --
     loom/test/cloud-delete-dialog.test.js pins that side)."""
-    note = g.published_delete_note
+    note = catalog_verbs_mod.published_delete_note
     assert note(0) == ""
     assert note(1) == ("1 of these is published on PixAI. Deleting the task may remove the "
                        "published artwork too.")
@@ -769,7 +770,7 @@ def test_delete_preview_counts_the_tasks_it_could_not_check(tmp_path, monkeypatc
                                        json={"media_ids": ["l1", "n1"]}).get_json()
     assert body["published"] == 1
     assert body["published_unchecked"] is True and body["published_unchecked_tasks"] == 1
-    assert g.published_delete_note(body["published"], body["published_unchecked"],
+    assert catalog_verbs_mod.published_delete_note(body["published"], body["published_unchecked"],
                                    tasks=body["totals"]["tasks"],
                                    unchecked_tasks=body["published_unchecked_tasks"]) == (
         "1 of these is published on PixAI. Deleting the tasks may remove the published "
@@ -780,7 +781,7 @@ def test_published_delete_note_part_checked_wording():
     """Part-checked, the second sentence names how many tasks went unchecked instead of
     "whether any of these are published was not checked", which would contradict a count
     (loom/test/cloud-delete-dialog.test.js pins the bulk dialog's copy of these words)."""
-    note = g.published_delete_note
+    note = catalog_verbs_mod.published_delete_note
     assert note(0, unchecked=True, tasks=3, unchecked_tasks=2) == (
         "2 of the 3 tasks were not checked for published artwork — deleting a task may "
         "remove its published artwork too.")

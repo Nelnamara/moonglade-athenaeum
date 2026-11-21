@@ -40,6 +40,7 @@ from moonglade import web_threads as web_threads_mod
 from moonglade import routes_panel as routes_panel_mod
 from moonglade import routes_community as routes_community_mod
 from moonglade import catalog as catalog_mod
+from moonglade import catalog_verbs as catalog_verbs_mod
 
 SRC = Path(__file__).resolve().parents[2]
 DAY = 86400.0
@@ -550,7 +551,7 @@ def test_apply_artwork_meta_writes_eleven_columns_and_touches_nothing_else(tmp_p
     save_catalog(db, [_row(media_id="m1", filename="keep.png", rating="5",
                            collections="Favourites", prompt_full="a wolf",
                            created_at="2026-01-01T00:00:00Z")])
-    changed = g.apply_artwork_meta(db, [{
+    changed = catalog_verbs_mod.apply_artwork_meta(db, [{
         "media_id": "m1", "artwork_id": "aX", "title": "Wolf", "is_published": "1",
         "is_nsfw": "0", "is_sensitive": "0", "liked_count": "12", "comment_count": "3",
         "aes_score": "6.1", "art_tags": "wolf, night", "blurhash": "L1", "nsfw_scores": "{}"}])
@@ -567,7 +568,7 @@ def test_apply_artwork_meta_never_invents_a_row(tmp_path):
     that created rows would fabricate library entries for images that are not on disk."""
     db = tmp_path / "catalog.db"
     save_catalog(db, [_row(media_id="m1", filename="a.png")])
-    assert g.apply_artwork_meta(db, [{"media_id": "ghost", "artwork_id": "a9"}]) == 0
+    assert catalog_verbs_mod.apply_artwork_meta(db, [{"media_id": "ghost", "artwork_id": "a9"}]) == 0
     assert len(load_catalog(db)) == 1
 
 
@@ -1116,7 +1117,7 @@ def test_no_living_job_path_can_reach_the_librarys_own_loaders():
     writes narrow UPDATEs, so there is no code path from a background job to the list the
     owner is looking at."""
     banned = ("query_catalog(", "load_catalog(", "save_catalog(", "catalog_counts(")
-    for fn in (living_mod.artworks_sweep, living_mod.artworks_sweep_kick, g.apply_artwork_meta,
+    for fn in (living_mod.artworks_sweep, living_mod.artworks_sweep_kick, catalog_verbs_mod.apply_artwork_meta,
                living_mod.published_index, living_mod.living_due, living_mod.living_merge,
                living_mod.artworks_page_needed):
         src = inspect.getsource(fn)

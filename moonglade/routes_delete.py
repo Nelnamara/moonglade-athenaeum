@@ -42,7 +42,7 @@ def register(app, ctx):
         NOT what the delete dialog is worded from -- that has to come from the live read
         (/api/delete-image with confirm false), because this number counts LOCAL rows and
         cannot see a sibling deleted from PixAI's own website."""
-        from moonglade.gallery import task_media_count
+        from moonglade.catalog_verbs import task_media_count
         return task_media_count(db_path, task_id)
 
     def _delete_image_rows(plan, task_id, media_id):
@@ -52,7 +52,7 @@ def register(app, ctx):
         whose image PixAI had already deleted -- their local copy is the only copy left
         anywhere, and removing the generation record on PixAI does not change that. The
         branch comes off the plan the delete itself reported, never off a local count."""
-        from moonglade.gallery import task_media
+        from moonglade.catalog_verbs import task_media
         from moonglade.catalog import get_row
         if plan.plan == "per-image":
             row = get_row(db_path, media_id) or {}
@@ -74,7 +74,8 @@ def register(app, ctx):
         published artwork: that branch sends the whole-task delete, the delete PixAI's
         contract says takes the linked artwork with it. What a one-image deleteBatchMedia
         does to an artwork is unknown, so the per-image branch makes no claim."""
-        from moonglade.gallery import Path, myart_coverage, published_delete_note, task_media
+        from moonglade.gallery import Path
+        from moonglade.catalog_verbs import myart_coverage, published_delete_note, task_media
         if plan.plan == "per-image":
             n = plan.live_siblings
             return ("This removes only this image from PixAI. {} other image{} in its "
@@ -145,7 +146,8 @@ def register(app, ctx):
         library's whole record of what left it stops depending on which button was used. The
         PREVIEW writes nothing: nothing happened, and a row per dialog-open is noise.
         """
-        from moonglade.gallery import mark_cloud_deleted, purge_media_local
+        from moonglade.gallery import purge_media_local
+        from moonglade.catalog_verbs import mark_cloud_deleted
         from moonglade.catalog import get_row
         from moonglade import backup as core          # lazy: avoid import cycle
         import uuid
@@ -343,7 +345,7 @@ def register(app, ctx):
 
         Returns a set of media ids. Called BEFORE the cloud delete fires -- afterwards the
         generation record is gone and there is nothing left to read."""
-        from moonglade.gallery import mark_cloud_deleted
+        from moonglade.catalog_verbs import mark_cloud_deleted
         from moonglade import backup as core   # lazy: avoid import cycle
         keep = {str(r["media_id"]) for r in rows
                 if str(r.get("cloud_deleted_at") or "").strip()}
@@ -438,7 +440,7 @@ def register(app, ctx):
         deadline = time.monotonic() + DELETE_PREVIEW_LIVE_BUDGET_S
 
         def _one(tid):
-            from moonglade.gallery import mark_cloud_deleted
+            from moonglade.catalog_verbs import mark_cloud_deleted
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return tid, None                     # budget spent: don't start another
@@ -579,8 +581,8 @@ def register(app, ctx):
           published_unchecked_tasks  how many tasks that is (0 when checked), so a dialog
                                that also has a live count can say "K of the N tasks were not
                                checked" instead of contradicting the count."""
-        from moonglade.gallery import (DELETE_PREVIEW_LIVE_CAP, DELETE_PREVIEW_TASK_CAP,
-                                       delete_preview_rows, myart_coverage)
+        from moonglade.gallery import DELETE_PREVIEW_LIVE_CAP, DELETE_PREVIEW_TASK_CAP
+        from moonglade.catalog_verbs import delete_preview_rows, myart_coverage
         body = request.get_json(silent=True) or {}
         # dict.fromkeys: deduped, order preserved. The blast radius is a set of FILES, so
         # a repeated id must not inflate "you picked N" (or drive `unselected` negative)
@@ -703,7 +705,7 @@ def register(app, ctx):
         _log_job(job_id, status="running", type="delete", label=label, done=0, total=total)
 
         def _work():
-            from moonglade.gallery import task_media
+            from moonglade.catalog_verbs import task_media
             deleted = failed = removed = done = 0
             kept = []
             step = max(1, total // 50)          # throttle progress writes (~every 2%)
@@ -795,7 +797,7 @@ def register(app, ctx):
         _check_read_only fires HERE, before the job even starts, on top of the one
         inside delete_task: failing fast with one readable refusal beats
         spawning a job whose every task then fails red on the Activity card."""
-        from moonglade.gallery import delete_targets
+        from moonglade.catalog_verbs import delete_targets
         from moonglade import backup as core   # lazy: avoid import cycle
         body = request.get_json(silent=True) or {}
         purge_local = bool(body.get("purge_local", True))

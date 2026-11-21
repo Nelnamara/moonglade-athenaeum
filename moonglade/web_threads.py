@@ -974,7 +974,7 @@ def register(app, ctx):
     def _collected_from_catalog(tid):
         """A finished collect's outcome, re-read from the catalog, in
         collect_generation's return shape (saved=0: THIS caller downloaded nothing)."""
-        from moonglade.gallery import task_media
+        from moonglade.catalog_verbs import task_media
         rows = task_media(db_path, tid)
         if not rows:
             return None

@@ -49,7 +49,7 @@ def register(app, ctx):
     def api_account():
         """Credits + free-card balance for the header chip. Read-only; login required.
         Fails soft to nulls so the header never breaks."""
-        from moonglade.gallery import backup_coverage
+        from moonglade.catalog_verbs import backup_coverage
         try:
             core, session = _gen_session()
             me = core.account_info(session)
@@ -210,7 +210,7 @@ def register(app, ctx):
         PixAI is unreachable, which is exactly the case where the classic banner
         shows counts but hides its coverage badge. The catalog counts never depend
         on the network."""
-        from moonglade.gallery import backup_coverage
+        from moonglade.catalog_verbs import backup_coverage
         from moonglade.curation import catalog_counts
         counts = catalog_counts(db_path)
         try:

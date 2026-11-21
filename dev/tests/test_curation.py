@@ -23,7 +23,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gallery as g
-from moonglade.gallery import list_media_ids, list_group_rows
+from moonglade.catalog_verbs import list_media_ids, list_group_rows
 from moonglade.curation import (CurationError, curate_apply, curate_restore, delete_collection,
                                 merge_collections, normalize_tag, personal_get, query_catalog,
                                 rename_collection, save_smart_collection)

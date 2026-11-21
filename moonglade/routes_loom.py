@@ -648,8 +648,8 @@ def register(app, ctx):
         "cost": int|null}]}: an int is PixAI's charge for that send (0: a free card covered
         it), null a send whose charge is not known (not collected yet, or a send with no
         clear answer from PixAI)."""
-        from moonglade.gallery import (loom_backfill_sends, loom_cost, loom_sends_fold,
-                                       paid_credit_for_tasks)
+        from moonglade.catalog_verbs import (loom_backfill_sends, loom_cost, loom_sends_fold,
+                                             paid_credit_for_tasks)
         user = str(session.get("user") or "")
         if not user:
             return jsonify({"error": "not logged in"}), 401
@@ -1448,7 +1448,7 @@ def register(app, ctx):
         asked, unknown ids left out. A READ-ONLY lookup of those ids' local catalog rows: the
         Loom titles a collection's shots from it, the gallery orders a plain selection by it.
         Never PixAI."""
-        from moonglade.gallery import rows_for_media_ids
+        from moonglade.catalog_verbs import rows_for_media_ids
         from moonglade.loom_files import LOOM_MEDIA_ID_RE
         raw = [x.strip() for x in (request.args.get("ids") or "").split(",") if x.strip()]
         if len(raw) > 200:

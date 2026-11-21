@@ -75,18 +75,18 @@ from moonglade import task_feed as _task_feed
 from moonglade import task_reads as _task_reads
 from moonglade import telemetry as _telemetry
 from moonglade import training as _training
-from moonglade.gallery import (rows_for_media_ids,
-                            # The row-level artwork write (see run_sync_artworks): one
-                            # narrow UPDATE of the eleven PixAI-owned columns, keyed by
-                            # media_id -- imported the same way its whole-table siblings
-                            # above are.
-                            apply_artwork_meta,
-                            # ...and its twin for the four view columns, which are folded
-                            # by their own narrow UPDATE because they are read once per
-                            # deliberate sync, not on the fifteen-minute sweep's cadence.
-                            apply_artwork_views,
-                            build_thumbnails,
-                            _NO_WINDOW)
+from moonglade.gallery import build_thumbnails, _NO_WINDOW
+from moonglade.catalog_verbs import (rows_for_media_ids,
+                                     # The row-level artwork write (see run_sync_artworks): one
+                                     # narrow UPDATE of the eleven PixAI-owned columns, keyed by
+                                     # media_id -- imported the same way its whole-table
+                                     # siblings above are.
+                                     apply_artwork_meta,
+                                     # ...and its twin for the four view columns, which are
+                                     # folded by their own narrow UPDATE because they are read
+                                     # once per deliberate sync, not on the fifteen-minute
+                                     # sweep's cadence.
+                                     apply_artwork_views)
 from moonglade.curation import query_catalog
 from moonglade.catalog import (CATALOG_FIELDS, init_db, migrate, load_catalog,
                                catalog_csv_text, save_catalog, _db_is_empty,
@@ -5724,7 +5724,8 @@ def run_backfill_phash(args):
     run_backfill_full_meta's docstring already explains."""
     out = Path(args.out)
     db_path = _ensure_db(out)
-    from moonglade.gallery import compute_dhash, find_image_file
+    from moonglade.gallery import compute_dhash
+    from moonglade.catalog_verbs import find_image_file
     from moonglade.catalog import load_catalog, save_catalog
 
     rows = load_catalog(db_path)

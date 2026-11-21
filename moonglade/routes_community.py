@@ -202,7 +202,7 @@ def register(app, ctx):
         receipt link), `check` says where the daily check stands for the contest, and
         `unverified_legacy` marks a contest an older sweep once believed won that no check
         has confirmed yet. No metric name and no ladder language appears in this payload."""
-        from moonglade.gallery import artwork_media_ids
+        from moonglade.catalog_verbs import artwork_media_ids
         d = _telemetry.load_telemetry(out_dir)
         sets = d.get("sets") if isinstance(d.get("sets"), dict) else {}
         raw_keys = sets.get("contest_entry_keys")
@@ -517,8 +517,8 @@ def register(app, ctx):
         myart_coverage()."""
         # First read on a library with no history yet: take today's reading now, so the window
         # has a baseline from the first open (a same-day rewrite is harmless).
-        from moonglade.gallery import (myart_coverage, myart_items, myart_window,
-                                       record_artwork_snapshots)
+        from moonglade.catalog_verbs import (myart_coverage, myart_items, myart_window,
+                                             record_artwork_snapshots)
         win, window = myart_window(db_path)
         if not window["seen"]:
             record_artwork_snapshots(db_path)
@@ -574,7 +574,7 @@ def register(app, ctx):
 
         CSRF: explicit-token class, matching /api/duplicates/resolve and the user-admin
         routes -- a real account mutation triggered by one web click."""
-        from moonglade.gallery import artwork_row, publish_state
+        from moonglade.catalog_verbs import artwork_row, publish_state
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
@@ -794,7 +794,7 @@ def register(app, ctx):
           * children -- every image derived FROM this one (rows whose source_media_id == this).
         Pure catalog read, no network. Any dimension can be empty (an original txt2img with
         a batch size of 1 and no derivatives has an empty tree)."""
-        from moonglade.gallery import lineage
+        from moonglade.catalog_verbs import lineage
         mid = str(media_id or "").strip()
         tree = lineage(db_path, mid)
         if tree is None:
@@ -827,7 +827,7 @@ def register(app, ctx):
         deleted sibling leaves a true gap.
         An empty task_id is NEVER queried: every import shares '' and would
         otherwise become one giant pseudo-batch. Pure catalog read, no network."""
-        from moonglade.gallery import sibling_media
+        from moonglade.catalog_verbs import sibling_media
         body = request.get_json(silent=True)
         if body is None:
             body = {}
@@ -1026,7 +1026,7 @@ def register(app, ctx):
 
     def _inbox_local_media(items):
         """Fill each work's local media id (Details opens on it), from the catalog."""
-        from moonglade.gallery import artwork_media_ids
+        from moonglade.catalog_verbs import artwork_media_ids
         ids = [i["artwork"]["id"] for i in items if i.get("artwork")]
         found = artwork_media_ids(db_path, ids) if ids else {}
         for i in items:
@@ -1147,7 +1147,7 @@ def register(app, ctx):
     def _own_work(artwork_id):
         """True when `artwork_id` is one of the owner's own published works -- a row in this
         library. Replies are for those alone (v1), and the thread is read only for them."""
-        from moonglade.gallery import artwork_media_ids
+        from moonglade.catalog_verbs import artwork_media_ids
         aid = str(artwork_id or "").strip()
         return bool(aid.isdigit() and artwork_media_ids(db_path, [aid]))
 

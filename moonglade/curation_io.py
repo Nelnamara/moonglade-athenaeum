@@ -58,6 +58,7 @@ from pathlib import Path
 from moonglade import paths as _paths
 from moonglade import catalog as _catalog
 from moonglade import curation as _curation
+from moonglade import catalog_verbs as _catalog_verbs
 
 FORMAT = "moonglade-curation"
 VERSION = 1
@@ -245,9 +246,9 @@ def import_curation(db_path, doc, apply=False, overwrite=False):
     db_path = Path(db_path)
 
     ids = [it["media_id"] for it in items]
-    known = {str(r["media_id"]): r for r in g.rows_for_media_ids(db_path, ids)}
+    known = {str(r["media_id"]): r for r in _catalog_verbs.rows_for_media_ids(db_path, ids)}
     order_ids = [m for v in order.values() for m in v]
-    known_order = {str(r["media_id"]) for r in g.rows_for_media_ids(db_path, order_ids)}
+    known_order = {str(r["media_id"]) for r in _catalog_verbs.rows_for_media_ids(db_path, order_ids)}
     unknown = sorted({m for m in ids if m not in known}
                      | {m for m in order_ids if m not in known_order and m not in known})
     personal = _curation.personal_get(db_path, list(known))
@@ -389,7 +390,7 @@ def import_curation(db_path, doc, apply=False, overwrite=False):
                 smart_created.remove(s["name"])
                 smart_skipped.append(s["name"])
     for name, oids in plan_orders.items():
-        members = {str(r["media_id"]) for r in g.rows_for_media_ids(db_path, oids)
+        members = {str(r["media_id"]) for r in _catalog_verbs.rows_for_media_ids(db_path, oids)
                    if name in _catalog._split_collections(r.get("collections"))}
         try:
             _curation.set_collection_order(db_path, name, [m for m in oids if m in members])

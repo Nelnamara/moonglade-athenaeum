@@ -834,6 +834,7 @@ def test_only_the_two_tool_terminals_write_the_bridge_set():
     from moonglade import catalog as catalog_mod
     from moonglade import curation as curation_mod
     from moonglade import train_guard as train_guard_mod
+    from moonglade import catalog_verbs as catalog_verbs_mod
     src = "\n".join(inspect.getsource(mod) for mod in (
         g, telemetry_mod, achievements_mod, branding_mod, living_mod, contest_sync_mod,
         routes_generate_mod, routes_loom_mod, web_loom_store_mod, routes_gate_mod, web_threads_mod,
@@ -842,7 +843,7 @@ def test_only_the_two_tool_terminals_write_the_bridge_set():
         routes_mirror_mod, routes_branding_mod, routes_import_mod,
         redact_mod, web_tiers_mod, watch_plans_mod, name_hunt_mod, ach_beacon_mod, scenes_mod,
         pages_mod, web_policy_mod, loom_files_mod, catalog_search_mod, catalog_mod, curation_mod,
-        train_guard_mod))
+        train_guard_mod, catalog_verbs_mod))
     writes = [ln.strip() for ln in src.splitlines()
               if "telem_set_add(" in ln and "bridge_gen_tasks" in ln]
     assert len(writes) == 2, writes

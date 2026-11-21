@@ -23,6 +23,7 @@ from moonglade import dupes as dupes_mod
 from moonglade import organize as organize_mod
 from moonglade import health as health_mod
 from moonglade import catalog as catalog_mod
+from moonglade import catalog_verbs as catalog_verbs_mod
 
 # moonglade.similar imports numpy and pixeltable at module level, and CI installs a curated list
 # without them (it ignores dev/tests/test_similar.py for the same reason), so only the test that
@@ -75,8 +76,8 @@ def test_a_picture_lookup_never_answers_from_it(library):
     assert scan_mod.files_for(library, "999") == []
     assert scan_mod.find_files_for_media_id(library, "999") == []
     assert scan_mod.find_files_for_media_id(library, "999", include_gallery=True) == []
-    assert g.find_image_file(library, "999", "a_999.png") is None
-    assert g.find_image_file(library, "100", "real_100.png") == library / "images" / "real_100.png"
+    assert catalog_verbs_mod.find_image_file(library, "999", "a_999.png") is None
+    assert catalog_verbs_mod.find_image_file(library, "100", "real_100.png") == library / "images" / "real_100.png"
 
 
 def test_the_audit_and_dedup_never_see_it(library):

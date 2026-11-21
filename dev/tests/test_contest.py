@@ -29,6 +29,7 @@ from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_client, record_own_sleeps
 from moonglade import telemetry as telemetry_mod
 from moonglade import contest_sync as contest_sync_mod
+from moonglade import catalog_verbs as catalog_verbs_mod
 
 
 def _row(**kw):
@@ -696,9 +697,9 @@ def test_artwork_media_ids_maps_only_what_the_catalog_holds(tmp_path):
     save_catalog(tmp_path / "catalog.db", [
         _row(media_id="m1", artwork_id="aw1", filename="a_m1.png"),
         _row(media_id="m2", artwork_id="", filename="b_m2.png")])
-    got = g.artwork_media_ids(tmp_path / "catalog.db", ["aw1", "aw-unknown", "", None])
+    got = catalog_verbs_mod.artwork_media_ids(tmp_path / "catalog.db", ["aw1", "aw-unknown", "", None])
     assert got == {"aw1": "m1"}
-    assert g.artwork_media_ids(tmp_path / "catalog.db", []) == {}
+    assert catalog_verbs_mod.artwork_media_ids(tmp_path / "catalog.db", []) == {}
 
 
 # ---- the metrics ------------------------------------------------------------

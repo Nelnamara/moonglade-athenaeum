@@ -28,6 +28,7 @@ from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_test_client
 from moonglade import series as series_mod
 from moonglade import curation as curation_mod
+from moonglade import catalog_verbs as catalog_verbs_mod
 
 
 def _seed(tmp_path, rows):
@@ -406,7 +407,7 @@ def test_detail_route_series_excludes_non_members_and_unknown_sids(tmp_path):
 def test_list_media_ids_series_matches_query_catalog(tmp_path):
     db = _seed_mixed(tmp_path)
     rows, total = curation_mod.query_catalog(db, sort="newest", page_size=None, series="X1")
-    assert G.list_media_ids(db, sort="newest", series="X1") == [r["media_id"] for r in rows]
+    assert catalog_verbs_mod.list_media_ids(db, sort="newest", series="X1") == [r["media_id"] for r in rows]
     assert total == 7
-    assert len(G.list_media_ids(db, sort="newest")) == 14                  # default: no narrowing
-    assert G.list_media_ids(db, sort="newest", series="NOPExx") == []
+    assert len(catalog_verbs_mod.list_media_ids(db, sort="newest")) == 14                  # default: no narrowing
+    assert catalog_verbs_mod.list_media_ids(db, sort="newest", series="NOPExx") == []

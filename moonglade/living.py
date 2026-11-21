@@ -205,7 +205,7 @@ def artworks_sweep(out_dir, db_path, force=False, now=None, log_event=None):
     into the Activity ledger every time would bury the events that matter under its own
     noise. It is the ONLY thing this function tells the browser; there is no path from
     here to the gallery's loaders."""
-    from moonglade.gallery import apply_artwork_meta
+    from moonglade.catalog_verbs import apply_artwork_meta
     from moonglade.redact import _redact_host_paths_cli
     import logging as _logging
     import uuid as _uuid

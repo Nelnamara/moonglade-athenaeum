@@ -475,6 +475,18 @@ SEAMS = {
         "batch_member_order", "_filters_from_args", "catalog_counts"]},
     "moonglade.train_guard": {"from": "moonglade.gallery", "names": [
         "TrainGuard"]},
+    "moonglade.catalog_verbs": {"from": "moonglade.gallery", "names": [
+        "task_media", "media_dims", "published_delete_note", "mark_cloud_deleted",
+        "task_media_count", "_TASK_CHUNK", "_delete_targets", "_members_of_tasks",
+        "delete_targets", "delete_preview_rows", "myart_items", "SNAPSHOT_KEEP_DAYS",
+        "MYART_WINDOW_DAYS", "_local_day", "record_artwork_snapshots", "myart_window",
+        "myart_coverage", "artwork_media_ids", "artwork_row", "publish_state",
+        "ARTWORK_META_FIELDS", "apply_artwork_meta", "apply_artwork_views", "lineage",
+        "sibling_media", "recent_train_task_page", "history_page", "history_created_ats",
+        "distinct_task_count", "backup_coverage", "rows_for_media_ids", "paid_credit_for_tasks",
+        "loom_cost", "loom_send_key", "loom_sends_fold", "loom_backfill_sends", "integrity_rows",
+        "list_media_ids", "list_group_rows", "unique_models", "backfill_batches", "catalog_years",
+        "find_image_file"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -2134,6 +2146,30 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_setup_prepare.py', 'moonglade.train_guard'),
     ('tests/test_task_model_detail_document.py', 'moonglade.train_guard'),
     ('tests/test_telemetry.py', 'moonglade.train_guard'),
+    # Split phase 4, catalog_verbs: no reader reads the verbs' text. test_catalog_verbs names the
+    # verbs but reads create_app and the registers (its no-SQL guard); test_living_library's
+    # banned-call guard reads apply_artwork_meta through catalog_verbs_mod; the history_page hits
+    # are backup's retired feed. The whole-module absence guards read the module too.
+    ('tests/test_app_paths.py', 'moonglade.catalog_verbs'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.catalog_verbs'),
+    ('tests/test_bonjour.py', 'moonglade.catalog_verbs'),
+    ('tests/test_branding.py', 'moonglade.catalog_verbs'),
+    ('tests/test_catalog_verbs.py', 'moonglade.catalog_verbs'),
+    ('tests/test_catchup_query.py', 'moonglade.catalog_verbs'),
+    ('tests/test_csrf_coverage.py', 'moonglade.catalog_verbs'),
+    ('tests/test_evidence_counters.py', 'moonglade.catalog_verbs'),
+    ('tests/test_first_party_sources.py', 'moonglade.catalog_verbs'),
+    ('tests/test_history_feed_document.py', 'moonglade.catalog_verbs'),
+    ('tests/test_living_library.py', 'moonglade.catalog_verbs'),
+    ('tests/test_logging.py', 'moonglade.catalog_verbs'),
+    ('tests/test_loom_p_routes.py', 'moonglade.catalog_verbs'),
+    ('tests/test_network.py', 'moonglade.catalog_verbs'),
+    ('tests/test_security_review_fixes.py', 'moonglade.catalog_verbs'),
+    ('tests/test_server_one_module.py', 'moonglade.catalog_verbs'),
+    ('tests/test_settings_store.py', 'moonglade.catalog_verbs'),
+    ('tests/test_setup_prepare.py', 'moonglade.catalog_verbs'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.catalog_verbs'),
+    ('tests/test_telemetry.py', 'moonglade.catalog_verbs'),
 }
 
 

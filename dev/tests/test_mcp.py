@@ -13,6 +13,7 @@ pytest.importorskip("fastmcp")   # CI installs no fastmcp -> skip, never fail
 from moonglade import gallery as g
 from moonglade import mcp_server as m
 from moonglade import catalog as catalog_mod
+from moonglade import catalog_verbs as catalog_verbs_mod
 
 
 def _row(**kw):
@@ -130,7 +131,7 @@ def test_get_image_never_opens_an_svg(catalog, monkeypatch):
                                   output_format="svg")])
     (catalog.parent / "m9.svg").write_text("<svg xmlns='http://www.w3.org/2000/svg'/>",
                                            encoding="utf-8")
-    monkeypatch.setattr(g, "find_image_file", lambda out, mid, fn: catalog.parent / fn)
+    monkeypatch.setattr(catalog_verbs_mod, "find_image_file", lambda out, mid, fn: catalog.parent / fn)
     import PIL.Image
     monkeypatch.setattr(PIL.Image, "open", lambda *a, **k: pytest.fail("opened an SVG"))
     out = m.get_image("m9")

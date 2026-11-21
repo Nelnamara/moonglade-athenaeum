@@ -358,7 +358,8 @@ def register(app, ctx):
     @tier(LOGIN)
     def thumb(media_id):
         # ?s= is an allowlist (_THUMB_TIERS: 32 and 256); anything else is the 768 thumb.
-        from moonglade.gallery import Path, find_image_file
+        from moonglade.gallery import Path
+        from moonglade.catalog_verbs import find_image_file
         from moonglade.catalog import get_row
         from moonglade.web_policy import harden_file_response
         size_key = request.args.get("s") or ""
@@ -424,7 +425,7 @@ def register(app, ctx):
     def full_image(media_id):
         # Resolve a media_id to its full-res file on the fly (used by the
         # lightbox so the index page doesn't precompute 250 image paths).
-        from moonglade.gallery import find_image_file
+        from moonglade.catalog_verbs import find_image_file
         from moonglade.catalog import get_row
         from moonglade.web_policy import harden_file_response, media_type_for
         row = get_row(db_path, media_id)
@@ -452,7 +453,8 @@ def register(app, ctx):
         # originals on disk are NEVER touched, and a converted file never re-enters the
         # catalog as a new row (the decided shape; the archive stays exactly as PixAI
         # delivered it). Videos are always passed through as-is (Pillow can't transform mp4).
-        from moonglade.gallery import Path, find_image_file
+        from moonglade.gallery import Path
+        from moonglade.catalog_verbs import find_image_file
         from moonglade.curation import query_catalog
         from moonglade.catalog import get_row
         import io
@@ -1068,7 +1070,7 @@ def register(app, ctx):
         moonglade.similar CLIP sidecar index. Mirrors /api/gallery-images's shape so the client
         reuses the same .card rendering. Read-only; fails soft to an empty list if the sidecar
         index or its ML stack isn't available/built yet, so it never 500s the gallery."""
-        from moonglade.gallery import find_image_file
+        from moonglade.catalog_verbs import find_image_file
         from moonglade.catalog import get_row
         try:
             k = max(1, min(int(request.args.get("k") or 24), 60))
@@ -1141,7 +1143,7 @@ def register(app, ctx):
         # below has to be escaped by hand or ?collection=<script>... is reflected XSS
         # straight into the logged-in session (markupsafe escapes ' and " too, which
         # the single-quoted src=' ' attributes here depend on).
-        from moonglade.gallery import rows_for_media_ids
+        from moonglade.catalog_verbs import rows_for_media_ids
         from moonglade.curation import ordered_members, query_catalog
         from markupsafe import escape
         ids_arg = (request.args.get("ids") or "").strip()
@@ -1262,7 +1264,7 @@ def register(app, ctx):
         preview and its own native (window.print()) output. Same source selection as the
         page route (rows_for_media_ids / query_catalog); the page route stays untouched
         for classic's own use until demolition -- the new front door never calls it."""
-        from moonglade.gallery import rows_for_media_ids
+        from moonglade.catalog_verbs import rows_for_media_ids
         from moonglade.curation import ordered_members, query_catalog
         import datetime as _dt
         ids_arg = (request.args.get("ids") or "").strip()
@@ -1347,7 +1349,7 @@ def register(app, ctx):
         /duplicates page and api_health. Members are shaped identically across all four
         tiers (media_id/thumb/dims/rating/date/path/bucket/size/is_keeper) so the client
         never has to special-case by matchType."""
-        from moonglade.gallery import find_image_file, rows_for_media_ids
+        from moonglade.catalog_verbs import find_image_file, rows_for_media_ids
         from moonglade import backup as core
 
         def _member(mid, row, path, bucket, size, is_keeper):
@@ -1668,7 +1670,7 @@ def register(app, ctx):
           * ?series=<sid> -- the complement: the ungrouped listing constrained to
             one series' members (B's 'open a stack' navigation), resolved in SQL by
             query_catalog. Ignored while group=series (grouping supersedes it)."""
-        from moonglade.gallery import list_group_rows, rows_for_media_ids
+        from moonglade.catalog_verbs import list_group_rows, rows_for_media_ids
         from moonglade.curation import personal_get, query_catalog
         q = (request.args.get("q") or "").strip()
         try:
@@ -1813,7 +1815,7 @@ def register(app, ctx):
         broken-image icon with no explanation. The client already gets that signal for
         free (an <img>/<video> onError), so there is nothing here worth a filesystem
         stat the caller didn't ask for."""
-        from moonglade.gallery import list_media_ids
+        from moonglade.catalog_verbs import list_media_ids
         from moonglade.curation import personal_get
         from moonglade.catalog import get_row, is_archive_only
         row = get_row(db_path, media_id)
@@ -1936,7 +1938,7 @@ def register(app, ctx):
         _build_where's own idiom. Day boundaries are computed HERE so the indexed
         window is exactly N local days and the empty days / `next_before` cursor are
         deterministic (and pytest-able) rather than a client-side guess."""
-        from moonglade.gallery import history_created_ats, history_page
+        from moonglade.catalog_verbs import history_created_ats, history_page
         from moonglade import backup as core
         from collections import Counter
         from datetime import datetime, timedelta, timezone

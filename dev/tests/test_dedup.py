@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from moonglade import backup as core
-from moonglade.gallery import find_image_file
+from moonglade.catalog_verbs import find_image_file
 from moonglade.catalog import init_db, save_catalog, load_catalog
 from moonglade import organize as organize_mod
 

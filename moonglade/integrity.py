@@ -64,6 +64,7 @@ from pathlib import Path
 from moonglade import paths as _paths
 from moonglade import scan as _scan
 from moonglade import catalog as _catalog
+from moonglade import catalog_verbs as _catalog_verbs
 
 REPORT_CSV = "integrity_report.csv"
 REPORT_JSON = "integrity_report.json"
@@ -366,7 +367,7 @@ def verify_library(out_dir, db_path, deep=False, progress=None):
     report lines under "lines" as (media_id, problem, path, size, recoverable) tuples."""
     from moonglade import gallery as g                     # lazy: the catalog verbs and the walk
     out = Path(out_dir)
-    rows = g.integrity_rows(db_path) if Path(db_path).exists() else []
+    rows = _catalog_verbs.integrity_rows(db_path) if Path(db_path).exists() else []
     index = _index(out, g)
     by_rel, by_mid, thumbs = index
 
@@ -655,7 +656,7 @@ def broken_list(out_dir, db_path, avg_bytes=None):
     summary = read_summary(out)
     lines = [ln for ln in read_lines(out) if ln[1] in LIST_KIND]
     ids = list(dict.fromkeys(ln[0] for ln in lines))
-    catalog = ({str(r["media_id"]): r for r in g.rows_for_media_ids(db_path, ids)}
+    catalog = ({str(r["media_id"]): r for r in _catalog_verbs.rows_for_media_ids(db_path, ids)}
                if ids and Path(db_path).exists() else {})
     marks = read_marks(out)
     rec_at = reconciled_at(out)
@@ -1144,7 +1145,7 @@ def _reverify_locked(out, db_path, ids, index, g):
     row_problems = set(_SEVERITY) - {P_UNCATALOGED, P_ORPHAN_THUMB}
     lines = [ln for ln in read_lines(out) if not (ln[0] in ids and ln[1] in row_problems)]
     deep = bool(summary.get("deep"))
-    for r in g.rows_for_media_ids(db_path, sorted(ids)):
+    for r in _catalog_verbs.rows_for_media_ids(db_path, sorted(ids)):
         if not str(r.get("filename") or "").strip():
             continue
         line = _line_for(r, _row_check(r, index, deep, _scan.GALLERY_DIRNAME), g)

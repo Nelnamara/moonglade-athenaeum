@@ -56,7 +56,7 @@ def register(app, ctx):
         (null when there is nothing older); the picker sends it back as `before_at` +
         `before_task` when its sentinel scrolls into view, the desktop pool's mechanism.
         Pure catalog read, no network."""
-        from moonglade.gallery import recent_train_task_page
+        from moonglade.catalog_verbs import recent_train_task_page
         try:
             limit = max(1, min(int(request.args.get("limit") or 18), 60))
         except ValueError:
@@ -234,7 +234,7 @@ def register(app, ctx):
         ORDER on the confirm: CSRF -> READ_ONLY (before ANY read, the reuse read included) ->
         validation -> quota / card -> the lock -> the guard -> the pause switch -> the
         amount -> arm -> one createTrainingTask -> resolve. Single attempt."""
-        from moonglade.gallery import media_dims
+        from moonglade.catalog_verbs import media_dims
         from moonglade.train_guard import TrainGuard
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
@@ -810,7 +810,7 @@ def register(app, ctx):
     def api_train_advanced_media(task_id):
         """Replace the draft's image set (PUT media; free). The per-side image rule runs over
         this library's sizes first and refuses a failing image by name, as Basic does."""
-        from moonglade.gallery import media_dims
+        from moonglade.catalog_verbs import media_dims
         body, ok = _train_csrf_body()
         if not ok:
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
