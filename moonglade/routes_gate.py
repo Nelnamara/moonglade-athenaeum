@@ -63,7 +63,7 @@ def register(app, ctx):
         # Delegates to the one module-level copy (see _redact_host_paths_cli:
         # the closure and the module function were maintained as twins until
         # 2026-08-14, when issue #14's fix collapsed them).
-        from moonglade.gallery import _redact_host_paths_cli
+        from moonglade.redact import _redact_host_paths_cli
         return _redact_host_paths_cli(out_dir, msg)
 
     @app.context_processor

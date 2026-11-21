@@ -5,6 +5,7 @@ effects + that the cloud call fires task-level). The classic /delete-tasks-bulk 
 route died in the 2026-08-08 classic cut; the JSON twin runs the same
 _start_bulk_delete engine, so the behavior pinned here is unchanged."""
 import contextlib
+from pathlib import Path
 
 import pytest
 
@@ -79,7 +80,7 @@ def test_purge_keeps_the_row_when_the_quarantine_move_fails(tmp_path, monkeypatc
     def _cross_device(self, target):
         raise OSError(18, "Invalid cross-device link")
 
-    monkeypatch.setattr(g.Path, "replace", _cross_device)
+    monkeypatch.setattr(Path, "replace", _cross_device)
 
     with pytest.raises(OSError):
         purge_media_local(tmp_path, thumb, db, "66", "66.png")
@@ -98,7 +99,7 @@ def test_purge_keeps_the_row_when_the_hard_delete_fails(tmp_path, monkeypatch):
     def _denied(self, **kw):
         raise OSError(13, "Permission denied")
 
-    monkeypatch.setattr(g.Path, "unlink", _denied)
+    monkeypatch.setattr(Path, "unlink", _denied)
 
     with pytest.raises(OSError):
         purge_media_local(tmp_path, tmp_path / "t", db, "67", "67.png", quarantine=False)
@@ -133,14 +134,14 @@ def test_bulk_delete_keeps_going_when_one_local_purge_fails(tmp_path, monkeypatc
 
     monkeypatch.setattr(cloud_delete_mod, "delete_task", lambda sess, tid: None)
 
-    real_replace = g.Path.replace
+    real_replace = Path.replace
 
     def _one_bad_file(self, target):
         if self.name == "300.png":                 # TA is processed first (task ids sort)
             raise OSError(18, "Invalid cross-device link")
         return real_replace(self, target)
 
-    monkeypatch.setattr(g.Path, "replace", _one_bad_file)
+    monkeypatch.setattr(Path, "replace", _one_bad_file)
 
     client = login_client(tmp_path)
     client.post("/api/delete-tasks", json={"media_ids": ["300", "400"]})

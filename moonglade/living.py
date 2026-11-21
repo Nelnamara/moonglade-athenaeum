@@ -83,7 +83,7 @@ _artworks_refusal = {"reported": False}
 def _note_artworks_refusal(log, out_dir, page, err):
     """Say why the sweep could not read the published list: once, in plain words, with the
     reason PixAI or the network gave (folder paths hidden), then quietly while it lasts."""
-    from moonglade.gallery import _redact_host_paths_cli
+    from moonglade.redact import _redact_host_paths_cli
     reason = _redact_host_paths_cli(out_dir, str(err))[:300]
     if _artworks_refusal["reported"]:
         log.debug("artworks sweep: page %d still cannot be read: %s", page, reason)
@@ -205,7 +205,8 @@ def artworks_sweep(out_dir, db_path, force=False, now=None, log_event=None):
     into the Activity ledger every time would bury the events that matter under its own
     noise. It is the ONLY thing this function tells the browser; there is no path from
     here to the gallery's loaders."""
-    from moonglade.gallery import apply_artwork_meta, _redact_host_paths_cli
+    from moonglade.gallery import apply_artwork_meta
+    from moonglade.redact import _redact_host_paths_cli
     import logging as _logging
     import uuid as _uuid
     from moonglade import backup as core
@@ -385,7 +386,7 @@ def artworks_sweep_kick(out_dir, db_path, force=False, log_event=None, busy=None
     lock it is the same instant _panel_run's own probe finds this lock held, so whichever of
     the two arrives first, the other one stands down. Passed in rather than imported because
     the slot is a create_app closure and this function is module-level and testable."""
-    from moonglade.gallery import _redact_host_paths_cli
+    from moonglade.redact import _redact_host_paths_cli
     import logging as _logging
     if not _artworks_lock.acquire(False):
         return None

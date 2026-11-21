@@ -169,7 +169,7 @@ def test_redactor_scrubs_foreign_user_homes_any_os(tmp_path):
     path under any OTHER username used to sail through. The generic user-home
     pass must scrub the home prefix on every OS's layout -- and only the
     prefix, so the tail stays readable -- without eating ordinary text."""
-    from moonglade.gallery import _redact_host_paths_cli
+    from moonglade.redact import _redact_host_paths_cli
     red = lambda m: _redact_host_paths_cli(tmp_path, m)
     assert "gwilkins" not in red(r"open C:\Users\gwilkins\secret\x failed")
     assert "gwilkins" not in red("open C:/Users/gwilkins/secret/x failed")

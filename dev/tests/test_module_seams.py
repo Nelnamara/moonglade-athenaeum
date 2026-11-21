@@ -396,6 +396,10 @@ SEAMS = {
     # the upload and the local import with its zip extractor), the same way: one
     # register(app, ctx), and no gallery attribute moved (the zip caps stay in gallery).
     "moonglade.routes_import": {"from": "moonglade.gallery", "names": []},
+    # Split phase 4, the module-level sections: gallery's top level leaves section by section,
+    # the same way phase 3's did (moved names are reached through the new module, not gallery).
+    "moonglade.redact": {"from": "moonglade.gallery", "names": [
+        "_USER_HOME_RE", "_redact_host_paths_cli"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -1711,6 +1715,35 @@ SOURCE_READERS_REVIEWED = {
         "tests/test_settings_store.py", "tests/test_setup_prepare.py",
         "tests/test_task_model_detail_document.py", "tests/test_telemetry.py",
         "tools/export_design_kit.py")),
+    # Split phase 4, redact: no reader reads text that left gallery.py (no reader names the
+    # redactor or its pattern; test_task_params reaches it through moonglade.redact).
+    ('loom/test/mg-art-filters.test.js', 'moonglade.redact'),
+    ('loom/test/mg-notify-queue-phase.test.js', 'moonglade.redact'),
+    ('loom/test/mg-notify-website-source.test.js', 'moonglade.redact'),
+    ('loom/test/phone-back-layers.test.js', 'moonglade.redact'),
+    ('tests/test_app_paths.py', 'moonglade.redact'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.redact'),
+    ('tests/test_bonjour.py', 'moonglade.redact'),
+    ('tests/test_branding.py', 'moonglade.redact'),
+    ('tests/test_catalog_verbs.py', 'moonglade.redact'),
+    ('tests/test_catchup_query.py', 'moonglade.redact'),
+    ('tests/test_csrf_coverage.py', 'moonglade.redact'),
+    ('tests/test_design_kit_sync.py', 'moonglade.redact'),
+    ('tests/test_evidence_counters.py', 'moonglade.redact'),
+    ('tests/test_first_party_sources.py', 'moonglade.redact'),
+    ('tests/test_history_feed_document.py', 'moonglade.redact'),
+    ('tests/test_living_library.py', 'moonglade.redact'),
+    ('tests/test_logging.py', 'moonglade.redact'),
+    ('tests/test_loom_notify.py', 'moonglade.redact'),
+    ('tests/test_loom_p_routes.py', 'moonglade.redact'),
+    ('tests/test_network.py', 'moonglade.redact'),
+    ('tests/test_security_review_fixes.py', 'moonglade.redact'),
+    ('tests/test_server_one_module.py', 'moonglade.redact'),
+    ('tests/test_settings_store.py', 'moonglade.redact'),
+    ('tests/test_setup_prepare.py', 'moonglade.redact'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.redact'),
+    ('tests/test_telemetry.py', 'moonglade.redact'),
+    ('tools/export_design_kit.py', 'moonglade.redact'),
 }
 
 

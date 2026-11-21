@@ -12,6 +12,7 @@ dev/tests/test_route_tiers.py; here only the contracts that go beyond a bare tie
 re-proven (READ_ONLY).
 """
 import time
+from pathlib import Path
 
 import pytest
 
@@ -105,14 +106,14 @@ def test_delete_local_reports_a_failed_move_without_stranding_the_rest(tmp_path,
         _row(media_id="good", filename="good.png"),
     ], {"bad.png": b"x", "good.png": b"y"})
 
-    real_replace = g.Path.replace
+    real_replace = Path.replace
 
     def _one_bad_file(self, target):
         if self.name == "bad.png":
             raise OSError(18, "Invalid cross-device link")
         return real_replace(self, target)
 
-    monkeypatch.setattr(g.Path, "replace", _one_bad_file)
+    monkeypatch.setattr(Path, "replace", _one_bad_file)
 
     cli = login_client(tmp_path)
     d = cli.post("/api/delete-local", json={"media_ids": ["bad", "good"]}).get_json()

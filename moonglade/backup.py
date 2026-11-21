@@ -92,7 +92,8 @@ from moonglade.gallery import (CATALOG_FIELDS, init_db, migrate, load_catalog,
                             # deliberate sync, not on the fifteen-minute sweep's cadence.
                             apply_artwork_views,
                             build_thumbnails,
-                            _NO_WINDOW, _redact_host_paths_cli)
+                            _NO_WINDOW)
+from moonglade.redact import _redact_host_paths_cli
 # The one library scan (moonglade/scan.py, out of the gallery since 3.21.0).
 from moonglade.scan import (_IMAGE_EXTS, media_id_of, find_files_for_media_id, DELETED_DIRNAME,
                             scan_library, bucket_of, _VIDEO_EXTS,
