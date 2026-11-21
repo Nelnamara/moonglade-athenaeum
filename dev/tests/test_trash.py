@@ -13,11 +13,12 @@ import os
 import time
 
 from moonglade import gallery as g
-from moonglade.gallery import purge_media_local
+from moonglade.trash import purge_media_local
 from moonglade.catalog import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.conftest import login_client
 from moonglade import scan as scan_mod
+from moonglade import trash as trash_mod
 
 LAN = "203.0.113.5"      # TEST-NET-3, matching dev/tests/test_route_tiers.py's stand-in
 
@@ -104,7 +105,7 @@ def test_purge_missing_row_writes_no_sidecar(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_list_quarantined_empty_when_no_deleted_dir(tmp_path):
-    items, total, total_bytes = g.list_quarantined(tmp_path)
+    items, total, total_bytes = trash_mod.list_quarantined(tmp_path)
     assert items == [] and total == 0 and total_bytes == 0
 
 
@@ -114,7 +115,7 @@ def test_list_quarantined_paginates_newest_first(tmp_path):
     # NEWEST (base-1) -- so newest-first order is 4, 3, 2, 1, 0.
     for i in range(5):
         _seed_quarantined(tmp_path, str(i), mtime=base - (5 - i))
-    items, total, total_bytes = g.list_quarantined(tmp_path, page=1, page_size=2)
+    items, total, total_bytes = trash_mod.list_quarantined(tmp_path, page=1, page_size=2)
     assert total == 5
     assert total_bytes == sum((tmp_path / scan_mod.DELETED_DIRNAME / "{}.png".format(i)).stat().st_size
                               for i in range(5))
@@ -122,9 +123,9 @@ def test_list_quarantined_paginates_newest_first(tmp_path):
     # newest mtime (i=4, base-1) must lead
     assert items[0]["media_id"] == "4"
     assert items[1]["media_id"] == "3"
-    page2, _, _ = g.list_quarantined(tmp_path, page=2, page_size=2)
+    page2, _, _ = trash_mod.list_quarantined(tmp_path, page=2, page_size=2)
     assert [it["media_id"] for it in page2] == ["2", "1"]
-    page3, _, _ = g.list_quarantined(tmp_path, page=3, page_size=2)
+    page3, _, _ = trash_mod.list_quarantined(tmp_path, page=3, page_size=2)
     assert [it["media_id"] for it in page3] == ["0"]
 
 
@@ -135,7 +136,7 @@ def test_list_quarantined_prefers_sidecar_deleted_at_and_prompt(tmp_path):
         json.dumps({"prompt_full": "a stormy harbor", "_deleted_at": real_deleted_at}),
         encoding="utf-8")
 
-    items, _, _ = g.list_quarantined(tmp_path)
+    items, _, _ = trash_mod.list_quarantined(tmp_path)
     assert len(items) == 1
     it = items[0]
     assert it["has_meta"] is True
@@ -163,7 +164,7 @@ def test_list_quarantined_sorts_by_sidecar_deleted_at_not_stale_mtime(tmp_path):
     (tmp_path / scan_mod.DELETED_DIRNAME / "9002.json").write_text(
         json.dumps({"_deleted_at": now - 100}), encoding="utf-8")   # ...deleted earlier
 
-    items, total, _ = g.list_quarantined(tmp_path)
+    items, total, _ = trash_mod.list_quarantined(tmp_path)
     assert total == 2
     assert [it["media_id"] for it in items] == ["9001", "9002"]
 
@@ -172,7 +173,7 @@ def test_list_quarantined_falls_back_to_mtime_without_a_sidecar(tmp_path):
     """Pre-2026-07-24 quarantined files: no sidecar exists at all."""
     mt = time.time() - 500
     _seed_quarantined(tmp_path, "1", mtime=mt)
-    items, _, _ = g.list_quarantined(tmp_path)
+    items, _, _ = trash_mod.list_quarantined(tmp_path)
     assert items[0]["has_meta"] is False
     assert items[0]["deleted_at"] == mt
     assert items[0]["prompt"] == ""
@@ -180,7 +181,7 @@ def test_list_quarantined_falls_back_to_mtime_without_a_sidecar(tmp_path):
 
 def test_list_quarantined_detects_video_extension(tmp_path):
     _seed_quarantined(tmp_path, "9", filename="{}.mp4", content=b"not really a video")
-    items, total, _ = g.list_quarantined(tmp_path)
+    items, total, _ = trash_mod.list_quarantined(tmp_path)
     assert total == 1
     assert items[0]["is_video"] == "1"
     assert items[0]["filename"] == "9.mp4"
@@ -191,7 +192,7 @@ def test_list_quarantined_skips_sidecar_json_as_an_item(tmp_path):
     only the real media file it describes."""
     _seed_quarantined(tmp_path, "3")
     (tmp_path / scan_mod.DELETED_DIRNAME / "3.json").write_text("{}", encoding="utf-8")
-    items, total, _ = g.list_quarantined(tmp_path)
+    items, total, _ = trash_mod.list_quarantined(tmp_path)
     assert total == 1
     assert items[0]["media_id"] == "3"
 
@@ -203,12 +204,12 @@ def test_list_quarantined_skips_sidecar_json_as_an_item(tmp_path):
 def test_find_quarantined_file_ignores_the_json_sidecar(tmp_path):
     p = _seed_quarantined(tmp_path, "12")
     (tmp_path / scan_mod.DELETED_DIRNAME / "12.json").write_text("{}", encoding="utf-8")
-    found = g._find_quarantined_file(tmp_path, "12")
+    found = trash_mod._find_quarantined_file(tmp_path, "12")
     assert found == p
 
 
 def test_find_quarantined_file_returns_none_when_absent(tmp_path):
-    assert g._find_quarantined_file(tmp_path, "nope") is None
+    assert trash_mod._find_quarantined_file(tmp_path, "nope") is None
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +226,7 @@ def test_restore_recovers_the_full_row_from_its_sidecar(tmp_path):
     purge_media_local(tmp_path, thumb, db, "55", "55.png")
     assert load_catalog(db) == []                     # sanity: really purged first
 
-    res = g.restore_quarantined_media(tmp_path, thumb, db, "55")
+    res = trash_mod.restore_quarantined_media(tmp_path, thumb, db, "55")
 
     assert res == {"ok": True, "media_id": "55", "filename": "55.png"}
     assert (tmp_path / "images" / "55.png").exists()
@@ -247,7 +248,7 @@ def test_restore_without_a_sidecar_gets_a_minimal_row(tmp_path):
     _seed_quarantined(tmp_path, "old1", filename="old1.png")
     thumb = tmp_path / "gallery" / "thumbs"
 
-    res = g.restore_quarantined_media(tmp_path, thumb, db, "old1")
+    res = trash_mod.restore_quarantined_media(tmp_path, thumb, db, "old1")
 
     assert res["ok"] is True
     assert (tmp_path / "images" / "old1.png").exists()
@@ -260,7 +261,7 @@ def test_restore_without_a_sidecar_gets_a_minimal_row(tmp_path):
 def test_restore_unknown_media_id_fails_cleanly(tmp_path):
     db = tmp_path / "catalog.db"
     save_catalog(db, [])
-    res = g.restore_quarantined_media(tmp_path, tmp_path / "t", db, "ghost")
+    res = trash_mod.restore_quarantined_media(tmp_path, tmp_path / "t", db, "ghost")
     assert res == {"ok": False, "error": "not found in trash"}
     assert load_catalog(db) == []
 
@@ -272,7 +273,7 @@ def test_restore_avoids_clobbering_a_same_named_live_file(tmp_path):
     (images / "77.png").write_bytes(b"LIVE FILE, DO NOT OVERWRITE")
     _seed_quarantined(tmp_path, "77")             # writes _deleted/77.png
 
-    res = g.restore_quarantined_media(tmp_path, tmp_path / "t", db, "77")
+    res = trash_mod.restore_quarantined_media(tmp_path, tmp_path / "t", db, "77")
 
     assert res["ok"] is True
     assert res["filename"] != "77.png"                # renamed to avoid the collision
@@ -290,7 +291,7 @@ def test_delete_quarantined_forever_removes_file_sidecar_and_thumb(tmp_path):
     thumb = tmp_path / "gallery" / "thumbs"; thumb.mkdir(parents=True)
     (thumb / "1.jpg").write_bytes(_png_bytes())
 
-    removed = g.delete_quarantined_forever(tmp_path, thumb, "1")
+    removed = trash_mod.delete_quarantined_forever(tmp_path, thumb, "1")
 
     assert removed is True
     assert not p.exists()
@@ -299,7 +300,7 @@ def test_delete_quarantined_forever_removes_file_sidecar_and_thumb(tmp_path):
 
 
 def test_delete_quarantined_forever_missing_media_id_is_safe(tmp_path):
-    assert g.delete_quarantined_forever(tmp_path, tmp_path / "t", "ghost") is False
+    assert trash_mod.delete_quarantined_forever(tmp_path, tmp_path / "t", "ghost") is False
 
 
 def test_empty_trash_wipes_everything_and_counts_media_only(tmp_path):
@@ -309,7 +310,7 @@ def test_empty_trash_wipes_everything_and_counts_media_only(tmp_path):
     thumb = tmp_path / "gallery" / "thumbs"; thumb.mkdir(parents=True)
     (thumb / "0.jpg").write_bytes(_png_bytes())
 
-    n = g.empty_trash(tmp_path, thumb)
+    n = trash_mod.empty_trash(tmp_path, thumb)
 
     assert n == 4                                       # sidecar doesn't count
     assert list((tmp_path / scan_mod.DELETED_DIRNAME).glob("*")) == []
@@ -317,7 +318,7 @@ def test_empty_trash_wipes_everything_and_counts_media_only(tmp_path):
 
 
 def test_empty_trash_on_missing_dir_is_a_safe_noop(tmp_path):
-    assert g.empty_trash(tmp_path, tmp_path / "t") == 0
+    assert trash_mod.empty_trash(tmp_path, tmp_path / "t") == 0
 
 
 # ---------------------------------------------------------------------------
@@ -446,7 +447,7 @@ def _trash_with_only_copies(tmp_path):
 
 def test_list_quarantined_flags_each_file_that_is_the_only_copy(tmp_path):
     _trash_with_only_copies(tmp_path)
-    items, total, _bytes = g.list_quarantined(tmp_path, page=1, page_size=10)
+    items, total, _bytes = trash_mod.list_quarantined(tmp_path, page=1, page_size=10)
     assert total == 4
     flags = {it["media_id"]: it["archive_only"] for it in items}
     assert flags == {"a": True, "b": True, "c": False, "d": False}

@@ -178,7 +178,8 @@ def register(app, ctx):
         comment on panel_is_local), just packaged for fetch() instead of Jinja. Nothing
         computed here is new: every field is a value /panel already builds every request.
         LOGIN tier, matching /panel itself."""
-        from moonglade.gallery import _supervised, list_quarantined
+        from moonglade.gallery import _supervised
+        from moonglade.trash import list_quarantined
         from moonglade.curation import catalog_counts
         panel_is_local = _is_local_request()
         all_actions = [{"action": k, "label": v["label"], "destructive": v["destructive"],

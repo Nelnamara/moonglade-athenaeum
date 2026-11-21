@@ -226,7 +226,7 @@ def delete_preview_rows(db_path, media_ids, task_cap=None):
     Returns {sel_rows, task_ids, local_only, members_by_task, local_rows}. The caps
     are DISPLAY bounds on `local_rows` only -- task_ids and local_only always describe
     the entire selection, because the totals are what the user reads to decide."""
-    from moonglade.gallery import DELETE_PREVIEW_TASK_CAP
+    from moonglade.trash import DELETE_PREVIEW_TASK_CAP
     cap = DELETE_PREVIEW_TASK_CAP if task_cap is None else task_cap
     with _catalog.catalog(db_path) as con:
         sel_rows, task_ids, local_only = _delete_targets(con, media_ids)

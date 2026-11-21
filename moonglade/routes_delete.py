@@ -146,7 +146,7 @@ def register(app, ctx):
         library's whole record of what left it stops depending on which button was used. The
         PREVIEW writes nothing: nothing happened, and a row per dialog-open is noise.
         """
-        from moonglade.gallery import purge_media_local
+        from moonglade.trash import purge_media_local
         from moonglade.catalog_verbs import mark_cloud_deleted
         from moonglade.catalog import get_row
         from moonglade import backup as core          # lazy: avoid import cycle
@@ -290,7 +290,7 @@ def register(app, ctx):
         purge_media_local writes first). What the bulk confirm needs is the count BEFORE it
         asks, so `preview: true` answers {"preview": true, "count", "archive_only"} -- the rows
         the delete would take and how many of them are the only copy -- and touches nothing."""
-        from moonglade.gallery import purge_media_local
+        from moonglade.trash import purge_media_local
         from moonglade.catalog import get_row, is_archive_only
         body = request.get_json(silent=True) or {}
         media_ids = list(dict.fromkeys(
@@ -320,7 +320,7 @@ def register(app, ctx):
     def _purge_local(media_id, filename):
         """Remove a media's catalog row + thumbnail; quarantine its file to _deleted/
         (recoverable) rather than destroying it."""
-        from moonglade.gallery import purge_media_local
+        from moonglade.trash import purge_media_local
         purge_media_local(out_dir, thumb_dir, db_path, media_id, filename)
 
     def _rows_the_bulk_purge_must_keep(session, task_id, rows):
@@ -418,7 +418,7 @@ def register(app, ctx):
         `artworkIds` -- batch_size being the task's image count ON PIXAI -- (the
         published-artwork count the dialog words, SCOPE_2026-09-26 E5; a task missing from it
         falls back to the catalog, see api_delete_preview)."""
-        from moonglade.gallery import DELETE_PREVIEW_LIVE_BUDGET_S, DELETE_PREVIEW_LIVE_WORKERS
+        from moonglade.trash import DELETE_PREVIEW_LIVE_BUDGET_S, DELETE_PREVIEW_LIVE_WORKERS
         from moonglade import backup as core   # lazy: avoid import cycle
         ids = [str(t) for t in task_ids]
         try:
@@ -581,7 +581,7 @@ def register(app, ctx):
           published_unchecked_tasks  how many tasks that is (0 when checked), so a dialog
                                that also has a live count can say "K of the N tasks were not
                                checked" instead of contradicting the count."""
-        from moonglade.gallery import DELETE_PREVIEW_LIVE_CAP, DELETE_PREVIEW_TASK_CAP
+        from moonglade.trash import DELETE_PREVIEW_LIVE_CAP, DELETE_PREVIEW_TASK_CAP
         from moonglade.catalog_verbs import delete_preview_rows, myart_coverage
         body = request.get_json(silent=True) or {}
         # dict.fromkeys: deduped, order preserved. The blast radius is a set of FILES, so
@@ -849,7 +849,7 @@ def register(app, ctx):
         route (no new serving route needed -- see _ensure_trash_thumbs()). LOGIN tier:
         seeing what's recoverable is the same trust level as browsing the live
         gallery, not a destructive action."""
-        from moonglade.gallery import _ensure_trash_thumbs, _list_quarantined
+        from moonglade.trash import _ensure_trash_thumbs, _list_quarantined
         try:
             page = max(1, int(request.args.get("page") or 1))
             limit = max(1, min(int(request.args.get("limit") or 60), 200))
@@ -875,7 +875,7 @@ def register(app, ctx):
         recovering something you (or anyone signed in) deleted is not the same trust
         question as permanently destroying it. Matches the decided design in
         the 2026-07-21 audit: restore=LOGIN, delete-forever/empty=LOCALHOST."""
-        from moonglade.gallery import restore_quarantined_media
+        from moonglade.trash import restore_quarantined_media
         body = request.get_json(silent=True) or {}
         media_ids = [str(m) for m in (body.get("media_ids") or []) if str(m).strip()]
         if not media_ids:
@@ -904,7 +904,7 @@ def register(app, ctx):
         what actually stands between a misclick and data loss; confirm=true here just
         proves the client meant to send the request at all, it is not itself the
         security boundary -- the LOCALHOST check is."""
-        from moonglade.gallery import delete_quarantined_forever
+        from moonglade.trash import delete_quarantined_forever
         body = request.get_json(silent=True) or {}
         if not body.get("confirm"):
             return jsonify({"error": "confirm required"}), 400
@@ -923,7 +923,7 @@ def register(app, ctx):
         selection. Same LOCALHOST + confirm=true contract as
         api_trash_delete_forever() (see its docstring); the client demands the same
         typed "DELETE" word first (Trash.emptyAll())."""
-        from moonglade.gallery import empty_trash
+        from moonglade.trash import empty_trash
         body = request.get_json(silent=True) or {}
         if not body.get("confirm"):
             return jsonify({"error": "confirm required"}), 400

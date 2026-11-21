@@ -493,6 +493,12 @@ SEAMS = {
         "thumb_rgb", "_could_be_see_through", "source_is_see_through", "make_thumbnail",
         "make_video_thumbnail", "probe_has_audio", "probe_duration", "build_thumbnails",
         "_write_checker_marker", "recheck_see_through_thumbnails", "start_see_through_recheck"]},
+    "moonglade.trash": {"from": "moonglade.gallery", "names": [
+        "DELETE_PREVIEW_TASK_CAP", "DELETE_PREVIEW_LIVE_CAP", "DELETE_PREVIEW_LIVE_WORKERS",
+        "DELETE_PREVIEW_LIVE_BUDGET_S", "_trash_meta_path", "_read_trash_meta",
+        "_snapshot_before_purge", "purge_media_local", "_find_quarantined_file",
+        "list_quarantined", "_list_quarantined", "_ensure_trash_thumbs",
+        "restore_quarantined_media", "delete_quarantined_forever", "empty_trash"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -2199,6 +2205,28 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_setup_prepare.py', 'moonglade.thumbs'),
     ('tests/test_task_model_detail_document.py', 'moonglade.thumbs'),
     ('tests/test_telemetry.py', 'moonglade.thumbs'),
+    # Split phase 4, trash: no reader reads the trash section's text (test_network names
+    # purge_media_local in prose); the whole-module absence guards read the module too.
+    ('tests/test_app_paths.py', 'moonglade.trash'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.trash'),
+    ('tests/test_bonjour.py', 'moonglade.trash'),
+    ('tests/test_branding.py', 'moonglade.trash'),
+    ('tests/test_catalog_verbs.py', 'moonglade.trash'),
+    ('tests/test_catchup_query.py', 'moonglade.trash'),
+    ('tests/test_csrf_coverage.py', 'moonglade.trash'),
+    ('tests/test_evidence_counters.py', 'moonglade.trash'),
+    ('tests/test_first_party_sources.py', 'moonglade.trash'),
+    ('tests/test_history_feed_document.py', 'moonglade.trash'),
+    ('tests/test_living_library.py', 'moonglade.trash'),
+    ('tests/test_logging.py', 'moonglade.trash'),
+    ('tests/test_loom_p_routes.py', 'moonglade.trash'),
+    ('tests/test_network.py', 'moonglade.trash'),
+    ('tests/test_security_review_fixes.py', 'moonglade.trash'),
+    ('tests/test_server_one_module.py', 'moonglade.trash'),
+    ('tests/test_settings_store.py', 'moonglade.trash'),
+    ('tests/test_setup_prepare.py', 'moonglade.trash'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.trash'),
+    ('tests/test_telemetry.py', 'moonglade.trash'),
 }
 
 

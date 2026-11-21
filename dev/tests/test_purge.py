@@ -11,7 +11,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gallery as g
-from moonglade.gallery import purge_media_local
+from moonglade.trash import purge_media_local
 from moonglade.catalog import CATALOG_FIELDS, save_catalog, load_catalog
 
 from tests.conftest import login_client
@@ -20,6 +20,7 @@ from moonglade import task_reads as task_reads_mod
 from moonglade import cloud_delete as cloud_delete_mod
 from moonglade import catalog as catalog_mod
 from moonglade import catalog_verbs as catalog_verbs_mod
+from moonglade import trash as trash_mod
 
 
 def _row(**kw):
@@ -230,7 +231,7 @@ def test_delete_preview_counts_stay_exact_when_the_strip_is_capped(tmp_path):
     truncated for DISPLAY only. The counts are what the user reads to decide, so they
     must describe the whole selection, not the visible slice -- a preview that
     undercounts an irreversible delete is worse than no preview at all."""
-    cap = g.DELETE_PREVIEW_TASK_CAP
+    cap = trash_mod.DELETE_PREVIEW_TASK_CAP
     rows = []
     for i in range(cap + 3):
         rows.append(_row(media_id="s{}".format(i), task_id="T{}".format(i),
@@ -404,7 +405,7 @@ def test_delete_preview_over_the_cap_reads_nothing_and_says_it_is_an_estimate(
     """Above DELETE_PREVIEW_LIVE_CAP the preview does not call PixAI at all. The counts
     are the library's, the response says so, and the delete still checks every task
     before it acts."""
-    n = g.DELETE_PREVIEW_LIVE_CAP + 1
+    n = trash_mod.DELETE_PREVIEW_LIVE_CAP + 1
     rows = [_row(media_id="e{}".format(i), task_id="E{}".format(i),
                  filename="e{}.png".format(i)) for i in range(n)]
     _seed(tmp_path, rows, {})
@@ -420,7 +421,7 @@ def test_delete_preview_over_the_cap_reads_nothing_and_says_it_is_an_estimate(
 
     assert reads == [], (
         "{} tasks is over the cap of {} -- the preview must not call PixAI at all, and "
-        "it made {} reads".format(n, g.DELETE_PREVIEW_LIVE_CAP, len(reads)))
+        "it made {} reads".format(n, trash_mod.DELETE_PREVIEW_LIVE_CAP, len(reads)))
     assert body["estimate"] is True
     assert body["live_checked"] == 0 and body["unverified"] == 0
     assert body["already_gone"] == 0
@@ -430,7 +431,7 @@ def test_delete_preview_over_the_cap_reads_nothing_and_says_it_is_an_estimate(
 def test_delete_preview_at_exactly_the_cap_still_reads(tmp_path, monkeypatch):
     """The cap is inclusive: 40 tasks is checked, 41 is an estimate. Pinned so the
     boundary cannot drift by one without somebody noticing."""
-    n = g.DELETE_PREVIEW_LIVE_CAP
+    n = trash_mod.DELETE_PREVIEW_LIVE_CAP
     rows = [_row(media_id="f{}".format(i), task_id="F{}".format(i),
                  filename="f{}.png".format(i)) for i in range(n)]
     _seed(tmp_path, rows, {})
@@ -590,7 +591,7 @@ def test_delete_preview_answers_inside_its_budget_when_a_read_hangs(tmp_path, mo
         _row(media_id="t2", task_id="S2", filename="t2.png"),
     ], {})
     _fake_session(monkeypatch)
-    monkeypatch.setattr(g, "DELETE_PREVIEW_LIVE_BUDGET_S", 0.3)
+    monkeypatch.setattr(trash_mod, "DELETE_PREVIEW_LIVE_BUDGET_S", 0.3)
 
     release = threading.Event()
     given = {}
@@ -678,7 +679,7 @@ def test_delete_preview_caps_a_tasks_artworks_at_its_files(tmp_path, monkeypatch
 def test_delete_preview_falls_back_to_the_catalog_over_the_live_cap(tmp_path, monkeypatch):
     """Over the cap nothing is read, so the count is the catalog's artwork_id rows -- over
     each task's whole membership, and a blank artwork_id never counts either way."""
-    n = g.DELETE_PREVIEW_LIVE_CAP + 1
+    n = trash_mod.DELETE_PREVIEW_LIVE_CAP + 1
     rows = [_row(media_id="e{}".format(i), task_id="E{}".format(i),
                  filename="e{}.png".format(i)) for i in range(n)]
     rows.append(_row(media_id="e0b", task_id="E0", filename="e0b.png", artwork_id="ART0"))
