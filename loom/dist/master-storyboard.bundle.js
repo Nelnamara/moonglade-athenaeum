@@ -6881,6 +6881,30 @@ ${"=".repeat(48)}
     }
     return out;
   }
+  function modelFamily(value) {
+    const v = String(value == null ? "" : value).trim().toLowerCase();
+    if (/^tbk/.test(v)) return { key: "tbk", label: "Tsubaki" };
+    const m = /^v(\d+)\./.exec(v);
+    if (m) return { key: "v" + m[1], label: "V" + m[1] + ".x" };
+    return { key: "other", label: "Other" };
+  }
+  function groupCards(cards) {
+    const groups = [];
+    const by = /* @__PURE__ */ new Map();
+    for (const c of cards) {
+      const f = modelFamily(c.value);
+      let g = by.get(f.key);
+      if (!g) {
+        g = { key: f.key, label: f.label, cards: [] };
+        by.set(f.key, g);
+        groups.push(g);
+      }
+      g.cards.push(c);
+    }
+    const other = groups.findIndex((g) => g.key === "other");
+    if (other >= 0 && other !== groups.length - 1) groups.push(groups.splice(other, 1)[0]);
+    return groups;
+  }
 
   // ../gallery/src/gen/sendHold.js
   var SEND_HOLD_MS = 6e4;
@@ -7698,6 +7722,62 @@ ${"=".repeat(48)}
         bumpCards((n) => n + 1);
       });
     });
+    const mcardsRef = useRef(null);
+    const mcScrolled = useRef(false);
+    const fitCards = () => {
+      const box = mcardsRef.current;
+      if (!box || !box.clientHeight) return;
+      const top = box.getBoundingClientRect().top - box.scrollTop;
+      let rowBottom = 0;
+      const rows = [];
+      box.querySelectorAll(".mgd-mcard").forEach((c) => {
+        const b = c.getBoundingClientRect();
+        const y = Math.round(b.top - top);
+        let row = rows.find((q) => Math.abs(q.y - y) < 3);
+        if (!row) {
+          row = { y, bottom: 0 };
+          rows.push(row);
+        }
+        row.bottom = Math.max(row.bottom, b.bottom - top);
+      });
+      rows.sort((a, b) => a.y - b.y);
+      if (rows.length) rowBottom = rows[Math.min(1, rows.length - 1)].bottom;
+      const px = Math.ceil(rowBottom + 6) + "px";
+      if (box.style.getPropertyValue("--mgd-mc-max") !== px) box.style.setProperty("--mgd-mc-max", px);
+      if (!mcScrolled.current && box.clientWidth > 0 && rows.length) {
+        const cur2 = box.querySelector(".mgd-mcard.cur");
+        mcScrolled.current = true;
+        if (cur2) {
+          const bt = box.getBoundingClientRect().top;
+          const cb = cur2.getBoundingClientRect();
+          const offTop = cb.top - bt + box.scrollTop;
+          if (offTop < box.scrollTop || offTop + cb.height > box.scrollTop + box.clientHeight) {
+            box.scrollTop = Math.max(0, offTop - 4);
+          }
+        }
+      }
+    };
+    const cardCount2 = cards.length;
+    useEffect(() => {
+      fitCards();
+      const box = mcardsRef.current;
+      if (!box || typeof ResizeObserver === "undefined") return void 0;
+      let raf = 0;
+      const ro = new ResizeObserver(() => {
+        if (raf) return;
+        raf = requestAnimationFrame(() => {
+          raf = 0;
+          fitCards();
+        });
+      });
+      ro.observe(box.parentNode);
+      ro.observe(box);
+      box.querySelectorAll(".mgd-fam").forEach((f) => ro.observe(f));
+      return () => {
+        ro.disconnect();
+        if (raf) cancelAnimationFrame(raf);
+      };
+    }, [cardCount2]);
     const shotModes = ["i2v", "flf", "r2v"].map((v) => {
       const ok = allowedModes.indexOf(v) >= 0;
       return { v, ok, label: SHOT_LABEL[v], title: ok ? SHOT_LABEL[v] : SHOT_LABEL[v] + " needs the V4.0 pair" };
@@ -7847,104 +7927,18 @@ ${"=".repeat(48)}
       " ",
       /* @__PURE__ */ react_global_shim_default.createElement("span", null, "\xD7")
     )) : null;
-    return /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: setRoot, className: "gen-drawer" + (inDock ? " mgd-dock" : "") + (inDock && dock.expanded === false ? " mgd-collapsed" : "") + privacyBlurClass(isPrivacyBlurOn()) + (className ? " " + className : ""), style, "data-loom-ctx": loomCtx ? "" : void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slabwrap" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slabs" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "0ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "Shot mode"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg", role: "tablist" }, shotModes.map((sm) => /* @__PURE__ */ react_global_shim_default.createElement(
-      "button",
-      {
-        key: sm.v,
-        type: "button",
-        role: "tab",
-        "aria-selected": s.mode === sm.v,
-        "aria-disabled": !sm.ok,
-        className: (s.mode === sm.v ? "on" : "") + (sm.ok ? "" : " off"),
-        title: sm.title,
-        onClick: () => {
-          if (sm.ok) userSetMode(sm.v);
-        }
-      },
-      sm.label
-    ))), s.modeNote ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-modenote" }, s.modeNote) : null, banks.map((b) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: b.label, className: "mgd-bank" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-bankhd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-banklbl" }, b.label), b.note ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-banknote" }, b.note) : null), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slots" }, b.slots))), isR2v ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-bank" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-bankhd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-banklbl" }, "Audio reference"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-banknote" }, "WAV \u226415MB")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slots" }, s.audSlot && s.audSlot.uploading ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slot", title: "Uploading " + s.audSlot.uploading }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slotcap" }, "uploading\u2026")) : s.audSlot ? /* @__PURE__ */ react_global_shim_default.createElement(
-      "div",
-      {
-        className: "mgd-slot filled audio",
-        title: "Audio reference \u2014 " + s.audSlot.filename,
-        onClick: () => {
-          st.current.audSlot = null;
-          rerender();
-          reprice();
-        }
-      },
-      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slotcap" }, /* @__PURE__ */ react_global_shim_default.createElement(Icon, { name: "music", title: "Audio" })),
-      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slot-tag" }, "@audio1")
-    ) : /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slot", title: "Upload a WAV (\u226415MB)", onClick: () => audFileRef.current && audFileRef.current.click() }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slotcap" }, "+ audio")))) : null, /* @__PURE__ */ react_global_shim_default.createElement(
-      "input",
-      {
-        ref: audFileRef,
-        type: "file",
-        className: "mgd-audiofile",
-        accept: "audio/*",
-        style: { display: "none" },
-        onChange: (e) => {
-          const f = e.target.files[0];
-          e.target.value = "";
-          if (f) uploadAudio(f);
-        }
-      }
-    ), !inDock && !loomCtx && ratioOffered(s) ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-ratioblock" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "Aspect ratio"), /* @__PURE__ */ react_global_shim_default.createElement(RatioGrid, { value: s.ratio, onPick: pickRatio, big: true })) : null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-cam-wrap" + (isR2v ? " hid" : ""), "aria-hidden": isR2v || void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "Camera"), /* @__PURE__ */ react_global_shim_default.createElement("select", { className: "mgd-sel mgd-cam", value: s.camera, tabIndex: isR2v ? -1 : void 0, disabled: !modelTakes(s.model, "camera"), title: modelTakes(s.model, "camera") ? void 0 : "Camera \u2014 not used by this engine (kept, not sent)", onChange: (e) => {
-      st.current.camera = e.target.value;
-      rerender();
-      reprice();
-    } }, CAMERA_OPTS.map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: v, value: v }, l))))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "60ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-enghd mgd-mchd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "Models \xB7 this picture"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg mgd-mcseg", role: "radiogroup", "aria-label": "Length" }, CARD_LENGTHS.map((d) => {
-      const ok = durationAllowed(s.model, d);
-      return /* @__PURE__ */ react_global_shim_default.createElement(
-        "button",
-        {
-          key: d,
-          type: "button",
-          role: "radio",
-          "aria-checked": d === s.duration,
-          "aria-disabled": !ok,
-          className: (d === s.duration ? "on" : "") + (ok ? "" : " off"),
-          title: d + " seconds" + (ok ? "" : " \u2014 not on this engine"),
-          onClick: () => pickDuration(d)
-        },
-        d,
-        "s"
-      );
-    }))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-mcards", role: "radiogroup", "aria-label": "Video model" }, cards.map((c) => /* @__PURE__ */ react_global_shim_default.createElement(
-      "div",
-      {
-        key: c.value,
-        role: "radio",
-        "aria-checked": c.inUse,
-        className: "mgd-mcard" + (c.inUse ? " cur" : ""),
-        "data-model": c.value
-      },
-      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-mcrow" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-mct" }, c.label), c.inUse ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-mcuse on" }, "in use") : /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-mcuse", "data-model": c.value, onClick: () => pickVideoModel(c.value) }, "Use this")),
-      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-mccaps" }, c.caps.map(([t, kind]) => /* @__PURE__ */ react_global_shim_default.createElement("span", { key: t, className: "mgd-cap" + (kind ? " " + kind : "") }, t))),
-      /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-mcm" }, c.modes),
-      /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-mcm mgd-mcprice" }, c.line),
-      /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-mcm mgd-mccover" + (c.cover.ok ? " ok" : "") }, c.cover.text)
-    ))), loomCtx ? /* @__PURE__ */ react_global_shim_default.createElement(
-      "button",
-      {
-        type: "button",
-        className: "mgd-applyall",
-        onClick: requestApplyAll,
-        title: "Copy this engine, the channel, audio and its language, and the prompt helper to every shot"
-      },
-      "Use these settings for every shot"
-    ) : null), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "120ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "Mode & channel"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg mgd-quality-wrap", role: "radiogroup", "aria-label": "Mode" }, [["basic", "Basic"], ["professional", "Professional"]].map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("button", { key: v, type: "button", role: "radio", "aria-checked": s.quality === v, className: "mgd-quality" + (s.quality === v ? " on" : ""), onClick: () => {
+    return /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: setRoot, className: "gen-drawer" + (inDock ? " mgd-dock" : "") + (inDock && dock.expanded === false ? " mgd-collapsed" : "") + privacyBlurClass(isPrivacyBlurOn()) + (className ? " " + className : ""), style, "data-loom-ctx": loomCtx ? "" : void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slabwrap" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slabs" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab mgd-strip", style: { animationDelay: "0ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "Mode & channel"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg mgd-quality-wrap", role: "radiogroup", "aria-label": "Mode" }, [["basic", "Basic"], ["professional", "Professional"]].map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("button", { key: v, type: "button", role: "radio", "aria-checked": s.quality === v, className: "mgd-quality" + (s.quality === v ? " on" : ""), onClick: () => {
       if (st.current.quality === v) return;
       st.current.quality = v;
       rerender();
       reprice();
-    } }, l))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg", role: "radiogroup", "aria-label": "Channel" }, [["normal", "Normal"], ["enhanced", "Private"]].map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("button", { key: v, type: "button", role: "radio", "aria-checked": s.channel === v, className: "mgd-channel" + (s.channel === v ? " on" : ""), onClick: () => {
+    } }, l))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-chan" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg", role: "radiogroup", "aria-label": "Channel" }, [["normal", "Normal"], ["enhanced", "Private"]].map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("button", { key: v, type: "button", role: "radio", "aria-checked": s.channel === v, className: "mgd-channel" + (s.channel === v ? " on" : ""), onClick: () => {
       if (st.current.channel === v) return;
       st.current.channel = v;
       rerender();
       reprice();
       emit7("mg-channel-commit", { isPrivate: v === "enhanced" });
-    } }, l))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-chancap" }, s.channel === "enhanced" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement(Icon, { name: "crown" }), " ") : null, CHANNEL_CAP[s.channel]), /* @__PURE__ */ react_global_shim_default.createElement("label", { className: "mgd-sw", title: "Spoken lines in the prompt become voiceover" }, /* @__PURE__ */ react_global_shim_default.createElement(
+    } }, l))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-chancap" }, s.channel === "enhanced" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement(Icon, { name: "crown" }), " ") : null, CHANNEL_CAP[s.channel])), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sws" }, /* @__PURE__ */ react_global_shim_default.createElement("label", { className: "mgd-sw", title: "Spoken lines in the prompt become voiceover" }, /* @__PURE__ */ react_global_shim_default.createElement(
       "input",
       {
         type: "checkbox",
@@ -7984,7 +7978,64 @@ ${"=".repeat(48)}
         }
       },
       AUDIO_LANGS.map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: v, value: v }, l))
-    ) : null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-durhd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "Duration"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-durval" }, s.duration, "s")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-stops mgd-dur", role: "radiogroup", "aria-label": "Duration" }, [5, 6, 10, 15].map((d) => {
+    ) : null)), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lower" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "0ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "Shot mode"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg", role: "tablist" }, shotModes.map((sm) => /* @__PURE__ */ react_global_shim_default.createElement(
+      "button",
+      {
+        key: sm.v,
+        type: "button",
+        role: "tab",
+        "aria-selected": s.mode === sm.v,
+        "aria-disabled": !sm.ok,
+        className: (s.mode === sm.v ? "on" : "") + (sm.ok ? "" : " off"),
+        title: sm.title,
+        onClick: () => {
+          if (sm.ok) userSetMode(sm.v);
+        }
+      },
+      sm.label
+    ))), s.modeNote ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-modenote" }, s.modeNote) : null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-banks" }, banks.map((b) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: b.label, className: "mgd-bank" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-bankhd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-banklbl" }, b.label), b.note ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-banknote" }, b.note) : null), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slots" }, b.slots))), isR2v ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-bank" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-bankhd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-banklbl" }, "Audio reference"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-banknote" }, "WAV \u226415MB")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slots" }, s.audSlot && s.audSlot.uploading ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slot", title: "Uploading " + s.audSlot.uploading }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slotcap" }, "uploading\u2026")) : s.audSlot ? /* @__PURE__ */ react_global_shim_default.createElement(
+      "div",
+      {
+        className: "mgd-slot filled audio",
+        title: "Audio reference \u2014 " + s.audSlot.filename,
+        onClick: () => {
+          st.current.audSlot = null;
+          rerender();
+          reprice();
+        }
+      },
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slotcap" }, /* @__PURE__ */ react_global_shim_default.createElement(Icon, { name: "music", title: "Audio" })),
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slot-tag" }, "@audio1")
+    ) : /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slot", title: "Upload a WAV (\u226415MB)", onClick: () => audFileRef.current && audFileRef.current.click() }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slotcap" }, "+ audio")))) : null, /* @__PURE__ */ react_global_shim_default.createElement(
+      "input",
+      {
+        ref: audFileRef,
+        type: "file",
+        className: "mgd-audiofile",
+        accept: "audio/*",
+        style: { display: "none" },
+        onChange: (e) => {
+          const f = e.target.files[0];
+          e.target.value = "";
+          if (f) uploadAudio(f);
+        }
+      }
+    ), !inDock && !loomCtx && ratioOffered(s) ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-ratioblock" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "Aspect ratio"), /* @__PURE__ */ react_global_shim_default.createElement(RatioGrid, { value: s.ratio, onPick: pickRatio, big: true })) : null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-cam-wrap" + (isR2v ? " hid" : ""), "aria-hidden": isR2v || void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "Camera"), /* @__PURE__ */ react_global_shim_default.createElement("select", { className: "mgd-sel mgd-cam", value: s.camera, tabIndex: isR2v ? -1 : void 0, disabled: !modelTakes(s.model, "camera"), title: modelTakes(s.model, "camera") ? void 0 : "Camera \u2014 not used by this engine (kept, not sent)", onChange: (e) => {
+      st.current.camera = e.target.value;
+      rerender();
+      reprice();
+    } }, CAMERA_OPTS.map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: v, value: v }, l)))))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "60ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-enghd mgd-mchd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "Models \xB7 this picture"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg mgd-mcseg", role: "radiogroup", "aria-label": "Length" }, CARD_LENGTHS.indexOf(s.duration) < 0 && /* @__PURE__ */ react_global_shim_default.createElement(
+      "span",
+      {
+        role: "radio",
+        "aria-checked": "true",
+        "aria-readonly": "true",
+        className: "mgd-lenchip on",
+        title: s.duration + " seconds (this run's length; pick 5, 10 or 15 to change it)"
+      },
+      s.duration,
+      "s"
+    ), CARD_LENGTHS.map((d) => {
       const ok = durationAllowed(s.model, d);
       return /* @__PURE__ */ react_global_shim_default.createElement(
         "button",
@@ -7994,13 +8045,37 @@ ${"=".repeat(48)}
           role: "radio",
           "aria-checked": d === s.duration,
           "aria-disabled": !ok,
-          className: "mgd-stop" + (d === s.duration ? " on" : "") + (ok ? "" : " off"),
+          className: (d === s.duration ? "on" : "") + (ok ? "" : " off"),
           title: d + " seconds" + (ok ? "" : " \u2014 not on this engine"),
           onClick: () => pickDuration(d)
         },
-        d
+        d,
+        "s"
       );
-    }))))), inDock ? dock.promptEl ? createPortal(promptField, dock.promptEl) : null : promptField, inDock ? dock.negativeEl ? createPortal(negativeField, dock.negativeEl) : null : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Negative prompt"), negativeField), inDock && dock.topEl ? createPortal(topRow, dock.topEl) : null, inDock ? dock.goEl ? createPortal(/* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, costLine, goButton), dock.goEl) : null : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, costLine, goButton), (() => {
+    }))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-mcards", role: "radiogroup", "aria-label": "Video model", ref: mcardsRef }, groupCards(cards).map((g) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: g.key, className: "mgd-fam" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-fh" }, /* @__PURE__ */ react_global_shim_default.createElement("span", null, g.label), /* @__PURE__ */ react_global_shim_default.createElement("small", null, g.cards.length, " ", g.cards.length > 1 ? "models" : "model")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-grid2" }, g.cards.map((c) => /* @__PURE__ */ react_global_shim_default.createElement(
+      "div",
+      {
+        key: c.value,
+        role: "radio",
+        "aria-checked": c.inUse,
+        className: "mgd-mcard" + (c.inUse ? " cur" : ""),
+        "data-model": c.value
+      },
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-mcrow" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-mct" }, c.label), c.inUse ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-mcuse on" }, "in use") : /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-mcuse", "data-model": c.value, onClick: () => pickVideoModel(c.value) }, "Use this")),
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-mccaps" }, c.caps.map(([t, kind]) => /* @__PURE__ */ react_global_shim_default.createElement("span", { key: t, className: "mgd-cap" + (kind ? " " + kind : "") }, t))),
+      /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-mcm" }, c.modes),
+      /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-mcm mgd-mcprice" }, c.line),
+      /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-mcm mgd-mccover" + (c.cover.ok ? " ok" : "") }, c.cover.text)
+    )))))), loomCtx ? /* @__PURE__ */ react_global_shim_default.createElement(
+      "button",
+      {
+        type: "button",
+        className: "mgd-applyall",
+        onClick: requestApplyAll,
+        title: "Copy this engine, the channel, audio and its language, and the prompt helper to every shot"
+      },
+      "Use these settings for every shot"
+    ) : null)))), inDock ? dock.promptEl ? createPortal(promptField, dock.promptEl) : null : promptField, inDock ? dock.negativeEl ? createPortal(negativeField, dock.negativeEl) : null : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Negative prompt"), negativeField), inDock && dock.topEl ? createPortal(topRow, dock.topEl) : null, inDock ? dock.goEl ? createPortal(/* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, costLine, goButton), dock.goEl) : null : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, costLine, goButton), (() => {
       const shown = linesShown(results, { dock: inDock, loom: !!loomCtx, shot: boundShot() });
       return /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-result" + (shown.length ? " has" : "") }, shown.map((l) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: l.id, className: "mgd-result-line" }, l.kind === "result" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { style: { color: "var(--emerald,#4fc99a)", fontSize: 12, marginBottom: 6 } }, "\u2713 Rendered \u2014 ", l.cost === 0 ? "free (card used)" : Number(l.cost || 0).toLocaleString() + " credits", ". Added to your gallery."), (l.mediaIds || []).map((mid) => /* @__PURE__ */ react_global_shim_default.createElement(
         "a",

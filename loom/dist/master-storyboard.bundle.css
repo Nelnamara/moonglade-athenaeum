@@ -4028,13 +4028,18 @@ button.mgspend {
   container-type: inline-size;
 }
 .gen-drawer .mgd-slabs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.gen-drawer .mgd-lower {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
   gap: 12px;
   align-items: start;
 }
-@container (max-width:640px) {
-  .gen-drawer .mgd-slabs {
+@container (width < 721px) {
+  .gen-drawer .mgd-lower {
     grid-template-columns: 1fr;
   }
 }
@@ -4150,6 +4155,22 @@ button.mgspend {
   flex-wrap: wrap;
   gap: 6px;
 }
+.gen-drawer .mgd-banks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 22px;
+  align-items: flex-start;
+}
+.gen-drawer .mgd-banks .mgd-ratioblock {
+  flex: 1 1 100%;
+}
+.gen-drawer .mgd-banks .mgd-cam-wrap {
+  width: 150px;
+  max-width: 100%;
+}
+.gen-drawer .mgd-banks .mgd-cam-wrap.hid {
+  display: none;
+}
 .gen-drawer .mgd-ce {
   width: 100%;
   box-sizing: border-box;
@@ -4242,46 +4263,41 @@ button.mgspend {
 .gen-drawer .mgd-sel:disabled {
   color: var(--overlay0,#6a6088);
 }
-.gen-drawer .mgd-durhd {
+.gen-drawer .mgd-strip {
+  --mgd-strip-row:34px;
+  flex-direction: row;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+}
+.gen-drawer .mgd-strip .mgd-seg {
+  width: 210px;
+  max-width: 100%;
+  box-sizing: border-box;
+  height: var(--mgd-strip-row);
+}
+.gen-drawer .mgd-strip .mgd-seg button {
+  line-height: 14px;
+}
+.gen-drawer .mgd-strip > .mgd-sec,
+.gen-drawer .mgd-strip > .mgd-sws {
+  min-height: var(--mgd-strip-row);
   display: flex;
-  align-items: baseline;
-  gap: 7px;
+  align-items: center;
 }
-.gen-drawer .mgd-durval {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text,#d6d2e2);
-}
-.gen-drawer .mgd-stops {
+.gen-drawer .mgd-chan {
   display: flex;
-  gap: 5px;
+  flex-direction: column;
+  gap: 3px;
 }
-.gen-drawer .mgd-stop {
-  flex: 1 1 0;
-  min-width: 0;
-  padding: 5px 0;
-  text-align: center;
-  border-radius: 8px;
-  font-size: 10.5px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  transition:
-    border-color .2s,
-    background .2s,
-    color .2s;
-  border: 1px solid var(--surface1,#3a3460);
-  background: transparent;
-  color: var(--subtext,#9a93ab);
+.gen-drawer .mgd-sws {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 22px;
 }
-.gen-drawer .mgd-stop.on {
-  border-color: var(--accent,#b692e6);
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  color: var(--text,#d6d2e2);
-}
-.gen-drawer .mgd-stop.off {
-  cursor: not-allowed;
-  opacity: .3;
+.gen-drawer .mgd-strip .mgd-sel {
+  width: auto;
 }
 .gen-drawer .mgd-cam-wrap {
   display: flex;
@@ -4488,17 +4504,72 @@ button.mgspend {
   padding: 3px 9px;
   font-size: 10.5px;
 }
+.gen-drawer .mgd-mcseg .mgd-lenchip {
+  flex: none;
+  padding: 3px 9px;
+  font-size: 10.5px;
+  font-weight: 600;
+  border-radius: 7px;
+  cursor: default;
+  background: color-mix(in srgb, var(--lavender) 20%, transparent);
+  color: var(--text,#d6d2e2);
+}
 .gen-drawer .mgd-mcards {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   min-height: 0;
 }
-.gen-drawer.mgd-dock .mgd-mcards {
-  max-height: 200px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding-right: 2px;
+.gen-drawer .mgd-fam {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gen-drawer .mgd-fh {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--mauve,#c4a6f0);
+}
+.gen-drawer .mgd-fh:after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: color-mix(in srgb, var(--surface1) 80%, transparent);
+}
+.gen-drawer .mgd-fh small {
+  order: 2;
+  font-weight: 500;
+  color: var(--overlay0,#6a6088);
+  font-size: 9.5px;
+  margin-left: 2px;
+}
+.gen-drawer .mgd-grid2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+@container (width >= 721px) {
+  .gen-drawer .mgd-grid2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .gen-drawer .mgd-mcards {
+    max-height: var(--mgd-mc-max,none);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 4px;
+    scrollbar-width: thin;
+  }
+}
+@container (width < 721px) {
+  .gen-drawer.mgd-dock .mgd-mcards {
+    max-height: 200px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 2px;
+  }
 }
 .gen-drawer .mgd-mcard {
   display: flex;
