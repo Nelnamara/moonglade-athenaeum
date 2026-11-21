@@ -404,6 +404,10 @@ SEAMS = {
         "PUBLIC", "LOGIN", "LOCALHOST", "TIERS", "LOCALHOST_REFUSAL", "_TIER_ATTR", "tier",
         "route_tier", "route_tier_message", "declare_endpoint_tier",
         "assert_every_route_declares_a_tier"]},
+    "moonglade.watch_plans": {"from": "moonglade.gallery", "names": [
+        "WATCH_HEALTHY_S", "WATCH_RECONNECT_WAIT", "WATCH_BACKOFF_FIRST", "WATCH_BACKOFF_MAX",
+        "WATCH_CATCHUP_MIN_GAP", "WATCH_SWEEP_FLOOR", "WATCH_SUBSCRIBE_SETTLE",
+        "WATCH_COLLECT_RETRY_S", "watch_reconnect_plan", "catchup_plan", "watch_close_info"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -1780,6 +1784,35 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_task_model_detail_document.py', 'moonglade.web_tiers'),
     ('tests/test_telemetry.py', 'moonglade.web_tiers'),
     ('tools/export_design_kit.py', 'moonglade.web_tiers'),
+    # Split phase 4, watch_plans: no reader reads the timing plans' text; test_watch reaches them
+    # through moonglade.watch_plans, and web_threads imports them from there.
+    ('loom/test/mg-art-filters.test.js', 'moonglade.watch_plans'),
+    ('loom/test/mg-notify-queue-phase.test.js', 'moonglade.watch_plans'),
+    ('loom/test/mg-notify-website-source.test.js', 'moonglade.watch_plans'),
+    ('loom/test/phone-back-layers.test.js', 'moonglade.watch_plans'),
+    ('tests/test_app_paths.py', 'moonglade.watch_plans'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.watch_plans'),
+    ('tests/test_bonjour.py', 'moonglade.watch_plans'),
+    ('tests/test_branding.py', 'moonglade.watch_plans'),
+    ('tests/test_catalog_verbs.py', 'moonglade.watch_plans'),
+    ('tests/test_catchup_query.py', 'moonglade.watch_plans'),
+    ('tests/test_csrf_coverage.py', 'moonglade.watch_plans'),
+    ('tests/test_design_kit_sync.py', 'moonglade.watch_plans'),
+    ('tests/test_evidence_counters.py', 'moonglade.watch_plans'),
+    ('tests/test_first_party_sources.py', 'moonglade.watch_plans'),
+    ('tests/test_history_feed_document.py', 'moonglade.watch_plans'),
+    ('tests/test_living_library.py', 'moonglade.watch_plans'),
+    ('tests/test_logging.py', 'moonglade.watch_plans'),
+    ('tests/test_loom_notify.py', 'moonglade.watch_plans'),
+    ('tests/test_loom_p_routes.py', 'moonglade.watch_plans'),
+    ('tests/test_network.py', 'moonglade.watch_plans'),
+    ('tests/test_security_review_fixes.py', 'moonglade.watch_plans'),
+    ('tests/test_server_one_module.py', 'moonglade.watch_plans'),
+    ('tests/test_settings_store.py', 'moonglade.watch_plans'),
+    ('tests/test_setup_prepare.py', 'moonglade.watch_plans'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.watch_plans'),
+    ('tests/test_telemetry.py', 'moonglade.watch_plans'),
+    ('tools/export_design_kit.py', 'moonglade.watch_plans'),
 }
 
 

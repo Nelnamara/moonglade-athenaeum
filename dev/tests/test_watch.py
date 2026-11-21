@@ -11,6 +11,7 @@ from moonglade import gen_road as gen_road_mod
 from moonglade import jobs as jobs_mod
 from moonglade import task_feed as task_feed_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import watch_plans as watch_plans_mod
 
 
 class _FakeWS:
@@ -302,7 +303,7 @@ def test_a_stale_reconnect_does_not_wait_out_the_long_backoff():
     (watch_reconnect_plan), so this pin moved from the stale branch's own `backoff = 5` to the
     rule: a connection that lived a stale window is a healthy one, and reconnects at once."""
     from moonglade import gallery as mg
-    assert mg.watch_reconnect_plan(60, task_feed_mod._WS_STALE_TIMEOUT) == (1, 5)
+    assert watch_plans_mod.watch_reconnect_plan(60, task_feed_mod._WS_STALE_TIMEOUT) == (1, 5)
 
 
 def test_mirror_and_reconcile_agree_on_what_done_means():
@@ -865,7 +866,7 @@ def test_reconnect_plan_table():
     faster -- a refused handshake, a drop seconds after subscribing -- climbs 5/15/45/60, so a
     reconnect storm is bounded at about one connect a minute."""
     from moonglade import gallery as mg
-    plan = mg.watch_reconnect_plan
+    plan = watch_plans_mod.watch_reconnect_plan
     assert plan(5, 900) == (1, 5)            # healthy drop: at once
     assert plan(60, 900) == (1, 5)           # ...even after the ladder had climbed to 60
     assert plan(5, 60) == (1, 5)             # lived exactly one heartbeat
@@ -884,7 +885,7 @@ def test_catchup_plan_table():
     periodic backstop keeps its 300 s rule against the last SUCCESSFUL sweep, and never stacks
     on a fresh attempt."""
     from moonglade import gallery as mg
-    P = mg.catchup_plan
+    P = watch_plans_mod.catchup_plan
     # a reconnect waits out the settle delay after its subscribe...
     assert P("reconnect", 100.0, None, None, 102.0) == ("wait", 2.0)
     assert P("reconnect", 102.0, None, None, 102.0) == ("run", 0)
@@ -1094,7 +1095,7 @@ def test_a_failed_collect_is_retried_after_300s_not_every_sweep(tmp_path, monkey
     sweep("reconnect")
     assert tries == ["T_bad"]                    # skipped inside 300 s
     assert "T_bad" not in app.extensions["mg_watch_backed"]
-    clock["t"] += mg.WATCH_COLLECT_RETRY_S
+    clock["t"] += watch_plans_mod.WATCH_COLLECT_RETRY_S
     sweep("reconnect")
     assert tries == ["T_bad", "T_bad"]           # and retried after
 

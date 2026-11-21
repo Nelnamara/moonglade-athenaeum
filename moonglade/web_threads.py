@@ -1379,7 +1379,8 @@ def register(app, ctx):
         mg_watch_catchup seam drives.
 
         Never raises -- a failed catch-up must not kill the thread that called it."""
-        from moonglade.gallery import WATCH_COLLECT_RETRY_S, get_row, get_row_by_task
+        from moonglade.gallery import get_row, get_row_by_task
+        from moonglade.watch_plans import WATCH_COLLECT_RETRY_S
         import logging as _logging
         import time as _time
         from moonglade import backup as core
@@ -1482,7 +1483,7 @@ def register(app, ctx):
         and a connect upgrades a pending periodic sweep to a connect one (never skipped). If a
         worker is running, a connect sets `rerun`: the gap it opened is read once more when the
         current sweep finishes. A periodic ask while anything is pending or running is moot."""
-        from moonglade.gallery import WATCH_SUBSCRIBE_SETTLE
+        from moonglade.watch_plans import WATCH_SUBSCRIBE_SETTLE
         env = _catchup_env
         with _catchup_lock:
             if reason != "periodic":
@@ -1513,7 +1514,7 @@ def register(app, ctx):
         `running` and sets `rerun`, which that block reads. No gap in between can lose a
         request. An unexpected crash still leaves the phase idle (the `finally`), so it can
         never wedge every later request behind a worker that no longer exists."""
-        from moonglade.gallery import catchup_plan
+        from moonglade.watch_plans import catchup_plan
         env = _catchup_env
         finished = False
         try:
@@ -1562,7 +1563,7 @@ def register(app, ctx):
         disconnect, nothing to react to, so reconnect-triggered catch-up alone left it
         undiscovered. This loop asks the same worker on a fixed clock, so discovery never
         depends entirely on the socket's own reconnect cadence."""
-        from moonglade.gallery import WATCH_CATCHUP_MIN_GAP
+        from moonglade.watch_plans import WATCH_CATCHUP_MIN_GAP
         import time as _time
         while True:
             _time.sleep(WATCH_CATCHUP_MIN_GAP)
@@ -1687,7 +1688,7 @@ def register(app, ctx):
         not afterwards, not at all. Every transition below is recorded in
         local/logs/moonglade.log. Transitions and mirrored tasks only, never per-event:
         this stream can carry a lot of traffic and a per-event line would bury the signal."""
-        from moonglade.gallery import watch_close_info, watch_reconnect_plan
+        from moonglade.watch_plans import watch_close_info, watch_reconnect_plan
         import asyncio
         import logging as _logging
         import time as _time
@@ -1767,7 +1768,7 @@ def register(app, ctx):
     app.extensions["mg_watch_status"] = _watch_status
 
     def _watch_loop():
-        from moonglade.gallery import WATCH_BACKOFF_FIRST
+        from moonglade.watch_plans import WATCH_BACKOFF_FIRST
         import logging as _logging
         import time as _time
         _log = _logging.getLogger(__name__)
