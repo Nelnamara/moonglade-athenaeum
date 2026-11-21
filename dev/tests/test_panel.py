@@ -16,6 +16,7 @@ from moonglade import media_tools as media_tools_mod
 from moonglade import thumbs as thumbs_mod
 from moonglade import web_accounts as web_accounts_mod
 from moonglade import full_meta as full_meta_mod
+from moonglade import account_api as account_api_mod
 
 
 def _csrf(html):
@@ -1134,11 +1135,11 @@ def _publish_setup(tmp_path, monkeypatch):
         calls.append(("task_media_index", task_id, media_id))
         return None if media_id == "mNoIdx" else 1
 
-    monkeypatch.setattr(core, "task_media_index", _media_index)
-    monkeypatch.setattr(core, "resolve_tack_ids", _tacks)
-    monkeypatch.setattr(core, "publish_artwork_from_task", _publish)
-    monkeypatch.setattr(core, "update_artwork", _update)
-    monkeypatch.setattr(core, "delete_artwork", _delete)
+    monkeypatch.setattr(account_api_mod, "task_media_index", _media_index)
+    monkeypatch.setattr(account_api_mod, "resolve_tack_ids", _tacks)
+    monkeypatch.setattr(account_api_mod, "publish_artwork_from_task", _publish)
+    monkeypatch.setattr(account_api_mod, "update_artwork", _update)
+    monkeypatch.setattr(account_api_mod, "delete_artwork", _delete)
     return login_test_client(create_app(tmp_path)), calls
 
 
@@ -1366,18 +1367,18 @@ def test_list_trainable_base_models_is_the_curated_snapshot_grouped_by_arch():
 # --- Lineage (2026-08-06): batch siblings (task_id) + derivation chain (source_media_id).
 
 def test_source_media_of_task_reads_all_three_derive_shapes():
-    edit = core.source_media_of_task({"parameters": {"chat": {"mediaId": "111", "modelId": "x"}}})
+    edit = account_api_mod.source_media_of_task({"parameters": {"chat": {"mediaId": "111", "modelId": "x"}}})
     assert edit == ("111", "edit")
-    video = core.source_media_of_task({"parameters": {"i2v": {"mediaId": "222"}}})
+    video = account_api_mod.source_media_of_task({"parameters": {"i2v": {"mediaId": "222"}}})
     assert video == ("222", "video")
-    upscale = core.source_media_of_task({"parameters": {"mediaId": "333", "upscale": 2}})
+    upscale = account_api_mod.source_media_of_task({"parameters": {"mediaId": "333", "upscale": 2}})
     assert upscale == ("333", "upscale")
-    enlarge = core.source_media_of_task({"parameters": {"mediaId": "444", "enlarge": 2}})
+    enlarge = account_api_mod.source_media_of_task({"parameters": {"mediaId": "444", "enlarge": 2}})
     assert enlarge == ("444", "upscale")
-    original = core.source_media_of_task({"parameters": {"prompts": "a cat"}})
+    original = account_api_mod.source_media_of_task({"parameters": {"prompts": "a cat"}})
     assert original == (None, None)
-    assert core.source_media_of_task(None) == (None, None)
-    assert core.source_media_of_task({}) == (None, None)
+    assert account_api_mod.source_media_of_task(None) == (None, None)
+    assert account_api_mod.source_media_of_task({}) == (None, None)
 
 
 def test_api_lineage_returns_siblings_parent_and_children(tmp_path):

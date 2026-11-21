@@ -44,6 +44,7 @@ from moonglade import pixai_client as pixai_client_mod
 from moonglade import history as history_mod
 from moonglade import media_fetch as media_fetch_mod
 from moonglade import library_runs as library_runs_mod
+from moonglade import account_api as account_api_mod
 
 REPO = Path(__file__).resolve().parents[2]
 FEED = operation_name(history_mod._HISTORY_PAGE_DOC)       # what the fake keys the document by
@@ -323,7 +324,7 @@ def test_the_probe_reads_through_the_document(pixai, monkeypatch, capsys):
     _history(pixai, [[_node("T1", mid="M1"), _node("T2")]])
     monkeypatch.setattr(media_fetch_mod, "resolve_media",
                         lambda s, mid: ("https://cdn/" + mid, {"width": 2, "height": 3}))
-    core.run_probe(SimpleNamespace(token=None, page_size=250))
+    account_api_mod.run_probe(SimpleNamespace(token=None, page_size=250))
     out = capsys.readouterr().out
     assert "OK -- 2 items. hasPreviousPage=False" in out
     assert "First task: id=T1 media_ids=['M1']" in out
@@ -334,7 +335,7 @@ def test_the_count_reads_through_the_document(pixai, tmp_path, capsys):
     """The mutation proof for the road: with `gql` back on the saved request, the fake has no
     answer for it and this fails."""
     h = _history(pixai, [[_node("T1"), _node("T2")], [_node("T3")]])
-    core.run_count(SimpleNamespace(token=None, out=str(tmp_path), delay=0))
+    account_api_mod.run_count(SimpleNamespace(token=None, out=str(tmp_path), delay=0))
     out = capsys.readouterr().out
     assert "Total tasks (generations) : 3" in out and "Fetched in 2 request(s)." in out
     assert [c.verb for c in pixai.calls] == ["query", "query"]
@@ -348,7 +349,7 @@ def test_the_count_walks_on_from_a_smaller_page_s_own_cursor(pixai, tmp_path, ca
     it got what it asked for."""
     h = _history(pixai, [[_node("T1")], [_node("T2")]],
                  script=[_internal(), _internal(), _answer([_node("T1")], True, "c1")])
-    core.run_count(SimpleNamespace(token=None, out=str(tmp_path), delay=0,
+    account_api_mod.run_count(SimpleNamespace(token=None, out=str(tmp_path), delay=0,
                                    count_page_size=5000))
     assert [(v["last"], v.get("before")) for v in h.variables] == [
         (5000, None), (5000, None), (2000, None), (5000, "c1")]

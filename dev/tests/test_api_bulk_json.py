@@ -26,6 +26,7 @@ from moonglade import task_reads as task_reads_mod
 from moonglade import cloud_delete as cloud_delete_mod
 from moonglade import curation as curation_mod
 from moonglade import library_runs as library_runs_mod
+from moonglade import account_api as account_api_mod
 
 
 def _row(**kw):
@@ -461,7 +462,7 @@ def test_stats_coverage_matches_the_account_badge_computation(tmp_path, monkeypa
     """Same formula the cover-badge gets from /api/account: distinct local tasks over
     the server's lifetime task count, one decimal, capped at 100."""
     _stats_catalog(tmp_path)
-    monkeypatch.setattr(core, "account_info",
+    monkeypatch.setattr(account_api_mod, "account_info",
                         lambda session: {"tasks": {"totalCount": 3}})
     cli = login_client(tmp_path)
     d = cli.get("/api/stats").get_json()
@@ -475,7 +476,7 @@ def test_stats_coverage_never_exceeds_100(tmp_path, monkeypatch, pixai):
     """A server count lagging behind local (sync raced a deletion) must clamp, not
     report 200% backed up -- same min() the account route applies."""
     _stats_catalog(tmp_path)
-    monkeypatch.setattr(core, "account_info",
+    monkeypatch.setattr(account_api_mod, "account_info",
                         lambda session: {"tasks": {"totalCount": 1}})
     cli = login_client(tmp_path)
     assert cli.get("/api/stats").get_json()["coverage_pct"] == 100.0

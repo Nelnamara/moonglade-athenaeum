@@ -305,6 +305,7 @@ from moonglade import history as history_mod
 from moonglade import media_fetch as media_fetch_mod
 from moonglade import full_meta as full_meta_mod
 from moonglade import library_runs as library_runs_mod
+from moonglade import account_api as account_api_mod
 
 
 def _dl_args(out, **kw):
@@ -763,7 +764,7 @@ def test_extract_artwork_meta():
                       {"displayName": "tag2"}],
             "extra": {"imageBlurHash": "U8A]jP%L",
                       "nsfwPredict": {"porn": 0.0510777, "hentai": 0.913348, "neutral": 0.01}}}
-    m = core.extract_artwork_meta(node)
+    m = account_api_mod.extract_artwork_meta(node)
     assert m["media_id"] == "m1" and m["artwork_id"] == "aw1"
     assert m["title"] == "Lollipop Elf"
     assert m["is_published"] == "1" and m["is_nsfw"] == "1" and m["is_sensitive"] == "1"
@@ -776,7 +777,7 @@ def test_extract_artwork_meta():
 
 def test_extract_artwork_meta_no_extra():
     # a node without an `extra` block leaves the new fields blank (never raises)
-    m = core.extract_artwork_meta({"id": "a", "mediaId": "m", "visibility": "PRIVATE"})
+    m = account_api_mod.extract_artwork_meta({"id": "a", "mediaId": "m", "visibility": "PRIVATE"})
     assert m["blurhash"] == "" and m["nsfw_scores"] == "" and m["is_published"] == "0" and m["is_sensitive"] == "0"
 
 
@@ -809,7 +810,7 @@ def test_sync_artworks_merges_by_media_id(tmp_path, mocker, pixai):
                                 "likedCount": 3, "commentCount": 1,
                                 "aesScore": 6.0, "tacks": []}}],
             "pageInfo": {"hasPreviousPage": False}}
-    mocker.patch.object(core, "artwork_list_gql", return_value=conn)
+    mocker.patch.object(account_api_mod, "artwork_list_gql", return_value=conn)
     _views_sweep(pixai, {"aw1": 412})
 
     res = library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
@@ -837,7 +838,7 @@ def test_sync_artworks_tags_the_animation_video_row(tmp_path, mocker, pixai):
                                 "isNsfw": False, "likedCount": 4, "commentCount": 0,
                                 "aesScore": 6.0, "tacks": []}}],
             "pageInfo": {"hasPreviousPage": False}}
-    mocker.patch.object(core, "artwork_list_gql", return_value=conn)
+    mocker.patch.object(account_api_mod, "artwork_list_gql", return_value=conn)
     _views_sweep(pixai, {"aw9": 77})
 
     res = library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
@@ -861,7 +862,7 @@ def test_sync_artworks_resolves_userid_via_session(tmp_path, mocker):
         core.USER_ID = "resolved-99"                          # _make_session resolves it live
         return mocker.MagicMock()
     mocker.patch.object(core, "_make_session", side_effect=fake_session)
-    mocker.patch.object(core, "artwork_list_gql",
+    mocker.patch.object(account_api_mod, "artwork_list_gql",
                         return_value={"edges": [], "pageInfo": {"hasPreviousPage": False}})
     res = library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
     assert res["artworks"] == 0 and core.USER_ID == "resolved-99"   # ran instead of raising
@@ -883,7 +884,7 @@ def test_sync_artworks_with_videos_skips_already_downloaded(tmp_path, mocker, pi
                                 "likedCount": 0, "commentCount": 0, "aesScore": 0,
                                 "tacks": [], "videoMediaId": "V1"}}],
             "pageInfo": {"hasPreviousPage": False}}
-    mocker.patch.object(core, "artwork_list_gql", return_value=conn)
+    mocker.patch.object(account_api_mod, "artwork_list_gql", return_value=conn)
     # Mocked with a well-formed return (not a bare MagicMock): if the bug fires and
     # this DOES get called, _fetch_video must still complete cleanly so the failure
     # shows up as the assertion below, not an incidental unpack/network crash.
@@ -914,7 +915,7 @@ def test_sync_artworks_flags_incomplete_pagination_as_a_failure(tmp_path, mocker
                                  "likedCount": 1, "commentCount": 0}}],
              "pageInfo": {"hasPreviousPage": True, "startCursor": "cursor2"}}
     # Page 1 succeeds; page 2's fetch "fails" (artwork_list_gql's own failure mode).
-    mocker.patch.object(core, "artwork_list_gql",
+    mocker.patch.object(account_api_mod, "artwork_list_gql",
                         side_effect=[page1, core.ArtworkListRefused("page 2 refused")])
     _views_sweep(pixai, {"aw1": 5})
 
@@ -940,7 +941,7 @@ def test_sync_artworks_counts_failed_video_downloads_as_a_failure(tmp_path, mock
                                 "likedCount": 0, "commentCount": 0,
                                 "videoMediaId": "vid1"}}],
             "pageInfo": {"hasPreviousPage": False}}
-    mocker.patch.object(core, "artwork_list_gql", return_value=conn)
+    mocker.patch.object(account_api_mod, "artwork_list_gql", return_value=conn)
     # already_downloaded_video, not already_downloaded -- B16 (merged separately, same
     # sweep) redirected this call site to the video-aware matcher.
     mocker.patch.object(history_mod, "already_downloaded_video", return_value=None)
@@ -1051,7 +1052,7 @@ def test_account_info_parses_me(pixai):
                        "privilege": {"dailyClaimAdded": 10000, "professionalMode": True}},
         "subscription": {"planId": "membership-plus", "status": "active",
                          "cancelAtPeriodEnd": True, "endAt": "2026-07-08T00:00:00Z"}}})
-    me = core.account_info(pixai)
+    me = account_api_mod.account_info(pixai)
     assert me["quotaAmount"] == 21290
     assert me["membership"]["membershipId"] == "membership-plus"
     assert me["tasks"]["totalCount"] == 19623      # server's lifetime task count (backup coverage)
@@ -1073,17 +1074,17 @@ def test_account_query_does_not_ask_for_roles(pixai):
     ever genuinely wanted, query them SEPARATELY with a subfield selection so a mistake there
     cannot take the account read down with it.
     """
-    assert "roles" not in core._ACCOUNT_QUERY, (
+    assert "roles" not in account_api_mod._ACCOUNT_QUERY, (
         "roles is back in the account query -- bare, it fails validation and takes credits, "
         "membership, the LoRA cap and the setup wizard with it")
     pixai.on("me", {"me": {"id": "42", "quotaAmount": 1850640}})
-    assert core.account_info(pixai)["quotaAmount"] == 1850640
+    assert account_api_mod.account_info(pixai)["quotaAmount"] == 1850640
 
 def test_account_info_empty_on_error(pixai):
     pixai.fail("me", core.PixAIError("boom"))
-    assert core.account_info(pixai) == {}                       # soft-fail (web relies on this)
+    assert account_api_mod.account_info(pixai) == {}                       # soft-fail (web relies on this)
     with __import__("pytest").raises(core.PixAIError):          # ...but can surface the reason
-        core.account_info(pixai, raise_on_error=True)
+        account_api_mod.account_info(pixai, raise_on_error=True)
 
 
 def test_run_account_info_reports_real_reason(pixai, capsys):
@@ -1091,10 +1092,10 @@ def test_run_account_info_reports_real_reason(pixai, capsys):
     catch-all that blamed the API key for any hiccup."""
     from types import SimpleNamespace
     pixai.fail("me", core.PixAIError("401 Unauthorized -- API key"))
-    core.run_account_info(SimpleNamespace(token=None))
+    account_api_mod.run_account_info(SimpleNamespace(token=None))
     assert "API key" in capsys.readouterr().out
     pixai.fail("me", core.PixAIError("connection reset"))
-    core.run_account_info(SimpleNamespace(token=None))
+    account_api_mod.run_account_info(SimpleNamespace(token=None))
     assert "temporary" in capsys.readouterr().out.lower()
 
 
@@ -1104,13 +1105,13 @@ def test_credit_balance_returns_the_free_paid_split(pixai):
     # The real split: aliased quotaAmount fields on `me` with currency "free"/"paid"
     # (recovered from the site's own operation AST, verified live 2026-08-07).
     pixai.on("me", {"me": {"id": "42", "total": 3752991, "free": 219951, "paid": 3533040}})
-    result = core.credit_balance(pixai)
+    result = account_api_mod.credit_balance(pixai)
     assert result == {"total": 3752991, "free": 219951, "paid": 3533040}
 
 
 def test_credit_balance_fails_soft(pixai):
     pixai.fail("me", core.PixAIError("boom"))
-    assert core.credit_balance(pixai) == {
+    assert account_api_mod.credit_balance(pixai) == {
         "total": None, "free": None, "paid": None}
 
 
@@ -1129,7 +1130,7 @@ def test_run_account_info_shows_free_paid_breakdown(pixai, capsys):
         return {"me": {"id": "42", "quotaAmount": 3752991}}
 
     pixai.on("me", answer)
-    res = core.run_account_info(SimpleNamespace(token=None))
+    res = account_api_mod.run_account_info(SimpleNamespace(token=None))
     out = capsys.readouterr().out
     assert "of which free" in out and "219,951" in out
     assert "of which paid" in out and "3,533,040" in out

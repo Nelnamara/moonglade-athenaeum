@@ -690,7 +690,7 @@ def test_generate_answers_a_recipe_refusal_structured(tmp_path, monkeypatch):
     def refuse(session, req, **k):
         raise _refused("RECIPE_INCOMPATIBLE", "model_mismatch", [RID])
     monkeypatch.setattr(gen_road_mod, "submit", refuse)
-    monkeypatch.setattr(core, "account_info", lambda s: {})
+    monkeypatch.setattr(account_api_mod, "account_info", lambda s: {})
     monkeypatch.setattr(gen_road_mod, "model_version_resolver",
                         lambda s: (lambda m, v="": "1983308862240288769"))
     monkeypatch.setattr(gen_road_mod, "gate_resolver", lambda s: (lambda p: (p, [])))
@@ -710,6 +710,7 @@ def test_generate_answers_a_recipe_refusal_structured(tmp_path, monkeypatch):
 
 from tests.test_tsubaki3_generate import T3, Rest, ctx_payload, road  # noqa: E402
 from moonglade import pixai_client as pixai_client_mod
+from moonglade import account_api as account_api_mod
 
 
 @pytest.fixture

@@ -46,6 +46,7 @@ from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_client, login_test_client
 from moonglade import jobs as jobs_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import account_api as account_api_mod
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 VECTORS = json.load(open(os.path.join(HERE, "fixtures", "template_vectors.json"), encoding="utf-8"))
@@ -133,7 +134,7 @@ def rig(monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "_rest_get", rest_get)
     monkeypatch.setattr(core, "_rest_post", rest_post)
-    monkeypatch.setattr(core, "account_info", account_info)
+    monkeypatch.setattr(account_api_mod, "account_info", account_info)
     monkeypatch.setattr(pricing_mod, "price_task", price_task)
     monkeypatch.setattr(cards_mod, "match_kaisuuken", match)
     monkeypatch.setattr(core, "gql_mutate", gql_mutate)

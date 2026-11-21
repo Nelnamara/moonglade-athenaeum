@@ -1949,7 +1949,7 @@ def test_setup_wizard_onboards_a_genuinely_fresh_install(
 
         # --- key: a REAL POST /api/setup/save-key; only account_info is mocked (the same
         # substitution dev/tests/test_setup_wizard.py uses -- this harness has no real key) ---
-        monkeypatch.setattr(core, "account_info",
+        monkeypatch.setattr(account_api_mod, "account_info",
                             lambda session, raise_on_error=False: {"quotaAmount": 777})
         page.fill(".wz-keyinput", "sk-harness-fake-key")
         page.click(".wz-authbtn")
@@ -4861,6 +4861,7 @@ from tests.conftest import donor_feat as _donor_feat
 from moonglade import telemetry as telemetry_mod
 from moonglade import branding as branding_mod
 from moonglade import web_accounts as web_accounts_mod
+from moonglade import account_api as account_api_mod
 _UNDER_THE_HOOD = _donor_feat(unlocks="branding_tab")
 _DROP_RGB = (200, 40, 90)              # a colour nothing else in this harness paints, so a
 #                                        served pixel PROVES it came from this exact drop

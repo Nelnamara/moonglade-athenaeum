@@ -26,6 +26,7 @@ from moonglade import living as _living
 from moonglade import pixai_client as _pixai_client
 from moonglade import series as _series
 from moonglade import telemetry as _telemetry
+from moonglade import account_api as _account_api
 
 
 def register(app, ctx):
@@ -448,7 +449,7 @@ def register(app, ctx):
             return jsonify({"views": None}), 400
         try:
             core, session = _gen_session()
-            return jsonify({"views": core.artwork_views(session, aid)})
+            return jsonify({"views": _account_api.artwork_views(session, aid)})
         except Exception as e:
             return jsonify({"views": None, "error": _redact_host_paths(str(e))[:120]}), 200
 
@@ -604,7 +605,7 @@ def register(app, ctx):
 
         tack_ids, unmatched = [], []
         if tags is not None:
-            tack_ids, unmatched = core.resolve_tack_ids(session, tags)   # read-only
+            tack_ids, unmatched = _account_api.resolve_tack_ids(session, tags)   # read-only
 
         # Which image of its task this media_id is. Resolved SERVER-side from the task's
         # own ordered outputs, never taken from the client: publishing index 2 when the
@@ -613,7 +614,7 @@ def register(app, ctx):
         # which is what lets the preview refuse an unresolvable image before confirming.
         media_index = None
         if action == "publish":
-            media_index = core.task_media_index(session, row["task_id"], mid)
+            media_index = _account_api.task_media_index(session, row["task_id"], mid)
             if media_index is None:
                 return jsonify({"error": "couldn't work out which image of task %s this is "
                                          "-- refusing to publish rather than risk the wrong "
@@ -636,7 +637,7 @@ def register(app, ctx):
                 # which is exactly the bug: the confirm sheet showed "(untitled)" but the
                 # mutation went out with the stale title. Only an absent field (title is
                 # None, the client never sent it) falls back. Found by ultrareview 2026-08-06.
-                art = core.publish_artwork_from_task(
+                art = _account_api.publish_artwork_from_task(
                     session, row["task_id"],
                     media_index=media_index,
                     title=(title if title is not None else row["title"]) or "",
@@ -646,10 +647,10 @@ def register(app, ctx):
                     challenge=body.get("challenge") or None)
                 result = {"artwork_id": art.get("id"), "published": True}
             elif action == "delete":
-                core.delete_artwork(session, row["artwork_id"])
+                _account_api.delete_artwork(session, row["artwork_id"])
                 result = {"deleted": True}
             else:
-                art = core.update_artwork(
+                art = _account_api.update_artwork(
                     session, row["artwork_id"],
                     title=title,
                     tack_ids=(tack_ids if tags is not None else None),

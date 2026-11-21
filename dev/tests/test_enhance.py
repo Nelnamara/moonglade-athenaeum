@@ -17,6 +17,7 @@ from moonglade import mirror as mirror_mod
 from moonglade import telemetry as telemetry_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import catalog as catalog_mod
+from moonglade import account_api as account_api_mod
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -235,9 +236,9 @@ def test_source_media_of_task_derives_enhance_lineage():
     getTaskById -- PixAI may camelCase media_id -> mediaId on the persisted read-back. This
     fixture proves the derive branch, not the field name PixAI stores it under."""
     params = gen_params_mod.build_panelplugin_parameters("SRC123", "1796053397111789217")
-    assert core.source_media_of_task({"parameters": params}) == ("SRC123", "enhance")
+    assert account_api_mod.source_media_of_task({"parameters": params}) == ("SRC123", "enhance")
     # A workflowName preset carries the same inputs.image.media_id shape.
     p2 = gen_params_mod.build_panelplugin_parameters("SRC456", workflow_name="mymusise/hand-fix")
-    assert core.source_media_of_task({"parameters": p2}) == ("SRC456", "enhance")
+    assert account_api_mod.source_media_of_task({"parameters": p2}) == ("SRC456", "enhance")
     # A plain txt2img (no inputs.image) is still an original -> (None, None), unchanged.
-    assert core.source_media_of_task({"parameters": {"modelId": "m", "prompt": "x"}}) == (None, None)
+    assert account_api_mod.source_media_of_task({"parameters": {"modelId": "m", "prompt": "x"}}) == (None, None)

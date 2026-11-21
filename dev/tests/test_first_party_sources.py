@@ -68,6 +68,7 @@ _TODAY = (
     "moonglade/media_fetch.py",
     "moonglade/full_meta.py",
     "moonglade/library_runs.py",
+    "moonglade/account_api.py",
     "moonglade/similar.py", "moonglade/task_reads.py", "moonglade/telemetry.py",
     "moonglade/updater.py",
 )

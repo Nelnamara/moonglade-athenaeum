@@ -40,6 +40,7 @@ from moonglade import mirror as mirror_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import cloud_delete as cloud_delete_mod
 from moonglade import training as training_mod
+from moonglade import account_api as account_api_mod
 
 
 # Every function that fires a credit-spending or account-mutating GraphQL call. When a new
@@ -75,8 +76,8 @@ SPEND_PATHS = ("submit_generation", "run_generate", "run_generate_video",
                # another, each through submit() -> submit_generation(exact=True).
                "send_run")
 
-# Where each spend path lives: backup, or the split module it moved to (3.22, phase 5).
-_HOMES = (core, cloud_delete_mod, gen_road_mod, gen_cli_mod, training_mod)
+# Where each spend path lives: backup, or the split module it moved to (3.22, phases 4-5).
+_HOMES = (core, cloud_delete_mod, gen_road_mod, gen_cli_mod, training_mod, account_api_mod)
 
 
 def _spend_path(name):
@@ -352,18 +353,18 @@ class TestSpendingPathsAreSingleAttempt:
 
     def test_publish_artwork_from_task(self, mock_session, gql_calls):
         """No credits, but a re-POST after a lost response publishes the artwork twice."""
-        core.publish_artwork_from_task(mock_session, "task1")
-        _assert_single_attempt(gql_calls, core._PUBLISH_FROM_TASK)
+        account_api_mod.publish_artwork_from_task(mock_session, "task1")
+        _assert_single_attempt(gql_calls, account_api_mod._PUBLISH_FROM_TASK)
 
     def test_update_artwork(self, mock_session, gql_calls):
-        core.update_artwork(mock_session, "art1", title="new title")
-        _assert_single_attempt(gql_calls, core._UPSERT_ARTWORK)
+        account_api_mod.update_artwork(mock_session, "art1", title="new title")
+        _assert_single_attempt(gql_calls, account_api_mod._UPSERT_ARTWORK)
 
     def test_delete_artwork(self, mock_session, gql_calls):
         """A void mutation: success is the ABSENCE of an error, and a retry could delete
         something already gone."""
-        core.delete_artwork(mock_session, "art1")
-        _assert_single_attempt(gql_calls, core._DELETE_ARTWORK)
+        account_api_mod.delete_artwork(mock_session, "art1")
+        _assert_single_attempt(gql_calls, account_api_mod._DELETE_ARTWORK)
 
 
 class TestNoSpendPathReachesPastTheHelper:

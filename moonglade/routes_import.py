@@ -19,6 +19,7 @@ from moonglade import gen_params as _gen_params
 from moonglade import scan as _scan
 from moonglade import telemetry as _telemetry
 from moonglade import library_runs as _library_runs
+from moonglade import account_api as _account_api
 
 
 def register(app, ctx):
@@ -74,7 +75,7 @@ def register(app, ctx):
             return jsonify({"suggestions": [], "error": why}), 200
         try:
             core, session = _gen_session()
-            return jsonify({"suggestions": core.suggest_prompt(session, mid)})
+            return jsonify({"suggestions": _account_api.suggest_prompt(session, mid)})
         except Exception as e:
             return jsonify({"suggestions": [], "error": _redact_host_paths(str(e))[:200]}), 200
 
@@ -88,7 +89,7 @@ def register(app, ctx):
             return jsonify({"tags": []})
         try:
             core, session = _gen_session()
-            return jsonify({"tags": core.tag_search_gql(session, q, first=8)})
+            return jsonify({"tags": _account_api.tag_search_gql(session, q, first=8)})
         except Exception as e:
             return jsonify({"tags": [], "error": _redact_host_paths(str(e))[:200]}), 200
 

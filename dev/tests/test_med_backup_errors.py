@@ -40,6 +40,7 @@ from moonglade import thumbs as thumbs_mod
 from moonglade import media_fetch as media_fetch_mod
 from moonglade import full_meta as full_meta_mod
 from moonglade import library_runs as library_runs_mod
+from moonglade import account_api as account_api_mod
 
 
 @pytest.fixture()
@@ -316,7 +317,7 @@ class TestM05Claims:
     def test_list_claims_carries_the_failure_reason(self):
         """conftest blocks live /v2, so _rest_get raises here exactly as a 5xx would. The
         fail-soft contract (an empty list) is preserved for the gallery's callers."""
-        res = core.list_claims(object())
+        res = account_api_mod.list_claims(object())
 
         assert res == []                              # unchanged for every existing caller
         assert getattr(res, "error", "")              # ...but it now says why
@@ -326,7 +327,7 @@ class TestM05Claims:
         transient 5xx printed 'No claimable rewards found'."""
         monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
 
-        res = core.run_claims(SimpleNamespace(token=None, claims=True, claim="", confirm=False))
+        res = account_api_mod.run_claims(SimpleNamespace(token=None, claims=True, claim="", confirm=False))
 
         out = capsys.readouterr().out
         assert "No claimable rewards found" not in out
@@ -337,9 +338,9 @@ class TestM05Claims:
         """The other half of the distinction -- and proof a caller handing back a PLAIN list
         (no .error attribute) still works, which is how the existing tests stub this."""
         monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-        monkeypatch.setattr(core, "list_claims", lambda s: [])
+        monkeypatch.setattr(account_api_mod, "list_claims", lambda s: [])
 
-        res = core.run_claims(SimpleNamespace(token=None, claims=True, claim="", confirm=False))
+        res = account_api_mod.run_claims(SimpleNamespace(token=None, claims=True, claim="", confirm=False))
 
         assert res == {"rewards": 0}
         assert "No claimable rewards found" in capsys.readouterr().out

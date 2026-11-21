@@ -191,7 +191,7 @@ def _task_for_full_meta(session, task_id):
 
 def extract_full_meta(task):
     """Pull the extended fields out of a getTaskById task dict."""
-    from moonglade.backup import source_media_of_task
+    from moonglade.account_api import source_media_of_task
     if not task:
         return {}
     params = task.get("parameters") or {}

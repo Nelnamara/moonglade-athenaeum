@@ -698,7 +698,7 @@ def test_the_wizard_saves_the_key_through_the_atomic_writer(tmp_path, monkeypatc
     monkeypatch.setattr(core, "_config_path", lambda: tmp_path / "config.json")
     cli = login_client(tmp_path)
     before = (tmp_path / "config.json").read_bytes()
-    monkeypatch.setattr(core, "account_info",
+    monkeypatch.setattr(account_api_mod, "account_info",
                         lambda session, raise_on_error=False: {"quotaAmount": 5})
     monkeypatch.setattr(core.os, "replace",
                         lambda *a: (_ for _ in ()).throw(PermissionError(13, "held")))
@@ -716,6 +716,7 @@ import types  # noqa: E402
 from tests.conftest import stub_code_module  # noqa: E402
 from tests.test_launcher_gets_ready_first import _ready, _setup, launch  # noqa: E402,F401
 from moonglade import branding as branding_mod
+from moonglade import account_api as account_api_mod
 
 
 def test_a_later_failure_is_not_given_an_earlier_start_s_sentence(launch, monkeypatch):

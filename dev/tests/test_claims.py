@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 from moonglade import backup as core
+from moonglade import account_api as account_api_mod
 
 _REWARDS = [
     {"id": "pixai-daily-credits", "amount": 30000, "canClaim": False,
@@ -13,13 +14,13 @@ _REWARDS = [
 
 def test_list_claims(monkeypatch):
     monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: _REWARDS)
-    assert core.list_claims(object()) == _REWARDS
+    assert account_api_mod.list_claims(object()) == _REWARDS
 
 
 def test_list_claims_fails_soft(monkeypatch):
     monkeypatch.setattr(core, "_rest_get",
                         lambda *a, **k: (_ for _ in ()).throw(core.PixAIError("down")))
-    assert core.list_claims(object()) == []
+    assert account_api_mod.list_claims(object()) == []
 
 
 def test_claim_reward_posts_to_id(monkeypatch):
@@ -28,7 +29,7 @@ def test_claim_reward_posts_to_id(monkeypatch):
         seen["path"] = path
         return {"id": "x", "canClaim": False}
     monkeypatch.setattr(core, "_rest_post", fake_post)
-    core.claim_reward(object(), "agent-daily-stamina")
+    account_api_mod.claim_reward(object(), "agent-daily-stamina")
     assert seen["path"] == "/claim/agent-daily-stamina"
 
 
@@ -39,43 +40,43 @@ def _args(**kw):
 
 
 def test_run_claims_list_readonly(monkeypatch, capsys, pixai):
-    monkeypatch.setattr(core, "list_claims", lambda s: _REWARDS)
-    res = core.run_claims(_args(claims=True))
+    monkeypatch.setattr(account_api_mod, "list_claims", lambda s: _REWARDS)
+    res = account_api_mod.run_claims(_args(claims=True))
     out = capsys.readouterr().out
     assert res == {"rewards": 2, "ready": 1}
     assert "agent-daily-stamina" in out and "READY" in out
 
 
 def test_run_claims_previews_without_confirm(monkeypatch, capsys, pixai):
-    monkeypatch.setattr(core, "list_claims", lambda s: _REWARDS)
-    monkeypatch.setattr(core, "claim_reward",
+    monkeypatch.setattr(account_api_mod, "list_claims", lambda s: _REWARDS)
+    monkeypatch.setattr(account_api_mod, "claim_reward",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("no claim in preview")))
-    res = core.run_claims(_args(claim="agent-daily-stamina"))
+    res = account_api_mod.run_claims(_args(claim="agent-daily-stamina"))
     assert res == {"claimed": 0, "preview": True}
     assert "Would claim" in capsys.readouterr().out
 
 
 def test_run_claims_with_confirm(monkeypatch, pixai):
-    monkeypatch.setattr(core, "list_claims", lambda s: _REWARDS)
+    monkeypatch.setattr(account_api_mod, "list_claims", lambda s: _REWARDS)
     calls = []
-    monkeypatch.setattr(core, "claim_reward", lambda s, cid: calls.append(cid) or {"id": cid})
-    res = core.run_claims(_args(claim="agent-daily-stamina", confirm=True))
+    monkeypatch.setattr(account_api_mod, "claim_reward", lambda s, cid: calls.append(cid) or {"id": cid})
+    res = account_api_mod.run_claims(_args(claim="agent-daily-stamina", confirm=True))
     assert res == {"claimed": 1} and calls == ["agent-daily-stamina"]
 
 
 def test_run_claims_unclaimable_guard(monkeypatch, capsys, pixai):
-    monkeypatch.setattr(core, "list_claims", lambda s: _REWARDS)
-    monkeypatch.setattr(core, "claim_reward",
+    monkeypatch.setattr(account_api_mod, "list_claims", lambda s: _REWARDS)
+    monkeypatch.setattr(account_api_mod, "claim_reward",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not claim")))
-    res = core.run_claims(_args(claim="pixai-daily-credits", confirm=True))
+    res = account_api_mod.run_claims(_args(claim="pixai-daily-credits", confirm=True))
     assert res == {"claimed": 0}
     assert "not claimable yet" in capsys.readouterr().out
 
 
 def test_run_claims_all_claims_only_ready(monkeypatch, pixai):
-    monkeypatch.setattr(core, "list_claims", lambda s: _REWARDS)
+    monkeypatch.setattr(account_api_mod, "list_claims", lambda s: _REWARDS)
     calls = []
-    monkeypatch.setattr(core, "claim_reward", lambda s, cid: calls.append(cid) or {})
-    res = core.run_claims(_args(claim="all", confirm=True))
+    monkeypatch.setattr(account_api_mod, "claim_reward", lambda s, cid: calls.append(cid) or {})
+    res = account_api_mod.run_claims(_args(claim="all", confirm=True))
     assert calls == ["agent-daily-stamina"]   # skips the not-yet-claimable daily credits
     assert res == {"claimed": 1}

@@ -57,6 +57,7 @@ from moonglade import history as history_mod
 from moonglade import media_fetch as media_fetch_mod
 from moonglade import full_meta as full_meta_mod
 from moonglade import library_runs as library_runs_mod
+from moonglade import account_api as account_api_mod
 
 REPO = Path(__file__).resolve().parents[2]
 RECORDED = json.loads((Path(__file__).resolve().parent / "fixtures" /
@@ -323,7 +324,7 @@ def test_every_other_reader_of_a_task_reads_it_the_same(pixai, kind):
     doc, saved = _document(kind), _saved(kind)
     pixai.on(TASK_DETAIL, {"task": doc})
     task = task_reads_mod.task_detail_gql(pixai, doc["id"])
-    for reader in (full_meta_mod.video_outputs, core.source_media_of_task, history_mod.fixer_block,
+    for reader in (full_meta_mod.video_outputs, account_api_mod.source_media_of_task, history_mod.fixer_block,
                    cloud_delete_mod.task_artwork_ids, full_meta_mod._paid_credit_str):
         assert reader(task) == reader(saved), reader.__name__
     assert gen_cli_mod._task_image_media(task["outputs"]) == gen_cli_mod._task_image_media(saved["outputs"])
@@ -439,7 +440,7 @@ def test_the_video_sync_reads_its_task_through_the_document(pixai, tmp_path, mon
     row = {r["media_id"]: r for r in load_catalog(tmp_path / "catalog.db")}[vmid]
     assert row["paid_credit"] == str(doc["paidCredit"])
     assert row["video_model"] == "v4.0.1" and row["prompt_full"] == shared["prompt"]
-    assert row["source_media_id"] == core.source_media_of_task(doc)[0]
+    assert row["source_media_id"] == account_api_mod.source_media_of_task(doc)[0]
 
 
 def test_backfill_full_meta_reads_both_documents(pixai, tmp_path, fresh_model_caches):

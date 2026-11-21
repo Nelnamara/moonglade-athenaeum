@@ -20,6 +20,7 @@ from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_client, login_test_client
 from moonglade import jobs as jobs_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import account_api as account_api_mod
 
 
 def _status_answers(monkeypatch, task):
@@ -1358,8 +1359,8 @@ def _claim_stubs(monkeypatch, rewards):
     """A claimable account with no network: the route's session, its reward list, and a
     claim call that succeeds. Nothing here reaches PixAI."""
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "list_claims", lambda s: rewards)
-    monkeypatch.setattr(core, "claim_reward", lambda s, cid: {"id": cid})
+    monkeypatch.setattr(account_api_mod, "list_claims", lambda s: rewards)
+    monkeypatch.setattr(account_api_mod, "claim_reward", lambda s, cid: {"id": cid})
 
 
 def _claim_rows(cli):
@@ -1411,7 +1412,7 @@ def test_a_failed_claim_writes_no_line(tmp_path, monkeypatch):
     """An upstream failure answers with its error and leaves no trail of a claim that never
     landed."""
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "list_claims",
+    monkeypatch.setattr(account_api_mod, "list_claims",
                         lambda s: (_ for _ in ()).throw(core.PixAIError("claims are down")))
     cli = _authed_client(tmp_path)
     assert cli.post("/api/claim").get_json()["error"]

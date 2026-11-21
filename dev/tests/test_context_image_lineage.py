@@ -17,6 +17,7 @@ from moonglade import backup as core
 from moonglade.catalog import CATALOG_FIELDS, load_catalog, migrate, save_catalog
 from moonglade import task_reads as task_reads_mod
 from moonglade import full_meta as full_meta_mod
+from moonglade import account_api as account_api_mod
 
 T3 = "2024383379556065549"          # Tsubaki.3
 FLASH = "2050048243034896798"       # Tsubaki.3 Flash
@@ -44,11 +45,11 @@ def _context_run(*context_ids, model=T3):
 
 
 def test_a_context_image_run_names_its_source():
-    assert core.source_media_of_task(_context_run(SRC_A)) == (SRC_A, "derived")
+    assert account_api_mod.source_media_of_task(_context_run(SRC_A)) == (SRC_A, "derived")
 
 
 def test_with_two_context_images_the_first_is_the_source():
-    assert core.source_media_of_task(_context_run(SRC_A, SRC_B)) == (SRC_A, "derived")
+    assert account_api_mod.source_media_of_task(_context_run(SRC_A, SRC_B)) == (SRC_A, "derived")
 
 
 def test_the_existing_shapes_still_win_over_context_images():
@@ -57,14 +58,14 @@ def test_the_existing_shapes_still_win_over_context_images():
     t = _context_run(SRC_A)
     t["parameters"]["mediaId"] = "999"
     t["parameters"]["upscale"] = 2
-    assert core.source_media_of_task(t) == ("999", "upscale")
+    assert account_api_mod.source_media_of_task(t) == ("999", "upscale")
 
 
 def test_empty_or_blank_context_images_are_still_an_original():
     for ctx in ([], [""], None):
         t = _context_run()
         t["parameters"]["contextImages"] = ctx
-        assert core.source_media_of_task(t) == (None, None)
+        assert account_api_mod.source_media_of_task(t) == (None, None)
 
 
 def test_create_time_collection_files_the_lineage():

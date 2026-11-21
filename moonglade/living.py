@@ -16,6 +16,7 @@ import time
 
 from moonglade import pixai_client as _pixai_client
 from moonglade import series as _series
+from moonglade import account_api as _account_api
 
 # ======================================================================================
 # THE LIVING LIBRARY (2026-09-06)
@@ -240,7 +241,7 @@ def artworks_sweep(out_dir, db_path, force=False, now=None, log_event=None):
             incomplete = True
             break
         try:
-            conn = core.artwork_list_gql(session, before=before, last=ARTWORKS_PAGE, retries=0)
+            conn = _account_api.artwork_list_gql(session, before=before, last=ARTWORKS_PAGE, retries=0)
         except core.ArtworkListRefused as e:
             # A page that cannot be read. Whatever was collected is real and is written
             # below; the run is simply incomplete, and an incomplete sweep must NOT buy
@@ -265,7 +266,7 @@ def artworks_sweep(out_dir, db_path, force=False, now=None, log_event=None):
                 # AND leaving the run unstamped. A skip costs one row until the next sweep;
                 # the alternative costs the entire pass, every fifteen minutes, forever.
                 try:
-                    meta = core.extract_artwork_meta(node)
+                    meta = _account_api.extract_artwork_meta(node)
                     if meta.get("media_id"):
                         metas.append(meta)
                         artworks += 1

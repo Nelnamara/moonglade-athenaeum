@@ -26,6 +26,7 @@ from moonglade import models as _models
 from moonglade import paths as _paths
 from moonglade import telemetry as _telemetry
 from moonglade import training as _training
+from moonglade import account_api as _account_api
 
 
 def register(app, ctx):
@@ -556,7 +557,7 @@ def register(app, ctx):
         if url is None:
             try:
                 core, session = _gen_session()
-                url = core.media_thumbnail_url(session, mid) or ""
+                url = _account_api.media_thumbnail_url(session, mid) or ""
             except Exception:                           # noqa: BLE001
                 url = ""
             if len(_thumb_url_cache) > 2000:
@@ -1170,7 +1171,7 @@ def register(app, ctx):
             return jsonify({"offered": False, "joined": False, "can_join": False}), 400
         try:
             core, session = _gen_session()
-            return jsonify(core.lora_rebate_eligibility(session, mid))
+            return jsonify(_account_api.lora_rebate_eligibility(session, mid))
         except Exception:                               # noqa: BLE001
             return jsonify({"offered": False, "joined": False, "can_join": False})
 
@@ -1218,9 +1219,9 @@ def register(app, ctx):
             joined, note = False, ""
             if join:
                 try:
-                    el = core.lora_rebate_eligibility(session, mid)
+                    el = _account_api.lora_rebate_eligibility(session, mid)
                     if el["can_join"]:
-                        core.join_lora_rebates(session, mid)
+                        _account_api.join_lora_rebates(session, mid)
                         joined = True
                     else:
                         note = "PixAI isn't offering rebates for it right now."

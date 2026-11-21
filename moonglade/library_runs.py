@@ -54,10 +54,9 @@ def run_sync_artworks(args):
     "fail" means this run is INCOMPLETE even though it didn't raise. Callers should
     thread it into _cli_job_finish(warn=...) the same way run_download's own callers
     thread dl['fail']."""
-    from moonglade.backup import (artwork_list_gql, artwork_views_bulk, ArtworkListRefused,
-                                  _ensure_db, extract_artwork_meta, _make_session,
-                                  PANEL_WARN_PREFIX, _parallel_map, PixAIError, READ_ONLY,
-                                  _read_only_now)
+    from moonglade.backup import (ArtworkListRefused, _ensure_db, _make_session, PANEL_WARN_PREFIX,
+                                  _parallel_map, PixAIError, READ_ONLY, _read_only_now)
+    from moonglade.account_api import artwork_list_gql, artwork_views_bulk, extract_artwork_meta
     out = Path(args.out)
     db_path = _ensure_db(out)
     # Build the session FIRST -- _make_session auto-resolves USER_ID from the API key when it

@@ -52,9 +52,10 @@ _SITE = textwrap.dedent('''
     import requests
 
     def _engine_frame():
+        # main(): run_account_info itself is moonglade/account_api.py's since 3.22 (phase 4)
         f = sys._getframe(1)
         while f is not None:
-            if f.f_code.co_name == "run_account_info":
+            if f.f_code.co_name == "main":
                 return f
             f = f.f_back
         return None

@@ -19,6 +19,7 @@ from moonglade import telemetry as telemetry_mod
 from moonglade import contest_sync as contest_sync_mod
 from moonglade import achievements as achievements_mod
 from moonglade import catalog as catalog_mod
+from moonglade import account_api as account_api_mod
 
 
 def _row(**kw):
@@ -222,9 +223,9 @@ def test_publish_and_enter_records_the_entry_itself(tmp_path, monkeypatch):
     """It answered entered:true and wrote nothing, leaning on a sweep that silently no-ops
     when the lock is held -- so the entry existed on PixAI and nowhere locally."""
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "resolve_tack_ids", lambda s, tags: ([], []))
-    monkeypatch.setattr(core, "task_media_index", lambda s, t, m: 0)
-    monkeypatch.setattr(core, "publish_artwork_from_task",
+    monkeypatch.setattr(account_api_mod, "resolve_tack_ids", lambda s, tags: ([], []))
+    monkeypatch.setattr(account_api_mod, "task_media_index", lambda s, t, m: 0)
+    monkeypatch.setattr(account_api_mod, "publish_artwork_from_task",
                         lambda s, t, **kw: {"id": "newart1"})
     monkeypatch.setattr(contests_mod, "list_contests", lambda s, **k: [
         {"id": "c7", "slug": "ice-pop", "title": "Ice", "type": "community",

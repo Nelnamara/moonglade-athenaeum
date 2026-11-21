@@ -30,6 +30,7 @@ from moonglade import paths as _paths
 from moonglade import task_reads as _task_reads
 from moonglade import telemetry as _telemetry
 from moonglade import updater as _updater
+from moonglade import account_api as _account_api
 
 
 def register(app, ctx):
@@ -52,7 +53,7 @@ def register(app, ctx):
         from moonglade.catalog_verbs import backup_coverage
         try:
             core, session = _gen_session()
-            me = core.account_info(session)
+            me = _account_api.account_info(session)
             try:
                 credits = int(me.get("quotaAmount") or 0)
             except (TypeError, ValueError):
@@ -81,7 +82,7 @@ def register(app, ctx):
             card_expiry = min(expiries) if expiries else None
             # claimable daily rewards (free credits/stamina) -- for the "+N claim" badge
             claim_credits, claim_ids = 0, []
-            for c in core.list_claims(session):
+            for c in _account_api.list_claims(session):
                 if not c.get("canClaim"):
                     continue
                 claim_ids.append(c.get("id"))
@@ -105,7 +106,7 @@ def register(app, ctx):
             # number the server ENFORCES can never disagree. Crucially this now returns the
             # free-tier cap for a non-member instead of null: null hid the counter and
             # switched the client guard off entirely the moment a membership lapsed.
-            lora_cap = core.account_lora_cap(me)
+            lora_cap = _account_api.account_lora_cap(me)
             # Backup coverage: server's lifetime TASK count vs distinct tasks we hold locally.
             # Both are task counts (not images), so the ratio is honest.
             try:
@@ -119,7 +120,7 @@ def register(app, ctx):
             # account response (credits/cards/coverage) if the split call fails -- a failure
             # just leaves free/paid null, which the rail renders as an honest "split unknown".
             try:
-                bal = core.credit_balance(session) or {}
+                bal = _account_api.credit_balance(session) or {}
             except Exception:
                 bal = {}
             return jsonify({"credits": credits, "cards": cards,
@@ -136,7 +137,7 @@ def register(app, ctx):
                             # True / False / null=unknown. The drawer gates members-only
                             # controls on an explicit False only, so an unreadable account
                             # never strips a paying member's options.
-                            "is_member": core.account_is_member(me)})
+                            "is_member": _account_api.account_is_member(me)})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
@@ -215,7 +216,7 @@ def register(app, ctx):
         counts = catalog_counts(db_path)
         try:
             core, gsession = _gen_session()
-            me = core.account_info(gsession)
+            me = _account_api.account_info(gsession)
             server_tasks = int((me.get("tasks") or {}).get("totalCount"))
         except Exception:                                    # noqa: BLE001
             server_tasks = None
@@ -263,7 +264,7 @@ def register(app, ctx):
             "x-apollo-operation-name": core.OPERATION_NAME,
         })
         try:
-            me = core.account_info(test_session, raise_on_error=True)
+            me = _account_api.account_info(test_session, raise_on_error=True)
         except Exception as e:
             msg = _redact_host_paths(str(e))
             if "401" in msg or "Unauthorized" in msg:
@@ -392,11 +393,11 @@ def register(app, ctx):
         try:
             core, session = _gen_session()
             claimed, credits = 0, 0
-            for c in core.list_claims(session):
+            for c in _account_api.list_claims(session):
                 if not c.get("canClaim"):
                     continue
                 try:
-                    core.claim_reward(session, c.get("id"))
+                    _account_api.claim_reward(session, c.get("id"))
                     claimed += 1
                     if "credit" in str(c.get("id") or "").lower():
                         credits += int(c.get("amount") or 0)

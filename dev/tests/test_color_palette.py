@@ -22,6 +22,7 @@ from moonglade import gen_road as gen_road_mod
 from moonglade import models as models_mod
 from tests.conftest import login_client
 from moonglade import mirror as mirror_mod
+from moonglade import account_api as account_api_mod
 
 T3 = "2024383379556065549"
 SDXL = "V-SDXL"
@@ -252,7 +253,7 @@ def test_api_price_quotes_without_it_and_refuses_a_bad_one(tmp_path, rest, monke
 
 
 def _web(monkeypatch, tmp_path):
-    monkeypatch.setattr(core, "account_info",
+    monkeypatch.setattr(account_api_mod, "account_info",
                         lambda *a, **k: (_ for _ in ()).throw(core.PixAIError("offline")))
     return login_client(tmp_path)
 

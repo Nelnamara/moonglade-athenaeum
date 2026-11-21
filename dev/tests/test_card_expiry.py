@@ -10,6 +10,7 @@ from moonglade import cards as cards_mod
 from moonglade.gallery import create_app
 from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_test_client
+from moonglade import account_api as account_api_mod
 
 
 def test_the_summary_keeps_every_expiry_date_per_card_type():
@@ -28,13 +29,13 @@ def test_a_summary_row_without_dates_has_none():
 
 
 def test_the_account_breakdown_carries_the_dates(tmp_path, monkeypatch, pixai):
-    monkeypatch.setattr(core, "account_info", lambda s: {"quotaAmount": 1})
+    monkeypatch.setattr(account_api_mod, "account_info", lambda s: {"quotaAmount": 1})
     monkeypatch.setattr(cards_mod, "list_kaisuukens", lambda s: [
         {"name": "Tsubaki.3", "count": 5, "expires": "2026-10-06T00:00:00Z",
          "category": "Model Card",
          "expiry_counts": [{"expires_at": "2026-10-06T00:00:00Z", "count": 5}]},
         {"name": "Legacy", "count": 1, "expires": ""}])
-    monkeypatch.setattr(core, "list_claims", lambda s: [])
+    monkeypatch.setattr(account_api_mod, "list_claims", lambda s: [])
     save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {"media_id": "1"}])
     cli = login_test_client(create_app(tmp_path))
     d = cli.get("/api/account").get_json()

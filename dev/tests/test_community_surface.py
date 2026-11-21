@@ -34,6 +34,7 @@ from moonglade import pixai_client as pixai_client_mod
 from moonglade import living as living_mod
 from moonglade import catalog_verbs as catalog_verbs_mod
 from moonglade import library_runs as library_runs_mod
+from moonglade import account_api as account_api_mod
 
 
 def _row(**kw):
@@ -76,7 +77,7 @@ def test_bulk_views_pages_the_whole_library(mocker):
         return pages[len(seen) - 1]
 
     mocker.patch.object(core, "gql_adhoc", side_effect=fake)
-    views, complete = core.artwork_views_bulk(
+    views, complete = account_api_mod.artwork_views_bulk(
         _session("u1"), page_size=40, delay=0)
 
     assert complete is True
@@ -94,7 +95,7 @@ def test_bulk_views_reports_a_failed_page_as_incomplete(mocker):
         _bulk_page([("aw1", 100), ("aw2", 200)], True, "c1"),
         core.PixAIError("page 2 refused"),
     ])
-    views, complete = core.artwork_views_bulk(
+    views, complete = account_api_mod.artwork_views_bulk(
         _session("u1"), page_size=2, delay=0)
     assert complete is False
     assert views == {"aw1": 100, "aw2": 200}
@@ -108,7 +109,7 @@ def test_bulk_views_selects_the_only_field_name_that_exists():
     error, and artwork_views_bulk fails SOFT on those, so every count would quietly
     become blank rather than wrong."""
     import inspect
-    src = inspect.getsource(core.artwork_views_bulk)
+    src = inspect.getsource(account_api_mod.artwork_views_bulk)
     assert "node { id views }" in src
     for dead in ("viewCount", "viewsCount", "totalViews", "impressions"):
         assert dead not in src
@@ -128,8 +129,8 @@ def test_sync_artworks_writes_views_and_keeps_the_previous_reading(tmp_path, moc
                                 "likedCount": 3, "commentCount": 1,
                                 "aesScore": 6.0, "tacks": []}}],
             "pageInfo": {"hasPreviousPage": False}}
-    mocker.patch.object(core, "artwork_list_gql", return_value=conn)
-    mocker.patch.object(core, "artwork_views_bulk", return_value=({"aw1": 400}, True))
+    mocker.patch.object(account_api_mod, "artwork_list_gql", return_value=conn)
+    mocker.patch.object(account_api_mod, "artwork_views_bulk", return_value=({"aw1": 400}, True))
     args = SimpleNamespace(out=str(tmp_path), token=None, delay=0)
 
     res = library_runs_mod.run_sync_artworks(args)
@@ -139,7 +140,7 @@ def test_sync_artworks_writes_views_and_keeps_the_previous_reading(tmp_path, moc
     first_at = row["views_at"]
     assert first_at                                                # stamped
 
-    core.artwork_views_bulk.return_value = ({"aw1": 465}, True)
+    account_api_mod.artwork_views_bulk.return_value = ({"aw1": 465}, True)
     library_runs_mod.run_sync_artworks(args)
     row = {r["media_id"]: r for r in load_catalog(db)}["m1"]
     assert row["views"] == "465"
@@ -153,11 +154,11 @@ def test_no_views_skips_the_sweep_entirely(tmp_path, mocker, pixai):
     db = tmp_path / "catalog.db"
     save_catalog(db, [_row(media_id="m1", filename="x_m1.png")])
     mocker.patch.object(core, "USER_ID", "u1")
-    mocker.patch.object(core, "artwork_list_gql", return_value={
+    mocker.patch.object(account_api_mod, "artwork_list_gql", return_value={
         "edges": [{"node": {"id": "aw1", "mediaId": "m1", "visibility": "PUBLIC",
                             "likedCount": 0, "commentCount": 0, "tacks": []}}],
         "pageInfo": {"hasPreviousPage": False}})
-    swept = mocker.patch.object(core, "artwork_views_bulk")
+    swept = mocker.patch.object(account_api_mod, "artwork_views_bulk")
 
     res = library_runs_mod.run_sync_artworks(SimpleNamespace(
         out=str(tmp_path), token=None, delay=0, no_views=True))
@@ -174,11 +175,11 @@ def test_a_failed_sweep_does_not_fail_the_whole_sync(tmp_path, mocker, pixai):
     reach PixAI says nothing about that, and must not borrow the alarm."""
     save_catalog(tmp_path / "catalog.db", [_row(media_id="m1", filename="x_m1.png")])
     mocker.patch.object(core, "USER_ID", "u1")
-    mocker.patch.object(core, "artwork_list_gql", return_value={
+    mocker.patch.object(account_api_mod, "artwork_list_gql", return_value={
         "edges": [{"node": {"id": "aw1", "mediaId": "m1", "visibility": "PUBLIC",
                             "likedCount": 0, "commentCount": 0, "tacks": []}}],
         "pageInfo": {"hasPreviousPage": False}})
-    mocker.patch.object(core, "artwork_views_bulk", return_value=({}, False))
+    mocker.patch.object(account_api_mod, "artwork_views_bulk", return_value=({}, False))
 
     res = library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
 
@@ -200,9 +201,9 @@ def test_views_only_reads_the_counts_without_re_walking_the_listing(tmp_path, mo
                            is_published="1")])
     mocker.patch.object(core, "USER_ID", "u1")
     listing = mocker.patch.object(
-        core, "artwork_list_gql",
+        account_api_mod, "artwork_list_gql",
         side_effect=AssertionError("the listing must not be walked in views-only mode"))
-    mocker.patch.object(core, "artwork_views_bulk", return_value=({"aw1": 400}, True))
+    mocker.patch.object(account_api_mod, "artwork_views_bulk", return_value=({"aw1": 400}, True))
 
     res = library_runs_mod.run_sync_artworks(SimpleNamespace(
         out=str(tmp_path), token=None, delay=0, views_only=True))
@@ -220,9 +221,9 @@ def test_views_only_beats_no_views_rather_than_doing_nothing(tmp_path, mocker, p
                            is_published="1")])
     mocker.patch.object(core, "USER_ID", "u1")
     mocker.patch.object(
-        core, "artwork_list_gql",
+        account_api_mod, "artwork_list_gql",
         side_effect=AssertionError("the listing must not be walked in views-only mode"))
-    swept = mocker.patch.object(core, "artwork_views_bulk",
+    swept = mocker.patch.object(account_api_mod, "artwork_views_bulk",
                                 return_value=({"aw1": 400}, True))
     library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
                                            views_only=True, no_views=True))
@@ -242,11 +243,11 @@ def test_read_only_refuses_the_view_read_and_says_so(tmp_path, mocker, pixai, ca
     save_catalog(db, [_row(media_id="m1", filename="x_m1.png")])
     mocker.patch.object(core, "USER_ID", "u1")
     mocker.patch.object(core, "READ_ONLY", True)
-    mocker.patch.object(core, "artwork_list_gql", return_value={
+    mocker.patch.object(account_api_mod, "artwork_list_gql", return_value={
         "edges": [{"node": {"id": "aw1", "mediaId": "m1", "visibility": "PUBLIC",
                             "likedCount": 2, "commentCount": 0, "tacks": []}}],
         "pageInfo": {"hasPreviousPage": False}})
-    swept = mocker.patch.object(core, "artwork_views_bulk")
+    swept = mocker.patch.object(account_api_mod, "artwork_views_bulk")
 
     res = library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
 
@@ -306,7 +307,7 @@ def test_the_view_sweep_never_re_reads_a_page_after_a_lost_response(mocker):
     client._session = sess
     client._user_id = "u1"
 
-    views, complete = core.artwork_views_bulk(client, page_size=40, delay=0)
+    views, complete = account_api_mod.artwork_views_bulk(client, page_size=40, delay=0)
 
     assert sess.posts == 1, "one lost response must not buy a second read of the page"
     assert (views, complete) == ({}, False)

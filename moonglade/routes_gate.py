@@ -29,6 +29,7 @@ from moonglade import paths as _paths
 from moonglade import settings as _settings
 from moonglade import web_sessions as _web_sessions
 from moonglade import web_accounts as _web_accounts
+from moonglade import account_api as _account_api
 
 
 def register(app, ctx):
@@ -795,9 +796,9 @@ def register(app, ctx):
         if cached is not None and (now - _entitle_cache["at"]) < _ENTITLE_TTL:
             return cached
         try:
-            me = core.account_info(session)
-            val = {"is_member": core.account_is_member(me),
-                   "lora_cap": core.account_lora_cap(me)}
+            me = _account_api.account_info(session)
+            val = {"is_member": _account_api.account_is_member(me),
+                   "lora_cap": _account_api.account_lora_cap(me)}
         except Exception:                                    # noqa: BLE001
             return {"is_member": None, "lora_cap": None}
         if val["is_member"] is not None:

@@ -27,6 +27,7 @@ from tests.conftest import login_client, record_own_sleeps
 from moonglade import telemetry as telemetry_mod
 from moonglade import contest_sync as contest_sync_mod
 from moonglade import web_threads as web_threads_mod
+from moonglade import account_api as account_api_mod
 
 DAY = 86400.0
 T0 = 1790000000.0                       # a result time (2026-09-21, UTC); only differences matter
@@ -827,8 +828,8 @@ def test_the_apps_own_artwork_reads_do_not_carry_the_contest_slug():
     which keeps a fixed set of fields; the live-view read asks for `views` alone."""
     node = {"id": "1", "mediaId": "m", "title": "t", "visibility": "PUBLIC",
             "contest": {"id": "c1", "slug": "s1", "entry": {"rank": 1}}}
-    meta = core.extract_artwork_meta(node)
+    meta = account_api_mod.extract_artwork_meta(node)
     assert "contest" not in json.dumps(meta) and "s1" not in json.dumps(meta)
     assert "slug" not in meta
-    src = inspect.getsource(core.artwork_views)
+    src = inspect.getsource(account_api_mod.artwork_views)
     assert "artwork(id:$id){ views }" in src.replace("\n", " ")

@@ -73,6 +73,7 @@ import pytest
 
 from moonglade import gallery as moonglade_gallery
 from moonglade import backup as core
+from moonglade import account_api as account_api_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import cloud_delete as cloud_delete_mod
 from moonglade.gallery import create_app
@@ -553,8 +554,10 @@ def armed(monkeypatch):
     for name in ("Popen", "run", "call", "check_output", "check_call"):
         monkeypatch.setattr(subprocess, name, blocked("subprocess." + name),
                             raising=False)
-    for name in ("gql_adhoc", "claim_reward"):
+    for name in ("gql_adhoc",):
         monkeypatch.setattr(core, name, blocked("core." + name), raising=False)
+    for name in ("claim_reward",):                        # in account_api since 3.22
+        monkeypatch.setattr(account_api_mod, name, blocked("core." + name), raising=False)
     for name in ("submit_generation", "submit_fixer"):  # in gen_road since 3.22
         monkeypatch.setattr(gen_road_mod, name, blocked("core." + name), raising=False)
     for name in ("delete_task",):                         # in cloud_delete since 3.22

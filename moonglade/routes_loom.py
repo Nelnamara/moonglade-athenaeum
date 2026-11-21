@@ -30,6 +30,7 @@ from moonglade import paths as _paths
 from moonglade import scan as _scan
 from moonglade import telemetry as _telemetry
 from moonglade import full_meta as _full_meta
+from moonglade import account_api as _account_api
 
 
 def register(app, ctx):
@@ -555,7 +556,7 @@ def register(app, ctx):
         from moonglade.thumbs import make_thumbnail
         from moonglade.scenes import pixai_cdn_url_ok
         import requests as _req
-        url = core.media_thumbnail_url(sess, mid)
+        url = _account_api.media_thumbnail_url(sess, mid)
         if not url or not pixai_cdn_url_ok(url):
             return False
         r = _req.get(url, timeout=20)

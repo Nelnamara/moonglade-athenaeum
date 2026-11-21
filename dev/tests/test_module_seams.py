@@ -538,6 +538,17 @@ SEAMS = {
         "DiskCounts", "_count_backup_images", "run_rebuild_similar", "run_sync_similar",
         "_one_line", "run_search", "run_catalog_stats", "_META_COVERAGE",
         "_print_meta_coverage"]},
+    "moonglade.account_api": {"from": "moonglade.backup", "names": [
+        "run_probe", "run_count", "_ARTWORK_LIST_DOC", "_artwork_list_reason", "artwork_list_gql",
+        "artwork_views_bulk", "extract_artwork_meta", "_ACCOUNT_QUERY", "artwork_views",
+        "_UPSERT_ARTWORK", "_PUBLISH_FROM_TASK", "_DELETE_ARTWORK", "_LIST_TACKS",
+        "resolve_tack_ids", "lora_rebate_eligibility", "_THUMB_VARIANTS", "media_thumbnail_url",
+        "join_lora_rebates", "source_media_of_task", "task_media_index",
+        "publish_artwork_from_task", "update_artwork", "delete_artwork", "account_info",
+        "account_is_member", "_CREDIT_BALANCE_QUERY", "credit_balance", "FREE_LORA_CAP",
+        "account_lora_cap", "run_account_info", "suggest_prompt", "tag_search_gql",
+        "run_suggest_prompt", "ClaimsResult", "list_claims", "claim_reward", "_fmt_epoch_ms",
+        "run_claims", "run_cards", "run_card_history", "run_coupons", "run_credit_log"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -553,9 +564,7 @@ SOURCE_READERS = {
     "tests/test_catalog_verbs.py": ("moonglade.gallery",),
     "tests/test_catchup_query.py": ("moonglade.gallery",),
     "tests/test_cli_doc_coverage.py": ("moonglade.backup",),
-    "tests/test_community_surface.py": ("moonglade.backup",),
     "tests/test_config_path_routing.py": ("moonglade.backup",),
-    "tests/test_contest_wins.py": ("moonglade.backup",),   # its scheduler read: web_threads
     "tests/test_create_door.py": ("moonglade.backup",),
     "tests/test_csrf_coverage.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_edit_upload.py": ("moonglade.backup",),
@@ -2408,6 +2417,31 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_telemetry.py', 'moonglade.library_runs'),
     ('tests/test_training_advanced.py', 'moonglade.library_runs'),
     ('tests/test_training_parity.py', 'moonglade.library_runs'),
+    # Split phase 4, account_api: no reader reads the account code's text but through
+    # account_api_mod; test_spend_no_retry looks its spend paths up there too, and
+    # test_artworks_adhoc's retired-hash guard reads it. test_community_surface's and
+    # test_contest_wins' backup source reads go there, so they leave SOURCE_READERS.
+    ('tests/test_artworks_adhoc.py', 'moonglade.account_api'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.account_api'),
+    ('tests/test_config_path_routing.py', 'moonglade.account_api'),
+    ('tests/test_create_door.py', 'moonglade.account_api'),
+    ('tests/test_csrf_coverage.py', 'moonglade.account_api'),
+    ('tests/test_enhance.py', 'moonglade.account_api'),
+    ('tests/test_evidence_counters.py', 'moonglade.account_api'),
+    ('tests/test_full_meta_rest_fallback.py', 'moonglade.account_api'),
+    ('tests/test_gen_surface.py', 'moonglade.account_api'),
+    ('tests/test_history_feed_document.py', 'moonglade.account_api'),
+    ('tests/test_jwt.py', 'moonglade.account_api'),
+    ('tests/test_living_library.py', 'moonglade.account_api'),
+    ('tests/test_loom_notify.py', 'moonglade.account_api'),
+    ('tests/test_pixai_client.py', 'moonglade.account_api'),
+    ('tests/test_settings_store.py', 'moonglade.account_api'),
+    ('tests/test_setup_prepare.py', 'moonglade.account_api'),
+    ('tests/test_spend_no_retry.py', 'moonglade.account_api'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.account_api'),
+    ('tests/test_telemetry.py', 'moonglade.account_api'),
+    ('tests/test_training_advanced.py', 'moonglade.account_api'),
+    ('tests/test_training_parity.py', 'moonglade.account_api'),
 }
 
 

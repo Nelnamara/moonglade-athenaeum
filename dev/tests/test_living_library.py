@@ -43,6 +43,7 @@ from moonglade import catalog as catalog_mod
 from moonglade import catalog_verbs as catalog_verbs_mod
 from moonglade import thumbs as thumbs_mod
 from moonglade import library_runs as library_runs_mod
+from moonglade import account_api as account_api_mod
 
 SRC = Path(__file__).resolve().parents[2]
 DAY = 86400.0
@@ -530,7 +531,7 @@ def test_a_failed_page_does_not_buy_the_sweep_fifteen_minutes_of_silence(tmp_pat
     when they had not."""
     def _refused(*_a, **_k):
         raise core.ArtworkListRefused("test refusal")
-    monkeypatch.setattr(core, "artwork_list_gql", _refused)
+    monkeypatch.setattr(account_api_mod, "artwork_list_gql", _refused)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: FakePixAI(user_id="u"))
     now = NOW
     res = living_mod.artworks_sweep(tmp_path, tmp_path / "catalog.db", force=True, now=now)
@@ -638,9 +639,9 @@ def test_the_publish_kick_fires_for_unpublish_and_retag_too(tmp_path, monkeypatc
     cli = _client(tmp_path, [_row(media_id="m1", filename="a_m1.png",
                                   artwork_id="aw1", is_published="1")])
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "resolve_tack_ids", lambda *a, **k: ([1], []))
-    monkeypatch.setattr(core, "update_artwork", lambda *a, **k: {"id": "aw1"})
-    monkeypatch.setattr(core, "delete_artwork", lambda *a, **k: None)
+    monkeypatch.setattr(account_api_mod, "resolve_tack_ids", lambda *a, **k: ([1], []))
+    monkeypatch.setattr(account_api_mod, "update_artwork", lambda *a, **k: {"id": "aw1"})
+    monkeypatch.setattr(account_api_mod, "delete_artwork", lambda *a, **k: None)
     csrf = cli.get("/api/panel/summary").get_json()["csrf"]
     # visibility = unpublish, tags = retag, delete = gone from the list entirely. Each
     # changes what listArtworks returns, so each is a reason to read it back.
@@ -1215,7 +1216,7 @@ def test_the_full_sync_cannot_revert_a_write_that_lands_while_it_is_running(
         writer_a()                       # a writer landing DURING the walk
         return page
 
-    monkeypatch.setattr(core, "artwork_list_gql", _list)
+    monkeypatch.setattr(account_api_mod, "artwork_list_gql", _list)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _sync_fake())
     # The old shape's window was everything between its whole-table read and its
     # whole-table save, so put a writer there too. Wrapping the REAL load and the REAL
@@ -1266,7 +1267,7 @@ def test_the_full_sync_still_tags_an_animation_through_its_video_media_id(
     save_catalog(db, [_row(media_id="vid1", filename="v.mp4", is_video="1"),
                       _row(media_id="poster1", filename="p.png")])
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _sync_fake())
-    monkeypatch.setattr(core, "artwork_list_gql", lambda *a, **k: {
+    monkeypatch.setattr(account_api_mod, "artwork_list_gql", lambda *a, **k: {
         "edges": [{"node": _node("poster1", "aw9", video_mid="vid1")}],
         "pageInfo": {"hasPreviousPage": False}})
     res = library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
@@ -1415,14 +1416,14 @@ def test_one_malformed_artwork_node_is_skipped_not_the_whole_sweep(tmp_path, mon
     db = tmp_path / "catalog.db"
     save_catalog(db, [_row(media_id="good1", filename="a.png", created_at=_iso(400)),
                       _row(media_id="good2", filename="b.png", created_at=_iso(400))])
-    real = core.extract_artwork_meta
+    real = account_api_mod.extract_artwork_meta
 
     def _extract(node):
         if node.get("mediaId") == "bad":
             raise TypeError("a shape this build has never seen")
         return real(node)
 
-    monkeypatch.setattr(core, "extract_artwork_meta", _extract)
+    monkeypatch.setattr(account_api_mod, "extract_artwork_meta", _extract)
     _sweep_env(monkeypatch, [[_node("good1", "aG1"), _node("bad", "aBad"),
                               _node("good2", "aG2")]])
     res = living_mod.artworks_sweep(tmp_path, db, force=True, now=NOW)

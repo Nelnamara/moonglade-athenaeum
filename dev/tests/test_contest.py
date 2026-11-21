@@ -30,6 +30,7 @@ from tests.conftest import login_client, record_own_sleeps
 from moonglade import telemetry as telemetry_mod
 from moonglade import contest_sync as contest_sync_mod
 from moonglade import catalog_verbs as catalog_verbs_mod
+from moonglade import account_api as account_api_mod
 
 
 def _row(**kw):
@@ -263,14 +264,14 @@ def test_enter_route_treats_an_unsuccessful_response_as_a_refusal(tmp_path, monk
 def _publish_client(tmp_path, monkeypatch, artwork_id="newart1", fail=False):
     """A logged-in client over one unpublished row, with the publish mutation stubbed."""
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "resolve_tack_ids", lambda s, tags: ([], []))
-    monkeypatch.setattr(core, "task_media_index", lambda s, t, m: 0)
+    monkeypatch.setattr(account_api_mod, "resolve_tack_ids", lambda s, tags: ([], []))
+    monkeypatch.setattr(account_api_mod, "task_media_index", lambda s, t, m: 0)
 
     def _publish(session, task_id, **kw):
         if fail:
             raise core.PixAIError("upstream refused the publish")
         return {"id": artwork_id}
-    monkeypatch.setattr(core, "publish_artwork_from_task", _publish)
+    monkeypatch.setattr(account_api_mod, "publish_artwork_from_task", _publish)
     return _client(tmp_path, [_row(media_id="m1", task_id="t1", filename="x_m1.png",
                                    created_at="2026-07-01T00:00:00")])
 
@@ -829,7 +830,7 @@ def test_the_core_docstring_records_what_challenge_actually_does():
     """The belief that cost the owner a live walk: that extra.challenge enters a contest.
     It is metadata. Pinned so the next reader of publish_artwork_from_task is told."""
     import inspect
-    doc = inspect.getdoc(core.publish_artwork_from_task) or ""
+    doc = inspect.getdoc(account_api_mod.publish_artwork_from_task) or ""
     assert "DOES NOT ENTER A CONTEST" in doc
     assert "contest_enter" in doc
 

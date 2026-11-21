@@ -33,6 +33,7 @@ from moonglade import mirror as mirror_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import history as history_mod
 from moonglade import full_meta as full_meta_mod
+from moonglade import account_api as account_api_mod
 
 
 class FakeResponse:
@@ -208,7 +209,7 @@ class TestThePrimitivesAreThinDelegates:
                             lambda *a, **k: pytest.fail("wrapping resolved a user id"))
         s = RecordingSession(FakeResponse({"data": {"me": {"id": "1"}}}))
         assert pixai_client_mod._client_of(s).session is s
-        assert core.account_info(s) == {"id": "1"}
+        assert account_api_mod.account_info(s) == {"id": "1"}
 
     def test_make_session_hands_back_a_client(self, monkeypatch, tmp_path):
         """`_make_session` is the app's one entry to PixAI and now returns the seam
@@ -592,4 +593,4 @@ class TestTheFixtureIsWhatTheAppIsHanded:
         """The whole point: nothing registered, nothing answered, and the message names
         what to register."""
         with pytest.raises(UnregisteredOperation, match="me"):
-            core.account_info(pixai, raise_on_error=True)
+            account_api_mod.account_info(pixai, raise_on_error=True)

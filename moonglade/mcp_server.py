@@ -42,6 +42,7 @@ from moonglade import catalog as _catalog
 from moonglade import curation as _curation
 from moonglade import catalog_verbs as _catalog_verbs
 from moonglade import thumbs as _thumbs
+from moonglade import account_api as _account_api
 
 # The library the tools read: bound by main() once the move has run and the library is
 # resolved (bind_library). Importing this module reads nothing.
@@ -337,7 +338,7 @@ def tag_suggest(media_id: str) -> dict:
     PIXAI_API_KEY). Returns {media_id, suggestions:[...]} or {..., error} on failure."""
     from moonglade import backup as mb
     try:
-        out = mb.suggest_prompt(_session(), str(media_id))
+        out = _account_api.suggest_prompt(_session(), str(media_id))
     except Exception as e:
         return {"media_id": media_id, "suggestions": [], "error": str(e)}
     return {"media_id": media_id, "suggestions": list(out or [])}

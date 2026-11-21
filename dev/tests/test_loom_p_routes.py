@@ -45,6 +45,7 @@ from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import loom_files as loom_files_mod
 from moonglade import thumbs as thumbs_mod
+from moonglade import account_api as account_api_mod
 
 REPO = Path(__file__).resolve().parents[2]
 # The Loom's code: what create_app still holds, and its store and routes, split out of it (split
@@ -1059,7 +1060,7 @@ def ft(tmp_path, monkeypatch):
         assert sess is session
         looked.append(mid)
         return urls.get(mid)
-    monkeypatch.setattr(core, "media_thumbnail_url", fake_url)
+    monkeypatch.setattr(account_api_mod, "media_thumbnail_url", fake_url)
     pic = _png_bytes()
 
     def fake_get(url, *a, **k):
@@ -1115,7 +1116,7 @@ def test_no_pixai_session_is_not_a_verdict_on_the_frame(ft):
     ft["mp"].setattr(core, "_make_session", no_session)
     assert _thumbs_post(ft, ["222"]).get_json() == {"have": [], "fetched": [], "gone": ["222"]}
     ft["mp"].setattr(core, "_make_session", lambda *a, **k: object())
-    ft["mp"].setattr(core, "media_thumbnail_url", lambda s, mid: ft["urls"].get(mid))
+    ft["mp"].setattr(account_api_mod, "media_thumbnail_url", lambda s, mid: ft["urls"].get(mid))
     assert _thumbs_post(ft, ["222"]).get_json()["fetched"] == ["222"], "the next open asks again"
 
 
