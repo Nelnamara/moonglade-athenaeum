@@ -40,7 +40,7 @@
    (a third) sits beside the model picker (two thirds). Stacks to one column, strip first, when
    the host is narrow (the Loom's side panel, the phone). */
 .gen-drawer .mgd-lower{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:12px;align-items:start;}
-@container (max-width:720px){.gen-drawer .mgd-lower{grid-template-columns:1fr;}}
+@container (width < 721px){.gen-drawer .mgd-lower{grid-template-columns:1fr;}}
 .gen-drawer .mgd-slab{display:flex;flex-direction:column;gap:7px;padding:10px 12px;border-radius:14px;background:color-mix(in srgb,var(--base) 60%,transparent);border:1px solid color-mix(in srgb,var(--surface1) 75%,transparent);min-width:0;animation:mgdSlab .42s cubic-bezier(.22,1,.36,1) both;}
 @keyframes mgdSlab{from{opacity:0;transform:translate3d(0,12px,0);}to{opacity:1;transform:none;}}
 @keyframes mgdFade{from{opacity:0;}to{opacity:1;}}
@@ -145,6 +145,7 @@
 .gen-drawer .mgd-mchd{align-items:center;justify-content:space-between;}
 .gen-drawer .mgd-mcseg{flex:none;padding:2px;}
 .gen-drawer .mgd-mcseg button{flex:none;padding:3px 9px;font-size:10.5px;}
+.gen-drawer .mgd-mcseg .mgd-lenchip{flex:none;padding:3px 9px;font-size:10.5px;font-weight:600;border-radius:7px;cursor:default;background:color-mix(in srgb,var(--lavender) 20%,transparent);color:var(--text,#d6d2e2);}
 .gen-drawer .mgd-mcards{display:flex;flex-direction:column;gap:8px;min-height:0;}
 /* Family headings (the board's A: ruled) over a two-column card grid. */
 .gen-drawer .mgd-fam{display:flex;flex-direction:column;gap:6px;}
@@ -152,7 +153,7 @@
 .gen-drawer .mgd-fh:after{content:"";flex:1;height:1px;background:color-mix(in srgb,var(--surface1) 80%,transparent);}
 .gen-drawer .mgd-fh small{order:2;font-weight:500;color:var(--overlay0,#6a6088);font-size:9.5px;margin-left:2px;}
 .gen-drawer .mgd-grid2{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;}
-@container (min-width:721px){
+@container (width >= 721px){
   .gen-drawer .mgd-grid2{grid-template-columns:repeat(2,minmax(0,1fr));}
   /* The list box is two card rows tall (VideoDrawer.jsx measures it into --mgd-mc-max) and
      scrolls inside itself. */
@@ -160,7 +161,7 @@
 }
 /* In the dock the list scrolls inside its slab, sized to sit level with the two slabs beside
    it; on the phone and in the Loom's panel the page (or the panel) scrolls instead. */
-@container (max-width:720px){.gen-drawer.mgd-dock .mgd-mcards{max-height:200px;overflow-y:auto;overscroll-behavior:contain;padding-right:2px;}}
+@container (width < 721px){.gen-drawer.mgd-dock .mgd-mcards{max-height:200px;overflow-y:auto;overscroll-behavior:contain;padding-right:2px;}}
 .gen-drawer .mgd-mcard{display:flex;flex-direction:column;gap:3px;min-width:0;flex:none;padding:7px 8px;border-radius:9px;transition:border-color .2s,background .2s;border:1px solid var(--surface1,#3a3460);background:color-mix(in srgb,var(--surface0) 50%,transparent);}
 .gen-drawer .mgd-mcard.cur{border-color:var(--accent,#b692e6);background:color-mix(in srgb,var(--accent) 13%,transparent);}
 .gen-drawer .mgd-mcrow{display:flex;align-items:center;justify-content:space-between;gap:6px;min-width:0;}

@@ -797,23 +797,39 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     if (rows.length) rowBottom = rows[Math.min(1, rows.length - 1)].bottom;
     const px = Math.ceil(rowBottom + 6) + "px";
     if (box.style.getPropertyValue("--mgd-mc-max") !== px) box.style.setProperty("--mgd-mc-max", px);
-    if (!mcScrolled.current) {
-      mcScrolled.current = true;
+    // Scroll the in-use card itself into view, inside the box only (never scrollIntoView, which
+    // would move the page). Once, and only when the box has a real size and the cards a real width.
+    if (!mcScrolled.current && box.clientWidth > 0 && rows.length) {
       const cur = box.querySelector(".mgd-mcard.cur");
+      mcScrolled.current = true;
       if (cur) {
-        const fam = cur.closest(".mgd-fam") || cur;
-        box.scrollTop = Math.max(0, fam.getBoundingClientRect().top - top - 2);
+        const bt = box.getBoundingClientRect().top;
+        const cb = cur.getBoundingClientRect();
+        const offTop = cb.top - bt + box.scrollTop;
+        if (offTop < box.scrollTop || offTop + cb.height > box.scrollTop + box.clientHeight) {
+          box.scrollTop = Math.max(0, offTop - 4);
+        }
       }
     }
   };
+  // Re-measure when the slab, the box or any family inside it changes size (a font load or a price
+  // line reflowing the cards leaves a stale cap otherwise). The write is deferred a frame so the
+  // observer never loops, and fitCards skips an unchanged value. Rebuilt only when the card set changes.
+  const cardCount = cards.length;
   useEffect(() => {
     fitCards();
     const box = mcardsRef.current;
     if (!box || typeof ResizeObserver === "undefined") return undefined;
-    const ro = new ResizeObserver(() => fitCards());
+    let raf = 0;
+    const ro = new ResizeObserver(() => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => { raf = 0; fitCards(); });
+    });
     ro.observe(box.parentNode);
-    return () => ro.disconnect();
-  });
+    ro.observe(box);
+    box.querySelectorAll(".mgd-fam").forEach((f) => ro.observe(f));
+    return () => { ro.disconnect(); if (raf) cancelAnimationFrame(raf); };
+  }, [cardCount]); // eslint-disable-line react-hooks/exhaustive-deps
   // ---- SHOT MODE + the ref/frame banks (DC 1346-1376, getters 2842-2895) ----------------
   // ALL three segments always render; one the engine lacks is dimmed (opacity .35, not-allowed,
   // title '<label> needs the V4.0 pair'), never removed -- the DC's shotModes.
@@ -1085,6 +1101,10 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
           <div className="mgd-enghd mgd-mchd">
             <div className="mgd-sec">Models · this picture</div>
             <div className="mgd-seg mgd-mcseg" role="radiogroup" aria-label="Length">
+              {CARD_LENGTHS.indexOf(s.duration) < 0 && (
+                <span role="radio" aria-checked="true" aria-readonly="true" className="mgd-lenchip on"
+                  title={s.duration + " seconds (this run's length; pick 5, 10 or 15 to change it)"}>{s.duration}s</span>
+              )}
               {CARD_LENGTHS.map((d) => {
                 const ok = durationAllowed(s.model, d);
                 return (
