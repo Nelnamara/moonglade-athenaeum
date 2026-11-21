@@ -473,6 +473,8 @@ SEAMS = {
         "_clean_mark", "_clean_rating", "_clean_ids", "curate_apply", "curation_rows",
         "curate_restore", "query_catalog", "_narrow_to_series", "_series_member_task_ids",
         "batch_member_order", "_filters_from_args", "catalog_counts"]},
+    "moonglade.train_guard": {"from": "moonglade.gallery", "names": [
+        "TrainGuard"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -2110,6 +2112,28 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_setup_prepare.py', 'moonglade.curation'),
     ('tests/test_task_model_detail_document.py', 'moonglade.curation'),
     ('tests/test_telemetry.py', 'moonglade.curation'),
+    # Split phase 4, train_guard: no reader reads TrainGuard's text (test_setup_prepare names
+    # train_guard.json as a records file); the whole-module absence guards read it too.
+    ('tests/test_app_paths.py', 'moonglade.train_guard'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.train_guard'),
+    ('tests/test_bonjour.py', 'moonglade.train_guard'),
+    ('tests/test_branding.py', 'moonglade.train_guard'),
+    ('tests/test_catalog_verbs.py', 'moonglade.train_guard'),
+    ('tests/test_catchup_query.py', 'moonglade.train_guard'),
+    ('tests/test_csrf_coverage.py', 'moonglade.train_guard'),
+    ('tests/test_evidence_counters.py', 'moonglade.train_guard'),
+    ('tests/test_first_party_sources.py', 'moonglade.train_guard'),
+    ('tests/test_history_feed_document.py', 'moonglade.train_guard'),
+    ('tests/test_living_library.py', 'moonglade.train_guard'),
+    ('tests/test_logging.py', 'moonglade.train_guard'),
+    ('tests/test_loom_p_routes.py', 'moonglade.train_guard'),
+    ('tests/test_network.py', 'moonglade.train_guard'),
+    ('tests/test_security_review_fixes.py', 'moonglade.train_guard'),
+    ('tests/test_server_one_module.py', 'moonglade.train_guard'),
+    ('tests/test_settings_store.py', 'moonglade.train_guard'),
+    ('tests/test_setup_prepare.py', 'moonglade.train_guard'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.train_guard'),
+    ('tests/test_telemetry.py', 'moonglade.train_guard'),
 }
 
 

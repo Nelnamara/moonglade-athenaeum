@@ -10,9 +10,10 @@ register(app, ctx) once, where the block was, after the community routes. Names 
 from create_app's setup and the front door (the CSRF check, the PixAI session, the host-path
 redactor) come in through ctx (the bound-from-ctx lines below), so every closure on both sides
 holds the one same object; the start lock, the per-run locks and the train guard are bound once,
-in register, and nothing outside it holds them. gallery's own names (TrainGuard among them) are
-imported inside the function that reads them, at call time, so a test's patch of
-moonglade.gallery still reaches the route.
+in register, and nothing outside it holds them. The module-level names it reads (gallery's, and
+TrainGuard, moonglade.train_guard's since it left gallery's top level) are imported inside the
+function that reads them, at call time, so a test's patch of their module still reaches the
+route.
 """
 import threading
 import time
@@ -28,7 +29,7 @@ from moonglade import training as _training
 
 
 def register(app, ctx):
-    from moonglade.gallery import TrainGuard
+    from moonglade.train_guard import TrainGuard
     from moonglade.web_tiers import LOGIN, tier
     # -- bound from ctx (split_move) --
     _check_csrf = ctx._check_csrf
@@ -233,7 +234,8 @@ def register(app, ctx):
         ORDER on the confirm: CSRF -> READ_ONLY (before ANY read, the reuse read included) ->
         validation -> quota / card -> the lock -> the guard -> the pause switch -> the
         amount -> arm -> one createTrainingTask -> resolve. Single attempt."""
-        from moonglade.gallery import TrainGuard, media_dims
+        from moonglade.gallery import media_dims
+        from moonglade.train_guard import TrainGuard
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400

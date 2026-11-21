@@ -256,6 +256,7 @@ def test_config_json_keeps_only_hand_edited_values():
     from moonglade import catalog_search as catalog_search_mod
     from moonglade import catalog as catalog_mod
     from moonglade import curation as curation_mod
+    from moonglade import train_guard as train_guard_mod
     src = (inspect.getsource(g) + inspect.getsource(core) + inspect.getsource(mirror_mod)
            + inspect.getsource(branding_mod) + inspect.getsource(routes_generate_mod)
            + inspect.getsource(routes_loom_mod) + inspect.getsource(web_loom_store_mod)
@@ -282,6 +283,7 @@ def test_config_json_keeps_only_hand_edited_values():
            + inspect.getsource(loom_files_mod)
            + inspect.getsource(catalog_search_mod)
            + inspect.getsource(catalog_mod)
-           + inspect.getsource(curation_mod))
+           + inspect.getsource(curation_mod)
+           + inspect.getsource(train_guard_mod))
     for key in ('"LIBRARY_DIR"', '"BONJOUR_ENABLED"', '"BONJOUR_NAME"', '"MIRROR_TO_PIXAI"'):
         assert key not in src, key

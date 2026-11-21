@@ -26,7 +26,8 @@ from moonglade import backup as core
 from moonglade import gen_road as gen_road_mod
 from moonglade import paths
 from moonglade import training as training_mod
-from moonglade.gallery import TrainGuard, create_app
+from moonglade.gallery import create_app
+from moonglade.train_guard import TrainGuard
 from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_test_client
 from moonglade import pixai_client as pixai_client_mod

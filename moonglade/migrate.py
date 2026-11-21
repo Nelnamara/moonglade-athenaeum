@@ -1666,7 +1666,7 @@ def _merge_achievements(a, b, b_newer):
     return out
 
 
-# How long each entry of the training spend guard blocks (moonglade.gallery.TrainGuard): a Basic
+# How long each entry of the training spend guard blocks (moonglade.train_guard): a Basic
 # start that may have gone through ("ambiguous", or "armed" and never resolved) for 15 minutes,
 # one PixAI started for a minute; a retry PixAI took ("done") for good, one that may have gone
 # through for a day; an Advanced confirm that may have gone through for 15 minutes.
