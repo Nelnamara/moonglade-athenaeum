@@ -135,7 +135,8 @@ def test_the_folder_setting_never_offers_to_move_anything():
     (The classic /panel page that stated this in copy is gone with the classic UI; the
     enforcement half -- the handler source must never touch files -- is what matters and
     stays pinned here.)"""
-    src = (ROOT / "moonglade" / "gallery.py").read_text(encoding="utf-8")
+    # The Control Panel routes left create_app for moonglade/routes_panel.py (split phase 4).
+    src = (ROOT / "moonglade" / "routes_panel.py").read_text(encoding="utf-8")
     body = src[src.index("def api_library_path("):]
     body = body[:body.index("@app.route(\"/api/server/restart\"")]
     for danger in ("shutil.move", "shutil.copytree", "os.rename", "os.replace", ".unlink("):

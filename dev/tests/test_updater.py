@@ -17,6 +17,7 @@ from moonglade import backup as core
 from moonglade import jobs as jobs_mod
 from moonglade import updater as updater_mod
 from moonglade import web_threads as web_threads_mod
+from moonglade import routes_panel as routes_panel_mod
 
 
 def _row(**kw):
@@ -978,7 +979,7 @@ def test_the_updates_own_restart_is_not_blocked_by_its_own_phase():
     """The exemption that keeps the whole thing from deadlocking on itself: the updater
     calls the exit scheduler directly, never through the route it just locked out."""
     import inspect
-    src = inspect.getsource(g.create_app)
+    src = inspect.getsource(routes_panel_mod)   # the update route left create_app (split phase 4)
     body = src[src.index("def _restart():"):]
     assert "_schedule_server_exit(42)" in body[:900]
     assert "_update_busy" not in body[:900]

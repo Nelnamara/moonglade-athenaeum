@@ -44,7 +44,7 @@ _GALLERY = Path(__file__).resolve().parents[2] / "moonglade" / "gallery.py"
 # Where routes are defined: gallery.create_app, and the families split out of it (phase 4).
 _ROUTE_SOURCES = (_GALLERY, _GALLERY.with_name("routes_generate.py"),
                   _GALLERY.with_name("web_loom_store.py"), _GALLERY.with_name("routes_loom.py"),
-                  _GALLERY.with_name("routes_gate.py"))
+                  _GALLERY.with_name("routes_gate.py"), _GALLERY.with_name("routes_panel.py"))
 _STATE_CHANGING = {"POST", "PUT", "PATCH", "DELETE"}
 _REFUSAL = "Your session expired. Reload the page and try again."
 

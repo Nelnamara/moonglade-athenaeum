@@ -233,9 +233,11 @@ def test_config_json_keeps_only_hand_edited_values():
     from moonglade import web_loom_store as web_loom_store_mod
     from moonglade import routes_gate as routes_gate_mod            # and the front door's
     from moonglade import web_threads as web_threads_mod            # and the background jobs'
+    from moonglade import routes_panel as routes_panel_mod          # and the Control Panel's
     src = (inspect.getsource(g) + inspect.getsource(core) + inspect.getsource(mirror_mod)
            + inspect.getsource(branding_mod) + inspect.getsource(routes_generate_mod)
            + inspect.getsource(routes_loom_mod) + inspect.getsource(web_loom_store_mod)
-           + inspect.getsource(routes_gate_mod) + inspect.getsource(web_threads_mod))
+           + inspect.getsource(routes_gate_mod) + inspect.getsource(web_threads_mod)
+           + inspect.getsource(routes_panel_mod))
     for key in ('"LIBRARY_DIR"', '"BONJOUR_ENABLED"', '"BONJOUR_NAME"', '"MIRROR_TO_PIXAI"'):
         assert key not in src, key
