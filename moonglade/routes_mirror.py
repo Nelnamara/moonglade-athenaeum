@@ -166,7 +166,7 @@ def register(app, ctx):
         a signed-out visitor goes through /login and lands back here, still the opener's
         window. Dressed in the login card's own classes -- no new design. Holds no credential
         itself; the page is marked no-store all the same."""
-        from moonglade.gallery import DESIGN_TOKENS_CSS
+        from moonglade.pages import DESIGN_TOKENS_CSS
         session.setdefault("csrf", secrets.token_hex(16))
         resp = app.response_class(render_template_string(
             _noncify(MIRROR_CONNECT_PAGE.replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS)),

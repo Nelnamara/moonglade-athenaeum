@@ -418,6 +418,9 @@ SEAMS = {
         "SCENES_TTL", "_scenes_cache", "_scenes_cache_lock", "_SCENE_LANG_KEYS", "_SCENE_CDN_HOST",
         "pixai_cdn_url_ok", "scene_catalog", "_scene_label", "_scene_shape", "_scene_detail",
         "scene_thumb_url", "scene_local_art", "scene_row"]},
+    "moonglade.pages": {"from": "moonglade.gallery", "names": [
+        "DESIGN_TOKENS_CSS", "_upscale_const_js", "_PREPAINT_BOOT_JS", "_AUTH_401_GUARD_JS",
+        "_LOOM_SHELL", "LOOM_PAGE_BUNDLE"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -438,7 +441,6 @@ SOURCE_READERS = {
     "tests/test_contest_wins.py": ("moonglade.backup",),   # its scheduler read: web_threads
     "tests/test_create_door.py": ("moonglade.backup",),
     "tests/test_csrf_coverage.py": ("moonglade.backup", "moonglade.gallery"),
-    "tests/test_design_kit_sync.py": ("moonglade.gallery",),
     "tests/test_edit_upload.py": ("moonglade.backup",),
     "tests/test_enhance.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_evidence_counters.py": ("moonglade.backup", "moonglade.gallery"),
@@ -449,7 +451,7 @@ SOURCE_READERS = {
     "tests/test_jwt.py": ("moonglade.backup",),   # its scheduler read is web_threads' now
     "tests/test_living_library.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_logging.py": ("moonglade.gallery",),
-    "tests/test_loom_notify.py": ("moonglade.backup", "moonglade.gallery"),
+    "tests/test_loom_notify.py": ("moonglade.backup",),
     "tests/test_loom_p_routes.py": ("moonglade.gallery",),
     "tests/test_media_tools.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_move_edges.py": ("moonglade.gallery",),
@@ -474,17 +476,16 @@ SOURCE_READERS = {
     "tests/test_unclear_single_sends.py": ("moonglade.backup",),
     "tests/test_video_tsubaki.py": ("moonglade.backup",),
     "tests/test_web_auth.py": ("moonglade.backup",),
-    "tools/export_design_kit.py": ("moonglade.gallery",),     # reads DESIGN_TOKENS_CSS by path
     "tools/split_names.py": ("moonglade.backup", "moonglade.gallery"),   # the move proof's sweep
     "loom/test/import-batches.test.js": ("moonglade.scan",),
     "loom/test/ledger-known-reasons.test.js": ("moonglade.cards",),
     "loom/test/med-loom-bundle-missing-report.test.js": ("moonglade.routes_loom",),
-    "loom/test/mg-art-filters.test.js": ("moonglade.gallery",),
-    "loom/test/mg-notify-queue-phase.test.js": ("moonglade.gallery",),
-    "loom/test/mg-notify-website-source.test.js": ("moonglade.gallery",
+    "loom/test/mg-art-filters.test.js": ("moonglade.pages",),
+    "loom/test/mg-notify-queue-phase.test.js": ("moonglade.pages",),
+    "loom/test/mg-notify-website-source.test.js": ("moonglade.pages",
                                                    "moonglade.routes_generate",
                                                    "moonglade.web_threads"),
-    "loom/test/phone-back-layers.test.js": ("moonglade.gallery", "moonglade.routes_gate"),
+    "loom/test/phone-back-layers.test.js": ("moonglade.pages", "moonglade.routes_gate"),
     "loom/test/video-roster-parity.test.js": ("moonglade.gen_params",),
 }
 
@@ -1912,6 +1913,31 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_task_model_detail_document.py', 'moonglade.scenes'),
     ('tests/test_telemetry.py', 'moonglade.scenes'),
     ('tools/export_design_kit.py', 'moonglade.scenes'),
+    # Split phase 4, pages: the readers that read the moved text now read moonglade/pages.py: the
+    # design kit's exporter and test_design_kit_sync (DESIGN_TOKENS_CSS by path; both leave
+    # SOURCE_READERS), test_loom_notify's shell font check, and the node tests mg-art-filters,
+    # mg-notify-queue-phase, mg-notify-website-source and phone-back-layers (each extracts the
+    # tokens or _LOOM_SHELL and fails when it finds none). No other reader reads the shells' text.
+    ('tests/test_app_paths.py', 'moonglade.pages'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.pages'),
+    ('tests/test_bonjour.py', 'moonglade.pages'),
+    ('tests/test_branding.py', 'moonglade.pages'),
+    ('tests/test_catalog_verbs.py', 'moonglade.pages'),
+    ('tests/test_catchup_query.py', 'moonglade.pages'),
+    ('tests/test_csrf_coverage.py', 'moonglade.pages'),
+    ('tests/test_evidence_counters.py', 'moonglade.pages'),
+    ('tests/test_first_party_sources.py', 'moonglade.pages'),
+    ('tests/test_history_feed_document.py', 'moonglade.pages'),
+    ('tests/test_living_library.py', 'moonglade.pages'),
+    ('tests/test_logging.py', 'moonglade.pages'),
+    ('tests/test_loom_p_routes.py', 'moonglade.pages'),
+    ('tests/test_network.py', 'moonglade.pages'),
+    ('tests/test_security_review_fixes.py', 'moonglade.pages'),
+    ('tests/test_server_one_module.py', 'moonglade.pages'),
+    ('tests/test_settings_store.py', 'moonglade.pages'),
+    ('tests/test_setup_prepare.py', 'moonglade.pages'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.pages'),
+    ('tests/test_telemetry.py', 'moonglade.pages'),
 }
 
 
@@ -2187,7 +2213,12 @@ def test_the_js_reader_scan_sees_the_node_tests():
     readers = detect_source_readers(_reader_files())
     js = {p for p in readers if p.endswith(rp.JS_SUFFIXES)}
     assert "loom/test/import-batches.test.js" in js
-    assert any("moonglade.gallery" in readers[p] for p in js)
+    # Since 3.22 phase 4 the node tests that read the gallery's page shells read the module they
+    # moved to (pages), not gallery.py itself; import-batches (scan) does not count here.
+    from_gallery = {"moonglade.gallery"} | {m for m, e in SEAMS.items()
+                                            if e["from"] == "moonglade.gallery"}
+    assert any(set(readers[p]) & from_gallery for p in js
+               if p != "loom/test/import-batches.test.js")
     # Since 3.22 the node tests that read the engine read the modules split out of it
     # (cards, gen_params), not backup.py itself.
     from_backup = {"moonglade.backup"} | {m for m, e in SEAMS.items()

@@ -31,7 +31,7 @@ from moonglade import web_sessions as _web_sessions
 
 
 def register(app, ctx):
-    from moonglade.gallery import _AUTH_401_GUARD_JS, _PREPAINT_BOOT_JS
+    from moonglade.pages import _AUTH_401_GUARD_JS, _PREPAINT_BOOT_JS
     from moonglade.web_tiers import LOGIN, PUBLIC, tier
     # -- bound from ctx (split_move) --
     build_stamp = ctx.build_stamp
@@ -136,7 +136,7 @@ def register(app, ctx):
         here. LoginPage.jsx renders one of three states off the boot flags below:
         sign-in (an account exists), local bootstrap-create (no_accounts + is_local),
         or the LAN-first-run safety message (no_accounts + NOT is_local)."""
-        from moonglade.gallery import DESIGN_TOKENS_CSS
+        from moonglade.pages import DESIGN_TOKENS_CSS
         next_url = _safe_next(request.values.get("next", "")) or ""
         from moonglade import backup as core
         no_accounts = not core.list_web_users()
@@ -1087,9 +1087,9 @@ __DESIGN_TOKENS__
     @app.route("/")
     @tier(LOGIN)
     def app_page():
-        from moonglade.gallery import (DESIGN_TOKENS_CSS, _upscale_const_js, catalog_counts,
-                                       catalog_years, list_smart_collections, unique_collections,
-                                       unique_models)
+        from moonglade.gallery import (catalog_counts, catalog_years, list_smart_collections,
+                                       unique_collections, unique_models)
+        from moonglade.pages import DESIGN_TOKENS_CSS, _upscale_const_js
         from moonglade.ach_beacon import _ach_mint
         session.setdefault("csrf", secrets.token_hex(16))
         brand = _branding.brand_context(out_dir)

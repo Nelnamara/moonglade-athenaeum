@@ -104,8 +104,9 @@ describe("recipe data integrity (baked from PixAI's public imageArtFilters confi
 // The five skins these are derived from, and where their palettes live. The default
 // ("moonglade") is the `:root` block of DESIGN_TOKENS_CSS; the other four are
 // `html[data-skin="..."]` overrides after it. Read straight out of the app so a retinted
-// skin fails the cross-check below instead of quietly drifting from its filter.
-const APP_PY = readFileSync(path.join(__dirname, "../../moonglade/gallery.py"), "utf8");
+// skin fails the cross-check below instead of quietly drifting from its filter. The tokens
+// live in moonglade/pages.py since split phase 4.
+const APP_PY = readFileSync(path.join(__dirname, "../../moonglade/pages.py"), "utf8");
 
 function skinPalette(skin) {
   const start = skin === "moonglade"

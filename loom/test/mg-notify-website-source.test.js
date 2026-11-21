@@ -26,9 +26,9 @@ const row = readFileSync(
 const css = readFileSync(
   path.join(__dirname, "../../gallery/src/styles/notify.css"), "utf8");
 // The website-run job's source and status mapping live with the watch in web_threads.py since
-// split phase 4; the Loom's shell stays in gallery.py.
+// split phase 4, and the Loom's shell in pages.py.
 const server = readFileSync(
-  path.join(__dirname, "../../moonglade/gallery.py"), "utf8") + readFileSync(
+  path.join(__dirname, "../../moonglade/pages.py"), "utf8") + readFileSync(
   path.join(__dirname, "../../moonglade/web_threads.py"), "utf8");
 // The job log's routes (/api/jobs and its register) live with the create routes since split
 // phase 4.

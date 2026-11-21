@@ -218,7 +218,8 @@ def test_loom_shell_body_declares_a_font_for_what_mounts_outside_root():
     """The shell mounts the Activity chip/tray, the toasts and the ? FAB outside #root, so
     they inherit from body, not from .sb-root's own font-family. Belt to notify.css's braces
     (mg-notify's, pre-port): the shell should not hand anything an unstyled baseline."""
-    src = (Path(__file__).resolve().parents[2] / "moonglade" / "gallery.py").read_text(encoding="utf-8")
+    # The shell lives in moonglade/pages.py since split phase 4.
+    src = (Path(__file__).resolve().parents[2] / "moonglade" / "pages.py").read_text(encoding="utf-8")
     shell = src[src.index("_LOOM_SHELL = r"):]
     body_rule = shell[shell.index("body {"):shell.index("}", shell.index("body {"))]
     assert "font-family" in body_rule, (
