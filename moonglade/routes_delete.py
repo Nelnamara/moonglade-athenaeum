@@ -21,7 +21,7 @@ from moonglade import telemetry as _telemetry
 
 
 def register(app, ctx):
-    from moonglade.gallery import LOCALHOST, LOGIN, tier
+    from moonglade.web_tiers import LOCALHOST, LOGIN, tier
     # -- bound from ctx (split_move) --
     _log_job = ctx._log_job
     _redact_host_paths = ctx._redact_host_paths

@@ -28,7 +28,7 @@ from moonglade import updater as _updater
 
 
 def register(app, ctx):
-    from moonglade.gallery import LOCALHOST, LOGIN, PUBLIC, tier
+    from moonglade.web_tiers import LOCALHOST, LOGIN, PUBLIC, tier
     # -- bound from ctx (split_move) --
     PANEL_ACTIONS = ctx.PANEL_ACTIONS
     _LIVING_STALE_ACTIONS = ctx._LIVING_STALE_ACTIONS

@@ -75,14 +75,10 @@ from moonglade import gallery as moonglade_gallery
 from moonglade import backup as core
 from moonglade import gen_road as gen_road_mod
 from moonglade import cloud_delete as cloud_delete_mod
-from moonglade.gallery import (
-    LOCALHOST,
-    LOGIN,
-    PUBLIC,
-    create_app,
-    route_tier,
-    assert_every_route_declares_a_tier,
-)
+from moonglade.gallery import create_app
+from moonglade.web_tiers import (LOCALHOST, LOGIN, PUBLIC, route_tier,
+                                 assert_every_route_declares_a_tier)
+from moonglade import web_tiers as web_tiers_mod
 
 
 LAN = "203.0.113.5"      # TEST-NET-3 -- the "some other device on the LAN" stand-in
@@ -852,7 +848,7 @@ def test_localhost_refusal_body_is_the_declared_one(app, armed):
                         environ_overrides={"REMOTE_ADDR": LAN},
                         **PROBE_BODIES.get((endpoint, method), {}))
         body = resp.get_json(silent=True)
-        expected = moonglade_gallery.route_tier_message(app.view_functions[endpoint])
+        expected = web_tiers_mod.route_tier_message(app.view_functions[endpoint])
         if body != {"error": expected}:
             failures.append("  {} ({}): expected {!r}, got {!r}".format(
                 method, endpoint, {"error": expected}, body))

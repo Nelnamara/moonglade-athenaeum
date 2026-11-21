@@ -28,7 +28,8 @@ from moonglade import training as _training
 
 
 def register(app, ctx):
-    from moonglade.gallery import LOGIN, TrainGuard, tier
+    from moonglade.gallery import TrainGuard
+    from moonglade.web_tiers import LOGIN, tier
     # -- bound from ctx (split_move) --
     _check_csrf = ctx._check_csrf
     _gen_session = ctx._gen_session

@@ -21,7 +21,7 @@ from moonglade import settings as _settings
 
 
 def register(app, ctx):
-    from moonglade.gallery import LOCALHOST, LOGIN, tier
+    from moonglade.web_tiers import LOCALHOST, LOGIN, tier
     # -- bound from ctx (split_move) --
     MIRROR_CONNECT_PAGE = ctx.MIRROR_CONNECT_PAGE
     _check_csrf = ctx._check_csrf

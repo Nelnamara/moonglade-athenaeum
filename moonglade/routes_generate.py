@@ -37,7 +37,7 @@ from moonglade import updater as _updater
 
 
 def register(app, ctx):
-    from moonglade.gallery import LOGIN, tier
+    from moonglade.web_tiers import LOGIN, tier
     # -- bound from ctx (split_move) --
     _LOOM_ID_RE = ctx._LOOM_ID_RE
     _account_is_member = ctx._account_is_member

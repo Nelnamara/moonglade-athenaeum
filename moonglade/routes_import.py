@@ -21,7 +21,7 @@ from moonglade import telemetry as _telemetry
 
 
 def register(app, ctx):
-    from moonglade.gallery import LOCALHOST, LOGIN, tier
+    from moonglade.web_tiers import LOCALHOST, LOGIN, tier
     # -- bound from ctx (split_move) --
     _check_csrf = ctx._check_csrf
     _gen_session = ctx._gen_session

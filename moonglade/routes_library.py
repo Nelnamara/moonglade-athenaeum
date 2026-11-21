@@ -33,7 +33,7 @@ from moonglade import telemetry as _telemetry
 
 
 def register(app, ctx):
-    from moonglade.gallery import LOGIN, tier
+    from moonglade.web_tiers import LOGIN, tier
     # -- bound from ctx (split_move) --
     _batch_sibling_count = ctx._batch_sibling_count
     _check_csrf = ctx._check_csrf

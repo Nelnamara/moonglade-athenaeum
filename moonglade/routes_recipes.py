@@ -22,7 +22,7 @@ from moonglade import task_reads as _task_reads
 
 
 def register(app, ctx):
-    from moonglade.gallery import LOGIN, tier
+    from moonglade.web_tiers import LOGIN, tier
     # -- bound from ctx (split_move) --
     _check_csrf = ctx._check_csrf
     _gen_session = ctx._gen_session

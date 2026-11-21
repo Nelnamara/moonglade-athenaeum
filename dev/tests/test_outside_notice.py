@@ -34,6 +34,7 @@ from moonglade import outside
 from moonglade import paths
 from tests.conftest import REPO_ROOT, login_client, session_csrf, stub_code_module, with_csrf
 from moonglade import branding as branding_mod
+from moonglade import web_tiers as web_tiers_mod
 
 LAN = {"REMOTE_ADDR": "192.168.1.9"}
 _ITEMS = [outside.Item("task", "\\Moonglade sync", "the scheduled task “Moonglade sync”", {}),
@@ -140,7 +141,7 @@ def test_fix_them_is_this_machine_only(tmp_path, fixer):
     assert r.status_code == 403
     assert fixer.fix == []
     view = cli.application.view_functions["api_outside_fix"]
-    assert g.route_tier(view, "POST") == g.LOCALHOST
+    assert web_tiers_mod.route_tier(view, "POST") == web_tiers_mod.LOCALHOST
 
 
 def test_one_fix_at_a_time(tmp_path, fixer):

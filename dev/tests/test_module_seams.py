@@ -400,6 +400,10 @@ SEAMS = {
     # the same way phase 3's did (moved names are reached through the new module, not gallery).
     "moonglade.redact": {"from": "moonglade.gallery", "names": [
         "_USER_HOME_RE", "_redact_host_paths_cli"]},
+    "moonglade.web_tiers": {"from": "moonglade.gallery", "names": [
+        "PUBLIC", "LOGIN", "LOCALHOST", "TIERS", "LOCALHOST_REFUSAL", "_TIER_ATTR", "tier",
+        "route_tier", "route_tier_message", "declare_endpoint_tier",
+        "assert_every_route_declares_a_tier"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -1744,6 +1748,38 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_task_model_detail_document.py', 'moonglade.redact'),
     ('tests/test_telemetry.py', 'moonglade.redact'),
     ('tools/export_design_kit.py', 'moonglade.redact'),
+    # Split phase 4, web_tiers: no reader reads the tier definitions; the readers that name a tier
+    # name it in prose, a route's docstring or a payload, and test_route_tiers and
+    # test_outside_notice reach the tier helpers through moonglade.web_tiers.
+    ('loom/test/mg-art-filters.test.js', 'moonglade.web_tiers'),
+    ('loom/test/mg-notify-queue-phase.test.js', 'moonglade.web_tiers'),
+    ('loom/test/mg-notify-website-source.test.js', 'moonglade.web_tiers'),
+    ('loom/test/phone-back-layers.test.js', 'moonglade.web_tiers'),
+    ('tests/test_app_paths.py', 'moonglade.web_tiers'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.web_tiers'),
+    ('tests/test_bonjour.py', 'moonglade.web_tiers'),
+    ('tests/test_branding.py', 'moonglade.web_tiers'),
+    ('tests/test_branding_tree_rules.py', 'moonglade.web_tiers'),
+    ('tests/test_catalog_verbs.py', 'moonglade.web_tiers'),
+    ('tests/test_catchup_query.py', 'moonglade.web_tiers'),
+    ('tests/test_csrf_coverage.py', 'moonglade.web_tiers'),
+    ('tests/test_design_kit_sync.py', 'moonglade.web_tiers'),
+    ('tests/test_evidence_counters.py', 'moonglade.web_tiers'),
+    ('tests/test_first_party_sources.py', 'moonglade.web_tiers'),
+    ('tests/test_history_feed_document.py', 'moonglade.web_tiers'),
+    ('tests/test_living_library.py', 'moonglade.web_tiers'),
+    ('tests/test_logging.py', 'moonglade.web_tiers'),
+    ('tests/test_loom_notify.py', 'moonglade.web_tiers'),
+    ('tests/test_loom_p_routes.py', 'moonglade.web_tiers'),
+    ('tests/test_network.py', 'moonglade.web_tiers'),
+    ('tests/test_outside_notice.py', 'moonglade.web_tiers'),
+    ('tests/test_security_review_fixes.py', 'moonglade.web_tiers'),
+    ('tests/test_server_one_module.py', 'moonglade.web_tiers'),
+    ('tests/test_settings_store.py', 'moonglade.web_tiers'),
+    ('tests/test_setup_prepare.py', 'moonglade.web_tiers'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.web_tiers'),
+    ('tests/test_telemetry.py', 'moonglade.web_tiers'),
+    ('tools/export_design_kit.py', 'moonglade.web_tiers'),
 }
 
 

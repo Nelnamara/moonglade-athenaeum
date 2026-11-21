@@ -31,7 +31,8 @@ from moonglade import web_sessions as _web_sessions
 
 
 def register(app, ctx):
-    from moonglade.gallery import LOGIN, PUBLIC, _AUTH_401_GUARD_JS, _PREPAINT_BOOT_JS, tier
+    from moonglade.gallery import _AUTH_401_GUARD_JS, _PREPAINT_BOOT_JS
+    from moonglade.web_tiers import LOGIN, PUBLIC, tier
     # -- bound from ctx (split_move) --
     build_stamp = ctx.build_stamp
     db_path = ctx.db_path
@@ -421,7 +422,7 @@ def register(app, ctx):
         `/api/achievements`, `/api/skin`, `/api/ach-event`, `/api/your-art`,
         `/api/loom/export-status`, `/api/loom/export-file`, `/api/ping` had NO
         auth check of any kind before this hook existed."""
-        from moonglade.gallery import LOCALHOST, LOGIN, PUBLIC, route_tier, route_tier_message
+        from moonglade.web_tiers import LOCALHOST, LOGIN, PUBLIC, route_tier, route_tier_message
         view = app.view_functions.get(request.endpoint or "")
         # No rule matched (a 404 in waiting), so there is no declaration to
         # read. Gate it as LOGIN, exactly as the old path-prefix version did:

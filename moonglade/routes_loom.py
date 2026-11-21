@@ -32,7 +32,8 @@ from moonglade import telemetry as _telemetry
 
 
 def register(app, ctx):
-    from moonglade.gallery import LOGIN, LOOM_EXPORT_SWEEP_AGE_S, tier
+    from moonglade.gallery import LOOM_EXPORT_SWEEP_AGE_S
+    from moonglade.web_tiers import LOGIN, tier
     # -- bound from ctx (split_move) --
     _LOOM_ID_RE = ctx._LOOM_ID_RE
     _LOOM_REV_MISSING = ctx._LOOM_REV_MISSING

@@ -33,7 +33,7 @@ from moonglade import updater as _updater
 
 
 def register(app, ctx):
-    from moonglade.gallery import LOCALHOST, LOGIN, tier
+    from moonglade.web_tiers import LOCALHOST, LOGIN, tier
     # -- bound from ctx (split_move) --
     _asset_job = ctx._asset_job
     _check_csrf = ctx._check_csrf

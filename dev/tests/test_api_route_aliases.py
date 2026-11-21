@@ -18,7 +18,8 @@ every unrouted path redirects to /login, which would pass just as happily agains
 """
 import pytest
 
-from moonglade.gallery import CATALOG_FIELDS, PUBLIC, create_app, route_tier, save_catalog
+from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.web_tiers import PUBLIC, route_tier
 
 from tests.conftest import login_test_client
 
