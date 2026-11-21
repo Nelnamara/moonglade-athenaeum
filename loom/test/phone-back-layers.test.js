@@ -36,7 +36,8 @@ const glmCss = src("styles/gallery-mobile.css");
 const idmCss = src("styles/image-details-mobile.css");
 const fmCss = src("styles/folio-mobile.css");
 const iconCss = src("styles/icons.css");
-const server = repo("moonglade/gallery.py");
+// The served shells: the Loom's in gallery.py, the other three in routes_gate.py (split phase 4).
+const server = repo("moonglade/gallery.py") + repo("moonglade/routes_gate.py");
 const devShell = repo("gallery/index.html");
 
 // ------------------------------------------------------------------ 1. the Back gesture
