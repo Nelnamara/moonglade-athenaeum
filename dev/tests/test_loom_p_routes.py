@@ -45,9 +45,10 @@ from moonglade import task_reads as task_reads_mod
 
 REPO = Path(__file__).resolve().parents[2]
 # The Loom's code: what create_app still holds, and its store and routes, split out of it (split
-# phase 4). The source walks below read all three.
+# phase 4), and the library's routes, which took _loom_complete_clip with them. The source walks
+# below read all four.
 _LOOM_SOURCES = (REPO / "moonglade" / "gallery.py", REPO / "moonglade" / "web_loom_store.py",
-                 REPO / "moonglade" / "routes_loom.py")
+                 REPO / "moonglade" / "routes_loom.py", REPO / "moonglade" / "routes_library.py")
 
 
 def _loom_trees():

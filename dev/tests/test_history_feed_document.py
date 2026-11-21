@@ -537,7 +537,9 @@ def test_the_retired_saved_request_leaves_nothing_behind():
     from moonglade import routes_panel as routes_panel_mod          # and the Control Panel's
     from moonglade import routes_delete as routes_delete_mod        # and the delete routes'
     from moonglade import routes_recipes as routes_recipes_mod      # and the recipe routes'
+    from moonglade import routes_library as routes_library_mod      # and the library routes'
     for module in (core, g, pixai_client_mod,      # the transport moved out of core
                    routes_generate_mod, routes_loom_mod, web_loom_store_mod, routes_gate_mod,
-                   web_threads_mod, routes_panel_mod, routes_delete_mod, routes_recipes_mod):
+                   web_threads_mod, routes_panel_mod, routes_delete_mod, routes_recipes_mod,
+                   routes_library_mod):
         assert "PERSISTED_QUERY_HASH" not in inspect.getsource(module)

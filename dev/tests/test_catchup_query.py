@@ -162,12 +162,14 @@ def test_the_miss_account_is_gone():
     from moonglade import routes_panel as routes_panel_mod          # and the Control Panel's
     from moonglade import routes_delete as routes_delete_mod        # and the delete routes'
     from moonglade import routes_recipes as routes_recipes_mod      # and the recipe routes'
+    from moonglade import routes_library as routes_library_mod      # and the library routes'
     src = (inspect.getsource(mg) + inspect.getsource(routes_generate_mod)
            + inspect.getsource(routes_loom_mod) + inspect.getsource(web_loom_store_mod)
            + inspect.getsource(routes_gate_mod) + inspect.getsource(web_threads_mod)
            + inspect.getsource(routes_panel_mod)
            + inspect.getsource(routes_delete_mod)
-           + inspect.getsource(routes_recipes_mod))
+           + inspect.getsource(routes_recipes_mod)
+           + inspect.getsource(routes_library_mod))
     for retired in ("_note_catchup_query", "_catchup_query", "WATCH_CATCHUP_QUERY_MISSES",
                     "via_document", "saved history request", "core.history_page"):
         assert retired not in src, retired

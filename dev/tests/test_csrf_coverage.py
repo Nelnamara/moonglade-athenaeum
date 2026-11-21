@@ -46,7 +46,8 @@ _ROUTE_SOURCES = (_GALLERY, _GALLERY.with_name("routes_generate.py"),
                   _GALLERY.with_name("web_loom_store.py"), _GALLERY.with_name("routes_loom.py"),
                   _GALLERY.with_name("routes_gate.py"), _GALLERY.with_name("routes_panel.py"),
                   _GALLERY.with_name("routes_delete.py"),
-                  _GALLERY.with_name("routes_recipes.py"))
+                  _GALLERY.with_name("routes_recipes.py"),
+                  _GALLERY.with_name("routes_library.py"))
 _STATE_CHANGING = {"POST", "PUT", "PATCH", "DELETE"}
 _REFUSAL = "Your session expired. Reload the page and try again."
 
