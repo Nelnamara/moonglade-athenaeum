@@ -621,7 +621,7 @@ def _route_function_nodes():
     """create_app, and the register(app, ctx) of each route family split out of it (split
     phase 4): the invariant covers the handlers wherever they now live."""
     out = [("gallery.py", _create_app_node())]
-    for name in ("routes_generate.py",):
+    for name in ("routes_generate.py", "web_loom_store.py", "routes_loom.py"):
         tree = ast.parse(Path(g.__file__).with_name(name).read_text(encoding="utf-8"))
         out.append((name, next(n for n in tree.body
                                if isinstance(n, ast.FunctionDef) and n.name == "register")))

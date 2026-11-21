@@ -338,6 +338,12 @@ SEAMS = {
     # Split phase 4: the first route family. Its routes and helpers are closures inside
     # register(app, ctx), not module attributes, so register is the one name it owns.
     "moonglade.routes_generate": {"from": "moonglade.gallery", "names": ["register"]},
+    # Split phase 4: the Loom family, the same way: its store (the board files, the render
+    # journal, the sends ledger, the beds) and its routes, each a register(app, ctx). A name has
+    # one owner and routes_generate owns gallery's `register`, so these two list none: no
+    # gallery attribute moved, and every reader of gallery's text counts as touched.
+    "moonglade.web_loom_store": {"from": "moonglade.gallery", "names": []},
+    "moonglade.routes_loom": {"from": "moonglade.gallery", "names": []},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -365,13 +371,12 @@ SOURCE_READERS = {
     "tests/test_evidence_counters.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_first_party_sources.py": ("moonglade.gallery",),
     "tests/test_full_meta_rest_fallback.py": ("moonglade.backup",),
-    "tests/test_gen_surface.py": ("moonglade.backup", "moonglade.gallery"),
+    "tests/test_gen_surface.py": ("moonglade.backup",),   # its Loom read is routes_loom's now
     "tests/test_history_feed_document.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_jwt.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_library_dir.py": ("moonglade.gallery",),
     "tests/test_living_library.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_logging.py": ("moonglade.gallery",),
-    "tests/test_loom_generate_guard.py": ("moonglade.gallery",),
     "tests/test_loom_notify.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_loom_p_routes.py": ("moonglade.gallery",),
     "tests/test_media_tools.py": ("moonglade.backup", "moonglade.gallery"),
@@ -404,7 +409,7 @@ SOURCE_READERS = {
     "tools/split_names.py": ("moonglade.backup", "moonglade.gallery"),   # the move proof's sweep
     "loom/test/import-batches.test.js": ("moonglade.scan",),
     "loom/test/ledger-known-reasons.test.js": ("moonglade.cards",),
-    "loom/test/med-loom-bundle-missing-report.test.js": ("moonglade.gallery",),
+    "loom/test/med-loom-bundle-missing-report.test.js": ("moonglade.routes_loom",),
     "loom/test/mg-art-filters.test.js": ("moonglade.gallery",),
     "loom/test/mg-notify-queue-phase.test.js": ("moonglade.gallery",),
     "loom/test/mg-notify-website-source.test.js": ("moonglade.gallery",
@@ -1309,6 +1314,36 @@ SOURCE_READERS_REVIEWED = {
         "tests/test_settings_store.py", "tests/test_setup_prepare.py",
         "tests/test_task_model_detail_document.py", "tests/test_telemetry.py", "tests/test_watch.py",
         "tools/export_design_kit.py")),
+    # Split phase 4: the Loom -> moonglade.web_loom_store and moonglade.routes_loom. Readers of
+    # the moved text now read the Loom modules: test_loom_p_routes (its no-spend walks cover all
+    # three files), test_loom_generate_guard (the JSON-body and handoff source checks),
+    # test_security_review_fixes (the bundle import's named cap), test_gen_surface (the bundle
+    # import's catalog rows) and med-loom-bundle-missing-report.test.js (its label shapes); the
+    # absence and coverage readers routes_generate's move widened (test_csrf_coverage,
+    # test_catalog_verbs, test_telemetry, test_evidence_counters, test_settings_store,
+    # test_catchup_query, test_artworks_adhoc, test_history_feed_document) read both Loom
+    # modules too. The rest read code that did not move (main, the page shells and _LOOM_SHELL,
+    # the palettes, the scheduler and its ticks, create_app's setup and its other closures).
+    *((_r, "moonglade." + _m) for _m in ("web_loom_store", "routes_loom") for _r in (
+        "loom/test/med-loom-bundle-missing-report.test.js", "loom/test/mg-art-filters.test.js",
+        "loom/test/mg-notify-queue-phase.test.js", "loom/test/mg-notify-website-source.test.js",
+        "loom/test/phone-back-layers.test.js", "tests/test_app_paths.py",
+        "tests/test_artworks_adhoc.py", "tests/test_bonjour.py", "tests/test_branding.py",
+        "tests/test_branding_tree_rules.py", "tests/test_catalog_verbs.py",
+        "tests/test_catchup_query.py", "tests/test_contest_wins.py", "tests/test_csrf_coverage.py",
+        "tests/test_design_kit_sync.py", "tests/test_doc_truth_residuals.py",
+        "tests/test_evidence_counters.py", "tests/test_first_party_sources.py",
+        "tests/test_gen_surface.py", "tests/test_history_feed_document.py", "tests/test_jwt.py",
+        "tests/test_library_dir.py", "tests/test_living_library.py", "tests/test_logging.py",
+        "tests/test_loom_generate_guard.py", "tests/test_loom_notify.py",
+        "tests/test_loom_p_routes.py", "tests/test_move_edges.py", "tests/test_network.py",
+        "tests/test_outside_notice.py", "tests/test_pack_file_name.py",
+        "tests/test_pack_file_type.py", "tests/test_panel.py",
+        "tests/test_rest_delete_and_renewal.py", "tests/test_security_review_fixes.py",
+        "tests/test_server_one_module.py", "tests/test_server_stop_record.py",
+        "tests/test_settings_store.py", "tests/test_setup_prepare.py",
+        "tests/test_task_model_detail_document.py", "tests/test_telemetry.py",
+        "tests/test_updater.py", "tests/test_watch.py", "tools/export_design_kit.py")),
 }
 
 

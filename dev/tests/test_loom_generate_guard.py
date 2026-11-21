@@ -551,8 +551,8 @@ def test_a_non_json_body_neither_renders_nor_writes_a_board(rig, ctype):
     assert w.status_code == 400 and not (w.get_json() or {}).get("ok")
     assert cli.get("/api/loom/get?key=" + key).get_json()["missing"] is True, "no board was written"
     import inspect
-    from moonglade import gallery as moonglade_gallery
-    src = inspect.getsource(moonglade_gallery)
+    from moonglade import routes_loom as routes_loom_mod    # the Loom routes (split phase 4)
+    src = inspect.getsource(routes_loom_mod)
     for fn in ("def loom_generate", "def loom_set"):
         i = src.index(fn)
         body = src[i:src.index("\n    @app.route", i)]
@@ -562,8 +562,8 @@ def test_a_non_json_body_neither_renders_nor_writes_a_board(rig, ctype):
 def test_the_handoff_source_names_no_spend_call():
     import ast
     import inspect
-    from moonglade import gallery as moonglade_gallery
-    src = inspect.getsource(moonglade_gallery)
+    from moonglade import routes_loom as routes_loom_mod    # the Loom routes (split phase 4)
+    src = inspect.getsource(routes_loom_mod)
     for fn in ("def loom_handoff", "def loom_submit_status", "def loom_submit_abandon"):
         i = src.index(fn)
         body = src[i:src.index("\n    @app.route", i)]

@@ -155,8 +155,8 @@ def test_the_local_import_paths_also_use_the_shared_builder():
     body = _function_body(src, "def run_import_local")
     assert "build_catalog_row(" in body and '{f: "" for f in CATALOG_FIELDS}' not in body
 
-    from moonglade import gallery as moonglade_gallery
-    gsrc = pathlib.Path(moonglade_gallery.__file__).read_text(encoding="utf-8")
+    from moonglade import routes_loom as routes_loom_mod    # the Loom routes (split phase 4)
+    gsrc = pathlib.Path(routes_loom_mod.__file__).read_text(encoding="utf-8")
     loom = gsrc[gsrc.index("def api_loom_import_bundle"):]
     loom = loom[:loom.index("media_added")]
     assert "build_catalog_row(" in loom and '{k: "" for k in CATALOG_FIELDS}' not in loom

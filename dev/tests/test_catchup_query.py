@@ -155,7 +155,10 @@ def test_the_miss_account_is_gone():
     """#80's saved-request accounting goes with the saved request: nothing is left to count
     or to warn about."""
     from moonglade import routes_generate as routes_generate_mod    # gallery's create routes
-    src = inspect.getsource(mg) + inspect.getsource(routes_generate_mod)
+    from moonglade import routes_loom as routes_loom_mod            # and the Loom's
+    from moonglade import web_loom_store as web_loom_store_mod
+    src = (inspect.getsource(mg) + inspect.getsource(routes_generate_mod)
+           + inspect.getsource(routes_loom_mod) + inspect.getsource(web_loom_store_mod))
     for retired in ("_note_catchup_query", "_catchup_query", "WATCH_CATCHUP_QUERY_MISSES",
                     "via_document", "saved history request", "core.history_page"):
         assert retired not in src, retired

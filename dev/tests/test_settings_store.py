@@ -229,7 +229,10 @@ def test_config_json_keeps_only_hand_edited_values():
     """The keys the app used to write into config.json are gone from every writer."""
     import inspect
     from moonglade import routes_generate as routes_generate_mod    # gallery's create routes
+    from moonglade import routes_loom as routes_loom_mod            # and the Loom's
+    from moonglade import web_loom_store as web_loom_store_mod
     src = (inspect.getsource(g) + inspect.getsource(core) + inspect.getsource(mirror_mod)
-           + inspect.getsource(branding_mod) + inspect.getsource(routes_generate_mod))
+           + inspect.getsource(branding_mod) + inspect.getsource(routes_generate_mod)
+           + inspect.getsource(routes_loom_mod) + inspect.getsource(web_loom_store_mod))
     for key in ('"LIBRARY_DIR"', '"BONJOUR_ENABLED"', '"BONJOUR_NAME"', '"MIRROR_TO_PIXAI"'):
         assert key not in src, key

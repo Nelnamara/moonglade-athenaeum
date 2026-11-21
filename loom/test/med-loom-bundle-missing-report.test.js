@@ -19,7 +19,8 @@ import { mediaRefIndex, bundleMissingReport } from "../src/loom-core.js";
        because the header is deliberately length-capped (a header that grows with the project
        is how a bundle downloads fine on one machine and gets rejected by a proxy on the next).
        That makes this walk a second implementation of the server's _loom_collect_media_ids,
-       so the last test reads moonglade_gallery.py and fails if its label shapes move.
+       so the last test reads moonglade/routes_loom.py (the Loom routes, split out of gallery.py in
+       split phase 4) and fails if its label shapes move.
      - the wiring in master-storyboard.jsx, by source assertion: this runner has no jsdom (see
        mg-generate-drawer-concurrent.test.js's comment on why real interaction verification
        needs a real browser), and the defect being guarded here is precisely "the header is
@@ -27,7 +28,7 @@ import { mediaRefIndex, bundleMissingReport } from "../src/loom-core.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const jsx = readFileSync(path.join(__dirname, "../master-storyboard.jsx"), "utf8").replace(/\r\n/g, "\n");
-const gallery = readFileSync(path.join(__dirname, "../../moonglade/gallery.py"), "utf8").replace(/\r\n/g, "\n");
+const gallery = readFileSync(path.join(__dirname, "../../moonglade/routes_loom.py"), "utf8").replace(/\r\n/g, "\n");
 
 const project = {
   name: "Test", target: 60, look: "",

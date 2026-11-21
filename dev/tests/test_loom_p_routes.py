@@ -44,6 +44,16 @@ from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
 
 REPO = Path(__file__).resolve().parents[2]
+# The Loom's code: what create_app still holds, and its store and routes, split out of it (split
+# phase 4). The source walks below read all three.
+_LOOM_SOURCES = (REPO / "moonglade" / "gallery.py", REPO / "moonglade" / "web_loom_store.py",
+                 REPO / "moonglade" / "routes_loom.py")
+
+
+def _loom_trees():
+    return [ast.parse(path.read_text(encoding="utf-8")) for path in _LOOM_SOURCES]
+
+
 OTHER_USER, OTHER_PW = "someone-else", "another-real-password-2"
 
 
@@ -336,9 +346,8 @@ _SPEND = {"submit", "submit_generation", "build_request", "gql_mutate", "gql_adh
 
 
 def test_no_new_route_function_names_a_render_or_pixai():
-    tree = ast.parse((REPO / "moonglade" / "gallery.py").read_text(encoding="utf-8"))
     found = {}
-    for node in ast.walk(tree):
+    for node in (n for tree in _loom_trees() for n in ast.walk(tree)):
         if isinstance(node, ast.FunctionDef) and node.name in _NEW_FUNCS:
             called = set()
             for sub in ast.walk(node):
@@ -1129,9 +1138,8 @@ _READ_ONLY_FUNCS = ("loom_frame_thumbs", "_loom_fetch_frame_thumb")
 def test_the_frame_thumbs_route_names_nothing_that_spends_or_uploads():
     """It needs a PixAI session (the media read), so it is not in _NEW_FUNCS' no-session list;
     it must still name no submit, no gql and no upload."""
-    tree = ast.parse((REPO / "moonglade" / "gallery.py").read_text(encoding="utf-8"))
     found = {}
-    for node in ast.walk(tree):
+    for node in (n for tree in _loom_trees() for n in ast.walk(tree)):
         if isinstance(node, ast.FunctionDef) and node.name in _READ_ONLY_FUNCS:
             found[node.name] = {(s.func.attr if isinstance(s.func, ast.Attribute) else getattr(s.func, "id", ""))
                                 for s in ast.walk(node) if isinstance(s, ast.Call)}

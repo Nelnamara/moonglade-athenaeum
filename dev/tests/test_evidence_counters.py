@@ -214,9 +214,10 @@ def test_no_submit_path_bumps_a_retired_counter():
     # the submit paths themselves, since split phase 4).
     from moonglade import branding as branding_mod, contest_sync as contest_sync_mod
     from moonglade import living as living_mod, routes_generate as routes_generate_mod
+    from moonglade import routes_loom as routes_loom_mod, web_loom_store as web_loom_store_mod
     src = "\n".join(inspect.getsource(mod) for mod in (
         g, telemetry_mod, achievements_mod, branding_mod, living_mod, contest_sync_mod,
-        routes_generate_mod))
+        routes_generate_mod, routes_loom_mod, web_loom_store_mod))
     # anchor: the moved submit paths really are in what this reads (their live counters)
     assert 'telem_bump("enhances"' in inspect.getsource(routes_generate_mod)
     for needle in ('telem_bump("edits"', 'telem_bump("lora_used"', 'telem_max("lora_stacked"',

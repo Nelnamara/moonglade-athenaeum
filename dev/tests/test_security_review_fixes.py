@@ -829,9 +829,15 @@ def test_a_loom_bundle_with_too_many_entries_is_refused(tmp_path, monkeypatch):
 
 def test_the_upload_routes_raise_their_own_caps_in_named_constants():
     src = open(g.__file__, encoding="utf-8").read()
-    for route, const in (("def api_upload(", "UPLOAD_MAX_BYTES"),
-                         ("def api_import_local(", "IMPORT_REQUEST_MAX_BYTES"),
-                         ("def api_loom_import_bundle(", "LOOM_BUNDLE_REQUEST_MAX_BYTES")):
-        body = src[src.index(route):]
-        body = body[:body.index("\n    @app.route")]
+    # the Loom's routes left create_app for their own module (split phase 4)
+    loom_src = open(os.path.join(os.path.dirname(g.__file__), "routes_loom.py"),
+                    encoding="utf-8").read()
+    for route, const, where in (("def api_upload(", "UPLOAD_MAX_BYTES", src),
+                                ("def api_import_local(", "IMPORT_REQUEST_MAX_BYTES", src),
+                                ("def api_loom_import_bundle(", "LOOM_BUNDLE_REQUEST_MAX_BYTES",
+                                 loom_src)):
+        body = where[where.index(route):]
+        # up to the next route, or the end of the module (the bundle import is the Loom's last)
+        nxt = body.find("\n    @app.route")
+        body = body if nxt < 0 else body[:nxt]
         assert "request.max_content_length = " + const in body, route
