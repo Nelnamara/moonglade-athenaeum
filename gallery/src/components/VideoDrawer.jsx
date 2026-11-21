@@ -23,7 +23,7 @@ import {
 import usePriceProbe from "../gen/usePriceProbe.js";
 import { requestPrice } from "../gen/priceRequest.js";
 import { priceKey } from "../gen/priceProbeCore.js";
-import { CARD_LENGTHS, modelCards, pendingPrices } from "../gen/videoModelCardsCore.js";
+import { CARD_LENGTHS, groupCards, modelCards, pendingPrices } from "../gen/videoModelCardsCore.js";
 import { submitTask } from "../gen/submitTask.js";
 import { CEILING_MS } from "../notify/pollCadence.js";
 import { chipify as refChipify, promptText as refPromptText } from "../gen/refChips.js";
@@ -773,6 +773,47 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     });
   });
 
+  // ---- the picker's box: two card rows tall, scrolling inside itself (layout A) ---------------
+  // The list box is held to the first two card rows (their headings included), measured off the
+  // real layout so a longer price line or a narrower column still shows two rows; CSS applies the
+  // cap (--mgd-mc-max) only where the picker sits beside Shot mode. The card in use scrolls into
+  // view the first time the box has a size (on open, or when the dock's settings expand).
+  const mcardsRef = useRef(null);
+  const mcScrolled = useRef(false);
+  const fitCards = () => {
+    const box = mcardsRef.current;
+    if (!box || !box.clientHeight) return;
+    const top = box.getBoundingClientRect().top - box.scrollTop;
+    let rowBottom = 0;
+    const rows = [];
+    box.querySelectorAll(".mgd-mcard").forEach((c) => {
+      const b = c.getBoundingClientRect();
+      const y = Math.round(b.top - top);
+      let row = rows.find((q) => Math.abs(q.y - y) < 3);
+      if (!row) { row = { y, bottom: 0 }; rows.push(row); }
+      row.bottom = Math.max(row.bottom, b.bottom - top);
+    });
+    rows.sort((a, b) => a.y - b.y);
+    if (rows.length) rowBottom = rows[Math.min(1, rows.length - 1)].bottom;
+    const px = Math.ceil(rowBottom + 6) + "px";
+    if (box.style.getPropertyValue("--mgd-mc-max") !== px) box.style.setProperty("--mgd-mc-max", px);
+    if (!mcScrolled.current) {
+      mcScrolled.current = true;
+      const cur = box.querySelector(".mgd-mcard.cur");
+      if (cur) {
+        const fam = cur.closest(".mgd-fam") || cur;
+        box.scrollTop = Math.max(0, fam.getBoundingClientRect().top - top - 2);
+      }
+    }
+  };
+  useEffect(() => {
+    fitCards();
+    const box = mcardsRef.current;
+    if (!box || typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(() => fitCards());
+    ro.observe(box.parentNode);
+    return () => ro.disconnect();
+  });
   // ---- SHOT MODE + the ref/frame banks (DC 1346-1376, getters 2842-2895) ----------------
   // ALL three segments always render; one the engine lacks is dimmed (opacity .35, not-allowed,
   // title '<label> needs the V4.0 pair'), never removed -- the DC's shotModes.
@@ -909,6 +950,53 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
           content all survive), and the result lines below keep showing. */}
       <div className="mgd-slabwrap">
       <div className="mgd-slabs">
+        {/* MODE & CHANNEL (DC 1416-1441), now ONE WIDE STRIP across the top of the settings
+            (video drawer layout A, owner pick 2026-11-20): Basic|Professional, Normal|Private
+            with its caption, the two pill switches and (audio on) the language select, in a
+            row that wraps. The DURATION stops left it -- the length lives only in the model
+            picker's header switch, and there is no 6 s stop anywhere in the drawer. The second
+            channel reads Private since PixAI renamed it (2026-08-18); the value behind it is
+            still "enhanced" and still submits is_private -- display only. */}
+        <div className="mgd-slab mgd-strip" style={{ animationDelay: "0ms" }}>
+          <div className="mgd-sec">Mode &amp; channel</div>
+          <div className="mgd-seg mgd-quality-wrap" role="radiogroup" aria-label="Mode">
+            {[["basic", "Basic"], ["professional", "Professional"]].map(([v, l]) => (
+              <button key={v} type="button" role="radio" aria-checked={s.quality === v} className={"mgd-quality" + (s.quality === v ? " on" : "")} onClick={() => { if (st.current.quality === v) return; st.current.quality = v; rerender(); reprice(); }}>{l}</button>
+            ))}
+          </div>
+          <div className="mgd-chan">
+            <div className="mgd-seg" role="radiogroup" aria-label="Channel">
+              {[["normal", "Normal"], ["enhanced", "Private"]].map(([v, l]) => (
+                <button key={v} type="button" role="radio" aria-checked={s.channel === v} className={"mgd-channel" + (s.channel === v ? " on" : "")} onClick={() => { if (st.current.channel === v) return; st.current.channel = v; rerender(); reprice(); emit("mg-channel-commit", { isPrivate: v === "enhanced" }); }}>{l}</button>
+              ))}
+            </div>
+            <div className="mgd-chancap">{s.channel === "enhanced" ? <><Icon name="crown" /> </> : null}{CHANNEL_CAP[s.channel]}</div>
+          </div>
+          <div className="mgd-sws">
+            <label className="mgd-sw" title="Spoken lines in the prompt become voiceover">
+              <input type="checkbox" className="mgd-audio" checked={s.audioGen}
+                onChange={(e) => { st.current.audioGen = e.target.checked; rerender(); reprice(); emit("mg-audio-commit", { audioGen: e.target.checked, audioLanguage: st.current.audioLanguage }); }} />
+              <span className="mgd-swtrack"><i /></span>
+              <span className="mgd-swlab">Generate audio</span>
+            </label>
+            <label className="mgd-sw" title="Off by default — the opposite of image gen">
+              <input type="checkbox" className="mgd-helper" checked={s.videoHelper}
+                onChange={(e) => { st.current.videoHelper = e.target.checked; rerender(); reprice(); emit("mg-helper-commit", { videoHelper: e.target.checked }); }} />
+              <span className="mgd-swtrack"><i /></span>
+              <span className="mgd-swlab">Video prompt helper</span>
+            </label>
+            {s.audioGen ? (
+              <select className="mgd-sel mgd-lang" value={s.audioLanguage} aria-label="Audio language"
+                onChange={(e) => { st.current.audioLanguage = e.target.value; rerender(); reprice(); emit("mg-audio-commit", { audioGen: st.current.audioGen, audioLanguage: e.target.value }); }}>
+                {AUDIO_LANGS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            ) : null}
+          </div>
+        </div>
+
+        {/* The row under the strip: SHOT MODE (about a third, its frames side by side and wrapping)
+            beside the model picker (about two thirds). */}
+        <div className="mgd-lower">
         <div className="mgd-slab" style={{ animationDelay: "0ms" }}>
           <div className="mgd-sec">Shot mode</div>
           <div className="mgd-seg" role="tablist">
@@ -919,6 +1007,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
             ))}
           </div>
           {s.modeNote ? <div className="mgd-modenote">{s.modeNote}</div> : null}
+          <div className="mgd-banks">
           {banks.map((b) => (
             <div key={b.label} className="mgd-bank">
               <div className="mgd-bankhd">
@@ -978,6 +1067,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
               {CAMERA_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </div>
+          </div>
         </div>
 
         {/* ENGINE: the middle slab. Since look pick round 2 (topic 4 C, 2026-11-19) it is the
@@ -1006,21 +1096,28 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
               })}
             </div>
           </div>
-          <div className="mgd-mcards" role="radiogroup" aria-label="Video model">
-            {cards.map((c) => (
-              <div key={c.value} role="radio" aria-checked={c.inUse}
-                className={"mgd-mcard" + (c.inUse ? " cur" : "")} data-model={c.value}>
-                <div className="mgd-mcrow">
-                  <span className="mgd-mct">{c.label}</span>
-                  {c.inUse ? <span className="mgd-mcuse on">in use</span>
-                    : <button type="button" className="mgd-mcuse" data-model={c.value} onClick={() => pickVideoModel(c.value)}>Use this</button>}
+          <div className="mgd-mcards" role="radiogroup" aria-label="Video model" ref={mcardsRef}>
+            {groupCards(cards).map((g) => (
+              <div key={g.key} className="mgd-fam">
+                <div className="mgd-fh"><span>{g.label}</span><small>{g.cards.length} {g.cards.length > 1 ? "models" : "model"}</small></div>
+                <div className="mgd-grid2">
+                  {g.cards.map((c) => (
+                    <div key={c.value} role="radio" aria-checked={c.inUse}
+                      className={"mgd-mcard" + (c.inUse ? " cur" : "")} data-model={c.value}>
+                      <div className="mgd-mcrow">
+                        <span className="mgd-mct">{c.label}</span>
+                        {c.inUse ? <span className="mgd-mcuse on">in use</span>
+                          : <button type="button" className="mgd-mcuse" data-model={c.value} onClick={() => pickVideoModel(c.value)}>Use this</button>}
+                      </div>
+                      <div className="mgd-mccaps">
+                        {c.caps.map(([t, kind]) => <span key={t} className={"mgd-cap" + (kind ? " " + kind : "")}>{t}</span>)}
+                      </div>
+                      <span className="mgd-mcm">{c.modes}</span>
+                      <span className="mgd-mcm mgd-mcprice">{c.line}</span>
+                      <span className={"mgd-mcm mgd-mccover" + (c.cover.ok ? " ok" : "")}>{c.cover.text}</span>
+                    </div>
+                  ))}
                 </div>
-                <div className="mgd-mccaps">
-                  {c.caps.map(([t, kind]) => <span key={t} className={"mgd-cap" + (kind ? " " + kind : "")}>{t}</span>)}
-                </div>
-                <span className="mgd-mcm">{c.modes}</span>
-                <span className="mgd-mcm mgd-mcprice">{c.line}</span>
-                <span className={"mgd-mcm mgd-mccover" + (c.cover.ok ? " ok" : "")}>{c.cover.text}</span>
               </div>
             ))}
           </div>
@@ -1033,63 +1130,6 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
             </button>
           ) : null}
         </div>
-
-        {/* MODE & CHANNEL (DC 1416-1441): Basic|Professional seg -> Normal|Private seg ->
-            plain caption -> the two pill switches -> (audio on) the bare language select.
-            The second channel reads Private since PixAI renamed it (2026-08-18); the value
-            behind it is still "enhanced" and still submits is_private -- display only. */}
-        <div className="mgd-slab" style={{ animationDelay: "120ms" }}>
-          <div className="mgd-sec">Mode &amp; channel</div>
-          <div className="mgd-seg mgd-quality-wrap" role="radiogroup" aria-label="Mode">
-            {[["basic", "Basic"], ["professional", "Professional"]].map(([v, l]) => (
-              <button key={v} type="button" role="radio" aria-checked={s.quality === v} className={"mgd-quality" + (s.quality === v ? " on" : "")} onClick={() => { if (st.current.quality === v) return; st.current.quality = v; rerender(); reprice(); }}>{l}</button>
-            ))}
-          </div>
-          <div className="mgd-seg" role="radiogroup" aria-label="Channel">
-            {[["normal", "Normal"], ["enhanced", "Private"]].map(([v, l]) => (
-              <button key={v} type="button" role="radio" aria-checked={s.channel === v} className={"mgd-channel" + (s.channel === v ? " on" : "")} onClick={() => { if (st.current.channel === v) return; st.current.channel = v; rerender(); reprice(); emit("mg-channel-commit", { isPrivate: v === "enhanced" }); }}>{l}</button>
-            ))}
-          </div>
-          <div className="mgd-chancap">{s.channel === "enhanced" ? <><Icon name="crown" /> </> : null}{CHANNEL_CAP[s.channel]}</div>
-          <label className="mgd-sw" title="Spoken lines in the prompt become voiceover">
-            <input type="checkbox" className="mgd-audio" checked={s.audioGen}
-              onChange={(e) => { st.current.audioGen = e.target.checked; rerender(); reprice(); emit("mg-audio-commit", { audioGen: e.target.checked, audioLanguage: st.current.audioLanguage }); }} />
-            <span className="mgd-swtrack"><i /></span>
-            <span className="mgd-swlab">Generate audio</span>
-          </label>
-          <label className="mgd-sw" title="Off by default — the opposite of image gen">
-            <input type="checkbox" className="mgd-helper" checked={s.videoHelper}
-              onChange={(e) => { st.current.videoHelper = e.target.checked; rerender(); reprice(); emit("mg-helper-commit", { videoHelper: e.target.checked }); }} />
-            <span className="mgd-swtrack"><i /></span>
-            <span className="mgd-swlab">Video prompt helper</span>
-          </label>
-          {s.audioGen ? (
-            <select className="mgd-sel mgd-lang" value={s.audioLanguage} aria-label="Audio language"
-              onChange={(e) => { st.current.audioLanguage = e.target.value; rerender(); reprice(); emit("mg-audio-commit", { audioGen: st.current.audioGen, audioLanguage: e.target.value }); }}>
-              {AUDIO_LANGS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-          ) : null}
-          {/* DURATION (§45 drift): moved to the foot of the right slab, under MODE & CHANNEL
-              (was in the ENGINE slab) -- DC 1479-1487. Label + live 'Ns' readout, then four
-              segmented stops. A stop the engine does not take -- above its REAL cap
-              (MODEL_MAXDUR), or outside its own set (MODEL_DURATIONS: no 6 s on a Tsubaki
-              engine) -- stays visible but dimmed, not-allowed, titled, and its click is
-              ignored -- never removed. applyModelGating snaps onto the same rule. */}
-          <div className="mgd-durhd">
-            <div className="mgd-sec">Duration</div>
-            <div className="mgd-durval">{s.duration}s</div>
-          </div>
-          <div className="mgd-stops mgd-dur" role="radiogroup" aria-label="Duration">
-            {[5, 6, 10, 15].map((d) => {
-              const ok = durationAllowed(s.model, d);
-              return (
-                <button key={d} type="button" role="radio" aria-checked={d === s.duration} aria-disabled={!ok}
-                  className={"mgd-stop" + (d === s.duration ? " on" : "") + (ok ? "" : " off")}
-                  title={d + " seconds" + (ok ? "" : " — not on this engine")}
-                  onClick={() => pickDuration(d)}>{d}</button>
-              );
-            })}
-          </div>
         </div>
       </div>
       </div>
