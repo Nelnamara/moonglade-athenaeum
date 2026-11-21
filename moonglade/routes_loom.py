@@ -32,7 +32,7 @@ from moonglade import telemetry as _telemetry
 
 
 def register(app, ctx):
-    from moonglade.gallery import LOOM_EXPORT_SWEEP_AGE_S
+    from moonglade.loom_files import LOOM_EXPORT_SWEEP_AGE_S
     from moonglade.web_tiers import LOGIN, tier
     # -- bound from ctx (split_move) --
     _LOOM_ID_RE = ctx._LOOM_ID_RE
@@ -428,8 +428,8 @@ def register(app, ctx):
         """Keep the newest-used ribbon frames within LOOM_FRAME_CACHE_MAX_FILES files and
         LOOM_FRAME_CACHE_MAX_BYTES bytes; remove the rest. Other files in _frames are never
         counted or touched. Returns the names removed."""
-        from moonglade.gallery import (LOOM_FRAME_CACHE_MAX_BYTES, LOOM_FRAME_CACHE_MAX_FILES,
-                                       LOOM_FRAME_FILE_RE)
+        from moonglade.loom_files import (LOOM_FRAME_CACHE_MAX_BYTES, LOOM_FRAME_CACHE_MAX_FILES,
+                                          LOOM_FRAME_FILE_RE)
         found = []
         try:
             for f in fdir.iterdir():
@@ -466,8 +466,9 @@ def register(app, ctx):
         400 for a malformed mid or time; 404 when the clip is not on this machine or no frame
         could be produced (no ffmpeg here, a broken file) -- the ribbon then shows its
         placeholder tint. Login required; local only."""
-        from moonglade.gallery import (Image, LOOM_FRAME_FPS, LOOM_FRAME_MAX_SECONDS,
-                                       LOOM_FRAME_WIDTH, LOOM_MEDIA_ID_RE)
+        from moonglade.gallery import Image
+        from moonglade.loom_files import (LOOM_FRAME_FPS, LOOM_FRAME_MAX_SECONDS, LOOM_FRAME_WIDTH,
+                                          LOOM_MEDIA_ID_RE)
         from moonglade.web_policy import harden_file_response
         user = str(session.get("user") or "")
         if not user:
@@ -578,8 +579,8 @@ def register(app, ctx):
         """{csrf, media_ids: [up to LOOM_FRAME_THUMBS_MAX digit ids]} -> {have, fetched, gone}:
         already on this machine / filled from PixAI now / PixAI could not give it back (the
         Loom then says "Frame not on this machine. Splice again." instead of a broken picture)."""
-        from moonglade.gallery import (LOOM_FRAME_THUMBS_MAX, LOOM_FRAME_THUMBS_PAUSE_S,
-                                       LOOM_FRAME_THUMB_ID_RE)
+        from moonglade.loom_files import (LOOM_FRAME_THUMBS_MAX, LOOM_FRAME_THUMBS_PAUSE_S,
+                                          LOOM_FRAME_THUMB_ID_RE)
         user = str(session.get("user") or "")
         if not user:
             return jsonify({"error": "not logged in"}), 401
@@ -1199,8 +1200,8 @@ def register(app, ctx):
         BEFORE the body is read (the declared length) and while it is read (a hard stream
         limit); the type is sniffed from the bytes, never the file name; the file is stored
         under the sha1 of its bytes, atomically, and an identical bed is not rewritten."""
-        from moonglade.gallery import (LOOM_BED_FORM_SLACK, LOOM_BED_MAX_BYTES, _unlink_quiet,
-                                       sniff_audio_ext)
+        from moonglade.loom_files import (LOOM_BED_FORM_SLACK, LOOM_BED_MAX_BYTES, _unlink_quiet,
+                                          sniff_audio_ext)
         import tempfile
         user = str(session.get("user") or "")
         if not user:
@@ -1269,7 +1270,7 @@ def register(app, ctx):
     def api_loom_bed_get():
         """?file=<sha1>.<ext> -> the caller's own bed, streamed (HTTP Range for seeking).
         The name must match the pattern AND resolve inside the caller's own bed folder."""
-        from moonglade.gallery import LOOM_BED_MIMES
+        from moonglade.loom_files import LOOM_BED_MIMES
         from moonglade.web_policy import harden_file_response
         user = str(session.get("user") or "")
         if not user:
@@ -1304,7 +1305,7 @@ def register(app, ctx):
     def api_loom_beds_sweep():
         """{csrf, files: [...]} -> deletes ONLY the named beds that are still unused when it
         looks again (a board saved in between keeps its bed). {removed, kept}."""
-        from moonglade.gallery import LOOM_BED_FILE_RE
+        from moonglade.loom_files import LOOM_BED_FILE_RE
         user = str(session.get("user") or "")
         if not user:
             return jsonify({"error": "not logged in"}), 401
@@ -1358,9 +1359,10 @@ def register(app, ctx):
         Every name is validated against the pattern the planner uses, every mid against the
         media-id grammar, the bed against the caller's own folder (F19); the zip is written to
         out_dir/_moonglade/loom/_exports/<uuid>.zip, streamed, and deleted when the response closes."""
-        from moonglade.gallery import (LOOM_EDL_BED_NAME_RE, LOOM_EDL_CLIP_RE, LOOM_EDL_MAX_CLIPS,
-                                       LOOM_EDL_MAX_CSV_CHARS, LOOM_EDL_MAX_EDL_CHARS,
-                                       LOOM_MEDIA_ID_RE, _unlink_quiet, loom_edl_zip_stem)
+        from moonglade.loom_files import (LOOM_EDL_BED_NAME_RE, LOOM_EDL_CLIP_RE,
+                                          LOOM_EDL_MAX_CLIPS, LOOM_EDL_MAX_CSV_CHARS,
+                                          LOOM_EDL_MAX_EDL_CHARS, LOOM_MEDIA_ID_RE, _unlink_quiet,
+                                          loom_edl_zip_stem)
         import uuid
         import zipfile
         user = str(session.get("user") or "")
@@ -1446,7 +1448,8 @@ def register(app, ctx):
         asked, unknown ids left out. A READ-ONLY lookup of those ids' local catalog rows: the
         Loom titles a collection's shots from it, the gallery orders a plain selection by it.
         Never PixAI."""
-        from moonglade.gallery import LOOM_MEDIA_ID_RE, rows_for_media_ids
+        from moonglade.gallery import rows_for_media_ids
+        from moonglade.loom_files import LOOM_MEDIA_ID_RE
         raw = [x.strip() for x in (request.args.get("ids") or "").split(",") if x.strip()]
         if len(raw) > 200:
             return jsonify({"error": "at most 200 ids at once"}), 400
@@ -1474,8 +1477,8 @@ def register(app, ctx):
         it either drops the audio track entirely (when there was no real audio anywhere, so
         nothing is lost) or refuses and names the shot (when real audio would be thrown out
         of sync by it). See the span pre-pass below. body: {clips:[{mid,in,out}], total_seconds}"""
-        from moonglade.gallery import (get_row, loom_bed_audio_graph, loom_bed_windows,
-                                       probe_duration, probe_has_audio)
+        from moonglade.gallery import get_row, probe_duration, probe_has_audio
+        from moonglade.loom_files import loom_bed_audio_graph, loom_bed_windows
         from moonglade import backup as core
         if not _media_tools.ffmpeg_path():
             return jsonify({"error": "ffmpeg is not on PATH -- install it to export."}), 400
@@ -1961,10 +1964,11 @@ def register(app, ctx):
         bundle instead of --update), and returns {project, thumbs} in the exact shape
         importJSON already expects, so both tiers share one client-side create-project path.
         Login required (any session, local or LAN)."""
-        from moonglade.gallery import (LOOM_BED_FILE_RE, LOOM_BED_MAX_BYTES, LOOM_BUNDLE_MAX_BEDS,
-                                       LOOM_BUNDLE_MEDIA_MAX_BYTES, LOOM_BUNDLE_MEDIA_RE,
-                                       _unlink_quiet, make_thumbnail, make_video_thumbnail,
-                                       save_catalog_over_snapshot, sniff_audio_ext)
+        from moonglade.gallery import (make_thumbnail, make_video_thumbnail,
+                                       save_catalog_over_snapshot)
+        from moonglade.loom_files import (LOOM_BED_FILE_RE, LOOM_BED_MAX_BYTES,
+                                          LOOM_BUNDLE_MAX_BEDS, LOOM_BUNDLE_MEDIA_MAX_BYTES,
+                                          LOOM_BUNDLE_MEDIA_RE, _unlink_quiet, sniff_audio_ext)
         from moonglade.web_policy import (LOOM_BUNDLE_REQUEST_MAX_BYTES, REQUEST_MAX_BYTES,
                                           ZIP_MAX_MEMBERS, ZIP_MAX_TOTAL_BYTES,
                                           ZIP_TOO_MANY_MEMBERS)

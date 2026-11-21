@@ -31,7 +31,8 @@ def collection_health(out_dir, db_path):
     Returns a dict consumed by the /health route. Cheap (no content hashing) so
     it's safe to render on every page load.
     """
-    from moonglade.gallery import catalog, loom_render_ids
+    from moonglade.gallery import catalog
+    from moonglade.loom_files import loom_render_ids
     from moonglade.achievements import _prompt_word_counter
     from collections import defaultdict, Counter
 

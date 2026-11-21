@@ -27,6 +27,7 @@ import pytest
 from moonglade import migrate
 from moonglade import setup as msetup
 from tests.move_layouts import KEY_NEL, rig, start, write, write_config
+from moonglade import loom_files as loom_files_mod
 
 BOARD = "storyboard%3Av2%3Aproj%3Ab1.json"
 
@@ -124,7 +125,7 @@ def test_relative_and_full_path_links_still_point_where_they_did_after_the_move(
         assert not os.path.lexists(str(old))
     assert json.loads(snips.read_text()) == ["golden hour"], "what it points at is untouched"
     from moonglade import gallery as g
-    assert [p.name for p in g._loom_board_files(r.lib)] == [BOARD], "the Loom reads through it"
+    assert [p.name for p in loom_files_mod._loom_board_files(r.lib)] == [BOARD], "the Loom reads through it"
     said = " ".join(line for _lvl, line in done.report.all_lines())
     assert "its target written as" in said
 

@@ -22,9 +22,11 @@ import pytest
 from moonglade import paths as _paths
 from moonglade import backup as core
 from moonglade import gallery as g
-from moonglade.gallery import CATALOG_FIELDS, loom_render_ids, query_catalog, save_catalog
+from moonglade.gallery import CATALOG_FIELDS, query_catalog, save_catalog
+from moonglade.loom_files import loom_render_ids
 from moonglade.health import collection_health, storage_breakdown
 from tests.conftest import login_client
+from moonglade import loom_files as loom_files_mod
 
 
 def _row(**kw):
@@ -249,8 +251,8 @@ def test_type_partitions_the_library(lib):
 def test_a_search_reads_the_looms_boards_once_not_once_per_row(lib, monkeypatch):
     out, db = lib
     calls = []
-    real = g.loom_render_ids
-    monkeypatch.setattr(g, "loom_render_ids", lambda d: (calls.append(1), real(d))[1])
+    real = loom_files_mod.loom_render_ids
+    monkeypatch.setattr(loom_files_mod, "loom_render_ids", lambda d: (calls.append(1), real(d))[1])
     assert _ids(db, "type:image")                       # a handful of rows, each asking
     assert len(calls) == 1
 

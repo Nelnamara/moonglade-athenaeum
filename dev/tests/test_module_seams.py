@@ -430,6 +430,19 @@ SEAMS = {
         "_MEDIA_TYPE_BY_EXT", "media_type_for", "_attachment_disposition", "harden_file_response",
         "CSP_NONCE_MARK", "CSP_PAGE_POLICY", "page_csp", "CROSS_ORIGIN_REFUSED",
         "PLAIN_HTTP_REFUSED", "CONNECT_TOKEN_NEEDS_HTTPS", "_origin_tuple", "same_origin_write"]},
+    "moonglade.loom_files": {"from": "moonglade.gallery", "names": [
+        "_LOOM_IDS_CACHE", "_loom_board_files", "loom_render_ids", "LOOM_BED_MAX_BYTES",
+        "LOOM_BED_FORM_SLACK", "LOOM_BED_FILE_RE", "LOOM_BUNDLE_MAX_BEDS", "LOOM_BED_MIMES",
+        "LOOM_BED_UNUSED_GRACE_S", "LOOM_BED_TEMP_SWEEP_AGE_S", "LOOM_EDL_CLIP_RE",
+        "LOOM_EDL_BED_NAME_RE", "LOOM_MEDIA_ID_RE", "LOOM_BUNDLE_MEDIA_RE",
+        "LOOM_BUNDLE_MEDIA_MAX_BYTES", "LOOM_EDL_MAX_EDL_CHARS", "LOOM_EDL_MAX_CSV_CHARS",
+        "LOOM_EDL_MAX_CLIPS", "LOOM_EXPORT_SWEEP_AGE_S", "LOOM_FRAME_FPS", "LOOM_FRAME_WIDTH",
+        "LOOM_FRAME_MAX_SECONDS", "LOOM_FRAME_CACHE_MAX_FILES", "LOOM_FRAME_CACHE_MAX_BYTES",
+        "LOOM_FRAME_THUMBS_MAX", "LOOM_FRAME_THUMBS_PAUSE_S", "LOOM_FRAME_THUMB_ID_RE",
+        "LOOM_FRAME_FILE_RE", "LOOM_BED_FADE_IN", "LOOM_BED_FADE_OUT", "LOOM_BED_DUCK_DB",
+        "sniff_audio_ext", "_unlink_quiet", "loom_edl_zip_stem", "_LOOM_BOARD_NAME_RE",
+        "_json_string_body", "loom_board_name_salvage", "loom_board_beds", "loom_bed_windows",
+        "loom_bed_audio_graph"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -1970,6 +1983,29 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_setup_prepare.py', 'moonglade.web_policy'),
     ('tests/test_task_model_detail_document.py', 'moonglade.web_policy'),
     ('tests/test_telemetry.py', 'moonglade.web_policy'),
+    # Split phase 4, loom_files: no reader reads the moved text. test_loom_p_routes' AST walks look
+    # for the Loom's route and store functions (none moved here) and its regex parity checks read
+    # the compiled patterns through moonglade.loom_files.
+    ('tests/test_app_paths.py', 'moonglade.loom_files'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.loom_files'),
+    ('tests/test_bonjour.py', 'moonglade.loom_files'),
+    ('tests/test_branding.py', 'moonglade.loom_files'),
+    ('tests/test_catalog_verbs.py', 'moonglade.loom_files'),
+    ('tests/test_catchup_query.py', 'moonglade.loom_files'),
+    ('tests/test_csrf_coverage.py', 'moonglade.loom_files'),
+    ('tests/test_evidence_counters.py', 'moonglade.loom_files'),
+    ('tests/test_first_party_sources.py', 'moonglade.loom_files'),
+    ('tests/test_history_feed_document.py', 'moonglade.loom_files'),
+    ('tests/test_living_library.py', 'moonglade.loom_files'),
+    ('tests/test_logging.py', 'moonglade.loom_files'),
+    ('tests/test_loom_p_routes.py', 'moonglade.loom_files'),
+    ('tests/test_network.py', 'moonglade.loom_files'),
+    ('tests/test_security_review_fixes.py', 'moonglade.loom_files'),
+    ('tests/test_server_one_module.py', 'moonglade.loom_files'),
+    ('tests/test_settings_store.py', 'moonglade.loom_files'),
+    ('tests/test_setup_prepare.py', 'moonglade.loom_files'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.loom_files'),
+    ('tests/test_telemetry.py', 'moonglade.loom_files'),
 }
 
 

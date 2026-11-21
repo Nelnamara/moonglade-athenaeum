@@ -25,7 +25,7 @@ from moonglade import scan as _scan
 
 
 def register(app, ctx):
-    from moonglade.gallery import LOOM_BED_TEMP_SWEEP_AGE_S
+    from moonglade.loom_files import LOOM_BED_TEMP_SWEEP_AGE_S
     # -- bound from ctx (split_move) --
     out_dir = ctx.out_dir
     # -- end --
@@ -371,7 +371,7 @@ def register(app, ctx):
 
     def _loom_bed_path(user, name):
         """The caller's bed file for `name`, or None (bad name, outside the folder, absent)."""
-        from moonglade.gallery import LOOM_BED_FILE_RE
+        from moonglade.loom_files import LOOM_BED_FILE_RE
         name = str(name or "")
         if not LOOM_BED_FILE_RE.match(name):
             return None
@@ -446,7 +446,7 @@ def register(app, ctx):
         else from it: {board: its id, name: best-effort (loom_board_name_salvage), saved: the
         file's time (UTC ISO), where: the file relative to the library -- never a host path}.
         The file is the one that decides the answer, as _loom_kv_text resolves it."""
-        from moonglade.gallery import loom_board_name_salvage
+        from moonglade.loom_files import loom_board_name_salvage
         from datetime import datetime, timezone
         rows = []
         for k in keys:
@@ -483,7 +483,7 @@ def register(app, ctx):
         """[(name, bytes)] of the caller's beds no board of the account references, oldest
         first, leaving out any bed added in the last LOOM_BED_UNUSED_GRACE_S (its board's save
         may not have landed). Read-only."""
-        from moonglade.gallery import LOOM_BED_FILE_RE, LOOM_BED_UNUSED_GRACE_S, loom_board_beds
+        from moonglade.loom_files import LOOM_BED_FILE_RE, LOOM_BED_UNUSED_GRACE_S, loom_board_beds
         d = _loom_beds_dir(user)
         if not d.is_dir():
             return []
