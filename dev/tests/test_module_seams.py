@@ -410,6 +410,10 @@ SEAMS = {
         "WATCH_COLLECT_RETRY_S", "watch_reconnect_plan", "catchup_plan", "watch_close_info"]},
     "moonglade.name_hunt": {"from": "moonglade.gallery", "names": [
         "_HUNT_MAX_PAGES", "_hunt_by_name"]},
+    "moonglade.ach_beacon": {"from": "moonglade.gallery", "names": [
+        "_ACH_NONCE_TTL_S", "_ACH_NONCE_MAX", "_ACH_DEBOUNCE_S", "_ACH_RATE_MAX",
+        "_ACH_RATE_WINDOW_S", "_ach_lock", "_ach_nonces", "_ach_last", "_ach_rate", "_ach_sweep",
+        "_ach_mint", "_ach_consume", "_ach_debounced", "_ach_rate_ok"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -1844,6 +1848,36 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_task_model_detail_document.py', 'moonglade.name_hunt'),
     ('tests/test_telemetry.py', 'moonglade.name_hunt'),
     ('tools/export_design_kit.py', 'moonglade.name_hunt'),
+    # Split phase 4, ach_beacon: no reader reads the beacon's text; test_telemetry's whole-module
+    # read counts bridge_gen_tasks writers, which never sat in the beacon, and it reaches the
+    # tables through moonglade.ach_beacon.
+    ('loom/test/mg-art-filters.test.js', 'moonglade.ach_beacon'),
+    ('loom/test/mg-notify-queue-phase.test.js', 'moonglade.ach_beacon'),
+    ('loom/test/mg-notify-website-source.test.js', 'moonglade.ach_beacon'),
+    ('loom/test/phone-back-layers.test.js', 'moonglade.ach_beacon'),
+    ('tests/test_app_paths.py', 'moonglade.ach_beacon'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.ach_beacon'),
+    ('tests/test_bonjour.py', 'moonglade.ach_beacon'),
+    ('tests/test_branding.py', 'moonglade.ach_beacon'),
+    ('tests/test_catalog_verbs.py', 'moonglade.ach_beacon'),
+    ('tests/test_catchup_query.py', 'moonglade.ach_beacon'),
+    ('tests/test_csrf_coverage.py', 'moonglade.ach_beacon'),
+    ('tests/test_design_kit_sync.py', 'moonglade.ach_beacon'),
+    ('tests/test_evidence_counters.py', 'moonglade.ach_beacon'),
+    ('tests/test_first_party_sources.py', 'moonglade.ach_beacon'),
+    ('tests/test_history_feed_document.py', 'moonglade.ach_beacon'),
+    ('tests/test_living_library.py', 'moonglade.ach_beacon'),
+    ('tests/test_logging.py', 'moonglade.ach_beacon'),
+    ('tests/test_loom_notify.py', 'moonglade.ach_beacon'),
+    ('tests/test_loom_p_routes.py', 'moonglade.ach_beacon'),
+    ('tests/test_network.py', 'moonglade.ach_beacon'),
+    ('tests/test_security_review_fixes.py', 'moonglade.ach_beacon'),
+    ('tests/test_server_one_module.py', 'moonglade.ach_beacon'),
+    ('tests/test_settings_store.py', 'moonglade.ach_beacon'),
+    ('tests/test_setup_prepare.py', 'moonglade.ach_beacon'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.ach_beacon'),
+    ('tests/test_telemetry.py', 'moonglade.ach_beacon'),
+    ('tools/export_design_kit.py', 'moonglade.ach_beacon'),
 }
 
 

@@ -7,11 +7,12 @@ register(app, ctx) once, where the block was, after the training routes. Names t
 from create_app's setup and the front door (the CSRF check, the beacon's session id) come in
 through ctx (the bound-from-ctx lines below), so every closure on both sides holds the one same
 object. The `_ach_lock` bound in register is create_app's own lock, moved with its only two users
-(the achievements read and the skin switch): it shadows gallery's module-level `_ach_lock`, and
-it stays a separate lock, as it was. The nonce tables and their functions (_ach_mint,
-_ach_consume, _ach_debounced, _ach_rate_ok) stay in gallery and are imported inside the routes
+(the achievements read and the skin switch): it shadows moonglade.ach_beacon's module-level
+`_ach_lock` (gallery's, until the beacon's tables left gallery's top level), and it stays a
+separate lock, as it was. The nonce tables and their functions (_ach_mint, _ach_consume,
+_ach_debounced, _ach_rate_ok) live in moonglade.ach_beacon and are imported inside the routes
 that call them, at call time, so the front door's page render, the Loom shell and these routes
-mint and spend in one table, and a test's patch of moonglade.gallery still reaches the route.
+mint and spend in one table, and a test's patch of moonglade.ach_beacon still reaches the route.
 """
 import threading
 
@@ -219,7 +220,7 @@ def register(app, ctx):
         window, or spent). Same session budget as the events themselves -- see
         _ach_rate_ok(). The render seams (app_page, /loom) mint their first one inline;
         this is the top-up."""
-        from moonglade.gallery import _ach_mint, _ach_rate_ok
+        from moonglade.ach_beacon import _ach_mint, _ach_rate_ok
         sid = _ach_sid()
         if not _ach_rate_ok(sid):
             return jsonify({"error": "slow down"}), 429
@@ -288,7 +289,7 @@ def register(app, ctx):
         2026-10-02 from a word that gave the egg away). There is no alias for the old name:
         a stale cached page's 400 is a silent no-op and the next press after a reload counts.
         The telemetry flag it sets keeps its key, which is the sealed roster's metric."""
-        from moonglade.gallery import _ach_consume, _ach_debounced, _ach_mint, _ach_rate_ok
+        from moonglade.ach_beacon import _ach_consume, _ach_debounced, _ach_mint, _ach_rate_ok
         sid = _ach_sid()
         if not _ach_rate_ok(sid):
             return jsonify({"error": "slow down"}), 429

@@ -1087,9 +1087,10 @@ __DESIGN_TOKENS__
     @app.route("/")
     @tier(LOGIN)
     def app_page():
-        from moonglade.gallery import (DESIGN_TOKENS_CSS, _ach_mint, _upscale_const_js,
-                                       catalog_counts, catalog_years, list_smart_collections,
-                                       unique_collections, unique_models)
+        from moonglade.gallery import (DESIGN_TOKENS_CSS, _upscale_const_js, catalog_counts,
+                                       catalog_years, list_smart_collections, unique_collections,
+                                       unique_models)
+        from moonglade.ach_beacon import _ach_mint
         session.setdefault("csrf", secrets.token_hex(16))
         brand = _branding.brand_context(out_dir)
         stats = catalog_counts(db_path)

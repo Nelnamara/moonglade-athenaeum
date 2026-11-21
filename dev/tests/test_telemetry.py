@@ -22,6 +22,7 @@ from moonglade import telemetry as telemetry_mod
 from moonglade import achievements as achievements_mod
 from moonglade import branding as branding_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import ach_beacon as ach_beacon_mod
 
 # The roster is sealed in the container (built from the private donor), not in source.
 # Gate ONLY the tests that assert sealed roster/skin/criteria CONTENT -- NOT the whole
@@ -258,7 +259,7 @@ def test_api_ach_event_beacon(tmp_path, monkeypatch):
     """The two events still earn what they always earned, now each with a nonce. (Narrator
     pokes left this beacon for /api/narrator/poke, whose ladder keeps the count on the
     server per account -- dev/tests/test_narrator_route.py owns that.)"""
-    monkeypatch.setattr(g, "_ACH_DEBOUNCE_S", 0.0)
+    monkeypatch.setattr(ach_beacon_mod, "_ACH_DEBOUNCE_S", 0.0)
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
     r = ach_event(cli, STARFALL_EVENT)
@@ -317,8 +318,8 @@ def test_ach_nonce_expires(tmp_path):
     slept: the table is a plain module dict of nonce -> (issued_at, sid)."""
     cli = login_client(tmp_path)
     nonce = ach_nonce(cli)
-    issued, sid = g._ach_nonces[nonce]
-    g._ach_nonces[nonce] = (issued - (g._ACH_NONCE_TTL_S + 1), sid)
+    issued, sid = ach_beacon_mod._ach_nonces[nonce]
+    ach_beacon_mod._ach_nonces[nonce] = (issued - (ach_beacon_mod._ACH_NONCE_TTL_S + 1), sid)
     r = cli.post("/api/ach-event", json={"event": "docs", "nonce": nonce})
     assert r.status_code == 403 and r.get_json()["error"] == "stale page — reload"
     assert "docs_opened" not in telemetry_mod.telemetry_metrics(tmp_path)
@@ -376,8 +377,8 @@ def test_ach_debounce_window_is_narrower_than_a_hand(tmp_path, monkeypatch):
     pair of real taps was thrown away, while three separate comments said separate clicks
     were never touched. 150ms is over a double-fired DOM event and under a hand."""
     clock = {"t": time.time()}   # real epoch: the sweep prunes stamps by it
-    real = g._ach_debounced
-    monkeypatch.setattr(g, "_ach_debounced",
+    real = ach_beacon_mod._ach_debounced
+    monkeypatch.setattr(ach_beacon_mod, "_ach_debounced",
                         lambda sid, event, now=None: real(sid, event, now=clock["t"]))
     cli = login_client(tmp_path)
     n = ach_nonce(cli)
@@ -397,22 +398,22 @@ def test_ach_debounce_window_is_narrower_than_a_hand(tmp_path, monkeypatch):
     assert d["debounced"] is True
     assert telemetry_mod.telemetry_metrics(tmp_path)["docs_opened"] == 3
     # A hand cannot do this; that is the whole basis of the window.
-    assert g._ACH_DEBOUNCE_S <= 0.15
+    assert ach_beacon_mod._ACH_DEBOUNCE_S <= 0.15
 
 
 def test_ach_event_rate_limited_per_session(tmp_path, monkeypatch):
     """30 beacon calls a rolling minute, the mint included. Past that: 429 and nothing
     moves -- the replay loop the nonce alone would only slow down."""
-    monkeypatch.setattr(g, "_ACH_DEBOUNCE_S", 0.0)
+    monkeypatch.setattr(ach_beacon_mod, "_ACH_DEBOUNCE_S", 0.0)
     cli = login_client(tmp_path)
     nonce = ach_nonce(cli)                       # call 1 of 30
-    for i in range(2, g._ACH_RATE_MAX + 1):      # calls 2..30
+    for i in range(2, ach_beacon_mod._ACH_RATE_MAX + 1):      # calls 2..30
         d = cli.post("/api/ach-event", json={"event": "docs", "nonce": nonce}).get_json()
         assert d["ok"] is True, "call %d should still be accepted" % i
         nonce = d["next_nonce"]
     r = cli.post("/api/ach-event", json={"event": "docs", "nonce": nonce})
     assert r.status_code == 429 and r.get_json()["error"] == "slow down"
-    assert telemetry_mod.telemetry_metrics(tmp_path)["docs_opened"] == g._ACH_RATE_MAX - 1
+    assert telemetry_mod.telemetry_metrics(tmp_path)["docs_opened"] == ach_beacon_mod._ACH_RATE_MAX - 1
     assert cli.get("/api/ach-nonce").status_code == 429   # the top-up draws on the same budget
 
 
@@ -427,7 +428,7 @@ def test_ach_rate_limit_binds_across_a_replayed_cookie(tmp_path, monkeypatch):
     own docstring calls the stop for a scripted replay loop did not bind at all (probed
     2026-09-07: 60 rounds, 60 sids, no 429). Keyed on the login's own stable identity, the
     replays all draw on one budget."""
-    monkeypatch.setattr(g, "_ACH_DEBOUNCE_S", 0.0)
+    monkeypatch.setattr(ach_beacon_mod, "_ACH_DEBOUNCE_S", 0.0)
     app = g.create_app(tmp_path)
     cli = login_test_client(app)
     c0 = cli.get_cookie("session").value          # captured before any beacon call
@@ -439,7 +440,7 @@ def test_ach_rate_limit_binds_across_a_replayed_cookie(tmp_path, monkeypatch):
         c.set_cookie("session", c0)
         return c
 
-    rounds = g._ACH_RATE_MAX // 2                 # a top-up + an event is two calls
+    rounds = ach_beacon_mod._ACH_RATE_MAX // 2                 # a top-up + an event is two calls
     for i in range(rounds):
         c = replay()
         d = c.get("/api/ach-nonce").get_json()

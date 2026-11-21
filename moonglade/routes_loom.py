@@ -139,7 +139,8 @@ def register(app, ctx):
         engine, ...) are plain imports esbuild resolves, with no hand-inlining. A checkout
         that hasn't built the bundle gets a clear message, not a silent fallback; the
         committed bundle + the CI staleness guard keep it current."""
-        from moonglade.gallery import LOOM_PAGE_BUNDLE, _ach_mint, _upscale_const_js
+        from moonglade.gallery import LOOM_PAGE_BUNDLE, _upscale_const_js
+        from moonglade.ach_beacon import _ach_mint
         loom_dir = _paths.loom_dir()
         bundle_file = loom_dir / "dist" / "master-storyboard.bundle.js"
         if not bundle_file.is_file():
