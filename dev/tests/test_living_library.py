@@ -37,6 +37,7 @@ from moonglade import updater as updater_mod
 from moonglade import living as living_mod
 from moonglade import web_threads as web_threads_mod
 from moonglade import routes_panel as routes_panel_mod
+from moonglade import routes_community as routes_community_mod
 
 SRC = Path(__file__).resolve().parents[2]
 DAY = 86400.0
@@ -47,11 +48,12 @@ NOW = 1_800_000_000.0            # 2027-01-15
 
 
 def _app_src():
-    """create_app's text and the two blocks split out of it into moonglade/web_threads.py and
-    moonglade/routes_panel.py (split phase 4): the pins below read the scheduler, the ticks and
-    the routes together, as they did when all of it was create_app."""
+    """create_app's text and the three blocks split out of it into moonglade/web_threads.py,
+    moonglade/routes_panel.py and moonglade/routes_community.py (split phase 4): the pins below
+    read the scheduler, the ticks and the routes (My Art's publish among them) together, as they
+    did when all of it was create_app."""
     return (inspect.getsource(g.create_app) + inspect.getsource(web_threads_mod)
-            + inspect.getsource(routes_panel_mod))
+            + inspect.getsource(routes_panel_mod) + inspect.getsource(routes_community_mod))
 
 
 def _iso(days_ago):
