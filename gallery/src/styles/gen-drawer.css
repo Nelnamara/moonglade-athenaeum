@@ -85,8 +85,14 @@
 .gen-drawer .mgd-sel:disabled{color:var(--overlay0,#6a6088);}
 /* The strip (layout A): a wrapping row -- label, the Basic|Professional pair, the Normal|Private
    pair over its caption, then the switches (and the language select when audio is on). */
-.gen-drawer .mgd-strip{flex-direction:row;align-items:center;flex-wrap:wrap;gap:10px 22px;}
-.gen-drawer .mgd-strip .mgd-seg{width:210px;max-width:100%;}
+/* Every item sits on one shared control line (--mgd-strip-row tall, the segment's height with
+   its button line-height pinned) and aligns to the TOP of the row, so the channel caption hangs
+   below its pair without lifting the label, the Basic|Professional pair or the switches
+   (owner walk vd-01, 2026-11-21: centring on the taller caption column threw the row off). */
+.gen-drawer .mgd-strip{--mgd-strip-row:34px;flex-direction:row;align-items:flex-start;flex-wrap:wrap;gap:10px 22px;}
+.gen-drawer .mgd-strip .mgd-seg{width:210px;max-width:100%;box-sizing:border-box;height:var(--mgd-strip-row);}
+.gen-drawer .mgd-strip .mgd-seg button{line-height:14px;}
+.gen-drawer .mgd-strip>.mgd-sec,.gen-drawer .mgd-strip>.mgd-sws{min-height:var(--mgd-strip-row);display:flex;align-items:center;}
 .gen-drawer .mgd-chan{display:flex;flex-direction:column;gap:3px;}
 .gen-drawer .mgd-sws{display:flex;flex-wrap:wrap;align-items:center;gap:10px 22px;}
 .gen-drawer .mgd-strip .mgd-sel{width:auto;}
