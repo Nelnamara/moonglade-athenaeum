@@ -16,6 +16,9 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Changed
+- **The Video drawer has a new layout.** Mode and channel sit in one strip under Runs, with the channel's caption hanging below its pair. Shot mode's slots wrap in a row beside a picker twice as wide, grouped by family and held to two rows of cards. The length (5, 10 or 15 seconds) is picked on the picker only. (2026-11-21)
+
 ## [3.22.0] - 2026-11-20 — New Roads
 
 ### Added
