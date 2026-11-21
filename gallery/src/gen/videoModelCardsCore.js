@@ -144,3 +144,29 @@ export function pendingPrices(cards, duration, have = () => false) {
   }
   return out;
 }
+
+/* The picker's family headings (video drawer layout A, 2026-11-20). A family is read off the
+   engine id, never a list of names: "tbk..." is Tsubaki, "v<N>.<..." is "V<N>.x", anything else
+   lands in "Other" (last) so an engine added later is grouped, never dropped. Groups appear in
+   the order their first engine does in the roster; each keeps the roster's own order. */
+export function modelFamily(value) {
+  const v = String(value == null ? "" : value).trim().toLowerCase();
+  if (/^tbk/.test(v)) return { key: "tbk", label: "Tsubaki" };
+  const m = /^v(\d+)\./.exec(v);
+  if (m) return { key: "v" + m[1], label: "V" + m[1] + ".x" };
+  return { key: "other", label: "Other" };
+}
+
+export function groupCards(cards) {
+  const groups = [];
+  const by = new Map();
+  for (const c of cards) {
+    const f = modelFamily(c.value);
+    let g = by.get(f.key);
+    if (!g) { g = { key: f.key, label: f.label, cards: [] }; by.set(f.key, g); groups.push(g); }
+    g.cards.push(c);
+  }
+  const other = groups.findIndex((g) => g.key === "other");
+  if (other >= 0 && other !== groups.length - 1) groups.push(groups.splice(other, 1)[0]);
+  return groups;
+}

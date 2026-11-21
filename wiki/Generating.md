@@ -625,10 +625,11 @@ python -m moonglade --generate-video --task-id <id>
 
 These video engines are selectable (newest first), and they are **not interchangeable** —
 each has its own duration cap, free-card eligibility, and which of the Loom's four
-[Shot modes](The-Loom#shot-modes) (I2V / FLF / R2V / V2V) it actually supports. The web
-drawer's duration picker offers exactly four values — **5, 6, 10, and 15 seconds** — and
-enforces the current model's lengths (see below); an out-of-range value (e.g. inherited from
-an older Loom project) snaps to the nearest one. The CLI's `--duration` is a plain integer
+[Shot modes](The-Loom#shot-modes) (I2V / FLF / R2V / V2V) it actually supports. In the web
+drawer the length is picked on the model picker's own switch — **5, 10 or 15 seconds**; the
+drawer has no 6 s choice. A run that arrives at 6 s (a remixed 6 s clip, say) shows 6s as a lit
+chip beside the switch until you pick one of the three; any other length (an older Loom
+project, say) snaps to the nearest of 5, 6, 10 and 15. The CLI's `--duration` is a plain integer
 that snaps the same way, to the nearest length the chosen model takes.
 
 | Model (`--video-model`) | Max duration | Free card ever? | Shot modes available |
@@ -649,7 +650,7 @@ Notes:
   (I2V) — the drawer hides the mode buttons a model can't do rather than letting you
   submit a combination PixAI would reject.
 - **The Tsubaki engines are different in four ways.** They take **5, 10 or 15 seconds — no 6**
-  (the 6 stop reads dimmed, and a 6 s request goes out as 5); **no negative prompt and no
+  (a 6 s request goes out as 5); **no negative prompt and no
   camera move** (both controls read disabled — anything you typed stays in the box but is not
   sent); **no video references** in Multi-Reference (images and audio only — video references
   you already picked are held, dimmed and not sent, never deleted); and a reference video can
