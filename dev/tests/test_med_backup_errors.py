@@ -36,6 +36,7 @@ from moonglade import media_tools as media_tools_mod
 from moonglade import telemetry as telemetry_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import models as models_mod
+from moonglade import thumbs as thumbs_mod
 
 
 @pytest.fixture()
@@ -566,7 +567,7 @@ def recovery_network(monkeypatch):
                                             {"width": 8, "height": 8}))
         monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: True)
         monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
-        monkeypatch.setattr(gallery, "make_thumbnail", lambda *a, **k: None)
+        monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
         monkeypatch.setattr(telemetry_mod, "telem_bump",
                             lambda name, out_dir=None: bumps.append(name))
 

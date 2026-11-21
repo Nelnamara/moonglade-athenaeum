@@ -444,7 +444,7 @@ def test_download_video_task_with_poster_skips_ffmpeg(monkeypatch, tmp_path):
         p = Path(str(stem)); p.parent.mkdir(parents=True, exist_ok=True)
         p = p.with_suffix(p.suffix or ".bin"); p.write_bytes(b"data"); return "ok", p
     monkeypatch.setattr(core, "download", _fake_download)
-    monkeypatch.setattr("moonglade.gallery.make_thumbnail",
+    monkeypatch.setattr("moonglade.thumbs.make_thumbnail",
                         lambda src, dst: (Path(dst).write_bytes(b"jpg"), True)[1])
 
     called = []

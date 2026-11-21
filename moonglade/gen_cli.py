@@ -187,7 +187,7 @@ def run_generate(args):
         session = _make_session(getattr(args, "token", None))
     _print_gate_receipt(adjusted, gated=True)
     thumb_dir = out / "gallery" / "thumbs"
-    from moonglade.gallery import make_thumbnail
+    from moonglade.thumbs import make_thumbnail
 
     if existing_task:
         # Recover an already-created generation by id (no new credits). Tool/API
@@ -469,7 +469,7 @@ def _download_video_task(session, result, task_id, out, args, params):
     prompt = shared.get("prompt") or sent.get("prompts") or sent.get("prompt") or ""
     model_id, model_name = _video_row_model(session, result, params, sent, fm)
 
-    from moonglade.gallery import make_thumbnail
+    from moonglade.thumbs import make_thumbnail
     thumb_dir = out / "gallery" / "thumbs"
     thumb_dir.mkdir(parents=True, exist_ok=True)
     vdir = out / "videos"
@@ -620,7 +620,7 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
     outputs = result.get("outputs") or {}
     media = _task_image_media(outputs)
     _outputs_or_raise(result, media, "task completed but no media ids found")
-    from moonglade.gallery import make_thumbnail
+    from moonglade.thumbs import make_thumbnail
     thumb_dir = out / "gallery" / "thumbs"
     img_dir = out / "images"
     db_path = out / "catalog.db"
@@ -1068,7 +1068,7 @@ def run_edit_image(args):
     init_db(db_path)
     session = _make_session(getattr(args, "token", None))
     thumb_dir = out / "gallery" / "thumbs"
-    from moonglade.gallery import make_thumbnail
+    from moonglade.thumbs import make_thumbnail
 
     params = {}
     if existing_task:

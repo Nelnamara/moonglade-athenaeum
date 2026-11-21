@@ -32,6 +32,7 @@ from moonglade.scan import DELETED_DIRNAME
 from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import catalog as catalog_mod
+from moonglade import thumbs as thumbs_mod
 
 
 # ---------------------------------------------------------------------------
@@ -318,7 +319,7 @@ def video_task_network(monkeypatch):
     monkeypatch.setattr(core, "download", fake_download)
     monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: True)
     monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
-    monkeypatch.setattr(gallery, "make_thumbnail", lambda *a, **k: None)
+    monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
 
 
 class TestM16VideoTaskRecoveredThroughGenerate:
@@ -394,7 +395,7 @@ def edit_task_network(monkeypatch):
             return "ok", path
 
         monkeypatch.setattr(core, "download", fake_download)
-        monkeypatch.setattr(gallery, "make_thumbnail", lambda *a, **k: None)
+        monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
 
         def fake_name(session, mid, **kw):
             asked.append(mid)

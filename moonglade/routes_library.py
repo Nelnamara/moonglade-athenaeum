@@ -77,7 +77,8 @@ def register(app, ctx):
         /api/rate: it only rewrites a regenerable local cache file, touches nothing on
         PixAI and no config. Videos only; an image's thumb is a straight resize and
         never wrong in this way."""
-        from moonglade.gallery import Path, make_video_thumbnail
+        from moonglade.gallery import Path
+        from moonglade.thumbs import make_video_thumbnail
         from moonglade.catalog import get_row
         if not media_id or "/" in media_id or "\\" in media_id or ".." in media_id:
             return json.dumps({"ok": False, "error": "bad id"}), 400, {"Content-Type": "application/json"}

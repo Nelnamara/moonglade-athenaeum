@@ -41,6 +41,7 @@ from moonglade import dupes as _dupes
 from moonglade import catalog as _catalog
 from moonglade import curation as _curation
 from moonglade import catalog_verbs as _catalog_verbs
+from moonglade import thumbs as _thumbs
 
 # The library the tools read: bound by main() once the move has run and the library is
 # resolved (bind_library). Importing this module reads nothing.
@@ -139,7 +140,7 @@ def get_image(media_id: str, include_image: bool = True):
         import PIL.Image
         im = PIL.Image.open(path)
         buf = io.BytesIO()
-        g.thumb_rgb(im, (640, 640), PIL.Image.BICUBIC).save(buf, format="JPEG", quality=85)
+        _thumbs.thumb_rgb(im, (640, 640), PIL.Image.BICUBIC).save(buf, format="JPEG", quality=85)
         return [meta, Image(data=buf.getvalue(), format="jpeg")]
     except Exception as e:
         return {**meta, "note": "could not render image: {}".format(e)}

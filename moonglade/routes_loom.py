@@ -287,7 +287,7 @@ def register(app, ctx):
 
         The answer also says where the frame came from: `at` (seconds) and `at_end` (it was
         the clip's last frame), so the splice and Re-anchor record the true source time."""
-        from moonglade.gallery import make_thumbnail
+        from moonglade.thumbs import make_thumbnail
         body = request.get_json(silent=True) or {}
         mid = str(body.get("video_media_id") or "").strip()
         if not mid:
@@ -355,7 +355,7 @@ def register(app, ctx):
 
         Partial success is a real outcome and is returned as one: if only one end extracts
         or uploads, that end still lands. The board fills whichever frames come back."""
-        from moonglade.gallery import make_thumbnail
+        from moonglade.thumbs import make_thumbnail
         body = request.get_json(silent=True) or {}
         mid = str(body.get("video_media_id") or "").strip()
         if not mid:
@@ -551,7 +551,7 @@ def register(app, ctx):
 
     def _loom_fetch_frame_thumb(core, sess, mid):
         """Fill thumbs/<mid>.jpg from PixAI. True when it is there afterwards."""
-        from moonglade.gallery import make_thumbnail
+        from moonglade.thumbs import make_thumbnail
         from moonglade.scenes import pixai_cdn_url_ok
         import requests as _req
         url = core.media_thumbnail_url(sess, mid)
@@ -1477,7 +1477,7 @@ def register(app, ctx):
         it either drops the audio track entirely (when there was no real audio anywhere, so
         nothing is lost) or refuses and names the shot (when real audio would be thrown out
         of sync by it). See the span pre-pass below. body: {clips:[{mid,in,out}], total_seconds}"""
-        from moonglade.gallery import probe_duration, probe_has_audio
+        from moonglade.thumbs import probe_duration, probe_has_audio
         from moonglade.catalog import get_row
         from moonglade.loom_files import loom_bed_audio_graph, loom_bed_windows
         from moonglade import backup as core
@@ -1965,7 +1965,7 @@ def register(app, ctx):
         bundle instead of --update), and returns {project, thumbs} in the exact shape
         importJSON already expects, so both tiers share one client-side create-project path.
         Login required (any session, local or LAN)."""
-        from moonglade.gallery import make_thumbnail, make_video_thumbnail
+        from moonglade.thumbs import make_thumbnail, make_video_thumbnail
         from moonglade.catalog import save_catalog_over_snapshot
         from moonglade.loom_files import (LOOM_BED_FILE_RE, LOOM_BED_MAX_BYTES,
                                           LOOM_BUNDLE_MAX_BEDS, LOOM_BUNDLE_MEDIA_MAX_BYTES,

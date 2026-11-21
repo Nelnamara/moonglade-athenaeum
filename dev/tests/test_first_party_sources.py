@@ -60,6 +60,7 @@ _TODAY = (
     "moonglade/curation.py",
     "moonglade/train_guard.py",
     "moonglade/catalog_verbs.py",
+    "moonglade/thumbs.py",
     "moonglade/similar.py", "moonglade/task_reads.py", "moonglade/telemetry.py",
     "moonglade/updater.py",
 )

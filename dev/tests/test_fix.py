@@ -24,6 +24,7 @@ from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_client
 from moonglade import mirror as mirror_mod
 from moonglade import catalog as catalog_mod
+from moonglade import thumbs as thumbs_mod
 
 
 REFERENCE_PRO = gen_params_mod.EDIT_MODELS["reference-pro"]["model_id"]
@@ -107,7 +108,7 @@ def _stub_collect(monkeypatch, tmp_path):
                         lambda s, m: ("https://cdn/" + m, {"width": 1024, "height": 1536}))
     monkeypatch.setattr(core, "download",
                         lambda s, url, stem, **k: ("ok", stem.with_suffix(".jpg")))
-    monkeypatch.setattr(moonglade_gallery, "make_thumbnail", lambda *a, **k: None)
+    monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
 
 
 def test_collect_names_a_fix_from_its_source_image_not_the_template(monkeypatch, tmp_path):

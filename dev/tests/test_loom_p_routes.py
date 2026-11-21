@@ -44,6 +44,7 @@ from tests.conftest import _TEST_USERNAME, login_test_client
 from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import loom_files as loom_files_mod
+from moonglade import thumbs as thumbs_mod
 
 REPO = Path(__file__).resolve().parents[2]
 # The Loom's code: what create_app still holds, and its store and routes, split out of it (split
@@ -652,8 +653,8 @@ def test_render_passes_the_bed_as_an_input_with_the_graph(rig, monkeypatch, clip
     bed = _upload(cli, FLAC).get_json()["file"]
     monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "ffmpeg-fake")
     monkeypatch.setattr(media_tools_mod, "ffprobe_path", lambda: "ffprobe-fake")
-    monkeypatch.setattr(g, "probe_has_audio", lambda p, timeout=None: p.endswith("7002.mp4"))
-    monkeypatch.setattr(g, "probe_duration", lambda p, timeout=None: 60.0 if p.endswith(".flac") else 5.0)
+    monkeypatch.setattr(thumbs_mod, "probe_has_audio", lambda p, timeout=None: p.endswith("7002.mp4"))
+    monkeypatch.setattr(thumbs_mod, "probe_duration", lambda p, timeout=None: 60.0 if p.endswith(".flac") else 5.0)
     started = []
 
     class _Thread:
@@ -684,8 +685,8 @@ def test_render_passes_the_bed_as_an_input_with_the_graph(rig, monkeypatch, clip
 def test_render_without_the_bed_file_says_so_and_renders_the_cut(rig, monkeypatch, clips):
     cli = rig["cli"]
     monkeypatch.setattr(media_tools_mod, "ffmpeg_path", lambda: "ffmpeg-fake")
-    monkeypatch.setattr(g, "probe_has_audio", lambda p, timeout=None: True)
-    monkeypatch.setattr(g, "probe_duration", lambda p, timeout=None: 5.0)
+    monkeypatch.setattr(thumbs_mod, "probe_has_audio", lambda p, timeout=None: True)
+    monkeypatch.setattr(thumbs_mod, "probe_duration", lambda p, timeout=None: 5.0)
     started = []
 
     class _Thread:

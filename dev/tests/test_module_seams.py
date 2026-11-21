@@ -487,6 +487,12 @@ SEAMS = {
         "loom_cost", "loom_send_key", "loom_sends_fold", "loom_backfill_sends", "integrity_rows",
         "list_media_ids", "list_group_rows", "unique_models", "backfill_batches", "catalog_years",
         "find_image_file"]},
+    "moonglade.thumbs": {"from": "moonglade.gallery", "names": [
+        "compute_dhash", "_THUMBLESS_EXTS", "thumbnail_renders", "_PIL_EXTS", "CHECKER_A",
+        "CHECKER_B", "CHECKER_SQUARE", "CHECKER_MARKER", "_see_through_rgba", "_checkerboard",
+        "thumb_rgb", "_could_be_see_through", "source_is_see_through", "make_thumbnail",
+        "make_video_thumbnail", "probe_has_audio", "probe_duration", "build_thumbnails",
+        "_write_checker_marker", "recheck_see_through_thumbnails", "start_see_through_recheck"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -2170,6 +2176,29 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_setup_prepare.py', 'moonglade.catalog_verbs'),
     ('tests/test_task_model_detail_document.py', 'moonglade.catalog_verbs'),
     ('tests/test_telemetry.py', 'moonglade.catalog_verbs'),
+    # Split phase 4, thumbs: no reader reads the thumbnail section as text except
+    # test_living_library's _atomic_replace pin, which reads make_thumbnail through thumbs_mod; the
+    # other hits are patches of thumbs_mod. The whole-module absence guards read the module too.
+    ('tests/test_app_paths.py', 'moonglade.thumbs'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.thumbs'),
+    ('tests/test_bonjour.py', 'moonglade.thumbs'),
+    ('tests/test_branding.py', 'moonglade.thumbs'),
+    ('tests/test_catalog_verbs.py', 'moonglade.thumbs'),
+    ('tests/test_catchup_query.py', 'moonglade.thumbs'),
+    ('tests/test_csrf_coverage.py', 'moonglade.thumbs'),
+    ('tests/test_evidence_counters.py', 'moonglade.thumbs'),
+    ('tests/test_first_party_sources.py', 'moonglade.thumbs'),
+    ('tests/test_history_feed_document.py', 'moonglade.thumbs'),
+    ('tests/test_living_library.py', 'moonglade.thumbs'),
+    ('tests/test_logging.py', 'moonglade.thumbs'),
+    ('tests/test_loom_p_routes.py', 'moonglade.thumbs'),
+    ('tests/test_network.py', 'moonglade.thumbs'),
+    ('tests/test_security_review_fixes.py', 'moonglade.thumbs'),
+    ('tests/test_server_one_module.py', 'moonglade.thumbs'),
+    ('tests/test_settings_store.py', 'moonglade.thumbs'),
+    ('tests/test_setup_prepare.py', 'moonglade.thumbs'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.thumbs'),
+    ('tests/test_telemetry.py', 'moonglade.thumbs'),
 }
 
 

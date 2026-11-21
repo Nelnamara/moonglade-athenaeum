@@ -75,12 +75,13 @@ from moonglade import task_feed as _task_feed
 from moonglade import task_reads as _task_reads
 from moonglade import telemetry as _telemetry
 from moonglade import training as _training
-from moonglade.gallery import build_thumbnails, _NO_WINDOW
+from moonglade.gallery import _NO_WINDOW
+from moonglade.thumbs import build_thumbnails
 from moonglade.catalog_verbs import (rows_for_media_ids,
                                      # The row-level artwork write (see run_sync_artworks): one
                                      # narrow UPDATE of the eleven PixAI-owned columns, keyed by
                                      # media_id -- imported the same way its whole-table
-                                     # siblings above are.
+                                     # siblings below are.
                                      apply_artwork_meta,
                                      # ...and its twin for the four view columns, which are
                                      # folded by their own narrow UPDATE because they are read
@@ -3330,7 +3331,7 @@ def run_sync_videos(args):
 
     # Generate a gallery poster thumbnail for a video (keyed by the VIDEO media
     # id) from its still frame, so previews work without a separate image backup.
-    from moonglade.gallery import make_thumbnail
+    from moonglade.thumbs import make_thumbnail
     thumb_dir = out / "gallery" / "thumbs"
     poster_tmp = out / "gallery" / "_postertmp"
 
@@ -3504,7 +3505,7 @@ def run_import_local(args):
     safe to re-run. Images get a gallery thumbnail; videos play via the catalog
     filename (no still to thumbnail, so they show a placeholder + the video badge)."""
     import shutil
-    from moonglade.gallery import make_thumbnail
+    from moonglade.thumbs import make_thumbnail
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     db_path = out / "catalog.db"
@@ -5724,7 +5725,7 @@ def run_backfill_phash(args):
     run_backfill_full_meta's docstring already explains."""
     out = Path(args.out)
     db_path = _ensure_db(out)
-    from moonglade.gallery import compute_dhash
+    from moonglade.thumbs import compute_dhash
     from moonglade.catalog_verbs import find_image_file
     from moonglade.catalog import load_catalog, save_catalog
 
@@ -6339,7 +6340,7 @@ def run_rebuild_thumbs(args):
     and thumbs whose media left the catalog are swept."""
     out = Path(args.out)
     db_path = _ensure_db(out)
-    from moonglade.gallery import build_thumbnails
+    from moonglade.thumbs import build_thumbnails
     from moonglade.catalog import load_catalog
     thumb_dir = out / "gallery" / "thumbs"
     thumb_dir.mkdir(parents=True, exist_ok=True)

@@ -13,6 +13,7 @@ from tests.conftest import login_test_client, login_existing_client
 from moonglade import scan as scan_mod
 from moonglade import jobs as jobs_mod
 from moonglade import media_tools as media_tools_mod
+from moonglade import thumbs as thumbs_mod
 
 
 def _csrf(html):
@@ -723,17 +724,17 @@ def test_probe_has_audio(monkeypatch):
             self.returncode = rc
             self.stderr = ""
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: R("0\n"))
-    assert g.probe_has_audio("clip.mp4") is True
+    assert thumbs_mod.probe_has_audio("clip.mp4") is True
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: R(""))
-    assert g.probe_has_audio("silent.mp4") is False          # no stream index -> no audio
+    assert thumbs_mod.probe_has_audio("silent.mp4") is False          # no stream index -> no audio
     monkeypatch.setattr(media_tools_mod, "ffprobe_path", lambda: "")
-    assert g.probe_has_audio("clip.mp4") is False            # ffprobe missing -> fail soft
+    assert thumbs_mod.probe_has_audio("clip.mp4") is False            # ffprobe missing -> fail soft
 
     def _boom(*a, **k):
         raise OSError("gone")
     monkeypatch.setattr(media_tools_mod, "ffprobe_path", lambda: "/bin/ffprobe")
     monkeypatch.setattr(subprocess, "run", _boom)
-    assert g.probe_has_audio("clip.mp4") is False             # never raises
+    assert thumbs_mod.probe_has_audio("clip.mp4") is False             # never raises
 
 
 def test_probe_duration(monkeypatch):
@@ -750,11 +751,11 @@ def test_probe_duration(monkeypatch):
             self.returncode = rc
             self.stderr = ""
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: R("5.234\n"))
-    assert g.probe_duration("clip.mp4") == 5.234
+    assert thumbs_mod.probe_duration("clip.mp4") == 5.234
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: R("not-a-number\n"))
-    assert g.probe_duration("clip.mp4") is None                # never raises on garbage
+    assert thumbs_mod.probe_duration("clip.mp4") is None                # never raises on garbage
     monkeypatch.setattr(media_tools_mod, "ffprobe_path", lambda: "")
-    assert g.probe_duration("clip.mp4") is None                # ffprobe missing -> None
+    assert thumbs_mod.probe_duration("clip.mp4") is None                # ffprobe missing -> None
 
 
 # --- /api/loom/export: real audio rides along, silence fills the gap -----------
@@ -811,7 +812,7 @@ def test_export_real_audio_maps_both_streams_no_a0(tmp_path, monkeypatch):
     """The original bug: audio was hard-dropped (concat=...a=0, no -c:a, no [aout] map)
     even when every clip has real audio. Two clips, both WITH audio."""
     captured = _mock_export_ffmpeg(monkeypatch)
-    monkeypatch.setattr(g, "probe_has_audio", lambda path: True)
+    monkeypatch.setattr(thumbs_mod, "probe_has_audio", lambda path: True)
     cli = _two_video_client(tmp_path)
     r = cli.post("/api/loom/export", json={"clips": [
         {"mid": "v1", "in": 0, "out": 2}, {"mid": "v2", "in": 0, "out": 3}],
@@ -835,7 +836,7 @@ def test_export_silent_clip_gets_matching_duration_silence(tmp_path, monkeypatch
     """One real-audio clip + one silent clip (e.g. rendered without 'Generate audio') --
     the silent one must get a synthetic track sized to its OWN trim span, not skipped."""
     captured = _mock_export_ffmpeg(monkeypatch)
-    monkeypatch.setattr(g, "probe_has_audio",
+    monkeypatch.setattr(thumbs_mod, "probe_has_audio",
                         lambda path: "v1" in str(path))   # v1 has audio, v2 doesn't
     cli = _two_video_client(tmp_path)
     r = cli.post("/api/loom/export", json={"clips": [
@@ -856,7 +857,7 @@ def test_export_all_silent_reuses_one_anullsrc_input(tmp_path, monkeypatch):
     """Neither clip has audio -- exactly ONE synthetic-silence input is added and referenced
     twice (not duplicated per segment); each segment still gets its own correctly-sized span."""
     captured = _mock_export_ffmpeg(monkeypatch)
-    monkeypatch.setattr(g, "probe_has_audio", lambda path: False)
+    monkeypatch.setattr(thumbs_mod, "probe_has_audio", lambda path: False)
     cli = _two_video_client(tmp_path)
     r = cli.post("/api/loom/export", json={"clips": [
         {"mid": "v1", "in": 0, "out": 2}, {"mid": "v2", "in": 0, "out": 3}],
@@ -872,8 +873,8 @@ def test_export_silent_clip_with_no_trim_out_probes_real_duration(tmp_path, monk
     """When 'out' isn't set (trim to the clip's real end) AND the clip has no audio, the
     synthetic silence can't infer a length from anullsrc -- probe_duration must be consulted."""
     captured = _mock_export_ffmpeg(monkeypatch)
-    monkeypatch.setattr(g, "probe_has_audio", lambda path: False)
-    monkeypatch.setattr(g, "probe_duration", lambda path: 6.0)
+    monkeypatch.setattr(thumbs_mod, "probe_has_audio", lambda path: False)
+    monkeypatch.setattr(thumbs_mod, "probe_duration", lambda path: 6.0)
     cli = _two_video_client(tmp_path)
     r = cli.post("/api/loom/export", json={"clips": [
         {"mid": "v1", "in": 1.0}], "total_seconds": 5})   # no 'out' -> co is None

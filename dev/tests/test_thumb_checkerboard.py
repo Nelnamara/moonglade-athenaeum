@@ -5,6 +5,7 @@ import io
 from moonglade import gallery as g
 from moonglade.catalog import CATALOG_FIELDS
 from moonglade import catalog as catalog_mod
+from moonglade import thumbs as thumbs_mod
 
 
 def _row(**kw):
@@ -28,14 +29,14 @@ def test_see_through_png_gets_checkerboard(tmp_path):
     from PIL import Image
     src, dst = tmp_path / "a.png", tmp_path / "t" / "a.jpg"
     _holey_png(src)
-    assert g.make_thumbnail(src, dst) is True
+    assert thumbs_mod.make_thumbnail(src, dst) is True
     with Image.open(dst) as t:
         t = t.convert("RGB")
         assert t.size == (100, 100)
         # top-left 12px square is the first colour, the next one over the second
-        assert _close(t.getpixel((5, 5)), g.CHECKER_A)
-        assert _close(t.getpixel((17, 5)), g.CHECKER_B)
-        assert _close(t.getpixel((5, 17)), g.CHECKER_B)
+        assert _close(t.getpixel((5, 5)), thumbs_mod.CHECKER_A)
+        assert _close(t.getpixel((17, 5)), thumbs_mod.CHECKER_B)
+        assert _close(t.getpixel((5, 17)), thumbs_mod.CHECKER_B)
         # the opaque middle shows the picture
         assert _close(t.getpixel((50, 50)), (220, 30, 30), tol=12)
 
@@ -44,7 +45,7 @@ def test_opaque_thumbnail_is_unchanged(tmp_path):
     from PIL import Image
     src, dst = tmp_path / "o.png", tmp_path / "o.jpg"
     Image.effect_mandelbrot((90, 60), (-3, -2.5, 2, 2.5), 30).convert("RGB").save(src)
-    assert g.make_thumbnail(src, dst) is True
+    assert thumbs_mod.make_thumbnail(src, dst) is True
     with Image.open(src) as im:                      # the old path, spelled out
         im = im.convert("RGB")
         im.thumbnail(catalog_mod.THUMB_SIZE, Image.LANCZOS)
@@ -55,7 +56,7 @@ def test_opaque_thumbnail_is_unchanged(tmp_path):
     src2 = tmp_path / "o2.png"
     Image.open(src).convert("RGBA").save(src2)
     dst2 = tmp_path / "o2.jpg"
-    g.make_thumbnail(src2, dst2)
+    thumbs_mod.make_thumbnail(src2, dst2)
     assert dst2.read_bytes() == buf.getvalue()
 
 
@@ -65,9 +66,9 @@ def test_gif_first_frame_with_transparency_gets_checkerboard(tmp_path):
     f1 = Image.new("RGBA", (40, 40), (0, 0, 0, 0))
     f2 = Image.new("RGBA", (40, 40), (0, 255, 0, 255))
     f1.save(src, save_all=True, append_images=[f2], loop=0, disposal=2)
-    g.make_thumbnail(src, dst)
+    thumbs_mod.make_thumbnail(src, dst)
     with Image.open(dst) as t:
-        assert _close(t.convert("RGB").getpixel((5, 5)), g.CHECKER_A, tol=8)
+        assert _close(t.convert("RGB").getpixel((5, 5)), thumbs_mod.CHECKER_A, tol=8)
 
 
 def test_old_see_through_thumbnails_rebuild_once(tmp_path):
@@ -81,15 +82,15 @@ def test_old_see_through_thumbnails_rebuild_once(tmp_path):
     old_opaque = (thumbs / "2.jpg").read_bytes()
     rows = [_row(media_id="1", filename="a_1.png"), _row(media_id="2", filename="b_2.png")]
 
-    g.build_thumbnails(rows, tmp_path, thumbs, workers=1)
+    thumbs_mod.build_thumbnails(rows, tmp_path, thumbs, workers=1)
     with Image.open(thumbs / "1.jpg") as t:
-        assert _close(t.convert("RGB").getpixel((5, 5)), g.CHECKER_A)
+        assert _close(t.convert("RGB").getpixel((5, 5)), thumbs_mod.CHECKER_A)
     assert (thumbs / "2.jpg").read_bytes() == old_opaque     # opaque one not rebuilt
-    assert (thumbs / g.CHECKER_MARKER).exists()
+    assert (thumbs / thumbs_mod.CHECKER_MARKER).exists()
 
     # second pass: marker present, nothing is re-examined or rebuilt
     (thumbs / "1.jpg").write_bytes(b"sentinel")
-    g.build_thumbnails(rows, tmp_path, thumbs, workers=1)
+    thumbs_mod.build_thumbnails(rows, tmp_path, thumbs, workers=1)
     assert (thumbs / "1.jpg").read_bytes() == b"sentinel"
 
 def _old_style_library(tmp_path):
@@ -107,12 +108,12 @@ def _old_style_library(tmp_path):
 def test_start_build_does_not_run_the_recheck_inline(tmp_path):
     thumbs, rows = _old_style_library(tmp_path)
     before = (thumbs / "1.jpg").read_bytes()
-    g.build_thumbnails(rows, tmp_path, thumbs, workers=1, recheck=False)
+    thumbs_mod.build_thumbnails(rows, tmp_path, thumbs, workers=1, recheck=False)
     assert (thumbs / "1.jpg").read_bytes() == before         # old thumbnail untouched
-    assert not (thumbs / g.CHECKER_MARKER).exists()
+    assert not (thumbs / thumbs_mod.CHECKER_MARKER).exists()
     # a MISSING thumbnail is still built by the same call, as before the re-check existed
     (thumbs / "2.jpg").unlink()
-    g.build_thumbnails(rows, tmp_path, thumbs, workers=1, recheck=False)
+    thumbs_mod.build_thumbnails(rows, tmp_path, thumbs, workers=1, recheck=False)
     assert (thumbs / "2.jpg").exists()
 
 
@@ -120,14 +121,14 @@ def test_background_pass_recuts_see_through_and_writes_marker(tmp_path):
     from PIL import Image
     thumbs, rows = _old_style_library(tmp_path)
     old_opaque = (thumbs / "2.jpg").read_bytes()
-    th = g.start_see_through_recheck(rows, tmp_path, thumbs)
+    th = thumbs_mod.start_see_through_recheck(rows, tmp_path, thumbs)
     assert th is not None
     th.join(30)
     with Image.open(thumbs / "1.jpg") as t:
-        assert _close(t.convert("RGB").getpixel((5, 5)), g.CHECKER_A)
+        assert _close(t.convert("RGB").getpixel((5, 5)), thumbs_mod.CHECKER_A)
     assert (thumbs / "2.jpg").read_bytes() == old_opaque
-    assert (thumbs / g.CHECKER_MARKER).exists()
-    assert g.start_see_through_recheck(rows, tmp_path, thumbs) is None   # marker: nothing to do
+    assert (thumbs / thumbs_mod.CHECKER_MARKER).exists()
+    assert thumbs_mod.start_see_through_recheck(rows, tmp_path, thumbs) is None   # marker: nothing to do
 
 
 def test_interrupted_pass_leaves_no_marker(tmp_path, monkeypatch):
@@ -135,12 +136,12 @@ def test_interrupted_pass_leaves_no_marker(tmp_path, monkeypatch):
     thumbs, rows = _old_style_library(tmp_path)
     cancel = threading.Event()
     cancel.set()
-    assert g.recheck_see_through_thumbnails(rows, tmp_path, thumbs, workers=1, cancel=cancel) is False
-    assert not (thumbs / g.CHECKER_MARKER).exists()
+    assert thumbs_mod.recheck_see_through_thumbnails(rows, tmp_path, thumbs, workers=1, cancel=cancel) is False
+    assert not (thumbs / thumbs_mod.CHECKER_MARKER).exists()
     # a failed recut also leaves no marker, so the pass runs again next start
-    monkeypatch.setattr(g, "make_thumbnail", lambda *a, **k: False)
-    assert g.recheck_see_through_thumbnails(rows, tmp_path, thumbs, workers=2) is False
-    assert not (thumbs / g.CHECKER_MARKER).exists()
+    monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: False)
+    assert thumbs_mod.recheck_see_through_thumbnails(rows, tmp_path, thumbs, workers=2) is False
+    assert not (thumbs / thumbs_mod.CHECKER_MARKER).exists()
 
 
 def test_header_decides_candidates_before_any_alpha_decode(tmp_path, monkeypatch):
@@ -148,9 +149,9 @@ def test_header_decides_candidates_before_any_alpha_decode(tmp_path, monkeypatch
     Image.new("RGB", (30, 30), (1, 2, 3)).save(tmp_path / "o.png")
     _holey_png(tmp_path / "h.png")
     calls = []
-    real = g._see_through_rgba
-    monkeypatch.setattr(g, "_see_through_rgba", lambda im: calls.append(1) or real(im))
-    assert g.source_is_see_through(tmp_path / "o.png") is False
+    real = thumbs_mod._see_through_rgba
+    monkeypatch.setattr(thumbs_mod, "_see_through_rgba", lambda im: calls.append(1) or real(im))
+    assert thumbs_mod.source_is_see_through(tmp_path / "o.png") is False
     assert calls == []                                   # opaque RGB: header only
-    assert g.source_is_see_through(tmp_path / "h.png") is True
+    assert thumbs_mod.source_is_see_through(tmp_path / "h.png") is True
     assert calls == [1]

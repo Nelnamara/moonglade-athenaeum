@@ -12,6 +12,7 @@ pytest.importorskip("PIL")
 from PIL import Image                                         # noqa: E402
 from moonglade import catalog as catalog_mod
 from moonglade import curation as curation_mod
+from moonglade import thumbs as thumbs_mod
 
 
 def _task(outputs=None, model_config=None):
@@ -75,7 +76,7 @@ def test_a_gif_thumbnail_is_its_first_frame(tmp_path):
     _two_frame_gif(src)
     with Image.open(src) as im:
         im.seek(1)                       # a reader that left it on frame 2 changes nothing
-    assert g.make_thumbnail(src, thumb)
+    assert thumbs_mod.make_thumbnail(src, thumb)
     with Image.open(thumb) as t:
         r, gr, b = t.convert("RGB").getpixel((t.width // 2, t.height // 2))
     assert r > 200 and b < 60
@@ -87,15 +88,15 @@ def test_an_svg_row_is_skipped_by_the_thumbnailer_and_never_counted_failed(tmp_p
         '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"></svg>', encoding="utf-8")
     Image.new("RGB", (8, 8), (0, 255, 0)).save(tmp_path / "images" / "a_8.png")
     calls, drawn = [], []
-    real = g.make_thumbnail
+    real = thumbs_mod.make_thumbnail
     rows = [{"media_id": "7", "filename": "images/logo_7.svg", "is_video": ""},
             {"media_id": "8", "filename": "images/a_8.png", "is_video": ""}]
     try:
-        g.make_thumbnail = lambda src, dst: drawn.append(str(src)) or real(src, dst)
-        g.build_thumbnails(rows, tmp_path, tmp_path / "thumbs",
+        thumbs_mod.make_thumbnail = lambda src, dst: drawn.append(str(src)) or real(src, dst)
+        thumbs_mod.build_thumbnails(rows, tmp_path, tmp_path / "thumbs",
                            progress_cb=lambda *a: calls.append(a), workers=1)
     finally:
-        g.make_thumbnail = real
+        thumbs_mod.make_thumbnail = real
     assert not (tmp_path / "thumbs" / "7.jpg").exists() and (tmp_path / "thumbs" / "8.jpg").exists()
     assert not [d for d in drawn if d.endswith(".svg")]        # never asked for one
     assert calls[-1][:2] == (2, 2)                             # done == total: nothing failed

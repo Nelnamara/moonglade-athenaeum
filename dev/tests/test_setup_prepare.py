@@ -35,6 +35,7 @@ from moonglade import setup as msetup
 from tests.move_layouts import read_config, rig, write, write_config
 from moonglade import health as health_mod
 from moonglade import branding as branding_mod
+from moonglade import thumbs as thumbs_mod
 
 
 @pytest.fixture
@@ -113,7 +114,7 @@ def test_the_server_applies_the_stored_launch_switches(r, monkeypatch):
     write_config(r)
     settings.set_values(launch_args=["--skip-thumbs"], port=5199)
     seen = {}
-    monkeypatch.setattr(g, "build_thumbnails",
+    monkeypatch.setattr(thumbs_mod, "build_thumbnails",
                         lambda *a, **k: seen.setdefault("built", True))
     monkeypatch.setattr(g, "port_owner", _refused_after_the_move())
     monkeypatch.setattr(sys, "argv", ["python -m moonglade.gallery"])

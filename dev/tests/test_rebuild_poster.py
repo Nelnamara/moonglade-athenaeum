@@ -5,6 +5,7 @@ redone without a whole --rebuild-thumbs pass (owner, 2026-08-22). Videos only.
 from pathlib import Path
 
 from moonglade import gallery as G
+from moonglade import thumbs as thumbs_mod
 
 
 def _seed(tmp_path, mid, is_video):
@@ -28,7 +29,7 @@ def test_rebuild_poster_regenerates_a_video_thumb(tmp_path, monkeypatch):
         Path(thumb_path).parent.mkdir(parents=True, exist_ok=True)
         Path(thumb_path).write_bytes(b"jpg")
         return True
-    monkeypatch.setattr(G, "make_video_thumbnail", fake_make)
+    monkeypatch.setattr(thumbs_mod, "make_video_thumbnail", fake_make)
 
     cli = login_test_client(create_app(tmp_path))
     r = cli.post("/api/rebuild-poster/555")
@@ -44,7 +45,7 @@ def test_rebuild_poster_refuses_an_image(tmp_path, monkeypatch):
     from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     _seed(tmp_path, "777", is_video=False)
-    monkeypatch.setattr(G, "make_video_thumbnail", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not run")))
+    monkeypatch.setattr(thumbs_mod, "make_video_thumbnail", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not run")))
     cli = login_test_client(create_app(tmp_path))
     r = cli.post("/api/rebuild-poster/777")
     assert r.status_code == 400
@@ -64,7 +65,7 @@ def test_rebuild_poster_reports_ffmpeg_failure_softly(tmp_path, monkeypatch):
     from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     _seed(tmp_path, "555", is_video=True)
-    monkeypatch.setattr(G, "make_video_thumbnail", lambda *a, **k: False)
+    monkeypatch.setattr(thumbs_mod, "make_video_thumbnail", lambda *a, **k: False)
     cli = login_test_client(create_app(tmp_path))
     r = cli.post("/api/rebuild-poster/555")
     assert r.status_code == 200
@@ -88,7 +89,7 @@ def test_rebuild_poster_finds_a_moved_video_via_the_matcher(tmp_path, monkeypatc
     calls = []
     def fake_make(video_path, thumb_path):
         calls.append(Path(video_path).name); return True
-    monkeypatch.setattr(G, "make_video_thumbnail", fake_make)
+    monkeypatch.setattr(thumbs_mod, "make_video_thumbnail", fake_make)
     cli = login_test_client(create_app(tmp_path))
     r = cli.post("/api/rebuild-poster/555")
     assert r.status_code == 200, r.get_data(as_text=True)

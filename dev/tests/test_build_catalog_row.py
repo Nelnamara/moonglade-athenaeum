@@ -37,6 +37,7 @@ from tests.conftest import login_test_client
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import thumbs as thumbs_mod
 
 
 # --------------------------------------------------------------------------------------
@@ -273,7 +274,7 @@ def _stub_image_task(monkeypatch, out, mid="m-golden", seed="424242"):
     monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, r: None)
     monkeypatch.setattr(core, "_resolved_model_name", lambda s, fm, m: MODEL_NAME)
     monkeypatch.setattr(core, "_resolved_loras", lambda s, r: LORAS)
-    monkeypatch.setattr(g, "make_thumbnail", lambda *a, **k: None)
+    monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
     return path
 
 
@@ -319,7 +320,7 @@ def _stub_video_task(monkeypatch, out):
     monkeypatch.setattr(core, "resolve_media", lambda s, m: ("", {}))
     monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
     monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
-    monkeypatch.setattr(g, "make_thumbnail", lambda *a, **k: None)
+    monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
     return path, result
 
 
@@ -395,7 +396,7 @@ def _stub_generate(monkeypatch, out):
     monkeypatch.setattr(core, "_resolved_loras", lambda s, r: LORAS)
     monkeypatch.setattr(core, "resolve_media", lambda s, m: ("https://x/i.png", dict(INFO)))
     monkeypatch.setattr(core, "download", lambda s, url, stem: ("skip", path))
-    monkeypatch.setattr(g, "make_thumbnail", lambda *a, **k: None)
+    monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
     return path
 
 
@@ -452,7 +453,7 @@ def _stub_edit(monkeypatch, out):
     monkeypatch.setattr(core, "_edit_model_label", lambda s, fm, m: EDIT_MODEL_NAME)
     monkeypatch.setattr(core, "resolve_media", lambda s, m: ("https://x/i.png", dict(INFO)))
     monkeypatch.setattr(core, "download", lambda s, url, stem: ("skip", path))
-    monkeypatch.setattr(g, "make_thumbnail", lambda *a, **k: None)
+    monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
     return path
 
 
@@ -511,7 +512,7 @@ def _stub_sync_videos(monkeypatch, out):
     monkeypatch.setattr(core, "resolve_media", lambda s, m: ("", {}))
     monkeypatch.setattr(media_tools_mod, "video_poster_thumb", lambda *a, **k: None)
     monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
-    monkeypatch.setattr(g, "make_thumbnail", lambda *a, **k: None)
+    monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
     return path, task
 
 
@@ -556,7 +557,7 @@ def test_import_local_row_is_identical_to_the_old_builder(tmp_path, monkeypatch)
     src.mkdir()
     from PIL import Image
     Image.new("RGB", (8, 8), (90, 70, 160)).save(src / "my_ref.png")
-    monkeypatch.setattr(g, "make_thumbnail", lambda *a, **k: None)
+    monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
 
     core.run_import_local(_import_args(tmp_path, src))
 
@@ -597,8 +598,8 @@ def _bundle(mid="m-loom"):
 
 
 def test_loom_bundle_row_is_identical_to_the_old_builder(tmp_path, monkeypatch):
-    monkeypatch.setattr(g, "make_thumbnail", lambda *a, **k: None)
-    monkeypatch.setattr(g, "make_video_thumbnail", lambda *a, **k: None)
+    monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
+    monkeypatch.setattr(thumbs_mod, "make_video_thumbnail", lambda *a, **k: None)
     cli = login_test_client(g.create_app(tmp_path))
     r = cli.post("/api/loom/import-bundle",
                  data={"file": (_bundle(), "bundle.zip")},
@@ -622,8 +623,8 @@ def test_loom_bundle_carries_local_fields(tmp_path, monkeypatch):
     file must be written; the row must keep every locally-owned column. Omitting `known`
     here blanked all of them through save_catalog's full-row upsert -- the 2026-09-03
     data-loss class, at the one site issue #19 left unwired."""
-    monkeypatch.setattr(g, "make_thumbnail", lambda *a, **k: None)
-    monkeypatch.setattr(g, "make_video_thumbnail", lambda *a, **k: None)
+    monkeypatch.setattr(thumbs_mod, "make_thumbnail", lambda *a, **k: None)
+    monkeypatch.setattr(thumbs_mod, "make_video_thumbnail", lambda *a, **k: None)
     _seed_local(tmp_path / "catalog.db", "m-gone")
     assert not (tmp_path / "images" / "old.png").exists()   # row present, file is not
 

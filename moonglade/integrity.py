@@ -65,6 +65,7 @@ from moonglade import paths as _paths
 from moonglade import scan as _scan
 from moonglade import catalog as _catalog
 from moonglade import catalog_verbs as _catalog_verbs
+from moonglade import thumbs as _thumbs
 
 REPORT_CSV = "integrity_report.csv"
 REPORT_JSON = "integrity_report.json"
@@ -313,7 +314,7 @@ def _thumbless(path):
     open): it has no thumbnail by design, so none is checked for, reported or rebuilt (3.21.2,
     L3)."""
     from moonglade import gallery as g                     # lazy: the thumbnailer's own rule
-    return not g.thumbnail_renders(path)
+    return not _thumbs.thumbnail_renders(path)
 
 
 def _row_check(r, index, deep, gallery_dirname):
@@ -1062,9 +1063,9 @@ def redownload_one(out_dir, db_path, media_id, session_factory=None, index=None,
     if _safe_id(mid):
         if str(row.get("is_video") or "") == "1":
             if not thumb.exists() or thumb.stat().st_size == 0:
-                g.make_video_thumbnail(target, thumb)
+                _thumbs.make_video_thumbnail(target, thumb)
         elif not _thumbless(target):                   # an SVG has none to make (L3)
-            g.make_thumbnail(target, thumb)
+            _thumbs.make_thumbnail(target, thumb)
     return _result(mid, "redownload", nbytes=nbytes)
 
 
@@ -1085,8 +1086,8 @@ def rebuild_one(out_dir, db_path, media_id, index=None):
     if _scan.media_id_of(best.path) != mid:                # this picture's thumbnail, from its own file
         return _result(mid, "rebuild", ok=False, refused="not_this_picture")
     thumb = out / _scan.GALLERY_DIRNAME / "thumbs" / (mid + ".jpg")
-    made = (g.make_video_thumbnail(best.path, thumb) if str(row.get("is_video") or "") == "1"
-            else g.make_thumbnail(best.path, thumb))
+    made = (_thumbs.make_video_thumbnail(best.path, thumb) if str(row.get("is_video") or "") == "1"
+            else _thumbs.make_thumbnail(best.path, thumb))
     if not made:
         return _result(mid, "rebuild", ok=False, refused="rebuild_failed")
     return _result(mid, "rebuild")

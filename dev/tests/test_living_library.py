@@ -41,6 +41,7 @@ from moonglade import routes_panel as routes_panel_mod
 from moonglade import routes_community as routes_community_mod
 from moonglade import catalog as catalog_mod
 from moonglade import catalog_verbs as catalog_verbs_mod
+from moonglade import thumbs as thumbs_mod
 
 SRC = Path(__file__).resolve().parents[2]
 DAY = 86400.0
@@ -1441,7 +1442,7 @@ def test_an_interrupted_thumbnail_never_lands_on_the_real_name(tmp_path, monkeyp
     src = tmp_path / "src.png"
     PILImage.new("RGB", (40, 30), "red").save(src)
     thumb = tmp_path / "thumbs" / "m1.jpg"
-    assert g.make_thumbnail(src, thumb) is True
+    assert thumbs_mod.make_thumbnail(src, thumb) is True
     good = thumb.read_bytes()
 
     real_save = PILImage.Image.save
@@ -1454,12 +1455,12 @@ def test_an_interrupted_thumbnail_never_lands_on_the_real_name(tmp_path, monkeyp
         raise OSError("No space left on device")
 
     monkeypatch.setattr(PILImage.Image, "save", _torn_save)
-    assert g.make_thumbnail(src, thumb) is False
+    assert thumbs_mod.make_thumbnail(src, thumb) is False
     assert thumb.read_bytes() == good, \
         "an interrupted rebuild overwrote the live thumbnail with a torn file"
     # no debris, and nothing --rebuild-thumbs' orphan sweep (glob '*.jpg') could confuse
     assert [p.name for p in thumb.parent.iterdir()] == ["m1.jpg"]
-    assert "_atomic_replace" in inspect.getsource(g.make_thumbnail)
+    assert "_atomic_replace" in inspect.getsource(thumbs_mod.make_thumbnail)
     # ...and the docstring that promised "overwritten in place" is now true
     assert "os.replace" in (inspect.getdoc(core.run_rebuild_thumbs) or "")
 
