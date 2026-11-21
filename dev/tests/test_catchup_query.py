@@ -20,8 +20,9 @@ from moonglade import gen_road as gen_road_mod
 
 from tests.fake_pixai import FakePixAI, operation_name
 from moonglade import catalog as catalog_mod
+from moonglade import history as history_mod
 
-FEED = operation_name(core._HISTORY_PAGE_DOC)
+FEED = operation_name(history_mod._HISTORY_PAGE_DOC)
 REFUSED_DOC = "Cannot query field taskSummaries on type User"
 
 
@@ -54,7 +55,7 @@ def test_gql_adhoc_raises_a_plain_error_for_a_graphql_refusal():
             return _Resp({"errors": [{"message": REFUSED_DOC}]})
 
     with pytest.raises(core.PixAIError) as ei:
-        core.gql_adhoc(_PostSession(), core._HISTORY_PAGE_DOC, {"last": 1}, retries=0)
+        core.gql_adhoc(_PostSession(), history_mod._HISTORY_PAGE_DOC, {"last": 1}, retries=0)
     assert str(ei.value).startswith("GraphQL error")
     assert type(ei.value) is core.PixAIError
     assert ei.value.graphql_errors == [{"message": REFUSED_DOC}]
@@ -102,7 +103,7 @@ def test_the_catchup_reads_the_document_and_converges(monkeypatch, tmp_path, cap
     assert collected == ["T_new"]                    # converged on ONE row, no second collect
     feed = fake.calls_for(FEED)
     assert len(feed) == 2
-    assert all(c.verb == "query" and c.document == core._HISTORY_PAGE_DOC for c in feed)
+    assert all(c.verb == "query" and c.document == history_mod._HISTORY_PAGE_DOC for c in feed)
     assert feed[0].variables == {"last": 30, "userId": "U1"}      # one page of recent tasks
     assert not [c for c in fake.calls if c.verb == "persisted"]   # no saved request, ever
     assert _failed_lines(caplog) == []
@@ -122,7 +123,7 @@ def test_a_refused_read_is_logged_every_time_and_is_not_coverage(monkeypatch, tm
     assert collected == []
     lines = _failed_lines(caplog)
     assert len(lines) == 3
-    assert "HistoryPageRefused" in lines[0] and core.HISTORY_REFUSED in lines[0]
+    assert "HistoryPageRefused" in lines[0] and history_mod.HISTORY_REFUSED in lines[0]
     for stale in ("Recapture", "hash", "saved history request", "Updating the app"):
         assert not any(stale in r.getMessage() for r in caplog.records), stale
 

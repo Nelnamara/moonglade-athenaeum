@@ -22,7 +22,7 @@ _REAL_PATHS_CONFIG_PATH = moonglade_paths.config_path
 
 def test_already_downloaded_finds_flat(tmp_path):
     (tmp_path / "cool_prompt_task1_mid999.png").write_bytes(b"fakeimage")
-    result = core.already_downloaded(tmp_path, "mid999")
+    result = history_mod.already_downloaded(tmp_path, "mid999")
     assert result is not None
     assert result.name.endswith("mid999.png")
 
@@ -31,27 +31,27 @@ def test_already_downloaded_finds_in_subfolder(tmp_path):
     sub = tmp_path / "batches" / "my_batch"
     sub.mkdir(parents=True)
     (sub / "01_mid888.webp").write_bytes(b"fakeimage")
-    result = core.already_downloaded(tmp_path, "mid888")
+    result = history_mod.already_downloaded(tmp_path, "mid888")
     assert result is not None
 
 
 def test_already_downloaded_returns_none_when_missing(tmp_path):
-    assert core.already_downloaded(tmp_path, "nonexistent") is None
+    assert history_mod.already_downloaded(tmp_path, "nonexistent") is None
 
 
 def test_already_downloaded_ignores_part_files(tmp_path):
     (tmp_path / "task_mid777.png.part").write_bytes(b"partial")
-    assert core.already_downloaded(tmp_path, "mid777") is None
+    assert history_mod.already_downloaded(tmp_path, "mid777") is None
 
 
 def test_already_downloaded_ignores_zero_byte(tmp_path):
     (tmp_path / "task_mid666.png").write_bytes(b"")
-    assert core.already_downloaded(tmp_path, "mid666") is None
+    assert history_mod.already_downloaded(tmp_path, "mid666") is None
 
 
 def test_already_downloaded_multiple_exts_returns_first(tmp_path):
     (tmp_path / "task_mid555.jpg").write_bytes(b"img")
-    result = core.already_downloaded(tmp_path, "mid555")
+    result = history_mod.already_downloaded(tmp_path, "mid555")
     assert result is not None
 
 
@@ -505,7 +505,7 @@ def test_reconcile_flags_deleted_server_side(tmp_path, monkeypatch, pixai):
         {f: "" for f in CATALOG_FIELDS} | {"media_id": "L", "task_id": "GONE2", "filename": "L.png", "source": "local", "created_at": old},
     ])
     conn = {"edges": [{"node": {"id": "LIVE1"}}], "pageInfo": {"hasPreviousPage": False}}
-    monkeypatch.setattr(core, "gql", lambda *a, **k: conn)
+    monkeypatch.setattr(history_mod, "gql", lambda *a, **k: conn)
     res = core.run_reconcile_deleted(SimpleNamespace(out=str(tmp_path), token=None, page_size=250))
     assert res["live"] == 1 and res["flagged"] == 1
     by = {r["media_id"]: r for r in load_catalog(db)}
@@ -532,6 +532,7 @@ from moonglade.catalog import (CATALOG_FIELDS, init_db, save_catalog, load_catal
 from moonglade import organize as organize_mod
 from moonglade import media_tools as media_tools_mod
 from moonglade import branding as branding_mod
+from moonglade import history as history_mod
 
 
 def _make_row(**kwargs):

@@ -21,6 +21,7 @@ import pytest
 
 from moonglade import paths as _paths
 from moonglade import backup as core
+from moonglade import history as history_mod
 from moonglade import gallery as g
 from moonglade.curation import query_catalog
 from moonglade.catalog import CATALOG_FIELDS, save_catalog
@@ -45,8 +46,9 @@ def _no_network(monkeypatch):
         raise AssertionError("the storage bars / ar: reached for the network")
     monkeypatch.setattr(socket.socket, "connect", _boom)
     for name in ("gql", "gql_adhoc", "gql_mutate", "_make_session"):
-        if hasattr(core, name):
-            monkeypatch.setattr(core, name, _boom)
+        home = next((m for m in (core, history_mod) if hasattr(m, name)), None)
+        if home is not None:
+            monkeypatch.setattr(home, name, _boom)
 
 
 # ---------------------------------------------------------------------------------------------

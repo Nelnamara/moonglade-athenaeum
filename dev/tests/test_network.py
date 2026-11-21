@@ -46,14 +46,14 @@ class TestGql:
         # Re-mock properly
         mock_session.post.return_value.status_code = 200
         mock_session.post.return_value.json.return_value = payload
-        result = core.gql(mock_session, {"last": 10, "userId": "u1"})
+        result = history_mod.gql(mock_session, {"last": 10, "userId": "u1"})
         assert result == payload["data"]
 
     def test_raises_on_401(self, mock_session, mocker):
         resp = _make_response(mocker, status_code=401, json_body={})
         mock_session.post.return_value = resp
         with pytest.raises(core.PixAIError, match="401"):
-            core.gql(mock_session, {"last": 10, "userId": "u1"})
+            history_mod.gql(mock_session, {"last": 10, "userId": "u1"})
 
     def test_raises_on_non_json(self, mock_session, mocker):
         resp = mocker.MagicMock()
@@ -63,7 +63,7 @@ class TestGql:
         resp.raise_for_status.return_value = None
         mock_session.post.return_value = resp
         with pytest.raises(core.PixAIError, match="non-JSON"):
-            core.gql(mock_session, {"last": 10, "userId": "u1"})
+            history_mod.gql(mock_session, {"last": 10, "userId": "u1"})
 
     def test_raises_on_graphql_errors(self, mock_session, mocker):
         payload = {"errors": [{"message": "something broke"}]}
@@ -73,7 +73,7 @@ class TestGql:
         resp.raise_for_status.return_value = None
         mock_session.post.return_value = resp
         with pytest.raises(core.HistoryPageRefused, match="refused the history feed") as ei:
-            core.gql(mock_session, {"last": 10, "userId": "u1"})
+            history_mod.gql(mock_session, {"last": 10, "userId": "u1"})
         assert "GraphQL error" in str(ei.value.__cause__)
 
     def test_never_asks_for_the_saved_request(self, mock_session, mocker):
@@ -86,7 +86,7 @@ class TestGql:
         resp.raise_for_status.return_value = None
         mock_session.post.return_value = resp
         with pytest.raises(core.HistoryPageRefused) as ei:
-            core.gql(mock_session, {"last": 10, "userId": "u1"})
+            history_mod.gql(mock_session, {"last": 10, "userId": "u1"})
         assert "hash" not in str(ei.value) and "Recapture" not in str(ei.value)
         mock_session.get.assert_not_called()
 
@@ -301,6 +301,7 @@ class TestQuickCount:
 
 from types import SimpleNamespace
 from moonglade import pixai_client as pixai_client_mod
+from moonglade import history as history_mod
 
 
 def _dl_args(out, **kw):
@@ -340,7 +341,7 @@ def test_resume_skips_on_disk_without_redownload(tmp_path, mocker):
     (tmp_path / "images").mkdir(parents=True)
     (tmp_path / "images" / "x_known.webp").write_bytes(b"img")
     dl = _patch_download_layer(mocker)
-    mocker.patch.object(core, "gql", side_effect=[_page("new1", True, "c1"),
+    mocker.patch.object(history_mod, "gql", side_effect=[_page("new1", True, "c1"),
                                                   _page("known", False)])
 
     core.run_download(_dl_args(tmp_path))
@@ -360,7 +361,7 @@ def test_resume_ignores_quarantined_deleted_file(tmp_path, mocker):
     qdir.mkdir(parents=True)
     (qdir / "x_known.webp").write_bytes(b"img")
     dl = _patch_download_layer(mocker)
-    mocker.patch.object(core, "gql", side_effect=[_page("known", False)])
+    mocker.patch.object(history_mod, "gql", side_effect=[_page("known", False)])
 
     core.run_download(_dl_args(tmp_path))
 
@@ -381,7 +382,7 @@ def test_resume_does_not_skip_a_zero_byte_file(tmp_path, mocker):
     (tmp_path / "images").mkdir(parents=True)
     (tmp_path / "images" / "x_known.webp").write_bytes(b"")   # 0 bytes -- interrupted
     dl = _patch_download_layer(mocker)
-    mocker.patch.object(core, "gql", side_effect=[_page("new1", True, "c1"),
+    mocker.patch.object(history_mod, "gql", side_effect=[_page("new1", True, "c1"),
                                                   _page("known", False)])
 
     core.run_download(_dl_args(tmp_path))
@@ -409,7 +410,7 @@ def test_run_download_returns_its_fail_count(tmp_path, mocker, capsys, pixai):
         dest.write_bytes(b"img")
         return ("ok", dest)
     mocker.patch.object(core, "download", side_effect=fake_download)
-    mocker.patch.object(core, "gql", side_effect=[_page("bad", True, "c1"), _page("good", False)])
+    mocker.patch.object(history_mod, "gql", side_effect=[_page("bad", True, "c1"), _page("good", False)])
 
     result = core.run_download(_dl_args(tmp_path))
 
@@ -524,7 +525,7 @@ def test_update_mode_stops_early(tmp_path, mocker):
     (tmp_path / "images").mkdir(parents=True)
     (tmp_path / "images" / "x_old.webp").write_bytes(b"img")
     _patch_download_layer(mocker)
-    gql = mocker.patch.object(core, "gql", side_effect=[
+    gql = mocker.patch.object(history_mod, "gql", side_effect=[
         _page("fresh", True, "c1"), _page("old", True, "c2"),
         _page("should_not_fetch", False)])
 
@@ -549,7 +550,7 @@ def test_update_walks_to_the_end_while_the_marker_is_absent(tmp_path, mocker):
     (tmp_path / "images" / "x_p1.webp").write_bytes(b"img")
     (tmp_path / "images" / "x_p2.webp").write_bytes(b"img")
     dl = _patch_download_layer(mocker)
-    gql = mocker.patch.object(core, "gql", side_effect=[
+    gql = mocker.patch.object(history_mod, "gql", side_effect=[
         _page("p1", True, "c1"), _page("p2", True, "c2"), _page("p3", True, "c3"),
         _page("p4", True, "c4"), _page("p5", False)])
 
@@ -577,7 +578,7 @@ def test_update_walks_to_the_end_while_the_marker_is_absent_parallel(tmp_path, m
     (tmp_path / "images" / "x_p1.webp").write_bytes(b"img")
     (tmp_path / "images" / "x_p2.webp").write_bytes(b"img")
     dl = _patch_download_layer(mocker)
-    gql = mocker.patch.object(core, "gql", side_effect=[
+    gql = mocker.patch.object(history_mod, "gql", side_effect=[
         _page("p1", True, "c1"), _page("p2", True, "c2"), _page("p3", False)])
 
     core.run_download(_dl_args(tmp_path, update=True, update_grace=2, workers=4))
@@ -595,7 +596,7 @@ def test_update_stops_early_once_the_marker_is_set(tmp_path, mocker):
     (tmp_path / "images" / "x_p1.webp").write_bytes(b"img")
     (tmp_path / "images" / "x_p2.webp").write_bytes(b"img")
     dl = _patch_download_layer(mocker)
-    gql = mocker.patch.object(core, "gql", side_effect=[
+    gql = mocker.patch.object(history_mod, "gql", side_effect=[
         _page("p1", True, "c1"), _page("p2", True, "c2"), _page("p3", True, "c3"),
         _page("p4", True, "c4"), _page("p5", False)])
 
@@ -615,7 +616,7 @@ def test_the_walk_end_marker_is_per_library(tmp_path, mocker):
     a.mkdir()
     b.mkdir()
     _patch_download_layer(mocker)
-    mocker.patch.object(core, "gql", side_effect=[_page("only", False)])
+    mocker.patch.object(history_mod, "gql", side_effect=[_page("only", False)])
     core.run_download(_dl_args(a))
 
     assert core.walk_end_reached(a) is True
@@ -627,7 +628,7 @@ def test_the_walk_end_marker_is_per_library(tmp_path, mocker):
     (b / "images").mkdir(parents=True)
     (b / "images" / "x_q1.webp").write_bytes(b"img")
     (b / "images" / "x_q2.webp").write_bytes(b"img")
-    gql_b = mocker.patch.object(core, "gql", side_effect=[
+    gql_b = mocker.patch.object(history_mod, "gql", side_effect=[
         _page("q1", True, "c1"), _page("q2", True, "c2"), _page("q3", False)])
 
     core.run_download(_dl_args(b, update=True, update_grace=2))
@@ -640,7 +641,7 @@ def test_a_max_capped_run_does_not_claim_the_end_of_history(tmp_path, mocker):
     that armed the marker, the very next Sync would stop two pages in on a library that was
     never walked -- the reported bug, re-entered through a different door."""
     _patch_download_layer(mocker)
-    mocker.patch.object(core, "gql", side_effect=[_page("p1", True, "c1")])
+    mocker.patch.object(history_mod, "gql", side_effect=[_page("p1", True, "c1")])
 
     result = core.run_download(_dl_args(tmp_path, max=1))
 
@@ -649,10 +650,10 @@ def test_a_max_capped_run_does_not_claim_the_end_of_history(tmp_path, mocker):
 
 
 def test_is_video_task_node():
-    assert core._is_video_task_node({"i2vProModel": "v4.0.1"}) is True
-    assert core._is_video_task_node({"i2vProModel": ""}) is False   # empty = not a video task
-    assert core._is_video_task_node({"mediaId": "x"}) is False
-    assert core._is_video_task_node({}) is False
+    assert history_mod._is_video_task_node({"i2vProModel": "v4.0.1"}) is True
+    assert history_mod._is_video_task_node({"i2vProModel": ""}) is False   # empty = not a video task
+    assert history_mod._is_video_task_node({"mediaId": "x"}) is False
+    assert history_mod._is_video_task_node({}) is False
 
 
 def test_download_skips_video_task_posters(tmp_path, mocker):
@@ -669,7 +670,7 @@ def test_download_skips_video_task_posters(tmp_path, mocker):
     page = {"user": {"taskSummaries": {
         "edges": [{"node": img_node}, {"node": vid_node}],
         "pageInfo": {"hasPreviousPage": False, "startCursor": ""}}}}
-    mocker.patch.object(core, "gql", side_effect=[page])
+    mocker.patch.object(history_mod, "gql", side_effect=[page])
 
     core.run_download(_dl_args(tmp_path))
 
@@ -691,7 +692,7 @@ def test_populated_catalog_skips_network_count(tmp_path, mocker):
     (tmp_path / "images" / "x_old.webp").write_bytes(b"img")
     _patch_download_layer(mocker)
     qc = mocker.patch.object(core, "_quick_count", return_value=999)
-    mocker.patch.object(core, "gql", side_effect=[_page("old", False)])
+    mocker.patch.object(history_mod, "gql", side_effect=[_page("old", False)])
 
     core.run_download(_dl_args(tmp_path, update=True, update_grace=1))
 
@@ -711,7 +712,7 @@ def test_parallel_workers_download_new_skip_known(tmp_path, mocker):
         return {"user": {"taskSummaries": {
             "edges": edges, "pageInfo": {"hasPreviousPage": has_prev, "startCursor": cursor}}}}
 
-    mocker.patch.object(core, "gql", side_effect=[_multi_page(["a", "b", "known"], False)])
+    mocker.patch.object(history_mod, "gql", side_effect=[_multi_page(["a", "b", "known"], False)])
     core.run_download(_dl_args(tmp_path, workers=4))
 
     names = [str(c.args[2]) for c in dl.call_args_list]
@@ -738,7 +739,7 @@ def test_update_and_workers_compose(tmp_path_factory, mocker):
         return {"user": {"taskSummaries": {
             "edges": edges, "pageInfo": {"hasPreviousPage": has_prev, "startCursor": c}}}}
 
-    gql = mocker.patch.object(core, "gql", side_effect=[
+    gql = mocker.patch.object(history_mod, "gql", side_effect=[
         _mp(["new1", "new2"], True, "c1"), _mp(["old"], True, "c2"),
         _mp(["should_not_fetch"], False)])
 
@@ -939,7 +940,7 @@ def test_sync_artworks_counts_failed_video_downloads_as_a_failure(tmp_path, mock
     mocker.patch.object(core, "artwork_list_gql", return_value=conn)
     # already_downloaded_video, not already_downloaded -- B16 (merged separately, same
     # sweep) redirected this call site to the video-aware matcher.
-    mocker.patch.object(core, "already_downloaded_video", return_value=None)
+    mocker.patch.object(history_mod, "already_downloaded_video", return_value=None)
     mocker.patch.object(core, "resolve_media", return_value=("https://x/vid1.mp4", {}))
     mocker.patch.object(core, "download", return_value=("fail", None))
     _views_sweep(pixai, {"aw1": 5})
@@ -1009,7 +1010,7 @@ def test_progress_counter_does_not_double_count(tmp_path, mocker):
     edges = [{"node": {"id": "t_" + m, "mediaId": m, "batchMediaIds": [],
                        "createdAt": "2024-01-01", "promptsPreview": "p", "status": "ok"}}
              for m in ("a", "b")]
-    mocker.patch.object(core, "gql", side_effect=[
+    mocker.patch.object(history_mod, "gql", side_effect=[
         {"user": {"taskSummaries": {"edges": edges,
                                     "pageInfo": {"hasPreviousPage": False}}}}])
 

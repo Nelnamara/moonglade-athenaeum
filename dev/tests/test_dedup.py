@@ -9,6 +9,7 @@ from moonglade import backup as core
 from moonglade.catalog_verbs import find_image_file
 from moonglade.catalog import init_db, save_catalog, load_catalog
 from moonglade import organize as organize_mod
+from moonglade import history as history_mod
 
 
 # ---------------------------------------------------------------------------
@@ -22,14 +23,14 @@ def test_resume_finds_bare_month_file(tmp_path):
     month = tmp_path / "2023-10"
     month.mkdir()
     (month / "375741317926742088.webp").write_bytes(b"img")
-    assert core.already_downloaded(tmp_path, "375741317926742088") is not None
+    assert history_mod.already_downloaded(tmp_path, "375741317926742088") is not None
 
 
 def test_gallery_thumbnails_excluded(tmp_path):
     g = tmp_path / "gallery"
     g.mkdir()
     (g / "777.webp").write_bytes(b"thumb")
-    assert core.already_downloaded(tmp_path, "777") is None
+    assert history_mod.already_downloaded(tmp_path, "777") is None
 
 
 # ---------------------------------------------------------------------------

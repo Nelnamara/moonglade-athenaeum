@@ -511,6 +511,14 @@ SEAMS = {
         "remove_web_user_guarded", "get_web_user_session_epoch", "bump_web_user_session_epoch",
         "_dummy_hash_cache", "_dummy_password_hash", "verify_web_user", "run_add_web_user",
         "run_remove_web_user", "remove_login_files", "run_list_web_users"]},
+    "moonglade.history": {"from": "moonglade.backup", "names": [
+        "_HISTORY_PAGE_DOC", "HISTORY_REFUSED", "HISTORY_RETRY_WAIT_S", "HISTORY_FALLBACK_LAST",
+        "COUNT_PAGE_SIZE", "_history_wait", "_feed_refusal", "gql", "_history_answer",
+        "find_connection", "slug_from_prompt", "build_stem_name", "_FIX_TAGS", "local_media_id",
+        "_LOCAL_SUFFIX_RE", "build_local_name", "migrate_local_filenames", "fixer_block",
+        "fix_marker", "build_fix_stem_name", "already_downloaded", "already_downloaded_video",
+        "_file_sha", "_same_bytes", "_same_pixels", "media_ids_for", "cataloged_media_ids",
+        "_is_video_task_node", "extract_meta"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -2283,6 +2291,30 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_telemetry.py', 'moonglade.web_accounts'),
     ('tests/test_training_advanced.py', 'moonglade.web_accounts'),
     ('tests/test_training_parity.py', 'moonglade.web_accounts'),
+    # Split phase 4, history: no reader reads the feed's or the extraction's text but through
+    # history_mod; test_history_feed_document's retired-hash guard reads history_mod too.
+    ('tests/test_artworks_adhoc.py', 'moonglade.history'),
+    ('tests/test_cli_doc_coverage.py', 'moonglade.history'),
+    ('tests/test_config_path_routing.py', 'moonglade.history'),
+    ('tests/test_create_door.py', 'moonglade.history'),
+    ('tests/test_csrf_coverage.py', 'moonglade.history'),
+    ('tests/test_enhance.py', 'moonglade.history'),
+    ('tests/test_evidence_counters.py', 'moonglade.history'),
+    ('tests/test_full_meta_rest_fallback.py', 'moonglade.history'),
+    ('tests/test_gen_surface.py', 'moonglade.history'),
+    ('tests/test_history_feed_document.py', 'moonglade.history'),
+    ('tests/test_jwt.py', 'moonglade.history'),
+    ('tests/test_living_library.py', 'moonglade.history'),
+    ('tests/test_loom_notify.py', 'moonglade.history'),
+    ('tests/test_network.py', 'moonglade.history'),
+    ('tests/test_pixai_client.py', 'moonglade.history'),
+    ('tests/test_settings_store.py', 'moonglade.history'),
+    ('tests/test_setup_prepare.py', 'moonglade.history'),
+    ('tests/test_spend_no_retry.py', 'moonglade.history'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.history'),
+    ('tests/test_telemetry.py', 'moonglade.history'),
+    ('tests/test_training_advanced.py', 'moonglade.history'),
+    ('tests/test_training_parity.py', 'moonglade.history'),
 }
 
 

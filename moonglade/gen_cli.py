@@ -123,11 +123,12 @@ def run_generate(args):
     A task recovered by --task-id that turns out to have VIDEO outputs is collected as
     video, through the same _download_video_task the video commands use -- never dragged
     through the image path. See the comment at the outputs split below for why."""
-    from moonglade.backup import (build_catalog_row, build_stem_name, _check_read_only,
-                                  _created_at_utc, download, extract_full_meta,
-                                  _fill_preset_defaults, init_db, known_catalog_rows,
-                                  _make_session, _paid_credit_str, resolve_media, _resolved_loras,
-                                  _resolved_model_name, save_catalog_over_snapshot, video_outputs)
+    from moonglade.backup import (build_catalog_row, _check_read_only, _created_at_utc, download,
+                                  extract_full_meta, _fill_preset_defaults, init_db,
+                                  known_catalog_rows, _make_session, _paid_credit_str,
+                                  resolve_media, _resolved_loras, _resolved_model_name,
+                                  save_catalog_over_snapshot, video_outputs)
+    from moonglade.history import build_stem_name
     out = Path(args.out)
     params = _gen_params._gen_parameters(args)
     existing_task = (getattr(args, "task_id", "") or "").strip()
@@ -457,10 +458,10 @@ def _download_video_task(session, result, task_id, out, args, params):
     """Download + catalog the video output(s) of a completed task. Shared by i2v (i2vPro)
     and reference-video (referenceVideo) -- reads outputs.videos + the submitted block
     generically. Returns the list of saved file paths."""
-    from moonglade.backup import (build_catalog_row, build_stem_name, _created_at_utc, download,
-                                  extract_full_meta, known_catalog_rows, media_file_gql,
-                                  _paid_credit_str, resolve_media, save_catalog_over_snapshot,
-                                  video_outputs)
+    from moonglade.backup import (build_catalog_row, _created_at_utc, download, extract_full_meta,
+                                  known_catalog_rows, media_file_gql, _paid_credit_str,
+                                  resolve_media, save_catalog_over_snapshot, video_outputs)
+    from moonglade.history import build_stem_name
     outs, shared = video_outputs(result)
     _outputs_or_raise(result, outs, "video task completed but no video outputs found")
     detail = ((result or {}).get("outputs") or {}).get("detailParameters") or {}
@@ -612,11 +613,11 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
     """Download + catalog the image output(s) of a completed task. Saves the individual batch
     images (not the composite grid) via _task_image_media, storing each image's own seed.
     resolve_media -> download -> catalog as source='api'. Returns the saved file paths."""
-    from moonglade.backup import (build_catalog_row, build_fix_stem_name, build_stem_name,
-                                  _created_at_utc, download, extract_full_meta,
-                                  _fill_preset_defaults, fixer_block, known_catalog_rows,
-                                  _paid_credit_str, resolve_media, _resolved_loras,
-                                  _resolved_model_name, save_catalog_over_snapshot)
+    from moonglade.backup import (build_catalog_row, _created_at_utc, download, extract_full_meta,
+                                  _fill_preset_defaults, known_catalog_rows, _paid_credit_str,
+                                  resolve_media, _resolved_loras, _resolved_model_name,
+                                  save_catalog_over_snapshot)
+    from moonglade.history import build_fix_stem_name, build_stem_name, fixer_block
     outputs = result.get("outputs") or {}
     media = _task_image_media(outputs)
     _outputs_or_raise(result, media, "task completed but no media ids found")
@@ -1006,11 +1007,12 @@ def run_edit_image(args):
     reference). Poll -> download the result image(s) -> catalog as source='api'.
     GUARDED: without --confirm it only PREVIEWS (uploads nothing, spends nothing).
     --task-id recovers an already-created edit for free. Mirrors run_generate."""
-    from moonglade.backup import (build_catalog_row, build_stem_name, _check_read_only,
-                                  _created_at_utc, download, _edit_model_label, extract_full_meta,
-                                  _fill_preset_defaults, init_db, known_catalog_rows,
-                                  _make_session, _paid_credit_str, PixAIError, resolve_media,
-                                  save_catalog_over_snapshot, upload_media)
+    from moonglade.backup import (build_catalog_row, _check_read_only, _created_at_utc, download,
+                                  _edit_model_label, extract_full_meta, _fill_preset_defaults,
+                                  init_db, known_catalog_rows, _make_session, _paid_credit_str,
+                                  PixAIError, resolve_media, save_catalog_over_snapshot,
+                                  upload_media)
+    from moonglade.history import build_stem_name
     out = Path(args.out)
     existing_task = (getattr(args, "task_id", "") or "").strip()
     srcs = [s for s in (getattr(args, "edit_src", None) or []) if s and str(s).strip()]

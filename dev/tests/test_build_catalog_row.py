@@ -38,6 +38,7 @@ from moonglade import pixai_client as pixai_client_mod
 from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import thumbs as thumbs_mod
+from moonglade import history as history_mod
 
 
 # --------------------------------------------------------------------------------------
@@ -502,8 +503,8 @@ def _stub_sync_videos(monkeypatch, out):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(pixai_client_mod, "_client_of",
                         lambda s: types.SimpleNamespace(user_id="u1"))
-    monkeypatch.setattr(core, "gql", lambda s, v: {})
-    monkeypatch.setattr(core, "find_connection", _find_connection)
+    monkeypatch.setattr(history_mod, "gql", lambda s, v: {})
+    monkeypatch.setattr(history_mod, "find_connection", _find_connection)
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", lambda s, t: task)
     monkeypatch.setattr(core, "video_outputs", lambda r: ([dict(VOUT)], dict(VSHARED)))
     monkeypatch.setattr(core, "media_file_gql", lambda s, m: {"fileUrl": "https://x/v.mp4"})

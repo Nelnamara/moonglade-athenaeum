@@ -31,6 +31,7 @@ from tests.fake_pixai import FakePixAI, UnregisteredOperation, operation_name
 from moonglade import pixai_client as pixai_client_mod
 from moonglade import mirror as mirror_mod
 from moonglade import task_reads as task_reads_mod
+from moonglade import history as history_mod
 
 
 class FakeResponse:
@@ -162,7 +163,8 @@ class TestThePrimitivesAreThinDelegates:
     @pytest.mark.parametrize("name", ["gql", "gql_adhoc", "gql_mutate",
                                       "_rest_get", "_rest_post"])
     def test_it_routes_through_the_client(self, name, real_rest):
-        src = inspect.getsource(getattr(core, name))
+        home = next(m for m in (core, history_mod) if hasattr(m, name))
+        src = inspect.getsource(getattr(home, name))
         # gql reads the history feed's document through gql_adhoc, itself one of these five
         road = "gql_adhoc(" if name == "gql" else "_client_of("
         assert road in src, "{} no longer routes through the client".format(name)
@@ -172,10 +174,10 @@ class TestThePrimitivesAreThinDelegates:
     def test_gql_posts_the_history_document(self):
         page = {"user": {"taskSummaries": {"edges": [], "pageInfo": {}}}}  # a page, no edges
         s = RecordingSession(FakeResponse({"data": page}))
-        assert core.gql(s, {"last": 3}) == page
+        assert history_mod.gql(s, {"last": 3}) == page
         (verb, _url, kwargs), = s.calls
         assert verb == "POST"
-        assert kwargs["json"] == {"query": core._HISTORY_PAGE_DOC, "variables": {"last": 3}}
+        assert kwargs["json"] == {"query": history_mod._HISTORY_PAGE_DOC, "variables": {"last": 3}}
 
     def test_gql_adhoc_takes_a_raw_session(self):
         s = RecordingSession(FakeResponse({"data": {"me": {"id": "1"}}}))
@@ -360,7 +362,7 @@ class TestRetryPolicy:
         times, as the saved-request GET was."""
         s = RecordingSession(requests.ConnectionError("connection dropped"))
         with pytest.raises(requests.RequestException):
-            core.gql(s, {"last": 1})
+            history_mod.gql(s, {"last": 1})
         assert len(s.calls) == 5 and all(v == "POST" for v, _u, _k in s.calls)
 
     def test_rest_post_makes_exactly_one_attempt(self):
@@ -573,11 +575,11 @@ class TestTheFixtureIsWhatTheAppIsHanded:
     def test_every_primitive_routes_to_the_fake(self, pixai):
         pixai.on("me", {"me": {"id": "9"}})
         page = {"edges": [], "pageInfo": {}}                    # the feed's answer: a page
-        pixai.on(operation_name(core._HISTORY_PAGE_DOC), page)   # the feed's document
+        pixai.on(operation_name(history_mod._HISTORY_PAGE_DOC), page)   # the feed's document
         pixai.on("/claim", {"claims": []})
         pixai.on("/claim/1", {"ok": True})
         assert core.gql_adhoc(pixai, "query me { id }") == {"me": {"id": "9"}}
-        assert core.gql(pixai, {"last": 1}) == page
+        assert history_mod.gql(pixai, {"last": 1}) == page
         assert core._rest_get(pixai, "/claim") == {"claims": []}
         assert core._rest_post(pixai, "/claim/1", {}) == {"ok": True}
         assert [c.verb for c in pixai.calls] == ["query", "query", "rest_get",

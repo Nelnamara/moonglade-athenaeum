@@ -53,6 +53,7 @@ from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import cloud_delete as cloud_delete_mod
 from moonglade import thumbs as thumbs_mod
+from moonglade import history as history_mod
 
 REPO = Path(__file__).resolve().parents[2]
 RECORDED = json.loads((Path(__file__).resolve().parent / "fixtures" /
@@ -319,7 +320,7 @@ def test_every_other_reader_of_a_task_reads_it_the_same(pixai, kind):
     doc, saved = _document(kind), _saved(kind)
     pixai.on(TASK_DETAIL, {"task": doc})
     task = task_reads_mod.task_detail_gql(pixai, doc["id"])
-    for reader in (core.video_outputs, core.source_media_of_task, core.fixer_block,
+    for reader in (core.video_outputs, core.source_media_of_task, history_mod.fixer_block,
                    cloud_delete_mod.task_artwork_ids, core._paid_credit_str):
         assert reader(task) == reader(saved), reader.__name__
     assert gen_cli_mod._task_image_media(task["outputs"]) == gen_cli_mod._task_image_media(saved["outputs"])
@@ -352,7 +353,7 @@ def test_a_fix_reads_the_same_through_the_document(pixai):
     saved["parameters"]["chat"]["fixer"] = copy.deepcopy(fixer)
     pixai.on(TASK_DETAIL, {"task": doc})
     task = task_reads_mod.task_detail_gql(pixai, doc["id"])
-    assert core.fixer_block(task) == fixer == core.fixer_block(saved)
+    assert history_mod.fixer_block(task) == fixer == history_mod.fixer_block(saved)
     assert core.extract_full_meta(task) == core.extract_full_meta(saved)
 
 
@@ -409,7 +410,7 @@ def test_the_video_sync_reads_its_task_through_the_document(pixai, tmp_path, mon
     vmid = out["video_media_id"]
     save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "seed-row", "filename": "a.png"}])
-    pixai.on(operation_name(core._HISTORY_PAGE_DOC), _feed([{
+    pixai.on(operation_name(history_mod._HISTORY_PAGE_DOC), _feed([{
         "id": doc["id"], "status": "completed", "mediaId": doc["mediaId"],
         "batchMediaIds": [], "createdAt": doc["createdAt"], "promptsPreview": "p",
         "i2vProModel": "v4.0.1"}]))

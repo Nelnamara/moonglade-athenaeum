@@ -35,6 +35,7 @@ from moonglade import task_feed as _task_feed
 from moonglade import task_reads as _task_reads
 from moonglade import telemetry as _telemetry
 from moonglade import updater as _updater
+from moonglade import history as _history
 
 
 def register(app, ctx):
@@ -1388,9 +1389,9 @@ def register(app, ctx):
         try:
             session = core._make_session(None)
             # The feed's one road (core.gql: the full document, #89), as every other reader.
-            data = core.gql(session, core.page_variables(
+            data = _history.gql(session, core.page_variables(
                 WATCH_CATCHUP_TASKS, _pixai_client._client_of(session).user_id))
-            conn = core.find_connection(data)
+            conn = _history.find_connection(data)
             edges = (conn or {}).get("edges") or []
             missed = []
             nodes = {}
@@ -1421,14 +1422,14 @@ def register(app, ctx):
                 # "the app no longer picks up tracking of generations run from the website".
                 # The skip-only-when-really-present ruling is unchanged; this is the id set
                 # it always meant.
-                if core._is_video_task_node(node):
+                if _history._is_video_task_node(node):
                     # A summary names none of a video's cataloged ids, so ask by task: its
                     # video row carries this task id.
                     if get_row_by_task(db_path, tid):
                         continue
                     missed.append(tid)
                     continue
-                mids = [str(m) for m in (core.cataloged_media_ids(node) or [])]
+                mids = [str(m) for m in (_history.cataloged_media_ids(node) or [])]
                 if not mids:
                     continue
                 # EVERY one, so a half-collected batch is still finished off.

@@ -4,6 +4,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import gen_params as gen_params_mod
 from moonglade import models as models_mod
+from moonglade import history as history_mod
 
 
 # ---------------------------------------------------------------------------
@@ -75,25 +76,25 @@ def test_progress_line_starts_with_cr():
 # ---------------------------------------------------------------------------
 
 def test_slug_basic():
-    s = core.slug_from_prompt("a beautiful cat", 60)
+    s = history_mod.slug_from_prompt("a beautiful cat", 60)
     assert s == "a_beautiful_cat"
 
 
 def test_slug_removes_forbidden_chars():
-    s = core.slug_from_prompt('cat: "meow"', 60)
+    s = history_mod.slug_from_prompt('cat: "meow"', 60)
     assert ":" not in s
     assert '"' not in s
 
 
 def test_slug_truncates():
-    s = core.slug_from_prompt("word " * 20, 10)
+    s = history_mod.slug_from_prompt("word " * 20, 10)
     assert len(s) <= 10
 
 
 def test_slug_empty():
-    assert core.slug_from_prompt("", 60) == ""
+    assert history_mod.slug_from_prompt("", 60) == ""
 
-    assert core.slug_from_prompt(None, 60) == ""
+    assert history_mod.slug_from_prompt(None, 60) == ""
 
 
 # ---------------------------------------------------------------------------
@@ -101,24 +102,24 @@ def test_slug_empty():
 # ---------------------------------------------------------------------------
 
 def test_build_stem_name_contains_ids():
-    stem = core.build_stem_name("a cat", "task123", "mid456", 60, "_")
+    stem = history_mod.build_stem_name("a cat", "task123", "mid456", 60, "_")
     assert "task123" in stem
     assert "mid456" in stem
 
 
 def test_build_stem_name_media_id_last():
-    stem = core.build_stem_name("a cat", "task123", "mid456", 60, "_")
+    stem = history_mod.build_stem_name("a cat", "task123", "mid456", 60, "_")
     assert stem.endswith("mid456")
 
 
 def test_build_stem_name_no_prompt():
-    stem = core.build_stem_name("", "task1", "mid1", 60, "_")
+    stem = history_mod.build_stem_name("", "task1", "mid1", 60, "_")
     assert "task1" in stem
     assert "mid1" in stem
 
 
 def test_build_stem_name_sep():
-    stem = core.build_stem_name("hello world", "t1", "m1", 60, "-")
+    stem = history_mod.build_stem_name("hello world", "t1", "m1", 60, "-")
     assert "_" not in stem
     assert "-" in stem
 
@@ -129,26 +130,26 @@ def test_build_stem_name_sep():
 
 def test_media_ids_for_single():
     node = {"mediaId": "abc123", "batchMediaIds": None}
-    assert core.media_ids_for(node) == ["abc123"]
+    assert history_mod.media_ids_for(node) == ["abc123"]
 
 
 def test_media_ids_for_batch_dedup():
     node = {"mediaId": "abc123", "batchMediaIds": ["abc123", "def456", "ghi789"]}
-    assert core.media_ids_for(node) == ["abc123", "def456", "ghi789"]
+    assert history_mod.media_ids_for(node) == ["abc123", "def456", "ghi789"]
 
 
 def test_media_ids_for_empty_node():
-    assert core.media_ids_for({}) == []
+    assert history_mod.media_ids_for({}) == []
 
 
 def test_media_ids_for_batch_only():
     node = {"mediaId": None, "batchMediaIds": ["a", "b"]}
-    assert core.media_ids_for(node) == ["a", "b"]
+    assert history_mod.media_ids_for(node) == ["a", "b"]
 
 
 def test_media_ids_for_falsy_batch_entries_skipped():
     node = {"mediaId": "x", "batchMediaIds": ["x", "", None, "y"]}
-    result = core.media_ids_for(node)
+    result = history_mod.media_ids_for(node)
     assert "" not in result
     assert None not in result
     assert "y" in result
@@ -164,16 +165,16 @@ def test_cataloged_media_ids_batch_summary_drops_the_composite_grid():
     """A batch task's `mediaId` is the combined preview picture and is never one of the
     batch (probe 2026-09-06), so no row is keyed by it. The members are."""
     node = {"id": "T", "mediaId": "GRID", "batchMediaIds": ["b1", "b2", "b3", "b4"]}
-    assert core.cataloged_media_ids(node) == ["b1", "b2", "b3", "b4"]
-    assert "GRID" in core.media_ids_for(node)          # the old set, for contrast
+    assert history_mod.cataloged_media_ids(node) == ["b1", "b2", "b3", "b4"]
+    assert "GRID" in history_mod.media_ids_for(node)          # the old set, for contrast
 
 
 def test_cataloged_media_ids_single_image_summary_is_its_media_id():
-    assert core.cataloged_media_ids(
+    assert history_mod.cataloged_media_ids(
         {"id": "T", "mediaId": "solo", "batchMediaIds": None}) == ["solo"]
-    assert core.cataloged_media_ids(
+    assert history_mod.cataloged_media_ids(
         {"id": "T", "mediaId": "solo", "batchMediaIds": []}) == ["solo"]
-    assert core.cataloged_media_ids({}) == []
+    assert history_mod.cataloged_media_ids({}) == []
 
 
 def test_cataloged_media_ids_all_deleted_batch_yields_nothing_not_the_grid():
@@ -181,14 +182,14 @@ def test_cataloged_media_ids_all_deleted_batch_yields_nothing_not_the_grid():
     has nothing to collect, and must NOT fall back to the grid -- the same refusal
     _task_image_media makes on the detail shape."""
     node = {"id": "T", "mediaId": "GRID", "batchMediaIds": [None, "", None]}
-    assert core.cataloged_media_ids(node) == []
+    assert history_mod.cataloged_media_ids(node) == []
 
 
 def test_cataloged_media_ids_video_summary_names_nothing_the_catalog_holds():
     """The summary carries only the poster still; the video's own media id lives in
     getTaskById. [] here means "this node cannot tell you", not "nothing to collect"."""
     node = {"id": "T", "mediaId": "POSTER", "i2vProModel": "v4.0.1"}
-    assert core.cataloged_media_ids(node) == []
+    assert history_mod.cataloged_media_ids(node) == []
 
 
 def test_cataloged_media_ids_reads_a_full_task_detail_too():
@@ -198,12 +199,12 @@ def test_cataloged_media_ids_reads_a_full_task_detail_too():
     task = {"id": "T", "outputs": {"mediaId": "GRID", "batch": [
         {"mediaId": "b1"}, {"mediaId": "b2", "deletedAt": "2026-09-06T00:00:00Z"},
         {"mediaId": "b3"}]}}
-    assert core.cataloged_media_ids(task) == ["b1", "b3"]
+    assert history_mod.cataloged_media_ids(task) == ["b1", "b3"]
 
     vid = {"id": "T", "parameters": {"i2vPro": {"prompts": "p"}},
            "outputs": {"mediaId": "POSTER",
                        "videos": [{"mediaId": "V1", "thumbnailMediaId": "POSTER"}]}}
-    assert core.cataloged_media_ids(vid) == ["V1"]
+    assert history_mod.cataloged_media_ids(vid) == ["V1"]
 
 
 # ---------------------------------------------------------------------------
@@ -217,7 +218,7 @@ def test_extract_meta_basic():
         "promptsPreview": "a beautiful cat",
         "status": "succeeded",
     }
-    meta = core.extract_meta(node)
+    meta = history_mod.extract_meta(node)
     assert meta["task_id"] == "task1"
     assert meta["created_at"] == "2024-01-15T10:00:00Z"
     assert meta["prompt_preview"] == "a beautiful cat"
@@ -225,14 +226,14 @@ def test_extract_meta_basic():
 
 
 def test_extract_meta_missing_fields():
-    meta = core.extract_meta({})
+    meta = history_mod.extract_meta({})
     assert meta["task_id"] == ""
     assert meta["prompt_preview"] == ""
 
 
 def test_extract_meta_null_prompt():
     node = {"id": "t", "promptsPreview": None}
-    assert core.extract_meta(node)["prompt_preview"] == ""
+    assert history_mod.extract_meta(node)["prompt_preview"] == ""
 
 
 # ---------------------------------------------------------------------------
@@ -241,24 +242,24 @@ def test_extract_meta_null_prompt():
 
 def test_find_connection_nested():
     data = {"user": {"taskSummaries": {"edges": [], "pageInfo": {"hasPreviousPage": False}}}}
-    conn = core.find_connection(data)
+    conn = history_mod.find_connection(data)
     assert conn is not None
     assert "edges" in conn
     assert "pageInfo" in conn
 
 
 def test_find_connection_returns_none_on_empty():
-    assert core.find_connection({}) is None
-    assert core.find_connection(None) is None
+    assert history_mod.find_connection({}) is None
+    assert history_mod.find_connection(None) is None
 
 
 def test_find_connection_returns_none_no_match():
-    assert core.find_connection({"a": 1, "b": 2}) is None
+    assert history_mod.find_connection({"a": 1, "b": 2}) is None
 
 
 def test_find_connection_inside_list():
     data = [{"edges": [], "pageInfo": {}}]
-    conn = core.find_connection(data)
+    conn = history_mod.find_connection(data)
     assert conn is not None
 
 

@@ -33,6 +33,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import web_accounts as web_accounts_mod
+from moonglade import history as history_mod
 
 
 def _dl_args(out, **kw):
@@ -99,7 +100,7 @@ class TestM07ParallelDownloadHonoursDelay:
         starts = []
         _patch_download_layer(mocker, on_resolve=lambda mid: starts.append(time.monotonic()))
         mids = ["m%d" % i for i in range(6)]
-        mocker.patch.object(core, "gql", side_effect=[_one_page(mids)])
+        mocker.patch.object(history_mod, "gql", side_effect=[_one_page(mids)])
 
         core.run_download(_dl_args(tmp_path, delay=0.05, workers=4))
 
@@ -144,7 +145,7 @@ class TestM07ParallelDownloadHonoursDelay:
 
         _patch_download_layer(mocker, on_download=slow_download)
         mids = ["m%d" % i for i in range(8)]
-        mocker.patch.object(core, "gql", side_effect=[_one_page(mids)])
+        mocker.patch.object(history_mod, "gql", side_effect=[_one_page(mids)])
 
         core.run_download(_dl_args(tmp_path, delay=0.02, workers=4))
 
@@ -170,7 +171,7 @@ class TestM07ParallelDownloadHonoursDelay:
         starts = []
         _patch_download_layer(mocker, on_resolve=lambda mid: starts.append(time.monotonic()))
         mids = ["m%d" % i for i in range(6)]
-        mocker.patch.object(core, "gql", side_effect=[_one_page(mids)])
+        mocker.patch.object(history_mod, "gql", side_effect=[_one_page(mids)])
 
         core.run_download(_dl_args(tmp_path, delay=core.DEFAULT_DELAY, workers=4))
 
@@ -186,14 +187,14 @@ class TestM07ParallelDownloadHonoursDelay:
         when asking why their backup is slow, and it would send them chasing a throttle that
         is not there."""
         _patch_download_layer(mocker)
-        mocker.patch.object(core, "gql", side_effect=[_one_page(["m1"])])
+        mocker.patch.object(history_mod, "gql", side_effect=[_one_page(["m1"])])
         core.run_download(_dl_args(tmp_path, delay=core.DEFAULT_DELAY, workers=4))
         out = capsys.readouterr().out
         assert "Parallel downloads: 4 workers." in out
         assert "paced" not in out
 
         _patch_download_layer(mocker)
-        mocker.patch.object(core, "gql", side_effect=[_one_page(["m1"])])
+        mocker.patch.object(history_mod, "gql", side_effect=[_one_page(["m1"])])
         # A second library, already there as the command line always leaves it before a
         # download (main() makes the folder and opens its records first).
         (tmp_path / "b").mkdir()

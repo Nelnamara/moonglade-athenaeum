@@ -25,6 +25,7 @@ from tests.conftest import login_client
 from moonglade import mirror as mirror_mod
 from moonglade import catalog as catalog_mod
 from moonglade import thumbs as thumbs_mod
+from moonglade import history as history_mod
 
 
 REFERENCE_PRO = gen_params_mod.EDIT_MODELS["reference-pro"]["model_id"]
@@ -64,28 +65,28 @@ def _row(**kw):
 # ---------------------------------------------------------------------------
 
 def test_fixer_block_only_matches_a_real_fix():
-    assert core.fixer_block(_fixer_task())["boxes"][0]["tag"] == "hand"
+    assert history_mod.fixer_block(_fixer_task())["boxes"][0]["tag"] == "hand"
     # an instruct Edit is also a chat task, but carries no fixer sub-block
-    assert core.fixer_block({"parameters": {"chat": {"prompts": "make it night"}}}) is None
-    assert core.fixer_block({"parameters": {"prompts": "a druid"}}) is None
-    assert core.fixer_block(None) is None
+    assert history_mod.fixer_block({"parameters": {"chat": {"prompts": "make it night"}}}) is None
+    assert history_mod.fixer_block({"parameters": {"prompts": "a druid"}}) is None
+    assert history_mod.fixer_block(None) is None
 
 
 def test_fix_marker_names_the_regions_that_were_repaired():
-    assert core.fix_marker([{"tag": "face"}]) == "fix-face"
-    assert core.fix_marker([{"tag": "hand"}]) == "fix-hand"
+    assert history_mod.fix_marker([{"tag": "face"}]) == "fix-face"
+    assert history_mod.fix_marker([{"tag": "hand"}]) == "fix-hand"
     # stable order regardless of the order the boxes were drawn in, and deduped
-    assert core.fix_marker([{"tag": "hand"}, {"tag": "face"}, {"tag": "hand"}]) == "fix-face-hand"
+    assert history_mod.fix_marker([{"tag": "hand"}, {"tag": "face"}, {"tag": "hand"}]) == "fix-face-hand"
     # an untagged box degrades to a plain marker rather than guessing which it was
-    assert core.fix_marker([{}]) == "fix"
-    assert core.fix_marker([]) == "fix"
+    assert history_mod.fix_marker([{}]) == "fix"
+    assert history_mod.fix_marker([]) == "fix"
 
 
 def test_build_fix_stem_name_keeps_the_media_id_last():
     """Invariant 7 (the shared media_id -> file matcher) is what resume and every
     already_downloaded() check rely on: the readable text may be anything, but the file
     must still end in `_<media_id>`."""
-    stem = core.build_fix_stem_name("a night elf druid", [{"tag": "face"}], "T1", "M9", 60)
+    stem = history_mod.build_fix_stem_name("a night elf druid", [{"tag": "face"}], "T1", "M9", 60)
     assert stem == "a_night_elf_druid_fix-face_T1_M9"
     assert stem.endswith("_M9")
 
@@ -94,13 +95,13 @@ def test_build_fix_stem_name_marker_survives_a_long_source_label():
     """The length cap applies to the source slug ONLY. If the marker could be truncated
     away, a long-prompted source would produce exactly the unreadable name this scheme
     exists to replace."""
-    stem = core.build_fix_stem_name("x" * 200, [{"tag": "hand"}], "T1", "M9", 20)
+    stem = history_mod.build_fix_stem_name("x" * 200, [{"tag": "hand"}], "T1", "M9", 20)
     assert "_fix-hand_T1_M9" in stem
     assert stem.startswith("x" * 20 + "_")
 
 
 def test_build_fix_stem_name_without_a_source_label():
-    assert core.build_fix_stem_name("", [{"tag": "face"}], "T1", "M9", 60) == "fix-face_T1_M9"
+    assert history_mod.build_fix_stem_name("", [{"tag": "face"}], "T1", "M9", 60) == "fix-face_T1_M9"
 
 
 def _stub_collect(monkeypatch, tmp_path):

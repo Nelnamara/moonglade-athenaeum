@@ -41,9 +41,10 @@ from moonglade.catalog import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.fake_pixai import operation_name
 from moonglade import pixai_client as pixai_client_mod
+from moonglade import history as history_mod
 
 REPO = Path(__file__).resolve().parents[2]
-FEED = operation_name(core._HISTORY_PAGE_DOC)       # what the fake keys the document by
+FEED = operation_name(history_mod._HISTORY_PAGE_DOC)       # what the fake keys the document by
 
 
 def _node(tid, mid=None, **kw):
@@ -87,7 +88,7 @@ class _History:
         self.variables = []
 
     def __call__(self, call):
-        assert call.verb == "query" and call.document == core._HISTORY_PAGE_DOC
+        assert call.verb == "query" and call.document == history_mod._HISTORY_PAGE_DOC
         self.variables.append(dict(call.variables or {}))
         if self.script:
             a = self.script.pop(0)
@@ -104,7 +105,7 @@ class _History:
 def waits(monkeypatch):
     """Every wait gql takes after an internal-server failure, recorded instead of taken."""
     seen = []
-    monkeypatch.setattr(core, "_history_wait", seen.append)
+    monkeypatch.setattr(history_mod, "_history_wait", seen.append)
     return seen
 
 
@@ -124,7 +125,7 @@ def _catalog(tmp_path, rows):
 # =====================================================================================
 
 def test_the_document_is_a_query_paged_backward():
-    doc = " ".join(core._HISTORY_PAGE_DOC.split())
+    doc = " ".join(history_mod._HISTORY_PAGE_DOC.split())
     assert pixai_client_mod._is_mutation_document(doc) is False
     assert "taskSummaries(last: $last, before: $before)" in doc
     for name in ("$userId", "$last", "$before"):
@@ -149,25 +150,25 @@ def test_a_page_is_one_post_of_the_full_document():
 
     s = Session()
     variables = core.page_variables(250, "u-wire", before="c9")
-    data = core.gql(pixai_client_mod.PixAIClient(s), variables)
+    data = history_mod.gql(pixai_client_mod.PixAIClient(s), variables)
     [(verb, url, kw)] = s.calls
     assert (verb, url) == ("POST", core.API_URL)
-    assert kw["json"] == {"query": core._HISTORY_PAGE_DOC,
+    assert kw["json"] == {"query": history_mod._HISTORY_PAGE_DOC,
                           "variables": {"last": 250, "userId": "u-wire", "before": "c9"}}
-    conn = core.find_connection(data)                        # the result shape feeds it
+    conn = history_mod.find_connection(data)                        # the result shape feeds it
     assert [e["node"]["id"] for e in conn["edges"]] == ["T1"]
 
 
 def test_through_the_fake_it_is_a_query_and_never_a_saved_request(pixai):
     h = _history(pixai, [[_node("T1")]])
-    data = core.gql(pixai, core.page_variables(30, "u-test"))
-    assert core.find_connection(data)["pageInfo"]["hasPreviousPage"] is False
+    data = history_mod.gql(pixai, core.page_variables(30, "u-test"))
+    assert history_mod.find_connection(data)["pageInfo"]["hasPreviousPage"] is False
     assert [c.verb for c in pixai.calls] == ["query"]
     assert h.variables == [{"last": 30, "userId": "u-test"}]
 
 
 def test_the_read_never_rides_the_saved_request_or_a_mutation():
-    src = inspect.getsource(core.gql)
+    src = inspect.getsource(history_mod.gql)
     assert "gql_adhoc(" in src
     assert ".persisted(" not in src and "gql_mutate" not in src and ".mutate(" not in src
 
@@ -193,34 +194,34 @@ def test_an_internal_server_error_waits_five_seconds_and_asks_again(waits):
     failed = {"errors": [{"message": "Internal server error", "path": ["user", "taskSummaries"],
                           "extensions": {"code": "INTERNAL_SERVER_ERROR"}}], "data": None}
     s = Session([failed, {"data": _answer([_node("T1")])}])
-    data = core.gql(pixai_client_mod.PixAIClient(s), {"last": 5000, "userId": "u1"})
-    assert waits == [5.0] == [core.HISTORY_RETRY_WAIT_S]
+    data = history_mod.gql(pixai_client_mod.PixAIClient(s), {"last": 5000, "userId": "u1"})
+    assert waits == [5.0] == [history_mod.HISTORY_RETRY_WAIT_S]
     assert s.sent == [{"last": 5000, "userId": "u1"}] * 2       # the same request, twice
-    assert core.find_connection(data)["edges"][0]["node"]["id"] == "T1"
+    assert history_mod.find_connection(data)["edges"][0]["node"]["id"] == "T1"
 
 
 def test_a_second_failure_at_5000_asks_once_more_at_2000_with_the_same_before(pixai, waits):
     h = _history(pixai, [], script=[_internal(), _internal(), _answer([_node("T1")])])
-    data = core.gql(pixai, {"last": 5000, "userId": "u-test", "before": "c7"})
+    data = history_mod.gql(pixai, {"last": 5000, "userId": "u-test", "before": "c7"})
     assert h.variables == [{"last": 5000, "userId": "u-test", "before": "c7"},
                            {"last": 5000, "userId": "u-test", "before": "c7"},
                            {"last": 2000, "userId": "u-test", "before": "c7"}]
     assert waits == [5.0]
-    assert core.find_connection(data)["edges"][0]["node"]["id"] == "T1"
+    assert history_mod.find_connection(data)["edges"][0]["node"]["id"] == "T1"
 
 
 def test_the_2000_row_ask_failing_too_is_a_refusal(pixai, waits):
     _history(pixai, [], script=[_internal(), _internal(), _internal()])
     with pytest.raises(core.HistoryPageRefused) as ei:
-        core.gql(pixai, {"last": 5000, "userId": "u-test"})
-    assert str(ei.value) == core.HISTORY_REFUSED
+        history_mod.gql(pixai, {"last": 5000, "userId": "u-test"})
+    assert str(ei.value) == history_mod.HISTORY_REFUSED
     assert len(pixai.calls) == 3
 
 
 def test_a_second_failure_at_500_is_a_refusal_in_plain_words(pixai, waits):
     h = _history(pixai, [], script=[_internal(), _internal()])
     with pytest.raises(core.HistoryPageRefused) as ei:
-        core.gql(pixai, {"last": 500, "userId": "u-test"})
+        history_mod.gql(pixai, {"last": 500, "userId": "u-test"})
     assert str(ei.value) == ("PixAI refused the history feed; nothing was changed -- try "
                              "again in a minute.")
     assert isinstance(ei.value, core.PixAIError)                # every catch site holds
@@ -232,16 +233,16 @@ def test_another_refusal_is_refused_at_once_with_no_retry(pixai, waits):
     cause = _refusal("Cannot query field \"taskSummaries\" on type \"User\".")
     h = _history(pixai, [], script=[cause])
     with pytest.raises(core.HistoryPageRefused) as ei:
-        core.gql(pixai, {"last": 5000, "userId": "u-test"})
+        history_mod.gql(pixai, {"last": 5000, "userId": "u-test"})
     assert ei.value.__cause__ is cause
-    assert str(ei.value) == core.HISTORY_REFUSED
+    assert str(ei.value) == history_mod.HISTORY_REFUSED
     assert len(h.variables) == 1 and waits == []
 
 
 def test_a_different_refusal_after_the_wait_is_refused_too(pixai, waits):
     h = _history(pixai, [], script=[_internal(), _refusal("Cannot query field \"x\".")])
     with pytest.raises(core.HistoryPageRefused):
-        core.gql(pixai, {"last": 5000, "userId": "u-test"})
+        history_mod.gql(pixai, {"last": 5000, "userId": "u-test"})
     assert len(h.variables) == 2 and waits == [5.0]
 
 
@@ -251,7 +252,7 @@ def test_a_different_refusal_after_the_wait_is_refused_too(pixai, waits):
 def test_a_network_error_or_a_5xx_raises_untouched(pixai, waits, error):
     pixai.fail(FEED, error)
     with pytest.raises(type(error)) as ei:
-        core.gql(pixai, {"last": 250, "userId": "u-test"})
+        history_mod.gql(pixai, {"last": 250, "userId": "u-test"})
     assert ei.value is error
     assert len(pixai.calls) == 1 and waits == []
 
@@ -260,7 +261,7 @@ def test_a_401_raises_untouched(pixai, waits):
     error = core.PixAIError("401 Unauthorized -- API key missing/expired.")
     pixai.fail(FEED, error)
     with pytest.raises(core.PixAIError) as ei:
-        core.gql(pixai, {"last": 250, "userId": "u-test"})
+        history_mod.gql(pixai, {"last": 250, "userId": "u-test"})
     assert ei.value is error and not isinstance(ei.value, core.HistoryPageRefused)
     assert waits == []
 
@@ -285,8 +286,8 @@ def test_an_answer_that_is_not_graphql_is_a_refusal_not_an_empty_history(status,
 
     s = Session()
     with pytest.raises(core.HistoryPageRefused) as ei:
-        core.gql(pixai_client_mod.PixAIClient(s), {"last": 250, "userId": "u1"})
-    assert str(ei.value) == core.HISTORY_REFUSED
+        history_mod.gql(pixai_client_mod.PixAIClient(s), {"last": 250, "userId": "u1"})
+    assert str(ei.value) == history_mod.HISTORY_REFUSED
     assert "no history page" in str(ei.value.__cause__)
     assert s.posts == 1 and waits == []
 
@@ -294,14 +295,14 @@ def test_an_answer_that_is_not_graphql_is_a_refusal_not_an_empty_history(status,
 def test_a_user_with_no_generations_is_not_refused(pixai):
     """The empty history is still a page: a connection with no edges."""
     _history(pixai, [])
-    data = core.gql(pixai, core.page_variables(250, "u-test"))
-    assert core.find_connection(data)["edges"] == []
-    assert core.find_connection(data)["pageInfo"]["hasPreviousPage"] is False
+    data = history_mod.gql(pixai, core.page_variables(250, "u-test"))
+    assert history_mod.find_connection(data)["edges"] == []
+    assert history_mod.find_connection(data)["pageInfo"]["hasPreviousPage"] is False
 
 
 def test_the_sentence_never_speaks_of_a_hash():
     for stale in ("hash", "Recapture", "recapture", "config.json", "GraphQL"):
-        assert stale not in core.HISTORY_REFUSED
+        assert stale not in history_mod.HISTORY_REFUSED
 
 
 # =====================================================================================
@@ -336,7 +337,7 @@ def test_the_count_reads_through_the_document(pixai, tmp_path, capsys):
     assert "Total tasks (generations) : 3" in out and "Fetched in 2 request(s)." in out
     assert [c.verb for c in pixai.calls] == ["query", "query"]
     assert [v.get("before") for v in h.variables] == [None, "c1"]
-    assert all(v["last"] == core.COUNT_PAGE_SIZE == 2000 for v in h.variables)
+    assert all(v["last"] == history_mod.COUNT_PAGE_SIZE == 2000 for v in h.variables)
 
 
 def test_the_count_walks_on_from_a_smaller_page_s_own_cursor(pixai, tmp_path, capsys, waits):
@@ -497,7 +498,7 @@ def test_a_refusal_leaves_the_plain_sentence(pixai, tmp_path, monkeypatch, flag)
     monkeypatch.setattr(sys, "argv", ["moonglade", flag, "--out", str(tmp_path)])
     with pytest.raises(SystemExit) as ex:
         core.main()
-    assert ex.value.code == core.HISTORY_REFUSED
+    assert ex.value.code == history_mod.HISTORY_REFUSED
 
 
 def test_a_count_that_meets_an_answer_with_no_page_exits_with_the_sentence(
@@ -509,7 +510,7 @@ def test_a_count_that_meets_an_answer_with_no_page_exits_with_the_sentence(
     monkeypatch.setattr(sys, "argv", ["moonglade", "--count", "--out", str(tmp_path)])
     with pytest.raises(SystemExit) as ex:
         core.main()
-    assert ex.value.code == core.HISTORY_REFUSED
+    assert ex.value.code == history_mod.HISTORY_REFUSED
     out = capsys.readouterr().out
     assert "page 1: 1 tasks so far" in out
     assert "LIBRARY TOTALS" not in out and "Total tasks" not in out
@@ -546,6 +547,7 @@ def test_the_retired_saved_request_leaves_nothing_behind():
     from moonglade import routes_branding as routes_branding_mod    # and the branding routes'
     from moonglade import routes_import as routes_import_mod        # and the import routes'
     for module in (core, g, pixai_client_mod,      # the transport moved out of core
+                   history_mod,                    # and the feed's reader (3.22 phase 4)
                    routes_generate_mod, routes_loom_mod, web_loom_store_mod, routes_gate_mod,
                    web_threads_mod, routes_panel_mod, routes_delete_mod, routes_recipes_mod,
                    routes_library_mod, routes_account_mod, routes_community_mod,

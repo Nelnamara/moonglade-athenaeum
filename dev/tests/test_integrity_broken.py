@@ -23,6 +23,7 @@ from moonglade.gallery import create_app
 from moonglade.catalog import save_catalog
 from tests.conftest import login_test_client, with_csrf
 from tests.test_integrity import _REPORTS_WRITTEN, _jpeg, _png, _row, _tree_hash
+from moonglade import history as history_mod
 
 # What a mark writes, besides the check's own reports: its file, beside them.
 _WRITTEN = _REPORTS_WRITTEN + ("_moonglade/decisions", "_moonglade/decisions/integrity_marks.json")
@@ -274,7 +275,7 @@ def test_a_reconcile_stamps_when_it_ran(tmp_path, monkeypatch, pixai):
     save_catalog(tmp_path / "catalog.db", [
         _row(media_id="a", task_id="GONE", filename="a.png", created_at="2024-01-01T00:00:00")])
     conn = {"edges": [{"node": {"id": "LIVE"}}], "pageInfo": {"hasPreviousPage": False}}
-    monkeypatch.setattr(core, "gql", lambda *a, **k: conn)
+    monkeypatch.setattr(history_mod, "gql", lambda *a, **k: conn)
     core.run_reconcile_deleted(SimpleNamespace(out=str(tmp_path), token=None, page_size=250))
     doc = json.loads(paths.records_path(tmp_path, core.RECONCILE_STAMP).read_text(encoding="utf-8"))
     assert doc["reconciled_at"].endswith("Z") and doc["flagged"] == 1

@@ -16,6 +16,7 @@ from moonglade import catalog as _catalog
 from moonglade import dupes as _dupes
 from moonglade import organize as _organize
 from moonglade import scan as _scan
+from moonglade import history as _history
 
 
 # ---------------------------------------------------------------------------
@@ -317,7 +318,7 @@ def _validate_duplicate_pair(out_dir, db_path, match_type, keep, remove):
 
     if match_type == "identical_file":
         for mid, path in checked:
-            if not core._same_bytes(keep_path, path):
+            if not _history._same_bytes(keep_path, path):
                 return False, "keeper and {} are no longer byte-identical".format(mid)
         return True, ""
 
