@@ -55,8 +55,8 @@ In the recommended order.
 - **PixAI's new site areas, a look.** Library (collections, saves, batch delete), comics, creator
   series, the OC maker and the agent: a read-only look at each and a short list of what Moonglade
   could do with it, for the owner's pick. Nothing is built from it without that pick.
-- **App security review.** Runs now that the split has shipped (3.21.0), on the new layout (owner, 2026-11-12); its fixes go
-  in a 3.21.x release. A read-only audit that ends in a ranked list: the threat model, login and
+- **App security review.** Runs on the finished module layout (owner, 2026-11-12); its fixes go
+  in the next release. A read-only audit that ends in a ranked list: the threat model, login and
   the no-accounts mode, session cookie handling, the localhost and LAN trust model, request
   integrity (the CSRF debt the 3.16.0 coverage guard lists, headers, CSP), file and input handling,
   credentials at rest. Owner's go of 2026-10-02 ("after Wave 1"); Wave 1 shipped in 3.16.0. Already
@@ -64,7 +64,7 @@ In the recommended order.
   remember-this-device and the QR change below. Also takes (2026-11-18): whether the opt-in
   `--https` switch (self-signed, off by default) should become the way Moonglade is used over the
   home network, now that the Mirror sign-in crosses it, and PixAI's new sign-in and session
-  options as context. Runs beside the 3.22 design step.
+  options as context.
 
 - **Convert the rest of the tests that read code as text.** *(test review, 2026-10-05)* Many Loom
   and gallery tests look for words in a component's source instead of running it, so a small change
@@ -255,9 +255,8 @@ A visible change gets a design or workshop step first.
 - **Loom preview / placement follow-ups.** A handful of small Loom tweaks on a surface the owner
   already likes, deliberately unscoped: the owner walks it. The items on record are the appendix
   agenda of the Loom workshop prep.
-- **Split phases 4-5.** `create_app`'s route families, then the spend path (the generation road,
-  cards and price, models, deleting one image), after phases 0-3; each its own design and adversarial
-  review. Then revisit where `gallery/`, `loom/`, `wiki/` and `static/` live.
+- **Where the front-end folders live.** Revisit where `gallery/`, `loom/`, `wiki/` and `static/`
+  sit, now that the Python split is finished.
 - **Does a tablet tier exist?** *(tabled until the owner's iPad walk of the
   iPad fixes)* Today one hook
   (`MOBILE_QUERY` 520px plus a coarse-pointer fallback) routes every tablet to the desktop build.

@@ -6,7 +6,12 @@ The Python modules below sit around one SQLite catalog, with the Loom's JS surfa
 moonglade/                the app's code (since 3.20), one package:
   backup.py               CLI engine: download, organize, generate, sync, delete, reconcile
                           (run it as `python -m moonglade`)
-  gallery.py              Flask web gallery + ALL SQLite catalog helpers (the shared base)
+  gallery.py              the web gallery server: builds the Flask app and runs it
+  routes_*.py, web_*.py   the gallery's routes and background threads, one module per family
+                          (the Loom, Generate, Library, the Control Panel, accounts, and so on)
+  catalog.py              the SQLite catalog: its schema, migration, reads and writes
+                          (the shared base; the search, curation and thumbnail code sits in modules
+                          beside it)
                           (the launcher, Moonglade Launcher, runs it as `python -m moonglade.gallery`)
   similar.py              "more like this" sidecar: CLIP embeddings in Pixeltable (optional dep)
   mcp_server.py           local stdio MCP server: curation tools over the catalog, a duplicate
@@ -52,7 +57,7 @@ names an old file is found by the app, which offers to fix it (**Fix it** or **F
 notice), and a shortcut to the old launcher is re-pointed by itself the first time the new
 launcher starts.
 
-The CLI engine and the MCP server both import `moonglade/gallery.py` for catalog access — so
+The CLI engine and the MCP server both import `moonglade/catalog.py` for catalog access — so
 catalog logic lives in exactly one place. The two surfaces are the CLI and the web gallery:
 the Loom, Control Panel, achievements, collections, and contact sheet are browser-only.
 `--watch` and `--claims` have web equivalents too, not CLI-only surfaces: the gallery runs
@@ -97,7 +102,7 @@ Task summaries carry `mediaId` / `batchMediaIds`, not URLs. Full-res comes from
 
 ## The catalog (`catalog.db`)
 SQLite, one row per media, keyed by `media_id`. All I/O goes through helpers in
-`moonglade/gallery.py`. Schema migrations live in **three places**: `CATALOG_FIELDS`,
+`moonglade/catalog.py`. Schema migrations live in **three places**: `CATALOG_FIELDS`,
 the `_CREATE_TABLE` DDL, and `_MIGRATIONS`. `migrate()` runs them once per process, on the first `catalog()`
 open for a path and memoized after, so existing DBs still auto-upgrade on first touch. Columns span identity/timing, full meta (prompt/seed/steps/sampler/
 cfg/model/loras/negative/clip-skip), published-artwork data, video fields, `source`
