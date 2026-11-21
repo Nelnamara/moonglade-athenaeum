@@ -10,10 +10,10 @@ credit-log runners. Moved verbatim out of moonglade/backup.py in the 3.22 split 
 
 The names it reads from the engine (the transport -- _make_session, gql_adhoc, gql_mutate and
 the /v2 REST verbs -- _check_read_only, the error classes, MEDIA_BASE, _TRUSTSTORE_ACTIVE,
-upload_media, _format_size and the catalog's load_catalog, which tests patch there) are
+upload_media and _format_size, which tests patch there) are
 imported from moonglade.backup inside each function that uses them, at call time, so a test's
 patch of backup's binding still reaches them and importing this module never imports the
-engine.
+engine. The catalog's load_catalog comes from moonglade.catalog.
 """
 import datetime
 import json
@@ -845,7 +845,8 @@ def run_suggest_prompt(args):
     already hides the "Suggest prompt" button for a video row (`row.is_video != '1'`
     in moonglade/gallery.py). Mirror that same gate here (B18 residual) so the CLI refuses
     early with a clear message instead of surfacing that raw 500."""
-    from moonglade.backup import load_catalog, _make_session, PixAIError, upload_media
+    from moonglade.backup import _make_session, PixAIError, upload_media
+    from moonglade.catalog import load_catalog
     src = (getattr(args, "suggest_prompt", "") or "").strip()
     if not src:
         raise PixAIError("--suggest-prompt needs a catalog media_id or a local image file.")

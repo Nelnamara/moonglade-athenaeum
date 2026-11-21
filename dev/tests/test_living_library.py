@@ -1235,8 +1235,8 @@ def test_the_full_sync_cannot_revert_a_write_that_lands_while_it_is_running(
         saved.append(len(rows))
         return real_save(path, rows, *a, **k)
 
-    monkeypatch.setattr(core, "load_catalog", _load_then_write)
-    monkeypatch.setattr(core, "save_catalog", _record_save)
+    monkeypatch.setattr(catalog_mod, "load_catalog", _load_then_write)
+    monkeypatch.setattr(catalog_mod, "save_catalog", _record_save)
 
     res = library_runs_mod.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
 

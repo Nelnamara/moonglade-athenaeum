@@ -9,7 +9,7 @@ the metadata coverage summary). Moved verbatim out of moonglade/backup.py in the
 
 The names it reads from the engine (the error classes, READ_ONLY and _read_only_now,
 _make_session, _ensure_db, _atomic_replace, _parallel_map, the progress helpers, vlog, the
-artwork readers and the catalog's load/save calls, which tests patch there) are imported from
+artwork readers; the catalog's load/save calls come from moonglade.catalog) are imported from
 moonglade.backup inside each function that uses them, at call time, so a test's patch of
 backup's binding still reaches them and importing this module never imports the engine.
 """
@@ -287,8 +287,8 @@ def run_sync_videos(args):
     fileUrl. So: find i2v tasks (i2vProModel set in the summary), fetch each task,
     resolve + download the mp4 into videos/, and catalog it as a video row
     (is_video=1) with the still frame as its poster."""
-    from moonglade.backup import (_ensure_db, load_catalog, _make_session,
-                                  save_catalog_over_snapshot)
+    from moonglade.backup import _ensure_db, _make_session
+    from moonglade.catalog import load_catalog, save_catalog_over_snapshot
     from moonglade.sync import _parallel_map
     out = Path(args.out)
     db_path = _ensure_db(out)
@@ -507,7 +507,8 @@ def run_import_local(args):
     Idempotent: files already cataloged (by relative path) are skipped, so it's
     safe to re-run. Images get a gallery thumbnail; videos play via the catalog
     filename (no still to thumbnail, so they show a placeholder + the video badge)."""
-    from moonglade.backup import load_catalog, PixAIError, save_catalog_over_snapshot, vlog
+    from moonglade.backup import PixAIError, vlog
+    from moonglade.catalog import load_catalog, save_catalog_over_snapshot
     import shutil
     from moonglade.thumbs import make_thumbnail
     out = Path(args.out)
@@ -749,8 +750,8 @@ def run_fix_models(args):
     """Re-resolve human-readable model names for catalog rows whose model_name is
     blank or still a numeric version-id (e.g. saved while the model lookup was failing).
     One API call per distinct model id (cached)."""
-    from moonglade.backup import (_ensure_db, load_catalog, _make_session,
-                                  save_catalog_over_snapshot)
+    from moonglade.backup import _ensure_db, _make_session
+    from moonglade.catalog import load_catalog, save_catalog_over_snapshot
     from moonglade.sync import _parallel_map
     out = Path(args.out)
     db_path = _ensure_db(out)
@@ -895,8 +896,8 @@ def run_reconcile_deleted(args):
     the gallery can surface them for a local prune. Closes the cloud->local delete
     drift. Advisory: re-running refreshes the flags. Skips imports (no task) and
     very-recent rows (a fresh generation may not have propagated to the feed yet)."""
-    from moonglade.backup import (_ensure_db, load_catalog, _make_session, PixAIError,
-                                  save_catalog, vlog)
+    from moonglade.backup import _ensure_db, _make_session, PixAIError, vlog
+    from moonglade.catalog import load_catalog, save_catalog
     out = Path(args.out)
     db_path = _ensure_db(out)
     session = _make_session(getattr(args, "token", None))
@@ -1098,7 +1099,8 @@ def run_search(args):
     """--search / --export-csv: the gallery's own search, from the command line. Reads
     catalog.db only -- no network, nothing written except the CSV a caller names. The query
     goes through the SAME parser the search box uses (moonglade.gallery.query_catalog)."""
-    from moonglade.backup import _ensure_db, load_catalog
+    from moonglade.backup import _ensure_db
+    from moonglade.catalog import load_catalog
     try:     # a prompt with characters the console cannot show must not stop the listing
         sys.stdout.reconfigure(errors="replace")
     except (AttributeError, ValueError):
@@ -1141,7 +1143,8 @@ def run_search(args):
 
 def run_catalog_stats(args):
     """Summarize the existing catalog (no network needed)."""
-    from moonglade.backup import _ensure_db, _format_size, load_catalog
+    from moonglade.backup import _ensure_db, _format_size
+    from moonglade.catalog import load_catalog
     out = Path(args.out)
     db_path = _ensure_db(out)
     _prog = getattr(args, "progress", None)

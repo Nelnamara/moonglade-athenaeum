@@ -7,10 +7,10 @@ capsule, the walk-end marker, `run_download` and --rebuild-thumbs. Moved verbati
 moonglade/backup.py in the 3.22 split (phase 4).
 
 The names it reads from the engine (PixAIError, _make_session, _ensure_db, the progress and
-count helpers, PANEL_WARN_PREFIX, _TRUSTSTORE_ACTIVE, vlog and the catalog's load/save calls,
-which tests patch there) are imported from moonglade.backup inside each function that uses
-them, at call time, so a test's patch of backup's binding still reaches them and importing
-this module never imports the engine.
+count helpers, PANEL_WARN_PREFIX, _TRUSTSTORE_ACTIVE and vlog, which tests patch there) are
+imported from moonglade.backup inside each function that uses them, at call time, so a test's
+patch of backup's binding still reaches them and importing this module never imports the
+engine. The catalog's load and save calls come from moonglade.catalog.
 """
 import json
 import os
@@ -178,7 +178,8 @@ def _parallel_map(items, work_fn, workers=1, progress=None, delay=0.0, on_error=
 def run_backfill_meta(args):
     """Fill in missing url/width/height for catalog rows via resolve_media().
     Safe to re-run -- skips rows that already have all three fields."""
-    from moonglade.backup import _ensure_db, load_catalog, _make_session, save_catalog
+    from moonglade.backup import _ensure_db, _make_session
+    from moonglade.catalog import load_catalog, save_catalog
     out = Path(args.out)
     db_path = _ensure_db(out)
     session = _make_session(getattr(args, "token", None))
@@ -237,8 +238,8 @@ def run_backfill_full_meta(args):
                       the ONLY way a pre-#18 row that already has prompt + model ever gains
                       them, since it otherwise passes every _needs() gate and is skipped.
     Safe to re-run -- each pass skips rows already carrying what it targets."""
-    from moonglade.backup import (_ensure_db, load_catalog, _make_session,
-                                  save_catalog_over_snapshot)
+    from moonglade.backup import _ensure_db, _make_session
+    from moonglade.catalog import load_catalog, save_catalog_over_snapshot
     out = Path(args.out)
     db_path = _ensure_db(out)
     session = _make_session(getattr(args, "token", None))
@@ -460,7 +461,8 @@ def run_backfill_lineage(args):
     Safe to re-run -- skips rows that already have EITHER column set (an original txt2img
     legitimately has both blank forever, so "blank" alone can't be the skip signal; a task_id
     already visited is tracked instead so an original is never re-fetched every run)."""
-    from moonglade.backup import _ensure_db, load_catalog, _make_session, save_catalog
+    from moonglade.backup import _ensure_db, _make_session
+    from moonglade.catalog import load_catalog, save_catalog
     out = Path(args.out)
     db_path = _ensure_db(out)
     session = _make_session(getattr(args, "token", None))
@@ -678,9 +680,10 @@ def run_download(args, progress=None):
     When stdout is a real terminal and no progress callback is provided, a
     \r-overwriting ASCII progress bar is printed instead.
     """
-    from moonglade.backup import (_ensure_db, _format_size, load_catalog, _make_session,
-                                  PANEL_WARN_PREFIX, PixAIError, _progress_line, _quick_count,
-                                  save_catalog_over_snapshot, _TRUSTSTORE_ACTIVE, vlog)
+    from moonglade.backup import (_ensure_db, _format_size, _make_session, PANEL_WARN_PREFIX,
+                                  PixAIError, _progress_line, _quick_count, _TRUSTSTORE_ACTIVE,
+                                  vlog)
+    from moonglade.catalog import load_catalog, save_catalog_over_snapshot
     out = Path(args.out)
     img_dir = out / "images"
     raw_path = _paths.records_path(out, "raw_tasks.jsonl")

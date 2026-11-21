@@ -163,7 +163,7 @@ def register(app, ctx):
         deliberately: the roster/hidden-feat gate below is written once and cannot be
         half-applied to one extension, which is exactly how a second route would have
         leaked a sealed feat's art."""
-        from moonglade.gallery import Path
+        from pathlib import Path
         from flask import send_from_directory, abort
         if not aid or "/" in aid or "\\" in aid or ".." in aid:
             abort(404)

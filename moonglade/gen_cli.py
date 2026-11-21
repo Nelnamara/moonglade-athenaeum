@@ -123,8 +123,8 @@ def run_generate(args):
     A task recovered by --task-id that turns out to have VIDEO outputs is collected as
     video, through the same _download_video_task the video commands use -- never dragged
     through the image path. See the comment at the outputs split below for why."""
-    from moonglade.backup import (_check_read_only, init_db, _make_session,
-                                  save_catalog_over_snapshot)
+    from moonglade.backup import _check_read_only, _make_session
+    from moonglade.catalog import init_db, save_catalog_over_snapshot
     from moonglade.library_runs import _resolved_loras, _resolved_model_name
     from moonglade.full_meta import (build_catalog_row, _created_at_utc, extract_full_meta,
                                      _fill_preset_defaults, known_catalog_rows, _paid_credit_str,
@@ -460,7 +460,7 @@ def _download_video_task(session, result, task_id, out, args, params):
     """Download + catalog the video output(s) of a completed task. Shared by i2v (i2vPro)
     and reference-video (referenceVideo) -- reads outputs.videos + the submitted block
     generically. Returns the list of saved file paths."""
-    from moonglade.backup import save_catalog_over_snapshot
+    from moonglade.catalog import save_catalog_over_snapshot
     from moonglade.full_meta import (build_catalog_row, _created_at_utc, extract_full_meta,
                                      known_catalog_rows, media_file_gql, _paid_credit_str,
                                      video_outputs)
@@ -598,7 +598,7 @@ def _fix_source_label(task, out):
     browsable, and it lands the two files next to each other in a sorted listing.
 
     Fails soft: an unreadable catalog costs the name its readable half, never the download."""
-    from moonglade.backup import load_catalog
+    from moonglade.catalog import load_catalog
     params = (task or {}).get("parameters") or {}
     chat = params.get("chat") if isinstance(params.get("chat"), dict) else {}
     src = str(chat.get("mediaId") or params.get("mediaId") or "")
@@ -617,7 +617,7 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
     """Download + catalog the image output(s) of a completed task. Saves the individual batch
     images (not the composite grid) via _task_image_media, storing each image's own seed.
     resolve_media -> download -> catalog as source='api'. Returns the saved file paths."""
-    from moonglade.backup import save_catalog_over_snapshot
+    from moonglade.catalog import save_catalog_over_snapshot
     from moonglade.library_runs import _resolved_loras, _resolved_model_name
     from moonglade.full_meta import (build_catalog_row, _created_at_utc, extract_full_meta,
                                      _fill_preset_defaults, known_catalog_rows, _paid_credit_str)
@@ -738,7 +738,8 @@ def run_generate_video(args):
     is_video='1'). GUARDED: without --confirm it only PREVIEWS (spends nothing). Video
     is expensive (~27.5k credits for a 5s V4.0 clip), so the preview shouts the cost.
     Reuses the same submit/poll as images and the same video download as --sync-videos."""
-    from moonglade.backup import _check_read_only, init_db, _make_session, PixAIError
+    from moonglade.backup import _check_read_only, _make_session, PixAIError
+    from moonglade.catalog import init_db
     out = Path(args.out)
     existing_task = (getattr(args, "task_id", "") or "").strip()
     if not existing_task and not (getattr(args, "image", "") or "").strip():
@@ -852,7 +853,8 @@ def run_reference_video(args):
     media_ids OR local files (auto-uploaded on --confirm); reference them in --prompt as
     @image1/@video1/@audio1. Preview-only unless --confirm. Downloads + catalogs the mp4.
     --task-id recovers an existing reference-video task for free."""
-    from moonglade.backup import _check_read_only, init_db, _make_session, PixAIError
+    from moonglade.backup import _check_read_only, _make_session, PixAIError
+    from moonglade.catalog import init_db
     out = Path(args.out)
     existing_task = (getattr(args, "task_id", "") or "").strip()
     imgs = [s for s in (getattr(args, "ref_image", None) or []) if s and str(s).strip()]
@@ -1012,8 +1014,8 @@ def run_edit_image(args):
     reference). Poll -> download the result image(s) -> catalog as source='api'.
     GUARDED: without --confirm it only PREVIEWS (uploads nothing, spends nothing).
     --task-id recovers an already-created edit for free. Mirrors run_generate."""
-    from moonglade.backup import (_check_read_only, init_db, _make_session, PixAIError,
-                                  save_catalog_over_snapshot, upload_media)
+    from moonglade.backup import _check_read_only, _make_session, PixAIError, upload_media
+    from moonglade.catalog import init_db, save_catalog_over_snapshot
     from moonglade.library_runs import _edit_model_label
     from moonglade.full_meta import (build_catalog_row, _created_at_utc, extract_full_meta,
                                      _fill_preset_defaults, known_catalog_rows, _paid_credit_str)

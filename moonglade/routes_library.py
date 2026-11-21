@@ -78,7 +78,7 @@ def register(app, ctx):
         /api/rate: it only rewrites a regenerable local cache file, touches nothing on
         PixAI and no config. Videos only; an image's thumb is a straight resize and
         never wrong in this way."""
-        from moonglade.gallery import Path
+        from pathlib import Path
         from moonglade.thumbs import make_video_thumbnail
         from moonglade.catalog import get_row
         if not media_id or "/" in media_id or "\\" in media_id or ".." in media_id:
@@ -93,8 +93,7 @@ def register(app, ctx):
         # set is images only).
         src = out_dir / str(row.get("filename") or "")
         if not (row.get("filename") and src.is_file()):
-            from moonglade import backup as core   # lazy, like every other gallery use of it
-            files = _scan.find_files_for_media_id(out_dir, media_id, exts=core._VIDEO_EXTS)
+            files = _scan.find_files_for_media_id(out_dir, media_id, exts=_scan._VIDEO_EXTS)
             if not files:
                 return json.dumps({"ok": False, "error": "video file not found"}), 404, {"Content-Type": "application/json"}
             src = Path(files[0])
@@ -360,7 +359,7 @@ def register(app, ctx):
     @tier(LOGIN)
     def thumb(media_id):
         # ?s= is an allowlist (_THUMB_TIERS: 32 and 256); anything else is the 768 thumb.
-        from moonglade.gallery import Path
+        from pathlib import Path
         from moonglade.catalog_verbs import find_image_file
         from moonglade.catalog import get_row
         from moonglade.web_policy import harden_file_response
@@ -455,7 +454,7 @@ def register(app, ctx):
         # originals on disk are NEVER touched, and a converted file never re-enters the
         # catalog as a new row (the decided shape; the archive stays exactly as PixAI
         # delivered it). Videos are always passed through as-is (Pillow can't transform mp4).
-        from moonglade.gallery import Path
+        from pathlib import Path
         from moonglade.catalog_verbs import find_image_file
         from moonglade.curation import query_catalog
         from moonglade.catalog import get_row

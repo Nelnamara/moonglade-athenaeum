@@ -467,7 +467,10 @@ def register(app, ctx):
         400 for a malformed mid or time; 404 when the clip is not on this machine or no frame
         could be produced (no ffmpeg here, a broken file) -- the ribbon then shows its
         placeholder tint. Login required; local only."""
-        from moonglade.gallery import Image
+        try:
+            from PIL import Image
+        except ImportError:
+            Image = None
         from moonglade.loom_files import (LOOM_FRAME_FPS, LOOM_FRAME_MAX_SECONDS, LOOM_FRAME_WIDTH,
                                           LOOM_MEDIA_ID_RE)
         from moonglade.web_policy import harden_file_response

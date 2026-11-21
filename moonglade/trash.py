@@ -171,11 +171,10 @@ def _find_quarantined_file(out_dir, media_id):
     media_id as the real file (its stem IS the media_id), so this explicitly
     restricts the extension to real media -- a naive media_id_of() match alone would
     pick either file depending on directory order."""
-    from moonglade import backup as core
     qdir = Path(out_dir) / _scan.DELETED_DIRNAME
     if not qdir.exists():
         return None
-    media_exts = _scan._IMAGE_EXTS | core._VIDEO_EXTS
+    media_exts = _scan._IMAGE_EXTS | _scan._VIDEO_EXTS
     for p in qdir.glob("*"):
         if p.is_file() and p.suffix.lower() in media_exts and _scan.media_id_of(p) == media_id:
             return p
@@ -223,12 +222,11 @@ def list_quarantined(out_dir, page=1, page_size=60):
 def _list_quarantined(out_dir, page=1, page_size=60):
     """list_quarantined's body, plus a fourth value: how many media files in the whole trash
     are the only copy (their sidecar snapshot passes is_archive_only). See list_quarantined."""
-    from moonglade import backup as core
     qdir = Path(out_dir) / _scan.DELETED_DIRNAME
     if not qdir.exists():
         return [], 0, 0, 0
 
-    media_exts = _scan._IMAGE_EXTS | core._VIDEO_EXTS
+    media_exts = _scan._IMAGE_EXTS | _scan._VIDEO_EXTS
     entries = []
     meta_by_id = {}
     with os.scandir(qdir) as it:
@@ -268,7 +266,7 @@ def _list_quarantined(out_dir, page=1, page_size=60):
     items = []
     for name, size, mtime in page_entries:
         media_id = _scan.media_id_of(name)
-        is_video = Path(name).suffix.lower() in core._VIDEO_EXTS
+        is_video = Path(name).suffix.lower() in _scan._VIDEO_EXTS
         meta = meta_by_id.get(media_id)
         deleted_at = (meta or {}).get("_deleted_at") or mtime
         prompt = ((meta or {}).get("prompt_full") or (meta or {}).get("prompt_preview") or "")
@@ -348,7 +346,6 @@ def restore_quarantined_media(out_dir, thumb_dir, db_path, media_id):
     orphans, not "needed to make the file visible again".
 
     Returns {"ok": True, "media_id":, "filename":} or {"ok": False, "error":}."""
-    from moonglade import backup as core
     out_dir = Path(out_dir)
     src = _find_quarantined_file(out_dir, media_id)
     if not src:
@@ -379,7 +376,7 @@ def restore_quarantined_media(out_dir, thumb_dir, db_path, media_id):
     # blank and the gallery served it back as a broken image instead of a player. The
     # extension is the same signal list_quarantined() reads for exactly this reason.
     if not row["is_video"]:
-        row["is_video"] = "1" if dest.suffix.lower() in core._VIDEO_EXTS else ""
+        row["is_video"] = "1" if dest.suffix.lower() in _scan._VIDEO_EXTS else ""
     _catalog.save_catalog(db_path, [row])
 
     meta_path = _trash_meta_path(out_dir, media_id)
@@ -429,8 +426,7 @@ def empty_trash(out_dir, thumb_dir):
     qdir = Path(out_dir) / _scan.DELETED_DIRNAME
     if not qdir.exists():
         return 0
-    from moonglade import backup as core
-    media_exts = _scan._IMAGE_EXTS | core._VIDEO_EXTS
+    media_exts = _scan._IMAGE_EXTS | _scan._VIDEO_EXTS
     removed = 0
     for p in list(qdir.glob("*")):
         if not p.is_file():

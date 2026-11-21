@@ -7,10 +7,9 @@ markers, the already-downloaded checks), content hashing (`_file_sha`, `_same_by
 `_same_pixels`) and the cataloged-ids readers. Moved verbatim out of moonglade/backup.py in the
 3.22 split (phase 4).
 
-The names it reads from the engine (gql_adhoc, the error classes, vlog, video_outputs and the
-catalog's load_catalog/save_catalog, which tests patch there) are imported from moonglade.backup
-inside each function that uses them, at call time, so a test's patch of backup's binding still
-reaches them and importing this module never imports the engine.
+The names it reads from the engine (gql_adhoc, the error classes, vlog and video_outputs) are imported from moonglade.backup inside each function that uses them,
+at call time, so a test's patch of backup's binding still reaches them and importing this module
+never imports the engine. The catalog's load_catalog and save_catalog come from moonglade.catalog.
 """
 import re
 import time
@@ -232,7 +231,8 @@ def migrate_local_filenames(out, db_path, thumb_dir):
     Deliberately never deletes: a destination that already exists holds the same
     content (the name contains the content hash), so the row is left exactly as it
     is for a human to look at rather than resolved by removing one of them."""
-    from moonglade.backup import load_catalog, save_catalog, vlog
+    from moonglade.backup import vlog
+    from moonglade.catalog import load_catalog, save_catalog
     from moonglade.catalog import delete_from_catalog
     out = Path(out)
     thumb_dir = Path(thumb_dir)

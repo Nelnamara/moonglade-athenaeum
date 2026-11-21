@@ -457,7 +457,8 @@ def register(app, ctx):
         that is the program's own, or holds a Moonglade program, is refused here
         (moonglade.migrate.library_refusal), since every start would refuse it too.
         """
-        from moonglade.gallery import DEFAULT_LIBRARY_DIR, Path, _supervised
+        from moonglade.gallery import DEFAULT_LIBRARY_DIR, _supervised
+        from pathlib import Path
         if request.method == "GET":
             local = _is_local_request()
             # BOTH path fields are withheld from a non-local caller, not just the first.

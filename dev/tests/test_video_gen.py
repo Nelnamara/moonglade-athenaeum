@@ -15,6 +15,7 @@ from moonglade import media_tools as media_tools_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import media_fetch as media_fetch_mod
 from moonglade import full_meta as full_meta_mod
+from moonglade import catalog as catalog_mod
 
 
 def test_build_video_parameters_matches_real_submit():
@@ -665,7 +666,7 @@ def test_download_video_task_catalogs_video_even_if_poster_fails(monkeypatch, tm
     monkeypatch.setattr(media_tools_mod, "video_faststart", lambda p: None)
 
     saved = []
-    monkeypatch.setattr(core, "save_catalog_over_snapshot",
+    monkeypatch.setattr(catalog_mod, "save_catalog_over_snapshot",
                         lambda db, rows, snapshot: saved.extend(rows))
 
     gen_cli_mod._download_video_task(object(), {}, "T7", tmp_path, SimpleNamespace(name_length=60), {})

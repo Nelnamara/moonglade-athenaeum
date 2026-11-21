@@ -303,7 +303,6 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
     jobs (--sync, --rebuild-thumbs, after an update). The gallery start passes False so a
     missing-thumbnail build is all it waits for, and schedules recheck_see_through_thumbnails()
     to run behind the started server instead."""
-    from moonglade import backup as core
     if Image is None:
         print("Warning: Pillow not installed -- thumbnails will not be generated.")
         return
@@ -347,7 +346,7 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
                 # exts=_VIDEO_EXTS, not the matcher's image-only default: this fallback
                 # exists for a video whose stored filename is stale or blank, and an
                 # image-only match can never find one, so the row stayed thumbless.
-                m = _scan.find_files_for_media_id(Path(out_dir), mid, exts=core._VIDEO_EXTS)
+                m = _scan.find_files_for_media_id(Path(out_dir), mid, exts=_scan._VIDEO_EXTS)
                 vp = m[0] if m else None
             return bool(vp and make_video_thumbnail(vp, thumb_path))
         img_path = _catalog_verbs.find_image_file(out_dir, mid, filename)

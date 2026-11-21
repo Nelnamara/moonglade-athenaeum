@@ -766,7 +766,7 @@ def reconcile_catalog_with_disk(out_dir, db_path):
     """After files move/disappear, point each catalog row's filename+batch at the
     surviving on-disk file for that media_id. Rows whose file is gone keep their
     last-known filename but are left intact (the image may be re-downloadable)."""
-    from moonglade.backup import load_catalog, save_catalog
+    from moonglade.catalog import load_catalog, save_catalog
     rows = load_catalog(db_path)
     updated = 0
     for r in rows:
@@ -817,7 +817,8 @@ def cmd_organize(args, out, img_dir, db_path):
     sharing a media_id with the live catalogued copy collided with it in the move
     plan, either hard-deleting one outright as a spurious "redundant" duplicate or
     resurrecting the quarantined copy into the organized tree in its place)."""
-    from moonglade.backup import _ensure_db, load_catalog, PixAIError, save_catalog
+    from moonglade.backup import _ensure_db, PixAIError
+    from moonglade.catalog import load_catalog, save_catalog
     from moonglade.media_fetch import convert_image, embed_metadata
     from moonglade.history import build_stem_name, _same_bytes
     db_path = _ensure_db(out)

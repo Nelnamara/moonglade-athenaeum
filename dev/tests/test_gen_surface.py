@@ -13,6 +13,7 @@ from moonglade import task_reads as task_reads_mod
 from moonglade import full_meta as full_meta_mod
 from moonglade import library_runs as library_runs_mod
 from moonglade import sync as sync_mod
+from moonglade import catalog as catalog_mod
 
 
 _SURFACE = ["inference_profile", "quality_tag", "prompt_helper", "control_nets", "lora_parameters",
@@ -265,7 +266,7 @@ def test_backfill_checkpoints_incrementally_not_only_at_the_end(monkeypatch, tmp
         saves["n"] += 1
         return real_save(dbp, rws, *a, **k)
 
-    monkeypatch.setattr(core, "save_catalog_over_snapshot", counting_save)
+    monkeypatch.setattr(catalog_mod, "save_catalog_over_snapshot", counting_save)
 
     args = types.SimpleNamespace(out=str(tmp_path), token=None, workers=1, delay=0.0,
                                  progress=None, with_loras=False, with_credit=False,

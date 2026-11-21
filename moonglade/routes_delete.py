@@ -74,7 +74,7 @@ def register(app, ctx):
         published artwork: that branch sends the whole-task delete, the delete PixAI's
         contract says takes the linked artwork with it. What a one-image deleteBatchMedia
         does to an artwork is unknown, so the per-image branch makes no claim."""
-        from moonglade.gallery import Path
+        from pathlib import Path
         from moonglade.catalog_verbs import myart_coverage, published_delete_note, task_media
         if plan.plan == "per-image":
             n = plan.live_siblings

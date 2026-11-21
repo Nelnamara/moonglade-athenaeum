@@ -150,7 +150,7 @@ def _cli_job_finish(out_dir, job_id, error=None, warn=0, warn_detail=None):
     if not job_id:
         return
     try:
-        from moonglade.backup import _redact_host_paths_cli
+        from moonglade.redact import _redact_host_paths_cli
         if error is not None:
             append_job_event(out_dir, job_id, status="failed",
                              error=_redact_host_paths_cli(out_dir, str(error))[:200])
