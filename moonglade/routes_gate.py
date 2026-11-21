@@ -1088,8 +1088,8 @@ __DESIGN_TOKENS__
     @app.route("/")
     @tier(LOGIN)
     def app_page():
-        from moonglade.gallery import (catalog_counts, catalog_years, list_smart_collections,
-                                       unique_models)
+        from moonglade.gallery import catalog_years, unique_models
+        from moonglade.curation import catalog_counts, list_smart_collections
         from moonglade.catalog import unique_collections
         from moonglade.pages import DESIGN_TOKENS_CSS, _upscale_const_js
         from moonglade.ach_beacon import _ach_mint

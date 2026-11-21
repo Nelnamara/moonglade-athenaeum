@@ -210,7 +210,8 @@ def register(app, ctx):
         PixAI is unreachable, which is exactly the case where the classic banner
         shows counts but hides its coverage badge. The catalog counts never depend
         on the network."""
-        from moonglade.gallery import backup_coverage, catalog_counts
+        from moonglade.gallery import backup_coverage
+        from moonglade.curation import catalog_counts
         counts = catalog_counts(db_path)
         try:
             core, gsession = _gen_session()

@@ -22,7 +22,7 @@ import pytest
 from moonglade import paths as _paths
 from moonglade import backup as core
 from moonglade import gallery as g
-from moonglade.gallery import query_catalog
+from moonglade.curation import query_catalog
 from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from moonglade.loom_files import loom_render_ids
 from moonglade.health import collection_health, storage_breakdown

@@ -178,7 +178,8 @@ def register(app, ctx):
         comment on panel_is_local), just packaged for fetch() instead of Jinja. Nothing
         computed here is new: every field is a value /panel already builds every request.
         LOGIN tier, matching /panel itself."""
-        from moonglade.gallery import _supervised, catalog_counts, list_quarantined
+        from moonglade.gallery import _supervised, list_quarantined
+        from moonglade.curation import catalog_counts
         panel_is_local = _is_local_request()
         all_actions = [{"action": k, "label": v["label"], "destructive": v["destructive"],
                         "advanced": v.get("advanced", False),
@@ -866,7 +867,7 @@ def register(app, ctx):
         than the whole library. With no filter args it stays the full dump it has always
         been -- load_catalog, not query_catalog, because the latter's `filename != ''`
         would quietly drop rows whose file isn't on disk yet."""
-        from moonglade.gallery import _filters_from_args, query_catalog
+        from moonglade.curation import _filters_from_args, query_catalog
         from moonglade.catalog import catalog_csv_text, load_catalog
         import io
         import datetime

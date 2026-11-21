@@ -27,6 +27,7 @@ from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_test_client
 from moonglade import series as series_mod
+from moonglade import curation as curation_mod
 
 
 def _seed(tmp_path, rows):
@@ -345,10 +346,10 @@ def test_export_csv_filter_extraction_carries_series():
     _filters_from_args, which must extract ?series= the way it already extracts ?batch=.
     Without it, exporting an OPEN series stack silently drops the constraint and dumps the
     whole filtered library instead of the stack's members. Regression pin for the wiring."""
-    assert G._filters_from_args({"series": "S1"}).get("series") == "S1"     # present -> carried
-    assert "series" not in G._filters_from_args({})                        # absent -> dropped
-    assert "series" not in G._filters_from_args({"series": ""})            # empty  -> dropped (falsy)
-    both = G._filters_from_args({"series": "S1", "batch": "B2"})           # rides beside batch
+    assert curation_mod._filters_from_args({"series": "S1"}).get("series") == "S1"     # present -> carried
+    assert "series" not in curation_mod._filters_from_args({})                        # absent -> dropped
+    assert "series" not in curation_mod._filters_from_args({"series": ""})            # empty  -> dropped (falsy)
+    both = curation_mod._filters_from_args({"series": "S1", "batch": "B2"})           # rides beside batch
     assert both.get("series") == "S1" and both.get("batch") == "B2"
 
 
@@ -404,7 +405,7 @@ def test_detail_route_series_excludes_non_members_and_unknown_sids(tmp_path):
 
 def test_list_media_ids_series_matches_query_catalog(tmp_path):
     db = _seed_mixed(tmp_path)
-    rows, total = G.query_catalog(db, sort="newest", page_size=None, series="X1")
+    rows, total = curation_mod.query_catalog(db, sort="newest", page_size=None, series="X1")
     assert G.list_media_ids(db, sort="newest", series="X1") == [r["media_id"] for r in rows]
     assert total == 7
     assert len(G.list_media_ids(db, sort="newest")) == 14                  # default: no narrowing

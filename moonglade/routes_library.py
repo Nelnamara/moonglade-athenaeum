@@ -120,7 +120,7 @@ def register(app, ctx):
         redirect banner. LOGIN tier, exactly like both page routes it mirrors.
         `count` is rows actually CHANGED, the page banner's own number -- adding to
         a collection an image is already in counts zero, not one."""
-        from moonglade.gallery import CurationError, _is_smart_name
+        from moonglade.curation import CurationError, _is_smart_name
         from moonglade.catalog import add_to_collection, remove_from_collection
         body = request.get_json(silent=True) or {}
         action = str(body.get("action") or "").strip()
@@ -152,7 +152,7 @@ def register(app, ctx):
         """Every collection, hand-picked and smart, with its count and cover -- what the
         collections list and the manager draw. Read-only; a smart collection's count is its
         saved query run now."""
-        from moonglade.gallery import collection_summaries
+        from moonglade.curation import collection_summaries
         return jsonify({"collections": collection_summaries(db_path)})
 
     @app.route("/api/collections/manage", methods=["POST"])
@@ -162,8 +162,8 @@ def register(app, ctx):
         rename {name, new_name} · merge {names: [target, ...others]} · delete {name} ·
         smart {query, name?, replace?}. Labels and saved queries only -- a delete or a merge
         never removes a picture. A refusal is a 400 with the reason in words."""
-        from moonglade.gallery import (CurationError, delete_collection, merge_collections,
-                                       rename_collection, save_smart_collection)
+        from moonglade.curation import (CurationError, delete_collection, merge_collections,
+                                        rename_collection, save_smart_collection)
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
@@ -195,7 +195,7 @@ def register(app, ctx):
     def api_collections_order_get():
         """{name, kind, media_ids, manual} -- the collection's members in its order
         (ordered_members). Read-only: opening the editor writes nothing."""
-        from moonglade.gallery import ordered_members
+        from moonglade.curation import ordered_members
         name = (request.args.get("name") or "").strip()
         res = ordered_members(db_path, name)
         if res["kind"] is None:
@@ -207,7 +207,7 @@ def register(app, ctx):
     def api_collections_order_set():
         """{csrf, name, media_ids} -> the saved order (ordered_members after). A smart
         collection, an unknown one and any id that is not a member are refused (400)."""
-        from moonglade.gallery import CurationError, set_collection_order
+        from moonglade.curation import CurationError, set_collection_order
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 403
@@ -227,7 +227,7 @@ def register(app, ctx):
         carry each changed picture's full state -- so the client can show an honest count and
         an Undo that restores each picture's OWN previous values (POST /api/curate/restore).
         Tags, marks and notes live in the local catalog and are never sent to PixAI."""
-        from moonglade.gallery import CurationError, curate_apply
+        from moonglade.curation import CurationError, curate_apply
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
@@ -249,7 +249,7 @@ def register(app, ctx):
         """Undo for /api/curate: {prev: {media_id: {rating, mark, tags, note}}} -- exactly
         the `prev` map that call returned. Puts each picture back to its own previous
         values; a request with any invalid entry changes nothing."""
-        from moonglade.gallery import CurationError, curate_restore
+        from moonglade.curation import CurationError, curate_restore
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
@@ -452,7 +452,8 @@ def register(app, ctx):
         # originals on disk are NEVER touched, and a converted file never re-enters the
         # catalog as a new row (the decided shape; the archive stays exactly as PixAI
         # delivered it). Videos are always passed through as-is (Pillow can't transform mp4).
-        from moonglade.gallery import Path, find_image_file, query_catalog
+        from moonglade.gallery import Path, find_image_file
+        from moonglade.curation import query_catalog
         from moonglade.catalog import get_row
         import io
         import zipfile
@@ -1013,7 +1014,7 @@ def register(app, ctx):
         added no protection while breaking the picker for the owner on a --host 0.0.0.0
         server accessed via a LAN address. Spending still gated on the generate/upload
         routes. ?q=&limit=&page="""
-        from moonglade.gallery import query_catalog
+        from moonglade.curation import query_catalog
         q = (request.args.get("q") or "").strip()
         try:
             limit = max(1, min(int(request.args.get("limit") or 40), 100))
@@ -1140,7 +1141,8 @@ def register(app, ctx):
         # below has to be escaped by hand or ?collection=<script>... is reflected XSS
         # straight into the logged-in session (markupsafe escapes ' and " too, which
         # the single-quoted src=' ' attributes here depend on).
-        from moonglade.gallery import ordered_members, query_catalog, rows_for_media_ids
+        from moonglade.gallery import rows_for_media_ids
+        from moonglade.curation import ordered_members, query_catalog
         from markupsafe import escape
         ids_arg = (request.args.get("ids") or "").strip()
         collection = (request.args.get("collection") or "").strip()
@@ -1260,7 +1262,8 @@ def register(app, ctx):
         preview and its own native (window.print()) output. Same source selection as the
         page route (rows_for_media_ids / query_catalog); the page route stays untouched
         for classic's own use until demolition -- the new front door never calls it."""
-        from moonglade.gallery import ordered_members, query_catalog, rows_for_media_ids
+        from moonglade.gallery import rows_for_media_ids
+        from moonglade.curation import ordered_members, query_catalog
         import datetime as _dt
         ids_arg = (request.args.get("ids") or "").strip()
         collection = (request.args.get("collection") or "").strip()
@@ -1665,8 +1668,8 @@ def register(app, ctx):
           * ?series=<sid> -- the complement: the ungrouped listing constrained to
             one series' members (B's 'open a stack' navigation), resolved in SQL by
             query_catalog. Ignored while group=series (grouping supersedes it)."""
-        from moonglade.gallery import (list_group_rows, personal_get, query_catalog,
-                                       rows_for_media_ids)
+        from moonglade.gallery import list_group_rows, rows_for_media_ids
+        from moonglade.curation import personal_get, query_catalog
         q = (request.args.get("q") or "").strip()
         try:
             page = max(1, int(request.args.get("page") or 1))
@@ -1810,7 +1813,8 @@ def register(app, ctx):
         broken-image icon with no explanation. The client already gets that signal for
         free (an <img>/<video> onError), so there is nothing here worth a filesystem
         stat the caller didn't ask for."""
-        from moonglade.gallery import list_media_ids, personal_get
+        from moonglade.gallery import list_media_ids
+        from moonglade.curation import personal_get
         from moonglade.catalog import get_row, is_archive_only
         row = get_row(db_path, media_id)
         if not row:

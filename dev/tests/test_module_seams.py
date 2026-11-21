@@ -461,6 +461,18 @@ SEAMS = {
         "_DEFAULT_SORT_SQL", "_MANUAL_SORT_SQL", "_order_sql", "_like_pattern", "_like_escape",
         "get_row", "get_row_by_task", "is_archive_only", "_split_collections",
         "unique_collections", "_COLLECTIONS_LOCK", "add_to_collection", "remove_from_collection"]},
+    "moonglade.curation": {"from": "moonglade.gallery", "names": [
+        "CurationError", "PERSONAL_MARKS", "PERSONAL_TAG_MAX_LEN", "PERSONAL_TAGS_MAX",
+        "PERSONAL_NOTE_MAX", "CURATE_MAX_IDS", "_TAG_SPACE_RE", "_TAG_STRIP_RE", "_TAG_DASHES_RE",
+        "normalize_tag", "_split_tags", "_CURATION_LOCK", "_now_stamp", "_clean_collection_name",
+        "_all_collection_names", "_is_smart_name", "list_smart_collections",
+        "smart_collection_query", "_expand_smart", "_auto_smart_name", "save_smart_collection",
+        "_rows_with_label", "rename_collection", "merge_collections", "delete_collection",
+        "_collection_kind", "ordered_members", "set_collection_order", "collection_summaries",
+        "personal_get", "_curation_state", "_write_curation_state", "_clean_tag", "_clean_note",
+        "_clean_mark", "_clean_rating", "_clean_ids", "curate_apply", "curation_rows",
+        "curate_restore", "query_catalog", "_narrow_to_series", "_series_member_task_ids",
+        "batch_member_order", "_filters_from_args", "catalog_counts"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -2075,6 +2087,29 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_setup_prepare.py', 'moonglade.catalog'),
     ('tests/test_task_model_detail_document.py', 'moonglade.catalog'),
     ('tests/test_telemetry.py', 'moonglade.catalog'),
+    # Split phase 4, curation: no reader reads the curation text; test_living_library's banned-call
+    # guard reads living's functions and the scheduler blocks, not this section. The whole-module
+    # absence guards read moonglade.curation too.
+    ('tests/test_app_paths.py', 'moonglade.curation'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.curation'),
+    ('tests/test_bonjour.py', 'moonglade.curation'),
+    ('tests/test_branding.py', 'moonglade.curation'),
+    ('tests/test_catalog_verbs.py', 'moonglade.curation'),
+    ('tests/test_catchup_query.py', 'moonglade.curation'),
+    ('tests/test_csrf_coverage.py', 'moonglade.curation'),
+    ('tests/test_evidence_counters.py', 'moonglade.curation'),
+    ('tests/test_first_party_sources.py', 'moonglade.curation'),
+    ('tests/test_history_feed_document.py', 'moonglade.curation'),
+    ('tests/test_living_library.py', 'moonglade.curation'),
+    ('tests/test_logging.py', 'moonglade.curation'),
+    ('tests/test_loom_p_routes.py', 'moonglade.curation'),
+    ('tests/test_network.py', 'moonglade.curation'),
+    ('tests/test_security_review_fixes.py', 'moonglade.curation'),
+    ('tests/test_server_one_module.py', 'moonglade.curation'),
+    ('tests/test_settings_store.py', 'moonglade.curation'),
+    ('tests/test_setup_prepare.py', 'moonglade.curation'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.curation'),
+    ('tests/test_telemetry.py', 'moonglade.curation'),
 }
 
 

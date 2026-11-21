@@ -922,7 +922,7 @@ def add_to_collection(db_path, media_ids, name):
 
     Raises CurationError for a SMART collection's name (Session N1): a smart collection
     is a saved search, not a list, so nothing can be added to it by hand."""
-    from moonglade.gallery import CurationError, _is_smart_name
+    from moonglade.curation import CurationError, _is_smart_name
     name = (name or "").strip().replace(",", " ").strip()
     if not name or not media_ids:
         return 0

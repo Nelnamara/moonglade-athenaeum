@@ -182,6 +182,7 @@ def test_the_miss_account_is_gone():
     from moonglade import loom_files as loom_files_mod
     from moonglade import catalog_search as catalog_search_mod
     from moonglade import catalog as catalog_mod
+    from moonglade import curation as curation_mod
     src = (inspect.getsource(mg) + inspect.getsource(routes_generate_mod)
            + inspect.getsource(routes_loom_mod) + inspect.getsource(web_loom_store_mod)
            + inspect.getsource(routes_gate_mod) + inspect.getsource(web_threads_mod)
@@ -206,7 +207,8 @@ def test_the_miss_account_is_gone():
            + inspect.getsource(web_policy_mod)
            + inspect.getsource(loom_files_mod)
            + inspect.getsource(catalog_search_mod)
-           + inspect.getsource(catalog_mod))
+           + inspect.getsource(catalog_mod)
+           + inspect.getsource(curation_mod))
     for retired in ("_note_catchup_query", "_catchup_query", "WATCH_CATCHUP_QUERY_MISSES",
                     "via_document", "saved history request", "core.history_page"):
         assert retired not in src, retired

@@ -204,7 +204,7 @@ def achievement_metrics(db_path, use_cache=True):
     CACHED (see _ACH_METRICS_CACHE): recomputed whenever the catalog's cheap key
     changes, and served from the memo when it has not. `use_cache=False` forces a real
     read -- what a test asserting the computation itself wants."""
-    from moonglade.gallery import catalog_counts
+    from moonglade.curation import catalog_counts
     from moonglade.catalog import catalog
     if use_cache:
         try:

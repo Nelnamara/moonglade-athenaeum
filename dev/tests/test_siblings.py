@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from moonglade import gallery as G
+from moonglade import curation as curation_mod
 
 
 def _seed(tmp_path, rows):
@@ -177,10 +178,10 @@ def test_query_catalog_batch_finds_an_organized_row_by_task_id(tmp_path):
         {"media_id": "603", "task_id": "T2", "batch": "legacy-folder"},
         {"media_id": "604", "task_id": "T3", "batch": ""},
     ])
-    rows, total = G.query_catalog(tmp_path / "catalog.db", batch="T1")
+    rows, total = curation_mod.query_catalog(tmp_path / "catalog.db", batch="T1")
     assert total == 2 and {r["media_id"] for r in rows} == {"601", "602"}
     # the legacy folder-name batch still resolves through the same param
-    rows, total = G.query_catalog(tmp_path / "catalog.db", batch="legacy-folder")
+    rows, total = curation_mod.query_catalog(tmp_path / "catalog.db", batch="legacy-folder")
     assert total == 1 and rows[0]["media_id"] == "603"
     # and through the route the button actually hits
     cli = _client(tmp_path)

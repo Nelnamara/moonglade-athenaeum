@@ -39,6 +39,7 @@ from moonglade import gallery as g   # catalog helpers -- the single source of t
 from moonglade.backup import __version__   # gallery already imports backup: no new cost
 from moonglade import dupes as _dupes
 from moonglade import catalog as _catalog
+from moonglade import curation as _curation
 
 # The library the tools read: bound by main() once the move has run and the library is
 # resolved (bind_library). Importing this module reads nothing.
@@ -108,7 +109,7 @@ def search_catalog(query: str = "", model: str = "", collection: str = "",
     collection, minimum star rating (0-5), source (api/local), media_type
     (image/video), art_tag, lora, a created-at range (date_from/date_to as YYYY-MM-DD),
     or published_only. sort: newest|oldest|rating. Returns {total, count, rows}."""
-    rows, total = g.query_catalog(
+    rows, total = _curation.query_catalog(
         DB, q=query, model=model, collection=collection,
         rating_min=max(0, min(rating_min, 5)), source=source, media_type=media_type,
         art_tag=art_tag, lora=lora, date_from=date_from, date_to=date_to,
@@ -219,7 +220,7 @@ def add_to_collection(media_ids: list[str], collection: str) -> dict:
         return {"ok": False, "error": "collection name required"}
     try:
         n = _catalog.add_to_collection(DB, [str(m) for m in media_ids], name)
-    except g.CurationError as e:      # a smart collection is a saved search, not a list
+    except _curation.CurationError as e:      # a smart collection is a saved search, not a list
         return {"ok": False, "error": str(e)}
     return {"ok": True, "collection": name, "added": n}
 
@@ -230,7 +231,7 @@ def pull_for_review(limit: int = 20, unrated_only: bool = True,
     """Fetch images that likely need curation -- newest first, unrated by default.
     Set uncollected_only to surface images in NO collection instead (a common curation
     target). Review, then set_rating / add_to_collection. Returns {count, rows}."""
-    rows, _ = g.query_catalog(DB, source=source, sort="newest", page=1,
+    rows, _ = _curation.query_catalog(DB, source=source, sort="newest", page=1,
                               page_size=max(1, min(limit * 5, 300)))
     picked = []
     for r in rows:
@@ -251,7 +252,7 @@ def list_collections() -> dict:
     {count, collections:[{name, count}]}."""
     out = []
     for name in _catalog.unique_collections(DB):
-        _, total = g.query_catalog(DB, collection=name, page=1, page_size=1)
+        _, total = _curation.query_catalog(DB, collection=name, page=1, page_size=1)
         out.append({"name": name, "count": total})
     return {"count": len(out), "collections": out}
 
@@ -293,7 +294,7 @@ def catalog_stats() -> dict:
     span, and every collection with its size. Read-only, built from query_catalog totals
     (no reimplemented SQL)."""
     def total(**kw):
-        _, t = g.query_catalog(DB, page=1, page_size=1, **kw)
+        _, t = _curation.query_catalog(DB, page=1, page_size=1, **kw)
         return t
     # exact-rating buckets from the cumulative rating_min filter: rating r is
     # (>= r) minus (>= r+1); rating 0 is "unrated" (all minus rated-1-or-more).
@@ -301,8 +302,8 @@ def catalog_stats() -> dict:
     for r in range(0, 6):
         hi = total(rating_min=r + 1) if r < 5 else 0
         by_rating[str(r)] = total(rating_min=r) - hi
-    newest, _ = g.query_catalog(DB, sort="newest", page=1, page_size=1)
-    oldest, _ = g.query_catalog(DB, sort="oldest", page=1, page_size=1)
+    newest, _ = _curation.query_catalog(DB, sort="newest", page=1, page_size=1)
+    oldest, _ = _curation.query_catalog(DB, sort="oldest", page=1, page_size=1)
     return {
         "total": total(),
         "images": total(media_type="image"),

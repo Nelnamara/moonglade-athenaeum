@@ -57,6 +57,7 @@ from pathlib import Path
 
 from moonglade import paths as _paths
 from moonglade import catalog as _catalog
+from moonglade import curation as _curation
 
 FORMAT = "moonglade-curation"
 VERSION = 1
@@ -82,7 +83,7 @@ def _fold(s):
 def export_curation(db_path, now=None):
     """The library's curation as a deterministic dict (see the module docstring)."""
     from moonglade import gallery as g
-    raw = g.curation_rows(db_path)
+    raw = _curation.curation_rows(db_path)
     items = {}
 
     def item(mid):
@@ -102,7 +103,7 @@ def export_curation(db_path, now=None):
         for c in cols:
             members.setdefault(c, set()).add(mid)
     for r in raw["personal"]:
-        tags = g._split_tags(r["tags"])
+        tags = _curation._split_tags(r["tags"])
         if tags or r["mark"] or r["note"]:
             it = item(str(r["media_id"]))
             it["tags"] = tags
@@ -174,27 +175,27 @@ def _validate(doc):
         seen.add(mid)
         where = "Picture {}".format(mid)
         try:
-            rating = g._clean_rating(it.get("rating", 0) or 0)
-            mark = g._clean_mark(it.get("mark"))
-            note = g._clean_note(it.get("note"))
+            rating = _curation._clean_rating(it.get("rating", 0) or 0)
+            mark = _curation._clean_mark(it.get("mark"))
+            note = _curation._clean_note(it.get("note"))
             raw_tags = it.get("tags") or []
             if not isinstance(raw_tags, list):
-                raise g.CurationError("Its tags are not a list.")
+                raise _curation.CurationError("Its tags are not a list.")
             tags = []
             for t in raw_tags:
-                t = g._clean_tag(t)
+                t = _curation._clean_tag(t)
                 if t not in tags:
                     tags.append(t)
-            if len(tags) > g.PERSONAL_TAGS_MAX:
-                raise g.CurationError("It has more than {} tags.".format(g.PERSONAL_TAGS_MAX))
+            if len(tags) > _curation.PERSONAL_TAGS_MAX:
+                raise _curation.CurationError("It has more than {} tags.".format(_curation.PERSONAL_TAGS_MAX))
             raw_cols = it.get("collections") or []
             if not isinstance(raw_cols, list):
-                raise g.CurationError("Its collections are not a list.")
-        except g.CurationError as e:
+                raise _curation.CurationError("Its collections are not a list.")
+        except _curation.CurationError as e:
             raise CurationIOError("{}: {} ({})".format(where, e, _field_hint(str(e))))
         cols = []
         for c in raw_cols:
-            c = g._clean_collection_name(c)
+            c = _curation._clean_collection_name(c)
             if c and c not in cols:
                 cols.append(c)
         clean.append({"media_id": mid, "rating": rating, "mark": mark, "note": note,
@@ -202,11 +203,11 @@ def _validate(doc):
 
     clean_order = {}
     for name, ids in order.items():
-        cname = g._clean_collection_name(name)
+        cname = _curation._clean_collection_name(name)
         if not cname or not isinstance(ids, list):
             raise CurationIOError("The manual order for “{}” is not a list of pictures.".format(name))
         ids = [str(m).strip() for m in ids if str(m).strip()]
-        if len(ids) > g.CURATE_MAX_IDS or len(set(ids)) != len(ids):
+        if len(ids) > _curation.CURATE_MAX_IDS or len(set(ids)) != len(ids):
             raise CurationIOError("The manual order for “{}” repeats a picture or is too long."
                                   .format(cname))
         clean_order[cname] = ids
@@ -216,7 +217,7 @@ def _validate(doc):
         if (not isinstance(s, dict) or not str(s.get("name") or "").strip()
                 or not " ".join(str(s.get("query") or "").split())):
             raise CurationIOError("A smart collection needs both a name and a search.")
-        clean_smart.append({"name": g._clean_collection_name(s["name"]),
+        clean_smart.append({"name": _curation._clean_collection_name(s["name"]),
                             "query": " ".join(str(s["query"]).split())})
     return clean, clean_order, clean_smart
 
@@ -249,7 +250,7 @@ def import_curation(db_path, doc, apply=False, overwrite=False):
     known_order = {str(r["media_id"]) for r in g.rows_for_media_ids(db_path, order_ids)}
     unknown = sorted({m for m in ids if m not in known}
                      | {m for m in order_ids if m not in known_order and m not in known})
-    personal = g.personal_get(db_path, list(known))
+    personal = _curation.personal_get(db_path, list(known))
 
     # --- the personal layer and the rating: one full state per picture ------------
     states, ratings, marks, notes, tags_added, tags_refused = {}, 0, 0, 0, 0, 0
@@ -272,7 +273,7 @@ def import_curation(db_path, doc, apply=False, overwrite=False):
             for t in it["tags"]:
                 if t in new["tags"]:
                     continue
-                if len(new["tags"]) >= g.PERSONAL_TAGS_MAX:
+                if len(new["tags"]) >= _curation.PERSONAL_TAGS_MAX:
                     tags_refused += 1
                     continue
                 new["tags"].append(t)
@@ -286,7 +287,7 @@ def import_curation(db_path, doc, apply=False, overwrite=False):
 
     # --- collections: unioned; under overwrite, the document's list exactly ----------
     hand_now = set(_catalog.unique_collections(db_path))
-    smart_now = {s["name"].casefold(): s for s in g.list_smart_collections(db_path)}
+    smart_now = {s["name"].casefold(): s for s in _curation.list_smart_collections(db_path)}
     labels, unlabels, label_skipped = {}, {}, []
     for it in items:
         mid = it["media_id"]
@@ -330,7 +331,7 @@ def import_curation(db_path, doc, apply=False, overwrite=False):
         if not oids or name.casefold() in smart_now or not is_hand_after:
             orders_skipped.append(name)
             continue
-        if name in hand_now and g.ordered_members(db_path, name)["manual"] and not overwrite:
+        if name in hand_now and _curation.ordered_members(db_path, name)["manual"] and not overwrite:
             orders_kept.append(name)
             continue
         plan_orders[name] = oids
@@ -372,27 +373,27 @@ def import_curation(db_path, doc, apply=False, overwrite=False):
     snap.write_text(dumps(before), encoding="utf-8")
     report["snapshot"] = snap.name
 
-    for chunk in _chunks(states.items(), g.CURATE_MAX_IDS):
-        g.curate_restore(db_path, dict(chunk))
+    for chunk in _chunks(states.items(), _curation.CURATE_MAX_IDS):
+        _curation.curate_restore(db_path, dict(chunk))
     for name, mids in labels.items():
-        for chunk in _chunks(mids, g.CURATE_MAX_IDS):
+        for chunk in _chunks(mids, _curation.CURATE_MAX_IDS):
             _catalog.add_to_collection(db_path, chunk, name)
     for name, mids in unlabels.items():
-        for chunk in _chunks(mids, g.CURATE_MAX_IDS):
+        for chunk in _chunks(mids, _curation.CURATE_MAX_IDS):
             _catalog.remove_from_collection(db_path, chunk, name)
     for s in smart:
         if s["name"] in smart_created:
             try:
-                g.save_smart_collection(db_path, s["query"], name=s["name"])
-            except g.CurationError:
+                _curation.save_smart_collection(db_path, s["query"], name=s["name"])
+            except _curation.CurationError:
                 smart_created.remove(s["name"])
                 smart_skipped.append(s["name"])
     for name, oids in plan_orders.items():
         members = {str(r["media_id"]) for r in g.rows_for_media_ids(db_path, oids)
                    if name in _catalog._split_collections(r.get("collections"))}
         try:
-            g.set_collection_order(db_path, name, [m for m in oids if m in members])
-        except g.CurationError:
+            _curation.set_collection_order(db_path, name, [m for m in oids if m in members])
+        except _curation.CurationError:
             orders_set.remove(name)
             orders_skipped.append(name)
     return report

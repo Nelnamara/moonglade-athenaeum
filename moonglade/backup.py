@@ -75,7 +75,7 @@ from moonglade import task_feed as _task_feed
 from moonglade import task_reads as _task_reads
 from moonglade import telemetry as _telemetry
 from moonglade import training as _training
-from moonglade.gallery import (query_catalog, rows_for_media_ids,
+from moonglade.gallery import (rows_for_media_ids,
                             # The row-level artwork write (see run_sync_artworks): one
                             # narrow UPDATE of the eleven PixAI-owned columns, keyed by
                             # media_id -- imported the same way its whole-table siblings
@@ -87,6 +87,7 @@ from moonglade.gallery import (query_catalog, rows_for_media_ids,
                             apply_artwork_views,
                             build_thumbnails,
                             _NO_WINDOW)
+from moonglade.curation import query_catalog
 from moonglade.catalog import (CATALOG_FIELDS, init_db, migrate, load_catalog,
                                catalog_csv_text, save_catalog, _db_is_empty,
                                # A save of rows built from an earlier read: re-reads the

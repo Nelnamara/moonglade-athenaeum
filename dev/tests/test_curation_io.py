@@ -27,6 +27,7 @@ from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client
 from moonglade import catalog as catalog_mod
+from moonglade import curation as curation_mod
 
 NOW = "2026-10-02T12:00:00Z"
 IDS = ["m1", "m2", "m3", "m4", "m5"]
@@ -50,13 +51,13 @@ def _curated(path):
     catalog_mod.update_rating(db, "m2", 3)
     catalog_mod.add_to_collection(db, ["m1", "m3"], "Night Sky")
     catalog_mod.add_to_collection(db, ["m1"], "Best Of")
-    g.curate_apply(db, ["m2"], {"add_tag": "pose-study"})
-    g.curate_apply(db, ["m2"], {"add_tag": "blue"})
-    g.curate_apply(db, ["m2"], {"mark": "keeper"})
-    g.curate_apply(db, ["m2"], {"note": "the one"})
-    g.curate_apply(db, ["m3"], {"mark": "reject"})
-    g.save_smart_collection(db, "cat ★4+", name="Cats")
-    g.set_collection_order(db, "Night Sky", ["m3", "m1"])
+    curation_mod.curate_apply(db, ["m2"], {"add_tag": "pose-study"})
+    curation_mod.curate_apply(db, ["m2"], {"add_tag": "blue"})
+    curation_mod.curate_apply(db, ["m2"], {"mark": "keeper"})
+    curation_mod.curate_apply(db, ["m2"], {"note": "the one"})
+    curation_mod.curate_apply(db, ["m3"], {"mark": "reject"})
+    curation_mod.save_smart_collection(db, "cat ★4+", name="Cats")
+    curation_mod.set_collection_order(db, "Night Sky", ["m3", "m1"])
     return db
 
 
@@ -113,10 +114,10 @@ def test_fill_only_keeps_what_the_catalog_already_has(tmp_path):
     doc = cio.export_curation(_curated(tmp_path / "a" / "catalog.db"), now=NOW)
     b = _fresh(tmp_path / "b" / "catalog.db")
     catalog_mod.update_rating(b, "m2", 1)
-    g.curate_apply(b, ["m2"], {"note": "mine"})
-    g.curate_apply(b, ["m2"], {"add_tag": "red"})
+    curation_mod.curate_apply(b, ["m2"], {"note": "mine"})
+    curation_mod.curate_apply(b, ["m2"], {"add_tag": "red"})
     cio.import_curation(b, doc, apply=True)
-    st = g.personal_get(b, ["m2"])["m2"]
+    st = curation_mod.personal_get(b, ["m2"])["m2"]
     assert catalog_mod.get_row(b, "m2")["rating"] == "1"                  # kept
     assert st["note"] == "mine"                                 # kept
     assert st["mark"] == "keeper"                               # was empty: filled
@@ -127,11 +128,11 @@ def test_overwrite_makes_the_document_win_for_the_pictures_it_lists(tmp_path):
     doc = cio.export_curation(_curated(tmp_path / "a" / "catalog.db"), now=NOW)
     b = _fresh(tmp_path / "b" / "catalog.db")
     catalog_mod.update_rating(b, "m2", 1)
-    g.curate_apply(b, ["m2"], {"note": "mine"})
-    g.curate_apply(b, ["m2"], {"add_tag": "red"})
+    curation_mod.curate_apply(b, ["m2"], {"note": "mine"})
+    curation_mod.curate_apply(b, ["m2"], {"add_tag": "red"})
     catalog_mod.add_to_collection(b, ["m2", "m4"], "Mine")
     rep = cio.import_curation(b, doc, apply=True, overwrite=True)
-    st = g.personal_get(b, ["m2"])["m2"]
+    st = curation_mod.personal_get(b, ["m2"])["m2"]
     assert catalog_mod.get_row(b, "m2")["rating"] == "3"
     assert st["note"] == "the one" and st["tags"] == ["pose-study", "blue"]
     assert catalog_mod.get_row(b, "m2")["collections"] == ""              # the file lists none for m2
@@ -149,43 +150,43 @@ def test_unknown_media_ids_are_reported_not_invented(tmp_path):
     rep = cio.import_curation(b, doc, apply=True)
     assert rep["unknown"] == ["ghost"]
     assert catalog_mod.get_row(b, "ghost") is None
-    assert g.personal_get(b, ["ghost"]) == {}
-    assert g.ordered_members(b, "Night Sky")["media_ids"][:2] == ["m3", "m1"]
+    assert curation_mod.personal_get(b, ["ghost"]) == {}
+    assert curation_mod.ordered_members(b, "Night Sky")["media_ids"][:2] == ["m3", "m1"]
 
 
 def test_the_tag_cap_holds(tmp_path):
     b = _fresh(tmp_path / "b" / "catalog.db")
-    for i in range(g.PERSONAL_TAGS_MAX - 1):
-        g.curate_apply(b, ["m1"], {"add_tag": "t{}".format(i)})
+    for i in range(curation_mod.PERSONAL_TAGS_MAX - 1):
+        curation_mod.curate_apply(b, ["m1"], {"add_tag": "t{}".format(i)})
     doc = {"format": "moonglade-curation", "version": 1, "exported_at": NOW,
            "items": [{"media_id": "m1", "rating": 0, "collections": [], "tags": ["new-a", "new-b"],
                       "mark": "", "note": ""}],
            "collection_order": {}, "smart_collections": []}
     rep = cio.import_curation(b, doc, apply=True)
     assert rep["tags_refused"] == 1
-    tags = g.personal_get(b, ["m1"])["m1"]["tags"]
-    assert len(tags) == g.PERSONAL_TAGS_MAX and "new-a" in tags and "new-b" not in tags
+    tags = curation_mod.personal_get(b, ["m1"])["m1"]["tags"]
+    assert len(tags) == curation_mod.PERSONAL_TAGS_MAX and "new-a" in tags and "new-b" not in tags
 
 
 def test_a_smart_collection_name_clash_is_skipped_and_reported(tmp_path):
     doc = cio.export_curation(_curated(tmp_path / "a" / "catalog.db"), now=NOW)
     b = _fresh(tmp_path / "b" / "catalog.db")
-    g.save_smart_collection(b, "dog", name="Cats")              # same name, another search
+    curation_mod.save_smart_collection(b, "dog", name="Cats")              # same name, another search
     rep = cio.import_curation(b, doc, apply=True)
     assert rep["smart_skipped"] == ["Cats"]
-    assert g.smart_collection_query(b, "Cats") == "dog"         # left alone
+    assert curation_mod.smart_collection_query(b, "Cats") == "dog"         # left alone
 
 
 def test_an_existing_manual_order_is_kept_unless_overwriting(tmp_path):
     doc = cio.export_curation(_curated(tmp_path / "a" / "catalog.db"), now=NOW)
     b = _fresh(tmp_path / "b" / "catalog.db")
     catalog_mod.add_to_collection(b, ["m1", "m3"], "Night Sky")
-    g.set_collection_order(b, "Night Sky", ["m1", "m3"])
+    curation_mod.set_collection_order(b, "Night Sky", ["m1", "m3"])
     rep = cio.import_curation(b, doc, apply=True)
     assert rep["orders_kept"] == ["Night Sky"]
-    assert g.ordered_members(b, "Night Sky")["media_ids"] == ["m1", "m3"]
+    assert curation_mod.ordered_members(b, "Night Sky")["media_ids"] == ["m1", "m3"]
     cio.import_curation(b, doc, apply=True, overwrite=True)
-    assert g.ordered_members(b, "Night Sky")["media_ids"] == ["m3", "m1"]
+    assert curation_mod.ordered_members(b, "Night Sky")["media_ids"] == ["m3", "m1"]
 
 
 @pytest.mark.parametrize("mutate, words", [
@@ -194,8 +195,8 @@ def test_an_existing_manual_order_is_kept_unless_overwriting(tmp_path):
     (lambda d: d.update(items="nope"), "items"),
     (lambda d: d["items"][0].update(rating=7), "rating"),
     (lambda d: d["items"][0].update(mark="maybe"), "mark"),
-    (lambda d: d["items"][0].update(note="x" * (g.PERSONAL_NOTE_MAX + 1)), "note"),
-    (lambda d: d["items"][0].update(tags=["t{}".format(i) for i in range(g.PERSONAL_TAGS_MAX + 1)]), "tags"),
+    (lambda d: d["items"][0].update(note="x" * (curation_mod.PERSONAL_NOTE_MAX + 1)), "note"),
+    (lambda d: d["items"][0].update(tags=["t{}".format(i) for i in range(curation_mod.PERSONAL_TAGS_MAX + 1)]), "tags"),
     (lambda d: d["items"][0].update(media_id=""), "media id"),
     (lambda d: d.update(smart_collections=[{"name": "x"}]), "smart collection"),
 ])

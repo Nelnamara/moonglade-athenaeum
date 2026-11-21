@@ -21,7 +21,7 @@ feature existed -- pinned at the WHERE-clause level below.
 """
 import pytest
 
-from moonglade.gallery import query_catalog
+from moonglade.curation import query_catalog
 from moonglade.catalog import CATALOG_FIELDS, save_catalog
 from moonglade.catalog_search import _build_where
 

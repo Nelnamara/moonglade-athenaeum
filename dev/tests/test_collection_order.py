@@ -25,9 +25,10 @@ import pytest
 from moonglade import backup as core
 from moonglade import gen_road as gen_road_mod
 from moonglade import gallery as g
-from moonglade.gallery import (CurationError, delete_collection, merge_collections,
-                               ordered_members, query_catalog, rename_collection,
-                               save_smart_collection, set_collection_order, list_media_ids)
+from moonglade.gallery import list_media_ids
+from moonglade.curation import (CurationError, delete_collection, merge_collections,
+                                ordered_members, query_catalog, rename_collection,
+                                save_smart_collection, set_collection_order)
 from moonglade.catalog import (CATALOG_FIELDS, add_to_collection, load_catalog,
                                remove_from_collection, save_catalog)
 from tests.conftest import login_client

@@ -23,14 +23,15 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gallery as g
-from moonglade.gallery import (CurationError, curate_apply, curate_restore, delete_collection,
-                               list_media_ids, list_group_rows, merge_collections, normalize_tag,
-                               personal_get, query_catalog, rename_collection,
-                               save_smart_collection)
+from moonglade.gallery import list_media_ids, list_group_rows
+from moonglade.curation import (CurationError, curate_apply, curate_restore, delete_collection,
+                                merge_collections, normalize_tag, personal_get, query_catalog,
+                                rename_collection, save_smart_collection)
 from moonglade.catalog import CATALOG_FIELDS, load_catalog, save_catalog
 from tests.conftest import extract_login_csrf, login_client
 from moonglade import catalog_search as catalog_search_mod
 from moonglade import catalog as catalog_mod
+from moonglade import curation as curation_mod
 
 
 def _row(**kw):
@@ -120,8 +121,8 @@ def test_opening_and_reading_writes_nothing(db):
     save_smart_collection(db, "keeper")
     before = _dump(db)
     catalog_mod.unique_collections(db)
-    g.list_smart_collections(db)
-    g.collection_summaries(db)
+    curation_mod.list_smart_collections(db)
+    curation_mod.collection_summaries(db)
     query_catalog(db, q="keeper -reject tag:x note:y")
     query_catalog(db, collection="keeper")
     personal_get(db, ["1", "2"])
@@ -323,7 +324,7 @@ def test_save_over_replaces_only_the_query(db):
     save_smart_collection(db, "keeper", name="Keepers")
     r = save_smart_collection(db, "reject", replace="Keepers")
     assert r["created"] is False and r["name"] == "Keepers"
-    assert [s["query"] for s in g.list_smart_collections(db)] == ["reject"]
+    assert [s["query"] for s in curation_mod.list_smart_collections(db)] == ["reject"]
     with pytest.raises(CurationError):
         save_smart_collection(db, "x", replace="No such")
 
@@ -340,8 +341,8 @@ def test_pictures_cannot_be_added_to_a_smart_collection(db):
 def test_the_summaries_list_both_kinds_with_counts_and_covers(db):
     curate_apply(db, ["3"], {"mark": "keeper"})
     save_smart_collection(db, "keeper", name="Keepers")
-    s = {c["name"]: c for c in g.collection_summaries(db)}
-    assert [c["name"] for c in g.collection_summaries(db)] == ["Druid", "Faves", "Keepers"]
+    s = {c["name"]: c for c in curation_mod.collection_summaries(db)}
+    assert [c["name"] for c in curation_mod.collection_summaries(db)] == ["Druid", "Faves", "Keepers"]
     assert (s["Druid"]["kind"], s["Druid"]["count"], s["Druid"]["cover"]) == ("hand", 2, "1")
     assert (s["Faves"]["count"], s["Faves"]["cover"]) == (2, "1")
     assert s["Keepers"] == {"name": "Keepers", "kind": "smart", "count": 1, "query": "keeper", "cover": "3"}
@@ -372,7 +373,7 @@ def test_rename_scrubs_commas_which_are_the_stores_separator(db):
 def test_rename_a_smart_collection(db):
     save_smart_collection(db, "keeper", name="Keepers")
     assert rename_collection(db, "Keepers", "Best")["kind"] == "smart"
-    assert [s["name"] for s in g.list_smart_collections(db)] == ["Best"]
+    assert [s["name"] for s in curation_mod.list_smart_collections(db)] == ["Best"]
     with pytest.raises(CurationError):
         rename_collection(db, "Best", "Druid")
 

@@ -11,6 +11,7 @@ from moonglade import gallery as g
 pytest.importorskip("PIL")
 from PIL import Image                                         # noqa: E402
 from moonglade import catalog as catalog_mod
+from moonglade import curation as curation_mod
 
 
 def _task(outputs=None, model_config=None):
@@ -120,5 +121,5 @@ def test_the_picture_list_leaves_svg_rows_out(tmp_path):
     assert sorted(i["media_id"] for i in got["images"]) == ["1", "4"]
     assert got["total"] == 2
     # the library grid itself still lists every row
-    all_rows, total = g.query_catalog(tmp_path / "catalog.db", page_size=None)
+    all_rows, total = curation_mod.query_catalog(tmp_path / "catalog.db", page_size=None)
     assert total == 5

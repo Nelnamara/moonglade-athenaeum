@@ -24,6 +24,7 @@ from tests.conftest import login_client
 from moonglade import scan as scan_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import cloud_delete as cloud_delete_mod
+from moonglade import curation as curation_mod
 
 
 def _row(**kw):
@@ -150,7 +151,7 @@ def test_collection_add_then_remove_round_trips(tmp_path):
     assert d == {"ok": True, "count": 1}
     by_id = {r["media_id"]: r["collections"] for r in load_catalog(db)}
     assert by_id == {"1": "", "2": "Faves"}
-    assert g.query_catalog(db, collection="Faves")[1] == 1  # the collection filter agrees after a route remove
+    assert curation_mod.query_catalog(db, collection="Faves")[1] == 1  # the collection filter agrees after a route remove
 
 
 def test_collection_validates_its_inputs(tmp_path):

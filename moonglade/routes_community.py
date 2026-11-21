@@ -968,7 +968,7 @@ def register(app, ctx):
         The grouped grid marks a batch stack only at >= 2 survivors (see the folded-BATCH
         arm of /api/library), so nothing can open one -- answering 200 here would
         invent a stack the library never draws. Pure catalog read, no network."""
-        from moonglade.gallery import batch_member_order, query_catalog
+        from moonglade.curation import batch_member_order, query_catalog
         tid = str(task_id or "").strip()
         rows = []
         if tid:

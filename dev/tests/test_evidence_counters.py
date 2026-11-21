@@ -240,6 +240,7 @@ def test_no_submit_path_bumps_a_retired_counter():
     from moonglade import loom_files as loom_files_mod
     from moonglade import catalog_search as catalog_search_mod
     from moonglade import catalog as catalog_mod
+    from moonglade import curation as curation_mod
     src = "\n".join(inspect.getsource(mod) for mod in (
         g, telemetry_mod, achievements_mod, branding_mod, living_mod, contest_sync_mod,
         routes_generate_mod, routes_loom_mod, web_loom_store_mod, routes_gate_mod, web_threads_mod,
@@ -247,7 +248,7 @@ def test_no_submit_path_bumps_a_retired_counter():
         routes_account_mod, routes_community_mod, routes_train_mod, routes_ach_mod,
         routes_mirror_mod, routes_branding_mod, routes_import_mod,
         redact_mod, web_tiers_mod, watch_plans_mod, name_hunt_mod, ach_beacon_mod, scenes_mod,
-        pages_mod, web_policy_mod, loom_files_mod, catalog_search_mod, catalog_mod))
+        pages_mod, web_policy_mod, loom_files_mod, catalog_search_mod, catalog_mod, curation_mod))
     # anchor: the moved submit paths really are in what this reads (their live counters)
     assert 'telem_bump("enhances"' in inspect.getsource(routes_generate_mod)
     for needle in ('telem_bump("edits"', 'telem_bump("lora_used"', 'telem_max("lora_stacked"',

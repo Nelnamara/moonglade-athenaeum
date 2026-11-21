@@ -28,6 +28,7 @@ from moonglade import media_tools as media_tools_mod
 from moonglade import living as living_mod
 from moonglade import task_reads as task_reads_mod
 from moonglade import catalog as catalog_mod
+from moonglade import curation as curation_mod
 
 
 def _row(**kw):
@@ -1307,7 +1308,7 @@ def test_catalog_counts(tmp_path):
              collections="faves"),
         _row(media_id="3", filename="c_3.mp4", is_video="1", created_at="2025-01-03T00:00:00"),
     ])
-    c = g.catalog_counts(tmp_path / "catalog.db")
+    c = curation_mod.catalog_counts(tmp_path / "catalog.db")
     assert c == {"images": 2, "videos": 1, "collections": 2}   # faves + wips distinct
 
 

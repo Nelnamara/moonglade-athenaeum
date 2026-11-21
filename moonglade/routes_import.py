@@ -176,7 +176,7 @@ def register(app, ctx):
         Saves the uploads to a temp dir (expanding any zip), then reuses
         core.run_import_local (copy -> imported/ + catalog source='local' + thumbnail, path
         dedup), tags an optional collection, and returns counts. Synchronous for now."""
-        from moonglade.gallery import _is_smart_name
+        from moonglade.curation import _is_smart_name
         from moonglade.catalog import add_to_collection
         from moonglade.web_policy import IMPORT_REQUEST_MAX_BYTES, ZIP_MAX_TOTAL_BYTES, ZipTooBig
         import os as _os

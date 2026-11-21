@@ -24,10 +24,12 @@ from moonglade import backup as core
 from moonglade import cards as cards_mod
 from moonglade import gallery as moonglade_gallery
 from moonglade import gen_road as gen_road_mod
-from moonglade.gallery import create_app, query_catalog
+from moonglade.gallery import create_app
+from moonglade.curation import query_catalog
 from moonglade.catalog import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client, login_test_client
+from moonglade import curation as curation_mod
 
 
 def _row(**kw):
@@ -360,7 +362,7 @@ def test_a_write_during_the_export_cannot_drop_rows_that_were_already_there(tmp_
     # own, not whatever the login flow happens to run on the way past the front door.
     cli = login_test_client(create_app(tmp_path))
 
-    real_query = moonglade_gallery.query_catalog
+    real_query = curation_mod.query_catalog
     state = {"calls": 0}
 
     def racy_query(*args, **kwargs):
@@ -374,7 +376,7 @@ def test_a_write_during_the_export_cannot_drop_rows_that_were_already_there(tmp_
                               for i in range(1, 4)])
         return out
 
-    monkeypatch.setattr(moonglade_gallery, "query_catalog", racy_query)
+    monkeypatch.setattr(curation_mod, "query_catalog", racy_query)
 
     r = cli.get("/export-csv?q=druid")
     assert r.status_code == 200
