@@ -443,6 +443,14 @@ SEAMS = {
         "sniff_audio_ext", "_unlink_quiet", "loom_edl_zip_stem", "_LOOM_BOARD_NAME_RE",
         "_json_string_body", "loom_board_name_salvage", "loom_board_beds", "loom_bed_windows",
         "loom_bed_audio_graph"]},
+    "moonglade.catalog_search": {"from": "moonglade.gallery", "names": [
+        "_SEARCH_OPS", "_SEARCH_TOKEN_RE", "_SEARCH_KEY_RE", "_SEARCH_NUM_RE", "_SEARCH_DATE_RE",
+        "_SEARCH_DATE_PART_RE", "_SEARCH_LORA_WEIGHT_RE", "_LORA_ENTRY_RE", "_SEARCH_TRUTHY",
+        "_SEARCH_FALSY", "_unquote", "_personal_tag_pattern", "_SEARCH_NEG_NUMBER_RE",
+        "_SEARCH_STAR_RE", "_personal_mark_clause", "_search_token_clause", "_AR_EXPR",
+        "AR_SQUARE", "AR_TALL_MAX", "AR_WIDE_MIN", "AR_TOLERANCE", "_AR_WH_RE", "_AR_CMP_RE",
+        "_aspect_clause", "_type_clause", "_date_part_bounds", "_date_clause", "_lora_name_regex",
+        "_lora_weight_match", "_lora_weight_clause", "_operator_clause", "_build_where"]},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -2006,6 +2014,29 @@ SOURCE_READERS_REVIEWED = {
     ('tests/test_setup_prepare.py', 'moonglade.loom_files'),
     ('tests/test_task_model_detail_document.py', 'moonglade.loom_files'),
     ('tests/test_telemetry.py', 'moonglade.loom_files'),
+    # Split phase 4, catalog_search: no reader reads the operators' text (the hits are catalog
+    # column names; test_catalog_verbs reads create_app and the registers only).
+    # test_search_operators reaches the grammar through moonglade.catalog_search.
+    ('tests/test_app_paths.py', 'moonglade.catalog_search'),
+    ('tests/test_artworks_adhoc.py', 'moonglade.catalog_search'),
+    ('tests/test_bonjour.py', 'moonglade.catalog_search'),
+    ('tests/test_branding.py', 'moonglade.catalog_search'),
+    ('tests/test_catalog_verbs.py', 'moonglade.catalog_search'),
+    ('tests/test_catchup_query.py', 'moonglade.catalog_search'),
+    ('tests/test_csrf_coverage.py', 'moonglade.catalog_search'),
+    ('tests/test_evidence_counters.py', 'moonglade.catalog_search'),
+    ('tests/test_first_party_sources.py', 'moonglade.catalog_search'),
+    ('tests/test_history_feed_document.py', 'moonglade.catalog_search'),
+    ('tests/test_living_library.py', 'moonglade.catalog_search'),
+    ('tests/test_logging.py', 'moonglade.catalog_search'),
+    ('tests/test_loom_p_routes.py', 'moonglade.catalog_search'),
+    ('tests/test_network.py', 'moonglade.catalog_search'),
+    ('tests/test_security_review_fixes.py', 'moonglade.catalog_search'),
+    ('tests/test_server_one_module.py', 'moonglade.catalog_search'),
+    ('tests/test_settings_store.py', 'moonglade.catalog_search'),
+    ('tests/test_setup_prepare.py', 'moonglade.catalog_search'),
+    ('tests/test_task_model_detail_document.py', 'moonglade.catalog_search'),
+    ('tests/test_telemetry.py', 'moonglade.catalog_search'),
 }
 
 

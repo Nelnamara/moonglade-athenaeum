@@ -29,6 +29,7 @@ from moonglade.gallery import (
     personal_get, query_catalog, rename_collection, save_smart_collection, save_catalog,
 )
 from tests.conftest import extract_login_csrf, login_client
+from moonglade import catalog_search as catalog_search_mod
 
 
 def _row(**kw):
@@ -260,15 +261,15 @@ def test_negation_covers_free_text_and_operators_and_spares_bare_numbers(db):
     assert _ids(db, q='-"night elf"') == ["2", "3", "4"]
     assert _ids(db, q="-collection:Faves") == ["2", "4"]
     # a leading hyphen on a bare number is what it always was: literal text, not a negation
-    where, params = g._build_where("-5", "", "", "")
+    where, params = catalog_search_mod._build_where("-5", "", "", "")
     assert "NOT" not in where and params == ["%-5%", "%-5%"]
-    where, _ = g._build_where("-", "", "", "")
+    where, _ = catalog_search_mod._build_where("-", "", "", "")
     assert "NOT" not in where
 
 
 def test_a_quoted_keeper_is_a_phrase_not_the_operator(db):
     curate_apply(db, ["1"], {"mark": "keeper"})
-    where, params = g._build_where('"keeper"', "", "", "")
+    where, params = catalog_search_mod._build_where('"keeper"', "", "", "")
     assert "personal_meta" not in where and params == ["%keeper%", "%keeper%"]
 
 

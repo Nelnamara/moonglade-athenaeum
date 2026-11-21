@@ -27,6 +27,7 @@ from moonglade.loom_files import loom_render_ids
 from moonglade.health import collection_health, storage_breakdown
 from tests.conftest import login_client
 from moonglade import loom_files as loom_files_mod
+from moonglade import catalog_search as catalog_search_mod
 
 
 def _row(**kw):
@@ -129,7 +130,7 @@ def test_ar_combines_with_the_rest_of_the_search(shapes):
 def test_a_malformed_value_degrades_to_a_plain_search_never_an_error(shapes):
     for bad in ("ar:", "ar:banana", "ar:0:0", "ar:3:", "ar:>", "ar:>x", "ar:1:0"):
         assert _ids(shapes, bad) == []          # searched as prompt text: nothing says it
-    where, params = g._build_where("ar:banana", "", "", "")
+    where, params = catalog_search_mod._build_where("ar:banana", "", "", "")
     assert "banana" not in where.lower() or "?" in where       # the word is a bound parameter
 
 
@@ -138,10 +139,10 @@ def test_the_aspect_alias_and_the_case_of_the_value(shapes):
 
 
 def test_a_hostile_value_is_bound_never_interpolated(shapes):
-    where, params = g._build_where('ar:3:2") OR 1=1 --', "", "", "")
+    where, params = catalog_search_mod._build_where('ar:3:2") OR 1=1 --', "", "", "")
     assert "OR 1=1" not in where
     assert _ids(shapes, 'ar:3:2") OR 1=1 --') == []
-    where, _ = g._build_where("ar:>1;DROP TABLE catalog", "", "", "")
+    where, _ = catalog_search_mod._build_where("ar:>1;DROP TABLE catalog", "", "", "")
     assert "DROP" not in where
 
 
