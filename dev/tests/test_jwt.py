@@ -881,8 +881,8 @@ def test_the_renew_tick_rides_the_scheduler_heartbeat_and_adds_no_thread():
     """No timer thread of its own: it joins the one sixty-second heartbeat, outside the
     standing order's try/continue chain, gated like _update_check_tick and _contest_win_tick."""
     import inspect
-    from moonglade import gallery as g
-    src = inspect.getsource(g.create_app)
+    from moonglade import web_threads as web_threads_mod  # the scheduler left create_app (split phase 4)
+    src = inspect.getsource(web_threads_mod)
     loop = src[src.index("def _scheduler_loop():"):]
     body = loop[:loop.index("threading.Thread(target=_scheduler_loop")]
     assert "\n            _mirror_renew_tick()" in body

@@ -634,8 +634,8 @@ class TestNoCredentialLeaks:
     def test_the_tick_log_line_carries_only_the_road_and_the_days(self):
         """The gallery's background line prints a fixed road word and days left -- never the
         token (its arguments are read off the renewal record and jwt_days_left)."""
-        from moonglade import gallery as g
-        src = inspect.getsource(g.create_app)
+        from moonglade import web_threads as web_threads_mod  # left create_app (split phase 4)
+        src = inspect.getsource(web_threads_mod)
         tick = src[src.index("def _mirror_renew_tick():"):]
         tick = tick[:tick.index("\n    def ", 10)]
         assert "via %s" in tick and 'get("last_road")' in tick

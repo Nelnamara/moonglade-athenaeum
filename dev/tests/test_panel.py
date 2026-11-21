@@ -1566,7 +1566,8 @@ def test_the_release_check_rides_the_schedulers_own_tick():
     chain does is `continue` when no automated task is enabled, which is the default on every
     install -- inside it, the release check would never run for almost anybody."""
     import inspect
-    src = inspect.getsource(g.create_app)
+    from moonglade import web_threads as web_threads_mod  # the scheduler left create_app (split phase 4)
+    src = inspect.getsource(web_threads_mod)
     loop = src[src.index("def _scheduler_loop():"):]
     loop = loop[:loop.index("def ", 40)]
     body = loop[:loop.index("threading.Thread(target=_scheduler_loop")]

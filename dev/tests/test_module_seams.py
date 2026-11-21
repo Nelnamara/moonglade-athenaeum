@@ -348,6 +348,10 @@ SEAMS = {
     # hook, the CSRF and session checks, the page shells), the same way: one register(app, ctx),
     # and no gallery attribute moved.
     "moonglade.routes_gate": {"from": "moonglade.gallery", "names": []},
+    # Split phase 4: the background block (the Control Panel's job runner, the job log, the
+    # schedule and its thread, the watch and its threads, the export job's state), the same
+    # way: one register(app, ctx), and no gallery attribute moved.
+    "moonglade.web_threads": {"from": "moonglade.gallery", "names": []},
 }
 
 # Every file under dev/ (the suite and the tools) that reads an old module's source, and which
@@ -365,7 +369,7 @@ SOURCE_READERS = {
     "tests/test_cli_doc_coverage.py": ("moonglade.backup",),
     "tests/test_community_surface.py": ("moonglade.backup",),
     "tests/test_config_path_routing.py": ("moonglade.backup",),
-    "tests/test_contest_wins.py": ("moonglade.backup", "moonglade.gallery"),
+    "tests/test_contest_wins.py": ("moonglade.backup",),   # its scheduler read: web_threads
     "tests/test_create_door.py": ("moonglade.backup",),
     "tests/test_csrf_coverage.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_design_kit_sync.py": ("moonglade.gallery",),
@@ -377,7 +381,7 @@ SOURCE_READERS = {
     "tests/test_full_meta_rest_fallback.py": ("moonglade.backup",),
     "tests/test_gen_surface.py": ("moonglade.backup",),   # its Loom read is routes_loom's now
     "tests/test_history_feed_document.py": ("moonglade.backup", "moonglade.gallery"),
-    "tests/test_jwt.py": ("moonglade.backup", "moonglade.gallery"),
+    "tests/test_jwt.py": ("moonglade.backup",),   # its scheduler read is web_threads' now
     "tests/test_library_dir.py": ("moonglade.gallery",),
     "tests/test_living_library.py": ("moonglade.backup", "moonglade.gallery"),
     "tests/test_logging.py": ("moonglade.gallery",),
@@ -389,7 +393,6 @@ SOURCE_READERS = {
     "tests/test_outside_notice.py": ("moonglade.gallery",),
     "tests/test_pack_file_name.py": ("moonglade.gallery",),
     "tests/test_pack_file_type.py": ("moonglade.gallery",),
-    "tests/test_panel.py": ("moonglade.gallery",),
     "tests/test_pixai_client.py": ("moonglade.backup",),
     "tests/test_module_seams.py": ("moonglade.backup", "moonglade.gallery"),   # every module
     "tests/test_rest_delete_and_renewal.py": ("moonglade.backup", "moonglade.gallery"),
@@ -407,7 +410,6 @@ SOURCE_READERS = {
     "tests/test_unclear_single_sends.py": ("moonglade.backup",),
     "tests/test_updater.py": ("moonglade.gallery",),
     "tests/test_video_tsubaki.py": ("moonglade.backup",),
-    "tests/test_watch.py": ("moonglade.gallery",),
     "tests/test_web_auth.py": ("moonglade.backup",),
     "tools/export_design_kit.py": ("moonglade.gallery",),     # reads DESIGN_TOKENS_CSS by path
     "tools/split_names.py": ("moonglade.backup", "moonglade.gallery"),   # the move proof's sweep
@@ -417,7 +419,8 @@ SOURCE_READERS = {
     "loom/test/mg-art-filters.test.js": ("moonglade.gallery",),
     "loom/test/mg-notify-queue-phase.test.js": ("moonglade.gallery",),
     "loom/test/mg-notify-website-source.test.js": ("moonglade.gallery",
-                                                   "moonglade.routes_generate"),
+                                                   "moonglade.routes_generate",
+                                                   "moonglade.web_threads"),
     "loom/test/phone-back-layers.test.js": ("moonglade.gallery", "moonglade.routes_gate"),
     "loom/test/video-roster-parity.test.js": ("moonglade.gen_params",),
 }
@@ -1375,6 +1378,34 @@ SOURCE_READERS_REVIEWED = {
         "tests/test_settings_store.py", "tests/test_setup_prepare.py",
         "tests/test_task_model_detail_document.py", "tests/test_telemetry.py",
         "tests/test_updater.py", "tests/test_watch.py", "tools/export_design_kit.py")),
+    # Split phase 4: the background block -> moonglade.web_threads. Readers of the moved text now
+    # read it there: test_watch (the mirror's collect branch, the catch-up), test_contest_wins,
+    # test_jwt, test_panel, test_rest_delete_and_renewal and test_updater (the scheduler loop and
+    # its ticks), mg-notify-website-source.test.js (the website-run labels; _LOOM_SHELL stayed),
+    # and test_living_library, whose pins read create_app and web_threads together;
+    # test_outside_notice's "create_app never starts it" covers the moved block too; the absence
+    # and coverage readers the earlier moves widened read web_threads too. The rest read code that
+    # did not move (main, _LOOM_SHELL, the palettes and DESIGN_TOKENS_CSS, the routes, create_app's
+    # setup), or reach the moved code through a built app, not its text.
+    *((_r, "moonglade.web_threads") for _r in (
+        "loom/test/mg-art-filters.test.js", "loom/test/mg-notify-queue-phase.test.js",
+        "loom/test/mg-notify-website-source.test.js", "loom/test/phone-back-layers.test.js",
+        "tests/test_app_paths.py", "tests/test_artworks_adhoc.py", "tests/test_bonjour.py",
+        "tests/test_branding.py", "tests/test_branding_tree_rules.py",
+        "tests/test_catalog_verbs.py", "tests/test_catchup_query.py", "tests/test_csrf_coverage.py",
+        "tests/test_design_kit_sync.py", "tests/test_doc_truth_residuals.py",
+        "tests/test_enhance.py", "tests/test_evidence_counters.py",
+        "tests/test_first_party_sources.py", "tests/test_history_feed_document.py",
+        "tests/test_library_dir.py", "tests/test_living_library.py", "tests/test_logging.py",
+        "tests/test_loom_notify.py", "tests/test_loom_p_routes.py", "tests/test_media_tools.py",
+        "tests/test_module_seams.py", "tests/test_move_edges.py", "tests/test_network.py",
+        "tests/test_outside_notice.py", "tests/test_pack_file_name.py",
+        "tests/test_pack_file_type.py", "tests/test_rest_delete_and_renewal.py",
+        "tests/test_security_review_fixes.py", "tests/test_server_one_module.py",
+        "tests/test_server_stop_record.py", "tests/test_settings_store.py",
+        "tests/test_setup_prepare.py", "tests/test_task_model_detail_document.py",
+        "tests/test_telemetry.py", "tests/test_tsubaki3_image_gate.py", "tests/test_updater.py",
+        "tools/export_design_kit.py", "tools/split_names.py")),
 }
 
 

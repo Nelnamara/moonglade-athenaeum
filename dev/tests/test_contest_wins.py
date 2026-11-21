@@ -26,6 +26,7 @@ from moonglade import gallery as g
 from tests.conftest import login_client, record_own_sleeps
 from moonglade import telemetry as telemetry_mod
 from moonglade import contest_sync as contest_sync_mod
+from moonglade import web_threads as web_threads_mod
 
 DAY = 86400.0
 T0 = 1790000000.0                       # a result time (2026-09-21, UTC); only differences matter
@@ -589,7 +590,7 @@ class TestAlreadyRecordedWins:
 
 class TestTheHeartbeat:
     def test_it_rides_the_schedulers_own_tick_and_adds_no_thread_of_its_own(self):
-        src = inspect.getsource(g.create_app)
+        src = inspect.getsource(web_threads_mod)  # the scheduler left create_app (split phase 4)
         loop = src[src.index("def _scheduler_loop():"):]
         body = loop[:loop.index("threading.Thread(target=_scheduler_loop")]
         assert "\n            _contest_win_tick()" in body

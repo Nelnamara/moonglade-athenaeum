@@ -35,6 +35,7 @@ from tests.fake_pixai import FakePixAI
 from moonglade import jobs as jobs_mod
 from moonglade import updater as updater_mod
 from moonglade import living as living_mod
+from moonglade import web_threads as web_threads_mod
 
 SRC = Path(__file__).resolve().parents[2]
 DAY = 86400.0
@@ -42,6 +43,13 @@ DAY = 86400.0
 # 90-day tier is an age test, so a `now` in the past would make every row read as young and
 # a short-circuit test would pass for entirely the wrong reason.
 NOW = 1_800_000_000.0            # 2027-01-15
+
+
+def _app_src():
+    """create_app's text and the background block split out of it into
+    moonglade/web_threads.py (split phase 4): the pins below read the scheduler, the ticks and
+    the routes together, as they did when all of it was create_app."""
+    return inspect.getsource(g.create_app) + inspect.getsource(web_threads_mod)
 
 
 def _iso(days_ago):
@@ -214,7 +222,7 @@ def _runnable(tmp_path):
     """The real _living_runnable closure out of a real create_app -- the one place the
     automation policy lives, reached the way the loop reaches it."""
     app = create_app(tmp_path)
-    src = inspect.getsource(g.create_app)
+    src = _app_src()
     assert "def _living_runnable(action):" in src
     return app
 
@@ -434,7 +442,7 @@ def test_the_very_first_sweep_walks_everything_and_then_goes_quiet(tmp_path, mon
     feed.fetched = 0
     second = living_mod.artworks_sweep(tmp_path, tmp_path / "catalog.db", force=True, now=now + 900)
     assert second["deep"] is False and feed.fetched == living_mod.ARTWORKS_GRACE
-    assert "artworks_deep_at" in inspect.getsource(g.create_app)
+    assert "artworks_deep_at" in _app_src()
 
 
 def test_the_forty_eight_hour_deep_pass_walks_the_whole_history(tmp_path, monkeypatch):
@@ -585,7 +593,7 @@ def test_the_sweep_has_all_four_triggers_wired(tmp_path):
     be driven -- it is a thread create_app starts only when the background gate is open,
     which is exactly what the suite closes so no test can reach PixAI -- so it stays a
     wiring assertion, deliberately and for a stated reason."""
-    src = inspect.getsource(g.create_app)
+    src = _app_src()
     assert "_artworks_sync_startup" in src and "ARTWORKS_STARTUP_DELAY" in src
     assert "threading.Thread(target=_artworks_sync_startup" in src
 
@@ -637,7 +645,7 @@ def test_the_publish_kick_fires_for_unpublish_and_retag_too(tmp_path, monkeypatc
         assert living_mod._artworks_state["kicks"] == before + 1, \
             "%s must re-read PixAI's own list back" % body["action"]
     # the kick is the SHARED one, so it defers exactly as every other trigger does
-    src = inspect.getsource(g.create_app)
+    src = _app_src()
     publish = src[src.index("def api_myart_publish():"):]
     publish = publish[:publish.index("def _lineage_card(")]
     assert (publish.index("_artworks_kick(force=True, scheduled=True)")
@@ -778,7 +786,7 @@ def test_only_run_now_leaves_a_sweep_row_the_browser_will_toast(tmp_path, monkey
     # THE BOOT KICK and THE PUBLISH KICK -- read, narrowly, for the one argument that is
     # the whole point. Starting the app is not asking for a sweep, and neither is pressing
     # Publish: the owner has the publish's own answer in front of him already.
-    src = inspect.getsource(g.create_app)
+    src = _app_src()
     boot = src[src.index("def _artworks_sync_startup():"):]
     boot = boot[:boot.index("# MOONGLADE_DISABLE_WATCH=1 skips auto-start")]
     assert "_artworks_kick(force=False, scheduled=True)" in boot
@@ -793,7 +801,7 @@ def test_the_living_tick_rides_the_existing_sixty_second_loop_and_adds_no_thread
     exactly as the release check already does, and for the same reason it must sit OUTSIDE
     the schedule's own try/continue chain: that chain's first `continue` is "no standing
     order", which is the default on every install."""
-    src = inspect.getsource(g.create_app)
+    src = _app_src()
     loop = src[src.index("def _scheduler_loop():"):]
     loop = loop[:loop.index("def ", 40)]
     body = loop[:loop.index("threading.Thread(target=_scheduler_loop")]
@@ -860,7 +868,7 @@ def test_the_tick_starts_at_most_one_job_and_never_doubles_the_standing_order(tm
     assert started == [["--reconcile-deleted"]], \
         "the list must step over the action the standing order owns"
 
-    src = inspect.getsource(g.create_app)
+    src = _app_src()
     tick_src = src[src.index("def _living_tick():"):src.index("def _scheduler_loop():")]
     assert "if _update_busy():" in tick_src, "an update mid-flight must hold the list off"
 
@@ -909,7 +917,7 @@ def test_a_scheduled_metadata_refresh_does_not_read_view_counts(tmp_path):
     assert started == [["--sync-artworks"]], "a Run now click must still read views"
 
     # the scheduled paths: the same action, quietly
-    src = inspect.getsource(g.create_app)
+    src = _app_src()
     run = src[src.index("def _panel_run(action"):src.index("def _update_busy():")]
     assert 'action_args = action_args + list(spec.get("scheduled_args") or [])' in run
     assert '"scheduled_args": ["--no-views"]' in src, \
@@ -984,7 +992,7 @@ def test_the_backfill_chain_is_a_property_of_the_action_not_of_who_started_it(tm
 
     All three trigger paths now look the follow-on up from the same table."""
     create_app(tmp_path)
-    src = inspect.getsource(g.create_app)
+    src = _app_src()
     lookup = 'then=_living.LIVING_BY_ACTION.get(action, {}).get("then")'
     run_route = src[src.index("def api_panel_run():"):]
     run_route = run_route[:run_route.index("def _close_orphan_if_resolved(")]
@@ -1034,7 +1042,7 @@ def test_the_manual_click_really_starts_the_follow_on_job(tmp_path):
 def test_the_backfill_chain_only_follows_a_sync_that_actually_succeeded():
     """"Backfill phash after each Sync". After -- and only after a clean finish: chaining
     onto a failed sync is just a second failure."""
-    src = inspect.getsource(g.create_app)
+    src = _app_src()
     reader = src[src.index("def _panel_reader(proc, then=None):"):]
     reader = reader[:reader.index("def _panel_run(")]
     assert 'if then and status == "done":' in reader
@@ -1108,7 +1116,7 @@ def test_no_living_job_path_can_reach_the_librarys_own_loaders():
         src = inspect.getsource(fn)
         for name in banned:
             assert name not in src, "%s reaches for %s" % (fn.__name__, name)
-    app_src = inspect.getsource(g.create_app)
+    app_src = _app_src()
     for start, end in (("def _living_tick():", "def _scheduler_loop():"),
                        ("def _artworks_kick(force=False, scheduled=False):", "def _living_run(action):"),
                        ("def _living_run(action):", "# Read ONCE, here")):
@@ -1338,7 +1346,7 @@ def test_the_scheduled_paths_defer_the_same_way_the_manual_click_does(tmp_path):
     False from _panel_run is already "the slot was taken, try again next tick" to both
     schedulers, so they retry rather than stamp last_run and go quiet."""
     create_app(tmp_path)
-    src = inspect.getsource(g.create_app)
+    src = _app_src()
     run = src[src.index("def _panel_run(action"):]
     run = run[:run.index("def _update_busy():")]
     assert ("if action in _living.ARTWORKS_TOUCHING_ACTIONS and _living.artworks_sweep_in_flight():\n"
@@ -1379,7 +1387,7 @@ def test_the_ticks_first_kick_does_not_repeat_the_boot_sweep():
     # only a CLEAN finish stamps `at`, so a run of failing sweeps can never read as fresh
     living_mod._artworks_state["at"] = 0.0
     assert living_mod.artworks_sweep_fresh(living_mod.ARTWORKS_SWEEP_S, now) is False
-    tick = inspect.getsource(g.create_app)
+    tick = _app_src()
     tick = tick[tick.index("def _living_tick():"):]
     tick = tick[:tick.index("def _scheduler_loop():")]
     # ...and it SKIPS rather than stamps: last_run must keep meaning "when this job last
@@ -1540,7 +1548,7 @@ def test_the_defer_check_confirms_the_standing_order_can_actually_run_the_job(tm
     cat = {c["action"]: c for c in cli.get("/api/panel/schedule").get_json()["catalog"]}
     assert cat["resync-full"]["deferred"] is False, \
         "a standing order that refuses the job must not be shown as running it"
-    src = inspect.getsource(g.create_app)
+    src = _app_src()
     tick = src[src.index("def _living_tick():"):src.index("def _scheduler_loop():")]
     assert "_standing_action(s)" in tick, \
         "the tick must ask whether the standing order can run the job, not only its name"
@@ -1564,7 +1572,7 @@ def test_a_row_the_standing_order_owns_says_so_instead_of_a_cadence_it_is_not_ru
     cli.post("/api/panel/schedule", json={"enabled": False})
     cat = {c["action"]: c for c in cli.get("/api/panel/schedule").get_json()["catalog"]}
     assert cat["sync"]["deferred"] is False
-    tick = inspect.getsource(g.create_app)
+    tick = _app_src()
     tick = tick[tick.index("def _living_tick():"):]
     tick = tick[:tick.index("def _scheduler_loop():")]
     assert "standing = _standing_action(s)" in tick

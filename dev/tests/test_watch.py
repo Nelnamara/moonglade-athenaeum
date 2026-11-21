@@ -321,7 +321,8 @@ def test_mirror_and_reconcile_agree_on_what_done_means():
     ROW the frames produce, while this pins the one line that decides whether the FILE gets
     collected at all -- a branch whose failure mode is silence, not a wrong row."""
     import pathlib as _p
-    src = _p.Path(__file__).resolve().parents[2] / "moonglade" / "gallery.py"
+    # The watch left create_app for moonglade/web_threads.py (split phase 4).
+    src = _p.Path(__file__).resolve().parents[2] / "moonglade" / "web_threads.py"
     text = src.read_text(encoding="utf-8")
 
     i = text.index("def _watch_on_event(ev):")
@@ -353,7 +354,8 @@ def test_catchup_sweep_is_bounded_rate_limited_and_off_thread():
     actually run. _watch_catchup is invoked only from a background thread the suite never starts
     (MOONGLADE_DISABLE_WATCH), so both angles are worth keeping."""
     import pathlib as _p
-    src = _p.Path(__file__).resolve().parents[2] / "moonglade" / "gallery.py"
+    # The watch left create_app for moonglade/web_threads.py (split phase 4).
+    src = _p.Path(__file__).resolve().parents[2] / "moonglade" / "web_threads.py"
     text = src.read_text(encoding="utf-8")
 
     assert "def _watch_catchup(reason):" in text

@@ -168,6 +168,8 @@ def test_the_look_is_a_real_starts_and_off_the_request_path():
     assert "_outside_prime()" in src
     assert src.index("_outside_prime()") > src.index("_make_server(args.host")
     assert "_outside_prime" not in inspect.getsource(g.create_app)
+    from moonglade import web_threads as web_threads_mod     # create_app's background block
+    assert "_outside_prime" not in inspect.getsource(web_threads_mod)
     started = []
 
     class T:
