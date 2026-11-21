@@ -235,7 +235,6 @@ def make_video_thumbnail(video_path, thumb_path):
     availability probe, one place that owns the no-window flag, the timeouts and the
     "never raises" rule. This used to run its own uncached shutil.which() per file
     and two differently-shaped subprocess.run() calls."""
-    from moonglade import backup as core
     import tempfile
     if Image is None or not _media_tools.ffmpeg_path():
         return False
@@ -274,7 +273,6 @@ def probe_has_audio(path, timeout=None):
     is the two-way one, so the unanswerable case reads as silent -- deliberately, and in
     this one place rather than at each of the export's own branches. `timeout=None` takes
     media_tools' probe policy; the number does not live here any more."""
-    from moonglade import backup as core
     return bool(_media_tools.has_audio(path, timeout=timeout))
 
 
@@ -285,7 +283,6 @@ def probe_duration(path, timeout=None):
     Gallery-side face of moonglade.backup's `media_tools.duration` -- see it for why
     there is only one implementation of this question now, and why it answers at full
     precision. `timeout=None` takes media_tools' probe policy."""
-    from moonglade import backup as core
     return _media_tools.duration(path, timeout=timeout)
 
 

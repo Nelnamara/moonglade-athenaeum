@@ -447,7 +447,6 @@ def register(app, ctx):
         """Append a job event to the library's jobs.jsonl (_moonglade/records/) for the Jobs card. Fails soft --
         activity logging must never break the request that triggered it."""
         try:
-            from moonglade import backup as _core
             _jobs.append_job_event(out_dir, job_id, **fields)
         except Exception:
             pass
@@ -756,7 +755,6 @@ def register(app, ctx):
             return
         try:
             import logging as _logging
-            from moonglade import backup as _core
             out = _mirror.mirror_renew_tick()
             _log = _logging.getLogger(__name__)
             if out == "renewed":
@@ -1087,7 +1085,6 @@ def register(app, ctx):
         cannot raise into _watch_mirror's daemon thread: mirroring must never break,
         or lose its 'mirrored' count, because logging did."""
         try:
-            from moonglade import backup as _core
             mids = (got or {}).get("media_ids") or []
             if not mids:
                 return
@@ -1164,7 +1161,6 @@ def register(app, ctx):
         THIS function exactly -- what changed on 2026-09-07 is that a website run now HAS a
         row by the time this runs, written by _website_job_seen below off the same event.
         So this closes a website row without knowing or caring that it is one."""
-        from moonglade import backup as core
         try:
             term = "failed" if ws_status in _task_reads._GEN_FAIL else "done"
             j = next((x for x in _jobs.read_jobs(out_dir)
@@ -1261,7 +1257,6 @@ def register(app, ctx):
 
         Fails soft. This runs on the WebSocket's own event loop and in the catch-up's daemon
         thread, and neither may die because logging did."""
-        from moonglade import backup as core
         try:
             tid = str(tid or "")
             if not tid:
@@ -1607,7 +1602,6 @@ def register(app, ctx):
         with it."""
         import logging as _logging
         import time as _time
-        from moonglade import backup as core
         _log = _logging.getLogger(__name__)
         _watch_inbox(ev)
         if ev.get("__meta__") == "subscribed":

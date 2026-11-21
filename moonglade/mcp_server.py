@@ -336,7 +336,6 @@ def tag_suggest(media_id: str) -> dict:
     seed a search. FREE and read-only -- no credits, no mutation -- but it is the first
     tool that reaches the PixAI ACCOUNT, so it needs the session (config.json's
     PIXAI_API_KEY). Returns {media_id, suggestions:[...]} or {..., error} on failure."""
-    from moonglade import backup as mb
     try:
         out = _account_api.suggest_prompt(_session(), str(media_id))
     except Exception as e:

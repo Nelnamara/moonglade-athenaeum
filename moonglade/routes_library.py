@@ -463,7 +463,6 @@ def register(app, ctx):
         import zipfile
         import shutil
         import tempfile
-        from moonglade import backup as core
         # Two entry points: a curated SELECTION (media_ids from the grid) or a whole
         # COLLECTION by name. For a collection we resolve its FULL membership here in SQL
         # (up to the same 2000 cap) rather than trusting the rendered checkboxes -- "download
@@ -1352,7 +1351,6 @@ def register(app, ctx):
         tiers (media_id/thumb/dims/rating/date/path/bucket/size/is_keeper) so the client
         never has to special-case by matchType."""
         from moonglade.catalog_verbs import find_image_file, rows_for_media_ids
-        from moonglade import backup as core
 
         def _member(mid, row, path, bucket, size, is_keeper):
             from moonglade.catalog import is_archive_only
@@ -1941,7 +1939,6 @@ def register(app, ctx):
         window is exactly N local days and the empty days / `next_before` cursor are
         deterministic (and pytest-able) rather than a client-side guess."""
         from moonglade.catalog_verbs import history_created_ats, history_page
-        from moonglade import backup as core
         from collections import Counter
         from datetime import datetime, timedelta, timezone
         try:

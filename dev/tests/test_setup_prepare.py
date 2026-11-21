@@ -346,7 +346,7 @@ def test_the_mcp_server_never_logs_to_stdout(r, monkeypatch):
                  if isinstance(h, logging.StreamHandler)
                  and getattr(h, "stream", None) in (channel, sys.__stdout__)]
     assert on_stdout == [], "a root-logger handler writes to the MCP's stdout"
-    logging.getLogger("moonglade.gallery").warning("migration deferred: locked")
+    logging.getLogger("moonglade.catalog").warning("migration deferred: locked")
     logging.getLogger("some.library").error("a third-party error")
     assert channel.getvalue() == ""
 

@@ -112,7 +112,6 @@ def _upscale_const_js():
     since the classic cut (2026-08-08) removed the INDEX/DETAIL pages it was
     originally built for.
     """
-    from moonglade import backup as core
     return ("<script nonce=\"__CSP_NONCE__\">window.MG_UPSCALE={};window.MG_LORA={};</script>".format(
         json.dumps({
             "enlargeModels": list(_gen_params.ENLARGE_MODELS),

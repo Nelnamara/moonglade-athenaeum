@@ -185,7 +185,6 @@ def register(app, ctx):
         import tempfile
         import shutil
         from types import SimpleNamespace
-        from moonglade import backup as core
         # Finding 9: one request is at most IMPORT_REQUEST_MAX_BYTES (the page's batches stay
         # far under it), and everything its zips unpack shares one ZIP_MAX_TOTAL_BYTES budget.
         request.max_content_length = IMPORT_REQUEST_MAX_BYTES

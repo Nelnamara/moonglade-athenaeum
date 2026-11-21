@@ -346,7 +346,6 @@ def register(app, ctx):
         Returns a set of media ids. Called BEFORE the cloud delete fires -- afterwards the
         generation record is gone and there is nothing left to read."""
         from moonglade.catalog_verbs import mark_cloud_deleted
-        from moonglade import backup as core   # lazy: avoid import cycle
         keep = {str(r["media_id"]) for r in rows
                 if str(r.get("cloud_deleted_at") or "").strip()}
         try:

@@ -1817,7 +1817,6 @@ def main():
                 # told first_sync_complete() the first sync was done when most of the library
                 # was still missing. Now the flag means what its name says.
                 try:
-                    from moonglade import gallery as _mg
                     if _sync.walk_end_reached(out):
                         _telemetry.telem_flag("first_sync_done", out_dir=out)
                 except Exception:

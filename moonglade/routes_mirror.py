@@ -41,7 +41,6 @@ def register(app, ctx):
         the token's own life, never iat to exp) and `renewal` (core.mirror_renewal_status: ok,
         failed, paused, expired, off), so the tile warns only when a renewal actually failed
         or cannot run, not whenever the token sits in its normal renewal window."""
-        from moonglade import backup as core
         state = _mirror.load_mirror_state()
         jwt = (state.get("jwt") or "")
         left_s, span_s = _mirror.mirror_token_span(state)
@@ -59,7 +58,6 @@ def register(app, ctx):
         is in the same trust class as /api/setup/save-key and /api/branding/shortcut -- a
         logged-in LAN session must not be able to flip the owner's every generation onto the
         browser JWT. settings.json is written whole under its own lock (moonglade.settings)."""
-        from moonglade import backup as core
         want = bool((request.get_json(silent=True) or {}).get("enabled"))
         # [MAJOR] Only ARM (true-write) when a usable browser JWT actually exists: arming the
         # mirror with no live session lets every Bridge/enhance submit hit the mirror-ON gate,

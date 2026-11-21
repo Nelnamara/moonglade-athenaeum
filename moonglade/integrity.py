@@ -316,7 +316,6 @@ def _thumbless(path):
     """True for a picture the thumbnailer cannot draw (an SVG, or a type this Pillow does not
     open): it has no thumbnail by design, so none is checked for, reported or rebuilt (3.21.2,
     L3)."""
-    from moonglade import gallery as g                     # lazy: the thumbnailer's own rule
     return not _thumbs.thumbnail_renders(path)
 
 
@@ -601,7 +600,6 @@ def set_mark(out_dir, media_id, mark):
 def reconciled_at(out_dir):
     """When the last reconcile (moonglade.backup.run_reconcile_deleted) rewrote the
     archive-only flags, or None before the first stamped one."""
-    from moonglade import backup as core                  # lazy, like _write_atomic's
     try:
         doc = json.loads(_paths.records_path(out_dir, _library_runs.RECONCILE_STAMP, make=False)
                          .read_text(encoding="utf-8"))
@@ -655,7 +653,6 @@ def broken_list(out_dir, db_path, avg_bytes=None):
               redownload_bytes, an estimate (the cut-short file's own size or the library's
               average file size, `avg_bytes`, whichever is larger), None without an average.
     """
-    from moonglade import gallery as g                     # lazy: the catalog verbs
     out = Path(out_dir)
     summary = read_summary(out)
     lines = [ln for ln in read_lines(out) if ln[1] in LIST_KIND]
@@ -853,7 +850,6 @@ def missing_target(out_dir, row):
       5. a file name that carries this row's media id, so the file is found as this picture
          again and never lands under another picture's name.
     "occupied": something is already at that path. It is never overwritten."""
-    from moonglade import gallery as g
     mid = str(row.get("media_id") or "").strip()
     raw = str(row.get("filename") or "").strip().replace("\\", "/")
     if not mid or not raw or "\x00" in raw or ":" in raw or raw.startswith("/"):

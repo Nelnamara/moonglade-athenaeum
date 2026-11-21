@@ -83,7 +83,6 @@ def _fold(s):
 
 def export_curation(db_path, now=None):
     """The library's curation as a deterministic dict (see the module docstring)."""
-    from moonglade import gallery as g
     raw = _curation.curation_rows(db_path)
     items = {}
 
@@ -147,7 +146,6 @@ def load(path):
 
 def _validate(doc):
     """The document, cleaned through the catalog's own rules, or CurationIOError."""
-    from moonglade import gallery as g
     if not isinstance(doc, dict) or doc.get("format") != FORMAT:
         raise CurationIOError("This is not a Moonglade curation file.")
     if doc.get("version") != VERSION:
@@ -241,7 +239,6 @@ def import_curation(db_path, doc, apply=False, overwrite=False):
     """Apply (or, by default, plan) a curation document against this catalog. Returns the
     report: what would change / changed, the unknown media ids, what was skipped and why,
     and the pre-import snapshot's file name (apply only)."""
-    from moonglade import gallery as g
     items, order, smart = _validate(doc)
     db_path = Path(db_path)
 

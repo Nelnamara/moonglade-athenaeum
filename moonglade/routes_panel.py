@@ -191,7 +191,6 @@ def register(app, ctx):
                        for k, v in PANEL_ACTIONS.items()]
         actions = [a for a, (k, v) in zip(all_actions, PANEL_ACTIONS.items())
                   if v.get("panel_visible", True) and (panel_is_local or not v["destructive"])]
-        from moonglade import backup as core
         session.setdefault("csrf", secrets.token_hex(16))
         try:
             _branding.sweep_branding_drops(out_dir)   # see api_branding()'s own GET for why
@@ -267,7 +266,6 @@ def register(app, ctx):
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
-        from moonglade import backup as core
         username = str(body.get("username") or "").strip()
         password = str(body.get("password") or "")
         confirm = str(body.get("confirm") or "")
@@ -325,7 +323,6 @@ def register(app, ctx):
         username = str(body.get("username") or "").strip()
         if username != session.get("user") and not _is_local_request():
             return jsonify({"error": "localhost-only to remove another account"}), 403
-        from moonglade import backup as core
         result = _web_accounts.remove_web_user_guarded(username)
         if result == "not_found":
             return jsonify({"error": "No such account."}), 404
@@ -376,7 +373,6 @@ def register(app, ctx):
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
-        from moonglade import backup as core
         me = session.get("user")
         local = _is_local_request()
         target = str(body.get("username") or "").strip() or me
@@ -462,7 +458,6 @@ def register(app, ctx):
         (moonglade.migrate.library_refusal), since every start would refuse it too.
         """
         from moonglade.gallery import DEFAULT_LIBRARY_DIR, Path, _supervised
-        from moonglade import backup as _core
         if request.method == "GET":
             local = _is_local_request()
             # BOTH path fields are withheld from a non-local caller, not just the first.
@@ -985,7 +980,6 @@ def register(app, ctx):
         action instead of resurrecting it with a new event). Fails soft: the recovery
         itself must succeed even if this bookkeeping doesn't."""
         try:
-            from moonglade import backup as _core
             jobs_by_id, _order, _n = _jobs._reconstruct_jobs(out_dir)
             orig = jobs_by_id.get(tid)
             if orig and not orig.get("dismissed") and orig.get("status") not in _jobs._JOBS_TERMINAL:

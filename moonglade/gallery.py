@@ -394,12 +394,10 @@ def create_app(out_dir: Path):
     # cover these -- it works by asking PixAI about a task id that local jobs do not have.
     # Fails soft: a startup nicety must never be able to stop the server from starting. But it
     # REPORTS the failure rather than swallowing it -- a silent `except: pass` here is how a sweep
-    # that never actually ran would look identical to one with nothing to do. `core` is imported
-    # locally because this module has no module-level alias for it, and there is no module-level
-    # logger either; moonglade.logs.setup_logging() configures the root logger.
+    # that never actually ran would look identical to one with nothing to do. There is no
+    # module-level logger either; moonglade.logs.setup_logging() configures the root logger.
     import logging as _logging
     try:
-        from moonglade import backup as _core
         _swept = _jobs.resolve_interrupted_local_jobs(out_dir)
         if _swept:
             _logging.getLogger(__name__).info(
@@ -414,7 +412,6 @@ def create_app(out_dir: Path):
     # so restarting the server doesn't silently log everyone out. See
     # _is_authorized_request() below for the gate this session backs, and
     # /login /logout for the routes that populate it.
-    from moonglade import backup as _core_auth
     app.secret_key = _web_accounts.get_or_create_secret_key()
     app.config["SESSION_COOKIE_HTTPONLY"] = True   # JS can never read the session cookie
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"   # blocks cross-site POST/nav CSRF vectors

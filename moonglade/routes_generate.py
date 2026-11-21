@@ -76,11 +76,10 @@ def register(app, ctx):
     _scene_pending_lock = threading.Lock()
 
     # The 6 Bridge-Enhance presets, mapped workflow_name -> preset key, computed once at
-    # app-creation (core is imported per-handler, not module-wide, so alias it locally here).
+    # app-creation.
     # _fire_enhance_telemetry uses this at TERMINAL success to record WHICH enhance tool was
     # exercised (enhance_tools) -- never at submit, so a reaped/failed enhance never counts. Only
     # the six known presets map; a non-preset enhance resolves to nothing and records no tool.
-    from moonglade import backup as _mb_bridge
     _BRIDGE_PRESET_KEY_BY_NAME = {
         n: k for n, k in (
             (str(pp.get("workflow_name") or "").strip(), str(pp.get("key") or "").strip())
@@ -158,11 +157,10 @@ def register(app, ctx):
         """A reference video's real length in seconds, or None, for
         referenceVideo.inputVideoDurations (RequestResolver.video_duration): the local
         file's measured length (media_tools.duration on what _find_local_video_file's rule
-        finds), else the catalog's video_duration, else None -- core.make_video_duration_lookup,
+        finds), else the catalog's video_duration, else None -- _gen_params.make_video_duration_lookup,
         the same helper the CLI's --reference-video uses against --out. A pure local read,
         cached per media id for this app's life: /api/price runs it on every keystroke, and
         the quote, the drawer's spend and the Loom's spend all read one cached answer."""
-        from moonglade import backup as core
         if not _video_len_cache:
             _video_len_cache.append(_gen_params.make_video_duration_lookup(out_dir, db_path))
         return _video_len_cache[0](media_id)
@@ -306,9 +304,8 @@ def register(app, ctx):
         _gen_road.repeat_settle(key, state)
 
     def _Reached():
-        """This request thread's spend mark (core.spend_watch): `.v` turns True once the one
+        """This request thread's spend mark (_gen_road.spend_watch): `.v` turns True once the one
         spend request is reached. Observation only; nothing extra is passed to the send."""
-        from moonglade import backup as core
         return _gen_road.spend_watch()
 
     def _send_failed(where, exc, reached, params, key, task_id=None):
@@ -319,7 +316,6 @@ def register(app, ctx):
         unknown -- or the send had already SUCCEEDED (`task_id`) and only the bookkeeping
         after it failed: then the failure is logged and the task id answered as the success
         it is, so the job is registered and the record stays "sent"."""
-        from moonglade import backup as core
         if task_id:
             try:
                 import logging as _logging
@@ -1304,7 +1300,6 @@ def register(app, ctx):
         case this reports it truthfully. Fails soft: price=null when the mirror can't be reached
         (the slab only renders armed, but a price probe must never 500). LOGIN tier; read-only,
         spends nothing."""
-        from moonglade import backup as core
         now = time.time()
         cached = _enh_price_cache["presets"]
         if cached is not None and (now - _enh_price_cache["at"]) < _ENH_PRICE_TTL:
@@ -1450,7 +1445,6 @@ def register(app, ctx):
         LOGIN tier; read-only, spends nothing. Disk/container scans are CODED;
         the emitted URLs keep the PUBLIC /branding/bridge/emotion/ form the
         front-end knows (the /branding/ route translates them back)."""
-        from moonglade import backup as core
         exts = (".webp", ".png", ".jpg", ".jpeg")
         emo_prefix = (_branding._role_rel("emotion") + "/").lower()
         found = {}
@@ -1842,7 +1836,6 @@ def register(app, ctx):
         the Loom's landTake records the clip's true length. None when no complete file is here
         or ffprobe cannot read it. Local only: never PixAI. It never raises: the task IS done,
         and a measurement that went wrong must not turn that answer into a failure or a retry."""
-        from moonglade import backup as core
         try:
             for mid in media_ids or []:
                 vid = _loom_complete_clip(str(mid))
@@ -2009,7 +2002,6 @@ def register(app, ctx):
         it can light the version stamp and say so, and applying is still the Panel's
         Update button and its confirm."""
         from moonglade.gallery import server_notice
-        from moonglade import backup as core
         try:
             _reconcile_orphan_jobs(min_age=_jobs.JOBS_ORPHAN_SWEEP_AGE)
             jobs = _jobs.read_jobs(out_dir)
@@ -2087,7 +2079,6 @@ def register(app, ctx):
     def api_jobs_dismiss():
         """Dismiss one job (job_id) or every finished job (finished:true) from the card --
         this is how a sticky failure gets cleared. Login required (any session, local or LAN)."""
-        from moonglade import backup as core
         body = request.get_json(silent=True) or {}
         if body.get("finished"):
             try:

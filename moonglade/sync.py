@@ -657,7 +657,6 @@ WALK_END_FLAG = "walk_reached_end"
 def walk_end_reached(out_dir):
     """True once some pass over this library has seen pageInfo.hasPreviousPage == False."""
     try:
-        from moonglade import gallery as _mg
         return bool(_telemetry.load_telemetry(out_dir)["flags"].get(WALK_END_FLAG))
     except Exception:
         return False
@@ -666,7 +665,6 @@ def walk_end_reached(out_dir):
 def mark_walk_end_reached(out_dir):
     """Record that a pass walked all the way to the oldest page. Idempotent."""
     try:
-        from moonglade import gallery as _mg
         _telemetry.telem_flag(WALK_END_FLAG, out_dir=out_dir)
     except Exception:
         pass

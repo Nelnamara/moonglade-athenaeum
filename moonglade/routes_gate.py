@@ -113,7 +113,6 @@ def register(app, ctx):
         /login credential POST and the local-only first-account bootstrap POST
         below (factored out so the two paths can never drift apart on what a
         session looks like)."""
-        from moonglade import backup as core
         session.clear()
         session["user"] = username
         session["sess_epoch"] = _web_accounts.get_web_user_session_epoch(username)
@@ -140,7 +139,6 @@ def register(app, ctx):
         or the LAN-first-run safety message (no_accounts + NOT is_local)."""
         from moonglade.pages import DESIGN_TOKENS_CSS
         next_url = _safe_next(request.values.get("next", "")) or ""
-        from moonglade import backup as core
         no_accounts = not _web_accounts.list_web_users()
         is_local = _is_local_request()
         # setdefault, NEVER a fresh mint on GET: the front door redirects every
@@ -195,7 +193,6 @@ def register(app, ctx):
         and the classic form must never be distinguishable to an attacker by
         their error text."""
         body = request.get_json(silent=True) or {}
-        from moonglade import backup as core
 
         def _fail(error):
             # Every failed POST rotates the session token, exactly like classic
@@ -307,7 +304,6 @@ def register(app, ctx):
         then navigates to /login. See LoginPage.jsx / App.jsx's logout
         handler."""
         from moonglade.web_policy import SESSION_ABSOLUTE_LIFETIME_S
-        from moonglade import backup as core
         body = request.get_json(silent=True) or {}
         user = session.get("user")
         # ORDER MATTERS, same as logout(): read `user` before any call that
@@ -655,7 +651,6 @@ def register(app, ctx):
         user = session.get("user")
         if user is None:
             return False
-        from moonglade import backup as core
         current_epoch = _web_accounts.get_web_user_session_epoch(user)
         if current_epoch is None or current_epoch != session.get("sess_epoch"):
             session.clear()   # stale/revoked -- drop it so later requests short-circuit above

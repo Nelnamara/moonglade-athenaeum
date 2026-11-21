@@ -410,7 +410,6 @@ def register(app, ctx):
             vid = _find_local_video_file(mid)
             if vid is None:
                 return jsonify({"error": "video file not found locally", "duration": None}), 200
-            from moonglade import backup as core
             _dur = _media_tools.duration(str(vid))   # 2dp is this route's display choice, not the probe's
             return jsonify({"duration": round(_dur, 2) if _dur is not None else None})
         except Exception as e:
@@ -504,7 +503,6 @@ def register(app, ctx):
         vid = _loom_complete_clip(mid)
         if vid is None:
             return jsonify({"error": "that clip is not on this machine"}), 404
-        from moonglade import backup as core
         fdir.mkdir(parents=True, exist_ok=True)
         tag = secrets.token_hex(6)
         raw = fdir / ".raw-{}-{}.png".format(tag, frame)
@@ -1152,7 +1150,6 @@ def register(app, ctx):
         FLAG from media_tools (cmd[0] is core.ffmpeg_path(), set by the caller), so the
         two things that drifted between call sites are still decided in one place."""
         import subprocess, collections, re as _re
-        from moonglade import backup as core
         tpat = _re.compile(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)")
         try:
             proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -1259,7 +1256,6 @@ def register(app, ctx):
             return jsonify({"error": _redact_host_paths(str(e))[:120]}), 500
         dur = None
         try:
-            from moonglade import backup as core
             d = _media_tools.duration(str(_loom_beds_dir(user) / name))
             dur = round(d, 3) if d else None
         except Exception:
@@ -1482,7 +1478,6 @@ def register(app, ctx):
         from moonglade.thumbs import probe_duration, probe_has_audio
         from moonglade.catalog import get_row
         from moonglade.loom_files import loom_bed_audio_graph, loom_bed_windows
-        from moonglade import backup as core
         if not _media_tools.ffmpeg_path():
             return jsonify({"error": "ffmpeg is not on PATH -- install it to export."}), 400
         # ffprobe deliberately is NOT gated here alongside ffmpeg -- media_tools resolves the
@@ -1979,7 +1974,6 @@ def register(app, ctx):
         import time
         import zipfile
 
-        from moonglade import backup as core
         # Finding 9: the upload is capped (LOOM_BUNDLE_REQUEST_MAX_BYTES) and read as the file
         # Werkzeug already spooled it to, never copied whole into memory; a bundle with more
         # than ZIP_MAX_MEMBERS entries is refused before anything is read out of it.

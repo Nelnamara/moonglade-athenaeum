@@ -69,7 +69,6 @@ def _reconcile_one_row_after_move(out_dir, db_path, media_id, row):
     pointing at a keeper that survives elsewhere). No-op if nothing changed, and
     a no-op if the media_id has no surviving file at all (that case is the
     caller's row-delete branch instead, not this function's job)."""
-    from moonglade import backup as core
     matches = _scan.find_files_for_media_id(out_dir, media_id)
     if not matches:
         return
@@ -281,7 +280,6 @@ def _validate_duplicate_pair(out_dir, db_path, match_type, keep, remove):
     linked to the chosen keeper is refused here as a known, documented
     simplification -- resolving it means picking a keeper it IS directly close
     to, not a gap in the detection logic."""
-    from moonglade import backup as core
     out_dir = Path(out_dir)
 
     def _real(entry):

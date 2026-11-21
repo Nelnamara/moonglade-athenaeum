@@ -1044,7 +1044,6 @@ def register(app, ctx):
         if not tasks:
             return
         try:
-            from moonglade import backup as core
             jobs_by_id, _order, _n = _jobs._reconstruct_jobs(out_dir)
             for add in _inbox().task_activity(tasks, jobs_by_id):
                 _log_job(add["job_id"], status="done", type="generate", label=add["label"],

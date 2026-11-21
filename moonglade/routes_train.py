@@ -236,7 +236,6 @@ def register(app, ctx):
         validation -> quota / card -> the lock -> the guard -> the pause switch -> the
         amount -> arm -> one createTrainingTask -> resolve. Single attempt."""
         from moonglade.catalog_verbs import media_dims
-        from moonglade.train_guard import TrainGuard
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
