@@ -448,6 +448,19 @@ def test_one_click_connect_needs_the_token_and_refuses_under_read_only(tmp_path,
     assert not armed.path.exists()
 
 
+def test_one_click_connect_is_refused_from_outside_a_home_network(tmp_path, armed, monkeypatch):
+    """Same refusal as Connect from PixAI and Disconnect: a public address is turned away
+    before the CSRF check, so nothing is read from the browser and nothing is stored."""
+    cli = login_client(tmp_path)
+    monkeypatch.setattr(mirror_mod, "read_browser_jwt", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("no browser read from outside a home network")))
+    r = cli.post(BROWSER_ROUTE, json=with_csrf(cli), environ_base={"REMOTE_ADDR": "8.8.8.8"})
+    assert r.status_code == 403
+    d = r.get_json()
+    assert d["ok"] is False and d["error"] == mirror_mod.SITE_TOKEN_NOT_HOME
+    assert not armed.path.exists() and mirror_mod.load_mirror_state() == {}
+
+
 def test_one_click_connect_runs_a_due_renewal(tmp_path, armed, monkeypatch):
     cli = login_client(tmp_path)
     tok = _in(2)                                   # inside the refresh cushion
