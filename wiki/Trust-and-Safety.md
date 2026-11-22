@@ -136,7 +136,10 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   certificate until you install this PC's certificate on it once; check its fingerprint against
   the one the Control Panel's **LAN discovery** card shows before you install it or go on. That
   certificate can only vouch for this PC's own names and home-network addresses, never for a
-  website. A sign-in lasts at most 30
+  website. It covers this PC under any home-network address and any `.local` name, so a new
+  address from your router does not break it. Its private key stays on this PC, readable only by
+  your Windows account, so keep this PC free of malware: a copied key could pose as other
+  devices on your home network to the phones and Macs that installed the certificate. A sign-in lasts at most 30
   days, however often it is used. **Log Out** signs out the device you pressed it on and
   nothing else — your other devices stay signed in — and it ends that session on the server
   too, so a copy of its cookie stops working with it. If a device is lost, or you think a
