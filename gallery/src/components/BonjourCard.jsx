@@ -122,11 +122,12 @@ export default function BonjourCard({ isLocal }) {
           link in this card -- its fingerprint to check a device's warning or install against. */}
       {st.tls && st.tls !== "off" && st.tls_fingerprint ? (
         <div className="mgcp-tilenote">
-          Other devices open Moonglade at https://. Until a device has this PC's certificate
-          installed, its browser warns. To stop the warning, open{" "}
-          <a href="/moonglade-ca.crt">this PC's certificate</a> on the device and install it once;
-          before you trust it, check that its SHA-256 fingerprint matches this one, read here on
-          this PC: <code style={{ wordBreak: "break-all" }}>{st.tls_fingerprint}</code>
+          Other devices open Moonglade at {url || "this PC's https:// address"}. Until a device
+          has this PC's certificate installed, its browser warns. To stop the warning, open{" "}
+          <a href="/moonglade-ca.crt">this PC's certificate</a> on the device and install it once.
+          On a Mac, add it to the System keychain (the iCloud keychain refuses it), then set it to
+          Always Trust. Before you trust it, check that its SHA-256 fingerprint matches this one,
+          read here on this PC: <code style={{ wordBreak: "break-all" }}>{st.tls_fingerprint}</code>
         </div>
       ) : st.lan_bind && st.tls_problem ? (
         <div className="mgcp-tilenote">Not encrypted on the network: {st.tls_problem}</div>
