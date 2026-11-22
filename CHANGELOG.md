@@ -22,6 +22,7 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 - **The certificate note in Control Panel › LAN discovery names the address.** It said "open Moonglade at https://." with the address missing; it now shows the same address as the row above it. It also says where a Mac takes the certificate: the System keychain, since the iCloud keychain refuses it. The wiki's Mac steps say the same. (2026-11-22)
+- **A visit under a name that isn't this PC's is turned away before the HTTPS step.** With HTTPS on, a plain visit carrying a name the PC doesn't own used to be sent on to https:// at that same name; it now gets the same refusal it gets with HTTPS off, which says Moonglade answers only to this computer's own names and addresses. Visits under the PC's own names are sent to HTTPS as before. (2026-11-22)
 
 ## [3.22.0] - 2026-11-20 — New Roads
 

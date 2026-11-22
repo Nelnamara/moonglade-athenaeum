@@ -340,9 +340,11 @@ def register(app, ctx):
         """The DNS-rebinding guard (moonglade/hostcheck.py): a request whose Host header names
         something that is not this machine is refused with 421 before ANY route runs -- the
         public tier included, because the first-account form on /login is exactly what a
-        rebinding page would reach. Registered before _enforce_front_door so it runs first.
-        IP literals, localhost, this PC's hostname (bare and .local), the advertised Bonjour
-        name and settings.json's allowed_hosts all pass; see hostcheck for why that is safe."""
+        rebinding page would reach. It is the FIRST request hook: it runs ahead of the HTTPS
+        redirect (_send_plain_lan_visits_to_https, so a foreign Host gets 421, never a 307 to
+        https://<that host>) and ahead of _enforce_front_door. IP literals, localhost, this
+        PC's hostname (bare and .local), the advertised Bonjour name and settings.json's
+        allowed_hosts all pass; see hostcheck for why that is safe."""
         from moonglade.gallery import _SERVER_CONTROL
         header = request.environ.get("HTTP_HOST", "")
         try:
@@ -458,8 +460,10 @@ def register(app, ctx):
         redirect (never a cached one: a later start without HTTPS must not be redirected by the
         browser's memory), anything else refused with a sentence naming the address. This PC's
         own loopback keeps plain HTTP in the default mode (TLS_LAN); --https (TLS_ALL) sends
-        every plain visit over. Runs FIRST, ahead of the front door, so a visitor's very first
-        hop is already to https."""
+        every plain visit over. Runs SECOND: right after _refuse_unknown_host (a Host this
+        machine does not own is refused with 421 before any redirect, so this never sends a
+        visitor to https://<a foreign name>), and ahead of the front door, so a known visitor's
+        very first hop is already to https."""
         from moonglade.web_policy import PLAIN_HTTP_REFUSED
         mode = app.config.get("MG_TLS_MODE") or "off"
         if mode not in ("lan", "all") or request.is_secure:
@@ -476,7 +480,11 @@ def register(app, ctx):
             return jsonify({"error": msg}), 403
         return app.response_class(msg, status=403, mimetype="text/plain")
 
-    app.before_request_funcs.setdefault(None, []).insert(0, _send_plain_lan_visits_to_https)
+    # Placed directly after the Host check, not at index 0: an unknown Host is refused before
+    # any redirect (security review intake, 2026-11-20), and the redirect still runs ahead of
+    # _enforce_front_door, which was registered right after the Host check.
+    _hooks = app.before_request_funcs.setdefault(None, [])
+    _hooks.insert(_hooks.index(_refuse_unknown_host) + 1, _send_plain_lan_visits_to_https)
 
     @app.before_request
     def _refuse_cross_origin_writes():
