@@ -232,7 +232,7 @@ def test_delete_tasks_by_media_ids_matches_the_page_route(tmp_path, monkeypatch,
     monkeypatch.setattr(cloud_delete_mod, "delete_task", lambda sess, tid: calls.append(tid))
 
     cli = login_client(tmp_path)
-    d = cli.post("/api/delete-tasks", json={"media_ids": ["m1", "loc"]}).get_json()
+    d = cli.post("/api/delete-tasks", json={"confirm": "DELETE", "media_ids": ["m1", "loc"]}).get_json()
     assert d["ok"] is True and d["job_id"]
     assert d["tasks"] == 1 and d["local_only"] == 1 and d["count"] == 2
 
@@ -251,7 +251,7 @@ def test_delete_tasks_by_task_ids_directly(tmp_path, monkeypatch, pixai):
     monkeypatch.setattr(cloud_delete_mod, "delete_task", lambda sess, tid: calls.append(tid))
 
     cli = login_client(tmp_path)
-    d = cli.post("/api/delete-tasks", json={"task_ids": ["T1", "T1"]}).get_json()
+    d = cli.post("/api/delete-tasks", json={"confirm": "DELETE", "task_ids": ["T1", "T1"]}).get_json()
     assert d["ok"] is True and d["tasks"] == 1 and d["local_only"] == 0
 
     job = _wait_for_delete_job(cli)
@@ -271,7 +271,7 @@ def test_delete_tasks_purge_local_false_leaves_the_library_alone(tmp_path, monke
     monkeypatch.setattr(cloud_delete_mod, "delete_task", lambda sess, tid: calls.append(tid))
 
     cli = login_client(tmp_path)
-    d = cli.post("/api/delete-tasks", json={
+    d = cli.post("/api/delete-tasks", json={"confirm": "DELETE", 
         "media_ids": ["m1", "loc"], "purge_local": False}).get_json()
     assert d["ok"] is True
     assert d["local_only"] == 0, "an import slipped into a cloud-only run"
@@ -322,7 +322,7 @@ def test_bulk_delete_leaves_the_only_copy_left_anywhere_alone(tmp_path, monkeypa
                         lambda sess, tid, **k: _live_task_with_one_deleted())
 
     cli = login_client(tmp_path)
-    assert cli.post("/api/delete-tasks", json={"task_ids": ["T1"]}).get_json()["ok"] is True
+    assert cli.post("/api/delete-tasks", json={"confirm": "DELETE", "task_ids": ["T1"]}).get_json()["ok"] is True
     job = _wait_for_delete_job(cli)
     assert job is not None and job["status"] == "done", job
 
@@ -349,7 +349,7 @@ def test_bulk_delete_marks_the_row_it_kept(tmp_path, monkeypatch, pixai):
                         lambda sess, tid, **k: _live_task_with_one_deleted())
 
     cli = login_client(tmp_path)
-    cli.post("/api/delete-tasks", json={"task_ids": ["T1"]})
+    cli.post("/api/delete-tasks", json={"confirm": "DELETE", "task_ids": ["T1"]})
     assert _wait_for_delete_job(cli)["status"] == "done"
 
     rows = {r["media_id"]: r for r in load_catalog(db)}
@@ -370,7 +370,7 @@ def test_bulk_delete_keeps_a_marked_row_when_the_live_read_fails(tmp_path, monke
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", _blip)
 
     cli = login_client(tmp_path)
-    assert cli.post("/api/delete-tasks", json={"task_ids": ["T1"]}).get_json()["ok"] is True
+    assert cli.post("/api/delete-tasks", json={"confirm": "DELETE", "task_ids": ["T1"]}).get_json()["ok"] is True
     job = _wait_for_delete_job(cli)
     assert job is not None and job["status"] == "done", job
 
@@ -390,7 +390,7 @@ def test_bulk_delete_still_takes_the_whole_task_when_nothing_was_deleted_on_pixa
         "id": "T1", "outputs": {"batch": [{"mediaId": m} for m in ("m1", "m2", "gone")]}})
 
     cli = login_client(tmp_path)
-    cli.post("/api/delete-tasks", json={"task_ids": ["T1"]})
+    cli.post("/api/delete-tasks", json={"confirm": "DELETE", "task_ids": ["T1"]})
     job = _wait_for_delete_job(cli)
     assert job is not None and job["status"] == "done", job
     assert load_catalog(db) == []
@@ -407,7 +407,7 @@ def test_delete_tasks_read_only_refuses_before_the_job_starts(tmp_path, monkeypa
                         lambda *a, **k: pytest.fail("READ_ONLY did not stop the delete"))
 
     cli = login_client(tmp_path)
-    r = cli.post("/api/delete-tasks", json={"media_ids": ["m1"]})
+    r = cli.post("/api/delete-tasks", json={"confirm": "DELETE", "media_ids": ["m1"]})
     assert r.status_code == 403
     assert "READ_ONLY" in (r.get_json().get("error") or "")
     assert not [j for j in cli.get("/api/jobs").get_json()["jobs"]
@@ -417,15 +417,29 @@ def test_delete_tasks_read_only_refuses_before_the_job_starts(tmp_path, monkeypa
 def test_delete_tasks_requires_ids(tmp_path):
     _cloud_batch(tmp_path)
     cli = login_client(tmp_path)
-    assert cli.post("/api/delete-tasks", json={}).status_code == 400
+    assert cli.post("/api/delete-tasks", json={"confirm": "DELETE"}).status_code == 400
 
+
+@pytest.mark.parametrize("body_extra", [{}, {"confirm": "delete"}, {"confirm": ""}, {"confirm": True}])
+def test_delete_tasks_needs_the_typed_confirm_on_the_server(tmp_path, monkeypatch, body_extra):
+    """The typed DELETE is checked here too, not only in the page: no confirm, or a wrong
+    one, is a 400 and no delete job starts (the cloud delete is never reached)."""
+    _cloud_batch(tmp_path)
+    monkeypatch.setattr(cloud_delete_mod, "delete_task",
+                        lambda *a, **k: pytest.fail("a delete ran without the confirm"))
+    cli = login_client(tmp_path)
+    r = cli.post("/api/delete-tasks", json={"media_ids": ["m1"], **body_extra})
+    assert r.status_code == 400
+    assert "DELETE" in (r.get_json().get("error") or "")
+    assert not [j for j in cli.get("/api/jobs").get_json()["jobs"]
+                if j.get("type") == "delete"], "a job was logged for an unconfirmed delete"
 
 def test_delete_tasks_unknown_media_ids_is_a_clean_noop(tmp_path):
     """A selection that resolves to nothing (all ids unknown) answers ok/count=0
     instead of spawning an empty job -- the page route's silent redirect, in JSON."""
     _cloud_batch(tmp_path)
     cli = login_client(tmp_path)
-    d = cli.post("/api/delete-tasks", json={"media_ids": ["ghost"]}).get_json()
+    d = cli.post("/api/delete-tasks", json={"confirm": "DELETE", "media_ids": ["ghost"]}).get_json()
     assert d["ok"] is True and d["count"] == 0 and d["job_id"] is None
 
 

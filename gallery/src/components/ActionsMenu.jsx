@@ -394,7 +394,7 @@ export default function ActionsMenu({
     // it does not replace the guard.
     const typed = window.prompt("This permanently deletes from PixAI. Type DELETE to confirm:");
     if (typed !== "DELETE") { window.alert("Cancelled."); return; }
-    const d = await apiPost("/api/delete-tasks", { media_ids: idsArg });
+    const d = await apiPost("/api/delete-tasks", { media_ids: idsArg, confirm: "DELETE" });
     if (d.error) { toastErr("Not deleted", d.error); return; }
     toastOk("Deleting from PixAI",
       plural(d.count || 0, "file", "files") + " across " + plural(d.tasks || 0, "task", "tasks") +

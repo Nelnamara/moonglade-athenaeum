@@ -147,7 +147,7 @@ def test_bulk_delete_keeps_going_when_one_local_purge_fails(tmp_path, monkeypatc
     monkeypatch.setattr(Path, "replace", _one_bad_file)
 
     client = login_client(tmp_path)
-    client.post("/api/delete-tasks", json={"media_ids": ["300", "400"]})
+    client.post("/api/delete-tasks", json={"confirm": "DELETE", "media_ids": ["300", "400"]})
 
     job = None
     for _ in range(200):
@@ -173,7 +173,7 @@ def test_bulk_delete_async_logs_a_job_that_completes(tmp_path, monkeypatch, pixa
     monkeypatch.setattr(cloud_delete_mod, "delete_task", lambda s, tid: None)
 
     client = login_client(tmp_path)
-    client.post("/api/delete-tasks", json={"media_ids": ["a1"]})
+    client.post("/api/delete-tasks", json={"confirm": "DELETE", "media_ids": ["a1"]})
 
     job = None
     for _ in range(200):
@@ -554,7 +554,7 @@ def test_delete_preview_writes_down_what_pixai_said_so_the_delete_keeps_it(
     monkeypatch.setattr(task_reads_mod, "task_detail_gql", _blip)
 
     assert client.post("/api/delete-tasks",
-                       json={"media_ids": ["k1"]}).get_json()["ok"] is True
+                       json={"confirm": "DELETE", "media_ids": ["k1"]}).get_json()["ok"] is True
     job = None
     for _ in range(300):
         jobs = client.get("/api/jobs").get_json()["jobs"]

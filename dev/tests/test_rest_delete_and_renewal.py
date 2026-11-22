@@ -323,7 +323,7 @@ class TestTheGalleryRoads:
         _one_task_library(tmp_path)
         pixai.on("/task/T1/delete", {"success": True})
         cli = login_client(tmp_path)
-        d = cli.post("/api/delete-tasks", json={"task_ids": ["T1"],
+        d = cli.post("/api/delete-tasks", json={"confirm": "DELETE", "task_ids": ["T1"],
                                                 "purge_local": False}).get_json()
         assert d["ok"] is True
         job = _wait_for_delete_job(cli)
@@ -337,7 +337,7 @@ class TestTheGalleryRoads:
         pixai.on("TaskDetail", {"task": {"id": "T1", "outputs": {"mediaId": "m1"}}})
         pixai.on("/task/T1/delete", {"success": False})
         cli = login_client(tmp_path)
-        assert cli.post("/api/delete-tasks", json={"task_ids": ["T1"]}).get_json()["ok"]
+        assert cli.post("/api/delete-tasks", json={"confirm": "DELETE", "task_ids": ["T1"]}).get_json()["ok"]
         job = _wait_for_delete_job(cli)
         assert job is not None and job["status"] == "failed", job
         assert "1 failed" in (job.get("label") or job.get("error") or "")
