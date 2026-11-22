@@ -7,8 +7,9 @@ epochs that sign a login out everywhere, the timing-safe check, and the command 
 --add-web-user / --remove-web-user / --list-web-users runners. Moved verbatim out of
 moonglade/backup.py in the 3.22 split (phase 4).
 
-`_accounts_lock` stays in the engine, so every writer of AUTH_USERS (these, the gallery's key
-save and the migration) serializes on one lock: it is imported from moonglade.backup inside
+`_accounts_lock` stays in the engine, so every writer of AUTH_USERS (these, the session secret's
+first save, the gallery's key save and the migration) serializes on one lock, across threads and
+across processes: it is imported from moonglade.backup inside
 each function that takes it, at call time, as are `_load_config` and `_save_config`, so a
 test's patch of backup's binding still reaches them and importing this module never imports
 the engine.
@@ -48,20 +49,25 @@ def get_or_create_secret_key():
     secrets.token_hex(32) the first time this ever runs. Persisting it is what lets
     Flask sessions (and therefore logins) survive a server restart -- without this,
     every restart would silently log everyone out, which is a usability bug, not
-    just a security nitpick."""
-    from moonglade.backup import _load_config, _save_config
-    cfg = _load_config()
-    key = (cfg.get("AUTH_SECRET_KEY") or "").strip()
-    if key:
+    just a security nitpick.
+
+    The read-modify-write runs under `_accounts_lock` like every other config.json writer:
+    it writes back the whole file, AUTH_USERS and the API key included, so an account
+    added by another thread or process between its read and its write would be lost."""
+    from moonglade.backup import _accounts_lock, _load_config, _save_config
+    with _accounts_lock:
+        cfg = _load_config()
+        key = (cfg.get("AUTH_SECRET_KEY") or "").strip()
+        if key:
+            return key
+        key = secrets.token_hex(32)
+        cfg["AUTH_SECRET_KEY"] = key
+        try:
+            _save_config(cfg)
+        except OSError as e:
+            print("Warning: could not persist AUTH_SECRET_KEY to config.json: {}. "
+                  "Sessions will not survive a restart this run.".format(e))
         return key
-    key = secrets.token_hex(32)
-    cfg["AUTH_SECRET_KEY"] = key
-    try:
-        _save_config(cfg)
-    except OSError as e:
-        print("Warning: could not persist AUTH_SECRET_KEY to config.json: {}. "
-              "Sessions will not survive a restart this run.".format(e))
-    return key
 
 
 def _find_web_user(cfg, username):
