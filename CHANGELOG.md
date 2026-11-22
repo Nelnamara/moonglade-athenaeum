@@ -25,6 +25,9 @@ git tags. Full prose notes for tagged versions live on
 - **A visit under a name that isn't this PC's is turned away before the HTTPS step.** With HTTPS on, a plain visit carrying a name the PC doesn't own used to be sent on to https:// at that same name; it now gets the same refusal it gets with HTTPS off, which says Moonglade answers only to this computer's own names and addresses. Visits under the PC's own names are sent to HTTPS as before. (2026-11-22)
 - **Adding or removing a login from the command line while Moonglade is running no longer loses a change.** `--add-web-user` and `--remove-web-user` now wait their turn with the running server, so an account, a Users-tab change or a saved API key made at the same moment is kept. If another copy holds config.json for more than ten seconds, the command stops and says so instead of waiting forever. (2026-11-22)
 
+### For developers
+- **The REST no-retry guard reads the real code.** `test_spend_no_retry.py::test_rest_post_has_no_retry_loop` used to read three of its six functions through the suite's network stub, so it never checked the command-line engine's REST verbs. It now parses each function from its module file and fails on any loop or comprehension, and also checks that `_rest_post`, `_rest_put` and `_rest_patch` stay one-line hand-offs to the client. (2026-11-22)
+
 ## [3.22.0] - 2026-11-20 — New Roads
 
 ### Added
