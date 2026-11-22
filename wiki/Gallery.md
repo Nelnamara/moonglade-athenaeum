@@ -49,8 +49,10 @@ card's link to *this PC's certificate* (or `https://<the address>/moonglade-ca.c
 - **iPhone or iPad:** allow the download, then **Settings → Profile Downloaded → Install**, then
   **Settings → General → About → Certificate Trust Settings** and turn on full trust for
   *Moonglade (this PC)*.
-- **Mac:** open the downloaded file in **Keychain Access**, then open *Moonglade (this PC)* there
-  and set **Trust → When using this certificate** to **Always Trust**.
+- **Mac:** open the downloaded file in **Keychain Access** and add it to the **System** keychain.
+  Not iCloud: the iCloud keychain refuses an added certificate ("Unable to import", error -25294),
+  and Keychain Access can hang after that until you quit it. Then open *Moonglade (this PC)* in
+  the System keychain and set **Trust → When using this certificate** to **Always Trust**.
 - **Android:** **Settings → Security → Encryption & credentials → Install a certificate → CA
   certificate**, then pick the downloaded file. (The exact menu names differ between phones.)
 

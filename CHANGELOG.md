@@ -20,6 +20,9 @@ git tags. Full prose notes for tagged versions live on
 - **The module split is finished.** Every route family is out of `create_app` into its own module, and `gallery.py` and `backup.py` hold only their cores, with each section that left them in a module of its own. Behaviour is unchanged. One visible effect: the server's own log lines in `moonglade.log` now carry the name `moonglade.gallery` (they said `__main__` before). (2026-11-21)
 - **The Video drawer has a new layout.** Mode and channel sit in one strip under Runs, with the channel's caption hanging below its pair. Shot mode's slots wrap in a row beside a picker twice as wide, grouped by family and held to two rows of cards. The length (5, 10 or 15 seconds) is picked on the picker only. The Loom's Video tab has the same layout. (2026-11-21)
 
+### Fixed
+- **The certificate note in Control Panel › LAN discovery names the address.** It said "open Moonglade at https://." with the address missing; it now shows the same address as the row above it. It also says where a Mac takes the certificate: the System keychain, since the iCloud keychain refuses it. The wiki's Mac steps say the same. (2026-11-22)
+
 ## [3.22.0] - 2026-11-20 — New Roads
 
 ### Added
