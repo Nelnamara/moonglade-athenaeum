@@ -19,6 +19,7 @@ from moonglade import gallery
 from moonglade import gen_params as gen_params_mod
 from moonglade import gen_road as gen_road_mod
 from moonglade import health as health_mod
+from moonglade import logs as moonglade_logs
 from moonglade import migrate as moonglade_migrate
 from moonglade import mirror as mirror_mod
 from moonglade import models as models_mod
@@ -794,6 +795,25 @@ def pytest_sessionstart(session):
             line, red=True, bold=True)
     except Exception:                      # noqa: BLE001 -- the print above already carried it
         pass
+
+
+@pytest.fixture(autouse=True)
+def _logging_torn_down():
+    """Undo setup_logging() after every test that left it set up.
+
+    The console handler is a module global in moonglade.logs, made once per process, so a
+    test that runs a main() (the command line, the server, the MCP server) leaves it behind
+    for the next test on the same worker -- still writing to whatever sys.stdout was then:
+    pytest's capture buffer, which capsys has closed by the time the next test runs. The
+    next setup_logging(stream=...) re-points the handler, and logging's setStream flushes
+    the old stream first: "I/O operation on closed file". Master's CI run of 2026-11-22
+    failed that way in test_setup_prepare's MCP-server test, which xdist had put on a
+    worker right after one of these; a probe that day found dozens of tests across the
+    command-line files leaving it set up, many on a closed buffer. Which test follows which is xdist's
+    pick, so the reset belongs to every test, not to the ones a run happened to trip over."""
+    yield
+    if moonglade_logs._configured:
+        moonglade_logs._reset_for_tests()
 
 
 @pytest.fixture(autouse=True)
