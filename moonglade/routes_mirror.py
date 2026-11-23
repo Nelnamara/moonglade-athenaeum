@@ -127,9 +127,9 @@ def register(app, ctx):
         session's CSRF token (body {csrf})."""
         from moonglade import backup as core
         # Home network only, like Connect from PixAI and Disconnect: checked before anything
-        # is read or stored.
+        # is read or stored. Its own sentence: SITE_TOKEN_NOT_HOME names the bookmark.
         if not _mirror.home_network_address(request.remote_addr):
-            return jsonify({"ok": False, "error": _mirror.SITE_TOKEN_NOT_HOME}), 403
+            return jsonify({"ok": False, "error": _mirror.CONNECT_NOT_HOME}), 403
         body = request.get_json(silent=True) or {}
         if not isinstance(body, dict) or not _check_csrf(body):
             return jsonify({"ok": False, "error": "Your session expired. Reload the page and "
