@@ -19,13 +19,14 @@ CHANGELOG and the open issues on 2026-11-12.
 
 ## Now — active
 
-- **3.21.2**, on `next/3.21.2`: the 2026-11-18 review's no-look fixes in three lanes — data safety
-  (a sync no longer undoes edits made during it, Dedup's keeper, Undo organize, the V3.2 check on the
-  CLI's raw-settings flags, a delete confirm carries its plan), small fixes (host-name check, the
-  contest rules link, a catalog backup before updates, contest eligibility, the training finish
-  notice, what "Backed up" counts, maintenance jobs out of the tracker) and search/CLI/docs. The app
-  security review and the 3.22 design (with split phase 5) run beside it. What shipped is in
-  `CHANGELOG.md` (latest: 3.21.1 — The Right Key, 2026-11-19).
+- **The rulings the security review left open** (owner, 2026-11-22): how long a remembered device
+  stays signed in, whether it may spend, and the QR's hold. They unblock remember-this-device, the
+  QR change and the Apple TV client's pairing (below).
+- **A look board for PixAI's new site areas** (owner, 2026-11-22): everything the new Library,
+  comics, creator series, OC maker and agent areas offer, and where each idea would sit in
+  Moonglade, for his pick. Nothing is built from it before that pick.
+
+What shipped is in `CHANGELOG.md` (latest: 3.23.0 — Load-Bearing, 2026-11-22).
 
 ---
 
@@ -52,19 +53,6 @@ In the recommended order.
   Edit card after a look board, SVG and GIF shown in the library, and curated tiles for the seven new
   AI Tools; (4) the contest board read, which now downloads each description twice, slimmed, and its
   row ceiling raised. Tsubaki Video's new price already flows through live.
-- **PixAI's new site areas, a look.** Library (collections, saves, batch delete), comics, creator
-  series, the OC maker and the agent: a read-only look at each and a short list of what Moonglade
-  could do with it, for the owner's pick. Nothing is built from it without that pick.
-- **App security review.** Runs on the finished module layout (owner, 2026-11-12); its fixes go
-  in the next release. A read-only audit that ends in a ranked list: the threat model, login and
-  the no-accounts mode, session cookie handling, the localhost and LAN trust model, request
-  integrity (the CSRF debt the 3.16.0 coverage guard lists, headers, CSP), file and input handling,
-  credentials at rest. Owner's go of 2026-10-02 ("after Wave 1"); Wave 1 shipped in 3.16.0. Already
-  ruled: a signed-in LAN device keeps spending and deleting with no extra step. Its rulings unblock
-  remember-this-device and the QR change below. Also takes (2026-11-18): whether the opt-in
-  `--https` switch (self-signed, off by default) should become the way Moonglade is used over the
-  home network, now that the Mirror sign-in crosses it, and PixAI's new sign-in and session
-  options as context.
 
 - **Convert the rest of the tests that read code as text.** *(test review, 2026-10-05)* Many Loom
   and gallery tests look for words in a component's source instead of running it, so a small change
