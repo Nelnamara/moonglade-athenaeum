@@ -57,8 +57,9 @@ BACKUP_CORE = frozenset({
     # the module state tests patch
     "API_URL", "REST_API_BASE", "OPERATION_NAME", "READ_ONLY", "USER_ID", "U3T", "MEDIA_BASE",
     "_turbo_refused", "_cfg",
-    # config (the accounts lock stays in backup: web_accounts takes it lazily)
-    "_config_path", "_load_config", "_save_config", "_accounts_lock",
+    # config (the accounts lock stays in backup: web_accounts takes it lazily; its timeout
+    # error lives beside it, for the gate's 503 handler and the command-line runners)
+    "_config_path", "_load_config", "_save_config", "_accounts_lock", "AccountsLockTimeout",
     "_read_only_now", "_check_read_only", "load_token", "_ssl_help",
     # the progress helpers, the count and the size line they print, and the TLS state they report
     "_progress_line", "_make_progress", "PANEL_PROGRESS_PREFIX", "PANEL_WARN_PREFIX",
