@@ -474,21 +474,31 @@ def _accounts_lock_path():
 
 
 def _lock_fd(fd):
-    """One non-blocking try at the exclusive OS lock on `fd`. True when taken."""
+    """One non-blocking try at the exclusive OS lock on `fd`. True when taken, False when
+    another holder has it. Only the platform's own "already locked" answers mean busy
+    (msvcrt's lock-violation errnos EACCES/EDEADLK; flock's EWOULDBLOCK/EAGAIN, or EACCES
+    on some systems); any other error raises at once rather than being waited out."""
+    import errno
     if os.name == "nt":
         import msvcrt
         os.lseek(fd, 0, os.SEEK_SET)
         try:
             msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
             return True
-        except OSError:
-            return False
+        except OSError as e:
+            if e.errno in (errno.EACCES, errno.EDEADLK):
+                return False
+            raise
     import fcntl
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         return True
-    except (BlockingIOError, PermissionError):
+    except BlockingIOError:
         return False
+    except PermissionError as e:
+        if e.errno in (errno.EACCES, errno.EAGAIN):
+            return False
+        raise
 
 
 def _unlock_fd(fd):
@@ -546,17 +556,22 @@ class _AccountsLock:
             if lock_path.exists():
                 raise                         # there, but not ours to open: say so
             return None                       # no folder / unwritable: see the comment above
-        deadline = time.monotonic() + ACCOUNTS_LOCK_WAIT_S
-        delay = 0.01
-        while not _lock_fd(fd):
-            if time.monotonic() >= deadline:
-                os.close(fd)
-                raise AccountsLockTimeout(
-                    "Another Moonglade process has held the account lock on config.json for "
-                    "over {:g} seconds (lock file: {}). Let it finish or close it, then try "
-                    "again.".format(ACCOUNTS_LOCK_WAIT_S, lock_path))
-            time.sleep(delay)
-            delay = min(delay * 2, 0.1)
+        try:
+            deadline = time.monotonic() + ACCOUNTS_LOCK_WAIT_S
+            delay = 0.01
+            while not _lock_fd(fd):
+                if time.monotonic() >= deadline:
+                    raise AccountsLockTimeout(
+                        "Another Moonglade process has held the account lock on config.json "
+                        "for over {:g} seconds (lock file: {}). Let it finish or close it, "
+                        "then try again.".format(ACCOUNTS_LOCK_WAIT_S, lock_path))
+                time.sleep(delay)
+                delay = min(delay * 2, 0.1)
+        except BaseException:
+            # Any way out of the wait without the lock (the timeout, an unexpected lock
+            # error, a KeyboardInterrupt in the sleep) closes the descriptor: never leaked.
+            os.close(fd)
+            raise
         return fd
 
 
