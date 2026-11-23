@@ -555,6 +555,21 @@ def register(app, ctx):
             return jsonify({"error": msg}), 413
         return app.response_class(msg, status=413, mimetype="text/plain")
 
+    from moonglade.backup import AccountsLockTimeout
+
+    @app.errorhandler(AccountsLockTimeout)
+    def _accounts_busy(_e):
+        """A writer under backup._accounts_lock (the save-key route, Users add/remove/password,
+        /api/login's create, sign-out everywhere) waited its full time for another process
+        holding the lock -- most likely a command-line --add-web-user or --remove-web-user.
+        A 503 with a plain sentence, never Flask's HTML 500, and never the exception's own
+        text: that names the lock file's path on this machine. Nothing was changed."""
+        msg = ("Another Moonglade program is changing the account settings right now. "
+               "Nothing was changed here. Wait a moment, then try again.")
+        if request.path.startswith(_JSON_GATE_PREFIXES):
+            return jsonify({"error": msg}), 503
+        return app.response_class(msg, status=503, mimetype="text/plain")
+
     def _check_csrf(body):
         """Shared CSRF check for this app's state-changing POSTs -- the Panel's
         Users tab (a parsed JSON body) and /logout (request.form) -- using the exact

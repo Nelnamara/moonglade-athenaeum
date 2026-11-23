@@ -138,3 +138,90 @@ def test_the_lock_holds_across_processes(tmp_path, monkeypatch):
     assert not core._accounts_lock.locked()
     users = json.loads(core._config_path().read_text(encoding="utf-8"))["AUTH_USERS"]
     assert sorted(u["username"] for u in users) == ["alice", "bob"]
+
+
+# ---------------------------------------------------------------------------
+# When the lock cannot be had: the server still starts, the sign-in page still answers, a
+# writing route says so in JSON, and the command line stops with a sentence. A busy lock is
+# simulated in-process (the OS lock never comes free, a short wait), so these stay fast.
+# ---------------------------------------------------------------------------
+
+def _lock_never_free(monkeypatch):
+    monkeypatch.setattr(core, "ACCOUNTS_LOCK_WAIT_S", 0.05)
+    monkeypatch.setattr(core, "_lock_fd", lambda fd: False)
+
+
+def _sidecar_unopenable(monkeypatch):
+    def _refuse():
+        raise PermissionError("the lock file is there but cannot be opened")
+    monkeypatch.setattr(core._AccountsLock, "_take_file_lock", staticmethod(_refuse))
+
+
+@pytest.mark.parametrize("trouble", [_lock_never_free, _sidecar_unopenable])
+def test_a_lock_it_cannot_take_never_stops_the_server_starting(tmp_path, monkeypatch, capsys,
+                                                                trouble):
+    from moonglade.gallery import create_app
+    trouble(monkeypatch)
+    app = create_app(tmp_path)                    # raised out of create_app before the fix
+    assert app.secret_key
+    saved = json.loads(core._config_path().read_text(encoding="utf-8"))
+    assert saved["AUTH_SECRET_KEY"] == app.secret_key      # the unlocked read-or-create ran
+    assert "could not take config.json's account lock" in capsys.readouterr().out
+    assert not core._accounts_lock.locked()
+
+
+def test_a_writing_route_answers_503_json_when_the_lock_times_out(tmp_path, monkeypatch):
+    from tests.conftest import login_client
+    cli = login_client(tmp_path)
+    csrf = cli.get("/api/panel/summary").get_json()["csrf"]
+    _lock_never_free(monkeypatch)
+    r = cli.post("/api/users/add", json={"username": "newperson", "password": "hunter2222",
+                                         "confirm": "hunter2222", "csrf": csrf})
+    assert r.status_code == 503 and r.is_json
+    err = r.get_json()["error"]
+    assert "try again" in err
+    assert str(tmp_path) not in err and ".lock" not in err          # names no path
+    assert not core._accounts_lock.locked()
+    assert "newperson" not in {u["username"] for u in web_accounts.list_web_users()}
+
+
+def test_the_sign_in_page_answers_while_another_thread_holds_the_lock(tmp_path):
+    """GET /login and the POST /api/login sign-in read the account list without the lock, so
+    a holder (here a thread that keeps it for seconds) never stalls the public front door."""
+    from moonglade.gallery import create_app
+    from tests.conftest import _do_login
+    app = create_app(tmp_path)
+    web_accounts.add_or_update_web_user("tester", "a-real-test-password-1")
+    held, done = threading.Event(), threading.Event()
+
+    def hold():
+        with core._accounts_lock:
+            held.set()
+            done.wait(10)
+    t = threading.Thread(target=hold, daemon=True)
+    t.start()
+    try:
+        assert held.wait(5)
+        _do_login(app.test_client(), "tester", "a-real-test-password-1")
+        # Answered while the holder still has it, not after it let go.
+        assert core._accounts_lock.locked() and t.is_alive()
+    finally:
+        done.set()
+        t.join(10)
+    assert not core._accounts_lock.locked()
+
+
+def test_the_command_line_stops_with_the_plain_sentence(tmp_path, monkeypatch):
+    import argparse
+    web_accounts.add_or_update_web_user("carol", "a-test-password-carol")
+    _lock_never_free(monkeypatch)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "dave")
+    monkeypatch.setattr(web_accounts.getpass, "getpass", lambda prompt="": "a-test-password-dave")
+    with pytest.raises(SystemExit) as info:
+        web_accounts.run_add_web_user(argparse.Namespace())
+    assert isinstance(info.value.code, str) and "Another Moonglade process" in info.value.code
+    with pytest.raises(SystemExit) as info:
+        web_accounts.run_remove_web_user(argparse.Namespace(remove_web_user="carol", out=None))
+    assert isinstance(info.value.code, str) and "Another Moonglade process" in info.value.code
+    assert not core._accounts_lock.locked()
+    assert [u["username"] for u in web_accounts.list_web_users()] == ["carol"]
