@@ -82,7 +82,7 @@ def register(app, ctx):
         same reach as Connect from PixAI; the session's CSRF token. Body {csrf}. Answers ok, or
         a plain sentence; the sign-in is never read back."""
         if not _mirror.home_network_address(request.remote_addr):
-            return jsonify({"ok": False, "error": _mirror.SITE_TOKEN_NOT_HOME}), 403
+            return jsonify({"ok": False, "error": _mirror.DISCONNECT_NOT_HOME}), 403
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400

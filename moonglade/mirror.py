@@ -992,6 +992,9 @@ SITE_TOKEN_NOT_HOME = ("Connect from PixAI only works from this computer or your
 # One-click Connect's own refusal (the Mirror tile's Connect, not the bookmark above).
 CONNECT_NOT_HOME = ("Connect only works from this computer or your home network, so nothing "
                     "was read or saved.")
+# Disconnect's own refusal (the Mirror tile's Disconnect).
+DISCONNECT_NOT_HOME = ("Disconnect only works from this computer or your home network, so "
+                       "nothing changed.")
 # The longest life a real PixAI sign-in has had, plus a day of slack: ~27 days, measured on
 # the browser's own token in August 2026 (renewals mint 7 days today, MIRROR_TOKEN_LIFE_S).
 # A token claiming more was not issued by PixAI as we know it -- and, kept by the "keep the
