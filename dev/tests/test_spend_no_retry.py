@@ -26,6 +26,7 @@ import ast
 import inspect
 import re
 import textwrap
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -439,22 +440,65 @@ class TestRestSpendPathsAreSingleAttempt:
                  and not (isinstance(n.func.value, ast.Name) and n.func.value.id == "answer")]
         assert sends == ["rest_post"], sends
 
-    def test_rest_post_has_no_retry_loop(self):
-        """Read the IMPLEMENTATION, not the delegate. `core._rest_post` is now one line
-        that forwards to `PixAIClient.rest_post`, so scanning it alone would pass even if
-        the real road grew a loop. Both are checked: the delegate must stay a delegate and
-        the verb must stay single-attempt."""
-        for fn, name in ((core._rest_post, "_rest_post"),
-                         (pixai_client_mod.PixAIClient.rest_post, "PixAIClient.rest_post"),
-                         # the training routes' dataset/description PUT and the rebate PATCH
-                         (core._rest_put, "_rest_put"),
-                         (pixai_client_mod.PixAIClient.rest_put, "PixAIClient.rest_put"),
-                         (core._rest_patch, "_rest_patch"),
-                         (pixai_client_mod.PixAIClient.rest_patch, "PixAIClient.rest_patch")):
-            src = inspect.getsource(fn)
-            assert "for " not in src and "while " not in src, (
-                "{} grew a retry loop -- submit_fixer and claim_reward would "
-                "double-fire".format(name))
+    @staticmethod
+    def _real_function(module, name, cls=None):
+        """The FunctionDef for `name` (a method of `cls` when given) parsed from `module`'s
+        FILE on disk. Not inspect.getsource of the live object: dev/tests/conftest.py's
+        autouse `_no_live_card_network` swaps core._rest_post/_rest_put/_rest_patch for a
+        stub in every test, so getsource would read the stub, and getsource re-reads the
+        file at the live object's old line numbers, so an edit mid-run could misread."""
+        path = Path(module.__file__)
+        scope = ast.parse(path.read_text(encoding="utf-8"), filename=str(path)).body
+        if cls is not None:
+            owner = next((n for n in scope if isinstance(n, ast.ClassDef) and n.name == cls),
+                         None)
+            assert owner is not None, "no class {} in {}".format(cls, path)
+            scope = owner.body
+        fn = next((n for n in scope if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                   and n.name == name), None)
+        assert fn is not None, "no function {} in {}".format(
+            name if cls is None else cls + "." + name, path)
+        return fn
+
+    @pytest.mark.parametrize("verb", ["rest_post", "rest_put", "rest_patch"])
+    def test_rest_post_has_no_retry_loop(self, verb):
+        """Read the IMPLEMENTATION, not the delegate. `core._rest_post` (and _put, _patch) is
+        one line that forwards to `PixAIClient.rest_post`, so scanning it alone would pass even
+        if the real road grew a loop. Both are checked, from the module files on disk: the
+        delegate must stay a delegate (one return of one forwarded call) and neither may hold
+        a loop. The PUT carries the training routes' dataset/description saves, the PATCH the
+        rebate join.
+
+        Parsed rather than string-scanned, so prose in a docstring cannot make this pass or
+        fail by accident, and a comprehension or generator expression counts as a loop too."""
+        loop_kinds = (ast.For, ast.AsyncFor, ast.While,
+                      ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+        delegate = self._real_function(core, "_" + verb)
+        real = self._real_function(pixai_client_mod, verb, cls="PixAIClient")
+        for fn, name in ((delegate, "_" + verb), (real, "PixAIClient." + verb)):
+            loops = [type(n).__name__ for n in ast.walk(fn) if isinstance(n, loop_kinds)]
+            assert not loops, (
+                "{} grew a retry loop ({}) -- submit_fixer and claim_reward would "
+                "double-fire".format(name, loops))
+        # The delegate: after its docstring, exactly `return <client>.<verb>(...)`, where
+        # <client> is `_pixai_client._client_of(session)` -- one forwarded send, nothing else.
+        body = delegate.body
+        if (body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)):
+            body = body[1:]
+        assert len(body) == 1 and isinstance(body[0], ast.Return), (
+            "_{} is no longer a one-line delegate onto PixAIClient.{}".format(verb, verb))
+        call = body[0].value
+        assert (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                and call.func.attr == verb), ast.dump(call)
+        client = call.func.value
+        assert (isinstance(client, ast.Call) and isinstance(client.func, ast.Attribute)
+                and client.func.attr == "_client_of"
+                and isinstance(client.func.value, ast.Name)
+                and client.func.value.id == "_pixai_client"), ast.dump(client)
+        sends = [n for n in ast.walk(delegate) if isinstance(n, ast.Call)
+                 and isinstance(n.func, ast.Attribute) and n.func.attr.startswith("rest_")]
+        assert len(sends) == 1, "_{} forwards more than once".format(verb)
 
     def test_the_recipe_delete_verb_has_no_retry_loop(self):
         """Wave 2's recipe writes add the one /v2 DELETE (taking a recipe out of a set). It is

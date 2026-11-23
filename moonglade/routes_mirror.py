@@ -82,7 +82,7 @@ def register(app, ctx):
         same reach as Connect from PixAI; the session's CSRF token. Body {csrf}. Answers ok, or
         a plain sentence; the sign-in is never read back."""
         if not _mirror.home_network_address(request.remote_addr):
-            return jsonify({"ok": False, "error": _mirror.SITE_TOKEN_NOT_HOME}), 403
+            return jsonify({"ok": False, "error": _mirror.DISCONNECT_NOT_HOME}), 403
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
@@ -126,6 +126,10 @@ def register(app, ctx):
         crosses the network: the server reads its own local browser store. LOGIN tier, the
         session's CSRF token (body {csrf})."""
         from moonglade import backup as core
+        # Home network only, like Connect from PixAI and Disconnect: checked before anything
+        # is read or stored. Its own sentence: SITE_TOKEN_NOT_HOME names the bookmark.
+        if not _mirror.home_network_address(request.remote_addr):
+            return jsonify({"ok": False, "error": _mirror.CONNECT_NOT_HOME}), 403
         body = request.get_json(silent=True) or {}
         if not isinstance(body, dict) or not _check_csrf(body):
             return jsonify({"ok": False, "error": "Your session expired. Reload the page and "

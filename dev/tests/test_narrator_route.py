@@ -259,7 +259,9 @@ def test_nothing_else_is_written(tmp_path, clock):
                         "_moonglade/records/telemetry.json",
                         "_moonglade/records/achievements.json"}, new
     assert "_moonglade/accounts/%s/state.json" % key in new
-    assert not [n for n in after if n.endswith((".lock", ".tmp")) or ".tmp-" in n], "leftover"
+    # config.json.lock is the account lock's permanent sidecar (backup._accounts_lock), never a leftover
+    assert not [n for n in after if n != "config.json.lock"
+                and (n.endswith((".lock", ".tmp")) or ".tmp-" in n)], "leftover"
 
 
 def test_the_day_is_the_servers_local_day_the_app_uses_elsewhere():

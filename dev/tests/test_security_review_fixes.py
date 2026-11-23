@@ -145,6 +145,31 @@ def test_all_mode_sends_this_pc_too_and_off_mode_sends_nobody(tmp_path):
     assert r.status_code == 200
 
 
+@pytest.mark.parametrize("mode,remote", [("all", "127.0.0.1"), ("lan", LAN)])
+def test_an_unknown_host_is_refused_before_any_https_redirect(tmp_path, mode, remote):
+    """The Host check runs ahead of the redirect (security review intake, 2026-11-20): a plain
+    visit under a name this machine does not own gets 421, never a 307 to https://<that name>.
+    JSON under /api/, plain text elsewhere. A known name still gets its 307."""
+    cli = _app_in(tmp_path, mode).test_client()
+    env = {"REMOTE_ADDR": remote}
+    r = cli.get("/login", base_url="http://evil.example:5057", environ_base=env)
+    assert r.status_code == 421 and "Location" not in r.headers
+    assert r.mimetype == "text/plain"
+    r = cli.get("/api/ping", base_url="http://evil.example:5057", environ_base=env)
+    assert r.status_code == 421 and "Location" not in r.headers
+    assert "own names" in r.get_json()["error"]
+    r = cli.get("/login", base_url="http://192.168.1.5:5057", environ_base=env)
+    assert r.status_code == 307
+    assert r.headers["Location"] == "https://192.168.1.5:5057/login"
+
+
+def test_the_https_redirect_sits_between_the_host_check_and_the_front_door(tmp_path):
+    names = [f.__name__ for f in create_app(tmp_path).before_request_funcs[None]]
+    assert names.index("_refuse_unknown_host") == 0
+    assert names.index("_send_plain_lan_visits_to_https") == 1
+    assert names.index("_send_plain_lan_visits_to_https") < names.index("_enforce_front_door")
+
+
 def test_the_session_cookie_is_secure_over_https_only(tmp_path):
     web_accounts_mod.add_or_update_web_user("alice", "a-real-test-password-1")
     app = create_app(tmp_path)

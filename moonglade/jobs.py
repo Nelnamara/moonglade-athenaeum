@@ -51,8 +51,9 @@ _JOBS_COMPACT_AT = 2000        # rewrite the raw log once it passes this many li
 JOBS_ORPHAN_SWEEP_AGE = 30 * 60
 
 # Serializes the ONE non-append writer of jobs.jsonl (maybe_compact_jobs' whole-file
-# rewrite) against every other thread in this process, exactly like _accounts_lock does
-# for AUTH_USERS and for the same reproduced reason: moonglade/gallery.py runs
+# rewrite) against every other thread in this process. It is a plain threading.Lock, so it
+# covers threads in ONE process only (backup.py's _accounts_lock also locks across
+# processes; this one does not). The reason is the same one: moonglade/gallery.py runs
 # threaded=True, so two /api/jobs polls (two tabs, or the gallery plus the Loom) can both
 # see the log cross _JOBS_COMPACT_AT and start rewriting it at the same moment. Appends
 # don't need this -- they're one "a"-mode line and safe across processes by design.

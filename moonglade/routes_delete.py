@@ -799,6 +799,11 @@ def register(app, ctx):
         from moonglade.catalog_verbs import delete_targets
         from moonglade import backup as core   # lazy: avoid import cycle
         body = request.get_json(silent=True) or {}
+        # Server-side typed confirm: the page's typed DELETE is not enough on its own, a
+        # request that skips the page must still say it out loud. Nothing starts without it.
+        if body.get("confirm") != "DELETE":
+            return jsonify({"error": "deleting from PixAI needs confirm set to DELETE "
+                                     "-- nothing was deleted"}), 400
         purge_local = bool(body.get("purge_local", True))
         task_ids = sorted({str(t).strip() for t in (body.get("task_ids") or [])
                            if str(t).strip()})

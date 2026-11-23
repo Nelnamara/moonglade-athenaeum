@@ -904,7 +904,7 @@ export default function App({ boot }) {
       // it does not replace the guard.
       const typed = window.prompt("This permanently deletes from PixAI. Type DELETE to confirm:");
       if (typed !== "DELETE") { window.alert("Cancelled."); return; }
-      const d = await apiPost("/api/delete-tasks", { media_ids: ids });
+      const d = await apiPost("/api/delete-tasks", { media_ids: ids, confirm: "DELETE" });
       if (d.error) { window.alert(d.error); return; }
       afterMutation();
     },

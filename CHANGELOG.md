@@ -21,7 +21,14 @@ git tags. Full prose notes for tagged versions live on
 - **The Video drawer has a new layout.** Mode and channel sit in one strip under Runs, with the channel's caption hanging below its pair. Shot mode's slots wrap in a row beside a picker twice as wide, grouped by family and held to two rows of cards. The length (5, 10 or 15 seconds) is picked on the picker only. The Loom's Video tab has the same layout. (2026-11-21)
 
 ### Fixed
+- **Deleting from PixAI in bulk now needs the typed DELETE on the server too.** The gallery's bulk delete used to rely on the page alone to ask; a request that skips the page and does not say DELETE is now refused with a plain sentence and nothing starts. (2026-11-22)
+- **One-click Connect for the Mirror is limited to this PC and your home network.** It was the one Mirror change that did not check where the request came from; it now turns away any other address first, like Connect from PixAI and Disconnect, and reads and stores nothing. (2026-11-22)
 - **The certificate note in Control Panel › LAN discovery names the address.** It said "open Moonglade at https://." with the address missing; it now shows the same address as the row above it. It also says where a Mac takes the certificate: the System keychain, since the iCloud keychain refuses it. The wiki's Mac steps say the same. (2026-11-22)
+- **A visit under a name that isn't this PC's is turned away before the HTTPS step.** With HTTPS on, a plain visit carrying a name the PC doesn't own used to be sent on to https:// at that same name; it now gets the same refusal it gets with HTTPS off, which says Moonglade answers only to this computer's own names and addresses. Visits under the PC's own names are sent to HTTPS as before. (2026-11-22)
+- **Adding or removing a login from the command line while Moonglade is running no longer loses a change.** `--add-web-user` and `--remove-web-user` now wait their turn with the running server, so an account, a Users-tab change or a saved API key made at the same moment is kept. If another copy holds config.json for more than ten seconds, the command stops and says so instead of waiting forever. (2026-11-22)
+
+### For developers
+- **The REST no-retry guard reads the real code.** `test_spend_no_retry.py::test_rest_post_has_no_retry_loop` used to read three of its six functions through the suite's network stub, so it never checked the command-line engine's REST verbs. It now parses each function from its module file and fails on any loop or comprehension, and also checks that `_rest_post`, `_rest_put` and `_rest_patch` stay one-line hand-offs to the client. (2026-11-22)
 
 ## [3.22.0] - 2026-11-20 — New Roads
 

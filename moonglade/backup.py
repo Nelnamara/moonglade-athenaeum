@@ -431,22 +431,151 @@ def _save_config(cfg):
             pass
 
 
-# _accounts_lock serializes every read-modify-write of AUTH_USERS (and the
-# atomic check-and-mutate helpers below) against every OTHER thread doing the
-# same, within this one process. moonglade/gallery.py runs `app.run(...,
-# threaded=True)`, so two browser tabs/devices hitting /login's bootstrap POST
-# (or the Panel's Add/Remove-user endpoints) concurrently used to run
-# add_or_update_web_user()/remove_web_user()'s _load_config -> mutate ->
-# _save_config sequence unlocked and interleaved -- a real, reproduced lost-
-# update: two concurrent bootstrap creates for DIFFERENT usernames could both
-# return a 302 "success" to their own browser while only the second write
-# actually landed on disk, silently discarding the first account (adversarial
-# review, 2026-07-19). Does NOT protect against a separate CLI invocation
-# editing config.json while the server is also running -- that's a distinct,
-# pre-existing, cross-PROCESS assumption (_save_config's docstring), not what
-# this lock is for.
+# _accounts_lock serializes every read-modify-write of config.json's accounts and
+# keys (AUTH_USERS, the session epochs, AUTH_SECRET_KEY, PIXAI_API_KEY, the move's
+# key drop) against every other holder -- the other THREADS of this process AND
+# every other PROCESS on this machine. Two layers, taken in this order and released
+# in reverse:
+#   1. a threading.Lock, for this process's own threads. moonglade/gallery.py runs
+#      `app.run(..., threaded=True)`, so two browser tabs/devices hitting /login's
+#      bootstrap POST (or the Panel's Add/Remove-user endpoints) concurrently used to
+#      run the _load_config -> mutate -> _save_config sequence interleaved -- a real,
+#      reproduced lost update: two bootstrap creates for DIFFERENT usernames both
+#      returned "success" while only the second landed on disk (adversarial review,
+#      2026-07-19).
+#   2. an OS-level exclusive lock on a SIDECAR file beside config.json
+#      ("config.json.lock", git-ignored by the `config.json.*` pattern), for other
+#      processes: a command-line --add-web-user / --remove-web-user runs in its own
+#      process and used to be able to lose an update against a running server's key
+#      save or Users-tab write (security review intake, 2026-11-21). msvcrt.locking
+#      on Windows, fcntl.flock elsewhere. The sidecar, never config.json itself:
+#      _save_config swaps config.json by os.replace(), which a locked target would
+#      refuse on Windows.
+# The file lock waits ACCOUNTS_LOCK_WAIT_S, then raises AccountsLockTimeout (an
+# OSError) naming the lock file -- a stuck holder is an error a person can read,
+# never a hang. Still NON-REENTRANT, exactly as before: a thread that already holds
+# it and asks again deadlocks on layer 1, which is why web_accounts' helpers that
+# run under it take no lock of their own. The sidecar's path is read from
+# _config_path() at each acquisition, so it follows config.json wherever that is
+# (and wherever a test pins it). If config.json's folder is missing or no file can
+# be made in it, only layer 1 is taken: _save_config cannot write config.json there
+# either, since its temp file goes in that same folder.
 # ---------------------------------------------------------------------------
-_accounts_lock = threading.Lock()
+ACCOUNTS_LOCK_WAIT_S = 10.0
+
+
+class AccountsLockTimeout(TimeoutError):
+    """Another process held config.json's account lock for longer than the wait."""
+
+
+def _accounts_lock_path():
+    path = _config_path()
+    return path.with_name(path.name + ".lock")
+
+
+def _lock_fd(fd):
+    """One non-blocking try at the exclusive OS lock on `fd`. True when taken, False when
+    another holder has it. Only the platform's own "already locked" answers mean busy
+    (msvcrt's lock-violation errnos EACCES/EDEADLK; flock's EWOULDBLOCK/EAGAIN, or EACCES
+    on some systems); any other error raises at once rather than being waited out."""
+    import errno
+    if os.name == "nt":
+        import msvcrt
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError as e:
+            if e.errno in (errno.EACCES, errno.EDEADLK):
+                return False
+            raise
+    import fcntl
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except BlockingIOError:
+        return False
+    except PermissionError as e:
+        if e.errno in (errno.EACCES, errno.EAGAIN):
+            return False
+        raise
+
+
+def _unlock_fd(fd):
+    if os.name == "nt":
+        import msvcrt
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(fd, fcntl.LOCK_UN)
+
+
+class _AccountsLock:
+    """The thread lock plus the cross-process file lock; see the comment above."""
+
+    def __init__(self):
+        self._thread_lock = threading.Lock()
+        self._fd = None
+
+    def locked(self):
+        return self._thread_lock.locked()
+
+    def acquire(self):
+        self._thread_lock.acquire()
+        try:
+            self._fd = self._take_file_lock()
+        except BaseException:
+            self._thread_lock.release()
+            raise
+        return True
+
+    def release(self):
+        fd, self._fd = self._fd, None
+        try:
+            if fd is not None:
+                try:
+                    _unlock_fd(fd)
+                finally:
+                    os.close(fd)
+        finally:
+            self._thread_lock.release()
+
+    __enter__ = acquire
+
+    def __exit__(self, *exc):
+        self.release()
+        return False
+
+    @staticmethod
+    def _take_file_lock():
+        lock_path = _accounts_lock_path()
+        try:
+            fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o600)
+        except OSError:
+            if lock_path.exists():
+                raise                         # there, but not ours to open: say so
+            return None                       # no folder / unwritable: see the comment above
+        try:
+            deadline = time.monotonic() + ACCOUNTS_LOCK_WAIT_S
+            delay = 0.01
+            while not _lock_fd(fd):
+                if time.monotonic() >= deadline:
+                    raise AccountsLockTimeout(
+                        "Another Moonglade process has held the account lock on config.json "
+                        "for over {:g} seconds (lock file: {}). Let it finish or close it, "
+                        "then try again.".format(ACCOUNTS_LOCK_WAIT_S, lock_path))
+                time.sleep(delay)
+                delay = min(delay * 2, 0.1)
+        except BaseException:
+            # Any way out of the wait without the lock (the timeout, an unexpected lock
+            # error, a KeyboardInterrupt in the sleep) closes the descriptor: never leaked.
+            os.close(fd)
+            raise
+        return fd
+
+
+_accounts_lock = _AccountsLock()
 
 
 _cfg = _load_config()

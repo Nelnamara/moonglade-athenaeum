@@ -7,8 +7,9 @@ epochs that sign a login out everywhere, the timing-safe check, and the command 
 --add-web-user / --remove-web-user / --list-web-users runners. Moved verbatim out of
 moonglade/backup.py in the 3.22 split (phase 4).
 
-`_accounts_lock` stays in the engine, so every writer of AUTH_USERS (these, the gallery's key
-save and the migration) serializes on one lock: it is imported from moonglade.backup inside
+`_accounts_lock` stays in the engine, so every writer of AUTH_USERS (these, the session secret's
+first save, the gallery's key save and the migration) serializes on one lock, across threads and
+across processes: it is imported from moonglade.backup inside
 each function that takes it, at call time, as are `_load_config` and `_save_config`, so a
 test's patch of backup's binding still reaches them and importing this module never imports
 the engine.
@@ -48,20 +49,42 @@ def get_or_create_secret_key():
     secrets.token_hex(32) the first time this ever runs. Persisting it is what lets
     Flask sessions (and therefore logins) survive a server restart -- without this,
     every restart would silently log everyone out, which is a usability bug, not
-    just a security nitpick."""
-    from moonglade.backup import _load_config, _save_config
-    cfg = _load_config()
-    key = (cfg.get("AUTH_SECRET_KEY") or "").strip()
-    if key:
+    just a security nitpick.
+
+    The read-modify-write runs under `_accounts_lock` like every other config.json writer:
+    it writes back the whole file, AUTH_USERS and the API key included, so an account
+    added by another thread or process between its read and its write would be lost.
+
+    Taking the lock never stops the server starting: create_app() calls this, so a lock it
+    cannot take (AccountsLockTimeout, or a sidecar that exists but cannot be opened -- both
+    OSErrors) prints a warning and falls back to the unlocked read-or-create, which is how
+    this ran before the lock existed."""
+    from moonglade.backup import _accounts_lock, _load_config, _save_config
+
+    def _read_or_create():
+        cfg = _load_config()
+        key = (cfg.get("AUTH_SECRET_KEY") or "").strip()
+        if key:
+            return key
+        key = secrets.token_hex(32)
+        cfg["AUTH_SECRET_KEY"] = key
+        try:
+            _save_config(cfg)
+        except OSError as e:
+            print("Warning: could not persist AUTH_SECRET_KEY to config.json: {}. "
+                  "Sessions will not survive a restart this run.".format(e))
         return key
-    key = secrets.token_hex(32)
-    cfg["AUTH_SECRET_KEY"] = key
+
     try:
-        _save_config(cfg)
+        _accounts_lock.acquire()
     except OSError as e:
-        print("Warning: could not persist AUTH_SECRET_KEY to config.json: {}. "
-              "Sessions will not survive a restart this run.".format(e))
-    return key
+        print("Warning: could not take config.json's account lock ({}). Reading the "
+              "session key without it.".format(e))
+        return _read_or_create()
+    try:
+        return _read_or_create()
+    finally:
+        _accounts_lock.release()
 
 
 def _find_web_user(cfg, username):
@@ -126,12 +149,17 @@ def _next_sess_epoch(cfg):
 
 def list_web_users():
     """Return [{"username": ...}, ...] from config.json's AUTH_USERS -- USERNAMES
-    ONLY, never password hashes. Used by --list-web-users."""
-    from moonglade.backup import _accounts_lock, _load_config
-    with _accounts_lock:
-        cfg = _load_config()
-        return [{"username": u["username"]} for u in (cfg.get("AUTH_USERS") or [])
-                if isinstance(u, dict) and u.get("username")]
+    ONLY, never password hashes. Used by --list-web-users, the Panel, and the public
+    GET /login and POST /api/login.
+
+    A pure read, so it takes NO lock: _save_config swaps config.json in whole by
+    os.replace(), so a reader sees the complete old file or the complete new one. Taking
+    the lock here let another process holding it stall (and then fail) the public sign-in
+    page."""
+    from moonglade.backup import _load_config
+    cfg = _load_config()
+    return [{"username": u["username"]} for u in (cfg.get("AUTH_USERS") or [])
+            if isinstance(u, dict) and u.get("username")]
 
 
 # --- Web-login password policy -------------------------------------------
@@ -507,15 +535,24 @@ def run_add_web_user(args):
     confirm = getpass.getpass("Confirm password: ")
     if password != confirm:
         sys.exit("Passwords did not match. Nothing was saved.")
-    replaced = add_or_update_web_user(username, password)
+    from moonglade.backup import AccountsLockTimeout
+    try:
+        replaced = add_or_update_web_user(username, password)
+    except AccountsLockTimeout as e:
+        sys.exit(str(e))                  # the plain sentence, never a traceback
     print("{} web-login account '{}'.".format("Updated" if replaced else "Added", username))
 
 
 def run_remove_web_user(args):
     """CLI: remove one gallery web-login account by username, and its per-login folder in the
     library (S10: a removed login's preferences, presets and snippets go with it)."""
+    from moonglade.backup import AccountsLockTimeout
     username = args.remove_web_user
-    if remove_web_user(username):
+    try:
+        removed = remove_web_user(username)
+    except AccountsLockTimeout as e:
+        sys.exit(str(e))                  # the plain sentence, never a traceback
+    if removed:
         remove_login_files(getattr(args, "out", None), username)
         print("Removed web-login account '{}'.".format(username))
     else:

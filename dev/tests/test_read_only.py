@@ -76,7 +76,7 @@ class TestDeleteTaskReadOnly:
         (tmp_path / "images" / "m1.png").write_bytes(b"x")
         monkeypatch.setattr(core, "READ_ONLY", True)
         cli = login_client(tmp_path)
-        r = cli.post("/api/delete-tasks", json={"media_ids": ["m1"]})
+        r = cli.post("/api/delete-tasks", json={"confirm": "DELETE", "media_ids": ["m1"]})
         assert r.status_code == 403
         assert "READ_ONLY" in (r.get_json().get("error") or "")
         assert not [j for j in cli.get("/api/jobs").get_json()["jobs"]
