@@ -66,7 +66,7 @@ def _json(raw):
         return {}
 
 
-def tv_loop(server, ctx, label):
+def tv_loop(server, ctx):
     while True:
         with lock:
             phase = state["phase"]
@@ -205,12 +205,11 @@ def main():
     ap.add_argument("--server", default="https://10.0.0.49:5057")
     ap.add_argument("--port", type=int, default=5058)
     ap.add_argument("--ca", default=os.path.join(APP, "local", "tls_ca_cert.pem"))
-    ap.add_argument("--label", default="Apple TV")
     a = ap.parse_args()
     ctx = _ctx(a.ca)
     Handler.server_url = a.server.rstrip("/")
     Handler.ctx = ctx
-    threading.Thread(target=tv_loop, args=(Handler.server_url, ctx, a.label), daemon=True).start()
+    threading.Thread(target=tv_loop, args=(Handler.server_url, ctx), daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", a.port), Handler).serve_forever()
 
 
