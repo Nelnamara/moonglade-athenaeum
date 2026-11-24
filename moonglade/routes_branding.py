@@ -261,7 +261,8 @@ def register(app, ctx):
         require login (any session, local or LAN) -- cosmetic, so any authorized device may
         read or change it, same as the rest of the LOGIN-tier settings surface.
         Persists to settings.json's branding (save_branding)."""
-        if request.method == "GET":
+        # The write branch is POST and nothing else (review R1): HEAD runs this same view.
+        if request.method != "POST":
             # Reflects a raw filesystem drop immediately, same as /api/achievements --
             # a caller reading branding state directly (this route, not the achievements
             # one) must never see a stale pre-adoption picture. Cheap; see

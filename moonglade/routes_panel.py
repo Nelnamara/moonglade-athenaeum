@@ -391,7 +391,11 @@ def register(app, ctx):
         if current is not None and not current:
             return jsonify({"error": "Enter your current password."}), 400
 
-        result = _web_accounts.set_web_user_password_guarded(target, new_pw, current_password=current)
+        # Your own change keeps this browser's remembered-device record, re-stamped with the
+        # new epoch in the same accounts-lock section (review R10); every other one goes.
+        keep = session.get("dev") if target == me else None
+        result = _web_accounts.set_web_user_password_guarded(target, new_pw, current_password=current,
+                                                             keep_device=keep)
         if result == "not_found":
             return jsonify({"error": "No such account."}), 404
         if result == "bad_current":
@@ -459,7 +463,8 @@ def register(app, ctx):
         """
         from moonglade.gallery import DEFAULT_LIBRARY_DIR, _supervised
         from pathlib import Path
-        if request.method == "GET":
+        # The write branch is POST and nothing else (review R1): HEAD runs this same view.
+        if request.method != "POST":
             local = _is_local_request()
             # BOTH path fields are withheld from a non-local caller, not just the first.
             # POST stores an ABSOLUTE path, so `stored` is the host path too -- blanking
@@ -767,10 +772,15 @@ def register(app, ctx):
         hostname = adv.hostname if broadcasting else moonglade_bonjour.hostname_label(name) + ".local"
         lan_bind = moonglade_bonjour.is_lan_bind(host)
         ip = adv.ip if broadcasting else moonglade_bonjour.lan_ip()
+        # The home-network addresses, whenever this PC has one and listens on the network --
+        # not only while broadcasting (owner ruling 2026-11-22: the QR, which encodes the first
+        # one, carries no credential). The .local name answers only while Bonjour broadcasts
+        # it, so without the broadcast the plain address is the only one, and so the first.
         urls = []
         if lan_bind and ip:
-            urls = ["{}://{}:{}/".format(scheme, hostname, port),
-                    "{}://{}:{}/".format(scheme, ip, port)]
+            urls = ["{}://{}:{}/".format(scheme, ip, port)]
+            if broadcasting:
+                urls.insert(0, "{}://{}:{}/".format(scheme, hostname, port))
         return jsonify({
             "enabled": enabled, "broadcasting": broadcasting, "name": name,
             "host": host, "port": port, "scheme": scheme, "hostname": hostname,

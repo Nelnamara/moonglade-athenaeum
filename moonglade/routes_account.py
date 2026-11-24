@@ -515,7 +515,8 @@ def register(app, ctx):
             return jsonify({"error": "authentication required"}), 401
         with _presets_lock:
             presets = _load_presets(user)
-            if request.method == "GET":
+            # The import is POST and nothing else (review R1): HEAD runs this same view.
+            if request.method != "POST":
                 return jsonify({"presets": {
                     k: {"label": v.get("label") or k, "scene_id": v.get("scene_id", "")}
                     for k, v in presets.items()}})
@@ -682,7 +683,8 @@ def register(app, ctx):
             # Unreachable through the front door; fails closed if that ever changes,
             # and never falls back to ACCOUNT_LOCAL or a shared file.
             return jsonify({"error": "authentication required"}), 401
-        if request.method == "GET":
+        # The write branch is POST and nothing else (review R1): HEAD runs this same view.
+        if request.method != "POST":
             session.setdefault("csrf", secrets.token_hex(16))
             return jsonify({"prefs": _account_prefs.account_prefs_get(out_dir, user),
                             "csrf": session["csrf"]})

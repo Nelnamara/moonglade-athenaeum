@@ -80,11 +80,19 @@ def tier(default, message=LOCALHOST_REFUSAL, **by_method):
 
 
 def route_tier(view, method):
-    """The tier that governs `view` for `method`, or None if it declares none."""
+    """The tier that governs `view` for `method`, or None if it declares none.
+
+    HEAD is governed by the GET tier (review R1, 2026-11-23). Flask adds HEAD to every GET rule
+    and runs the same view for it; reading HEAD as its own method fell back to the DEFAULT tier,
+    so a route declared `@tier(LOGIN, POST=LOCALHOST)` answered HEAD at LOGIN -- and a handler
+    whose write branch was "anything not GET" wrote from a LAN session. Handlers now write only
+    on POST, and HEAD is the GET it stands for."""
     declaration = getattr(view, _TIER_ATTR, None)
     if declaration is None:
         return None
     default, by_method, _message = declaration
+    if method == "HEAD":
+        method = "GET"
     return by_method.get(method, default)
 
 
