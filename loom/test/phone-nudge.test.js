@@ -117,7 +117,10 @@ describe("U6/U7 what it says", () => {
 describe("U6/U7 the wiring", () => {
   test("a successful sign-in marks the visit before the page moves on", () => {
     const login = code("hooks/useLogin.js");
-    assert.match(login, /setPhase\("welcome"\);\s*markSignedIn\(\);\s*window\.location\.href = d\.next \|\| "\/";/);
+    // The move is `go` (held a beat when a ticked Remember this device couldn't be saved), and the
+    // mark comes before it is even defined.
+    assert.match(login, /setPhase\("welcome"\);\s*markSignedIn\(\);\s*const go = \(\) => \{ window\.location\.href = d\.next \|\| "\/"; \};/);
+    assert.doesNotMatch(login.slice(login.indexOf("const go = ")), /markSignedIn\(/);
   });
 
   test("the strip sits under the gallery's pill row and pushes the grid down; ✕ and a tap are its only writes", () => {
