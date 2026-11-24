@@ -26,7 +26,7 @@ Control Panel (closing its browser tab doesn't stop it).
 
 The gallery picks its folder in this order:
 
-1. `--out <folder>` on the command line — always wins, so a one-off launch or a second
+1. `--out <folder>` on the command line (or the `MOONGLADE_OUT` environment variable) — always wins, so a one-off launch or a second
    install can point anywhere without disturbing the setting. A run that names its own
    library never moves one, and refuses a library still in an older layout.
 2. The library folder in `local\settings.json` — what the Control Panel writes.
@@ -60,7 +60,8 @@ python -m moonglade --workers 8 --page-size 500 # fast full backfill
   website. Every step is idempotent, so re-running it on a clean catalog costs almost
   nothing. `--update` on its own is the narrower primitive. **Videos aren't part of
   `--sync`** — videos you make *in* Moonglade are caught the moment they finish, but ones
-  generated on the PixAI website need the separate `--sync-videos` pass (below).
+  generated on the PixAI website need the separate `--sync-videos` pass (below). The Control
+  Panel's **Runs itself** list does this nightly for you.
 - `--workers N` (default 4) = how many images download at once. 6–8 saturates most
   connections; composes with every flag.
 - `--update` stops after `--update-grace` consecutive already-on-disk pages (default
@@ -185,7 +186,7 @@ their own, with no listing re-walk.
 That split is how the app schedules it. The Control Panel's **View counts** row is a weekly
 `--views-only` run, on by default; every *unattended* run of the metadata refresh passes
 `--no-views`; and the published-artwork sweep never reads a view count at
-all. Clicking **Sync published-artwork metadata** yourself still reads them, because that is
+all. Clicking **Sync published-artwork metadata (full re-walk)** yourself still reads them, because that is
 you asking. With `READ_ONLY` set in `config.json` the view read is skipped everywhere — it
 changes a number on your PixAI account, so it sits behind the same switch as publishing and
 deleting.
@@ -336,7 +337,7 @@ Each runs its pass and exits; all are idempotent and safe to re-run.
 | `--fix-model-names` | re-resolves catalog rows whose model name is blank or a raw numeric id (one API call per distinct model). Also runs inside `--sync`. |
 | `--fix-model-names --relabel-removed` | additionally labels ids that **PixAI answered about and had no name for** (deleted models) as "Unknown or removed model" instead of leaving the raw number. An id whose lookup simply *failed* — timeout, 5xx, a dropped connection — is a different thing, and is now left exactly as it was and reported as `not checked`, so the next run picks it up. It used to get the "Unknown or removed model" label too, which is a permanent-looking answer to a temporary problem: a re-run then read the row as already resolved and never came back for it. |
 | `--backfill-meta` | fills missing url/width/height only (see [Full metadata](#full-metadata) for the full-meta variant) |
-| `--backfill-lineage` | fills in `source_media_id`/`derive_kind` (which image an edit, upscale or video was made **from**) for rows that predate lineage tracking, via `getTaskById`; powers Image Details' Lineage panel. Idempotent. |
+| `--backfill-lineage` | fills in `source_media_id`/`derive_kind` (which image an edit, upscale or video was made **from**) for rows that predate lineage tracking, by re-reading each run once; powers Image Details' Lineage panel. Idempotent. |
 | `--backfill-phash` | computes a perceptual difference-hash (dHash) for every image row that lacks one, powering the near-duplicate ("upscaled or recompressed copy") tier of the duplicates finder. Local Pillow work, no network. |
 | `--faststart-videos` | losslessly rewrites every video so iOS/Safari can stream it over HTTP (`ffmpeg -c copy +faststart`; needs ffmpeg on PATH; skips already-fixed files; safe to run while the gallery or a live watch is collecting — each remux uses its own unique temp file) |
 
@@ -353,7 +354,7 @@ whether the file is salvageable.
 ### Thumbnails and the Similar index
 
 Two more one-shots keep what the gallery shows in step with your files. Each has a button in
-the Control Panel too (**Rebuild ALL thumbnails**, **Top up Similar**, **Rebuild Similar (slow)**).
+the Control Panel too (**Rebuild ALL thumbnails**, **Rebuild the Similar index**, and the nightly **Top up Similar** job).
 
 | Command | What it does |
 |---|---|

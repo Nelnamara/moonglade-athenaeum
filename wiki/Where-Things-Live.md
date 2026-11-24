@@ -16,6 +16,8 @@ a second copy of anything for you to clean up.
     settings.json          everything the app sets for you: the library folder, the port and LAN
                            discovery, the Mirror to PixAI switch, your branding picks
     mirror_session.json    the Mirror's sign-in
+    tls_*.pem              the home-network certificate and the authority that signs it (keep private)
+    signed_out_sessions.json   sessions that Log Out ended
     moonglade.mgpack       the art pack (and its .version note)
     icons\                 the icons your Desktop and Start-menu shortcuts show
     banners\               a banner you wear that can't be drawn again
@@ -25,8 +27,9 @@ a second copy of anything for you to clean up.
   dev\                     developer files (the tests and tools); an install never needs them
 ```
 
-`config.json` is only for what you edit yourself. Anything you change in the Control Panel
-lands in `local\settings.json` instead.
+`config.json` is only for what you edit yourself. Most of what you set in the Control Panel (the
+library folder, the port and LAN discovery, the Mirror switch, your branding picks) lands in
+`local\settings.json` instead. Logins and your API key stay in `config.json`.
 
 ## Your library
 
@@ -64,7 +67,9 @@ logins, and the art tree if you uploaded branding art. Everything else rebuilds 
 Moonglade makes it again at the next start. The art pack downloads again and you sign the
 Mirror in again. You'd also re-pick what you'd changed in the Control Panel: the port, the
 library folder, LAN discovery, the Mirror switch and your branding picks. A banner you wear that
-can't be drawn again lives there too, so it would go. The caches and logs simply start fresh.
+can't be drawn again lives there too, so it would go. The home-network certificate is made
+again as a new one, so every device that installed the old one must install the new one.
+The caches and logs simply start fresh.
 
 **I moved my library to another drive.**
 Point the Control Panel's library folder at it. Your presets, boards and achievements go with it,

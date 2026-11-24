@@ -38,12 +38,13 @@ overhauls their site and something stops working, see [Troubleshooting](Troubles
 update to the latest release, or open an issue.
 
 **Where do my files and credentials go?**
-Everything is local. `config.json`, `token.txt`, and `pixai_backup/` are git-ignored.
-Nothing phones home.
+Your files and credentials stay on your PC. `config.json`, `token.txt`, and `pixai_backup/` are git-ignored.
+The app talks only to PixAI (your own account) and to GitHub (an hourly read-only check for a new release).
 
 **Can I run it on my phone/tablet?**
-Yes — in the Control Panel's **LAN discovery** card set **Reach** to **LAN** and save (the server
-restarts), then open the address the card shows on your device, or scan its QR. That address is
+Yes — in the Control Panel's **LAN discovery** card set **Reach** to **LAN** and **Save**, then
+press **⟳ Restart** in the Server tile (needs the launcher). When it is back, the card shows the
+address (with **Broadcast** on): open it on your device, or scan its QR. That address is
 `https://`, so what you type and your session cross your network encrypted. The browser warns
 about the certificate, because Moonglade made it itself. To stop the warning, install this PC's
 certificate on the device once, from the link on the card, after checking that its SHA-256
@@ -94,8 +95,10 @@ delete-to-Trash and restore-from-Trash (your file moves, but you can move it bac
 moving files is not itself the thing that gets gated). What needs the machine running the server,
 no matter who is signed in: the
 destructive Control Panel jobs (organize, undo-organize, dedup-apply, dedup-delete,
-restore-orphans, rebuild-thumbnails) plus cancelling a job or editing the schedule; emptying the
-Trash or deleting from it forever; deleting from your PixAI account, per-image or in bulk;
+restore-orphans, rebuild-thumbnails) plus cancelling a job or editing the schedule (Run now on
+the published-artwork sweep too); emptying the
+Trash or deleting from it forever; deleting a generation from your PixAI account, per-image or in bulk;
+switching the Mirror to PixAI on, changing the Reach, port or name in LAN discovery;
 setting the API key, the library folder, or the launcher icon; importing local files (**Import**
 / `--import-local`); and changing the account roster — adding an account, removing someone
 *else's*, or resetting someone else's password.

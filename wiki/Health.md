@@ -7,7 +7,7 @@ The **Health** overlay is your analytics dashboard over `catalog.db`:
   **Uncataloged**, **Zero-byte files**, **Missing thumbs** and **Last verified** (the last three
   are explained under *Library integrity* below).
 - **Storage used**, drawn as stacked bars (below).
-- Images by month, **Top models**, **Top tags & contests**, **Top LoRAs**, and a **Prompt word cloud**.
+- **Images over time**, a **Folder breakdown**, a **Tagged** ring, **Top models**, **Top tags & contests**, **Top LoRAs**, and a **Prompt word cloud**.
 
 > **Two coverage numbers, not one.** *Full-meta* counts rows that have a prompt. *Model
 > known* counts rows that have a model id — which only ever comes from a per-task detail

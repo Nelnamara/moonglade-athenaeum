@@ -53,7 +53,8 @@ independently.
 Every button that spends says what it will spend on a second line inside it: **✦ Generate**
 over "≈ 2,400 credits", or "Free · uses 1 card" (with a green ring) when a free card covers it.
 That is the dock's Image, Edit and Video tabs, the phone's Create tab, the Fixer, Upscale, the
-Enhance presets and The Loom's send buttons. The button stays **dim until the price is known**:
+Enhance presets and The Loom's send buttons. The free-card line applies to Image, Edit, Video
+and Upscale; the Fixer and the Enhance presets show a price only (no free card covers them). The button stays **dim until the price is known**:
 it says why instead ("pick a model first", "checking the price…"), and if the price check fails
 it stays dim and says **Couldn't check the price**. Your balance sits beside it.
 
@@ -601,12 +602,12 @@ wants a `--backfill-full-meta` pass afterwards.
 
 Turn any catalog image into a short clip (image-to-video). Same preview/confirm safety —
 but **video is expensive** (a V4.0 5-second clip is ~27,500 credits, ~50–100× an image),
-so the preview shouts the cost, and the actual charge is read back from the server
-(`paidCredit`) after it runs and stored in the catalog (`paid_credit`). Clips download
+so the preview shouts the cost, and the actual charge is read back from PixAI
+after it runs and stored in the catalog. Clips download
 into `videos/` and catalog as `is_video`.
 
 **Web:** the Generate drawer's **Video** tab — pick a source image, set model / duration
-(5/6/10/15s; 15 is V4.0-only, see below) / mode (Basic cheaper, Professional), optional
+(5, 10 or 15 s; 15 s is for the V4.0 and Tsubaki engines, the others stop at 10, see below) / mode (Basic cheaper, Professional), optional
 audio, optional end frame for first/last-frame interpolation, then submit (the cost +
 free-card check show first — for a video that check counts **tickets**, see
 [Free cards and videos](#free-cards-and-videos) below).
@@ -638,15 +639,16 @@ that snaps the same way, to the nearest length the chosen model takes.
 | V4.0 Lite Preview (`v4.0.1`, default) | 15s | Yes (V4.0 cards) | First Frame · First+Last · Multi-Reference |
 | Tsubaki Video (`tbkv1.0.1`) | 15s (5 / 10 / 15 only) | Not established — the cost badge checks each clip | First Frame · First+Last · Multi-Reference |
 | Tsubaki Video Flash (`tbkv1.0`) | 15s (5 / 10 / 15 only) | Not established — the cost badge checks each clip | First Frame · First+Last · Multi-Reference |
-| V3.2 (`v3.2`) — retired by PixAI on 23 Nov 2026 at 03:00 UTC; not offered after that, and a recipe naming it uses V4.0 Lite Preview | 10s | Yes (V4.0 cards) | First Frame · First+Last |
 | V3.0 Lite (`v3.0.2`) | 10s | Yes (V4.0 cards) | First Frame · First+Last |
 | V3.0 (High Consistency) (`v3.0`) | 10s | Yes (V4.0 cards) | First Frame · First+Last |
 | V3.0 Flash (`v3.0.1`) | 10s | **No — never covered** | First Frame only |
 | V2.7 (High Dynamics) (`v2.7`) | 10s | **No — never covered** | First Frame only |
 
 Notes:
+- **V3.2 was retired by PixAI on 23 Nov 2026.** It is no longer offered, the CLI refuses it
+  before anything is sent, and a recipe naming it uses V4.0 Lite Preview.
 - **Multi-Reference (R2V) only works on the V4.0 pair and the Tsubaki pair.** First+Last (FLF)
-  also works on the three V3.0-generation models. V3.0 Flash and V2.7 only ever offer First Frame
+  also works on the two V3.0-generation models that remain with it. V3.0 Flash and V2.7 only ever offer First Frame
   (I2V) — the drawer hides the mode buttons a model can't do rather than letting you
   submit a combination PixAI would reject.
 - **The Tsubaki engines are different in four ways.** They take **5, 10 or 15 seconds — no 6**
@@ -762,8 +764,8 @@ same as any other generation.
 ## Art filters — the Darkroom, free and in your browser
 
 **Art filters** are not generations. Each one is two or three gradient overlays with a blend mode
-and an opacity, plus an optional brightness/contrast/saturation trim. PixAI's seven come from a
-public config endpoint that their own site reads and composites in the browser — which is why
+and an opacity, plus an optional brightness/contrast/saturation trim. PixAI's seven come from PixAI's own published filter settings,
+which their site composites in the browser — which is why
 their Filters tab has no Generate button and never quotes a price.
 
 Moonglade does the same thing locally, and adds five of its own. They live in **the Darkroom**, a
@@ -809,12 +811,11 @@ pixels.
 
 > **PixAI's one-click *workflow* tools now work here — when the mirror is armed.** Background
 > removal, line-art, sketch coloring, hand-fix, face-enhance and change-emotion are PixAI
-> "panelplugin" workflows that dispatch only on a logged-in browser identity, never a bare API
-> key (submitted with a key they are accepted, queued, then cancelled about an hour later
-> without ever starting). So the Generate drawer's **Enhance** sub-tab offers them as
+> workflows. They need your signed-in PixAI session, not just the API key, so the Generate
+> drawer's **Enhance** sub-tab offers them as
 > selectable presets that run **only while _Mirror to PixAI_ is turned on** (Control Panel →
 > Maintenance) — with the mirror off, the sub-tab says so and points you at the toggle. Each
-> spends credits and **no free card covers a panelplugin task**, so the price shows before you
+> spends credits and **no free card covers them**, so the price shows before you
 > generate. **Change Emotion** asks which expression you want, sorted into five families —
 > Bright, Soft, Dark, Startled, Playful — one family on screen at a time, so you pick from a
 > handful rather than scrolling every expression PixAI ships. A purple crown means that expression
@@ -823,6 +824,12 @@ pixels.
 > credential: one kind per Fix (faces or hands, not both at once), priced by PixAI before it
 > asks you to confirm. Plain **Upscale** and **Hires** are ordinary generation settings on the
 > Generate tab, not workflows.
+
+**AI Tools scenes.** Picking a scene in **✦ AI Tools** (plushie, tarot, character card and the
+rest; needs _Mirror to PixAI_ on) opens its controls in the Generate dock. Unlike every other
+button, **a scene shows no price before you send**: the confirm says it couldn't verify the
+cost, no free card ever covers it, and the real cost appears in the run's result afterwards.
+Treat each press as spending.
 
 ## Multi-reference video (`--reference-video`)
 
@@ -898,10 +905,10 @@ PixAI grants free-generation cards — **kaisuuken** (回数券, "ticket book") 
 and events. Each is **locked to one model**.
 
 > **✅ Cards auto-apply — just generate.** On `--confirm`, the tool asks PixAI which of your
-> cards matches this generation (the same `check` call the website makes), attaches the
+> cards matches this generation, attaches the
 > nearest-expiry one that covers it, and that generation costs **0 credits**. The **preview**
-> tells you up-front whether it'll be free — and the **real credit cost** (via PixAI's
-> `task-price` estimate, which spends nothing):
+> tells you up-front whether it'll be free — and the **real credit cost** (PixAI's own price
+> estimate, which spends nothing):
 >
 > ```
 > FREE: Tsubaki.2 Only covers this -- with --confirm it costs 0 credits (saves ~1,600 credits) …
@@ -926,11 +933,17 @@ Just generate on a model you have a card for — the match is automatic:
 |---|---|
 | **Tsubaki.2** | `--generate` (default model) |
 | **Edit Pro** | `--edit-image` (default model) |
-| **Reference Pro** | `--generate --model 1948514378441961474` |
+| **Reference Pro** | `--edit-image --edit-model 1948514378441961474` |
 | **V4.0 video** | `--generate-video` / `--reference-video` (5s = 1 ticket, 10s = 2, 15s = 3 — see below) |
 
 Overrides: **`--no-card`** forces paying credits even when a card matches; **`--kaisuuken-id <id>`**
-forces a specific card. Cards closest to expiry are used first.
+attaches that exact card as given and does **not** check that it covers the job. If the card
+holds fewer tickets than the job needs (a 15 s clip needs 3), PixAI can charge the full credit
+price. Leave it off and the automatic match only picks a card that covers the whole job, closest
+to expiry first.
+
+If the preview says it couldn't verify the cost or the free-card match (offline, no key),
+`--confirm` may spend credits.
 
 ### Free cards and videos
 
@@ -1006,7 +1019,7 @@ details, and the picker opens with that picture already ticked.
 
 ---
 
-## The Generate drawer (web gallery, v1.9.0)
+## The Generate dock, in more detail
 
 Everything above also lives in the **web gallery** as a dockable drawer — click **✦ Generate**
 in the header. It is **login-tier, not localhost-only**: any signed-in device — local or
@@ -1023,14 +1036,16 @@ the button comes back — the app will tell you it doesn't know rather than leav
 
 - **Generate** — pick a base model in the pop-out browser (hover any card for a full preview),
   attach **LoRAs with weights** up to your account's own limit (read live from your PixAI
-  membership and shown as `LORAS · n/max` — it is not a fixed number, and Generate blocks
+  membership and shown as `n / max LoRAs` beside **+ Add LoRA** — it is not a fixed number, and Generate blocks
   rather than letting you submit over it), aspect/mode/count, live credit cost with the
   free-card check up front.
 - **Edit** — instruct edits ("make it night") over one source image. The **Enhance** sub-tab
   holds PixAI's one-click presets and the door to **the Darkroom**, where the **art filters**
   live: gradient overlays applied right in your browser, so they cost nothing, make no request,
-  and work offline. The drag-a-box hand/face **Fixer** is not built yet: the computer's Edit
-  tab has no Fixer control, and the phone's Edit tab shows a "coming next" placeholder for it.
+  and work offline. A **Toolbox preset** (the row on the Edit tab) is used instead of your typed
+  instruction and brings its own model. The drag-a-box hand/face **Fixer** lives in
+  [The Loom](The-Loom) (Edit → Fixer). The dock's Edit tab has **Edit** and **Enhance** only, and
+  the phone's Edit tab shows a "coming next" placeholder for it.
   The edit models take different numbers of reference images (Edit Pro up to 4; Edit Pro (v2.0),
   PixAI Edit (v4.0) and Reference Pro up to 10; the picture being edited counts as one of them), so switching
   from the roomier one to the tighter one can't keep everything you picked. **It now tells
@@ -1060,14 +1075,14 @@ the button comes back — the app will tell you it doesn't know rather than leav
 - **Tag Suggestions** — Danbooru-style autocomplete in the **Generate** prompt, the **Generate**
   negative, and the **Edit** instruction (not the Video tab's prompt); **TAB** accepts.
 - **Bridges from the gallery**: right-click any thumbnail (Edit / Send to Video / Remix / Copy
-  media id — and **Rebuild poster** on a video), the same Edit/Video buttons in the lightbox,
+  id — and **Rebuild poster** on a video), the same Edit/Video buttons in the lightbox,
   **↺ Remix** in Image Details, and multi-select → **Send to Video** in the bulk bar.
 - **↺ Remix** loads a picture's *full recipe* into the Generate tab — prompt, negative, size,
   steps/CFG/seed, the model at the exact version it rendered with, and its LoRAs at their real
   weights (recovered from the task itself, never guessed by name). It only fills the composer;
   generating is still your click. If any part can't be restored — the model's gone, a LoRA was
   delisted — the "↺ from #…" chip turns amber and says exactly what's missing, so review it
-  before you spend. Desktop for now.
+  before you spend. On the phone, **Remix** is the first button on a picture's Details page.
 - Results are downloaded and cataloged automatically (`source='api'`; videos into `videos/`),
   so everything you make lands in your own library the moment it finishes. **It lands without
   moving you.** If you are reading page 4 when a job completes, the page you are on, its

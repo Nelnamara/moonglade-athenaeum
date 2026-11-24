@@ -2,7 +2,7 @@
 
 This folder holds the Loom's **source and its Node toolchain**. The Loom itself is not a
 standalone page any more: it is a surface of the web app, served at **`/loom`** by
-`moonglade/gallery.py`, and its React source is **`master-storyboard.jsx`**.
+`moonglade/routes_loom.py` (the page shell is in `moonglade/pages.py`), and its React source is **`master-storyboard.jsx`**.
 
 **The user-facing manual is [`wiki/The-Loom.md`](../wiki/The-Loom.md)** — features, shortcuts, the
 storyboard model. This file only covers what lives in `loom/`.
@@ -10,8 +10,9 @@ storyboard model. This file only covers what lives in `loom/`.
 | Path | What it is |
 |---|---|
 | `master-storyboard.jsx` | The Loom's React source (the V2 shell). |
-| `src/loom-core.js`, `src/loom-mutations.js` | Pure, framework-agnostic logic, `node --test`-able. |
-| `test/` | The node test suite (`cd loom && npm test`). |
+| `src/*.js` | Pure, framework-agnostic logic, `node --test`-able (takes, music bed, ribbon, find, EDL, cast library, URL and so on). |
+| `vendor/` | React, served locally so the page paints with no network. |
+| `test/`, `test-support/` | The node test suite (`cd loom && npm test`) and its helpers. |
 | `scripts/build.mjs` | esbuild bundler → `dist/master-storyboard.bundle.js`. |
 | `dist/` | The pre-built bundle (committed). |
 
@@ -51,10 +52,10 @@ tags to match — so the old "confirm your tag numbers on the day" caveat no lon
 
 ---
 
-## Build tooling (Phase 1, 2026-07-16)
+## Build tooling
 
-The rest of the repo has no Node/npm toolchain; this is the first one, scoped entirely
-to `loom/` via `loom/package.json`.
+The Loom's toolchain is scoped to `loom/` via `loom/package.json` (the gallery has its
+own in `gallery/`).
 
 - `loom/src/loom-core.js` — pure, framework-agnostic logic pulled out of
   `master-storyboard.jsx` (`flat`, `shotText`, `nextTag`/`maxTagNum`, `frameLinked`,
@@ -68,8 +69,8 @@ to `loom/` via `loom/package.json`.
   (`cd loom && npm run build`; `npm install` once first).
 
 **One delivery path.** `/loom` serves the pre-built `loom/dist/` bundle; the old in-browser
-Babel-standalone transpile was retired on 2026-08-08 (see the comment above `loom()` in
-`moonglade/gallery.py`). The page refuses to open if the bundle was never built.
+Babel-standalone transpile was retired on 2026-08-08 (see `moonglade/routes_loom.py` and
+`moonglade/pages.py`). The page refuses to open if the bundle was never built.
 
 **The bundle is committed.** If you change `master-storyboard.jsx` or anything under `loom/src/`,
 run `npm run build` and commit `dist/`. CI rebuilds it and fails on any difference, and

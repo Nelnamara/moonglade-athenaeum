@@ -4,11 +4,8 @@ The storyboard for multi-clip video. Where the Generate drawer's **Video** tab m
 clip, the Loom plans a whole piece — acts, shots, cast, continuity — and renders each shot
 on the same PixAI video engine.
 
-Open it from the gallery header (**▰ The Loom**) or go to `/loom`:
-
-```bash
-python -m moonglade.gallery      # then http://127.0.0.1:5000/loom
-```
+Open it from the gallery header (**▰ The Loom**), or go to `/loom` on the same address the
+gallery uses.
 
 **A storyboard has its own address.** `/loom` opens whichever board you had open last, as it
 always has. `/loom?board=<id>` opens *that* one — so a storyboard is somewhere you can
@@ -125,7 +122,7 @@ are actually on this board. Chips in one group widen each other (**todo** and **
 both); the groups and the text narrow together.
 
 While a find is on, shots that don't match dim to 35%, the matching segments on the reel are
-ringed, and the count reads **2 of 5**. **↑ ↓** (the arrows or the keys) and **Enter** step
+ringed, and the count reads **2 of 5**. **↑ ↓** (the arrows or the keys) and **Enter** (**Shift Enter** goes back) step
 through the matches, selecting each shot and scrolling to it; the current one wears a brighter
 ring. **Esc** clears the text and the chips. Find only looks and selects: it never changes a
 shot, prices or renders anything.
@@ -142,8 +139,9 @@ shot, prices or renders anything.
 There is no text-only mode: these video models need an input frame or reference, so every
 shot needs one.
 
-**Not every model offers all four.** Multi-Reference (R2V) only works on the V4.0 pair;
-V3.0 Flash and V2.7 only ever offer First Frame (I2V) — the Generate drawer hides the
+**Not every model offers all four.** Multi-Reference (R2V) works on the V4.0 pair and the two
+Tsubaki Video engines; V3.0 Lite and V3.0 offer First Frame and First & Last; V3.0 Flash and
+V2.7 only ever offer First Frame (I2V) — the Generate drawer hides the
 modes a selected model doesn't support. See [Generating](Generating#video-models-and-shot-mode-gating)
 for the full per-model breakdown (durations, free-card eligibility, mode support).
 
@@ -337,10 +335,10 @@ selected shot at once, pictures included. You do not need to click a video-type 
 - **A shot that never had an engine picked uses V4.0 Lite**, as every shot did before engines
   were saved per shot. The drawer shows that, not the engine of the last shot you looked at.
   Storyboards made before this keep that behaviour until you set them.
-- **If a shot's type isn't one its engine offers** (Multi-Reference on V3.2, say), the drawer
+- **If a shot's type isn't one its engine offers** (Multi-Reference on V3.0, say), the drawer
   shows, prices and renders the type the engine does offer, and picking that engine moves the
   shot's type and length to what it takes, with a note saying so. A shot its engine can't send
-  as it stands (a single frame in First & Last on V3.2) is refused on its card with **Nothing
+  as it stands (a single frame in First & Last on V3.0 Lite, say) is refused on its card with **Nothing
   was sent.**
 - **A First Frame or First & Last shot sends its frames, never a cast or reference picture in
   their place.** One with no frame of its own is refused on its card, as the drawer's
@@ -460,7 +458,7 @@ lists it as an audio event. **✕** takes it off this storyboard; the file itsel
 are never deleted on their own: when some are no longer on any storyboard, the full view offers
 **Remove…** for exactly those, and asks first. If one of your storyboards won't read (a file torn by a crash, say),
 nothing is offered for removal: the line names that storyboard, when it was saved, and where its
-file is under the library's `_moonglade/loom/kv/` folder, so you can restore it from a backup or delete it.
+file is under the library's `_moonglade/loom/kv/<your account>/` folder, so you can restore it from a backup or delete it.
 
 ### The continuity ribbon
 
@@ -498,8 +496,7 @@ Generate drawer.
 camera, lighting, cast, `@refs`, project look — and puts it on your clipboard for any
 external generator that speaks the same `@reference` grammar. Plan here, render anywhere.
 
-Tip: the gallery's image picker has a **"Copy the image's prompt to the clipboard when
-picking"** checkbox — useful for carrying source-image context along while you cast shots.
+Tip: the gallery's image picker has a **Copy prompt on pick** checkbox — useful for carrying source-image context along while you cast shots.
 
 ## Storyboards
 
@@ -511,7 +508,7 @@ pieces in flight.
 
 ## Saving & export
 
-The board **autosaves to the gallery server** (one file per key under `_moonglade/loom/kv/` in your
+The board **autosaves to the gallery server** (one file per key under `_moonglade/loom/kv/<your account>/` in your
 library folder), so it survives restarts and follows you between browsers and devices.
 
 **Export ▾** offers three tiers, the editor handoff, plus restore:
@@ -622,6 +619,8 @@ The phone layout carries the same work, sized for a finger:
   reel, the rest dim, and the arrows step through them.
 - **Continuity ribbon** — a swipeable strip of the same pairs at the bottom of **Review & trim**;
   tap one to open both shots on the board.
+- **Frame handoff and Copy shot** — the shot's screen has the same splice / inherit button for the
+  opening frame as the desktop drawer, and **Copy shot**.
 - The **edit decision list** is desktop only.
 
 ## A workflow that works

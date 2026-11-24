@@ -13,7 +13,8 @@ with the app and are the same for everyone, so when one breaks it breaks for all
 
 - **First, update to the latest release** — open the **Control Panel** and click the gold
   version stamp in its sidebar footer if one is offered, then **View the update ›** in the
-  About card that opens (`git pull` by hand otherwise). Fixes usually land there quickly.
+  About card that opens (`git pull` by hand otherwise; a zip install updates by downloading
+  the new zip over it, because **Update now** needs the git version). Fixes usually land there quickly.
 - If it's still broken on the latest version, **open an issue** so it can be fixed for
   everyone.
 
@@ -45,8 +46,8 @@ refuses (Ultra without a membership) is reported, never resubmitted on another p
 the list can't be read, the **CLI** (`--generate`) and the **web app's Generate tab** both
 auto-fall-back to the model's default and generate anyway — a rejected submit costs no
 credits either way, so the retry is free. You shouldn't see this raw message at all
-anymore; if you do, it's a friendlier "That quality setting isn't available for this
-model — try Auto instead" banner in most places, or (rarer) a case the retry itself
+anymore; if you do, it's a friendlier banner saying that quality setting isn't available for
+the model (pick Auto, or another Mode) in most places, or (rarer) a case the retry itself
 didn't catch. Leave Mode on **Auto** if you'd rather not think about it.
 
 ## A generate/edit/video failed with a connection or timeout error
@@ -219,6 +220,10 @@ window names the reason either way. The usual ones:
   try again.
 - **`READ_ONLY` is set in `config.json`.** That flag means "don't change my install", and an
   update is the biggest change there is.
+- **No release has been announced yet.** Open the Control Panel so it checks, then try again.
+- **You are already on that release or newer.**
+- **This isn't a git checkout** (a zip install). **Update now** needs the git version; download
+  the new zip instead.
 
 Each of those is fixable, and `git pull` by hand stays available regardless.
 

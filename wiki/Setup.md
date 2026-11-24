@@ -4,7 +4,7 @@
 
 **You need a PixAI membership.** The API key this app runs on comes with a membership; a free PixAI account cannot get one, and without a key nothing here works.
 
-1. **Download** the zip from the [latest Release](https://github.com/Nelnamara/moonglade-athenaeum/releases/latest) and unzip it somewhere you will keep it.
+1. **Download** the zip from the [latest Release](https://github.com/Nelnamara/moonglade-athenaeum/releases/latest) and unzip it somewhere you will keep it. (A zip install updates by downloading the new zip over it; the Panel's one-click **Update now** needs the git version.)
 2. **Double-click `Install Moonglade.cmd`.** It sets up Python and everything else for you. If Windows asks "Do you want to run this file?", choose Run.
 3. **Paste your API key** when Moonglade asks for it.
 4. **Open the gallery.** The installer opens it for you; after that, double-click `Moonglade Launcher.pyw`.
@@ -38,6 +38,8 @@ it, and `python -m pip` installs for the `python` you typed.
 | `numpy` | the "more like this" picture search (`moonglade/similar.py`) |
 | `zeroconf` | the Bonjour name on your network, so devices can find Moonglade (the app runs without it, just not announced) |
 | `cryptography` | the gallery's HTTPS certificate for your other devices ([Using HTTPS](Gallery#using-https)); without it they reach Moonglade over plain `http://` |
+| `send2trash` | Tidy › Empty _duplicates/ (sends files to the Recycle Bin; without it that step refuses and deletes nothing) |
+| `pixeltable` (optional, not installed by `requirements.txt`) | the visual-similarity index (Top up / Rebuild Similar), see [Gallery](Gallery) |
 | `ffmpeg` (on PATH) | optional — posters for backed-up/imported videos; required for The Loom's video export, last-frame splice, re-anchor and music bed, and it cuts the frames the Loom's continuity ribbon shows |
 | `pytest`, `pytest-mock`, `pytest-cov`, `pytest-xdist` | dev only — running the test suite (`requirements-dev.txt`, which includes `requirements.txt`) |
 
@@ -88,10 +90,10 @@ instead: `python "C:\path\to\app\moonglade" --sync`. Before 3.20 the commands na
 files (`python moonglade_backup.py ...`); those files are gone. Going back to an earlier version
 after 3.20 isn't supported, because it won't find your records or settings.
 
-Web gallery (browse, generate, The Loom) — at [localhost:5000](http://localhost:5000):
-```bash
-python -m moonglade.gallery
-```
+Web gallery (browse, generate, The Loom): double-click **`Moonglade Launcher.pyw`**. It opens
+your browser at the saved address (port 5000 unless you chose another). For a headless server
+only, `python -m moonglade.gallery` also starts it, but started that way the Panel's **Restart**
+and **Update now** do not work.
 
 **Create your login (v2.0.0+).** The gallery requires an account on every path, including on
 the machine running it, so the first thing you'll see is the login page. On a fresh install
@@ -140,8 +142,7 @@ drops to zero and the first-run bootstrap re-opens on the server machine, a deli
 hatch rather than a bug. The Panel's **Remove** button deliberately won't do that from any
 address, loopback included, so emptying the roster on purpose stays a CLI act you have to mean.
 
-Prefer a double-click, no-console launcher? Use **`Moonglade Launcher.pyw`** — it starts the web
-gallery (and supervises it) without a terminal window.
+**`Moonglade Launcher.pyw`** starts the web gallery (and supervises it) without a terminal window.
 
 Headless:
 ```bash
@@ -151,7 +152,7 @@ python -m moonglade --max 40         # small test download
 python -m moonglade                  # download everything
 ```
 
-Everything lands in `pixai_backup/` (git-ignored). Next: **[Backing Up](Backing-Up)**.
+Everything lands in your library folder (`pixai_backup\` unless you chose another). Next: **[Backing Up](Backing-Up)**.
 
 **Finding your way around.** The first time you open the gallery, the Generate dock, The Loom,
 the Folio and the Control Panel, a small welcome card offers a short tour (or **Got it** to skip

@@ -167,7 +167,7 @@ export default function BonjourCard({ isLocal }) {
             {msg ? <span className="mgcp-tilenote">{msg}</span> : null}
           </div>
           <div className="mgcp-tilenote">
-            Changing Reach or Port restarts the server. With Reach on LAN, other devices use an
+            Saving a new Reach or Port takes effect after a restart. With Reach on LAN, other devices use an
             encrypted https:// address while this PC keeps http:// (Help › The Gallery › Using HTTPS).
             An iPad home-screen app is a later add.
           </div>

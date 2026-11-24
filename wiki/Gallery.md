@@ -105,6 +105,9 @@ line, with your account still at the right. Along the banner:
   skins. It opens as a maximized overlay over the gallery, not a separate page (`Esc`
   closes it). A goal you pin there, and your **Vigil**, can sit beside your credits as small chips.
 
+The small chevron at the end of the destinations row folds the banner to a slim bar; press it
+again to bring the hero back.
+
 The row under the banner holds the other destinations — **My Art**, **Publish**, **Train**,
 **Import**, **Contests**, **Health**, **Panel** and **Log Out** — plus **✦ AI Tools** at the start
 of it once **Mirror to PixAI** is armed, and **Activity** at one end. **Import** is drawn only
@@ -148,7 +151,7 @@ out this device only (to sign out every device, see [Trust & Safety](Trust-and-S
   Control Panel's **PixAI account** window. They are a reading, not a control — Moonglade
   never follows, unfollows or likes on your behalf, and it comments only when you write a
   reply yourself and press **Post publicly** (see [Comments](#comments-on-your-published-work)).
-- **Inbox** (the envelope) and **Gift box** (the gift) — two buttons just left of the credits chip, shown once a PixAI
+- **Inbox** (the mailbox) and **Gift box** (the gift) — two buttons just left of the credits chip, shown once a PixAI
   account is linked. The inbox is everything PixAI tells you; the gift box is only what you can
   collect.
 - **Inbox** (the mailbox) is your **PixAI inbox**. Its lavender badge is how many of PixAI's
@@ -176,15 +179,14 @@ out this device only (to sign out every device, see [Trust & Safety](Trust-and-S
   *Nothing waiting*. Opening it only reads.
   - **Gifts.** A gift PixAI sends you in a message shows with **Claim ▸**, which shows what it
     holds, which account it goes to and when it expires before a **Claim** button: one attempt,
-    then the app reads the gift back and says *Claimed*, or in peach *Already claimed* /
-    *This gift expired*. Credit-pack bonuses you hold say **Open on PixAI ↗**; the app redeems
+    then the app reads the gift back and says *Claimed*, or in peach *Already claimed. Nothing changed.* /
+    *This gift expired. Nothing changed.* Credit-pack bonuses you hold say **Open on PixAI ↗**; the app redeems
     nothing. In the Control Panel's **PixAI account → Credit ledger**, event-gift rows show the
     gift icon.
   - **On PixAI now** shows PixAI's live event banners as cards, one per row across the panel's
     full width, each at its own shape with the event's name and *event ↗* underneath; pressing one
     opens PixAI's page in a new tab. The app never checks in, claims or plays an event for you, and
-    the banner list is read without your API key (PixAI only answers it that way), at most once an
-    hour.
+    the banner list is read at most once an hour.
 - **On a phone** the **Menu** button (three lines) in the Gallery's header carries one badge (unread
   notifications plus waiting gifts), and **Inbox** and **Gift box** are two cards in the Menu,
   each opening a full-height sheet. Inbox is the same list as the desktop's Inbox panel. Gift box is
@@ -268,7 +270,7 @@ How it works, **About** and the first-run guide are described on
 ## The command palette
 
 **Ctrl K** (**⌘ K** on a Mac) opens the command palette over any screen of the gallery: type a few
-letters and press **Enter** on the row you want. It lists **Go to** (the Library, the Loom, the
+letters and press **Enter** on the row you want. It lists **Go to** (the Library, Storyboard (the Loom), the
 Control Panel, Contests, My Art, Health, the Folio, and every collection — smart ones marked **⟳**),
 **Layout** (masonry, grid, hero, timeline, and **Toggle Stack sessions**), **Do** (**New generation**,
 **Jump to Search**, **Sync now**, **Manage collections**, **Rate 1–5**, **Browse recipes**, and **Claim**
@@ -282,19 +284,22 @@ are typing in a field.
 
 ## Browsing & filtering
 
-The filter bar:
+The filter bar (the chips under the search field) and the **Advanced** panel (the ▾ beside it) between them hold:
 - **Prompt / task / media id** — wildcard (`night*`, `a?c`) and multi-word AND search over the
   prompt text, plus a substring match on task id or media id — paste an id from PixAI's site (or
   from `--dump-params` output) to jump straight to that generation.
-- **Model / Batch** — searchable dropdowns.
+- **Model** — a type-ahead box over your models.
 - **From / To** — year + month pickers.
 - **Min rating**, **Tag / contest**, **LoRA**, **Published only**.
 - **Media** — All / Images / Videos.
 - **Source** — All / PixAI history / Generated / Imported / **Deleted on PixAI**.
 - **Collection** — the chip opens the list of your [collections](Collections), hand-picked and
   smart, with Manage.
-- **Sort** — newest/oldest, rating, aesthetic, likes, resolution.
-- Per-page selector, thumbnail-size slider, saved filter presets, privacy blur. Saved
+- **Sort** — newest/oldest, rating (either way), model name, resolution, aspect, aesthetic score
+  (either way), most liked, width, height; a hand-picked collection also offers its own **Manual
+  order**. The chip on the bar cycles the everyday five; the full list is in Advanced.
+- Per-page selector, thumbnail-size slider, saved filter presets. The **Blur the grid** button in the
+  bar under the banner blurs the grid's thumbnails until you press it again. Saved
   views are stored server-side, so a view saved at the desktop is in the tablet's
   dropdown too. They belong to **your account**, not to the install — if someone else
   has a login here, your saved searches are yours and theirs are theirs. (Your skin
@@ -431,12 +436,13 @@ so you can bookmark one, and the browser's Back button closes it.
 
 ## The lightbox & detail page
 
-- **Click an image** → the lightbox overlay: swipe / `←` `→` to browse, `F`/Space
-  slideshow, `Esc` or ✕ to close. Arrow keys **roll over page boundaries** — reach the
+- **Click an image** → the lightbox overlay: swipe / `←` `→` to browse, `F`
+  slideshow, `Esc` or ✕ to close. `Esc` steps out one layer at a time: the Upscale panel, the edit
+  bar, a slideshow or zoom, then the viewer. Arrow keys **roll over page boundaries** — reach the
   end of a page and it loads the next one, continuing seamlessly. Its top bar says where
   the picture sits among everything your search and filters match (*101 OF 3,240*), not
   just its place on the page. Closing leaves your
-  scroll and selections intact. On a still picture, **✎ Edit** (or `E`) opens a **Describe
+  scroll and selections intact. On a picture Tsubaki.3 can edit, **✎ Edit** (or `E`) opens a **Describe
   your edits…** bar under the picture that sends a Tsubaki.3 edit of it, priced before you send;
   ✎ Edit again or `Esc` closes it, and its **More options in the Edit drawer ↗** opens the Edit
   tab — see [Generating](Generating#tsubaki3-context-images-and-image-prompts).
@@ -452,7 +458,7 @@ so you can bookmark one, and the browser's Back button closes it.
   them.
 - **Detail page** (via the lightbox's *Details*, or by clicking a video): full
   metadata (incl. negative + clip-skip), Copy Prompt, **Filter by model** — a filter
-  link to every image from the same model — View Batch, Edit Prompt. Keys: `←` `→`
+  link to every image from the same model — View batch, ✎ Edit prompt. Keys: `←` `→`
   prev-next, **`Esc` / `↑` back to gallery**, `F` focus mode. The header says where the
   picture sits among everything your search and filters match (*14 of 3,240*), not just
   among the page on screen, so it agrees with how far Prev and Next will carry you.
@@ -687,9 +693,14 @@ you to turn the phone.
   **0** to clear; a gold ★ flash confirms. See [Collections](Collections).
 - **Keeper / Reject, tags and notes** — your own layer over each picture, local to your catalog;
   the Details page edits it. See [Collections](Collections).
-- **Edit Prompt** — fix/annotate a single image's prompt on its detail page.
-- **Find/Replace** — bulk substring replace across selected prompts.
+- **Edit prompt** — fix/annotate a single image's prompt on its detail page.
+- **Find / replace in prompts** — bulk substring replace across selected prompts.
 - **Download ZIP** — bundle the selected full-res images (selection persists across pages).
+- **Actions (N)** — the menu for the selection: **+ Add to collection**, **- Remove from "<collection>"**
+  (inside a collection; only the label goes, no file), **▶ Send to Video**, **▮ Send to The Loom**
+  (as cast or as shots), **⎙ Print sheet**, **Download ZIP**, **Find / replace in prompts**,
+  **Delete locally**, and **Delete from PixAI** (only on the machine running the gallery).
+- **Right-click a card** — Edit, Send to Video, Find similar, Copy id, Open details, Remix.
 - **[Collections](Collections)** and **Select mode** — see that page.
 
 ### Saved prompt snippets

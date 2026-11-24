@@ -48,9 +48,9 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   again and asks before it charges. The price and the send check your cards under the same
   sign-in. Details and the
   exact preview wording are in [Generating → Free cards and videos](Generating#free-cards-and-videos).
-- **Delete from your PixAI account** — irreversible on PixAI's side. Gated behind typing
+- **Delete a generation from your PixAI account** — irreversible on PixAI's side. Gated behind typing
   `DELETE` in the gallery's confirm dialog, and it works only from the machine running the
-  server. That dialog is the only way to do it: the old `--delete-task` command is gone, so
+  server. That dialog is the only way to delete a generation: the old `--delete-task` command is gone, so
   nothing on the command line can delete from your account. A **single-image** delete asks PixAI what it still has of that generation
   first and tells you which of two things the click will do — remove just this picture, or,
   when it is the last one that generation still has on PixAI, remove the whole generation
@@ -58,6 +58,11 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   answer comes back only in part, the delete is refused and nothing is removed. Whenever a delete
   removes a whole generation record, the dialog also says if that generation is published on
   PixAI: its own description of that delete says the published artwork goes with it.
+- **Take a published artwork down** — the one other delete. In **My Art**, the trash button on
+  a published artwork removes that artwork from PixAI (your generation and your local files
+  stay). It **cannot be undone**, and it asks once on a confirm sheet. Unlike the delete above,
+  it is **not** limited to the server machine and does **not** ask you to type `DELETE`: any
+  signed-in device can do it. `READ_ONLY` refuses it.
 - **Claim your own daily rewards** (credits/stamina) — a routine entitlement, not something
   that costs you anything, but it's still a real account change, so it's covered by the same
   guarantees below. The same goes for a **gift** PixAI sends you in a message, claimed from the
@@ -102,7 +107,10 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   mirroring is on and the session isn't usable, the submit **refuses and spends nothing** —
   it never quietly falls back to your API key and files the piece somewhere you didn't
   ask. `python -m moonglade --mirror-check` verifies the session without spending.
-- **Charge you twice for one generation.** A submit is sent **once**, never re-sent. That
+- **Charge you twice for one generation.** A submit whose answer is lost or unclear is sent
+  **once**, never re-sent. The only second send is after PixAI plainly refuses (it made nothing
+  and charged nothing) and the app drops a setting that account cannot use, or steps down from
+  Turbo to the lower tier; a Loom render never does even that. That
   sounds obvious, but it isn't free: the tool retries ordinary *reads* when the network
   hiccups, and until **2026-07-26** a submit was treated the same way. The danger is that a
   lost reply looks exactly like a lost request — if PixAI creates and charges for your
@@ -125,8 +133,9 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   machine running the server exactly as it does over the network. Nothing is browsable
   anonymously — the only things served without an account are the login page itself, its own
   sign-out endpoint (a harmless no-op if nobody's signed in — needed so a stale cookie can
-  still be cleared locally), and the static pieces the login page needs to render: your
-  branding art and the web-app manifest, none of which carries any library content. Sessions
+  still be cleared locally), the public certificate file you install on a device (it holds no
+  private key), and the static pieces the login page needs to render: your
+  branding art, the page's own scripts and icons, and the web-app manifest, none of which carries any library content. Sessions
   are signed cookies over scrypt-hashed passwords,
   rate-limited per address. Every other device on your network reaches Moonglade over
   `https://`, so your password and that cookie cross the network encrypted, and the cookie is
@@ -164,7 +173,7 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
 
 - **Touch the server machine, irreversibly delete anything, or hand out access to it, from
   another device — even signed in.** The boundary is drawn around **what you cannot take back**,
-  not around what touches files: **permanent deletion, writes to `config.json`, the destructive
+  not around what touches files: **permanent deletion, writes to `config.json` or the machine's settings, the destructive
   maintenance jobs, and creating a login are localhost-only; everything else — including spending
   your credits — works from any signed-in device.**
 
@@ -184,10 +193,13 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
 
   What stays on the machine running the server, no matter who is signed in: the **destructive**
   Control Panel jobs (organize and undo-organize, dedup `--apply` and dedup-delete,
-  restore-orphans, rebuild-thumbnails), plus cancelling a running job and editing the schedule;
+  restore-orphans, rebuild-thumbnails, empty-_duplicates), plus cancelling a running job and editing the schedule
+  (and the **Run now** of the published-artwork sweep);
   **emptying the Trash, or deleting from it forever** — the one Trash action with no way back;
-  **deleting from your PixAI account**, per-image or in bulk; writing the **API key**, the
-  **library folder**, or the launcher icon; **importing local files** (the **Import**
+  **deleting a generation from your PixAI account**, per-image or in bulk; writing the **API key**, the
+  **library folder**, or the launcher icon; turning the **Mirror to PixAI** switch on or off,
+  changing the **LAN discovery** settings, and the one-click fix for outside shortcuts that name
+  the app's old files; **importing local files** (the **Import**
   drop-zone, host only / `--import-local`, which copies files onto the server machine); and **changing who
   has an account** — creating one, removing an account other than your own, or resetting another
   account's password.
@@ -252,7 +264,7 @@ for handing the tool to someone else — add this to your `config.json`:
 With it set, every path that can actually mutate your account — submitting a generation
 (image, video, reference video, or an edit, including each picture of a Random or Matrix run
 and each Loom render), submitting a hand/face fix, starting, describing, publishing or retrying
-a LoRA training run, deleting a task or one picture of it, claiming a reward, publishing an artwork, publishing or
+a LoRA training run, publishing a trained LoRA or joining it to rebates, deleting a task or one picture of it, claiming a reward, publishing, editing or deleting an artwork, connecting the Mirror, publishing or
 changing a recipe or a recipe set, saving a model or LoRA to PixAI or changing its sets (the
 pickers' **⊕ Save** and **Keep this model**), uploading a frame from The Loom (splice and Re-anchor),
 posting or deleting a reply to a comment, claiming a gift, marking a PixAI notification read, or
@@ -291,6 +303,7 @@ is the gallery's **Duplicate Review**: with `READ_ONLY` set, moving a duplicate 
 undoing that move are both refused, since they are the browser's way to run a dedup. So is
 **Empty _duplicates/** (the Control Panel's Tidy tab, and `--empty-duplicates --apply`): with
 `READ_ONLY` set it refuses, and it never deletes outright — the files go to the Recycle Bin.
+It also refuses Tidy's re-download of a broken file.
 
 ## Found a real gap in any of this?
 

@@ -14,7 +14,8 @@ in the gallery:
 - **Delete from PixAI** — deletes the whole **task** from your account *and* removes it
   locally, so they never drift. Requires a request from the machine running the server, even
   for a signed-in account on another device: this one is irreversible on PixAI's side, so it
-  stays stricter than "signed in".
+  stays stricter than "signed in". On a selection made only of files you imported, this
+  button is not shown.
 
 > 🛟 **Local files are recoverable, from inside the app.** Both buttons *move* your files
 > to a `_deleted/` folder inside your backup rather than destroying them, and clear the
@@ -30,7 +31,7 @@ in the gallery:
 > (Hand-copying files out of `_deleted/` and re-running `--import-local` still works as a
 > fallback, but you shouldn't need it.)
 
-> ⚠️ **The cloud side of "Delete from PixAI" is irreversible.** From the gallery's
+> ⚠️ **The cloud side of the task-level delete ("Delete from PixAI") is irreversible.** From the gallery's
 > Actions dropdown it is **task-level**: selecting one image deletes its whole batch on
 > PixAI. Gated behind a confirm dialog + typing `DELETE`. Only the *local* part is
 > recoverable via `_deleted/`.
@@ -161,6 +162,20 @@ else in **Runs itself** that is not fetching generation metadata: the jobs that 
 this marker unattended are the ones that re-read a generation from PixAI — **Sync now** and
 the sixty-day **Full re-walk** — and they reach it only on rows they were re-fetching anyway.
 
+## Taking a published artwork down
+
+This is a different delete. In **My Art**, the trash button on a published artwork removes
+that artwork from PixAI. Your generation and your local files stay. It **cannot be undone**,
+and it asks once on a confirm sheet, with a preview of the artwork. It does **not** ask you to
+type `DELETE`, and it is not limited to the server machine: any signed-in device can do it.
+`READ_ONLY` refuses it.
+
+## Other deletes
+
+Duplicates you set aside sit in `_duplicates/`. **Empty _duplicates/** (Control Panel, Tidy)
+sends them to the Recycle Bin after a clean Verify, from the server machine only. They are not
+in the Trash panel.
+
 ## Reconcile — clean up what you deleted on the website
 
 Deleting a task on PixAI doesn't touch your local backup (by design). To find and
@@ -191,8 +206,9 @@ removed, along with the `--yes` that only it used, so a script that still calls 
 once with an "unrecognized arguments" error and deletes nothing. To delete from your PixAI
 account, use the gallery's **Delete from PixAI** — on one image for a single picture, or from the
 **Actions** dropdown for a selection. Those check with PixAI first, keep your library in step
-(the local copy goes to the Trash), and ask you to type `DELETE`; they are the only way to do it,
-and they work only from the machine running the server.
+(the local copy goes to the Trash), and ask you to type `DELETE`; they are the only way to
+delete a generation, and they work only from the machine running the server. (Taking down a
+published artwork in My Art is separate; see above.)
 
-`READ_ONLY: true` in `config.json` blocks the gallery's **Delete from PixAI** outright — see
+`READ_ONLY: true` in `config.json` blocks the gallery's **Delete from PixAI** (and a published artwork's delete) outright — see
 [Trust & Safety](Trust-and-Safety#the-read_only-flag).

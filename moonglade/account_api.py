@@ -1041,7 +1041,7 @@ def run_cards(args):
           "automatically when you generate on its model (nearest-expiry first):".format(total))
     print("  Tsubaki.2 card  -> --generate         (default model already matches)")
     print("  Edit Pro card   -> --edit-image       (default model already matches)")
-    print("  Reference Pro   -> --generate --model 1948514378441961474")
+    print("  Reference Pro   -> --edit-image --edit-model 1948514378441961474")
     return {"cards": len(cards), "total": total}
 
 

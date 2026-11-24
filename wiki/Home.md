@@ -26,6 +26,8 @@ New here? Start with **[Setup](Setup)** — it takes one API key and about a min
   account, and the `READ_ONLY` flag.
 - **[Troubleshooting](Troubleshooting)** — common errors and fixes.
 - **[FAQ](FAQ)** — quick answers.
+- **[Where Things Live](Where-Things-Live)** — which folder holds what, and where each setting
+  lives.
 - **[Glossary](Glossary)** — what everything on screen is called, so a report can name
   the screen and the button.
 

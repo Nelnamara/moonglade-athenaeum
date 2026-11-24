@@ -13,7 +13,7 @@ waiting), **Needs a call** (an owner decision), **Waiting on design**, **Waiting
 on something outside** (another piece of work, a date, PixAI, a device), and **Later** (parked or
 banked). Each item says what it is, why, and what it touches. When an item ships, delete it here and
 add a CHANGELOG line — never annotate "done" in place. Reconciled against the code, git, the
-CHANGELOG and the open issues on 2026-11-12.
+CHANGELOG and the open issues on 2026-11-24.
 
 ---
 
@@ -44,15 +44,8 @@ why this section exists.
 
 In the recommended order.
 
-- **3.22: Moonglade on PixAI's new site** (the 2026-11-18 site check). PixAI rebuilt its site in
-  November. In one release: (1) generating, editing and the AI Tools move to the way PixAI's own site
-  now starts a task, before the older way Moonglade uses is switched off — a spend path, so a design
-  note and an independent review come first, and video test runs need the owner's per-run OK;
-  (2) the live "your task finished" feed moves to what PixAI sends now (catch-up still collects
-  everything meanwhile); (3) Edit Pro's new outputs — SVG, GIF and transparent backgrounds — on the
-  Edit card after a look board, SVG and GIF shown in the library, and curated tiles for the seven new
-  AI Tools; (4) the contest board read, which now downloads each description twice, slimmed, and its
-  row ceiling raised. Tsubaki Video's new price already flows through live.
+- **Curated tiles for PixAI's seven new AI Tools.** The rest of the 3.22 site move shipped; the
+  tiles for the seven new tools are still to do.
 
 - **Convert the rest of the tests that read code as text.** *(test review, 2026-10-05)* Many Loom
   and gallery tests look for words in a component's source instead of running it, so a small change
@@ -66,8 +59,8 @@ In the recommended order.
   the expiry rule under Needs a call).
 
 - **Unlimited Mode: confirm it is gone, then remove the switch.** Its end date (2026-10-25) has
-  passed and the switch is still in the code (`moonglade/backup.py`: the lane constants and
-  `_attach_unlimited`). Check on PixAI that the mode is gone, then remove the switch and its
+  passed and the switch is still in the code (`moonglade/gen_road.py`'s lane request and `moonglade/cards.py`'s
+  `is_lane_request` branches). Check on PixAI that the mode is gone, then remove the switch and its
   tests. Small.
 
 - **Honor counts after an edit.** The memo behind the achievements' counts is keyed on the catalog's
@@ -83,7 +76,7 @@ In the recommended order.
   forever, duplicates resolved, duplicates undone): delete them or say why they stay. The Loom's
   Import-collection dialog uses its own three catalog fetches instead of the shared picker helper.
   The goal tiles' unused glyph data goes (owner-approved 2026-10-05). Retire the `present_*` mascot rung, which only 404s into
-  "no mascot" (`gallery/src/notify/ach.js` ~475, the comment at `moonglade/gallery.py` ~4098). Small each.
+  "no mascot" (`gallery/src/notify/ach.js` ~475). Small each.
 
 - **Claude tools: library analytics.** A read-only tool over the catalog: top models and LoRAs, prompt
   keywords, cadence by day and month, credit spend over time, with a test. From the 2026-09-09
@@ -116,8 +109,8 @@ Each is a decision only the owner can make; most carry a recommendation.
   the real library. Its own scope says "run on the owner's go", and it is the input for the phone layouts.
   Needs the go.
 
-- **The sign-in welcome hold under reduced motion.** Today the welcome holds about 5.6 s even with
-  animations off. Keep it, shorten it, or skip it for reduced-motion users (a timing change on a
+- **The sign-in welcome hold under reduced motion.** Today the sign-in takes about 5.6 s from tap to the app (2.2 s busy,
+  then a 3.4 s welcome hold) even with animations off. Keep it, shorten it, or skip it for reduced-motion users (a timing change on a
   designed surface).
 
 - **QR connect without the security review.** Show the QR whenever a LAN address exists (not only

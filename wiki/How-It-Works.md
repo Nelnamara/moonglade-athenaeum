@@ -96,9 +96,7 @@ The practical upshot:
 - **The legacy browser token is retired** — only a fallback for users without an API key.
 
 ## Media URLs
-Task summaries carry `mediaId` / `batchMediaIds`, not URLs. Full-res comes from
-`GET /v1/media/<id>` (variant `PUBLIC`). Videos expose their mp4 via the GraphQL
-`media` object's `fileUrl` (REST returns an empty `urls[]` for videos).
+The app asks PixAI for each picture's full-size file when it downloads it.
 
 ## The catalog (`catalog.db`)
 SQLite, one row per media, keyed by `media_id`. All I/O goes through helpers in
@@ -174,13 +172,13 @@ not part of an `out_dir` backup; a fresh machine rebuilds it rather than restori
 4. **`catalog.db` is the source of truth.**
 5. **The library folder is walked through one scanner** — `scan_library()` for the whole tree and
    `files_for()` for a single media id, in the `LIBRARY SCAN` section, which own what a walk skips and
-   which extensions count. The ten callers that each used to walk the tree with their own exclusion set
+   which extensions count. Every caller that walks the library
    (resume, the audit, `--organize`, `--import-local`, the Health page, the disk counter, the Similar
-   index and three more) now share it (2026-08-23); `find_files_for_media_id` recognizes both naming
+   index and others) shares it; `find_files_for_media_id` recognizes both naming
    layouts and rides the same scan.
 
 ## Testing
-Run `python -m pytest -q dev/tests` from the repo root (the suite and its tools live in
+Run `python -m pytest -q dev/tests --ignore=dev/tests/test_similar.py` from the repo root (the suite and its tools live in
 `dev/`) — pure functions, filesystem, catalog, gallery routes, mocked network, embedded-JS
 syntax. `dev/tests/test_similar.py` needs the
 optional `pixeltable` dep and skips itself cleanly without it. The Loom has its own

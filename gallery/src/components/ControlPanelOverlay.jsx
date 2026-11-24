@@ -1052,7 +1052,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                     <div className="mgcp-tile mgcp-tile4">
                       <div className="mgcp-mkick">Recover a task by ID</div>
                       <div className="mgcp-taskrow">
-                        <input className="mgcp-taskinput" value={taskId} placeholder="task or media id…"
+                        <input className="mgcp-taskinput" value={taskId} placeholder="task id…"
                           onChange={(e) => setTaskId(e.target.value)}
                           onKeyDown={(e) => { if (e.key === "Enter") importTask(); }} />
                         <button type="button" className="mgcp-chip" onClick={importTask}><Icon name="download" /> Import</button>

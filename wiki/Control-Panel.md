@@ -45,7 +45,9 @@ beside it saves just what you made of the library — ratings, collections and t
 smart collections, tags, keeper/reject marks and notes — as one file that goes back in with
 `--import-curation` (see [Collections → Backing up your curation](Collections)). The
 **library folder…** chip, drawn only on the machine running the gallery, sets where the
-library lives (see [Backing Up](Backing-Up#where-the-library-lives)).
+library lives (see [Backing Up](Backing-Up#where-the-library-lives)). Saving moves nothing and
+leaves the old folder as it is; the new folder opens at the next start, so move your files
+first if you want them to come along.
 
 ## Running a maintenance job
 
@@ -242,7 +244,7 @@ Panel stays as you set it.)
 | **Sync i2v videos** | daily | Backs up your image-to-video generations. |
 | **Reconcile deleted** | weekly | Flags catalog rows whose task is gone from PixAI. |
 | **Top up Similar** | daily | Embeds anything the visual-similarity index is missing. Needs the optional ML install; without it the row stays asleep rather than failing nightly. Heavy: don't run it beside GPU- or RAM-heavy programs. |
-| **Full re-walk** · **Rebuild Similar** · **Rebuild ALL thumbnails** | only if it hasn't run in 60 days | The three jobs with no incremental form. They are not on a cadence — this is a floor under them, so a library can't drift for months untended. Rebuild Similar is the heavy one: don't let it run beside GPU- or RAM-heavy programs. |
+| **Full re-walk** · **Rebuild Similar** · **Rebuild ALL thumbnails** (it redraws thumbnails in place) | only if it hasn't run in 60 days | The three jobs with no incremental form. They are not on a cadence — this is a floor under them, so a library can't drift for months untended. Rebuild Similar is the heavy one: don't let it run beside GPU- or RAM-heavy programs. |
 
 ### The sweep, and why it's cheap
 
@@ -251,7 +253,7 @@ only to *this* machine's catalog: nothing else on earth hears about it until som
 PixAI's own list back. (That is how a piece published from the app could vanish from **My
 Art** on the other install.) So the sweep reads it back — on a timer, once shortly after the
 app starts, **and the instant you publish, unpublish or re-tag anything**, which makes the
-machine you published from right immediately instead of within the next quarter hour.
+machine you published from right immediately instead of at the next timer pass.
 
 It costs almost nothing because it stops early. It walks your published works newest-first
 and gives up after two pages in a row that hold nothing it needs — the same "stop when you
@@ -286,9 +288,12 @@ of anything that runs unattended:
 
 ### What never runs itself
 
-**Nothing destructive, ever — not now, and not as an option.** Organize, undo organize
+**Nothing that moves or deletes your pictures runs itself.** Organize, undo organize
 and dedup (quarantine or delete) have no row here and cannot be given one:
 they stay buttons, with their confirm and their server's-own-machine gate exactly as before.
+The one file-writing job on the list is **Rebuild ALL thumbnails**, and only as the sixty-day
+floor above: it redraws thumbnails (never your pictures) in place. Switch that row off if you
+do not want it.
 
 ### The rest of the rules
 
@@ -317,14 +322,17 @@ python -m moonglade --update
 - **A finished job never moves the page you are reading.** It announces itself the way
   everything else does — the notice in the corner and a row in **Activity** — and touches
   nothing else: not your page, your search, your address or the pictures you have ticked.
-- Changing a row (**on/off**, **every**, **Run now**) requires a request from the server's
-  own machine, like the destructive buttons. A LAN session — including the phone — still
+- Changing a row (**on/off**, **every**) needs the server's own PC, like the destructive
+  buttons. **Run now** works from any signed-in device, except the sweep's and **Rebuild ALL
+  thumbnails**', which also need that PC. A LAN session — including the phone — still
   **sees** the whole list and what it is doing.
 
 ### The standing order
 
 The single **Standing order** in the console's **Ledger** view is still there and still
-works: one job, one cadence, chosen from the **Run** dropdown. It predates the list above,
+works. It reads *run (a job) every (N) hours — on/off*. On the server PC you can change the
+hours (1, 3, 6, 12 or 24) and switch it on or off; the job it names is not picked from the
+Panel. It predates the list above,
 it is independent of it, and the list never doubles up on whatever job it names.
 
 ## Recover a task by ID
@@ -332,7 +340,7 @@ it is independent of it, and the list never doubles up on whatever job it names.
 Paste a numeric task id and click **Import** to pull that one generation or edit straight
 into your gallery. Handy for edits and anything in Favorites that the normal listing skips.
 It downloads your own finished media and spends nothing; if the task is already catalogued
-it tells you and links straight to it.
+it says so and fetches nothing.
 
 ## This device
 
@@ -378,8 +386,8 @@ affected.
 
 ## Identity
 
-The **mark** beside the title and the **skin** the whole suite wears, in one strip at the
-foot of the Maintenance tab, with a small sample showing the two together — a mark and a
+The **mark** beside the title and the **skin** the whole suite wears, in one strip
+on the Panel, with a small sample showing the two together — a mark and a
 palette are judged as a pair, so they are picked as one.
 
 Free marks and unlocked skins are one click each and apply everywhere immediately; the
@@ -435,6 +443,10 @@ phone, tablet or Mac and that device stops warning about Moonglade's certificate
 shows that certificate's **SHA-256 fingerprint** to check before you install it (see [The
 Gallery → Using HTTPS](Gallery#using-https)). Read the fingerprint here on the PC, not on the
 device you are checking. If the card says the network traffic is not encrypted, the line after it says why.
+
+The server machine can set **Broadcast** (On/Off), **Reach**, **Port** and **Name** (Moonglade,
+Athenaeum, Moonglade Athenaeum or The Library). Broadcast and Name apply at once; a new Reach
+or Port needs a restart (**⟳ Restart** in the Server tile).
 
 ## Mirror to PixAI
 
@@ -500,7 +512,8 @@ Things worth knowing:
 - **■ Stop** — shuts it down cleanly from the browser. No Task Manager.
 
 Each asks first: the button turns into **Confirm — Restart?** or **Confirm — Stop?**, and a
-second click does it. Both are available to any signed-in session. A reconnect overlay waits for the server to
+second click does it. Both are available to any signed-in session, and both are refused while
+a Panel job or an update is running: stop or finish it first. A reconnect overlay waits for the server to
 come back after a restart. If you close the Panel (or the page reloads it) while that wait is
 running, reopening it picks the wait back up instead of showing an idle Panel.
 

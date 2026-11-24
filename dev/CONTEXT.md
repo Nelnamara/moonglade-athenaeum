@@ -80,7 +80,7 @@ request once, then either quote it or spend it, both reading the same `parameter
 There is one road for every mode (image, edit, fix, video, enhance), and the mode dispatch
 lives in exactly one place.
 
-**Library scan** — the one walk of the library folder: `moonglade/gallery.py`'s LIBRARY SCAN
+**Library scan** — the one walk of the library folder: `moonglade/scan.py`'s LIBRARY SCAN
 section, `scan_library()` for the whole tree and `files_for()` for a single media id. It owns
 what a walk skips (the `.part` temp files, the thumbnail and quarantine folders), which file
 extensions count (`kinds`), and how a path becomes a bucket and a media id. A caller asks for
@@ -95,7 +95,7 @@ flat folder), `batches` (legacy batch folders), `month` (a `YYYY-MM/` folder or
 Buckets are how a duplicate is spotted (the same media id in more than one bucket) and how the
 keeper is chosen when one is — most-organized wins.
 **Media tools** — the one seam every ffmpeg and ffprobe invocation passes through: the
-delimited `media_tools` section of `moonglade/backup.py`. It answers "is the binary
+`moonglade/media_tools.py` module. It answers "is the binary
 installed" (once, cached, per binary), supplies the no-window flag and the timeout, and
 returns a **tool result** instead of raising. Video thumbnails, the faststart remux, the
 frame handoff, clip duration, audio detection and the Loom export are all callers of it,
@@ -119,9 +119,9 @@ else extracts frames.
 signed-in session, local or LAN; *localhost* is a signed-in session whose request also came
 from the serving machine's own loopback address. One `before_request` gate reads the
 declaration off the endpoint and enforces all three, and an app whose routes do not all
-declare one refuses to start.
+declare one refuses to start. The decorator lives in `moonglade/web_tiers.py`.
 **Catalog verb** — one named question the app asks of `catalog.db`, living beside the other
-catalog helpers in `moonglade/gallery.py`'s CATALOG VERBS section: `task_media`, `lineage`,
+catalog helpers in `moonglade/catalog_verbs.py`: `task_media`, `lineage`,
 `publish_state`, `history_page`, `delete_preview_rows` and the rest. A verb takes a `db_path`,
 holds the SQL, and returns **plain data** — dicts, lists, ints, never a `sqlite3.Row` and never a
 live connection. What the data becomes — a JSON payload, a `/thumbs/<id>.jpg` URL, a truncated
@@ -130,7 +130,7 @@ its own. `dev/tests/test_catalog_verbs.py` walks `create_app`'s handlers and fai
 SELECT that reappears in one.
 
 **The catalog road** — the two things opening `catalog.db` used to be at once, now separated.
-`catalog(db_path)` is a context manager that opens a `sqlite3.Row` connection and closes it,
+In `moonglade/catalog.py`, `catalog(db_path)` is a context manager that opens a `sqlite3.Row` connection and closes it,
 running no schema statements at all; `migrate(db_path)` runs the `_MIGRATIONS` list, idempotently,
 and is memoized per process per resolved path. **Lazy safety** is the rule that survived the split:
 the FIRST `catalog()` for a path in a process migrates it, so no entry point — the web app, the CLI,
@@ -145,11 +145,11 @@ no body error becomes `{error: "<status> <statusText>"}`, and a transport failur
 `{error: "network error: …"}`. Three files keep their own `fetch` by name, each because its
 contract needs a distinction that rule deliberately collapses.
 
-**PixAI client** — `PixAIClient`, in the delimited `pixai_client` section of
-`moonglade/backup.py`: the one seam every byte this app exchanges with PixAI leaves through.
-Five verbs — `query` / `mutate` (the ad-hoc GraphQL POST), `persisted` (the persisted-hash
-GET the personal-history operations ride), `rest_get` / `rest_post` (the oRPC `/v2` road) —
-plus `for_create()`, which picks the browser-JWT mirror session over the API key when the
+**PixAI client** — `PixAIClient`, in
+`moonglade/pixai_client.py`: the one seam every byte this app exchanges with PixAI leaves through.
+Its verbs are `query` / `mutate` (the ad-hoc GraphQL POST) and `rest_get` / `rest_post` /
+`rest_patch` / `rest_put` (the oRPC `/v2` road), plus `create()` (the create door) and
+`for_create()`, which picks the browser-JWT mirror session over the API key when the
 Mirror toggle is on, and the identity a caller can ask for (`user_id`, `auth_kind`,
 `session`). `_make_session()` returns one; the five module-level primitives
 (`gql`, `gql_adhoc`, `gql_mutate`, `_rest_get`, `_rest_post`) are thin delegates onto it, so

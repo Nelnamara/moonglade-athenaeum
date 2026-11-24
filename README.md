@@ -97,7 +97,7 @@ That's the whole setup. Your `USER_ID` is auto-resolved from the key, and everyt
 
 Everything deep lives in the **[Wiki](../../wiki)**:
 
-[Setup & Configuration](../../wiki/Setup) · [Backing Up](../../wiki/Backing-Up) · [The Gallery](../../wiki/Gallery) · [Generating Images](../../wiki/Generating) · [The Loom](../../wiki/The-Loom) · [Collections & Curation](../../wiki/Collections) · [Deleting & Cloud Sync](../../wiki/Deleting) · [Collection Health](../../wiki/Health) · [Control Panel](../../wiki/Control-Panel) · [Folio of Honors](../../wiki/Folio-of-Honors) · [Troubleshooting](../../wiki/Troubleshooting) · [Trust & Safety](../../wiki/Trust-and-Safety) · [FAQ](../../wiki/FAQ) · [How It Works](../../wiki/How-It-Works)
+[Setup & Configuration](../../wiki/Setup) · [Backing Up](../../wiki/Backing-Up) · [The Gallery](../../wiki/Gallery) · [Generating Images](../../wiki/Generating) · [The Loom](../../wiki/The-Loom) · [Collections & Curation](../../wiki/Collections) · [Deleting & Cloud Sync](../../wiki/Deleting) · [Collection Health](../../wiki/Health) · [Control Panel](../../wiki/Control-Panel) · [Folio of Honors](../../wiki/Folio-of-Honors) · [Troubleshooting](../../wiki/Troubleshooting) · [Trust & Safety](../../wiki/Trust-and-Safety) · [FAQ](../../wiki/FAQ) · [How It Works](../../wiki/How-It-Works) · [Where Things Live](../../wiki/Where-Things-Live) · [Glossary](../../wiki/Glossary)
 
 In-repo: [`CONTRIBUTING.md`](CONTRIBUTING.md) (how to contribute) — the deep material lives on the [Wiki](../../wiki) above, [How It Works](../../wiki/How-It-Works) included.
 
@@ -105,7 +105,7 @@ In-repo: [`CONTRIBUTING.md`](CONTRIBUTING.md) (how to contribute) — the deep m
 
 ## Requirements
 
-`requirements.txt` lists what Moonglade needs: `requests` (all network work), `pillow` (thumbnails/convert), `flask` (the gallery), `truststore` (HTTPS behind AV/proxies), `websockets` (`--watch` and the gallery's live-mirror), `numpy` (similar-image search) and `zeroconf` (LAN discovery; the app runs without it). **Moonglade Launcher** checks that file at every start and offers to install whatever is missing. `ffmpeg` on PATH is not a Python package: it is required for the Loom's export and frame handoff, and optional for video posters.
+`requirements.txt` lists what Moonglade needs: `requests` (all network work), `pillow` (thumbnails/convert), `flask` (the gallery), `truststore` (HTTPS behind AV/proxies), `websockets` (`--watch` and the gallery's live-mirror), `numpy` (similar-image search), `zeroconf` (LAN discovery; the app runs without it), `cryptography` (the HTTPS certificate for your other devices) and `send2trash` (Tidy's Empty _duplicates/ goes to the Recycle Bin; without it that one step refuses and deletes nothing). `truststore` installs on Python 3.10 or newer. **Moonglade Launcher** checks that file at every start and offers to install whatever is missing. `ffmpeg` on PATH is not a Python package: it is required for the Loom's export and frame handoff, and optional for video posters.
 
 ```bash
 python -m pip install -r requirements.txt
