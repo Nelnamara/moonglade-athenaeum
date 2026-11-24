@@ -1505,6 +1505,9 @@ def test_control_panel_runs_real_jobs_and_manages_a_real_account(logged_in_page,
     # .mgcp-useraction is shared with the (2026-08-02) "reset password..." control added
     # to the same row for local sessions -- disambiguate by the real button text.
     page.click('.mgcp-userrow:has-text("harness-added-user") button:has-text("remove")')
+    # Session V (handoff §3, 2026-11-23): remove confirms once, in the page, saying its reach.
+    page.wait_for_selector('[aria-label="Accounts"] .mgcp-confirm:has-text("signs it out everywhere")')
+    page.click('[aria-label="Accounts"] .mgcp-confirm button:has-text("Remove account")')
     page.wait_for_function(
         "() => !document.body.innerText.includes('harness-added-user')")
     page.click('[aria-label="Accounts"] button[aria-label="Close"]')
