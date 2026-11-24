@@ -2062,9 +2062,11 @@ function DeviceRows({ user, devices, phone, busyId, onRevoke }) {
       {devices.map((dv) => (
         <div key={dv.id} className={"mgcp-rdevrow" + (phone ? " phone" : "")}>
           <div className="mgcp-devmain">
-            {dv.label || "Browser"}
+            {dv.kind === "tv"
+              ? ((dv.label || "Apple TV") + (/apple tv/i.test(dv.label || "") ? "" : " · Apple TV"))
+              : (dv.label || "Browser")}
             <span className="mgcp-devmeta">
-              {"signed in " + devDate(dv.created) + " · seen " + devSeen(dv.last_seen) + " · until " + devDate(dv.expires)}
+              {(dv.kind === "tv" ? "paired " : "signed in ") + devDate(dv.created) + " · seen " + devSeen(dv.last_seen) + " · until " + devDate(dv.expires)}
             </span>
           </div>
           {dv.this_device ? (
@@ -2079,8 +2081,89 @@ function DeviceRows({ user, devices, phone, busyId, onRevoke }) {
   );
 }
 
+/* Pair a TV (look board 2026-11-23, choice B): ONE real input holds the code; the six cells are
+   drawn from its value (typing, paste, backspace and screen readers all stay native). */
+const PAIR_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const cleanPairCode = (s) =>
+  String(s || "").toUpperCase().split("").filter((c) => PAIR_ALPHABET.includes(c)).join("").slice(0, 6);
+
+function PairSheet({ phone, csrf, onClose, onPaired }) {
+  const [code, setCode] = useState("");
+  const [label, setLabel] = useState("Apple TV");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [done, setDone] = useState("");
+  const [focused, setFocused] = useState(true);
+  const codeRef = useRef(null);
+  useEffect(() => { if (codeRef.current) codeRef.current.focus(); }, []);
+  useEffect(() => {
+    const k = (e) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } };
+    document.addEventListener("keydown", k, true);
+    return () => document.removeEventListener("keydown", k, true);
+  }, [onClose]);
+  const ready = code.length === 6 && !busy && !done;
+  const pair = async () => {
+    if (!ready) return;
+    setBusy(true); setErr("");
+    let d;
+    try {
+      d = await apiPost("/api/pair/approve", { code, label: label.trim() || "Apple TV", csrf: csrf || "" });
+    } catch { d = { error: "Couldn't reach the server. Try again." }; }
+    setBusy(false);
+    if (!d || d.error || !d.ok) { setErr((d && d.error) || "Couldn't pair. Try again."); return; }
+    setDone(d.label || label);
+    onPaired();
+  };
+  const cur = Math.min(code.length, 5);
+  const cell = (i) => (
+    <i key={i} className={(code[i] ? "" : "e") + (focused && !done && i === cur ? " cur" : "")}>{code[i] || "·"}</i>
+  );
+  return (
+    <>
+      <div className="mgcp-pair-scrim" onClick={onClose} />
+      <div className={"mgcp-pair-host" + (phone ? " phone" : "")}>
+        <div className={"mgcp-pair-sheet" + (phone ? " phone" : "")} role="dialog" aria-label="Pair a TV">
+          <div className="mgcp-pair-tt">Pair a TV</div>
+          <div className="mgcp-pair-dim">Type the code the TV shows. It continues on its own.</div>
+          <div className="mgcp-pair-cells">
+            {[0, 1, 2].map(cell)}<b>{"–"}</b>{[3, 4, 5].map(cell)}
+            <input ref={codeRef} className="mgcp-pair-code" value={code} aria-label="Code from the TV"
+              autoCapitalize="characters" autoComplete="off" autoCorrect="off" spellCheck={false}
+              inputMode="text" maxLength={14} disabled={!!done}
+              onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+              onChange={(e) => setCode(cleanPairCode(e.target.value))}
+              onKeyDown={(e) => { if (e.key === "Enter") pair(); }} />
+          </div>
+          <input className="mgcp-pair-name" value={label} maxLength={40} aria-label="Name for the TV"
+            disabled={!!done} onChange={(e) => setLabel(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") pair(); }} />
+          {err && <div className="mgcp-pair-err" role="alert">{err}</div>}
+          {done && (
+            <div className="mgcp-pair-ok" role="status">
+              {"✓ Paired “" + done + "”. The TV continues on its own."}
+            </div>
+          )}
+          <div className="mgcp-pair-btns">
+            {done ? (
+              <button type="button" className="mgcp-pair-go" onClick={onClose}>Done</button>
+            ) : (
+              <>
+                <button type="button" className="mgcp-pair-cancel" onClick={onClose} disabled={busy}>Cancel</button>
+                <button type="button" className="mgcp-pair-go" onClick={pair} disabled={!ready}>
+                  {busy ? "Pairing…" : "Pair"}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
   const phone = useIsMobile();
+  const [pairOpen, setPairOpen] = useState(false);
   const [users, setUsers] = useState(summary.web_users || []);
   // Remembered devices by user. Fail-soft: a server without the route (or a failed read) shows none.
   const [devices, setDevices] = useState({});
@@ -2226,6 +2309,11 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
               <div className="mgcp-userrow">
                 <b>{u.username}</b>
                 {u.username === summary.current_username && <span>(you)</span>}
+                {u.username === summary.current_username && (
+                  <button type="button" className="mgcp-useraction mgcp-pairbtn" onClick={() => setPairOpen(true)}>
+                    Pair a TV…
+                  </button>
+                )}
                 {(u.username === summary.current_username || isLocal) && (
                   <button type="button" className="mgcp-useraction ruby" disabled={allOutBusy}
                     title="Signs this account out on every device"
@@ -2302,6 +2390,9 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
           {addErr && <div className="mgcp-usererr">{addErr}</div>}
         </div>
       </div>
+      {pairOpen && (
+        <PairSheet phone={phone} csrf={summary.csrf} onClose={() => setPairOpen(false)} onPaired={loadDevices} />
+      )}
     </>
   );
 }

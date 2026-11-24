@@ -574,7 +574,7 @@ check is deliberately quiet about its own failures.
 ## Accounts
 
 The **Accounts** tile in the Maintenance tab lists your gallery login accounts; its
-**Manage…** button opens them.
+**Manage…** button opens them. To pair an Apple TV, press **Pair a TV…** on your own row and type the six-character code the TV shows; the TV then appears in your device list with a Revoke.
 
 - **Add user** — username, password, confirm, then **+ Add**. Appears **only when you're using the browser on
   the server machine itself**; a LAN session gets a short note where the form would be, and a

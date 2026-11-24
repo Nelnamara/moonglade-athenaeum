@@ -590,6 +590,41 @@ button.mgcp-devrevoke:disabled { opacity: .5; cursor: default; }
 .mgcp-pwr-scrim { position: fixed; inset: 0; z-index: 430; /* above sub-scrim 422 -- overlays.css ladder */ background: rgba(5,4,13,.7); backdrop-filter: blur(7px); }
 html.mg-noblur .mgcp-pwr-scrim { backdrop-filter: none !important; }
 .mgcp-pwr-host { position: fixed; inset: 0; z-index: 431; /* above its own scrim (430) */ display: grid; place-items: center; padding: 24px; }
+/* Pair a TV (look board 2026-11-23, choice B): a centred sheet over Accounts, a bottom sheet on the phone. */
+button.mgcp-pairbtn { color: var(--subtext); border: 1px solid var(--surface1); border-radius: 9px; padding: 4px 11px; }
+button.mgcp-pairbtn:hover { border-color: var(--accent); }
+button.mgcp-pairbtn + button.mgcp-useraction { margin-left: 0; }
+.mgcp-pair-scrim { position: fixed; inset: 0; z-index: 424; background: rgba(5,4,13,.6); }
+.mgcp-pair-host { position: fixed; inset: 0; z-index: 425; display: grid; place-items: center; padding: 20px; pointer-events: none; }
+.mgcp-pair-host.phone { place-items: end center; padding: 0; }
+.mgcp-pair-sheet { pointer-events: auto; width: min(400px, calc(100vw - 40px)); box-sizing: border-box; display: flex; flex-direction: column; gap: 9px;
+  border: 1px solid var(--surface1); border-radius: 14px; background: #0c0a1c; box-shadow: 0 10px 24px rgba(0,0,0,.5);
+  padding: 12px; color: var(--text); animation: cpModalIn .28s cubic-bezier(.2,.9,.24,1) both; }
+.mgcp-pair-sheet.phone { width: 100%; border-radius: 18px 18px 0 0; padding: 14px 14px calc(14px + env(safe-area-inset-bottom, 0px)); }
+.mgcp-pair-tt { font-family: var(--font-hero); font-style: italic; font-size: 18px; }
+.mgcp-pair-dim { font-size: 11.5px; color: var(--overlay0); line-height: 1.45; }
+.mgcp-pair-cells { position: relative; display: flex; gap: 5px; align-items: center; }
+.mgcp-pair-cells i { font-style: normal; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 22px; width: 40px; height: 52px;
+  border-radius: 10px; background: var(--surface0); display: grid; place-items: center; color: var(--text); border: 1px solid var(--surface1); }
+.mgcp-pair-cells i.cur { border-color: var(--lavender); box-shadow: 0 0 0 2px color-mix(in srgb, var(--lavender) 25%, transparent); }
+.mgcp-pair-cells i.e { color: var(--overlay0); }
+.mgcp-pair-cells b { color: var(--overlay0); font-weight: 400; padding: 0 1px; }
+.mgcp-pair-code { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; border: 0; padding: 0; margin: 0; cursor: text;
+  font-size: 16px; /* 16px stops iOS zooming the page on focus */ }
+.mgcp-pair-name { box-sizing: border-box; width: 100%; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--surface1);
+  background: rgba(7,5,16,.9); color: var(--subtext); font-family: inherit; font-size: 12px; outline: none; }
+.mgcp-pair-name:focus { border-color: var(--lavender); }
+.mgcp-pair-ok { font-size: 11.5px; color: var(--emerald); }
+.mgcp-pair-err { font-size: 11.5px; color: var(--peach); }
+.mgcp-pair-btns { display: flex; gap: 6px; justify-content: flex-end; }
+.mgcp-pair-btns button { font-family: inherit; font-size: 10.5px; cursor: pointer; padding: 6px 12px; border-radius: 9px; white-space: nowrap;
+  background: none; border: 1px solid var(--surface1); color: var(--subtext); }
+.mgcp-pair-btns button.mgcp-pair-go { font-weight: 700; background: var(--lavender); border-color: var(--lavender); color: var(--base, #0c0a1c); }
+.mgcp-pair-btns button:disabled { opacity: .5; cursor: default; }
+.mgcp-pair-sheet.phone .mgcp-pair-btns { flex-direction: column-reverse; }
+.mgcp-pair-sheet.phone .mgcp-pair-btns button, .mgcp-pair-sheet.phone .mgcp-pair-name { min-height: 44px; }
+@media (max-width: 520px) { .mgcp-pair-cells i { width: 34px; height: 46px; font-size: 19px; } }
+html.mg-noblur .mgcp-pair-scrim { backdrop-filter: none !important; }
 .mgcp-pwr-card { width: min(420px, calc(100vw - 48px)); box-sizing: border-box; text-align: center;
   padding: 28px 26px 22px; border-radius: 16px; border: 1px solid rgba(182,146,230,.32);
   background: linear-gradient(120deg, rgba(24,18,54,.96) 0%, rgba(14,11,32,.98) 100%);
