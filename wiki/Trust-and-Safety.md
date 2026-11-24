@@ -145,7 +145,23 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   too, so a copy of its cookie stops working with it. If a device is lost, or you think a
   session was captured, press **sign out all devices** beside your name in **Control Panel →
   Accounts → Manage…**, or **change your password** there: either signs out every other
-  device on your account at once. (Nothing that merely
+  device on your account at once, remembered ones and a paired TV included. A device that was
+  signed out lands on the sign-in page with one line saying so, never why or by whom.
+
+  **Remember this device**, under **Sign in**, keeps that one browser signed in for 90 days
+  instead of 30. It is off every time the page opens. A remembered device can do everything any
+  signed-in device can, spending included, so **never tick it on a shared or borrowed
+  device**. Each remembered device is listed under its account in **Control Panel → Accounts →
+  Manage…** with when it signed in, when it was last seen and when it runs out, and a
+  **Revoke** that signs it out at once: the answer to a lost phone. You can revoke your own
+  account's devices from anywhere; another account's only on the server machine. Log Out on a
+  remembered device forgets it too.
+
+  **A paired TV.** A TV app pairs with Moonglade by showing a six-character code that a
+  signed-in device approves; the TV then belongs to that account. It can only look at the library and rate
+  pictures: it cannot spend, delete, read your inbox or account, or reach anything on the
+  server machine's own list. It pairs and talks to Moonglade only over `https://`. It is listed
+  with your remembered devices, and **Revoke** ends it the same way. (Nothing that merely
   *links* to the sign-out address can sign anyone out — it only answers the button's own
   request.) **Log Out also clears anything your browser
   cached locally** — installing this as an app (see [FAQ](FAQ)) keeps a copy of images you've

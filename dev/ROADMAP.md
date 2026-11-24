@@ -120,11 +120,6 @@ Each is a decision only the owner can make; most carry a recommendation.
   animations off. Keep it, shorten it, or skip it for reduced-motion users (a timing change on a
   designed surface).
 
-- **QR connect without the security review.** Show the QR whenever a LAN address exists (not only
-  while broadcasting), with the address as text under it and a short wiki paragraph. No credential
-  and no new control are involved, so the scope recommends lifting the review's hold for this part
-  alone.
-
 - **An expiry rule for upgrade fallbacks.** Code that reads older versions' files (and the 3.20 move's
   migrations, which must outlive 3.21 because an install can skip 3.20) needs a removal rule: N
   releases after it lands, or tied to the oldest version still allowed to update straight to current.
@@ -200,12 +195,11 @@ A visible change gets a design or workshop step first.
 
 ## Waiting on something outside
 
-- **Remember this device** (opt-in longer LAN session, designed as Session V): waits on the security
-  review's rulings (lifetime, whether a remembered device may spend). The "Log Out signs out only this
-  device" half shipped in 3.16.0.
 - **Apple TV client** — a native tvOS viewer in its own repo (Nelnamara/moonglade-tv); scope and plan
   in moonglade-internal/scopes (SCOPE_2026-10-26_apple-tv-client.md, PLAN_2026-10-26_apple-tv.md). The
-  server half of pairing waits on the app security review with Session V. Since the review's fixes
+  server half of pairing (S1) shipped on the server: the pair routes, the TV's device record and its
+  bearer token, view-and-rate only (CHANGELOG). The TV side waits on its own lanes; on the bearer
+  path it sends no CSRF token and reads no prefs GET. Since the review's fixes
   (2026-11-19) the server answers every LAN client over HTTPS only, under its own certificate
   authority: the TV client must browse `_https._tcp` (not `_http._tcp`) and pin the server's CA
   fingerprint (the LAN card shows it; the leaf is re-issued when the address changes) before

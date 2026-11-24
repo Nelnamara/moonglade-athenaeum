@@ -16,6 +16,15 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Added
+- **Remember this device.** Under Sign in, "Remember this device…" opens one box: tick it and that browser stays signed in for 90 days instead of 30. It is off every time the page opens, and it should never be ticked on a shared or borrowed device. Each remembered device is listed under its account in Control Panel › Accounts with when it signed in, when it was last seen and when it runs out, and Revoke signs it out at once. Log Out on it forgets it; sign out all devices, a password change and removing the account end it too. (2026-11-23)
+- **Pairing a TV, on the server.** A TV app can now pair with Moonglade: it shows a code, a signed-in device approves it, and the TV can then browse the library and rate pictures, nothing more. It talks to Moonglade only over https://, is listed with the remembered devices, and Revoke ends it. (2026-11-23)
+- **The LAN card's QR shows whenever this PC has a home-network address**, not only while its name is broadcast, with the address under it. It carries only the address. (2026-11-23)
+- **A signed-out device says so.** A device whose sign-in was ended elsewhere lands on the sign-in page with one line, "This device was signed out. Sign in again to continue." (2026-11-23)
+
+### Fixed
+- **A HEAD request can no longer change a setting.** A handful of routes that answer both reading and saving took the save path for any request that wasn't a read, HEAD included, and a HEAD request was checked at the reading level. A signed-in device on the network could set the library folder that way, which is meant for this PC only. Those routes now save only on a real save request, and HEAD is checked exactly like the read it stands for. (2026-11-23)
+
 ## [3.23.0] - 2026-11-22 — Load-Bearing
 
 ### Changed

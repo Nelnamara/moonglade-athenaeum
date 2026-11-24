@@ -436,6 +436,12 @@ shows that certificate's **SHA-256 fingerprint** to check before you install it 
 Gallery → Using HTTPS](Gallery#using-https)). Read the fingerprint here on the PC, not on the
 device you are checking. If the card says the network traffic is not encrypted, the line after it says why.
 
+The **QR** shows whenever this PC has a home-network address and **Reach** is on **LAN**, whether
+or not the name is being broadcast, with the address written under it. It carries only that
+address: no sign-in, password or token. The phone that scans it signs in the normal way when it
+gets there. While the name is not broadcast, the address is this PC's numbers (such as
+`https://192.168.1.20:5057/`), since a `.local` name only answers while it is.
+
 ## Mirror to PixAI
 
 *(Maintenance tab.)* Off by default. When it's on, each new generation you make in Moonglade
@@ -591,8 +597,16 @@ The **Accounts** tile in the Maintenance tab lists your gallery login accounts; 
   on your account and keeps the one you're using — the way to sign out everywhere if a device
   is lost (**Log Out** signs out only the device you press it on).
 - **sign out all devices** — beside your own name (**(you)**). Signs your account out on every
-  device at once, the one you're using included, without changing your password; you land on
-  the sign-in page. Works from anywhere.
+  device at once, the one you're using included and remembered devices and a paired TV too,
+  without changing your password; you land on the sign-in page. Works from anywhere. On the
+  server machine it is also offered beside each other account, and signs only that account out.
+- **Remembered devices** — under each account, every browser signed in with **Remember this
+  device** and every paired TV: its name (such as *iPhone · Safari*), when it signed in, when it
+  was last seen and when it runs out (90 days after it signed in). **Revoke** signs it out at
+  once; the device you are using shows *this device* instead (use Log Out there). Your own
+  account's from anywhere, another account's only on the server machine. Changing your password
+  keeps the remembered device you changed it on and ends the others; removing an account ends
+  all of its.
 - **reset password…** — appears next to each *other* account, and only when you're using the
   browser **on the server machine itself**. It sets a new password without needing the old
   one, which is what makes it a recovery path rather than a convenience.
