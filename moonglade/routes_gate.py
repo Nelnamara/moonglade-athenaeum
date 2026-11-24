@@ -378,16 +378,29 @@ def register(app, ctx):
         # might clear the session.
         try:
             authorized = bool(user) and _is_authorized_request()
-        except (_web_devices.DevicesUnavailable, _web_accounts.AccountsUnreadable):
+        except (_web_devices.DevicesUnavailable, _web_accounts.AccountsUnreadable) as e:
             # The gate can't tell whether this session is still good (a devices file or
-            # config.json that can't be read just now). Fail toward MORE cleanup: this session
-            # is still recorded as signed out and cleared below; it just can't revoke anything.
+            # config.json that can't be read just now), so this request can revoke nothing.
+            # Fail toward MORE cleanup for THIS device: its sid is recorded as signed out and
+            # the session cleared -- except when it asked to sign out ANOTHER account, which
+            # changes nothing here. A sign-out everywhere never says ok: the other devices
+            # were not reached.
+            unreadable = (_ACCOUNTS_UNREADABLE if isinstance(e, _web_accounts.AccountsUnreadable)
+                          else _DEVICES_UNREADABLE)
+            target = str(body.get("username") or "").strip()
+            if target and target != user:
+                return jsonify({"error": unreadable}), 503
             lifetime = SESSION_ABSOLUTE_LIFETIME_S
             exp, born = session.get("dev_exp"), session.get("born")
             if session.get("dev") and isinstance(exp, (int, float)) and isinstance(born, (int, float)):
                 lifetime = max(lifetime, exp - born)
             _web_sessions.sign_out(session.get("sid"), born, lifetime)
             session.clear()
+            if body.get("scope") == "everywhere":
+                return jsonify({"error": "This device is signed out, but the other devices "
+                                         "could not be reached. Try Sign out everywhere again "
+                                         "from this PC once Moonglade can read its "
+                                         "settings."}), 503
             return jsonify({"ok": True})
         if authorized:
             if not _check_csrf(body):
@@ -439,6 +452,8 @@ def register(app, ctx):
     # sign-out or an unpairing -- "no such account" is the only reading that refuses.
     _ACCOUNTS_UNREADABLE = ("Moonglade couldn't read its account settings just now. Nothing was "
                             "changed. Wait a moment, then try again.")
+    _DEVICES_UNREADABLE = ("Moonglade couldn't read its list of remembered devices just now. "
+                           "Nothing was changed. Wait a moment, then try again.")
 
     @app.route("/api/devices")
     @tier(LOGIN)
@@ -940,11 +955,9 @@ def register(app, ctx):
         """The remembered-devices file could not be read or saved just now (review R7): a 503
         with a plain sentence, never a sign-out -- a TV unpairs on a 401, and a remembered
         browser must not be signed out by a file another program is holding. Nothing changed."""
-        msg = ("Moonglade couldn't read its list of remembered devices just now. Nothing was "
-               "changed. Wait a moment, then try again.")
         if request.path.startswith(_JSON_GATE_PREFIXES):
-            return jsonify({"error": msg}), 503
-        return app.response_class(msg, status=503, mimetype="text/plain")
+            return jsonify({"error": _DEVICES_UNREADABLE}), 503
+        return app.response_class(_DEVICES_UNREADABLE, status=503, mimetype="text/plain")
 
     @app.errorhandler(_web_accounts.AccountsUnreadable)
     def _accounts_unreadable(_e):

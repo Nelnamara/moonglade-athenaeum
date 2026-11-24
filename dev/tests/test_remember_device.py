@@ -228,6 +228,38 @@ def test_log_out_with_an_unreadable_devices_file_still_cleans_up(tmp_path):
     assert p.read_text(encoding="utf-8") == "{not json"
 
 
+def test_sign_out_everywhere_with_an_unreadable_config_is_a_503(tmp_path):
+    """This device still signs out; the answer is never ok, since the others were not reached."""
+    app = create_app(tmp_path)
+    cli = _sign_in(app)
+    csrf = session_csrf(cli)
+    put_back = _break_config()
+    try:
+        r = cli.post("/api/logout", json={"csrf": csrf, "scope": "everywhere"})
+        assert r.status_code == 503 and "could not be reached" in r.get_json()["error"]
+        with cli.session_transaction() as s:
+            assert "user" not in s
+    finally:
+        put_back()
+    assert not _ok(cli)
+
+
+def test_signing_out_another_account_with_an_unreadable_config_changes_nothing_here(tmp_path):
+    app = create_app(tmp_path)
+    _sign_in(app, BOB)
+    cli = _sign_in(app)
+    csrf = session_csrf(cli)
+    put_back = _break_config()
+    try:
+        r = cli.post("/api/logout", json={"csrf": csrf, "scope": "everywhere", "username": "bob"})
+        assert r.status_code == 503 and r.get_json()["error"]
+        with cli.session_transaction() as s:
+            assert s.get("user") == "alice"
+    finally:
+        put_back()
+    assert _ok(cli)
+
+
 def test_signing_in_again_on_a_remembered_browser_drops_its_old_record(tmp_path):
     app = create_app(tmp_path)
     cli = _sign_in(app, remember=True)
