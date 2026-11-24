@@ -117,6 +117,17 @@
   background: conic-gradient(from 0deg, rgba(20, 16, 42, 0), rgba(20, 16, 42, .85));
   animation: lgnmSpin 1.2s linear infinite; flex: none; }
 
+/* Remember this device + the ended line (Remember Device Handoff, sections 1, 3 and 5): the
+   checkbox row is 44px tall. */
+.lgnm-ended { margin-top: 12px; padding: 9px 11px; border-radius: 10px; font-size: 10.5px; line-height: 1.5;
+  border: 1px solid rgba(250, 179, 135, .45); background: rgba(250, 179, 135, .08); color: var(--peach); }
+.lgnm-remwrap { display: flex; justify-content: center; padding-top: 6px; }
+button.lgnm-remlink { background: none; border: 0; cursor: pointer; font-family: inherit; min-height: 44px; padding: 0 12px;
+  font-size: 10px; color: var(--subtext); text-decoration: underline dotted; }
+.lgnm-remrow { display: flex; gap: 8px; align-items: center; min-height: 44px; margin-top: 6px; cursor: pointer;
+  font-size: 10.5px; line-height: 1.45; color: var(--subtext); }
+.lgnm-remrow input { margin: 0; accent-color: var(--lavender); flex: none; width: 18px; height: 18px; }
+.lgnm-remwarn { display: block; color: var(--overlay0); }
 .lgnm-foot { text-align: center; font-size: 9px; color: rgba(214, 210, 226, .34);
   padding-top: 12px; }
 

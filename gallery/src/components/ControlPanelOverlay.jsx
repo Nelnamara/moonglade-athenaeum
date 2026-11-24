@@ -8,6 +8,7 @@ import RolesSection from "./BrandRoles.jsx";
 import RolesPhone from "./BrandRolesPhone.jsx";
 import MarkAnimated from "./MarkAnimated.jsx";
 import useScrollLock from "../hooks/useScrollLock.js";
+import useIsMobile from "../hooks/useIsMobile.js";
 import AccountSubOverlay from "./AccountSubOverlay.jsx";
 import BonjourCard from "./BonjourCard.jsx";
 import { isBlurOff, setBlurOff, applyBlurClass } from "../lib/blurPref.js";
@@ -2025,8 +2026,67 @@ export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPi
   );
 }
 
+/* Remember this device (Remember Device Handoff, sections 2-4). Times arrive as epoch seconds. */
+function devDate(t) {
+  return new Date(t * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+// Coarse "seen": never an exact time, never an IP.
+function devSeen(t) {
+  const s = Math.max(0, Date.now() / 1000 - t);
+  if (s < 90) return "just now";
+  if (s < 3600) return Math.round(s / 60) + " min ago";
+  if (s < 86400) { const h = Math.round(s / 3600); return h + (h === 1 ? " hour ago" : " hours ago"); }
+  const days = Math.floor(s / 86400);
+  return days === 1 ? "yesterday" : days + " days ago";
+}
+
+/* One in-page confirm (R13) -- never window.confirm. Ruby action, Cancel beside it. */
+function ConfirmBox({ text, action, busy, phone, onCancel, onGo }) {
+  return (
+    <div className={"mgcp-confirm" + (phone ? " phone" : "")} role="alertdialog">
+      <div>{text}</div>
+      <div className="mgcp-confirm-btns">
+        <button type="button" onClick={onCancel} disabled={busy}>Cancel</button>
+        <button type="button" className="ruby" onClick={onGo} disabled={busy}>{busy ? "Working…" : action}</button>
+      </div>
+    </div>
+  );
+}
+
+/* The user's remembered devices (V3a): label, "signed in · seen · until", Revoke or "this device". */
+function DeviceRows({ user, devices, phone, busyId, onRevoke }) {
+  if (!devices || !devices.length) return null;
+  return (
+    <>
+      <div className="mgcp-devhead">{user.toUpperCase()} · {devices.length} REMEMBERED</div>
+      {devices.map((dv) => (
+        <div key={dv.id} className={"mgcp-devrow" + (phone ? " phone" : "")}>
+          <div className="mgcp-devmain">
+            {dv.label || "Browser"}
+            <span className="mgcp-devmeta">
+              {"signed in " + devDate(dv.created) + " · seen " + devSeen(dv.last_seen) + " · until " + devDate(dv.expires)}
+            </span>
+          </div>
+          {dv.this_device ? (
+            <span className="mgcp-devme">this device</span>
+          ) : (
+            <button type="button" className="mgcp-devrevoke" disabled={busyId === dv.id}
+              onClick={() => onRevoke(dv.id)}>Revoke</button>
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
+
 export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
+  const phone = useIsMobile();
   const [users, setUsers] = useState(summary.web_users || []);
+  // Remembered devices by user. Fail-soft: a server without the route (or a failed read) shows none.
+  const [devices, setDevices] = useState({});
+  const [devBusy, setDevBusy] = useState(null);
+  // The one pending in-page confirm: {kind: "everywhere" | "password" | "remove", user}.
+  const [pending, setPending] = useState(null);
   const [newUser, setNewUser] = useState("");
   const [newPass, setNewPass] = useState("");
   const [newConfirm, setNewConfirm] = useState("");
@@ -2053,6 +2113,28 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
     } catch { /* keep showing the last-known list */ }
   };
 
+  const loadDevices = async () => {
+    try {
+      const d = await apiGet("/api/devices");
+      if (d && !d.error && Array.isArray(d.users)) {
+        const m = {};
+        d.users.forEach((x) => { m[x.user] = x.devices || []; });
+        setDevices(m);
+      }
+    } catch { /* fail-soft: no device rows */ }
+  };
+  useEffect(() => { loadDevices(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Revoke ends that record at once, no confirm (signing in again is the undo).
+  const revokeDevice = async (id) => {
+    if (devBusy) return;
+    setDevBusy(id);
+    const d = await apiPost("/api/devices/revoke", { id, csrf: summary.csrf || "" });
+    setDevBusy(null);
+    if (d && d.error) { setPwMsg(errLine(d.error)); return; }
+    loadDevices();
+  };
+
   const addUser = async () => {
     if (addBusy) return;
     setAddBusy(true); setAddErr("");
@@ -2070,30 +2152,36 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
     setRemoveBusy(username); setRemoveErr("");
     const d = await apiPost("/api/users/remove", { username, csrf: summary.csrf });
     setRemoveBusy(null);
+    setPending(null);
     if (d.error) { setRemoveErr(d.error); return; }
-    refresh(); onChanged();
+    refresh(); onChanged(); loadDevices();
   };
 
   const changePassword = async (username) => {
     if (pwBusy || !pwNew) return;
+    setPending(null);
     setPwBusy(true); setPwMsg("");
     const body = { username, new_password: pwNew, csrf: summary.csrf };
     if (username === summary.current_username) body.current_password = pwCurrent;
     const d = await apiPost("/api/users/password", body);
     setPwBusy(false);
     setPwMsg(d.error ? errLine(d.error) : "✓ password changed");
-    if (!d.error) { setPwNew(""); setPwCurrent(""); }
+    if (!d.error) { setPwNew(""); setPwCurrent(""); loadDevices(); }
   };
 
   /* Sign out all devices (2026-11-19, app security review finding 6): the route Log Out already
      uses, with scope "everywhere" -- every cookie for this account stops working, this one
      included, so it ends like Log Out does: caches purged, then the sign-in page. */
   const [allOutBusy, setAllOutBusy] = useState(false);
-  const signOutEverywhere = async () => {
+  const signOutEverywhere = async (username) => {
     if (allOutBusy) return;
     setAllOutBusy(true);
-    const d = await apiPost("/api/logout", { csrf: summary.csrf || "", scope: "everywhere" });
-    if (d && d.error) { setAllOutBusy(false); setPwMsg(errLine(d.error)); return; }
+    const other = username && username !== summary.current_username;
+    const d = await apiPost("/api/logout", {
+      csrf: summary.csrf || "", scope: "everywhere", ...(other ? { username } : {}),
+    });
+    if (d && d.error) { setAllOutBusy(false); setPending(null); setPwMsg(errLine(d.error)); return; }
+    if (other) { setAllOutBusy(false); setPending(null); loadDevices(); return; }   // someone else's: this device stays
     const go = () => { window.location.href = "/login"; };
     if ("caches" in window) {
       caches.keys().then((ks) => Promise.all(ks.map((k) => caches.delete(k)))).catch(() => {}).then(go);
@@ -2129,11 +2217,11 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
               <div className="mgcp-userrow">
                 <b>{u.username}</b>
                 {u.username === summary.current_username && <span>(you)</span>}
-                {u.username === summary.current_username && (
-                  <button type="button" className="mgcp-useraction" disabled={allOutBusy}
-                    title="Signs this account out on every device, this one included"
-                    onClick={signOutEverywhere}>
-                    {allOutBusy ? "signing out…" : "sign out all devices"}
+                {(u.username === summary.current_username || isLocal) && (
+                  <button type="button" className="mgcp-useraction ruby" disabled={allOutBusy}
+                    title="Signs this account out on every device"
+                    onClick={() => setPending({ kind: "everywhere", user: u.username })}>
+                    {allOutBusy ? "signing out…" : "Sign out everywhere"}
                   </button>
                 )}
                 {u.username !== summary.current_username && (
@@ -2145,12 +2233,25 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
                       </button>
                     )}
                     <button type="button" className="mgcp-useraction" disabled={removeBusy === u.username}
-                      onClick={() => removeUser(u.username)}>
+                      onClick={() => setPending({ kind: "remove", user: u.username })}>
                       {removeBusy === u.username ? "removing…" : "remove"}
                     </button>
                   </>
                 )}
               </div>
+              {pending && pending.user === u.username && pending.kind === "everywhere" && (
+                <ConfirmBox phone={phone} busy={allOutBusy} action="Sign out everywhere"
+                  text={"Sign out on every device? Every browser and phone signed in as " + u.username +
+                    ", including remembered ones, will need to sign in again."}
+                  onCancel={() => setPending(null)} onGo={() => signOutEverywhere(u.username)} />
+              )}
+              {pending && pending.user === u.username && pending.kind === "remove" && (
+                <ConfirmBox phone={phone} busy={removeBusy === u.username} action="Remove account"
+                  text="Removing this account signs it out everywhere."
+                  onCancel={() => setPending(null)} onGo={() => removeUser(u.username)} />
+              )}
+              <DeviceRows user={u.username} devices={devices[u.username]} phone={phone}
+                busyId={devBusy} onRevoke={revokeDevice} />
               {resetTarget === u.username && (
                 <div className="mgcp-userform" style={{ marginTop: -2, marginBottom: 6 }}>
                   <input className="mgcp-userinput" type="password" placeholder={"new password for " + u.username}
@@ -2169,8 +2270,14 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
               value={pwCurrent} onChange={(e) => setPwCurrent(e.target.value)} />
             <input className="mgcp-userinput" type="password" placeholder="new password"
               value={pwNew} onChange={(e) => setPwNew(e.target.value)} />
-            <button type="button" className="mgcp-chip" onClick={() => changePassword(summary.current_username)} disabled={pwBusy}>Change…</button>
+            <button type="button" className="mgcp-chip" disabled={pwBusy || !pwNew}
+              onClick={() => setPending({ kind: "password", user: summary.current_username })}>Change…</button>
           </div>
+          {pending && pending.kind === "password" && (
+            <ConfirmBox phone={phone} busy={pwBusy} action="Change password"
+              text="Changing your password signs out every other device, including remembered ones."
+              onCancel={() => setPending(null)} onGo={() => changePassword(summary.current_username)} />
+          )}
           {pwMsg && <div className={lineIsErr(pwMsg) ? "mgcp-usererr" : "mgcp-usermsg"}><MsgLine m={pwMsg} /></div>}
           <div className="mgcp-mkick" style={{ marginTop: 14 }}>Add user</div>
           <div className="mgcp-userform">

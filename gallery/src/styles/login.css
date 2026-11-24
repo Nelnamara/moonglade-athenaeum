@@ -123,6 +123,17 @@
   background: conic-gradient(from 0deg, rgba(20, 16, 42, 0), rgba(20, 16, 42, .85));
   animation: lgnSpin 1.2s linear infinite; flex: none; }
 
+/* Remember this device + the ended line (Remember Device Handoff, sections 1 and 3). */
+.lgn-ended { margin-top: 12px; padding: 9px 11px; border-radius: 10px; font-size: 10.5px; line-height: 1.5;
+  border: 1px solid rgba(250, 179, 135, .45); background: rgba(250, 179, 135, .08); color: var(--peach); }
+.lgn-remwrap { display: flex; justify-content: center; padding-top: 12px; }
+button.lgn-remlink { background: none; border: 0; padding: 0; cursor: pointer; font-family: inherit;
+  font-size: 10px; color: var(--subtext); text-decoration: underline dotted; }
+button.lgn-remlink:hover, button.lgn-remlink:focus-visible { color: var(--text); }
+.lgn-remrow { display: flex; gap: 6px; align-items: flex-start; padding-top: 12px; cursor: pointer;
+  font-size: 10.5px; line-height: 1.45; color: var(--subtext); }
+.lgn-remrow input { margin: 1px 0 0; accent-color: var(--lavender); flex: none; }
+.lgn-remwarn { display: block; color: var(--overlay0); }
 .lgn-foot { text-align: center; font-size: 10px; color: rgba(214, 210, 226, .34);
   padding-top: 14px; }
 

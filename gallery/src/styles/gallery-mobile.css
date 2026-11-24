@@ -448,6 +448,14 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
 .glm-menu-item.glm-menu-logout { justify-content: space-between; margin-top: 6px; padding: 13px 4px;
   border-bottom: 1px dashed var(--surface1); }
 .glm-menu-chev { color: var(--overlay0); }
+/* V5b: the Log Out sheet (Remember Device Handoff, section 5) -- 44px buttons. */
+.glm-logout-btns { display: flex; gap: 8px; justify-content: center; margin-top: 4px; }
+.glm-logout-btns button { flex: 1; min-height: 44px; font-family: inherit; font-size: 12px; cursor: pointer; }
+.glm-logout-ruby, .glm-logout-ghost { border-radius: var(--radius-control); padding: 8px 14px; background: none; }
+.glm-logout-ruby { border: 1px solid rgba(243, 139, 168, .5); color: var(--red); }
+.glm-logout-ghost { border: 1px solid var(--surface1); color: var(--subtext); }
+.glm-logout-cancel { display: block; width: 100%; min-height: 44px; margin-top: 8px; }
+.glm-logout-ask { font-size: 11.5px; line-height: 1.5; color: var(--text); padding: 2px 0 8px; }
 
 /* ---- full-screen push chrome (MobileScreen.jsx) -- the shared "screen"
    primitive, alongside .glm-sheet's shared "sheet" primitive above. Absolutely

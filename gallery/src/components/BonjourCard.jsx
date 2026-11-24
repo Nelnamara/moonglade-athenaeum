@@ -29,7 +29,6 @@ export default function BonjourCard({ isLocal }) {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");        // save result / restart-needed note
   const [copied, setCopied] = useState(false);
-  const [showQr, setShowQr] = useState(false);
 
   async function load() {
     try {
@@ -64,7 +63,6 @@ export default function BonjourCard({ isLocal }) {
         setMsg(r.error);
       } else {
         setMsg(r && r.restart_needed ? "Saved — restart to apply the new reach/port." : "Saved.");
-        setShowQr(false);
         setDraft(null);       // re-seed from the fresh status
         await load();
       }
@@ -85,7 +83,7 @@ export default function BonjourCard({ isLocal }) {
     }
   }
 
-  const qr = showQr && url ? qrDataUrl(url) : null;
+  const qr = st.lan_bind && url ? qrDataUrl(url) : null;
 
   return (
     <div className="mgcp-bonjour">
@@ -102,19 +100,20 @@ export default function BonjourCard({ isLocal }) {
         )}
       </div>
 
-      {st.broadcasting && url ? (
+      {/* The address and its QR show whenever the server is on the home network and has an address
+          to give -- not only while broadcasting. The QR carries only that address. */}
+      {st.lan_bind && url ? (
         <>
-          <div className="mgcp-bjurls">
-            <span className="mgcp-bjurl" title={url}>{url}</span>
-            <button type="button" className="mgcp-chip" onClick={copy}>{copied ? "✓ Copied" : "Copy"}</button>
-            <button type="button" className="mgcp-chip" onClick={() => setShowQr((v) => !v)}>{showQr ? "Hide QR" : "QR"}</button>
-          </div>
           {qr ? (
             <div className="mgcp-bjqr">
               <img src={qr} alt={"QR code for " + url} width={132} height={132} />
               <div className="mgcp-tilenote">Scan with the iPad's camera to open it.</div>
             </div>
           ) : null}
+          <div className="mgcp-bjurls">
+            <span className="mgcp-bjurl" title={url}>{url}</span>
+            <button type="button" className="mgcp-chip" onClick={copy}>{copied ? "✓ Copied" : "Copy"}</button>
+          </div>
         </>
       ) : null}
 

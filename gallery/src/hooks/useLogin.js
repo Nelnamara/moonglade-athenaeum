@@ -105,6 +105,10 @@ export default function useLogin(boot) {
   const [usernameErr, setUsernameErr] = useState("");
   const [matchErr, setMatchErr] = useState("");
 
+  // Remember this device (handoff Session V section 1): off by default on every page view.
+  const [remember, setRemember] = useState(false);
+  const [rememberOpen, setRememberOpen] = useState(false);
+
   const [phase, setPhase] = useState("idle"); // idle | busy | welcome
   const [error, setError] = useState("");
   const [welcomeLine] = useState(() => WELCOMES[Math.floor(Math.random() * WELCOMES.length)]);
@@ -136,7 +140,7 @@ export default function useLogin(boot) {
     if (phase !== "idle") return;
     setPhase("busy");
     setError("");
-    submitLogin({ username: user, password: pass });
+    submitLogin({ username: user, password: pass, ...(remember ? { remember: true } : {}) });
   };
 
   const createAccount = () => {
@@ -182,6 +186,7 @@ export default function useLogin(boot) {
 
   return {
     mode, createMode, lanFirstRun,
+    remember, setRemember, rememberOpen, setRememberOpen,
     user, setUser, pass, setPass,
     createUser, createPass, createConfirm,
     createSubmitted, usernameErr, matchErr,

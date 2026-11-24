@@ -131,6 +131,11 @@ export default function LoginPage({ boot }) {
   const [usernameErr, setUsernameErr] = useState("");
   const [matchErr, setMatchErr] = useState("");
 
+  // Remember this device (handoff Session V section 1): a quiet link that expands in place to one
+  // checkbox row. Off by default on every page view; sign-in mode only.
+  const [remember, setRemember] = useState(false);
+  const [rememberOpen, setRememberOpen] = useState(false);
+
   const [phase, setPhase] = useState("idle"); // idle | busy | welcome
   const [error, setError] = useState("");
   const [welcomeLine] = useState(() => WELCOMES[Math.floor(Math.random() * WELCOMES.length)]);
@@ -175,7 +180,7 @@ export default function LoginPage({ boot }) {
     if (phase !== "idle") return;
     setPhase("busy");
     setError("");
-    submitLogin({ username: user, password: pass });
+    submitLogin({ username: user, password: pass, ...(remember ? { remember: true } : {}) });
   };
 
   const createAccount = () => {
@@ -258,6 +263,10 @@ export default function LoginPage({ boot }) {
             )}
           </div>
 
+          {boot.ended && !createMode && !lanFirstRun ? (
+            <div className="lgn-ended" role="status">This device was signed out. Sign in again to continue.</div>
+          ) : null}
+
           {lanFirstRun && (
             <div className="lgn-fieldin">
               <div className="lgn-error" style={{ marginTop: 0 }}>
@@ -284,6 +293,22 @@ export default function LoginPage({ boot }) {
                 {busy ? <span className="lgn-spin" /> : null}
                 <span>{busy ? "Signing in…" : "Sign in"}</span>
               </button>
+              {rememberOpen ? (
+                <label className="lgn-remrow">
+                  <input type="checkbox" checked={remember} disabled={busy}
+                    onChange={(e) => setRemember(e.target.checked)} />
+                  <span>
+                    Keep me signed in on this device for 90 days
+                    <span className="lgn-remwarn">Never tick this on a shared or borrowed device.</span>
+                  </span>
+                </label>
+              ) : (
+                <div className="lgn-remwrap">
+                  <button type="button" className="lgn-remlink" onClick={() => setRememberOpen(true)}>
+                    Remember this device…
+                  </button>
+                </div>
+              )}
             </>
           )}
 

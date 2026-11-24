@@ -1455,8 +1455,12 @@ export default function AppMobile({ boot }) {
 
   // NavSpine.jsx's own logout(), ported verbatim (same /api/logout JSON POST +
   // cache-purge-then-navigate shape -- see that file's header comment for why).
-  const logOut = () => {
-    apiPost("/api/logout", { csrf: boot.csrf || "" }).then(() => {
+  // V5b: the Menu's Log Out row opens a sheet -- This device (default) / Every device (ruby, one
+  // confirm, the same words as Control > Accounts) / Cancel. `scope: "everywhere"` is the route
+  // Control > Accounts' Sign out everywhere already uses.
+  const [logoutAsk, setLogoutAsk] = useState(false);
+  const logOut = (scope) => {
+    apiPost("/api/logout", { csrf: boot.csrf || "", ...(scope === "everywhere" ? { scope } : {}) }).then(() => {
       const go = () => { window.location.href = "/login"; };
       if ("caches" in window) {
         caches.keys().then((ks) => Promise.all(ks.map((k) => caches.delete(k)))).catch(() => {}).then(go);
@@ -1868,9 +1872,33 @@ export default function AppMobile({ boot }) {
           <MenuCard label="Guide" title={"Guide — how this screen works"} sub="how it works"
             onClick={() => { openSheet(null); openHelp({ surface: "gallery" }); }} />
         </div>
-        <button type="button" className="glm-menu-item glm-menu-logout" onClick={logOut}>
+        <button type="button" className="glm-menu-item glm-menu-logout"
+          onClick={() => { setLogoutAsk(false); openSheet("logout"); }}>
           <span>Log Out</span><span className="glm-menu-chev" aria-hidden="true">{"›"}</span>
         </button>
+      </MobileSheet>
+
+      <MobileSheet open={sheet === "logout"} closing={closing} onClose={closeSheet} title="Log out of…">
+        {logoutAsk ? (
+          <>
+            <div className="glm-logout-ask">
+              Sign out on every device? Every browser and phone signed in as {boot.user || "this account"},
+              including remembered ones, will need to sign in again.
+            </div>
+            <div className="glm-logout-btns">
+              <button type="button" className="glm-logout-ghost" onClick={() => setLogoutAsk(false)}>Cancel</button>
+              <button type="button" className="glm-logout-ruby" onClick={() => logOut("everywhere")}>Sign out everywhere</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="glm-logout-btns">
+              <button type="button" className="glm-primary glm-logout-primary" onClick={() => logOut()}>This device</button>
+              <button type="button" className="glm-logout-ruby" onClick={() => setLogoutAsk(true)}>Every device</button>
+            </div>
+            <button type="button" className="glm-logout-ghost glm-logout-cancel" onClick={closeSheet}>Cancel</button>
+          </>
+        )}
       </MobileSheet>
     </div>
   );
