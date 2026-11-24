@@ -2060,7 +2060,7 @@ function DeviceRows({ user, devices, phone, busyId, onRevoke }) {
     <>
       <div className="mgcp-devhead">{user.toUpperCase()} · {devices.length} REMEMBERED</div>
       {devices.map((dv) => (
-        <div key={dv.id} className={"mgcp-devrow" + (phone ? " phone" : "")}>
+        <div key={dv.id} className={"mgcp-rdevrow" + (phone ? " phone" : "")}>
           <div className="mgcp-devmain">
             {dv.label || "Browser"}
             <span className="mgcp-devmeta">

@@ -547,7 +547,7 @@ button.mgcp-useraction.ruby { color: var(--red); border: 1px solid rgba(243, 139
 .mgcp-confirm-btns button:disabled { opacity: .5; cursor: default; }
 .mgcp-devhead { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; font-weight: 700; letter-spacing: .14em;
   color: var(--overlay0); margin: 8px 0 5px; }
-.mgcp-devrow { display: flex; align-items: center; gap: 8px; padding: 7px 9px; margin-bottom: 5px; border-radius: 10px;
+.mgcp-rdevrow { display: flex; align-items: center; gap: 8px; padding: 7px 9px; margin-bottom: 5px; border-radius: 10px;
   border: 1px solid var(--surface1); font-size: 10.5px; line-height: 1.45; color: var(--text); }
 .mgcp-devmain { flex: 1; min-width: 0; }
 .mgcp-devmeta { display: block; color: var(--subtext); }
@@ -558,8 +558,8 @@ button.mgcp-devrevoke:disabled { opacity: .5; cursor: default; }
 .mgcp-devme { font-size: 8.5px; font-weight: 800; padding: 2px 7px; border-radius: 999px; white-space: nowrap;
   background: rgba(182, 146, 230, .18); color: var(--lavender); }
 /* the phone: rows 52px, Revoke and the confirm buttons 44px */
-.mgcp-devrow.phone { min-height: 52px; box-sizing: border-box; }
-.mgcp-devrow.phone button.mgcp-devrevoke { min-height: 44px; }
+.mgcp-rdevrow.phone { min-height: 52px; box-sizing: border-box; }
+.mgcp-rdevrow.phone button.mgcp-devrevoke { min-height: 44px; }
 .mgcp-confirm.phone .mgcp-confirm-btns button { min-height: 44px; }
 
 .mgcp-trashhead { font-size: 12px; color: var(--subtext); margin: 2px 0 12px; }
