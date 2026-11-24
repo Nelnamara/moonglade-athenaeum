@@ -67,16 +67,6 @@ function withParams(path, params) {
   return s ? path + (path.includes("?") ? "&" : "?") + s : path;
 }
 
-let leavingForLogin = false;
-function goToLogin() {
-  try {
-    if (leavingForLogin || typeof window === "undefined" || !window.location) return;
-    if (window.location.pathname === "/login") return;
-    leavingForLogin = true;
-    window.location.href = "/login";
-  } catch { /* never let the redirect break a real answer */ }
-}
-
 /* `timeoutMs` / `timeoutMessage` are OURS, not fetch's: they are lifted out of the init before
    it goes anywhere near the browser. A route with a wall-clock ceiling of its own passes the
    two so a server that goes silent still ends as an ordinary {error} answer the caller already
@@ -102,9 +92,6 @@ async function request(path, init) {
   } finally {
     if (timer) clearTimeout(timer);
   }
-  // R12: a 401 is the gate refusing the session. Go to the sign-in page, once, never combined
-  // with `next`, and never from /login itself (a failed sign-in must show its own error, not loop).
-  if (r.status === 401) goToLogin();
   // A HEAD has no body to read: its whole answer is the header (apiHeadSize below).
   if (rest.method === "HEAD") return { size: r.ok ? Number(r.headers.get("Content-Length")) || 0 : 0 };
   let d = null;

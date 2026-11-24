@@ -697,8 +697,11 @@ def test_sign_out_all_devices_is_a_text_button_in_the_accounts_window():
            / "ControlPanelOverlay.jsx").read_text(encoding="utf-8")
     body = src[src.index("export function UsersSubOverlay"):]
     body = body[:body.index("\nexport function", 10)]
-    assert 'scope: "everywhere"' in body and "sign out all devices" in body
-    assert 'className="mgcp-useraction"' in body
+    # Session V handoff §2 (2026-11-23): the words are "Sign out everywhere", ruby outline, and it
+    # confirms once before anything is sent.
+    assert 'scope: "everywhere"' in body and "Sign out everywhere" in body
+    assert 'className="mgcp-useraction ruby"' in body
+    assert 'action="Sign out everywhere"' in body
 
 
 # ---------------------------------------------------------------------------
