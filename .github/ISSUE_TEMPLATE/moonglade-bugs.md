@@ -27,14 +27,14 @@ Remember to mark the area in the application thats impacted.
  - OS: [e.g. Windows 11, macOS]
  - Browser [e.g. chrome, safari, firefox, edge]
  - Resolution [e.g. 2560 X 1289]
- - Moonglade version (Control Panel > About) [e.g. 3.23.0]
+ - Moonglade version (Control Panel > About) [e.g. 3.x.y]
 
 ## Mobile/Tablet
  - Device: [e.g. iPhone6]
  - OS: [e.g. iOS8.1]
  - Screen size: [e.g. 4.75, 5.5]
  - Mobile Browser [e.g. stock browser, safari]
- - Moonglade version (Control Panel > About) [e.g. 3.23.0]
+ - Moonglade version (Control Panel > About) [e.g. 3.x.y]
 
 ## Additional context
 Add any other context about the problem here.

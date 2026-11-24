@@ -147,12 +147,12 @@ contract needs a distinction that rule deliberately collapses.
 
 **PixAI client** — `PixAIClient`, in
 `moonglade/pixai_client.py`: the one seam every byte this app exchanges with PixAI leaves through.
-Its verbs are `query` / `mutate` (the ad-hoc GraphQL POST) and `rest_get` / `rest_post` /
-`rest_patch` / `rest_put` (the oRPC `/v2` road), plus `create()` (the create door) and
-`for_create()`, which picks the browser-JWT mirror session over the API key when the
-Mirror toggle is on, and the identity a caller can ask for (`user_id`, `auth_kind`,
-`session`). `_make_session()` returns one; the five module-level primitives
-(`gql`, `gql_adhoc`, `gql_mutate`, `_rest_get`, `_rest_post`) are thin delegates onto it, so
+Its verbs are `query` / `mutate` (GraphQL) and `rest_get` / `rest_post` /
+`rest_patch` / `rest_put` (PixAI's REST routes), plus `create()` (the create door) and
+`for_create()`, which chooses the Mirror's signed-in session or the API key, and the identity
+a caller can ask for (`user_id`, `auth_kind`, `session`). `_make_session()` returns one; the
+module-level primitives (`gql`, `gql_adhoc`, `gql_mutate`, `_rest_get`, `_rest_post`) are thin
+delegates onto it, so
 every function that still takes a `session` positionally keeps working. **`mutate` has no
 `retries` parameter** — not defaulted to zero, absent — which is where the spend rule lives
 now: a caller cannot ask for the value that pays twice.

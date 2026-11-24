@@ -39,7 +39,7 @@ update to the latest release, or open an issue.
 
 **Where do my files and credentials go?**
 Your files and credentials stay on your PC. `config.json`, `token.txt`, and `pixai_backup/` are git-ignored.
-The app talks only to PixAI (your own account) and to GitHub (an hourly read-only check for a new release).
+The app talks to PixAI (your own account) and to GitHub (an hourly read-only check for a new release, and the art pack and updates when you ask for them). If you install the optional Similar index, it also downloads its model once from Hugging Face.
 
 **Can I run it on my phone/tablet?**
 Yes — in the Control Panel's **LAN discovery** card set **Reach** to **LAN** and **Save**, then

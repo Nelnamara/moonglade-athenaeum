@@ -14,8 +14,9 @@ in the gallery:
 - **Delete from PixAI** — deletes the whole **task** from your account *and* removes it
   locally, so they never drift. Requires a request from the machine running the server, even
   for a signed-in account on another device: this one is irreversible on PixAI's side, so it
-  stays stricter than "signed in". On a selection made only of files you imported, this
-  button is not shown.
+  stays stricter than "signed in", and on any other device the button is not shown. If you
+  reach it for a file you imported (PixAI has no copy), the app says there is nothing to delete
+  on PixAI and points you to **Delete locally**.
 
 > 🛟 **Local files are recoverable, from inside the app.** Both buttons *move* your files
 > to a `_deleted/` folder inside your backup rather than destroying them, and clear the
@@ -164,9 +165,11 @@ the sixty-day **Full re-walk** — and they reach it only on rows they were re-f
 
 ## Taking a published artwork down
 
-This is a different delete. In **My Art**, the trash button on a published artwork removes
-that artwork from PixAI. Your generation and your local files stay. It **cannot be undone**,
-and it asks once on a confirm sheet, with a preview of the artwork. It does **not** ask you to
+This is a different delete. In **My Art**, the trash button on a published artwork (on the
+phone, **Delete** in the card's menu) removes that artwork from PixAI; **Delete** in Manage all
+does the same for every artwork you selected. Your generation and your local files stay. It
+**cannot be undone**, and it asks once on a confirm sheet that names the artwork (or how many
+you picked). It does **not** ask you to
 type `DELETE`, and it is not limited to the server machine: any signed-in device can do it.
 `READ_ONLY` refuses it.
 

@@ -175,7 +175,9 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   another device — even signed in.** The boundary is drawn around **what you cannot take back**,
   not around what touches files: **permanent deletion, writes to `config.json` or the machine's settings, the destructive
   maintenance jobs, and creating a login are localhost-only; everything else — including spending
-  your credits — works from any signed-in device.**
+  your credits — works from any signed-in device.** One irreversible act is the exception today:
+  taking a published artwork down in **My Art** works from any signed-in device (see
+  [Deleting](Deleting#taking-a-published-artwork-down)).
 
   Note what that deliberately does *not* say. It is not "anything that moves files", because
   delete-to-Trash moves your file and is allowed from anywhere — it is reversible. It is not
@@ -197,7 +199,8 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   (and the **Run now** of the published-artwork sweep);
   **emptying the Trash, or deleting from it forever** — the one Trash action with no way back;
   **deleting a generation from your PixAI account**, per-image or in bulk; writing the **API key**, the
-  **library folder**, or the launcher icon; turning the **Mirror to PixAI** switch on or off,
+  **library folder**, or the launcher icon; turning the **Mirror to PixAI** switch on (a signed-in device on your home network can still
+  Disconnect it, which turns it off),
   changing the **LAN discovery** settings, and the one-click fix for outside shortcuts that name
   the app's old files; **importing local files** (the **Import**
   drop-zone, host only / `--import-local`, which copies files onto the server machine); and **changing who
