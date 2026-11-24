@@ -200,9 +200,7 @@ A visible change gets a design or workshop step first.
   (2026-11-19) the server answers every LAN client over HTTPS only, under its own certificate
   authority: the TV client must browse `_https._tcp` (not `_http._tcp`) and pin the server's CA
   fingerprint (the LAN card shows it; the leaf is re-issued when the address changes) before
-  pairing (S1). Still to draw and build: the screen where a signed-in device types the TV's six-glyph
-  code (the route, `POST /api/pair/approve`, is there; no screen sends it yet). It is a new surface,
-  so it gets a design step first.
+  pairing (S1).
 - **The phone layouts** wait on the mobile-surface audit's defect list; the Chrome-on-iPhone column
   jump after a turn needs a measurement on the device itself.
 - **Windows Explorer's Network folder** *(scoped 2026-10-02)*. Moonglade shows up for phones through
