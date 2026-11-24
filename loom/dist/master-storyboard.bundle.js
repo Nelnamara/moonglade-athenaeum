@@ -11446,8 +11446,8 @@ ${"=".repeat(48)}
         {
           id: "rooms",
           at: ".mgx-navspine",
-          tour: "Your other rooms: My Art, Contests, Health and the Control Panel. Each opens over the library; Esc brings you back.",
-          note: "My Art, Contests, Health and the Control Panel open over the library."
+          tour: "Your other rooms: My Art, Publish, Train, Import, Contests, Health and the Panel. Each opens over the library; Esc brings you back.",
+          note: "My Art, Publish, Train, Import, Contests, Health and the Panel open over the library."
         },
         {
           id: "activity",
@@ -11485,13 +11485,13 @@ ${"=".repeat(48)}
         {
           id: "icons",
           at: ".glm-hero-icons",
-          tour: "The Folio, the Loom, Activity and the menu live up here.",
+          tour: "The Folio, the Loom and the menu live up here. Activity is in the menu.",
           moves: "wave 5 (Q, the phone)"
         },
         { id: "select", at: ".glm-bar .glm-metal", note: "Select picks several pictures at once." },
         { id: "kinds", at: ".glm-bar2", note: "Show everything, only images or only videos, and change the sort." },
         { id: "control", at: ".glm-nav .glm-navitem:nth-child(3)", note: "Control runs the syncs and the library's upkeep." },
-        { id: "help", at: ".glm-help", note: "The ? opens the guide for the screen you're on." }
+        { id: "help", at: ".glm-hero-icons", note: "Menu, then Guide, opens the guide for the screen you're on." }
       ]
     }
   };
@@ -11646,7 +11646,7 @@ ${"=".repeat(48)}
         { id: "recent", at: ".fm-hscroll", tour: "Recently entered: the newest first." },
         { id: "ledger", at: ".fm-ledgerbox", tour: "Your progress in each category.", moves: "wave 4 (O)" },
         { id: "reach", at: ".fm-reachcard", note: "The honor you're closest to.", moves: "wave 4 (O)" },
-        { id: "relics", at: ".fm-relicchip", note: "Relics: tap to see the full list.", moves: "wave 4 (L2)" },
+        { id: "relics", at: ".fm-kinds", note: "Relics: the skins and banners your honors have earned, by kind.", moves: "wave 4 (L2)" },
         { id: "back", at: ".fm-back", note: "\u2190 Gallery takes you back." }
       ]
     }
