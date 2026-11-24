@@ -575,9 +575,11 @@ def register(app, ctx):
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": _CSRF_REFUSED}), 400
-        refused = _pair_transport_refusal()
-        if refused:
-            return refused
+        if not request.is_secure and not _is_local_request():
+            # The approver's own sheet, in the board's words; the TV's routes keep
+            # DEVICE_NEEDS_HTTPS, which names where to find the https:// address.
+            return jsonify({"error": "Pairing works only over this PC's https:// address, or on "
+                                     "this PC itself."}), 403
         user = _request_user()
         code = "".join(ch for ch in str(body.get("code") or "").upper()
                        if ch.isascii() and ch.isalnum())
@@ -599,8 +601,9 @@ def register(app, ctx):
                 _pair_wrong["account"].setdefault(user, []).append(now)
                 _pair_wrong["ip"].setdefault(ip, []).append(now)
                 _pair_wrong["all"].append(now)
-                return jsonify({"error": "That code isn't right, or it has expired. Check the "
-                                         "code on the TV and try again."}), 400
+                # Words from the Pair a TV board (artifact 3GFxokXxiUasA2FfJ63Wu7, owner pick B).
+                return jsonify({"error": "That code didn't match, or it ran out. Check the TV's "
+                                         "screen and try again."}), 400
             match.update(status="approved", user=user, label=label, epoch=epoch)
         return jsonify({"ok": True, "label": label})
 

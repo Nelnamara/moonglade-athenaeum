@@ -2143,6 +2143,12 @@ function PairSheet({ phone, csrf, onClose, onPaired }) {
               {"✓ Paired “" + done + "”. The TV continues on its own."}
             </div>
           )}
+          {done && (
+            <div className="mgcp-pair-note">
+              The TV can show pictures and take your star ratings. It can't spend, delete or open
+              your messages. Revoke ends it, and the TV asks to pair again.
+            </div>
+          )}
           <div className="mgcp-pair-btns">
             {done ? (
               <button type="button" className="mgcp-pair-go" onClick={onClose}>Done</button>

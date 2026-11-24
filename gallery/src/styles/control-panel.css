@@ -594,6 +594,9 @@ html.mg-noblur .mgcp-pwr-scrim { backdrop-filter: none !important; }
 button.mgcp-pairbtn { color: var(--subtext); border: 1px solid var(--surface1); border-radius: 9px; padding: 4px 11px; }
 button.mgcp-pairbtn:hover { border-color: var(--accent); }
 button.mgcp-pairbtn + button.mgcp-useraction { margin-left: 0; }
+/* With two buttons on your own row, a narrow phone wraps the row, never a button's words. */
+.mgcp-userrow:has(> button.mgcp-pairbtn) { flex-wrap: wrap; align-items: center; row-gap: 8px; }
+.mgcp-userrow > button.mgcp-pairbtn, .mgcp-userrow > button.mgcp-pairbtn + button.mgcp-useraction { white-space: nowrap; }
 .mgcp-pair-scrim { position: fixed; inset: 0; z-index: 424; background: rgba(5,4,13,.6); }
 .mgcp-pair-host { position: fixed; inset: 0; z-index: 425; display: grid; place-items: center; padding: 20px; pointer-events: none; }
 .mgcp-pair-host.phone { place-items: end center; padding: 0; }
@@ -616,6 +619,7 @@ button.mgcp-pairbtn + button.mgcp-useraction { margin-left: 0; }
 .mgcp-pair-name:focus { border-color: var(--lavender); }
 .mgcp-pair-ok { font-size: 11.5px; color: var(--emerald); }
 .mgcp-pair-err { font-size: 11.5px; color: var(--peach); }
+.mgcp-pair-note { font-size: 10.5px; line-height: 1.45; color: var(--overlay0); }
 .mgcp-pair-btns { display: flex; gap: 6px; justify-content: flex-end; }
 .mgcp-pair-btns button { font-family: inherit; font-size: 10.5px; cursor: pointer; padding: 6px 12px; border-radius: 9px; white-space: nowrap;
   background: none; border: 1px solid var(--surface1); color: var(--subtext); }
