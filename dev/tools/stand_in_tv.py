@@ -143,7 +143,7 @@ h1{font-weight:400;font-size:28px;margin:14px 0}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-top:24px}
 .grid img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;background:#171a2e}
 </style></head><body><div class="wrap"><div class="tag">Stand-in TV &middot; walk only</div>
-%s</div></body></html>"""
+@@BODY@@</div></body></html>"""
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -192,7 +192,7 @@ class Handler(BaseHTTPRequestHandler):
             body = "<h1>Getting a code&hellip;</h1>"
         if s["note"]:
             body += "<p class='note'>%s</p>" % html.escape(s["note"])
-        out = (PAGE % body).encode("utf-8")
+        out = PAGE.replace("@@BODY@@", body).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
