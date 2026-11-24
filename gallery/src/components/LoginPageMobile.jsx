@@ -41,6 +41,7 @@ import "../styles/login-mobile.css";
 export default function LoginPageMobile({ boot }) {
   const {
     createMode, lanFirstRun,
+    remember, setRemember, rememberOpen, setRememberOpen,
     user, setUser, pass, setPass,
     createUser, createPass, createConfirm,
     createSubmitted, usernameErr, matchErr,
@@ -93,6 +94,10 @@ export default function LoginPageMobile({ boot }) {
             )}
           </div>
 
+          {boot.ended && !createMode && !lanFirstRun ? (
+            <div className="lgnm-ended" role="status">This device was signed out. Sign in again to continue.</div>
+          ) : null}
+
           {lanFirstRun && (
             <div className="lgnm-error" style={{ marginTop: 0 }}>
               No account has been set up yet. Whoever runs this server needs to sign in from
@@ -117,6 +122,22 @@ export default function LoginPageMobile({ boot }) {
                 {busy ? <span className="lgnm-spin" /> : null}
                 <span>{busy ? "Signing in…" : "Sign in"}</span>
               </button>
+              {rememberOpen ? (
+                <label className="lgnm-remrow">
+                  <input type="checkbox" checked={remember} disabled={busy}
+                    onChange={(e) => setRemember(e.target.checked)} />
+                  <span>
+                    Keep me signed in on this device for 90 days
+                    <span className="lgnm-remwarn">Never tick this on a shared or borrowed device.</span>
+                  </span>
+                </label>
+              ) : (
+                <div className="lgnm-remwrap">
+                  <button type="button" className="lgnm-remlink" onClick={() => setRememberOpen(true)}>
+                    Remember this device…
+                  </button>
+                </div>
+              )}
             </>
           )}
 

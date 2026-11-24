@@ -533,6 +533,35 @@ button.mgcp-useraction { margin-left: auto; color: var(--accent); font-size: 11p
 .mgcp-usererr { font-size: 11.5px; color: var(--red); margin-top: 6px; }
 .mgcp-usermsg { font-size: 11.5px; color: var(--emerald); margin-top: 6px; }
 
+/* Remember this device (Remember Device Handoff, sections 2, 3 and 4): the in-page confirm, and
+   the device rows under each user. Ruby is the handoff's rgba(243,139,168,.5) outline = --red. */
+button.mgcp-useraction.ruby { color: var(--red); border: 1px solid rgba(243, 139, 168, .5); border-radius: 9px;
+  padding: 4px 11px; }
+.mgcp-confirm { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 8px; padding: 10px 12px; border-radius: 12px;
+  border: 1px solid var(--surface1); background: #0c0a1c; box-shadow: 0 10px 24px rgba(0, 0, 0, .5);
+  font-size: 11.5px; line-height: 1.5; color: var(--text); }
+.mgcp-confirm-btns { display: flex; gap: 6px; justify-content: flex-end; }
+.mgcp-confirm-btns button { font-family: inherit; font-size: 10.5px; cursor: pointer; padding: 6px 12px; border-radius: 9px;
+  background: none; border: 1px solid var(--surface1); color: var(--subtext); white-space: nowrap; }
+.mgcp-confirm-btns button.ruby { border-color: rgba(243, 139, 168, .5); color: var(--red); }
+.mgcp-confirm-btns button:disabled { opacity: .5; cursor: default; }
+.mgcp-devhead { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; font-weight: 700; letter-spacing: .14em;
+  color: var(--overlay0); margin: 8px 0 5px; }
+.mgcp-devrow { display: flex; align-items: center; gap: 8px; padding: 7px 9px; margin-bottom: 5px; border-radius: 10px;
+  border: 1px solid var(--surface1); font-size: 10.5px; line-height: 1.45; color: var(--text); }
+.mgcp-devmain { flex: 1; min-width: 0; }
+.mgcp-devmeta { display: block; color: var(--subtext); }
+button.mgcp-devrevoke { font-family: inherit; font-size: 10.5px; cursor: pointer; padding: 6px 12px; border-radius: 9px;
+  background: none; border: 1px solid var(--surface1); color: var(--subtext); white-space: nowrap; }
+button.mgcp-devrevoke:hover:not(:disabled) { border-color: var(--accent); }
+button.mgcp-devrevoke:disabled { opacity: .5; cursor: default; }
+.mgcp-devme { font-size: 8.5px; font-weight: 800; padding: 2px 7px; border-radius: 999px; white-space: nowrap;
+  background: rgba(182, 146, 230, .18); color: var(--lavender); }
+/* the phone: rows 52px, Revoke and the confirm buttons 44px */
+.mgcp-devrow.phone { min-height: 52px; box-sizing: border-box; }
+.mgcp-devrow.phone button.mgcp-devrevoke { min-height: 44px; }
+.mgcp-confirm.phone .mgcp-confirm-btns button { min-height: 44px; }
+
 .mgcp-trashhead { font-size: 12px; color: var(--subtext); margin: 2px 0 12px; }
 .mgcp-trashbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .mgcp-selectall { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--subtext);
