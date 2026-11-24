@@ -20,6 +20,12 @@ import { markSignedIn } from "../lib/installNudge.js";
    one shared policy with the Panel's "Add user" flow. The server is the real
    authority either way; this is proactive client-side UX only. */
 
+/* A ticked "Remember this device" the server could not save (/api/login answered
+   remembered: false): an ordinary sign-in, and the welcome says so before it navigates. */
+export const REMEMBER_FAILED_LINE = "Couldn't remember this device; you're signed in for the usual 30 days.";
+// How long the mobile welcome holds when it has that line to show (it otherwise navigates at once).
+export const REMEMBER_NOTE_HOLD_MS = 3400;
+
 export const WELCOMES = [
   "The gallery is waking",
   "The void retreats",
@@ -111,6 +117,7 @@ export default function useLogin(boot) {
 
   const [phase, setPhase] = useState("idle"); // idle | busy | welcome
   const [error, setError] = useState("");
+  const [rememberNote, setRememberNote] = useState("");
   const [welcomeLine] = useState(() => WELCOMES[Math.floor(Math.random() * WELCOMES.length)]);
   const fl = useFlavour(undefined, boot.build_stamp);
 
@@ -133,7 +140,13 @@ export default function useLogin(boot) {
     }
     setPhase("welcome");
     markSignedIn();
-    window.location.href = d.next || "/";
+    const go = () => { window.location.href = d.next || "/"; };
+    if (payload.remember && d.remembered === false) {
+      setRememberNote(REMEMBER_FAILED_LINE);
+      setTimeout(go, REMEMBER_NOTE_HOLD_MS);
+      return;
+    }
+    go();
   };
 
   const signIn = () => {
@@ -190,7 +203,7 @@ export default function useLogin(boot) {
     user, setUser, pass, setPass,
     createUser, createPass, createConfirm,
     createSubmitted, usernameErr, matchErr,
-    phase, busy, error, welcomeLine, fl,
+    phase, busy, error, welcomeLine, rememberNote, fl,
     signIn, createAccount, onKey,
     onCreateUserChange, onCreatePassChange, onCreateConfirmChange,
     lenOk, guessOk,

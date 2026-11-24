@@ -95,15 +95,21 @@ def _drop_devices(username, keep=None, restamp=None):
 
     Never fails the account write. The epoch change already ends every record made under the
     old epoch (the gate compares them); deleting them keeps the device list honest. A devices
-    file that cannot be read or written is left alone and logged."""
+    file that cannot be read or written is left alone and logged.
+
+    Returns True when `keep` was re-stamped with `restamp` (so that device stays signed in),
+    False otherwise -- including when the devices file could not be written, which leaves the
+    kept record on its old epoch and so refused."""
     import logging
     from moonglade import web_devices as _web_devices
     try:
-        _web_devices.delete_for_user(username, keep=keep, restamp=restamp)
+        _gone, restamped = _web_devices.delete_for_user(username, keep=keep, restamp=restamp)
     except _web_devices.DevicesUnavailable as e:
         logging.getLogger(__name__).warning(
             "couldn't update the remembered devices for an account change (%s); the change "
             "itself was saved and those devices are refused by the session epoch", e)
+        return False
+    return restamped
 
 
 def _find_web_user(cfg, username):
@@ -300,12 +306,15 @@ def add_or_update_web_user(username, password):
 
 def set_web_user_password_guarded(username, new_password, current_password=None,
                                   keep_device=None):
-    """Change an existing account's password. Returns "ok", "not_found" or "bad_current".
+    """Change an existing account's password. Returns "ok", "ok_not_kept", "not_found" or
+    "bad_current".
 
     Every remembered device of the account is deleted in the same `_accounts_lock` section,
     except `keep_device` (a web_devices id): a user changing their OWN password from a
     remembered browser keeps that browser's record, re-stamped with the new epoch (R10), exactly
-    as /api/users/password keeps that browser's session.
+    as /api/users/password keeps that browser's session. "ok_not_kept" is a saved change whose
+    `keep_device` could not be re-stamped (the record was gone, or the devices file could not be
+    written): that browser is signed out with the rest.
 
     ONE `_accounts_lock` acquisition covers the existence check, the current-password
     verification and the write. That is not stylistic: `remove_web_user_guarded`'s docstring
@@ -356,7 +365,10 @@ def set_web_user_password_guarded(username, new_password, current_password=None,
                           "sess_epoch": next_epoch})
         cfg["AUTH_USERS"] = new_users
         _save_config(cfg)
-        _drop_devices(username, keep=keep_device, restamp=next_epoch if keep_device else None)
+        kept = _drop_devices(username, keep=keep_device,
+                             restamp=next_epoch if keep_device else None)
+        if keep_device and not kept:
+            return "ok_not_kept"
         return "ok"
 
 
@@ -450,6 +462,44 @@ def remove_web_user_guarded(username, min_remaining=1):
         _save_config(cfg)
         _drop_devices(username)
         return "removed"
+
+
+class AccountsUnreadable(Exception):
+    """config.json exists but could not be read just now. Not the same as "no such account":
+    the request gate answers 503 for this, never a sign-out (a TV unpairs on a 401, and a
+    remembered browser must not be signed out by a file another program is holding)."""
+
+
+def _read_config_strict():
+    """config.json as a dict: {} when there is no file; AccountsUnreadable when there is one
+    that cannot be read or parsed. backup._load_config reads the same file the same way but
+    answers {} for both, which would read as "every account is gone"."""
+    import json
+    from moonglade.backup import _config_path
+    path = _config_path()
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        return {}
+    except OSError as e:
+        raise AccountsUnreadable("config.json can't be read ({})".format(type(e).__name__)) from None
+    try:
+        cfg = json.loads(_paths.decode_text(raw))
+    except ValueError as e:
+        raise AccountsUnreadable("config.json can't be parsed ({})".format(type(e).__name__)) from None
+    if not isinstance(cfg, dict):
+        raise AccountsUnreadable("config.json is not an object")
+    return cfg
+
+
+def session_epoch_checked(username):
+    """Like get_web_user_session_epoch, for the request gate: the account's epoch, None when
+    config.json was read and has no such account, and AccountsUnreadable when config.json could
+    not be read at all -- so a read failure is never mistaken for a revocation."""
+    user = _find_web_user(_read_config_strict(), (username or "").strip())
+    if user is None:
+        return None
+    return int(user.get("sess_epoch", 0))
 
 
 def get_web_user_session_epoch(username):

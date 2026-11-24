@@ -45,7 +45,7 @@ export default function LoginPageMobile({ boot }) {
     user, setUser, pass, setPass,
     createUser, createPass, createConfirm,
     createSubmitted, usernameErr, matchErr,
-    phase, busy, error, welcomeLine, fl,
+    phase, busy, error, welcomeLine, rememberNote, fl,
     signIn, createAccount, onKey,
     onCreateUserChange, onCreatePassChange, onCreateConfirmChange,
     lenOk, guessOk,
@@ -188,6 +188,7 @@ export default function LoginPageMobile({ boot }) {
               {createMode ? "Welcome, " + createUser : "Welcome back" + (user ? ", " + user : "")}
             </div>
             <div className="lgnm-welcome-line">{welcomeLine}</div>
+            {rememberNote ? <div className="lgnm-welcome-note" role="status">{rememberNote}</div> : null}
           </div>
         </div>
       ) : null}

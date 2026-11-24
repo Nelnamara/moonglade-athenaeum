@@ -18,7 +18,7 @@ import os
 import re
 import time
 
-from flask import jsonify, redirect, request, send_file, send_from_directory, session
+from flask import g as _flask_g, jsonify, redirect, request, send_file, send_from_directory, session
 
 from moonglade import dupes as _dupes
 from moonglade import jobs as _jobs
@@ -1110,7 +1110,9 @@ def register(app, ctx):
                                 "error": "The similarity index is empty, so there is nothing to "
                                          "compare against. Rebuild it from the Control Panel "
                                          "(Rebuild similar index)."}), 200
-        _telemetry.telem_bump("similar_uses", out_dir=out_dir)       # Kindred Spirits
+        # Kindred Spirits counts the owner's own lookups; a paired TV's (g.bearer_user) only read.
+        if not getattr(_flask_g, "bearer_user", None):
+            _telemetry.telem_bump("similar_uses", out_dir=out_dir)
         out = []
         for mid, score in hits:
             r = get_row(db_path, mid)

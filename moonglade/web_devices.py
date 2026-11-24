@@ -353,12 +353,13 @@ def delete(device_id, now=None):
 
 def delete_for_user(user, keep=None, restamp=None, now=None):
     """Delete every record of `user` except `keep` (an id); `restamp` (an epoch) is written onto
-    the kept one (R10: changing your own password keeps this device). Returns the deleted
-    records. Raises DevicesUnavailable."""
+    the kept one (R10: changing your own password keeps this device). Returns (the deleted
+    records, whether `keep` is now saved under `restamp`) -- False when there was no such record
+    of theirs or no restamp was asked for. Raises DevicesUnavailable (nothing was changed)."""
     now = time.time() if now is None else now
     p = _path()
     if not any(r["user"] == user for r in _read(p).values()):
-        return []                       # nothing of theirs: no lock, no write, no lock file
+        return [], False                # nothing of theirs: no lock, no write, no lock file
     with _Locked():
         records = dict(_read(p, fresh=True))
         gone = [r for k, r in records.items() if r["user"] == user and k != keep]
@@ -366,15 +367,16 @@ def delete_for_user(user, keep=None, restamp=None, now=None):
         for r in gone:
             records.pop(r["id"], None)
         kept = records.get(keep) if keep else None
-        if kept is not None and kept["user"] == user and restamp is not None \
-                and kept["epoch"] != int(restamp):
+        restamped = (kept is not None and kept["user"] == user and restamp is not None
+                     and kept["expires"] > now)
+        if restamped and kept["epoch"] != int(restamp):
             records[keep] = dict(kept, epoch=int(restamp))
             changed = True
         if changed:
             _write(p, _prune(records, now))
     for r in gone:
         _end_cookie(r)
-    return [dict(r) for r in gone]
+    return [dict(r) for r in gone], restamped
 
 
 def touch(device_id, now=None):

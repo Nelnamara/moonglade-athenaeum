@@ -1,7 +1,7 @@
 import React, { useRef, useState } from "react";
 import { apiPost } from "../api.js";
 import useFlavour from "../hooks/useFlavour.js";
-import { onMascotError, LOGIN_BANNER_PACK, nextBannerSrc } from "../hooks/useLogin.js";
+import { onMascotError, LOGIN_BANNER_PACK, nextBannerSrc, REMEMBER_FAILED_LINE } from "../hooks/useLogin.js";
 import "../styles/login.css";
 
 /* The React sign-in AND first-run account-creation page (design spec:
@@ -138,6 +138,7 @@ export default function LoginPage({ boot }) {
 
   const [phase, setPhase] = useState("idle"); // idle | busy | welcome
   const [error, setError] = useState("");
+  const [rememberNote, setRememberNote] = useState("");
   const [welcomeLine] = useState(() => WELCOMES[Math.floor(Math.random() * WELCOMES.length)]);
   const fl = useFlavour(undefined, boot.build_stamp);
 
@@ -170,6 +171,9 @@ export default function LoginPage({ boot }) {
     // guillotined the moment the fetch resolves (issue #25 pt 2). The render harness's _login()
     // waits on the ACTUAL navigation (expect_navigation), so both delays are fine there.
     const popRemainder = Math.max(0, BUSY_MIN_MS - (Date.now() - startedAt));
+    // A ticked "Remember this device" the server couldn't save signs in as usual; the welcome
+    // says so on its one extra line, held for the whole welcome beat before navigating.
+    if (payload.remember && d.remembered === false) setRememberNote(REMEMBER_FAILED_LINE);
     setTimeout(() => {
       setPhase("welcome");
       setTimeout(() => { window.location.href = d.next || "/"; }, WELCOME_HOLD_MS);
@@ -372,6 +376,7 @@ export default function LoginPage({ boot }) {
               {createMode ? "Welcome, " + createUser : "Welcome back" + (user ? ", " + user : "")}
             </div>
             <div className="lgn-welcome-line">{welcomeLine}</div>
+            {rememberNote ? <div className="lgn-welcome-note" role="status">{rememberNote}</div> : null}
           </div>
         </div>
       ) : null}

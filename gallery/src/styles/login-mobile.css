@@ -139,6 +139,8 @@ button.lgnm-remlink { background: none; border: 0; cursor: pointer; font-family:
   color: #efecf8; }
 .lgnm-welcome-line { font-size: 11px; font-weight: 500; letter-spacing: normal;
   text-transform: none; color: var(--mauve); padding-top: 10px; }
+.lgnm-welcome-note { font-size: 10.5px; line-height: 1.45; color: var(--subtext); padding: 8px 16px 0;
+  max-width: 300px; margin: 0 auto; }
 
 @media (prefers-reduced-motion: reduce) {
   .lgnm-card, .lgnm-welcome, .lgnm-spin, .lgnm-mascot.peeked .lgnm-mascot-bob,

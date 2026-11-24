@@ -146,6 +146,8 @@ button.lgn-remlink:hover, button.lgn-remlink:focus-visible { color: var(--text);
 .lgn-welcome-line { font-size: 12px; font-weight: 500; letter-spacing: normal;
   text-transform: none; color: var(--mauve); padding-top: 12px;
   animation: lgnGlow 2.2s ease-in-out infinite; }
+.lgn-welcome-note { font-size: 11px; line-height: 1.45; color: var(--subtext); padding-top: 10px;
+  max-width: 320px; margin: 0 auto; }
 
 @media (prefers-reduced-motion: reduce) {
   .lgn-card, .lgn-welcome, .lgn-spin, .lgn-signbtn, .lgn-mascot.peeked .lgn-mascot-bob,

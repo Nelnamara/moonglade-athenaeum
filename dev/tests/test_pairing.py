@@ -7,6 +7,7 @@ record is made. The token reaches a named list of view routes and POST /api/rate
 else: never a LOCALHOST route (even from 127.0.0.1), never a cookie, never HEAD.
 """
 import hashlib
+import secrets
 import time
 
 import pytest
@@ -14,7 +15,7 @@ import pytest
 from moonglade import settings as settings_mod
 from moonglade import web_devices
 from moonglade.gallery import create_app
-from moonglade.web_tiers import LOGIN, route_tier
+from moonglade.web_tiers import LOGIN, route_tier, tier
 from tests.conftest import login_test_client, with_csrf
 
 LAN = "203.0.113.5"
@@ -102,6 +103,31 @@ def test_a_poll_from_another_address_learns_nothing(app, owner):
     assert tv("GET", "/api/pair/poll?pair_id=" + start["pair_id"]).get_json()["status"] == "approved"
 
 
+def test_a_head_poll_hands_out_nothing(app, owner):
+    tv = _tv(app)
+    start = tv("POST", "/api/pair/start").get_json()
+    owner.post("/api/pair/approve", json=with_csrf(owner, {"code": start["code"]}))
+    poll = "/api/pair/poll?pair_id=" + start["pair_id"]
+    r = tv("HEAD", poll)
+    assert r.status_code == 200 and web_devices.list_all() == []
+    got = tv("GET", poll).get_json()
+    assert got["status"] == "approved" and got["token"]
+
+
+def test_an_unreadable_config_is_a_503_for_a_bearer_never_a_401(app, owner):
+    from moonglade import backup as core
+    tv, token, _ = _pair(app, owner)
+    p = core._config_path()
+    good = p.read_bytes()
+    p.write_text("{not json", encoding="utf-8")
+    try:
+        r = tv("GET", "/api/ping", token=token)
+        assert r.status_code == 503 and r.is_json
+    finally:
+        p.write_bytes(good)
+    assert tv("GET", "/api/ping", token=token).status_code == 200
+
+
 def test_a_revoked_token_is_refused(app, owner):
     tv, token, _ = _pair(app, owner)
     assert tv("GET", "/api/collections", token=token).status_code == 200
@@ -119,12 +145,36 @@ def test_sign_out_everywhere_ends_the_tv_too(app, owner):
     assert tv("GET", "/api/ping", token=token).status_code == 401
 
 
-def test_localhost_refuses_a_bearer_even_from_127_0_0_1(app, owner):
+def test_localhost_refuses_a_bearer_even_from_127_0_0_1(tmp_path, monkeypatch):
+    """The gate's own `level == LOCALHOST` clause, alone: a LOCALHOST GET route that IS on the
+    allowlist (widened for this test) still refuses a bearer from this PC's loopback, while a
+    LOGIN twin on the same widened list lets it through -- so nothing else is doing the refusing."""
+    from flask import jsonify
+    from moonglade import routes_gate
+    from moonglade.web_tiers import LOCALHOST, tier
+    app = create_app(tmp_path)
+
+    @app.route("/api/probe-localhost-get")
+    @tier(LOCALHOST)
+    def probe_localhost_get():
+        return jsonify({"ok": True})
+
+    @app.route("/api/probe-login-get")
+    @tier(LOGIN)
+    def probe_login_get():
+        return jsonify({"ok": True})
+
+    monkeypatch.setattr(routes_gate, "BEARER_READS", routes_gate.BEARER_READS | {
+        "probe_localhost_get", "probe_login_get"})
+    owner = login_test_client(app, username="alice", password="a-real-test-password-1")
     _tv_unused, token, _ = _pair(app, owner)
     here = _tv(app, addr="127.0.0.1")
+    assert owner.get("/api/probe-localhost-get").status_code == 200       # the route works
+    assert here("GET", "/api/probe-login-get", token=token).status_code == 200
+    r = here("GET", "/api/probe-localhost-get", token=token)
+    assert r.status_code == 401 and r.get_json() == {"error": "authentication required"}
     r = here("POST", "/api/delete-tasks", token=token, json={"confirm": "DELETE"})
     assert r.status_code == 401
-    assert here("GET", "/api/gallery-images", token=token).status_code == 200
 
 
 def test_the_rate_limits(app, owner):
@@ -164,8 +214,27 @@ def test_a_bearer_get_works_on_its_list_only_and_never_head(app, owner):
     assert tv("HEAD", "/api/gallery-images", token=token).status_code == 401
 
 
-def test_a_bearer_never_reads_or_gets_a_cookie(app, owner):
+def test_a_bearer_never_reads_or_gets_a_cookie(tmp_path, monkeypatch):
+    """The handler below WRITES the session, which Flask's stock interface would answer with a
+    Set-Cookie; the bearer's never does (should_set_cookie / save_session, review R4)."""
+    from flask import jsonify, session
+    from moonglade import routes_gate
+    app = create_app(tmp_path)
+
+    @app.route("/api/probe-session-write")
+    @tier(LOGIN)
+    def probe_session_write():
+        session["probe"] = secrets.token_hex(4)
+        session.setdefault("csrf", secrets.token_hex(16))
+        return jsonify({"ok": True})
+
+    monkeypatch.setattr(routes_gate, "BEARER_READS",
+                        routes_gate.BEARER_READS | {"probe_session_write"})
+    owner = login_test_client(app, username="alice", password="a-real-test-password-1")
+    assert "Set-Cookie" in owner.get("/api/probe-session-write").headers   # a cookie caller: yes
     tv, token, _ = _pair(app, owner)
+    r = tv("GET", "/api/probe-session-write", token=token)
+    assert r.status_code == 200 and "Set-Cookie" not in r.headers
     r = tv("GET", "/api/gallery-images", token=token)
     assert r.status_code == 200 and "Set-Cookie" not in r.headers
     # an Authorization header means bearer-only: the owner's own good cookie does not count

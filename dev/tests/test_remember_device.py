@@ -155,11 +155,17 @@ def test_your_own_password_change_keeps_this_device(tmp_path):
     assert web_devices.get(_dev(phone))["epoch"] == web_accounts_mod.get_web_user_session_epoch("alice")
 
 
-def test_an_expired_record_is_refused(tmp_path, monkeypatch):
+def test_an_expired_record_is_refused(tmp_path):
+    """The record's own `expires` refuses it: the clock is the real one, well inside the 90-day
+    cookie signature and cookie lifetime, so only is_live's expiry check can say no here."""
     app = create_app(tmp_path)
     cli = _sign_in(app, remember=True)
-    real = time.time
-    monkeypatch.setattr(time, "time", lambda: real() + REMEMBER_DEVICE_LIFETIME_S + 60)
+    assert _ok(cli)
+    p = _devices_file(tmp_path)
+    doc = json.loads(p.read_text(encoding="utf-8"))
+    for rec in doc["devices"].values():
+        rec["expires"] = int(time.time()) - 60          # a minute ago
+    p.write_text(json.dumps(doc), encoding="utf-8")
     assert cli.get("/api/jobs").status_code == 401
 
 
@@ -184,6 +190,85 @@ def test_an_unreadable_devices_file_is_a_503_never_a_sign_out(tmp_path):
     assert p.read_text(encoding="utf-8") == "{not json"      # never overwritten as empty
     p.write_text(good, encoding="utf-8")
     assert _ok(cli)
+
+
+def _break_config():
+    """config.json made unreadable (not absent); returns a function that puts it back."""
+    from moonglade import backup as core
+    p = core._config_path()
+    good = p.read_bytes()
+    p.write_text("{not json", encoding="utf-8")
+    return lambda: p.write_bytes(good)
+
+
+def test_an_unreadable_config_is_a_503_never_an_ending(tmp_path):
+    app = create_app(tmp_path)
+    plain, remembered = _sign_in(app), _sign_in(app, remember=True)
+    put_back = _break_config()
+    for cli in (plain, remembered):
+        assert cli.get("/api/jobs").status_code == 503
+        with cli.session_transaction() as s:
+            assert s.get("user") == "alice" and "ended" not in s
+    put_back()
+    assert _ok(plain) and _ok(remembered)
+
+
+def test_log_out_with_an_unreadable_devices_file_still_cleans_up(tmp_path):
+    app = create_app(tmp_path)
+    cli = _sign_in(app, remember=True)
+    with cli.session_transaction() as s:
+        sid = s["sid"]
+    p = _devices_file(tmp_path)
+    p.write_text("{not json", encoding="utf-8")
+    assert cli.post("/api/logout", json={"csrf": session_csrf(cli)}).get_json() == {"ok": True}
+    with cli.session_transaction() as s:
+        assert "user" not in s
+    from moonglade import web_sessions
+    assert web_sessions.is_signed_out(sid)
+    assert p.read_text(encoding="utf-8") == "{not json"
+
+
+def test_signing_in_again_on_a_remembered_browser_drops_its_old_record(tmp_path):
+    app = create_app(tmp_path)
+    cli = _sign_in(app, remember=True)
+    old_dev = _dev(cli)
+    old_cookie = cli.get_cookie("session").value
+    with cli.session_transaction() as s:
+        old_sid = s["sid"]
+    csrf = extract_login_csrf(cli.get("/login").get_data(as_text=True))
+    d = cli.post("/api/login", json={"username": ALICE[0], "password": ALICE[1],
+                                     "csrf": csrf}).get_json()
+    assert d["ok"] and _dev(cli) is None and web_devices.get(old_dev) is None
+    from moonglade import web_sessions
+    assert web_sessions.is_signed_out(old_sid)
+    copy = app.test_client()
+    copy.set_cookie("session", old_cookie)
+    assert copy.get("/api/jobs").status_code == 401
+    assert _ok(cli)
+
+
+def test_own_password_change_whose_device_cannot_be_restamped_says_so(tmp_path, monkeypatch):
+    app = create_app(tmp_path)
+    phone = _sign_in(app, remember=True)
+
+    def busy(*a, **k):
+        raise web_devices.DevicesBusy("held")
+    monkeypatch.setattr(web_devices, "delete_for_user", busy)
+    r = phone.post("/api/users/password", json=with_csrf(phone, {
+        "current_password": ALICE[1], "new_password": "another-real-password-9"}))
+    assert r.get_json()["ok"] is True and r.get_json()["still_signed_in_here"] is False
+
+
+def test_an_unparseable_signed_out_file_is_never_overwritten(tmp_path):
+    from moonglade import web_sessions
+    p = web_sessions._path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("{not json", encoding="utf-8")
+    assert web_sessions.sign_out("some-sid", time.time(), 3600) is False
+    assert p.read_text(encoding="utf-8") == "{not json"
+    p.unlink()
+    assert web_sessions.sign_out("some-sid", time.time(), 3600) is True
+    assert web_sessions.is_signed_out("some-sid")
 
 
 def test_a_lan_session_cannot_list_or_revoke_another_accounts_device(tmp_path):

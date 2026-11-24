@@ -404,11 +404,14 @@ def register(app, ctx):
             # there is nothing left to leak, but keeping it vague costs nothing.
             return jsonify({"error": "That current password isn't right."}), 403
 
-        if target == me:
+        # This browser stays signed in only when its session follows the new epoch: an ordinary
+        # session always does; a remembered one only when its record was re-stamped (R10).
+        here = target == me and result == "ok"
+        if here:
             session["sess_epoch"] = _web_accounts.get_web_user_session_epoch(me)
         return jsonify({"ok": True, "username": target,
                         "signed_out_elsewhere": True,
-                        "still_signed_in_here": target == me})
+                        "still_signed_in_here": here})
 
     @app.route("/api/ping")
     @tier(LOGIN)

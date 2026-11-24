@@ -32,6 +32,17 @@ from moonglade import web_accounts as _web_accounts
 from moonglade import web_devices as _web_devices
 from moonglade import account_api as _account_api
 
+# The bearer path's scope (a paired TV; Apple TV plan S1, review R4): a NAMED allowlist of
+# endpoints, decided in the front door from request.endpoint and nothing else -- view and rate. A
+# LOGIN GET added later does NOT join it by being one; it joins only by being written here. Never
+# the inbox, comments, the account, credits, coupons, export, the panel, devices, users, or any
+# LOCALHOST route (the gate refuses LOCALHOST for a bearer even if one were listed here).
+BEARER_READS = frozenset((
+    "api_gallery_images", "api_collections", "api_collections_detail", "api_similar",
+    "api_achievements", "thumb", "full_image", "video_file", "badge_thumb",
+    "api_health", "api_ping"))
+BEARER_WRITES = frozenset(("rate",))
+
 
 def register(app, ctx):
     from moonglade.pages import _AUTH_401_GUARD_JS, _PREPAINT_BOOT_JS
@@ -124,6 +135,28 @@ def register(app, ctx):
         session["sid"] = secrets.token_urlsafe(18)
         session["born"] = int(time.time())
         session.permanent = True
+
+    def _drop_incoming_device():
+        """A sign-in on a browser whose session is a remembered device replaces that session, so
+        its record goes first: deleting it records its sid as signed out until the record would
+        have expired (review R14), so a copy of the old cookie stops working. A devices file that
+        can't be used just now still records the sid, from the session's own dev_exp."""
+        from moonglade.web_policy import SESSION_ABSOLUTE_LIFETIME_S
+        dev, sid = session.get("dev"), session.get("sid")
+        if not dev:
+            return
+        try:
+            rec = _web_devices.get(dev)
+            if rec is not None and rec.get("kind") == "browser" and rec.get("sid") == sid:
+                _web_devices.delete(dev)
+                return
+        except _web_devices.DevicesUnavailable:
+            pass
+        exp, born = session.get("dev_exp"), session.get("born")
+        lifetime = SESSION_ABSOLUTE_LIFETIME_S
+        if isinstance(exp, (int, float)) and isinstance(born, (int, float)):
+            lifetime = max(lifetime, exp - born)
+        _web_sessions.sign_out(sid, born, lifetime)
 
     def _remember_this_browser(username):
         """Make this freshly signed-in session a remembered device: a browser record holding
@@ -276,12 +309,14 @@ def register(app, ctx):
                 return _fail("Passwords do not match.")
             _web_accounts.add_or_update_web_user(username, password)
             _login_clear(ip)
+            _drop_incoming_device()
             _establish_session(username)
             return jsonify({"ok": True, "next": next_url or "/"})
         username = str(body.get("username") or "").strip()
         password = str(body.get("password") or "")
         if username and _web_accounts.verify_web_user(username, password):
             _login_clear(ip)
+            _drop_incoming_device()        # this browser's old remembered record, if any (R14)
             _establish_session(username)
             # "Remember this device" (sign-in only; a create never remembers): the session
             # gets a browser record (moonglade.web_devices) and lives as long as it does. A
@@ -341,7 +376,19 @@ def register(app, ctx):
         user = session.get("user")
         # ORDER MATTERS, same as logout(): read `user` before any call that
         # might clear the session.
-        authorized = bool(user) and _is_authorized_request()
+        try:
+            authorized = bool(user) and _is_authorized_request()
+        except (_web_devices.DevicesUnavailable, _web_accounts.AccountsUnreadable):
+            # The gate can't tell whether this session is still good (a devices file or
+            # config.json that can't be read just now). Fail toward MORE cleanup: this session
+            # is still recorded as signed out and cleared below; it just can't revoke anything.
+            lifetime = SESSION_ABSOLUTE_LIFETIME_S
+            exp, born = session.get("dev_exp"), session.get("born")
+            if session.get("dev") and isinstance(exp, (int, float)) and isinstance(born, (int, float)):
+                lifetime = max(lifetime, exp - born)
+            _web_sessions.sign_out(session.get("sid"), born, lifetime)
+            session.clear()
+            return jsonify({"ok": True})
         if authorized:
             if not _check_csrf(body):
                 return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
@@ -388,6 +435,10 @@ def register(app, ctx):
     # Remembered devices (moonglade.web_devices): the list and Revoke
     # ------------------------------------------------------------------
     _CSRF_REFUSED = "Your session expired. Reload the page and try again."
+    # config.json could not be read just now (web_accounts.AccountsUnreadable): a 503, never a
+    # sign-out or an unpairing -- "no such account" is the only reading that refuses.
+    _ACCOUNTS_UNREADABLE = ("Moonglade couldn't read its account settings just now. Nothing was "
+                            "changed. Wait a moment, then try again.")
 
     @app.route("/api/devices")
     @tier(LOGIN)
@@ -545,11 +596,18 @@ def register(app, ctx):
         Answered only to the address that started it, and rate-limited. The approved answer is
         the handout: the token is made here, the TV's record is created with it (stored hashed),
         and the pairing is gone -- the token is never shown again, and a later poll says
-        expired. An approver signed out everywhere since approving hands out nothing."""
+        expired. An approver signed out everywhere since approving hands out nothing.
+
+        Only a GET is a poll. Flask answers HEAD on this rule too, and a HEAD must never be the
+        handout (its body is thrown away, so the token and the TV's record would be lost): it
+        says "waiting" and touches nothing -- no pairing, no count, no record. A config.json
+        that cannot be read is a 503 and keeps nothing either (the pairing is already spent)."""
         from moonglade import web_policy as _wp
         refused = _pair_transport_refusal()
         if refused:
             return refused
+        if request.method != "GET":
+            return jsonify({"status": "waiting"})
         pair_id = str(request.args.get("pair_id") or "")
         ip, now = _client_ip(), time.time()
         with _pair_lock:
@@ -564,7 +622,11 @@ def register(app, ctx):
             if p["status"] != "approved":
                 return jsonify({"status": "waiting"})
             _pairings.pop(pair_id, None)           # single handout, under the lock
-        if _web_accounts.get_web_user_session_epoch(p["user"]) != p["epoch"]:
+        try:
+            epoch_now = _web_accounts.session_epoch_checked(p["user"])
+        except _web_accounts.AccountsUnreadable:
+            return jsonify({"error": _ACCOUNTS_UNREADABLE}), 503
+        if epoch_now != p["epoch"]:
             return jsonify({"status": "expired"})
         token = secrets.token_urlsafe(32)
         try:
@@ -704,22 +766,14 @@ def register(app, ctx):
         return None
 
     # ---- The bearer path: a paired TV (Apple TV plan S1; review R4-R6) ---------------------
-    # A NAMED allowlist of endpoints, decided here from request.endpoint and nothing else: the
-    # TV's own scope is view and rate. A LOGIN GET added later does NOT join it by being one;
-    # it joins only by being written here. Never the inbox, comments, the account, credits,
-    # coupons, export, the panel, devices, users, or any LOCALHOST route.
-    _BEARER_READS = frozenset((
-        "api_gallery_images", "api_collections", "api_collections_detail", "api_similar",
-        "api_achievements", "thumb", "full_image", "video_file", "badge_thumb",
-        "api_health", "api_ping"))
-    _BEARER_WRITES = frozenset(("rate",))
-
+    # The allowlist is BEARER_READS / BEARER_WRITES at the top of this module, read at request
+    # time (so a test can widen it and prove the LOCALHOST refusal stands on its own).
     def _bearer_allowed():
         ep, method = request.endpoint or "", request.method
-        if method == "GET" and ep in _BEARER_READS:
+        if method == "GET" and ep in BEARER_READS:
             # achievements READ: ?mark=1 records them as seen, which is the browser's job
             return not (ep == "api_achievements" and request.args.get("mark"))
-        return method == "POST" and ep in _BEARER_WRITES
+        return method == "POST" and ep in BEARER_WRITES
 
     def _bearer_gate(level):
         """A request carrying an Authorization header is bearer-only (R6): its session cookie is
@@ -728,7 +782,8 @@ def register(app, ctx):
         allowlist above (never HEAD, never LOCALHOST, even from 127.0.0.1), and only with a TV
         record whose token it carries and that is live under its account's current epoch. A
         refusal is a 401 JSON on every path, assets included, so the TV unpairs; a devices file
-        that cannot be read is a 503 (the error handler below), never a 401."""
+        that cannot be read is a 503 (the error handler below), and so is a config.json that
+        cannot be read (503 JSON here), never a 401."""
         from moonglade.web_policy import DEVICE_NEEDS_HTTPS
         from moonglade.web_tiers import LOCALHOST
         if not request.is_secure and not _is_local_request():
@@ -739,8 +794,13 @@ def register(app, ctx):
         if scheme.lower() != "bearer" or not token or level == LOCALHOST or not _bearer_allowed():
             return refused
         rec = _web_devices.find_by_token(token)
-        if rec is None or rec["kind"] != "tv" or not _web_devices.is_live(
-                rec, _web_accounts.get_web_user_session_epoch(rec["user"])):
+        if rec is None or rec["kind"] != "tv":
+            return refused
+        try:
+            epoch = _web_accounts.session_epoch_checked(rec["user"])
+        except _web_accounts.AccountsUnreadable:
+            return jsonify({"error": _ACCOUNTS_UNREADABLE}), 503   # never a 401: the TV unpairs
+        if not _web_devices.is_live(rec, epoch):
             return refused
         _web_devices.touch(rec["id"])
         _flask_g.bearer_user = rec["user"]
@@ -886,6 +946,15 @@ def register(app, ctx):
             return jsonify({"error": msg}), 503
         return app.response_class(msg, status=503, mimetype="text/plain")
 
+    @app.errorhandler(_web_accounts.AccountsUnreadable)
+    def _accounts_unreadable(_e):
+        """config.json exists but could not be read just now: the session gate cannot tell
+        whether this session is still good, so it answers 503 and leaves the session alone --
+        never the ending marker, which only a config that was read and lacks the account earns."""
+        if request.path.startswith(_JSON_GATE_PREFIXES):
+            return jsonify({"error": _ACCOUNTS_UNREADABLE}), 503
+        return app.response_class(_ACCOUNTS_UNREADABLE, status=503, mimetype="text/plain")
+
     def _check_csrf(body):
         """Shared CSRF check for this app's state-changing POSTs -- the Panel's
         Users tab (a parsed JSON body) and /logout (request.form) -- using the exact
@@ -999,7 +1068,9 @@ def register(app, ctx):
         user = session.get("user")
         if user is None:
             return False
-        current_epoch = _web_accounts.get_web_user_session_epoch(user)
+        # A config.json that cannot be read raises AccountsUnreadable (a 503, the handler
+        # above), never an ending: only a config that was read and lacks the account refuses.
+        current_epoch = _web_accounts.session_epoch_checked(user)
         if current_epoch is None or current_epoch != session.get("sess_epoch"):
             _end_session()   # stale/revoked -- drop it so later requests short-circuit above
             return False

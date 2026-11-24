@@ -16,7 +16,7 @@ mint and spend in one table, and a test's patch of moonglade.ach_beacon still re
 """
 import threading
 
-from flask import jsonify, request, session
+from flask import g as _flask_g, jsonify, request, session
 
 from moonglade import account_prefs as _account_prefs
 from moonglade import achievements as _achievements
@@ -54,9 +54,12 @@ def register(app, ctx):
         can't spoil them or even count how many remain; the whole feat tab stays
         cloaked until the first feat lands."""
         import datetime as _dt
+        # A paired TV (the bearer path, g.bearer_user) only READS: it marks no Vigil day, sweeps
+        # no telemetry and no branding drops -- those are the browser's, as ?mark=1 is.
+        bearer = bool(getattr(_flask_g, "bearer_user", None))
         try:
             today = _dt.date.today().isoformat()
-            if _telem_day["day"] != today:
+            if not bearer and _telem_day["day"] != today:
                 _telem_day["day"] = today
                 _telemetry.telem_mark_day(out_dir=out_dir)
                 _telemetry.sweep_telemetry(out_dir)
@@ -77,10 +80,11 @@ def register(app, ctx):
         # Unlike sweep_telemetry above, this runs EVERY call rather than once a day:
         # a file dropped into the tree since the last fetch is picked up on the next
         # reload, not up to a day later. See sweep_branding_drops()'s own docstring.
-        try:
-            _branding.sweep_branding_drops(out_dir, telem=telem)
-        except Exception:
-            pass
+        if not bearer:
+            try:
+                _branding.sweep_branding_drops(out_dir, telem=telem)
+            except Exception:
+                pass
         metrics = _achievements.achievement_metrics(db_path)
         metrics.update(_telemetry.telemetry_metrics(out_dir, telem=telem))
         # Gate the unlock toasts until the first full sync completes (see first_sync_complete):

@@ -2085,6 +2085,9 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
   // Remembered devices by user. Fail-soft: a server without the route (or a failed read) shows none.
   const [devices, setDevices] = useState({});
   const [devBusy, setDevBusy] = useState(null);
+  // A refusal from a row's own action (Revoke, another account's Sign out everywhere), shown on
+  // that user's row: {user, msg}. The password line below is for the password form only.
+  const [rowErr, setRowErr] = useState(null);
   // The one pending in-page confirm: {kind: "everywhere" | "password" | "remove", user}.
   const [pending, setPending] = useState(null);
   const [newUser, setNewUser] = useState("");
@@ -2126,12 +2129,12 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
   useEffect(() => { loadDevices(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Revoke ends that record at once, no confirm (signing in again is the undo).
-  const revokeDevice = async (id) => {
+  const revokeDevice = async (user, id) => {
     if (devBusy) return;
-    setDevBusy(id);
+    setDevBusy(id); setRowErr(null);
     const d = await apiPost("/api/devices/revoke", { id, csrf: summary.csrf || "" });
     setDevBusy(null);
-    if (d && d.error) { setPwMsg(errLine(d.error)); return; }
+    if (d && d.error) { setRowErr({ user, msg: errLine(d.error) }); return; }
     loadDevices();
   };
 
@@ -2177,10 +2180,16 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
     if (allOutBusy) return;
     setAllOutBusy(true);
     const other = username && username !== summary.current_username;
+    if (other) setRowErr(null);
     const d = await apiPost("/api/logout", {
       csrf: summary.csrf || "", scope: "everywhere", ...(other ? { username } : {}),
     });
-    if (d && d.error) { setAllOutBusy(false); setPending(null); setPwMsg(errLine(d.error)); return; }
+    if (d && d.error) {
+      setAllOutBusy(false); setPending(null);
+      if (other) setRowErr({ user: username, msg: errLine(d.error) });
+      else setPwMsg(errLine(d.error));
+      return;
+    }
     if (other) { setAllOutBusy(false); setPending(null); loadDevices(); return; }   // someone else's: this device stays
     const go = () => { window.location.href = "/login"; };
     if ("caches" in window) {
@@ -2250,8 +2259,11 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
                   text="Removing this account signs it out everywhere."
                   onCancel={() => setPending(null)} onGo={() => removeUser(u.username)} />
               )}
+              {rowErr && rowErr.user === u.username && (
+                <div className="mgcp-usererr" role="alert"><MsgLine m={rowErr.msg} /></div>
+              )}
               <DeviceRows user={u.username} devices={devices[u.username]} phone={phone}
-                busyId={devBusy} onRevoke={revokeDevice} />
+                busyId={devBusy} onRevoke={(id) => revokeDevice(u.username, id)} />
               {resetTarget === u.username && (
                 <div className="mgcp-userform" style={{ marginTop: -2, marginBottom: 6 }}>
                   <input className="mgcp-userinput" type="password" placeholder={"new password for " + u.username}
