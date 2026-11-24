@@ -618,6 +618,7 @@ def test_every_secret_write_restricts_the_file(tmp_path, monkeypatch):
 def test_the_startup_sweep_names_every_secret_file(tmp_path):
     names = [os.path.basename(str(p)) for p in secure_files.secret_files()]
     assert names == ["config.json", moonglade_paths.MIRROR_SESSION_NAME,
+                     moonglade_paths.REMEMBERED_DEVICES_NAME,
                      moonglade_paths.TLS_KEY_NAME, moonglade_paths.TLS_CA_KEY_NAME]
     src = open(g.__file__, encoding="utf-8").read()
     main_src = src[src.index("\ndef main():"):]

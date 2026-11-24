@@ -87,6 +87,25 @@ def get_or_create_secret_key():
         _accounts_lock.release()
 
 
+def _drop_devices(username, keep=None, restamp=None):
+    """Delete `username`'s remembered devices (moonglade.web_devices) -- every one, or every one
+    but `keep`, which gets epoch `restamp`. Called by each writer below that changes or removes
+    an account's session epoch, INSIDE `_accounts_lock` and after its config write: web_devices
+    takes only its own lock, so the order is always accounts lock, then devices lock.
+
+    Never fails the account write. The epoch change already ends every record made under the
+    old epoch (the gate compares them); deleting them keeps the device list honest. A devices
+    file that cannot be read or written is left alone and logged."""
+    import logging
+    from moonglade import web_devices as _web_devices
+    try:
+        _web_devices.delete_for_user(username, keep=keep, restamp=restamp)
+    except _web_devices.DevicesUnavailable as e:
+        logging.getLogger(__name__).warning(
+            "couldn't update the remembered devices for an account change (%s); the change "
+            "itself was saved and those devices are refused by the session epoch", e)
+
+
 def _find_web_user(cfg, username):
     for u in (cfg.get("AUTH_USERS") or []):
         if isinstance(u, dict) and u.get("username") == username:
@@ -274,11 +293,19 @@ def add_or_update_web_user(username, password):
                           "sess_epoch": next_epoch})
         cfg["AUTH_USERS"] = new_users
         _save_config(cfg)
+        # A reset (or a re-add of a removed name) ends that name's remembered devices too.
+        _drop_devices(username)
         return replaced
 
 
-def set_web_user_password_guarded(username, new_password, current_password=None):
+def set_web_user_password_guarded(username, new_password, current_password=None,
+                                  keep_device=None):
     """Change an existing account's password. Returns "ok", "not_found" or "bad_current".
+
+    Every remembered device of the account is deleted in the same `_accounts_lock` section,
+    except `keep_device` (a web_devices id): a user changing their OWN password from a
+    remembered browser keeps that browser's record, re-stamped with the new epoch (R10), exactly
+    as /api/users/password keeps that browser's session.
 
     ONE `_accounts_lock` acquisition covers the existence check, the current-password
     verification and the write. That is not stylistic: `remove_web_user_guarded`'s docstring
@@ -329,6 +356,7 @@ def set_web_user_password_guarded(username, new_password, current_password=None)
                           "sess_epoch": next_epoch})
         cfg["AUTH_USERS"] = new_users
         _save_config(cfg)
+        _drop_devices(username, keep=keep_device, restamp=next_epoch if keep_device else None)
         return "ok"
 
 
@@ -388,6 +416,7 @@ def remove_web_user(username):
             _next_sess_epoch(cfg)
             cfg["AUTH_USERS"] = new_users
             _save_config(cfg)
+            _drop_devices(username)
         return removed
 
 
@@ -419,6 +448,7 @@ def remove_web_user_guarded(username, min_remaining=1):
         cfg["AUTH_USERS"] = [u for u in users
                               if not (isinstance(u, dict) and u.get("username") == username)]
         _save_config(cfg)
+        _drop_devices(username)
         return "removed"
 
 
@@ -470,6 +500,9 @@ def bump_web_user_session_epoch(username):
             return False
         user["sess_epoch"] = _next_sess_epoch(cfg)
         _save_config(cfg)
+        # Sign out everywhere reaches remembered devices too: the bump already ends them, and
+        # deleting the records keeps the list honest.
+        _drop_devices(username)
         return True
 
 

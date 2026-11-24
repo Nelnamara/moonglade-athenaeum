@@ -2,7 +2,8 @@
 moonglade/web_policy.py
 =======================
 The web app's security policy constants and helpers (app security review 2026-11-19, red team
-2026-11-18): the request and zip size caps and their refusal sentences, the session lifetimes,
+2026-11-18): the request and zip size caps and their refusal sentences, the session lifetimes
+(the remembered device's included), the TV pairing's limits,
 `harden_file_response` (a file from the library never runs as a page), the page CSP
 (`page_csp`), the cross-origin and plain-HTTP refusals, and `same_origin_write`. The hooks that
 apply them are moonglade/routes_gate.py's. Moved verbatim out of moonglade/gallery.py in the
@@ -74,6 +75,22 @@ def _too_large_sentence(limit):
 # working the moment the device that made it signs out.
 SESSION_ABSOLUTE_LIFETIME_S = 30 * 86400
 SESSION_IDLE_LIFETIME_DAYS = 30
+# "Remember this device" (owner ruling 2026-11-22, Direction C): a ticked sign-in, and a paired TV,
+# is a device record (moonglade.web_devices) that lasts this long from the moment it was made. Its
+# cookie expires with the record, and the cookie's signature is accepted up to this age; every
+# other session keeps the two 30-day limits above.
+REMEMBER_DEVICE_LIFETIME_S = 90 * 86400
+# The TV's pairing (Apple TV plan S1): a code lives this long, and these are its guesses' limits.
+PAIR_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+PAIR_CODE_LENGTH = 6
+PAIR_CODE_LIFETIME_S = 600
+PAIR_WINDOW_S = 600                 # every pairing limit below counts over this window
+PAIR_STARTS_PER_IP = 5
+PAIR_WRONG_CODES_PER_ACCOUNT = 5
+PAIR_WRONG_CODES_PER_IP = 5
+PAIR_WRONG_CODES_GLOBAL = 30
+PAIR_POLL_WINDOW_S = 60
+PAIR_POLLS_PER_IP = 60              # the TV polls every 2 s; twice that rate is refused
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +196,11 @@ CONNECT_TOKEN_NEEDS_HTTPS = ("Connect from PixAI from another device only works 
                              "https:// address (the Control Panel's LAN card shows it), make the "
                              "Connect from PixAI bookmark again there, and click it on a "
                              "pixai.art tab.")
+# The TV's pairing and its token (R5): another device reaches them over HTTPS only. This PC's own
+# loopback may stay plain. A bearer request is refused with this, never redirected.
+DEVICE_NEEDS_HTTPS = ("Pairing and a paired device's requests only work over an encrypted "
+                      "connection from another device. Connect to Moonglade at its https:// "
+                      "address (the Control Panel's LAN card shows it).")
 
 
 def _origin_tuple(url):

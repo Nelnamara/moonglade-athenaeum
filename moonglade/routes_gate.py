@@ -29,6 +29,7 @@ from moonglade import paths as _paths
 from moonglade import settings as _settings
 from moonglade import web_sessions as _web_sessions
 from moonglade import web_accounts as _web_accounts
+from moonglade import web_devices as _web_devices
 from moonglade import account_api as _account_api
 
 
@@ -124,6 +125,27 @@ def register(app, ctx):
         session["born"] = int(time.time())
         session.permanent = True
 
+    def _remember_this_browser(username):
+        """Make this freshly signed-in session a remembered device: a browser record holding
+        its sid, labelled from the User-Agent, and `dev` / `dev_exp` in the session so the gate
+        and the cookie follow the record (90 days, not 30). True when it was saved."""
+        try:
+            rec = _web_devices.create(
+                username, "browser",
+                _web_devices.label_from_user_agent(request.headers.get("User-Agent")),
+                session["sess_epoch"], sid=session["sid"])
+        except _web_devices.DevicesUnavailable:
+            return False
+        session["dev"] = rec["id"]
+        session["dev_exp"] = rec["expires"]
+        return True
+
+    def _request_user():
+        """THE user a request acts as (review R3): a paired device's account on the bearer path
+        (g.bearer_user, set by the front door), else the signed-in session's. A handler a TV
+        may call reads the user here, never from `session` directly."""
+        return getattr(_flask_g, "bearer_user", None) or session.get("user")
+
     @app.route("/login")
     @tier(PUBLIC)
     def login():
@@ -146,10 +168,15 @@ def register(app, ctx):
         # GETs (favicon, apple-touch-icon, ...) -- an unconditional mint orphaned the
         # token the visible page already held ("Your session expired" on every submit,
         # reproduced). Failed POSTs rotate the token in /api/login instead.
+        # The ending line (review R12): the gate leaves a one-shot {"ended": 1} in place of a
+        # session it refused that had a user; this page takes it once. Never why, who or where,
+        # and never in the URL.
+        ended = bool(session.pop("ended", None))
         session.setdefault("csrf", secrets.token_hex(16))
         brand = _branding.brand_context(out_dir)
         boot = {
             "authenticated": False,
+            "ended": ended,
             "csrf": session["csrf"],
             "no_accounts": no_accounts,
             "is_local": is_local,
@@ -256,7 +283,13 @@ def register(app, ctx):
         if username and _web_accounts.verify_web_user(username, password):
             _login_clear(ip)
             _establish_session(username)
-            return jsonify({"ok": True, "next": next_url or "/"})
+            # "Remember this device" (sign-in only; a create never remembers): the session
+            # gets a browser record (moonglade.web_devices) and lives as long as it does. A
+            # record that cannot be saved leaves an ordinary sign-in, and says so.
+            out = {"ok": True, "next": next_url or "/"}
+            if body.get("remember") is True:
+                out["remembered"] = _remember_this_browser(username)
+            return jsonify(out)
         error = "Invalid username or password."
         # Same "just tripped the lockout" report login()'s own POST branch
         # gives -- see that comment for why this can't just be inferred from
@@ -312,15 +345,234 @@ def register(app, ctx):
         if authorized:
             if not _check_csrf(body):
                 return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+            # ANOTHER account's every device (the Accounts window's row for someone else): the
+            # argument-dependent localhost check /api/users/remove uses, and the caller stays
+            # signed in -- this signs THEM out, not you.
+            target = str(body.get("username") or "").strip()
+            if target and target != user:
+                if body.get("scope") != "everywhere":
+                    return jsonify({"error": "Another account can only be signed out on every "
+                                             "device."}), 400
+                if not _is_local_request():
+                    return jsonify({"error": "localhost-only to sign out another account"}), 403
+                if not _web_accounts.bump_web_user_session_epoch(target):
+                    return jsonify({"error": "No such account."}), 404
+                return jsonify({"ok": True})
             if body.get("scope") == "everywhere":
+                # Bumps the epoch and deletes every remembered device of the account
+                # (moonglade.web_accounts), this one included.
                 _web_accounts.bump_web_user_session_epoch(user)
             # Server-side, this session only (finding 6): its id is recorded as signed out,
             # so a copy of this cookie taken before the Log Out stops working too. A dead
-            # cookie never gets here (`authorized`), so it can record nothing.
-            _web_sessions.sign_out(session.get("sid"), session.get("born"),
-                                   SESSION_ABSOLUTE_LIFETIME_S)
+            # cookie never gets here (`authorized`), so it can record nothing. A remembered
+            # browser's record goes too, and its id stays recorded for the record's whole
+            # lifetime (review R14), not the ordinary session's 30 days.
+            lifetime = SESSION_ABSOLUTE_LIFETIME_S
+            dev = session.get("dev")
+            if dev:
+                exp = session.get("dev_exp")
+                try:
+                    rec = _web_devices.delete(dev)
+                    if rec:
+                        exp = rec["expires"]
+                except _web_devices.DevicesUnavailable:
+                    pass                     # the sid record below still ends this cookie
+                born = session.get("born")
+                if isinstance(exp, (int, float)) and isinstance(born, (int, float)):
+                    lifetime = max(lifetime, exp - born)
+            _web_sessions.sign_out(session.get("sid"), session.get("born"), lifetime)
         session.clear()
         return jsonify({"ok": True})
+
+    # ------------------------------------------------------------------
+    # Remembered devices (moonglade.web_devices): the list and Revoke
+    # ------------------------------------------------------------------
+    _CSRF_REFUSED = "Your session expired. Reload the page and try again."
+
+    @app.route("/api/devices")
+    @tier(LOGIN)
+    def api_devices():
+        """Remembered devices, per account: {users: [{user, devices: [{id, kind, label, created,
+        last_seen, expires, this_device}]}]}, times in epoch seconds. A session from another
+        device sees only its own account; this PC's own sees every account (the rule managing
+        other accounts follows). Only live records are listed. Never a token, hash or sid."""
+        me = _request_user()
+        if _is_local_request():
+            names = [u["username"] for u in _web_accounts.list_web_users()]
+        else:
+            names = [me]
+        records = _web_devices.list_all()
+        this_device = session.get("dev")
+        users = []
+        for name in names:
+            epoch = _web_accounts.get_web_user_session_epoch(name)
+            users.append({"user": name, "devices": [
+                _web_devices.public_view(r, this_device) for r in records
+                if r["user"] == name and _web_devices.is_live(r, epoch)]})
+        return jsonify({"users": users})
+
+    @app.route("/api/devices/revoke", methods=["POST"])
+    @tier(LOGIN)
+    def api_devices_revoke():
+        """Revoke one remembered device: {id, csrf} -> {ok: true} or {error}. Your own
+        account's from anywhere; another account's only from this PC (the argument-dependent
+        check /api/users/remove uses). The device's next request is refused: a browser lands on
+        the sign-in page, a TV gets a 401 and unpairs. This device's own record is refused --
+        Log out is how this device signs out."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": _CSRF_REFUSED}), 400
+        dev_id = str(body.get("id") or "").strip()
+        rec = _web_devices.get(dev_id) if dev_id else None
+        if rec is None:
+            return jsonify({"error": "That device isn't remembered any more."}), 404
+        if rec["user"] != _request_user() and not _is_local_request():
+            return jsonify({"error": "localhost-only to revoke another account's device"}), 403
+        if dev_id == session.get("dev"):
+            return jsonify({"error": "Use Log out on this device."}), 400
+        _web_devices.delete(dev_id)
+        return jsonify({"ok": True})
+
+    # ------------------------------------------------------------------
+    # TV pairing (Apple TV plan S1; the review's R5, R8, R9)
+    # ------------------------------------------------------------------
+    # In memory, per process, like the login limiter: a restart forgets every open pairing,
+    # which only means the TV shows a new code. A pairing holds no token: the token is made,
+    # and the TV's record created, at the one poll that hands it over (R8), so a lost poll, a
+    # restarted TV, an expiry or a double approve never leaves a record nobody holds.
+    _pair_lock = threading.Lock()
+    _pairings = {}        # pair_id -> {code, ip, expires, status, user, label, epoch}
+    _pair_starts = {}     # ip -> [start times]
+    _pair_polls = {}      # ip -> [poll times]
+    _pair_wrong = {"account": {}, "ip": {}, "all": []}   # wrong codes, server-side (R9)
+
+    def _pair_transport_refusal():
+        """R5: another device pairs over HTTPS only; this PC's loopback may stay plain."""
+        from moonglade.web_policy import DEVICE_NEEDS_HTTPS
+        if not request.is_secure and not _is_local_request():
+            return jsonify({"error": DEVICE_NEEDS_HTTPS}), 403
+        return None
+
+    def _pair_sweep(now):
+        """Drop what has aged out (under _pair_lock): expired pairings and old counts."""
+        from moonglade import web_policy as _wp
+        for pid in [k for k, p in _pairings.items() if p["expires"] <= now]:
+            _pairings.pop(pid, None)
+        for table, span in ((_pair_starts, _wp.PAIR_WINDOW_S), (_pair_polls, _wp.PAIR_POLL_WINDOW_S),
+                            (_pair_wrong["account"], _wp.PAIR_WINDOW_S),
+                            (_pair_wrong["ip"], _wp.PAIR_WINDOW_S)):
+            for k in list(table):
+                table[k] = [t for t in table[k] if now - t < span]
+                if not table[k]:
+                    table.pop(k, None)
+        _pair_wrong["all"] = [t for t in _pair_wrong["all"] if now - t < _wp.PAIR_WINDOW_S]
+
+    @app.route("/api/pair/start", methods=["POST"])
+    @tier(PUBLIC)
+    def api_pair_start():
+        """A TV asks for a code: {pair_id, code, expires_in}. Six glyphs with no look-alikes; one
+        open pairing per address (a new start replaces it); a few starts per address per ten
+        minutes, then 429. Public: the TV has no account until someone approves it."""
+        from moonglade import web_policy as _wp
+        refused = _pair_transport_refusal()
+        if refused:
+            return refused
+        ip, now = _client_ip(), time.time()
+        with _pair_lock:
+            _pair_sweep(now)
+            starts = _pair_starts.setdefault(ip, [])
+            if len(starts) >= _wp.PAIR_STARTS_PER_IP:
+                return jsonify({"error": "Too many pairing codes from this address. Wait a few "
+                                         "minutes, then try again."}), 429
+            starts.append(now)
+            for pid in [k for k, p in _pairings.items() if p["ip"] == ip]:
+                _pairings.pop(pid, None)
+            taken = {p["code"] for p in _pairings.values()}
+            code = ""
+            while not code or code in taken:
+                code = "".join(secrets.choice(_wp.PAIR_CODE_ALPHABET)
+                               for _ in range(_wp.PAIR_CODE_LENGTH))
+            pair_id = secrets.token_urlsafe(32)
+            _pairings[pair_id] = {"code": code, "ip": ip, "status": "waiting",
+                                  "expires": now + _wp.PAIR_CODE_LIFETIME_S}
+        return jsonify({"pair_id": pair_id, "code": code, "expires_in": _wp.PAIR_CODE_LIFETIME_S})
+
+    @app.route("/api/pair/approve", methods=["POST"])
+    @tier(LOGIN)
+    def api_pair_approve():
+        """A signed-in person approves the code a TV shows: {code, label, csrf} -> {ok, label}.
+        The TV joins the approver's account. Codes compare without regard to case; an unknown
+        or expired code is one plain refusal. Wrong codes are counted on the server, per account
+        and per address, with a cap across everyone (R9); past any of them, refused. A code is
+        approved once."""
+        from moonglade import web_policy as _wp
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": _CSRF_REFUSED}), 400
+        refused = _pair_transport_refusal()
+        if refused:
+            return refused
+        user = _request_user()
+        code = "".join(ch for ch in str(body.get("code") or "").upper()
+                       if ch.isascii() and ch.isalnum())
+        label = _web_devices.clean_label(body.get("label"), "tv")
+        epoch = _web_accounts.get_web_user_session_epoch(user)
+        ip, now = _client_ip(), time.time()
+        with _pair_lock:
+            _pair_sweep(now)
+            if (len(_pair_wrong["account"].get(user, ())) >= _wp.PAIR_WRONG_CODES_PER_ACCOUNT
+                    or len(_pair_wrong["ip"].get(ip, ())) >= _wp.PAIR_WRONG_CODES_PER_IP
+                    or len(_pair_wrong["all"]) >= _wp.PAIR_WRONG_CODES_GLOBAL):
+                return jsonify({"error": "Too many wrong codes. Wait a few minutes, then try "
+                                         "again."}), 429
+            match = None
+            for p in _pairings.values():
+                if p["status"] == "waiting" and secrets.compare_digest(p["code"], code):
+                    match = p
+            if match is None or epoch is None:
+                _pair_wrong["account"].setdefault(user, []).append(now)
+                _pair_wrong["ip"].setdefault(ip, []).append(now)
+                _pair_wrong["all"].append(now)
+                return jsonify({"error": "That code isn't right, or it has expired. Check the "
+                                         "code on the TV and try again."}), 400
+            match.update(status="approved", user=user, label=label, epoch=epoch)
+        return jsonify({"ok": True, "label": label})
+
+    @app.route("/api/pair/poll")
+    @tier(PUBLIC)
+    def api_pair_poll():
+        """The TV asks how its pairing stands: {status: "waiting"|"approved"|"expired", token?}.
+        Answered only to the address that started it, and rate-limited. The approved answer is
+        the handout: the token is made here, the TV's record is created with it (stored hashed),
+        and the pairing is gone -- the token is never shown again, and a later poll says
+        expired. An approver signed out everywhere since approving hands out nothing."""
+        from moonglade import web_policy as _wp
+        refused = _pair_transport_refusal()
+        if refused:
+            return refused
+        pair_id = str(request.args.get("pair_id") or "")
+        ip, now = _client_ip(), time.time()
+        with _pair_lock:
+            _pair_sweep(now)
+            polls = _pair_polls.setdefault(ip, [])
+            if len(polls) >= _wp.PAIR_POLLS_PER_IP:
+                return jsonify({"error": "Asking too often. Wait a moment."}), 429
+            polls.append(now)
+            p = _pairings.get(pair_id)
+            if p is None or p["ip"] != ip:
+                return jsonify({"status": "expired"})
+            if p["status"] != "approved":
+                return jsonify({"status": "waiting"})
+            _pairings.pop(pair_id, None)           # single handout, under the lock
+        if _web_accounts.get_web_user_session_epoch(p["user"]) != p["epoch"]:
+            return jsonify({"status": "expired"})
+        token = secrets.token_urlsafe(32)
+        try:
+            _web_devices.create(p["user"], "tv", p["label"], p["epoch"], token=token)
+        except _web_devices.DevicesUnavailable:
+            return jsonify({"error": "Moonglade couldn't save this TV just now. Start pairing "
+                                     "again."}), 503
+        return jsonify({"status": "approved", "token": token})
 
     # ------------------------------------------------------------------
     # THE front door: DEFAULT-DENY for every request, enforced in one place.
@@ -434,6 +686,8 @@ def register(app, ctx):
             level = LOGIN
         if level == PUBLIC:
             return None
+        if request.headers.get("Authorization") is not None:
+            return _bearer_gate(level)
         if not _is_authorized_request():
             if request.path.startswith(_JSON_GATE_PREFIXES):
                 return jsonify({"error": "authentication required"}), 401
@@ -447,6 +701,50 @@ def register(app, ctx):
             return redirect(url_for("login", next=_safe_next(_next) or ""))
         if level == LOCALHOST and not _is_local_request():
             return jsonify({"error": route_tier_message(view)}), 403
+        return None
+
+    # ---- The bearer path: a paired TV (Apple TV plan S1; review R4-R6) ---------------------
+    # A NAMED allowlist of endpoints, decided here from request.endpoint and nothing else: the
+    # TV's own scope is view and rate. A LOGIN GET added later does NOT join it by being one;
+    # it joins only by being written here. Never the inbox, comments, the account, credits,
+    # coupons, export, the panel, devices, users, or any LOCALHOST route.
+    _BEARER_READS = frozenset((
+        "api_gallery_images", "api_collections", "api_collections_detail", "api_similar",
+        "api_achievements", "thumb", "full_image", "video_file", "badge_thumb",
+        "api_health", "api_ping"))
+    _BEARER_WRITES = frozenset(("rate",))
+
+    def _bearer_allowed():
+        ep, method = request.endpoint or "", request.method
+        if method == "GET" and ep in _BEARER_READS:
+            # achievements READ: ?mark=1 records them as seen, which is the browser's job
+            return not (ep == "api_achievements" and request.args.get("mark"))
+        return method == "POST" and ep in _BEARER_WRITES
+
+    def _bearer_gate(level):
+        """A request carrying an Authorization header is bearer-only (R6): its session cookie is
+        never read (the session interface ignores it) and no cookie is ever sent back. It is let
+        through only over HTTPS or from this PC's loopback (R5, never a redirect), only to the
+        allowlist above (never HEAD, never LOCALHOST, even from 127.0.0.1), and only with a TV
+        record whose token it carries and that is live under its account's current epoch. A
+        refusal is a 401 JSON on every path, assets included, so the TV unpairs; a devices file
+        that cannot be read is a 503 (the error handler below), never a 401."""
+        from moonglade.web_policy import DEVICE_NEEDS_HTTPS
+        from moonglade.web_tiers import LOCALHOST
+        if not request.is_secure and not _is_local_request():
+            return jsonify({"error": DEVICE_NEEDS_HTTPS}), 403
+        refused = (jsonify({"error": "authentication required"}), 401)
+        scheme, _sp, token = (request.headers.get("Authorization") or "").strip().partition(" ")
+        token = token.strip()
+        if scheme.lower() != "bearer" or not token or level == LOCALHOST or not _bearer_allowed():
+            return refused
+        rec = _web_devices.find_by_token(token)
+        if rec is None or rec["kind"] != "tv" or not _web_devices.is_live(
+                rec, _web_accounts.get_web_user_session_epoch(rec["user"])):
+            return refused
+        _web_devices.touch(rec["id"])
+        _flask_g.bearer_user = rec["user"]
+        _flask_g.bearer_device = rec["id"]
         return None
 
     # ------------------------------------------------------------------
@@ -470,6 +768,13 @@ def register(app, ctx):
             return None
         if mode == "lan" and _is_local_request():
             return None
+        if request.headers.get("Authorization") is not None:
+            # A bearer request is never redirected (R5): the front door refuses a plain one
+            # from another device with a sentence, and a gated route is not a page to send on.
+            from moonglade.web_tiers import PUBLIC, route_tier
+            view = app.view_functions.get(request.endpoint or "")
+            if view is None or route_tier(view, request.method) != PUBLIC:
+                return None
         home = "https://" + request.host + "/"
         if request.method in ("GET", "HEAD"):
             target = "https://" + request.host + (
@@ -566,6 +871,17 @@ def register(app, ctx):
         text: that names the lock file's path on this machine. Nothing was changed."""
         msg = ("Another Moonglade program is changing the account settings right now. "
                "Nothing was changed here. Wait a moment, then try again.")
+        if request.path.startswith(_JSON_GATE_PREFIXES):
+            return jsonify({"error": msg}), 503
+        return app.response_class(msg, status=503, mimetype="text/plain")
+
+    @app.errorhandler(_web_devices.DevicesUnavailable)
+    def _devices_unavailable(_e):
+        """The remembered-devices file could not be read or saved just now (review R7): a 503
+        with a plain sentence, never a sign-out -- a TV unpairs on a 401, and a remembered
+        browser must not be signed out by a file another program is holding. Nothing changed."""
+        msg = ("Moonglade couldn't read its list of remembered devices just now. Nothing was "
+               "changed. Wait a moment, then try again.")
         if request.path.startswith(_JSON_GATE_PREFIXES):
             return jsonify({"error": msg}), 503
         return app.response_class(msg, status=503, mimetype="text/plain")
@@ -670,31 +986,68 @@ def register(app, ctx):
         signing out everywhere (/api/logout's scope "everywhere" bumps their
         sess_epoch) and the account being removed
         (get_web_user_session_epoch returns None once it's gone). See that
-        function's docstring for the fuller writeup."""
+        function's docstring for the fuller writeup.
+
+        A request carrying an Authorization header is never a session (review R6): this is
+        False for it, so Log Out does nothing for it and the LOCALHOST tier refuses it even from
+        127.0.0.1. The bearer path is _bearer_gate's, in the front door.
+
+        A session this refuses that HAD a user is replaced by the one-shot {"ended": 1} marker
+        (review R12), which /login turns into its "This device was signed out" line."""
+        if request.headers.get("Authorization") is not None:
+            return False
         user = session.get("user")
         if user is None:
             return False
         current_epoch = _web_accounts.get_web_user_session_epoch(user)
         if current_epoch is None or current_epoch != session.get("sess_epoch"):
-            session.clear()   # stale/revoked -- drop it so later requests short-circuit above
+            _end_session()   # stale/revoked -- drop it so later requests short-circuit above
             return False
-        if not _session_is_current():
-            session.clear()   # too old, signed out, or from before sessions had an id
+        if not _session_is_current(current_epoch=current_epoch):
+            _end_session()   # too old, signed out, revoked, or from before sessions had an id
             return False
         return True
 
-    def _session_is_current(now=None):
+    def _end_session():
+        """Clear a refused session; when it had a user, leave the ending marker in its place."""
+        had_user = bool(session.get("user"))
+        session.clear()
+        if had_user:
+            session["ended"] = 1
+
+    def _session_is_current(now=None, current_epoch=None):
         """The session's own id is not signed out (Log Out, moonglade.web_sessions) and it is
         younger than SESSION_ABSOLUTE_LIFETIME_S (finding 6). A cookie from before sessions
         carried an id and a birth time has neither and is refused: one sign-in per device
-        after this update, so that every live session can be ended on its own."""
+        after this update, so that every live session can be ended on its own.
+
+        A remembered session (`dev`, moonglade.web_devices) is current while its record is
+        live -- it exists, is this session's (user and sid), has not expired, and was made under
+        the account's current epoch -- and its id is not signed out; its age ceiling is the
+        record's `expires`, not born + 30 days. A missing, expired or stale record refuses it:
+        that is how Revoke, sign out everywhere, a password change and an account's removal
+        reach it. A devices file that cannot be read raises DevicesUnavailable (a 503), never a
+        sign-out. A seen remembered device is touched (at most one write an hour)."""
         from moonglade.web_policy import SESSION_ABSOLUTE_LIFETIME_S
         sid = session.get("sid")
         born = session.get("born")
         if not sid or not isinstance(born, (int, float)) or isinstance(born, bool):
             return False
         now = time.time() if now is None else now
-        if now - born > SESSION_ABSOLUTE_LIFETIME_S or born - now > 300:
+        if born - now > 300:
+            return False
+        dev = session.get("dev")
+        if dev:
+            rec = _web_devices.get(dev)
+            epoch = current_epoch if current_epoch is not None else session.get("sess_epoch")
+            if (rec is None or rec["kind"] != "browser" or rec["user"] != session.get("user")
+                    or rec.get("sid") != sid or not _web_devices.is_live(rec, epoch, now)):
+                return False
+            if _web_sessions.is_signed_out(sid):
+                return False
+            _web_devices.touch(dev, now)
+            return True
+        if now - born > SESSION_ABSOLUTE_LIFETIME_S:
             return False
         return not _web_sessions.is_signed_out(sid)
 

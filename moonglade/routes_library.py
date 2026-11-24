@@ -53,6 +53,12 @@ def register(app, ctx):
     @app.route("/api/rate/<media_id>", methods=["POST"])
     @tier(LOGIN)
     def rate(media_id):
+        """Set a picture's 0-5 rating. LOGIN tier, and the one write a paired TV may make
+        (the front door's bearer allowlist, routes_gate). It checks no CSRF token on purpose,
+        for either caller (review R6): a cookie caller's write is held by the front door's
+        cross-origin check (_refuse_cross_origin_writes), and a TV's bearer token is not ambient
+        -- no other page can make a browser send it. Do not add a token check here: the TV has
+        no session to read one from."""
         from moonglade.catalog import update_rating
         data = request.get_json(silent=True) or {}
         try:

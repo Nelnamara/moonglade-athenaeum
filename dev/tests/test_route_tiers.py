@@ -173,6 +173,9 @@ TIER_SNAPSHOT = [
     "/api/delete-preview [POST] LOCALHOST",
     "/api/delete-tasks [POST] LOCALHOST",
     "/api/detail/<media_id> [GET] LOGIN",
+    # remembered devices and the TV's pairing (2026-11-23)
+    "/api/devices [GET] LOGIN",
+    "/api/devices/revoke [POST] LOGIN",
     "/api/duplicates [GET] LOGIN",
     "/api/duplicates/resolve [POST] LOGIN",
     "/api/duplicates/undo [POST] LOGIN",
@@ -264,6 +267,9 @@ TIER_SNAPSHOT = [
     "/api/myart/publish [POST] LOGIN",
     "/api/narrator/poke [POST] LOGIN",         # the poke ladder; per-account, server-only state
     "/api/outside/fix [POST] LOCALHOST",       # rewrites this machine's tasks, configs, shortcuts
+    "/api/pair/approve [POST] LOGIN",
+    "/api/pair/poll [GET] PUBLIC",
+    "/api/pair/start [POST] PUBLIC",
     "/api/palettes/presets [GET] LOGIN",
     "/api/panel/cancel [POST] LOCALHOST",
     "/api/panel/run [POST] LOGIN",
@@ -399,6 +405,11 @@ PUBLIC_EXPECTED_STATUS = {
     # This PC's certificate authority: public by nature (every handshake hands it out), fetched
     # by a device before it signs in. No HTTPS in a test app, so it 404s -- never a redirect.
     ("moonglade_ca_certificate", "GET"): {404},
+    # The TV's pairing (2026-11-23): a TV has no account until someone approves it. Another
+    # device is refused over plain HTTP (403, a sentence, never a redirect); this PC's loopback
+    # gets a code (start) or "expired" for a pairing that does not exist (poll).
+    ("api_pair_start", "POST"): {200, 403},
+    ("api_pair_poll", "GET"): {200, 403},
 }
 
 # A few routes only reach a meaningful decision with a meaningful payload.

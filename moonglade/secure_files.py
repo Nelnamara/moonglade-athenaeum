@@ -5,7 +5,8 @@ Secrets at rest: the files that hold a credential are readable by the person run
 and nobody else on the machine.
 
 The files: config.json (the PixAI API key, the session signing key and the account hashes),
-local/mirror_session.json (the Mirror's PixAI sign-in), local/tls_key.pem (the home-network
+local/mirror_session.json (the Mirror's PixAI sign-in), local/remembered_devices.json (remembered
+browsers and paired TVs, with each TV token's hash), local/tls_key.pem (the home-network
 server certificate's key) and local/tls_ca_key.pem (the key of the small certificate authority
 that signs it). local/settings.json holds no secret (the library folder, the
 bind address and port, the Bonjour name, the Mirror switch, launch switches, branding) and is
@@ -161,6 +162,7 @@ def secret_files():
     from moonglade import paths as _paths
     return [_paths.config_path(),
             _paths.local_path(_paths.MIRROR_SESSION_NAME),
+            _paths.local_path(_paths.REMEMBERED_DEVICES_NAME),
             _paths.local_path(_paths.TLS_KEY_NAME),
             _paths.local_path(_paths.TLS_CA_KEY_NAME)]
 

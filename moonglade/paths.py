@@ -20,6 +20,8 @@ version kept things.
                              server certificate and its key (moonglade.tls).
       tls_ca_cert.pem, tls_ca_key.pem   the small authority that signs it (moonglade.tls).
       signed_out_sessions.json   local_path(SIGNED_OUT_SESSIONS_NAME): sessions Log Out ended.
+      remembered_devices.json    local_path(REMEMBERED_DEVICES_NAME): remembered browsers and
+                             paired TVs (moonglade.web_devices).
       moonglade.mgpack       local_path(PACK_NAME), and its .version marker.
       icons\\                 icons_dir(): the shortcut .ico files. NOT a cache: a shortcut
                              points here, so clearing a cache never blanks its icon.
@@ -100,6 +102,9 @@ TLS_CA_CERT_NAME = "tls_ca_cert.pem"
 TLS_CA_KEY_NAME = "tls_ca_key.pem"
 # Signed-out sessions (Log Out), kept until their cookie would have aged out anyway.
 SIGNED_OUT_SESSIONS_NAME = "signed_out_sessions.json"
+# Remembered devices (moonglade.web_devices): "Remember this device" browsers and paired TVs.
+# Holds each TV token's hash, so it is a secret file (moonglade.secure_files).
+REMEMBERED_DEVICES_NAME = "remembered_devices.json"
 PACK_NAME = "moonglade.mgpack"
 ICONS_DIRNAME = "icons"
 BANNERS_DIRNAME = "banners"

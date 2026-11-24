@@ -378,6 +378,68 @@ class _PerRequestSecureSessions(SecureCookieSessionInterface):
             return bool(app.config.get("SESSION_COOKIE_SECURE"))
 
 
+def _carries_bearer():
+    """Any Authorization header makes a request bearer-only (review R6): it never reads, and is
+    never given, a session cookie."""
+    try:
+        return request.headers.get("Authorization") is not None
+    except RuntimeError:                           # no request
+        return False
+
+
+class _RememberingSessions(_PerRequestSecureSessions):
+    """The per-request-Secure sessions above (subclassed, so that flag survives: review R2/R11),
+    taught about remembered devices (moonglade.web_devices).
+
+    * A cookie's signature is accepted up to REMEMBER_DEVICE_LIFETIME_S old; a session WITHOUT a
+      remembered device (`dev`) older than permanent_session_lifetime is still read as empty,
+      exactly as Flask's own max_age did. (Flask checks the signature against
+      permanent_session_lifetime, so a longer Expires alone would still drop an idle remembered
+      cookie at 30 days.)
+    * A remembered session's cookie expires when its record does (`dev_exp`); every other one
+      keeps permanent_session_lifetime.
+    * A request carrying an Authorization header reads no cookie and is sent none."""
+
+    def open_session(self, app, request):
+        from itsdangerous import BadSignature
+        if request.headers.get("Authorization") is not None:
+            return self.session_class()
+        s = self.get_signing_serializer(app)
+        if s is None:
+            return None
+        val = request.cookies.get(self.get_cookie_name(app))
+        if not val:
+            return self.session_class()
+        try:
+            data, signed = s.loads(val, max_age=_web_policy.REMEMBER_DEVICE_LIFETIME_S,
+                                   return_timestamp=True)
+        except BadSignature:
+            return self.session_class()
+        signed = signed.timestamp() if hasattr(signed, "timestamp") else float(signed)
+        if not (isinstance(data, dict) and data.get("dev")) and (
+                time.time() - signed > app.permanent_session_lifetime.total_seconds()):
+            return self.session_class()
+        return self.session_class(data)
+
+    def get_expiration_time(self, app, session):
+        import datetime as _dt
+        exp = session.get("dev_exp")
+        if session.permanent and session.get("dev") and isinstance(exp, (int, float)) \
+                and not isinstance(exp, bool):
+            return _dt.datetime.fromtimestamp(exp, _dt.timezone.utc)
+        return super().get_expiration_time(app, session)
+
+    def should_set_cookie(self, app, session):
+        if _carries_bearer():
+            return False
+        return super().should_set_cookie(app, session)
+
+    def save_session(self, app, session, response):
+        if _carries_bearer():
+            return None                            # not even a delete-cookie header
+        return super().save_session(app, session, response)
+
+
 def create_app(out_dir: Path):
     # Both named explicitly, because Flask's defaults are this MODULE's folder and both
     # belong to the app folder (moonglade.paths), wherever the module sits: root_path is
@@ -420,7 +482,9 @@ def create_app(out_dir: Path):
     # so a browser never sends it back over plain http://. This PC's own loopback may stay
     # plain HTTP, and a Secure cookie set there would be dropped by the browser and break
     # sign-in, so the flag follows the request rather than one app-wide setting.
-    app.session_interface = _PerRequestSecureSessions()
+    # _RememberingSessions keeps that flag and adds the remembered device's longer cookie
+    # (moonglade.web_devices) and the bearer path's no-cookie rule.
+    app.session_interface = _RememberingSessions()
     import datetime as _dt
     app.permanent_session_lifetime = _dt.timedelta(days=_web_policy.SESSION_IDLE_LIFETIME_DAYS)
     # The app-wide body ceiling (finding 9): routes that take big files raise it for themselves.
